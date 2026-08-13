@@ -215,6 +215,11 @@ static void task_handle_destroy(void* data) {
     (void)data;
 }
 
+static void task_handle_trace(void* data, gc_heap_t* gc) {
+    (void)data;
+    (void)gc;
+}
+
 static void async_frame_reset_from(LambdaAsyncFrame* frame) {
     while (frame) {
         frame->state = 0;
@@ -262,6 +267,7 @@ static VMapVtable task_handle_vtable = {
     task_handle_at,
     task_handle_at,
     task_handle_destroy,
+    task_handle_trace,
 };
 
 static bool scheduler_has_heap(void) {

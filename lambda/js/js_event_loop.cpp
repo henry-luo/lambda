@@ -53,24 +53,10 @@ extern "C" void js_domain_restore_stack(Item previous);
 // Task Queues
 // =============================================================================
 
-#define MICROTASK_CAPACITY JS_EVENT_MICROTASK_CAPACITY
 #define RAF_CAPACITY JS_EVENT_RAF_CAPACITY
-#define TASK_FLUSH_SAFETY_LIMIT (MICROTASK_CAPACITY * 8)
-
-#define next_tick_ring (js_runtime_state.event_loop.next_tick)
-#define next_tick_resource_ring (js_runtime_state.event_loop.next_tick_resource)
-#define next_tick_als_ring (js_runtime_state.event_loop.next_tick_als)
-#define next_tick_domain_ring (js_runtime_state.event_loop.next_tick_domain)
-#define next_tick_head (js_runtime_state.event_loop.next_tick_head)
-#define next_tick_tail (js_runtime_state.event_loop.next_tick_tail)
-#define next_tick_count (js_runtime_state.event_loop.next_tick_count)
-#define microtask_ring (js_runtime_state.event_loop.microtask)
-#define microtask_resource_ring (js_runtime_state.event_loop.microtask_resource)
-#define microtask_als_ring (js_runtime_state.event_loop.microtask_als)
-#define microtask_domain_ring (js_runtime_state.event_loop.microtask_domain)
-#define microtask_head (js_runtime_state.event_loop.microtask_head)
-#define microtask_tail (js_runtime_state.event_loop.microtask_tail)
-#define microtask_count (js_runtime_state.event_loop.microtask_count)
+#define TASK_FLUSH_WORK_BUDGET 8192
+#define next_tick_deque (js_runtime_state.event_loop.next_tick_deque)
+#define microtask_deque (js_runtime_state.event_loop.microtask_deque)
 #define microtask_running (js_runtime_state.event_loop.microtask_running)
 #define raf_callback_ring (js_runtime_state.event_loop.raf_callback)
 #define raf_id_ring (js_runtime_state.event_loop.raf_id)
@@ -98,60 +84,40 @@ extern "C" bool js_event_loop_is_shutting_down(void) {
     return event_loop_shutting_down;
 }
 
-static void next_tick_push(Item cb) {
-    if (next_tick_count >= MICROTASK_CAPACITY) {
-        log_error("event_loop: nextTick queue overflow (%d)", MICROTASK_CAPACITY);
-        return;
+static bool next_tick_push(Item cb) {
+    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
+        return false;
     }
-    next_tick_ring[next_tick_tail] = cb;
-    next_tick_resource_ring[next_tick_tail] = js_async_hooks_get_current_resource();
-    next_tick_als_ring[next_tick_tail] = js_als_capture_context();
-    next_tick_domain_ring[next_tick_tail] = js_domain_capture_async_stack();
-    next_tick_tail = (next_tick_tail + 1) % MICROTASK_CAPACITY;
-    next_tick_count++;
+    RootFrame roots(4);
+    Rooted<Item> callback_root(roots, cb);
+    Rooted<Item> resource_root(roots, js_async_hooks_get_current_resource());
+    Rooted<Item> als_root(roots, js_als_capture_context());
+    Rooted<Item> domain_root(roots, js_domain_capture_async_stack());
+    Item record[4] = {callback_root.get(), resource_root.get(),
+        als_root.get(), domain_root.get()};
+    return runtime_async_deque_push(&next_tick_deque, record);
 }
 
-static Item next_tick_pop(Item* out_resource, Item* out_als_context, Item* out_domain) {
-    if (next_tick_count == 0) return ItemNull;
-    Item cb = next_tick_ring[next_tick_head];
-    if (out_resource) *out_resource = next_tick_resource_ring[next_tick_head];
-    if (out_als_context) *out_als_context = next_tick_als_ring[next_tick_head];
-    if (out_domain) *out_domain = next_tick_domain_ring[next_tick_head];
-    next_tick_ring[next_tick_head] = ItemNull;
-    next_tick_resource_ring[next_tick_head] = ItemNull;
-    next_tick_als_ring[next_tick_head] = ItemNull;
-    next_tick_domain_ring[next_tick_head] = ItemNull;
-    next_tick_head = (next_tick_head + 1) % MICROTASK_CAPACITY;
-    next_tick_count--;
-    return cb;
+static bool next_tick_pop(Item* record) {
+    return runtime_async_deque_pop(&next_tick_deque, record);
 }
 
-static void microtask_push(Item cb) {
-    if (microtask_count >= MICROTASK_CAPACITY) {
-        log_error("event_loop: microtask queue overflow (%d)", MICROTASK_CAPACITY);
-        return;
+static bool microtask_push(Item cb) {
+    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
+        return false;
     }
-    microtask_ring[microtask_tail] = cb;
-    microtask_resource_ring[microtask_tail] = js_async_hooks_get_current_resource();
-    microtask_als_ring[microtask_tail] = js_als_capture_context();
-    microtask_domain_ring[microtask_tail] = js_domain_capture_async_stack();
-    microtask_tail = (microtask_tail + 1) % MICROTASK_CAPACITY;
-    microtask_count++;
+    RootFrame roots(4);
+    Rooted<Item> callback_root(roots, cb);
+    Rooted<Item> resource_root(roots, js_async_hooks_get_current_resource());
+    Rooted<Item> als_root(roots, js_als_capture_context());
+    Rooted<Item> domain_root(roots, js_domain_capture_async_stack());
+    Item record[4] = {callback_root.get(), resource_root.get(),
+        als_root.get(), domain_root.get()};
+    return runtime_async_deque_push(&microtask_deque, record);
 }
 
-static Item microtask_pop(Item* out_resource, Item* out_als_context, Item* out_domain) {
-    if (microtask_count == 0) return ItemNull;
-    Item cb = microtask_ring[microtask_head];
-    if (out_resource) *out_resource = microtask_resource_ring[microtask_head];
-    if (out_als_context) *out_als_context = microtask_als_ring[microtask_head];
-    if (out_domain) *out_domain = microtask_domain_ring[microtask_head];
-    microtask_ring[microtask_head] = ItemNull;
-    microtask_resource_ring[microtask_head] = ItemNull;
-    microtask_als_ring[microtask_head] = ItemNull;
-    microtask_domain_ring[microtask_head] = ItemNull;
-    microtask_head = (microtask_head + 1) % MICROTASK_CAPACITY;
-    microtask_count--;
-    return cb;
+static bool microtask_pop(Item* record) {
+    return runtime_async_deque_pop(&microtask_deque, record);
 }
 
 extern "C" void js_microtask_enqueue(Item callback) {
@@ -159,7 +125,9 @@ extern "C" void js_microtask_enqueue(Item callback) {
         log_error("event_loop: microtask_enqueue called with non-function (type=%d)", get_type_id(callback));
         return;
     }
-    microtask_push(callback);
+    if (!microtask_push(callback)) {
+        log_error("event_loop: failed to grow Promise microtask deque");
+    }
 }
 
 extern "C" void js_next_tick_enqueue(Item callback) {
@@ -167,14 +135,17 @@ extern "C" void js_next_tick_enqueue(Item callback) {
         log_error("event_loop: nextTick enqueue called with non-function (type=%d)", get_type_id(callback));
         return;
     }
-    next_tick_push(callback);
+    if (!next_tick_push(callback)) {
+        log_error("event_loop: failed to grow nextTick deque");
+    }
 }
 
 // Js57 P2c: visible queue size for the bounded-await drain heuristic.
 // Returns the combined pending nextTick + microtask count so js_await_sync can
 // detect whether a drain turn made progress (no progress = give up early).
 extern "C" int js_microtask_pending_count(void) {
-    return next_tick_count + microtask_count;
+    return (int)(runtime_async_deque_size(&next_tick_deque) +
+        runtime_async_deque_size(&microtask_deque));
 }
 
 extern "C" bool js_microtask_is_running(void) {
@@ -206,40 +177,44 @@ extern "C" void js_microtask_flush(void) {
 }
 
 extern "C" Item js_microtask_flush_result(void) {
-    Item first_error = ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> first_error_root(roots, ItemNull);
     int safety = 0;
-    while ((next_tick_count > 0 || microtask_count > 0) &&
-           safety < TASK_FLUSH_SAFETY_LIMIT) {
-        while (next_tick_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
-            Item resource = ItemNull;
-            Item als_context = ItemNull;
-            Item domain = ItemNull;
-            Item cb = next_tick_pop(&resource, &als_context, &domain);
+    while ((runtime_async_deque_size(&next_tick_deque) > 0 ||
+            runtime_async_deque_size(&microtask_deque) > 0) &&
+           safety < TASK_FLUSH_WORK_BUDGET) {
+        while (runtime_async_deque_size(&next_tick_deque) > 0 &&
+               safety < TASK_FLUSH_WORK_BUDGET) {
+            Item record[4] = {};
+            if (!next_tick_pop(record)) break;
             bool previous_running = microtask_running;
             microtask_running = true;
-            Item result = js_run_queued_callback(cb, resource, als_context, domain);
+            Item result = js_run_queued_callback(record[0], record[1], record[2], record[3]);
             microtask_running = previous_running;
-            if (item_is_error(result) && !item_is_error(first_error)) first_error = result;
+            if (item_is_error(result) && !item_is_error(first_error_root.get())) {
+                first_error_root.set(result);
+            }
             safety++;
         }
-        while (microtask_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
-            Item resource = ItemNull;
-            Item als_context = ItemNull;
-            Item domain = ItemNull;
-            Item cb = microtask_pop(&resource, &als_context, &domain);
+        while (runtime_async_deque_size(&microtask_deque) > 0 &&
+               safety < TASK_FLUSH_WORK_BUDGET) {
+            Item record[4] = {};
+            if (!microtask_pop(record)) break;
             bool previous_running = microtask_running;
             microtask_running = true;
-            Item result = js_run_queued_callback(cb, resource, als_context, domain);
+            Item result = js_run_queued_callback(record[0], record[1], record[2], record[3]);
             microtask_running = previous_running;
-            if (item_is_error(result) && !item_is_error(first_error)) first_error = result;
+            if (item_is_error(result) && !item_is_error(first_error_root.get())) {
+                first_error_root.set(result);
+            }
             safety++;
         }
     }
-    if (safety >= TASK_FLUSH_SAFETY_LIMIT) {
-        log_error("event_loop: nextTick/microtask flush exceeded safety limit");
+    if (runtime_async_deque_size(&next_tick_deque) == 0 &&
+            runtime_async_deque_size(&microtask_deque) == 0) {
+        js_promise_flush_unhandled_checks();
     }
-    js_promise_flush_unhandled_checks();
-    return first_error;
+    return first_error_root.get();
 }
 
 static bool raf_push(Item cb, int64_t id) {
@@ -1493,22 +1468,11 @@ extern "C" void js_event_loop_init(void) {
     }
     event_loop_shutting_down = false;
 
-    // reset task queues — zero ring buffers to prevent GC scanning stale Items
-    memset(next_tick_ring, 0, sizeof(next_tick_ring));
-    memset(next_tick_resource_ring, 0, sizeof(next_tick_resource_ring));
-    memset(next_tick_als_ring, 0, sizeof(next_tick_als_ring));
-    memset(next_tick_domain_ring, 0, sizeof(next_tick_domain_ring));
-    memset(microtask_ring, 0, sizeof(microtask_ring));
-    memset(microtask_resource_ring, 0, sizeof(microtask_resource_ring));
-    memset(microtask_als_ring, 0, sizeof(microtask_als_ring));
-    memset(microtask_domain_ring, 0, sizeof(microtask_domain_ring));
+    // reset the two logical JS lanes without retaining queue-owned Items.
+    runtime_async_deque_clear(&next_tick_deque);
+    runtime_async_deque_clear(&microtask_deque);
+    (void)js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots);
     memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
-    next_tick_head = 0;
-    next_tick_tail = 0;
-    next_tick_count = 0;
-    microtask_head = 0;
-    microtask_tail = 0;
-    microtask_count = 0;
     raf_head = 0;
     raf_tail = 0;
     raf_count = 0;
@@ -1522,25 +1486,9 @@ extern "C" void js_event_loop_init(void) {
     timer_nan_warning_emitted = false;
     timer_negative_warning_emitted = false;
 
-    // register task ring buffers as exact roots because static storage is not on the side stack
-    struct gc_heap* active_gc = context && context->heap ? context->heap->gc : NULL;
-    if (active_gc && js_runtime_state.event_loop_rooted_gc != active_gc) {
-        // Batch heap replacement creates a new root registry; static JS queues
-        // must be registered with that heap even though their addresses persist.
-        heap_register_gc_root_range((uint64_t*)next_tick_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)next_tick_resource_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)next_tick_als_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)next_tick_domain_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)microtask_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)microtask_resource_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)microtask_als_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)microtask_domain_ring, MICROTASK_CAPACITY);
-        heap_register_gc_root_range((uint64_t*)raf_callback_ring, RAF_CAPACITY);
-        // Mock scheduler waits are static, so queued promise resolvers must be
-        // rooted individually rather than via the whole struct with non-Item fields.
-        mock_scheduler_register_gc_roots();
-        js_runtime_state.event_loop_rooted_gc = active_gc;
-    }
+    // Mock scheduler waits are static, so queued promise resolvers are rooted
+    // individually rather than through the deque's non-Item control fields.
+    mock_scheduler_register_gc_roots();
 
     // initialize libuv loop
     lambda_uv_init();
@@ -1572,20 +1520,10 @@ extern "C" void js_event_loop_shutdown(void) {
                   timer_handle_count);
     }
 
-    memset(next_tick_ring, 0, sizeof(next_tick_ring));
-    memset(next_tick_resource_ring, 0, sizeof(next_tick_resource_ring));
-    memset(next_tick_als_ring, 0, sizeof(next_tick_als_ring));
-    memset(microtask_ring, 0, sizeof(microtask_ring));
-    memset(microtask_resource_ring, 0, sizeof(microtask_resource_ring));
-    memset(microtask_als_ring, 0, sizeof(microtask_als_ring));
+    runtime_async_deque_clear(&next_tick_deque);
+    runtime_async_deque_clear(&microtask_deque);
     memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
     memset(raf_id_ring, 0, sizeof(raf_id_ring));
-    next_tick_head = 0;
-    next_tick_tail = 0;
-    next_tick_count = 0;
-    microtask_head = 0;
-    microtask_tail = 0;
-    microtask_count = 0;
     raf_head = 0;
     raf_tail = 0;
     raf_count = 0;
@@ -1810,9 +1748,9 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
     int no_progress = 0;
 
     for (int turn = 0; turn < max_turns; turn++) {
-        int before = next_tick_count + microtask_count;
+        int before = js_microtask_pending_count();
         uv_run(loop, UV_RUN_NOWAIT);
-        int after_uv = next_tick_count + microtask_count;
+        int after_uv = js_microtask_pending_count();
         int frame_callbacks = js_animation_frame_has_pending()
             ? js_animation_frame_flush(js_performance_monotonic_now_ms()) : 0;
         js_microtask_flush();

@@ -21,6 +21,8 @@
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
 #include "js_runtime_internal.hpp"
+
+extern "C" bool js_promise_vmap_is(Item value);
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
@@ -6567,6 +6569,7 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_get_prototype(object);
     }
     if (ot == LMD_TYPE_VMAP) {
+        if (js_promise_vmap_is(object)) return js_get_prototype(object);
         Item host_proto = ItemNull;
         if (js_host_object_prototype(object, &host_proto)) {
             return get_type_id(host_proto) == LMD_TYPE_MAP ? host_proto : ItemNull;
@@ -7026,17 +7029,16 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             return (Item){.item = b2it(true)};
         }
     }
-    if (get_type_id(target) == LMD_TYPE_VMAP && receiver.item == target.item &&
-            js_host_object_type(target)) {
-        Item host_result = ItemNull;
-        // Host VMaps have no ordinary Map slot for a projected field or an
-        // expando. Running the descriptor fast path first bypassed the Jube
-        // setter and then discarded unknown-key storage, so Set must enter the
-        // metadata-owned host operation before OrdinarySet's Map fallback.
+    if (get_type_id(target) == LMD_TYPE_VMAP && receiver.item == target.item) {
+        Item exotic_result = ItemNull;
+        // VMap carriers have no ordinary Map descriptor to drive the receiver
+        // fast path. Dispatch their metadata-owned Set operation before the
+        // descriptor walk, otherwise Promise expando writes (including an
+        // overridden `then`) are diverted into a discarded DefineOwn shell.
         if (js_dispatch_property_op(JS_EXOTIC_SET, target_root.get(), 0,
                 key_root.get(), receiver_root.get(), ItemNull, value_root.get(),
-                false, &host_result)) {
-            if (item_is_error(host_result)) return host_result;
+                false, &exotic_result)) {
+            if (item_is_error(exotic_result)) return exotic_result;
             return (Item){.item = b2it(true)};
         }
     }
@@ -8214,6 +8216,20 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                 return js_throw_type_error("Cannot define TypedArray integer-indexed property");
             }
             return obj;
+        }
+    }
+    {
+        if (get_type_id(obj) == LMD_TYPE_VMAP && js_promise_vmap_is(obj)) {
+            Item promise_result = ItemNull;
+            if (js_dispatch_property_op(JS_EXOTIC_DEFINE_OWN, obj, 0, name,
+                    obj, descriptor_root.get(), ItemNull, false,
+                    &promise_result)) {
+                if (item_is_error(promise_result)) return promise_result;
+                if (!js_is_truthy(promise_result)) {
+                    return js_throw_type_error("Cannot define Promise property");
+                }
+                return obj;
+            }
         }
     }
 

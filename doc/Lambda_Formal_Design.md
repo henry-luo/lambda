@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.15.0 (2026-08-12)
+**Spec version:** 1.16.0 (2026-08-13)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -122,7 +122,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   back. [D7.2.2, D7.3.2]
 - **DI17 — One value currency.** `Item` crosses every boundary; a raw C
   pointer never appears in a script-visible signature; compiled artifacts
-  are local derived caches, never distributed. [D7.4.1, D1.7]
+  are local derived caches, never distributed. [D7.4.1v2, D1.7]
 - **DI18 — The emission ratchet.** Budgets carry 0% slack; the commit that
   grows emission carries the budget edit. [D8.6.1]
 - **DI19 — The COW bit.** The shared flag is monotonic; a false "shared"
@@ -915,13 +915,13 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D7.4 Jube modules: data and async contracts
 
-- **D7.4.1** `Item` is the only value currency; native structs cross as
-  **VMap projections** (brand = vtable identity; finalize = sweep-time
-  destroy; an opaque handle is the zero-field degenerate case); a raw C
-  pointer never appears in a script-visible signature; system resources
-  are integer **rids**. Principle: **MapKind = ECMAScript-spec exotics,
-  engine-owned; VMap = host/native objects, module-owned** — the DOM
-  MapKind special case is deleted.* [JA6, NM §6.3, §8]
+- **D7.4.1v2** `Item` is the only value currency; native structs cross as
+  **VMap projections**, and engine-owned internal-slot objects may use the
+  same carrier when native slots are primary. VMap is selected by
+  representation, not module ownership; shape-backed ECMAScript objects
+  remain typed Maps. Brand, precise trace, and finalize are vtable-owned; raw
+  C pointers never become script-visible, and system resources are integer
+  **rids**.* [JA6, NM §6.3, §8; JR7]
 - **D7.4.2** Modules are **fully shielded from the async substrate** — no
   loop escape hatch, ever. A micro-kernel of five concepts (scheduling,
   thread-safe completion post, blocking pool, rid table, shutdown);
@@ -1124,7 +1124,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-12.
+Status of `*`-marked rulings as of 2026-08-13.
 
 | Ruling | Status |
 |---|---|
@@ -1154,7 +1154,7 @@ Status of `*`-marked rulings as of 2026-08-12.
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.4.1 | Native-module POC 1 (radiant-dom onto VMap, MapKind deletion) not started; the JS semantic-adapter items 1–8 must be specified before its step 3. |
+| D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |

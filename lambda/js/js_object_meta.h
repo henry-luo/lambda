@@ -82,6 +82,7 @@ extern const JsPropertyOps js_typed_array_property_ops;
 extern const JsPropertyOps js_iterator_property_ops;
 extern const JsPropertyOps js_process_env_property_ops;
 extern const JsPropertyOps js_host_property_ops;
+extern const JsPropertyOps js_promise_property_ops;
 
 #ifdef __cplusplus
 extern "C" {

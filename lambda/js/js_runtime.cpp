@@ -135,6 +135,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
+extern "C" bool js_promise_vmap_is(Item value);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
     if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
@@ -1188,12 +1189,14 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     // Ordinary packed numeric arrays use ArrayNum storage but remain ordinary
     // JavaScript objects; rejecting that representation here made Proxy
     // construction disagree with every other object admission path (D4.6.1v2).
-    if (tt != LMD_TYPE_MAP && !js_is_ordinary_numeric_array(target) &&
+    if (tt != LMD_TYPE_MAP && tt != LMD_TYPE_VMAP &&
+            !js_is_ordinary_numeric_array(target) &&
             tt != LMD_TYPE_ARRAY && tt != LMD_TYPE_FUNC && tt != LMD_TYPE_ELEMENT) {
         return js_throw_type_error("Cannot create proxy with a non-object as target");
     }
     TypeId ht = get_type_id(handler);
-    if (ht != LMD_TYPE_MAP && !js_is_ordinary_numeric_array(handler) &&
+    if (ht != LMD_TYPE_MAP && ht != LMD_TYPE_VMAP &&
+            !js_is_ordinary_numeric_array(handler) &&
             ht != LMD_TYPE_ARRAY && ht != LMD_TYPE_FUNC && ht != LMD_TYPE_ELEMENT) {
         return js_throw_type_error("Cannot create proxy with a non-object as handler");
     }
@@ -5012,6 +5015,12 @@ extern "C" Item js_get_key_core(Item object, Item key,
         // A miss after the complete prototype walk stays a miss; consulting the
         // catalog here would resurrect deleted bindings and bypass Proxy/Get.
         return make_js_undefined();
+    } else if (type == LMD_TYPE_VMAP && js_promise_vmap_is(object)) {
+        Item out = ItemNull;
+        if (js_dispatch_property_op(JS_EXOTIC_GET, object, 0, key,
+                receiver_root.get(), ItemNull, ItemNull, false, &out)) {
+            return out;
+        }
     } else if (type == LMD_TYPE_VMAP && js_host_object_type(object)) {
         Item out = ItemNull;
         if (js_dispatch_property_op(JS_EXOTIC_GET, object, 0, key,
@@ -13759,7 +13768,8 @@ static Item js_intrinsic_promise_operation(JsPromiseIntrinsicOp operation,
     case JS_PROMISE_INTRINSIC_WITH_RESOLVERS:
         return js_promise_with_resolvers_for_constructor(this_value);
     case JS_PROMISE_INTRINSIC_THEN:
-        if (get_type_id(this_value) != LMD_TYPE_MAP ||
+        if ((get_type_id(this_value) != LMD_TYPE_MAP &&
+             get_type_id(this_value) != LMD_TYPE_VMAP) ||
             !js_get_promise(this_value)) {
             return js_throw_type_error(
                 "Promise.prototype.then called on non-Promise object");
@@ -29138,6 +29148,17 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         // the intrinsic Error prototype (D6.2.2v2).
         return;
     }
+    if (ot == LMD_TYPE_VMAP && js_promise_vmap_is(object)) {
+        JsPromise* promise = js_get_promise(object);
+        if (!promise) return;
+        // Promise carriers have no Map header slot for [[Prototype]]. Preserve
+        // the OrdinaryCreateFromConstructor result here so Promise subclasses
+        // retain their prototype for `instanceof` and species lookup (D6.2.2v2).
+        promise->prototype_override = prototype_root.get().item == ItemNull.item
+            ? (Item){.item = ITEM_JS_UNDEFINED} : prototype_root.get();
+        promise->has_prototype_override = true;
+        return;
+    }
     // Functions keep [[Prototype]] in their side map, but under an internal
     // key. Using the public `__proto__` spelling made prototype walks mistake
     // the internal link for an own data property and shadow Object.prototype's
@@ -29498,6 +29519,14 @@ extern "C" Item js_get_prototype(Item object) {
             }
         }
         return js_get_intrinsic_prototype_for_class(js_error_class_id(object));
+    }
+    if (get_type_id(object) == LMD_TYPE_VMAP && js_promise_vmap_is(object)) {
+        JsPromise* promise = js_get_promise(object);
+        if (promise && promise->has_prototype_override) {
+            return promise->prototype_override.item == ITEM_JS_UNDEFINED
+                ? ItemNull : promise->prototype_override;
+        }
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_PROMISE);
     }
     if (get_type_id(object) == LMD_TYPE_VMAP) {
         Item host_proto = ItemNull;
@@ -31472,14 +31501,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 // v14: Promise Runtime
 // =============================================================================
 
-// No-await async recursion allocates a promise before the body runs; keep this
-// above js_call_function's depth guard so stack overflow wins over table exhaustion.
-#define JS_MAX_PROMISES JS_PROMISE_STATE_MAX
-#define js_promises (js_runtime_state.promises.records)
-#define js_promise_count (js_runtime_state.promises.count)
 #define js_promise_unhandled_epoch (js_runtime_state.promises.unhandled_epoch)
-#define js_promise_unhandled_queue (js_runtime_state.promises.unhandled_queue)
-#define js_promise_unhandled_queue_count (js_runtime_state.promises.unhandled_queue_count)
+#define js_promise_unhandled_deque (js_runtime_state.promises.unhandled_deque)
 #define js_promise_unhandled_strict (js_runtime_state.promises.unhandled_strict)
 #define js_domain_current (js_runtime_state.promises.domain_current)
 #define js_domain_namespace (js_runtime_state.promises.domain_namespace)
@@ -31487,6 +31510,214 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 #define js_domain_stack_state (js_runtime_state.promises.domain_stack)
 #define js_domain_stack (js_domain_stack_state.roots.slots)
 #define js_domain_stack_count (js_domain_stack_state.depth)
+
+static JsPromise* js_promise_from_vmap_data(void* data) {
+    return (JsPromise*)data;
+}
+
+static JsPromise* js_get_promise(Item promise_obj);
+
+static Item js_promise_expando(JsPromise* promise, bool create) {
+    if (!promise) return ItemNull;
+    if (get_type_id(promise->expando) == LMD_TYPE_MAP || !create) {
+        return promise->expando;
+    }
+    promise->expando = js_new_object();
+    return promise->expando;
+}
+
+static Item js_promise_vmap_get(void* data, Item key) {
+    JsPromise* promise = js_promise_from_vmap_data(data);
+    if (!promise || get_type_id(promise->expando) != LMD_TYPE_MAP) return ItemNull;
+    Item value = ItemNull;
+    JsOwnGetStatus status = js_ordinary_get_own(promise->expando, key,
+        (Item){.vmap = (VMap*)promise}, &value);
+    return status == JS_OWN_READY ? value : ItemNull;
+}
+
+static void js_promise_vmap_set(void* data, Item key, Item value) {
+    JsPromise* promise = js_promise_from_vmap_data(data);
+    if (!promise || !promise->extensible) return;
+    if (get_type_id(promise->expando) != LMD_TYPE_MAP) {
+        promise->expando = js_new_object();
+    }
+    if (get_type_id(promise->expando) == LMD_TYPE_MAP) {
+        js_set_key_default(promise->expando, key, value);
+    }
+}
+
+static int64_t js_promise_vmap_count(void* data) {
+    JsPromise* promise = js_promise_from_vmap_data(data);
+    if (!promise || get_type_id(promise->expando) != LMD_TYPE_MAP) return 0;
+    Item names = js_object_get_own_property_names(promise->expando);
+    return get_type_id(names) == LMD_TYPE_ARRAY ? js_array_length(names) : 0;
+}
+
+static SymbolKeyList* js_promise_vmap_keys(void* data) {
+    (void)data;
+    return symbol_key_list_new(4);
+}
+
+static Item js_promise_vmap_key_at(void* data, int64_t index) {
+    (void)data; (void)index;
+    return ItemNull;
+}
+
+static Item js_promise_vmap_value_at(void* data, int64_t index) {
+    (void)data; (void)index;
+    return ItemNull;
+}
+
+static void js_promise_vmap_destroy(void* data) {
+    (void)data;
+}
+
+static void js_promise_vmap_trace(void* data, gc_heap_t* gc) {
+    JsPromise* promise = js_promise_from_vmap_data(data);
+    if (!promise || !gc) return;
+    gc_mark_item(gc, promise->result.item);
+    gc_mark_item(gc, promise->reactions.item);
+    gc_mark_item(gc, promise->reject_domain.item);
+    gc_mark_item(gc, promise->expando.item);
+    gc_mark_item(gc, promise->prototype_override.item);
+}
+
+// Promise carriers keep ordinary user properties in a traced side Map while
+// their state/reactions remain native slots. These callbacks make the carrier
+// obey the same property-operation seam as other native-payload classes.
+static JsPropertyOpResult js_promise_property_get(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)value; (void)descriptor;
+    JsPromise* promise = js_get_promise(target);
+    if (!promise) return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
+    key = js_to_property_key(key);
+    Item expando = js_promise_expando(promise, false);
+    if (get_type_id(expando) == LMD_TYPE_MAP) {
+        Item own = ItemNull;
+        JsOwnGetStatus status = js_ordinary_get_own(expando, key,
+            receiver.item == ItemNull.item ? target : receiver, &own);
+        if (status == JS_OWN_READY) return {JS_PROPERTY_OP_COMPLETE, own};
+    }
+    Item proto = js_get_prototype(target);
+    if (proto.item != ItemNull.item && proto.item != ITEM_JS_UNDEFINED) {
+        Item inherited = js_get_key_core(proto, key,
+            receiver.item == ItemNull.item ? target : receiver);
+        return {JS_PROPERTY_OP_COMPLETE, inherited};
+    }
+    return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
+}
+
+static JsPropertyOpResult js_promise_property_set(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)receiver; (void)descriptor;
+    JsPromise* promise = js_get_promise(target);
+    if (!promise) return {JS_PROPERTY_OP_COMPLETE, value};
+    key = js_to_property_key(key);
+    Item expando = js_promise_expando(promise, true);
+    if (get_type_id(expando) != LMD_TYPE_MAP) {
+        return {JS_PROPERTY_OP_COMPLETE, js_throw_type_error(
+            "Cannot create Promise property storage")};
+    }
+    Item stored = js_set_storage_mode(expando, key, value, expando, true, false);
+    return {JS_PROPERTY_OP_COMPLETE, stored};
+}
+
+static JsPropertyOpResult js_promise_property_define(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)value; (void)receiver;
+    JsPromise* promise = js_get_promise(target);
+    if (!promise) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
+    key = js_to_property_key(key);
+    Item expando = js_promise_expando(promise, true);
+    if (get_type_id(expando) != LMD_TYPE_MAP) {
+        return {JS_PROPERTY_OP_COMPLETE, js_throw_type_error(
+            "Cannot create Promise property storage")};
+    }
+    Item result = js_object_define_property(expando, key, descriptor);
+    if (item_is_error(result)) return {JS_PROPERTY_OP_COMPLETE, result};
+    return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+}
+
+static JsPropertyOpResult js_promise_property_delete(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)value; (void)receiver; (void)descriptor;
+    JsPromise* promise = js_get_promise(target);
+    if (!promise) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+    key = js_to_property_key(key);
+    Item expando = js_promise_expando(promise, false);
+    if (get_type_id(expando) != LMD_TYPE_MAP) {
+        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+    }
+    return {JS_PROPERTY_OP_COMPLETE, js_delete_property(expando, key)};
+}
+
+static JsPropertyOpResult js_promise_property_has(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)value; (void)receiver; (void)descriptor;
+    JsPromise* promise = js_get_promise(target);
+    if (!promise) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
+    key = js_to_property_key(key);
+    Item expando = js_promise_expando(promise, false);
+    if (get_type_id(expando) == LMD_TYPE_MAP && it2b(js_has_own_property(expando, key))) {
+        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+    }
+    Item proto = js_get_prototype(target);
+    if (proto.item != ItemNull.item && proto.item != ITEM_JS_UNDEFINED) {
+        if (it2b(js_has_own_property(proto, key))) {
+            return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+        }
+        bool found = false;
+        (void)js_prototype_lookup_ex(proto, key, &found);
+        if (found) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+    }
+    return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
+}
+
+static JsPropertyOpResult js_promise_property_descriptor(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)value; (void)receiver; (void)descriptor;
+    JsPromise* promise = js_get_promise(target);
+    if (!promise) return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
+    key = js_to_property_key(key);
+    Item expando = js_promise_expando(promise, false);
+    if (get_type_id(expando) != LMD_TYPE_MAP) {
+        return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
+    }
+    return {JS_PROPERTY_OP_COMPLETE, js_object_get_own_property_descriptor(expando, key)};
+}
+
+static JsPropertyOpResult js_promise_property_own_keys(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane; (void)key; (void)value; (void)receiver; (void)descriptor;
+    JsPromise* promise = js_get_promise(target);
+    Item expando = js_promise_expando(promise, false);
+    return {JS_PROPERTY_OP_COMPLETE, get_type_id(expando) == LMD_TYPE_MAP
+        ? js_object_get_own_property_names(expando) : js_array_new(0)};
+}
+
+extern const JsPropertyOps js_promise_property_ops = {
+    js_promise_property_get, js_promise_property_set,
+    js_promise_property_define, js_promise_property_delete,
+    js_promise_property_has, js_promise_property_descriptor,
+    js_promise_property_own_keys,
+    NULL, NULL, NULL, NULL,
+};
+
+static VMapVtable js_promise_vtable = {
+    js_promise_vmap_get,
+    js_promise_vmap_set,
+    js_promise_vmap_count,
+    js_promise_vmap_keys,
+    js_promise_vmap_key_at,
+    js_promise_vmap_value_at,
+    js_promise_vmap_destroy,
+    js_promise_vmap_trace,
+};
+
+extern "C" bool js_promise_vmap_is(Item value) {
+    return get_type_id(value) == LMD_TYPE_VMAP && value.vmap &&
+        value.vmap->vtable == &js_promise_vtable;
+}
 
 // global-ok: CLI policy is selected before the first EvalContext exists.
 // Each context snapshots this setting during creation; executing code only
@@ -31679,113 +31910,45 @@ extern "C" void js_promise_note_unhandled_listener_reset(void) {
     js_promise_unhandled_epoch++;
 }
 
-static bool js_promise_register_roots_once(int required_count) {
-    JsPromiseRuntimeState* promise_state = &js_runtime_state.promises;
-    if (!promise_state->records) {
-        promise_state->records = (JsPromise*)mem_calloc(JS_MAX_PROMISES,
-            sizeof(JsPromise), MEM_CAT_JS_RUNTIME);
-        if (!promise_state->records) {
-            log_error("promise: failed to allocate runtime table");
-            return false;
-        }
-    }
-
-    uint64_t epoch = js_get_heap_epoch();
-    if (promise_state->record_roots_epoch != epoch) {
-        promise_state->record_roots_epoch = epoch;
-        promise_state->record_roots_count = 0;
-    }
-
-    if (required_count > JS_MAX_PROMISES) required_count = JS_MAX_PROMISES;
-    // Register a promise slot before initialization; registering the whole
-    // slab made every first Promise allocation pay for thousands of unused
-    // root ranges and obscured the lifetime boundary of a newly published slot.
-    for (int i = promise_state->record_roots_count; i < required_count; i++) {
-        heap_register_gc_root_range((uint64_t*)&js_promises[i].result, 1);
-        heap_register_gc_root_range((uint64_t*)js_promises[i].on_fulfilled, 8);
-        heap_register_gc_root_range((uint64_t*)js_promises[i].on_rejected, 8);
-        heap_register_gc_root_range((uint64_t*)js_promises[i].next_promise, 8);
-        heap_register_gc_root_range((uint64_t*)js_promises[i].reaction_domain, 8);
-        heap_register_gc_root_range((uint64_t*)&js_promises[i].reject_domain, 1);
-        heap_register_gc_root_range((uint64_t*)&js_promises[i].wrapper, 1);
-    }
-    if (!js_root_range_ensure_registered(&promise_state->roots) ||
-        !js_root_range_ensure_registered(&js_domain_stack_state.roots)) {
-        return false;
-    }
-    promise_state->record_roots_count = required_count;
-    return true;
-}
-
 static JsPromise* js_alloc_promise() {
-    if (js_promise_count >= JS_MAX_PROMISES) {
-        log_error("promise: exceeded max promises (%d)", JS_MAX_PROMISES);
-        return NULL;
-    }
-    if (!js_promise_register_roots_once(js_promise_count + 1)) return NULL;
-    if (js_promise_count >= JS_MAX_PROMISES - 16 && (js_promise_count % 16 == 0)) {
-        log_info("promise: approaching capacity limit (%d/%d)", js_promise_count, JS_MAX_PROMISES);
-    }
-    JsPromise* p = &js_promises[js_promise_count++];
-    p->type_id = LMD_TYPE_MAP;
+    JsPromise* p = (JsPromise*)heap_calloc(sizeof(JsPromise), LMD_TYPE_VMAP);
+    if (!p) return NULL;
+    p->type_id = LMD_TYPE_VMAP;
+    p->flags = 0;
+    p->array_flags = 0;
+    p->map_kind = 0;
+    p->cow_state = 0;
+    p->data = p;
+    p->vtable = &js_promise_vtable;
+    p->host_type = NULL;
+    p->host_data = NULL;
     p->state = JS_PROMISE_PENDING;
     p->result = ItemNull;
-    p->then_count = 0;
-    memset(p->on_fulfilled, 0, sizeof(p->on_fulfilled));
-    memset(p->on_rejected, 0, sizeof(p->on_rejected));
-    memset(p->next_promise, 0, sizeof(p->next_promise));
-    memset(p->reaction_domain, 0, sizeof(p->reaction_domain));
-    memset(p->is_finally, 0, sizeof(p->is_finally));
+    p->reactions = ItemNull;
     p->reject_domain = ItemNull;
-    p->wrapper = ItemNull;
-    p->wrapper_created = false;
+    p->expando = ItemNull;
+    p->prototype_override = ItemNull;
+    p->has_prototype_override = false;
+    p->extensible = true;
     p->rejection_handled = false;
     p->unhandled_check_scheduled = false;
     p->unhandled_reported = false;
     p->unhandled_epoch = 0;
+    js_runtime_state.promises.pending_count++;
+    js_runtime_state.promises.live_count++;
+    if (js_runtime_state.promises.live_count > js_runtime_state.promises.peak_live_count) {
+        js_runtime_state.promises.peak_live_count = js_runtime_state.promises.live_count;
+    }
     return p;
 }
 
 static Item js_promise_to_item(JsPromise* p) {
-    if (p->wrapper_created) return p->wrapper;
-
-    RootFrame roots(4);
-    Rooted<Item> wrapper_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> ctor_key_root(roots, ItemNull);
-    Rooted<Item> promise_ctor_root(roots, ItemNull);
-    // Create a map object that holds a reference to the promise by index
-    int idx = (int)(p - js_promises);
-    wrapper_root.set(js_new_object_with_class(JS_CLASS_PROMISE));
-    String* key = heap_create_name("__promise_idx", 13);
-    key_root.set((Item){.item = s2it(key)});
-    js_set_key_default(wrapper_root.get(), key_root.get(), (Item){.item = i2it(idx)});
-    // Set __proto__ to Promise.prototype so methods are inherited
-    js_wrapper_set_proto(wrapper_root.get(), "Promise", 7);
-    ctor_key_root.set((Item){.item = s2it(heap_create_name("constructor", 11))});
-    promise_ctor_root.set(js_get_constructor((Item){.item = s2it(heap_create_name("Promise", 7))}));
-    js_set_key_default(wrapper_root.get(), ctor_key_root.get(), promise_ctor_root.get());
-    js_mark_non_enumerable(wrapper_root.get(), ctor_key_root.get());
-    // promise async_hooks must use the Promise wrapper itself as the resource.
-    js_async_hooks_stamp_resource(wrapper_root.get(), "PROMISE", 7);
-    // Wrapper setup allocates before the static promise table publishes it.
-    p->wrapper = wrapper_root.get();
-    p->wrapper_created = true;
-    return p->wrapper;
+    return p ? (Item){.vmap = (VMap*)p} : ItemNull;
 }
 
 static JsPromise* js_get_promise(Item promise_obj) {
-    if (get_type_id(promise_obj) != LMD_TYPE_MAP) return NULL;
-    if (js_class_id(promise_obj) != JS_CLASS_PROMISE) return NULL;
-    // Promise's JR7 bridge is the sole remaining private index slot; keep its
-    // exact-own lookup isolated from ordinary property semantics.
-    bool found = false;
-    Item index_value = js_map_shape_lookup_ext(promise_obj.map,
-        "__promise_idx", 13, &found);
-    if (!found || get_type_id(index_value) != LMD_TYPE_INT) return NULL;
-    int64_t idx = it2i(index_value);
-    if (idx < 0 || idx >= js_promise_count) return NULL;
-    return &js_promises[idx];
+    return js_promise_vmap_is(promise_obj)
+        ? (JsPromise*)promise_obj.vmap : NULL;
 }
 
 extern "C" const char* js_promise_state_name(Item promise_obj) {
@@ -31798,11 +31961,7 @@ extern "C" const char* js_promise_state_name(Item promise_obj) {
 }
 
 extern "C" int js_promise_pending_count(void) {
-    int count = 0;
-    for (int i = 0; i < js_promise_count; i++) {
-        if (js_promises[i].state == JS_PROMISE_PENDING) count++;
-    }
-    return count;
+    return js_runtime_state.promises.pending_count;
 }
 
 // Forward declaration — js_promise_settle is called recursively from microtask runner
@@ -31814,10 +31973,9 @@ static void js_promise_mark_rejection_handled(JsPromise* p);
 // Forward declarations for promise microtask helpers
 static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
 static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
-static Item js_promise_finally_continue(Item next_promise_item, Item state_item, Item original_result, Item ignored);
 static Item js_promise_async_hook_run(Item resource, Item job);
-static Item js_resolve_callback(Item promise_idx_item, Item value);
-static Item js_reject_callback(Item promise_idx_item, Item reason);
+static Item js_resolve_callback(Item resolving_state_item, Item value);
+static Item js_reject_callback(Item resolving_state_item, Item reason);
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain);
 enum JsPromiseCapabilityAction {
@@ -31873,28 +32031,25 @@ static Item js_promise_make_type_error(const char* message, int len) {
 }
 
 static Item js_promise_make_resolving_state(JsPromise* p) {
-    RootFrame roots(1);
+    RootFrame roots(2);
     Rooted<Item> state(roots, js_new_object());
-    int idx = p ? (int)(p - js_promises) : -1;
+    Rooted<Item> promise_root(roots, js_promise_to_item(p));
     // The state is fresh and otherwise unreachable while its two properties
     // allocate names/storage; publish it until the bound functions take ownership.
-    js_set_key_default(state.get(), (Item){.item = s2it(heap_create_name("idx", 3))},
-        (Item){.item = i2it(idx)});
+    js_set_key_default(state.get(), (Item){.item = s2it(heap_create_name("promise", 7))},
+        promise_root.get());
     js_set_key_default(state.get(),
         (Item){.item = s2it(heap_create_name("called", 6))},
         (Item){.item = ITEM_FALSE});
     return state.get();
 }
 
-static bool js_promise_resolving_state_claim(Item state_item, int64_t* out_idx) {
-    if (get_type_id(state_item) == LMD_TYPE_INT) {
-        *out_idx = it2i(state_item);
-        return true;
-    }
+static bool js_promise_resolving_state_claim(Item state_item, Item* out_promise) {
     if (get_type_id(state_item) != LMD_TYPE_MAP) return false;
 
-    Item idx = js_get_key_default(state_item, (Item){.item = s2it(heap_create_name("idx", 3))});
-    if (get_type_id(idx) != LMD_TYPE_INT) return false;
+    Item promise = js_get_key_default(state_item,
+        (Item){.item = s2it(heap_create_name("promise", 7))});
+    if (!js_promise_vmap_is(promise)) return false;
 
     Item called_key = (Item){.item = s2it(heap_create_name("called", 6))};
     Item called = js_get_key_default(state_item, called_key);
@@ -31902,7 +32057,49 @@ static bool js_promise_resolving_state_claim(Item state_item, int64_t* out_idx) 
         return false;
     }
     js_set_key_default(state_item, called_key, (Item){.item = ITEM_TRUE});
-    *out_idx = it2i(idx);
+    *out_promise = promise;
+    return true;
+}
+
+static int js_promise_reaction_count(const JsPromise* promise) {
+    if (!promise || get_type_id(promise->reactions) != LMD_TYPE_ARRAY) return 0;
+    return (int)js_array_length(promise->reactions);
+}
+
+static Item js_promise_reaction_at(const JsPromise* promise, int index) {
+    if (!promise || index < 0 || index >= js_promise_reaction_count(promise)) {
+        return ItemNull;
+    }
+    return js_elements_get(promise->reactions, (Item){.item = i2it(index)});
+}
+
+static bool js_promise_add_reaction(JsPromise* promise, Item on_fulfilled,
+        Item on_rejected, Item next_promise, Item domain) {
+    if (!promise) return false;
+    RootFrame roots(6);
+    Rooted<Item> promise_root(roots, js_promise_to_item(promise));
+    Rooted<Item> reactions_root(roots, promise->reactions);
+    // js_array_new(length) publishes that many logical elements; passing the
+    // reaction width here left five leading holes and made settlement read
+    // undefined handlers instead of the appended record.
+    Rooted<Item> reaction_root(roots, js_array_new(0));
+    Rooted<Item> fulfilled_root(roots, on_fulfilled);
+    Rooted<Item> rejected_root(roots, on_rejected);
+    Rooted<Item> next_root(roots, next_promise);
+    Rooted<Item> domain_root(roots, domain);
+    if (!roots.valid()) return false;
+    if (get_type_id(reactions_root.get()) != LMD_TYPE_ARRAY) {
+        reactions_root.set(js_array_new(0));
+        if (get_type_id(reactions_root.get()) != LMD_TYPE_ARRAY) return false;
+        promise = js_get_promise(promise_root.get());
+        if (!promise) return false;
+        promise->reactions = reactions_root.get();
+    }
+    js_array_push(reaction_root.get(), fulfilled_root.get());
+    js_array_push(reaction_root.get(), rejected_root.get());
+    js_array_push(reaction_root.get(), next_root.get());
+    js_array_push(reaction_root.get(), domain_root.get());
+    js_array_push(reactions_root.get(), reaction_root.get());
     return true;
 }
 
@@ -31913,13 +32110,17 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         js_promise_settle(target, JS_PROMISE_REJECTED, error);
         return;
     }
-    RootFrame roots(5);
+    RootFrame roots(7);
     Rooted<Item> target_root(roots, js_promise_to_item(target));
+    Rooted<Item> source_root(roots, js_promise_to_item(source));
     Rooted<Item> resolve_base_root(roots, ItemNull);
     Rooted<Item> reject_base_root(roots, ItemNull);
     Rooted<Item> resolve_root(roots, ItemNull);
     Rooted<Item> reject_root(roots, ItemNull);
     js_promise_mark_rejection_handled(source);
+    source = js_get_promise(source_root.get());
+    target = js_get_promise(target_root.get());
+    if (!source || !target) return;
     if (source->state != JS_PROMISE_PENDING) {
         JsNativeP2 reaction = source->state == JS_PROMISE_FULFILLED
             ? js_promise_microtask_resolve : js_promise_microtask_reject;
@@ -31930,78 +32131,96 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         js_promise_enqueue_handler(resolve_root.get(), source->result, target_root.get());
         return;
     }
-    if (source->then_count < 8) {
-        resolve_base_root.set(js_new_native_function(js_promise_microtask_resolve));
-        reject_base_root.set(js_new_native_function(js_promise_microtask_reject));
-        Item target_item = target_root.get();
-        resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &target_item, 1));
-        // The resolve callback had no owner while reject construction allocated,
-        // allowing both adoption edges to alias the recycled reject function.
-        reject_root.set(js_bind_function(reject_base_root.get(), ItemNull, &target_item, 1));
-        source->on_fulfilled[source->then_count] = resolve_root.get();
-        source->on_rejected[source->then_count] = reject_root.get();
-        source->next_promise[source->then_count] = target_root.get();
-        source->then_count++;
-    }
+    resolve_base_root.set(js_new_native_function(js_promise_microtask_resolve));
+    reject_base_root.set(js_new_native_function(js_promise_microtask_reject));
+    Item target_item = target_root.get();
+    resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &target_item, 1));
+    // The resolve callback had no owner while reject construction allocated,
+    // allowing both adoption edges to alias the recycled reject function.
+    reject_root.set(js_bind_function(reject_base_root.get(), ItemNull, &target_item, 1));
+    js_promise_add_reaction(source, resolve_root.get(), reject_root.get(),
+        target_root.get(), ItemNull);
 }
 
 // PromiseResolveThenableJob: invoke the captured then method asynchronously.
 // Bound args: promise_item, thenable, then_fn.
 static Item js_promise_thenable_job(Item promise_item, Item thenable, Item then_fn) {
-    JsPromise* p = js_get_promise(promise_item);
+    RootFrame roots(8);
+    Rooted<Item> promise_root(roots, promise_item);
+    Rooted<Item> thenable_root(roots, thenable);
+    Rooted<Item> then_fn_root(roots, then_fn);
+    Rooted<Item> resolving_state_root(roots, ItemNull);
+    Rooted<Item> resolve_base_root(roots, ItemNull);
+    Rooted<Item> reject_base_root(roots, ItemNull);
+    Rooted<Item> resolve_fn_root(roots, ItemNull);
+    Rooted<Item> reject_fn_root(roots, ItemNull);
+    JsPromise* p = js_get_promise(promise_root.get());
     if (!p || p->state != JS_PROMISE_PENDING) return ItemNull;
 
-    Item resolving_state = js_promise_make_resolving_state(p);
-    Item resolve_base = js_new_native_function(js_resolve_callback);
-    Item reject_base = js_new_native_function(js_reject_callback);
-    js_promise_mark_anonymous_builtin(resolve_base);
-    js_promise_mark_anonymous_builtin(reject_base);
-    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
-    Item reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
-    js_promise_mark_anonymous_builtin(resolve_fn);
-    js_promise_mark_anonymous_builtin(reject_fn);
+    resolving_state_root.set(js_promise_make_resolving_state(p));
+    resolve_base_root.set(js_new_native_function(js_resolve_callback));
+    reject_base_root.set(js_new_native_function(js_reject_callback));
+    js_promise_mark_anonymous_builtin(resolve_base_root.get());
+    js_promise_mark_anonymous_builtin(reject_base_root.get());
+    Item resolving_state = resolving_state_root.get();
+    resolve_fn_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &resolving_state, 1));
+    reject_fn_root.set(js_bind_function(reject_base_root.get(), ItemNull, &resolving_state, 1));
+    js_promise_mark_anonymous_builtin(resolve_fn_root.get());
+    js_promise_mark_anonymous_builtin(reject_fn_root.get());
 
-    Item args[2] = {resolve_fn, reject_fn};
-    Item then_result = js_call_function(then_fn, thenable, args, 2);
+    Item args[2] = {resolve_fn_root.get(), reject_fn_root.get()};
+    Item then_result = js_call_function(then_fn_root.get(), thenable_root.get(), args, 2);
     if (item_is_error(then_result)) {
         Item error = js_error_lane_payload(then_result);
         Item reject_args[1] = {error};
-        (void)js_call_function(reject_fn, ItemNull, reject_args, 1);
+        (void)js_call_function(reject_fn_root.get(), ItemNull, reject_args, 1);
     }
     return ItemNull;
 }
 
 static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item then_fn) {
-    Item runner_fn = js_new_native_function(js_promise_thenable_job);
-    Item bound_args[3] = {js_promise_to_item(p), thenable, then_fn};
-    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
-    js_enqueue_promise_job(thunk);
+    RootFrame roots(5);
+    Rooted<Item> promise_root(roots, js_promise_to_item(p));
+    Rooted<Item> thenable_root(roots, thenable);
+    Rooted<Item> then_fn_root(roots, then_fn);
+    Rooted<Item> runner_root(roots, ItemNull);
+    Rooted<Item> thunk_root(roots, ItemNull);
+    runner_root.set(js_new_native_function(js_promise_thenable_job));
+    Item bound_args[3] = {promise_root.get(), thenable_root.get(), then_fn_root.get()};
+    thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
+    js_enqueue_promise_job(thunk_root.get());
 }
 
 static void js_promise_resolve_with_value(JsPromise* p, Item value) {
+    RootFrame roots(2);
+    Rooted<Item> promise_root(roots, js_promise_to_item(p));
+    Rooted<Item> value_root(roots, value);
+    p = js_get_promise(promise_root.get());
     if (!p || p->state != JS_PROMISE_PENDING) return;
 
-    JsPromise* native_promise = js_get_promise(value);
+    JsPromise* native_promise = js_get_promise(value_root.get());
     if (native_promise) {
         js_promise_adopt_native(p, native_promise);
         return;
     }
 
-    if (js_promise_is_object_like(value)) {
+    if (js_promise_is_object_like(value_root.get())) {
         Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
-        Item then_fn = js_get_key_default(value, then_key);
+        Item then_fn = js_get_key_default(value_root.get(), then_key);
         if (item_is_error(then_fn)) {
             Item error = js_error_lane_payload(then_fn);
-            js_promise_settle(p, JS_PROMISE_REJECTED, error);
+            js_promise_settle(js_get_promise(promise_root.get()), JS_PROMISE_REJECTED, error);
             return;
         }
         if (js_is_callable(then_fn)) {
-            js_promise_enqueue_thenable_job(p, value, then_fn);
+            js_promise_enqueue_thenable_job(js_get_promise(promise_root.get()),
+                value_root.get(), then_fn);
             return;
         }
     }
 
-    js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+    js_promise_settle(js_get_promise(promise_root.get()), JS_PROMISE_FULFILLED,
+        value_root.get());
 }
 
 // Microtask runner for promise then() handlers.
@@ -32027,43 +32246,6 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
     }
     if (next) {
         js_promise_resolve_with_value(next, handler_result_root.get());
-    }
-    return ItemNull;
-}
-
-// Microtask runner for finally() handlers.
-// Called with 4 bound args: handler, next_promise_item, state_item, original_result.
-static Item js_promise_finally_microtask_run(Item handler, Item next_promise_item, Item state_item, Item original_result) {
-    JsPromise* next = js_get_promise(next_promise_item);
-    Item finally_result = js_call_function(handler, ItemNull, NULL, 0);
-    if (item_is_error(finally_result)) {
-        Item error = js_error_lane_payload(finally_result);
-        if (next) js_promise_settle(next, JS_PROMISE_REJECTED, error);
-        return ItemNull;
-    }
-    if (!next) return ItemNull;
-
-    Item cleanup_promise = js_promise_resolve(finally_result);
-    Item continue_base = js_new_native_function(js_promise_finally_continue);
-    Item continue_args[3] = {next_promise_item, state_item, original_result};
-    Item continue_fn = js_bind_function(continue_base, ItemNull, continue_args, 3);
-
-    Item reject_base = js_new_native_function(js_promise_microtask_reject);
-    Item reject_fn = js_bind_function(reject_base, ItemNull, &next_promise_item, 1);
-
-    Item cleanup_result = js_promise_then(cleanup_promise, continue_fn, reject_fn);
-    if (item_is_error(cleanup_result) && next) {
-        js_promise_settle(next, JS_PROMISE_REJECTED, js_error_lane_payload(cleanup_result));
-    }
-    return ItemNull;
-}
-
-static Item js_promise_finally_continue(Item next_promise_item, Item state_item, Item original_result, Item ignored) {
-    (void)ignored;
-    JsPromise* next = js_get_promise(next_promise_item);
-    if (next) {
-        JsPromiseState orig_state = (JsPromiseState)it2i(state_item);
-        js_promise_settle(next, orig_state, original_result);
     }
     return ItemNull;
 }
@@ -32187,22 +32369,29 @@ static Item js_promise_unhandled_check(Item promise_item) {
 
 static void js_promise_schedule_unhandled_check(JsPromise* p) {
     if (!p || p->rejection_handled || p->unhandled_check_scheduled || p->unhandled_reported) return;
-    p->unhandled_check_scheduled = true;
-    p->unhandled_epoch = js_promise_unhandled_epoch;
-    if (js_promise_unhandled_queue_count >= 1024) {
-        log_error("js-promise: unhandled rejection queue overflow");
+    RootFrame roots(1);
+    Rooted<Item> promise_root(roots, js_promise_to_item(p));
+    p = js_get_promise(promise_root.get());
+    if (!p) return;
+    if (!js_root_range_ensure_registered(&js_runtime_state.promises.roots)) {
+        log_error("js-promise: unhandled queue root registration failed");
         return;
     }
-    js_promise_unhandled_queue[js_promise_unhandled_queue_count++] = js_promise_to_item(p);
+    p->unhandled_check_scheduled = true;
+    p->unhandled_epoch = js_promise_unhandled_epoch;
+    Item record[1] = {js_promise_to_item(p)};
+    if (!runtime_async_deque_push(&js_promise_unhandled_deque, record)) {
+        p = js_get_promise(promise_root.get());
+        if (!p) return;
+        p->unhandled_check_scheduled = false;
+        log_error("js-promise: failed to grow unhandled rejection deque");
+    }
 }
 
 extern "C" void js_promise_flush_unhandled_checks(void) {
-    int count = js_promise_unhandled_queue_count;
-    if (count <= 0) return;
-    js_promise_unhandled_queue_count = 0;
-    for (int i = 0; i < count; i++) {
-        Item promise_item = js_promise_unhandled_queue[i];
-        js_promise_unhandled_queue[i] = ItemNull;
+    Item record[1] = {};
+    while (runtime_async_deque_pop(&js_promise_unhandled_deque, record)) {
+        Item promise_item = record[0];
         js_promise_unhandled_check(promise_item);
     }
 }
@@ -32280,24 +32469,6 @@ static void js_promise_enqueue_handler_domain(Item handler, Item result, Item ne
     js_promise_enqueue_wrapped_job(thunk_root.get(), resource, domain_root.get());
 }
 
-// Enqueue a finally handler as a microtask.
-static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsPromiseState state, Item result, Item domain) {
-    RootFrame roots(6);
-    Rooted<Item> handler_root(roots, handler);
-    Rooted<Item> next_root(roots, next_promise_item);
-    Rooted<Item> result_root(roots, result);
-    Rooted<Item> domain_root(roots, domain);
-    Rooted<Item> thunk_root(roots, ItemNull);
-    Rooted<Item> runner_root(roots, ItemNull);
-    runner_root.set(js_new_native_function(js_promise_finally_microtask_run));
-    Item bound_args[4] = {handler_root.get(), next_root.get(),
-        (Item){.item = i2it((int64_t)state)}, result_root.get()};
-    thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 4));
-    Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
-        ? next_root.get() : js_async_hooks_get_current_resource();
-    js_promise_enqueue_wrapped_job(thunk_root.get(), resource, domain_root.get());
-}
-
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain) {
     RootFrame roots(5);
     Rooted<Item> next_root(roots, next_promise_item);
@@ -32314,12 +32485,22 @@ static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseStat
 }
 
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
-    if (p->state != JS_PROMISE_PENDING) return; // already settled
+    RootFrame roots(3);
+    Rooted<Item> promise_root(roots, js_promise_to_item(p));
+    Rooted<Item> result_root(roots, result);
+    if (!roots.valid()) return;
+    p = js_get_promise(promise_root.get());
+    if (!p || p->state != JS_PROMISE_PENDING) return; // already settled
 
     p->state = state;
+    // A settled carrier leaves the pending set exactly once; this counter is
+    // diagnostic only and must not drift when resolve/reject races converge.
+    if (js_runtime_state.promises.pending_count > 0) {
+        js_runtime_state.promises.pending_count--;
+    }
     // Promise records outlive the producer activation; retain wide numerics in
     // the adjacent destination-owned payload instead of borrowing its home.
-    owned_item_slot_store(&p->result, 1, 0, result);
+    owned_item_slot_store(&p->result, 1, 0, result_root.get());
     Item promise_resource = js_promise_to_item(p);
     js_async_hooks_emit_promise_resolve_resource(promise_resource);
     if (state == JS_PROMISE_REJECTED) {
@@ -32327,56 +32508,56 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
     }
 
     // Schedule handlers as microtasks (per ECMAScript spec)
-    for (int i = 0; i < p->then_count; i++) {
-        Item handler = (state == JS_PROMISE_FULFILLED) ? p->on_fulfilled[i] : p->on_rejected[i];
-        Item next_item = p->next_promise[i];
-        Item domain = p->reaction_domain[i];
-
-        if (p->is_finally[i]) {
-            // finally handler: called with 0 args, passes through original result
-            if (js_is_callable(handler)) {
-                js_promise_enqueue_finally(handler, next_item, state, result, domain);
-            } else {
-                js_promise_enqueue_passthrough(next_item, state, result, domain);
-            }
-        } else if (js_is_callable(handler)) {
-            if (get_type_id(next_item) == LMD_TYPE_MAP) {
+    int reaction_count = js_promise_reaction_count(p);
+    for (int i = 0; i < reaction_count; i++) {
+        // Enqueueing each reaction may compact the VMap; reacquire the
+        // carrier from its exact root before reading the next reaction.
+        p = js_get_promise(promise_root.get());
+        if (!p) return;
+        Item reaction = js_promise_reaction_at(p, i);
+        if (get_type_id(reaction) != LMD_TYPE_ARRAY || js_array_length(reaction) < 4) continue;
+        Item handler = js_elements_get(reaction, (Item){.item = i2it(
+            state == JS_PROMISE_FULFILLED ? 0 : 1)});
+        Item next_item = js_elements_get(reaction, (Item){.item = i2it(2)});
+        Item domain = js_elements_get(reaction, (Item){.item = i2it(3)});
+        if (js_is_callable(handler)) {
+            if (js_get_promise(next_item)) {
                 // has a chained next promise — enqueue with chaining
-                js_promise_enqueue_handler_domain(handler, result, next_item, domain);
+                js_promise_enqueue_handler_domain(handler, result_root.get(), next_item, domain);
             } else {
                 // direct handler (e.g. from chaining resolution), no next promise
-                js_promise_enqueue_handler_domain(handler, result, ItemNull, domain);
+                js_promise_enqueue_handler_domain(handler, result_root.get(), ItemNull, domain);
             }
         } else {
             // no handler for this state — propagate through a Promise reaction job
-            js_promise_enqueue_passthrough(next_item, state, result, domain);
+            js_promise_enqueue_passthrough(next_item, state, result_root.get(), domain);
         }
     }
 
     if (state == JS_PROMISE_REJECTED) {
-        js_promise_schedule_unhandled_check(p);
+        js_promise_schedule_unhandled_check(js_get_promise(promise_root.get()));
     }
 }
 
 // Resolve/reject callbacks for promise executors.
 // Each callback is bound (via js_bind_function) to its promise index,
 // so these work even when called asynchronously (e.g. in setTimeout).
-static Item js_resolve_callback(Item promise_idx_item, Item value) {
-    int64_t idx = -1;
-    bool claimed = js_promise_resolving_state_claim(promise_idx_item, &idx);
+static Item js_resolve_callback(Item resolving_state_item, Item value) {
+    Item promise_item = ItemNull;
+    bool claimed = js_promise_resolving_state_claim(resolving_state_item, &promise_item);
     if (!claimed) return make_js_undefined();
-    if (idx >= 0 && idx < js_promise_count) {
-        js_promise_resolve_with_value(&js_promises[idx], value);
-    }
+    JsPromise* promise = js_get_promise(promise_item);
+    if (promise) js_promise_resolve_with_value(promise, value);
     return make_js_undefined();
 }
 
-static Item js_reject_callback(Item promise_idx_item, Item reason) {
-    int64_t idx = -1;
-    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return make_js_undefined();
-    if (idx >= 0 && idx < js_promise_count) {
-        js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
+static Item js_reject_callback(Item resolving_state_item, Item reason) {
+    Item promise_item = ItemNull;
+    if (!js_promise_resolving_state_claim(resolving_state_item, &promise_item)) {
+        return make_js_undefined();
     }
+    JsPromise* promise = js_get_promise(promise_item);
+    if (promise) js_promise_settle(promise, JS_PROMISE_REJECTED, reason);
     return make_js_undefined();
 }
 
@@ -32399,10 +32580,11 @@ extern "C" Item js_promise_create(Item executor) {
     promise_root.set(js_promise_to_item(p));
 
     {
-        // Create resolve/reject functions bound to this promise's index
+        // Create resolve/reject functions bound to this promise's resolving state.
         // Each fresh object is otherwise unreachable across the next allocator;
         // keep the whole resolving-function construction chain exact-rooted.
-        resolving_state_root.set(js_promise_make_resolving_state(p));
+        resolving_state_root.set(js_promise_make_resolving_state(
+            js_get_promise(promise_root.get())));
         resolve_base_root.set(js_new_native_function(js_resolve_callback));
         reject_base_root.set(js_new_native_function(js_reject_callback));
         js_promise_mark_anonymous_builtin(resolve_base_root.get());
@@ -32417,7 +32599,7 @@ extern "C" Item js_promise_create(Item executor) {
         Item executor_result = js_call_function(executor_root.get(), make_js_undefined(), args, 2);
         if (item_is_error(executor_result)) {
             Item error = js_error_lane_payload(executor_result);
-            js_promise_settle(p, JS_PROMISE_REJECTED, error);
+            js_promise_settle(js_get_promise(promise_root.get()), JS_PROMISE_REJECTED, error);
         }
     }
 
@@ -32538,16 +32720,25 @@ static Item js_promise_species_constructor(Item promise) {
 }
 
 static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_rejected) {
-    TypeId promise_type = get_type_id(promise);
+    RootFrame roots(5);
+    Rooted<Item> promise_root(roots, promise);
+    Rooted<Item> fulfilled_root(roots, on_fulfilled);
+    Rooted<Item> rejected_root(roots, on_rejected);
+    Rooted<Item> base_root(roots, ItemNull);
+    Rooted<Item> then_root(roots, ItemNull);
+    TypeId promise_type = get_type_id(promise_root.get());
     if (promise_type == LMD_TYPE_NULL || promise_type == LMD_TYPE_UNDEFINED ||
-        promise.item == ItemNull.item) {
+        promise_root.get().item == ItemNull.item) {
         return js_throw_type_error("Promise then lookup called on null or undefined");
     }
-    JS_ASSIGN_OR_RETURN(get_base, js_promise_is_object_like(promise) ? promise : js_to_object(promise));
+    base_root.set(js_promise_is_object_like(promise_root.get())
+        ? promise_root.get() : js_to_object(promise_root.get()));
+    if (item_is_error(base_root.get())) return base_root.get();
     Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
-    JS_ASSIGN_OR_RETURN(then_fn, js_get_key_default(get_base, then_key));
-    Item args[2] = {on_fulfilled, on_rejected};
-    return js_call_function(then_fn, promise, args, 2);
+    then_root.set(js_get_key_default(base_root.get(), then_key));
+    if (item_is_error(then_root.get())) return then_root.get();
+    Item args[2] = {fulfilled_root.get(), rejected_root.get()};
+    return js_call_function(then_root.get(), promise_root.get(), args, 2);
 }
 
 static Item js_promise_finally_value_thunk(Item value, Item ignored) {
@@ -32562,37 +32753,65 @@ static Item js_promise_finally_throw_thunk(Item reason, Item ignored) {
 
 static Item js_promise_make_finally_continuation(JsNativeP2 target,
         Item captured) {
-    Item base = js_new_native_function(target);
-    js_promise_mark_anonymous_builtin(base);
-    Item bound = js_bind_function(base, ItemNull, &captured, 1);
-    js_promise_mark_anonymous_builtin(bound);
-    return bound;
+    RootFrame roots(4);
+    Rooted<Item> captured_root(roots, captured);
+    Rooted<Item> base_root(roots, ItemNull);
+    Rooted<Item> bound_root(roots, ItemNull);
+    base_root.set(js_new_native_function(target));
+    js_promise_mark_anonymous_builtin(base_root.get());
+    Item captured_arg = captured_root.get();
+    bound_root.set(js_bind_function(base_root.get(), ItemNull, &captured_arg, 1));
+    js_promise_mark_anonymous_builtin(bound_root.get());
+    return bound_root.get();
 }
 
 static Item js_promise_then_finally(Item on_finally, Item constructor, Item value) {
-    JS_ASSIGN_OR_RETURN(finally_result, js_call_function(on_finally, make_js_undefined(), NULL, 0));
-    JS_ASSIGN_OR_RETURN(result, js_promise_resolve_with_constructor(constructor, finally_result));
-    Item thunk = js_promise_make_finally_continuation(
-        js_promise_finally_value_thunk, value);
-    return js_promise_invoke_then(result, thunk, make_js_undefined());
+    RootFrame roots(6);
+    Rooted<Item> on_finally_root(roots, on_finally);
+    Rooted<Item> constructor_root(roots, constructor);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> finally_result_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> thunk_root(roots, ItemNull);
+    finally_result_root.set(js_call_function(on_finally_root.get(), make_js_undefined(), NULL, 0));
+    if (item_is_error(finally_result_root.get())) return finally_result_root.get();
+    result_root.set(js_promise_resolve_with_constructor(constructor_root.get(), finally_result_root.get()));
+    if (item_is_error(result_root.get())) return result_root.get();
+    thunk_root.set(js_promise_make_finally_continuation(
+        js_promise_finally_value_thunk, value_root.get()));
+    return js_promise_invoke_then(result_root.get(), thunk_root.get(), make_js_undefined());
 }
 
 static Item js_promise_catch_finally(Item on_finally, Item constructor, Item reason) {
-    JS_ASSIGN_OR_RETURN(finally_result, js_call_function(on_finally, make_js_undefined(), NULL, 0));
-    JS_ASSIGN_OR_RETURN(result, js_promise_resolve_with_constructor(constructor, finally_result));
-    Item thunk = js_promise_make_finally_continuation(
-        js_promise_finally_throw_thunk, reason);
-    return js_promise_invoke_then(result, thunk, make_js_undefined());
+    RootFrame roots(6);
+    Rooted<Item> on_finally_root(roots, on_finally);
+    Rooted<Item> constructor_root(roots, constructor);
+    Rooted<Item> reason_root(roots, reason);
+    Rooted<Item> finally_result_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> thunk_root(roots, ItemNull);
+    finally_result_root.set(js_call_function(on_finally_root.get(), make_js_undefined(), NULL, 0));
+    if (item_is_error(finally_result_root.get())) return finally_result_root.get();
+    result_root.set(js_promise_resolve_with_constructor(constructor_root.get(), finally_result_root.get()));
+    if (item_is_error(result_root.get())) return result_root.get();
+    thunk_root.set(js_promise_make_finally_continuation(
+        js_promise_finally_throw_thunk, reason_root.get()));
+    return js_promise_invoke_then(result_root.get(), thunk_root.get(), make_js_undefined());
 }
 
 static Item js_promise_make_finally_wrapper(JsNativeP3 target,
         Item on_finally, Item constructor) {
-    Item base = js_new_native_function(target);
-    js_promise_mark_anonymous_builtin(base);
-    Item bound_args[2] = {on_finally, constructor};
-    Item bound = js_bind_function(base, ItemNull, bound_args, 2);
-    js_promise_mark_anonymous_builtin(bound);
-    return bound;
+    RootFrame roots(4);
+    Rooted<Item> on_finally_root(roots, on_finally);
+    Rooted<Item> constructor_root(roots, constructor);
+    Rooted<Item> base_root(roots, ItemNull);
+    Rooted<Item> bound_root(roots, ItemNull);
+    base_root.set(js_new_native_function(target));
+    js_promise_mark_anonymous_builtin(base_root.get());
+    Item bound_args[2] = {on_finally_root.get(), constructor_root.get()};
+    bound_root.set(js_bind_function(base_root.get(), ItemNull, bound_args, 2));
+    js_promise_mark_anonymous_builtin(bound_root.get());
+    return bound_root.get();
 }
 
 static bool js_promise_capability_slot_is_undefined(Item value) {
@@ -33032,25 +33251,34 @@ static Item js_promise_race_with_constructor(Item constructor, Item iterable) {
 }
 
 static Item js_promise_with_resolvers_for_constructor(Item constructor) {
-    if (!js_promise_is_object_like(constructor)) {
+    RootFrame roots(5);
+    Rooted<Item> constructor_root(roots, constructor);
+    Rooted<Item> promise_root(roots, ItemNull);
+    Rooted<Item> resolve_root(roots, ItemNull);
+    Rooted<Item> reject_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    if (!js_promise_is_object_like(constructor_root.get())) {
         return js_throw_type_error("Promise.withResolvers requires an object constructor");
     }
-    if (!js_is_constructor_internal(constructor)) {
+    if (!js_is_constructor_internal(constructor_root.get())) {
         return js_throw_type_error("Promise.withResolvers requires a constructor");
     }
     Item resolve_fn = ItemNull;
     Item reject_fn = ItemNull;
-    JS_ASSIGN_OR_RETURN(promise, js_promise_new_capability(constructor, &resolve_fn, &reject_fn));
+    promise_root.set(js_promise_new_capability(constructor_root.get(), &resolve_fn, &reject_fn));
+    if (item_is_error(promise_root.get())) return promise_root.get();
+    resolve_root.set(resolve_fn);
+    reject_root.set(reject_fn);
 
     // Build { promise, resolve, reject } object
-    Item result = js_new_object();
+    result_root.set(js_new_object());
     Item k_promise = (Item){.item = s2it(heap_create_name("promise"))};
     Item k_resolve = (Item){.item = s2it(heap_create_name("resolve"))};
     Item k_reject = (Item){.item = s2it(heap_create_name("reject"))};
-    js_set_key_default(result, k_promise, promise);
-    js_set_key_default(result, k_resolve, resolve_fn);
-    js_set_key_default(result, k_reject, reject_fn);
-    return result;
+    js_set_key_default(result_root.get(), k_promise, promise_root.get());
+    js_set_key_default(result_root.get(), k_resolve, resolve_root.get());
+    js_set_key_default(result_root.get(), k_reject, reject_root.get());
+    return result_root.get();
 }
 
 extern "C" Item js_promise_with_resolvers(void) {
@@ -33130,7 +33358,7 @@ extern "C" Item js_await_sync(Item value) {
     //
     // Conditional trigger: a pending rAF is also a progress source. Without it,
     // two-frame DOM promises return undefined before their frame callbacks run.
-    if (p->then_count > 0 || js_microtask_pending_count() > 0 ||
+    if (js_promise_reaction_count(p) > 0 || js_microtask_pending_count() > 0 ||
         js_animation_frame_has_pending()) {
         struct AwaitPredCtx { JsPromise* p; };
         AwaitPredCtx ctx = { p };
@@ -33176,6 +33404,9 @@ static void js_async_register_roots_once() {
         // generated wrapper returns, so the fixed context table must root it.
         heap_register_gc_root((uint64_t*)&js_async_contexts[i].env);
         heap_register_gc_root(&js_async_contexts[i].this_val.item);
+        // The promise carrier is a GC VMap now; retaining only the native
+        // context record would let a suspended async function lose its owner.
+        heap_register_gc_root(&js_async_contexts[i].promise.item);
     }
     heap_register_gc_root(&js_async_resolved_value.item);
 }
@@ -33266,7 +33497,8 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     }
     // Parse result: [value, next_state]
     if (get_type_id(result_root.get()) != LMD_TYPE_ARRAY) {
-        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, result_root.get());
+        JsPromise* promise = js_get_promise(ctx->promise);
+        if (promise) js_promise_settle(promise, JS_PROMISE_REJECTED, result_root.get());
         if (previous_module_state_id != UINT32_MAX) {
             js_set_active_module_state_id(previous_module_state_id);
         }
@@ -33274,7 +33506,8 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     }
     Array* arr = result_root.get().array;
     if (arr->length < 2) {
-        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, ItemNull);
+        JsPromise* promise = js_get_promise(ctx->promise);
+        if (promise) js_promise_settle(promise, JS_PROMISE_REJECTED, ItemNull);
         if (previous_module_state_id != UINT32_MAX) {
             js_set_active_module_state_id(previous_module_state_id);
         }
@@ -33286,10 +33519,12 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (next_state == -1) {
         // Done — resolve the async function promise with the shared Promise
         // Resolution Procedure so returned promises/thenables are adopted.
-        js_promise_resolve_with_value(&js_promises[ctx->promise_idx], value_root.get());
+        JsPromise* promise = js_get_promise(ctx->promise);
+        if (promise) js_promise_resolve_with_value(promise, value_root.get());
     } else if (next_state == -2) {
         // Rejected — reject the async function's promise
-        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, value_root.get());
+        JsPromise* promise = js_get_promise(ctx->promise);
+        if (promise) js_promise_settle(promise, JS_PROMISE_REJECTED, value_root.get());
     } else {
         // Suspended on pending promise — register resume/reject callbacks
         ctx->state = next_state;
@@ -33363,7 +33598,7 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
 
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
-    ctx->promise_idx = (int)(p - js_promises);
+    ctx->promise = js_promise_to_item(p);
     // async functions allocate their result promise before the body runs.
     js_promise_to_item(p);
 
@@ -33398,7 +33633,7 @@ extern "C" Item js_async_get_promise(Item ctx_idx_item) {
     int ctx_idx = (int)it2i(ctx_idx_item);
     if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
     JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
-    return js_promise_to_item(&js_promises[ctx->promise_idx]);
+    return ctx->promise;
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
@@ -33439,6 +33674,12 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
     JsPromise* next = js_alloc_promise();
     if (!next) return ItemNull;
     next_root.set(js_promise_to_item(next));
+    // Promise allocation may compact the GC heap. The source Promise is rooted
+    // above, so reacquire its derived pointer before inspecting state or
+    // appending the reaction; retaining the pre-allocation pointer loses the
+    // chained reaction when the intermediate Promise is the first live edge.
+    p = js_get_promise(promise_root.get());
+    if (!p) return ItemNull;
     if (use_capability) {
         js_promise_forward_native_to_capability(next_root.get(),
             capability_resolve_root.get(), capability_reject_root.get());
@@ -33448,14 +33689,11 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
 
     if (p->state == JS_PROMISE_PENDING) {
         // Register callbacks with chained next promise
-        if (p->then_count < 8) {
-            // Callback parameters otherwise live only in native registers while
-            // species/capability construction allocates before this ownership edge.
-            p->on_fulfilled[p->then_count] = fulfilled_root.get();
-            p->on_rejected[p->then_count] = rejected_root.get();
-            p->next_promise[p->then_count] = next_root.get();
-            p->reaction_domain[p->then_count] = reaction_domain_root.get();
-            p->then_count++;
+        // Reactions are growable GC arrays; the old eight-entry ceiling
+        // silently dropped handlers and violated the Promise job ordering.
+        if (!js_promise_add_reaction(p, fulfilled_root.get(), rejected_root.get(),
+                next_root.get(), reaction_domain_root.get())) {
+            return js_throw_type_error("Unable to allocate Promise reaction");
         }
     } else if (p->state == JS_PROMISE_FULFILLED) {
         if (js_is_callable(fulfilled_root.get())) {
@@ -33485,20 +33723,28 @@ extern "C" Item js_promise_catch(Item promise, Item on_rejected) {
 }
 
 extern "C" Item js_promise_finally(Item promise, Item on_finally) {
-    if (!js_promise_is_object_like(promise)) {
+    RootFrame roots(5);
+    Rooted<Item> promise_root(roots, promise);
+    Rooted<Item> on_finally_root(roots, on_finally);
+    Rooted<Item> constructor_root(roots, ItemNull);
+    Rooted<Item> then_finally_root(roots, ItemNull);
+    Rooted<Item> catch_finally_root(roots, ItemNull);
+    if (!js_promise_is_object_like(promise_root.get())) {
         return js_throw_type_error("Promise.prototype.finally called on non-object");
     }
-    JS_ASSIGN_OR_RETURN(constructor, js_promise_species_constructor(promise));
+    constructor_root.set(js_promise_species_constructor(promise_root.get()));
+    if (item_is_error(constructor_root.get())) return constructor_root.get();
 
-    Item then_finally = on_finally;
-    Item catch_finally = on_finally;
-    if (js_is_callable(on_finally)) {
-        then_finally = js_promise_make_finally_wrapper(js_promise_then_finally,
-            on_finally, constructor);
-        catch_finally = js_promise_make_finally_wrapper(js_promise_catch_finally,
-            on_finally, constructor);
+    then_finally_root.set(on_finally_root.get());
+    catch_finally_root.set(on_finally_root.get());
+    if (js_is_callable(on_finally_root.get())) {
+        then_finally_root.set(js_promise_make_finally_wrapper(js_promise_then_finally,
+            on_finally_root.get(), constructor_root.get()));
+        catch_finally_root.set(js_promise_make_finally_wrapper(js_promise_catch_finally,
+            on_finally_root.get(), constructor_root.get()));
     }
-    return js_promise_invoke_then(promise, then_finally, catch_finally);
+    return js_promise_invoke_then(promise_root.get(), then_finally_root.get(),
+        catch_finally_root.get());
 }
 
 // =============================================================================
@@ -33781,31 +34027,42 @@ static Item js_promise_make_combinator_counter(int remaining,
                                                int values_length,
                                                Item* values_out,
                                                Item* called_out) {
-    Item counter = js_new_object();
-    js_set_key_default(counter, (Item){.item = s2it(heap_create_name("remaining", 9))},
+    RootFrame roots(3);
+    Rooted<Item> counter_root(roots, js_new_object());
+    Rooted<Item> values_root(roots, ItemNull);
+    Rooted<Item> called_root(roots, ItemNull);
+    js_set_key_default(counter_root.get(), (Item){.item = s2it(heap_create_name("remaining", 9))},
         (Item){.item = i2it(remaining)});
-    Item values = js_array_new(values_length);
+    values_root.set(js_array_new(values_length));
+    Item values = values_root.get();
     values.array->length = values_length;
-    js_set_key_default(counter, (Item){.item = s2it(heap_create_name(values_name, values_name_len))}, values);
-    Item called = js_array_new(values_length);
+    js_set_key_default(counter_root.get(),
+        (Item){.item = s2it(heap_create_name(values_name, values_name_len))}, values_root.get());
+    called_root.set(js_array_new(values_length));
+    Item called = called_root.get();
     called.array->length = values_length;
     for (int i = 0; i < values_length; i++) {
         called.array->items[i] = (Item){.item = ITEM_FALSE};
     }
-    js_set_key_default(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called);
-    if (values_out) *values_out = values;
-    if (called_out) *called_out = called;
-    return counter;
+    js_set_key_default(counter_root.get(), (Item){.item = s2it(heap_create_name("called", 6))}, called_root.get());
+    if (values_out) *values_out = values_root.get();
+    if (called_out) *called_out = called_root.get();
+    return counter_root.get();
 }
 
 static Item js_promise_make_bound_element_handler(JsNativeP4 handler, Item counter,
                                                    int index, Item result_item,
                                                    bool mark_anonymous) {
-    Item base = js_new_native_function(handler);
-    Item args[3] = {counter, (Item){.item = i2it(index)}, result_item};
-    Item bound = js_bind_function(base, ItemNull, args, 3);
-    if (mark_anonymous) js_promise_mark_anonymous_builtin(bound);
-    return bound;
+    RootFrame roots(4);
+    Rooted<Item> counter_root(roots, counter);
+    Rooted<Item> result_root(roots, result_item);
+    Rooted<Item> base_root(roots, ItemNull);
+    Rooted<Item> bound_root(roots, ItemNull);
+    base_root.set(js_new_native_function(handler));
+    Item args[3] = {counter_root.get(), (Item){.item = i2it(index)}, result_root.get()};
+    bound_root.set(js_bind_function(base_root.get(), ItemNull, args, 3));
+    if (mark_anonymous) js_promise_mark_anonymous_builtin(bound_root.get());
+    return bound_root.get();
 }
 
 static bool js_promise_invoke_bound_element(Item elem, int index, Item counter,
@@ -33813,23 +34070,43 @@ static bool js_promise_invoke_bound_element(Item elem, int index, Item counter,
                                              JsNativeP4 fulfill_handler,
                                              JsNativeP4 reject_handler,
                                              Item* out_error) {
-    Item fulfill_fn = js_promise_make_bound_element_handler(fulfill_handler,
-        counter, index, result_item, false);
-    Item reject_fn = js_promise_make_bound_element_handler(reject_handler,
-        counter, index, result_item, false);
-    return js_invoke_promise_then(elem, fulfill_fn, reject_fn, out_error);
+    RootFrame roots(5);
+    Rooted<Item> elem_root(roots, elem);
+    Rooted<Item> counter_root(roots, counter);
+    Rooted<Item> result_root(roots, result_item);
+    Rooted<Item> fulfill_root(roots, ItemNull);
+    Rooted<Item> reject_root(roots, ItemNull);
+    fulfill_root.set(js_promise_make_bound_element_handler(fulfill_handler,
+        counter_root.get(), index, result_root.get(), false));
+    reject_root.set(js_promise_make_bound_element_handler(reject_handler,
+        counter_root.get(), index, result_root.get(), false));
+    return js_invoke_promise_then(elem_root.get(), fulfill_root.get(), reject_root.get(), out_error);
 }
 
 static Item js_promise_run_array_combinator(Item iterable,
         JsNativeP4 fulfill_handler, JsNativeP4 reject_handler,
         bool skip_resolve, bool reject_aggregate) {
+    // The iterable, result promise, and combinator counter all survive nested
+    // allocations while handlers are built; keeping only raw pointers here
+    // let forced GC move them before the next element was processed.
+    RootFrame roots(9);
+    Rooted<Item> iterable_root(roots, iterable);
+    Rooted<Item> arr_root(roots, ItemNull);
+    Rooted<Item> rejection_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> counter_root(roots, ItemNull);
+    Rooted<Item> results_root(roots, ItemNull);
+    Rooted<Item> called_root(roots, ItemNull);
+    Rooted<Item> elem_root(roots, ItemNull);
+    Rooted<Item> error_root(roots, ItemNull);
     Item arr_item = ItemNull;
     Item rejection = ItemNull;
-    if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
-        return js_promise_reject(rejection);
+    if (!js_promise_materialize_iterable(iterable_root.get(), &arr_item, &rejection)) {
+        rejection_root.set(rejection);
+        return js_promise_reject(rejection_root.get());
     }
-    Array* arr = arr_item.array;
-    int count = arr->length;
+    arr_root.set(arr_item);
+    int count = arr_root.get().array->length;
     if (count == 0) {
         if (reject_aggregate) {
             return js_promise_reject(js_promise_make_aggregate_error(js_array_new(0)));
@@ -33839,30 +34116,39 @@ static Item js_promise_run_array_combinator(Item iterable,
 
     JsPromise* result = js_alloc_promise();
     if (!result) return ItemNull;
-    Item result_item = js_promise_to_item(result);
+    result_root.set(js_promise_to_item(result));
     Item results_arr = ItemNull;
     Item called_arr = ItemNull;
     const char* counter_name = reject_aggregate ? "errors" : "results";
     int counter_name_len = reject_aggregate ? 6 : 7;
-    Item counter = js_promise_make_combinator_counter(count, counter_name, counter_name_len, count,
-        &results_arr, &called_arr);
+    counter_root.set(js_promise_make_combinator_counter(count, counter_name, counter_name_len, count,
+        &results_arr, &called_arr));
+    results_root.set(results_arr);
+    called_root.set(called_arr);
     for (int i = 0; i < count; i++) {
-        Item elem = arr->items[i];
+        elem_root.set(arr_root.get().array->items[i]);
+        Item elem = elem_root.get();
         if (!skip_resolve) {
             Item resolve_status = js_promise_builtin_constructor_resolve(elem, &elem);
             if (item_is_error(resolve_status)) {
-                js_promise_settle(result, JS_PROMISE_REJECTED, elem);
-                return result_item;
+                JsPromise* current_result = js_get_promise(result_root.get());
+                if (current_result) js_promise_settle(current_result, JS_PROMISE_REJECTED, elem);
+                return result_root.get();
             }
+            elem_root.set(elem);
         }
         Item error = ItemNull;
-        if (!js_promise_invoke_bound_element(elem, i, counter, result_item,
-                fulfill_handler, reject_handler, &error)) {
-            js_promise_settle(result, JS_PROMISE_REJECTED, error);
-            return result_item;
+        if (!js_promise_invoke_bound_element(elem_root.get(), i, counter_root.get(),
+                result_root.get(), fulfill_handler, reject_handler, &error)) {
+            error_root.set(error);
+            JsPromise* current_result = js_get_promise(result_root.get());
+            if (current_result) {
+                js_promise_settle(current_result, JS_PROMISE_REJECTED, error_root.get());
+            }
+            return result_root.get();
         }
     }
-    return result_item;
+    return result_root.get();
 }
 
 extern "C" Item js_promise_all(Item iterable) {
@@ -40602,11 +40888,13 @@ extern "C" bool js_is_weak_collection_instance(Item obj) {
 // Called by js_batch_reset() to prevent dangling pointers after pool destruction.
 // =============================================================================
 void js_deep_batch_reset() {
-    // generators, promises, async contexts — contain Items from old pool
+    // generators, queue owners, and async contexts contain Items from the old
+    // heap; GC-owned Promise carriers are reclaimed with that heap.
     memset(js_generators, 0, sizeof(js_generators));
     js_generator_count = 0;
-    if (js_promises) memset(js_promises, 0, sizeof(JsPromise) * JS_MAX_PROMISES);
-    js_promise_count = 0;
+    js_runtime_state.promises.pending_count = 0;
+    js_runtime_state.promises.live_count = 0;
+    js_runtime_state.promises.peak_live_count = 0;
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);

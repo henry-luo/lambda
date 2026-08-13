@@ -9,11 +9,11 @@
 #include "js_builtin_catalog.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
+#include "../runtime/async.h"
 #include "../../lib/hashmap.h"
 
 #define JS_REGEXP_MAX_PAREN 9
 #define JS_ROOT_RANGE_REGISTRY_MAX 64
-#define JS_EVENT_MICROTASK_CAPACITY 1024
 #define JS_EVENT_RAF_CAPACITY 1024
 #define JS_EVENT_TIMER_CAPACITY 1024
 #define JS_EVENT_MOCK_WAIT_CAPACITY 128
@@ -34,8 +34,6 @@
 #define JS_DIAGNOSTICS_DEFERRED_ERROR_MAX 64
 #define JS_ASYNC_HOOK_STATE_MAX 256
 #define JS_ASYNC_PENDING_DESTROY_STATE_MAX 1024
-#define JS_PROMISE_STATE_MAX 8192
-#define JS_PROMISE_UNHANDLED_QUEUE_MAX 1024
 #define JS_DOMAIN_STACK_MAX 64
 #define JS_MAX_MODULES 64
 #define JS_MAX_ASYNC_PARENTS 16
@@ -71,21 +69,9 @@ struct JsMockSchedulerWait {
 };
 
 struct JsEventLoopQueueState {
-    Item next_tick[JS_EVENT_MICROTASK_CAPACITY] = {};
-    Item next_tick_resource[JS_EVENT_MICROTASK_CAPACITY] = {};
-    Item next_tick_als[JS_EVENT_MICROTASK_CAPACITY] = {};
-    Item next_tick_domain[JS_EVENT_MICROTASK_CAPACITY] = {};
-    int next_tick_head = 0;
-    int next_tick_tail = 0;
-    int next_tick_count = 0;
-
-    Item microtask[JS_EVENT_MICROTASK_CAPACITY] = {};
-    Item microtask_resource[JS_EVENT_MICROTASK_CAPACITY] = {};
-    Item microtask_als[JS_EVENT_MICROTASK_CAPACITY] = {};
-    Item microtask_domain[JS_EVENT_MICROTASK_CAPACITY] = {};
-    int microtask_head = 0;
-    int microtask_tail = 0;
-    int microtask_count = 0;
+    Item queue_storage[2] = {};
+    RuntimeAsyncDeque next_tick_deque = {};
+    RuntimeAsyncDeque microtask_deque = {};
     bool microtask_running = false;
 
     Item raf_callback[JS_EVENT_RAF_CAPACITY] = {};
@@ -678,43 +664,38 @@ enum JsPromiseState {
     JS_PROMISE_REJECTED,
 };
 
-// This record keeps reaction data in fixed arrays for predictable Promise
-// throughput. The containing table is allocated only by contexts that use it.
-struct JsPromise {
-    TypeId type_id = LMD_TYPE_MAP;
+// GC-owned Promise carrier. Reactions are stored in a growable GC Array so
+// each live Promise owns its precise edge set without a context-wide cap.
+struct JsPromise : VMap {
     JsPromiseState state = JS_PROMISE_PENDING;
     Item result = {};
     uint64_t result_scalar = 0;
-    Item on_fulfilled[8] = {};
-    Item on_rejected[8] = {};
-    Item next_promise[8] = {};
-    Item reaction_domain[8] = {};
+    Item reactions = {};
     Item reject_domain = {};
-    Item wrapper = {};
-    bool is_finally[8] = {};
-    bool wrapper_created = false;
+    Item expando = {};
+    Item prototype_override = {};
+    bool has_prototype_override = false;
+    bool extensible = true;
     bool rejection_handled = false;
     bool unhandled_check_scheduled = false;
     bool unhandled_reported = false;
     int64_t unhandled_epoch = 0;
-    int then_count = 0;
 };
 
 struct JsPromiseRuntimeState {
-    // Lazy allocation avoids charging non-Promise contexts a multi-megabyte
-    // table while retaining fixed-index, lock-free steady-state access.
-    JsPromise* records = NULL;
-    Item unhandled_queue[JS_PROMISE_UNHANDLED_QUEUE_MAX] = {};
+    RuntimeAsyncDeque unhandled_deque = {};
+    // Keep the three GC-visible owner slots contiguous; the deque control
+    // record is native metadata and must never be scanned as an Item range.
+    Item unhandled_storage = {};
     Item domain_current = {};
     Item domain_namespace = {};
     Item domain_stack_slots[JS_DOMAIN_STACK_MAX] = {};
-    int count = 0;
+    int pending_count = 0;
+    int live_count = 0;
+    int peak_live_count = 0;
     int64_t unhandled_epoch = 0;
-    int unhandled_queue_count = 0;
     bool unhandled_strict = false;
     JsItemStack domain_stack = {};
-    uint64_t record_roots_epoch = 0;
-    int record_roots_count = 0;
     JsRootRange roots = {};
 };
 
@@ -832,7 +813,7 @@ struct JsAsyncContextStateRecord {
     Item* env = NULL;
     int env_size = 0;
     int state = 0;
-    int promise_idx = -1;
+    Item promise = {};
     // resumed MIR property names must use the module image that compiled the body.
     uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
@@ -1101,9 +1082,9 @@ struct JsRuntimeState {
 
     // Each context owns both range descriptors and the registry that resets
     // them. A heap replacement in one runtime must never touch another.
+    JsRootRange event_loop_queue_roots = {};
     JsRootRange* root_range_registry[JS_ROOT_RANGE_REGISTRY_MAX] = {};
     int root_range_registry_count = 0;
-    void* event_loop_rooted_gc = NULL;
 };
 
 // This derived TLS cache is initialized once after the eval thread acquires

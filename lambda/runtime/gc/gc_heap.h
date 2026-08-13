@@ -72,10 +72,9 @@ typedef struct gc_header {
 typedef void (*gc_collect_callback_t)(void);
 
 /**
- * Callback type for tracing VMap entries during GC mark phase.
- * Called with: (vmap_data_ptr, gc_heap, gc_mark_item_fn)
- * The callback should iterate all Item keys/values in the VMap data
- * and call gc_mark_item(gc, item) for each.
+ * Callback type for tracing legacy HashMap-backed VMap payloads during GC
+ * mark. Backend-specific VMaps may provide a precise vtable trace callback;
+ * this hook remains data-first for the generic runtime/test bridge.
  */
 typedef struct gc_heap gc_heap_t;  // forward declaration for function pointer types
 typedef void (*gc_vmap_trace_fn)(void* data, gc_heap_t* gc);

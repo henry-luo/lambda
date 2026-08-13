@@ -741,6 +741,7 @@ struct Element : List {
 // VMap: Virtual map with vtable dispatch
 // Supports arbitrary key types and pluggable backends (HashMap, TreeMap, etc.)
 // type(vmap) returns "map" — transparent to Lambda scripts
+struct gc_heap;
 struct VMapVtable {
     Item    (*get)(void* data, Item key);                    // map[key]
     void    (*set)(void* data, Item key, Item value);        // in-place mutation (pn context)
@@ -749,6 +750,7 @@ struct VMapVtable {
     Item    (*key_at)(void* data, int64_t index);            // original key at insertion index
     Item    (*value_at)(void* data, int64_t index);          // value at insertion index
     void    (*destroy)(void* data);                          // free backing store
+    void    (*trace)(void* data, gc_heap* gc);               // precise Item-edge tracing
 };
 
 struct VMap : Container {

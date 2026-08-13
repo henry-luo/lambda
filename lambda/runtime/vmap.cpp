@@ -276,6 +276,19 @@ static void hashmap_vmap_destroy(void* data) {
     hashmap_data_free(hd);
 }
 
+static void hashmap_vmap_trace(void* data, gc_heap_t* gc) {
+    HashMapData* hd = (HashMapData*)data;
+    if (!hd || !hd->table || !gc) return;
+
+    size_t iter = 0;
+    void* entry;
+    while (hashmap_iter(hd->table, &iter, &entry)) {
+        HashMapEntry* e = (HashMapEntry*)entry;
+        gc_mark_item(gc, e->key.item);
+        gc_mark_item(gc, e->value.item);
+    }
+}
+
 // singleton vtable for HashMap-backed VMaps
 static VMapVtable hashmap_vtable = {
     hashmap_vmap_get,
@@ -285,6 +298,7 @@ static VMapVtable hashmap_vtable = {
     hashmap_vmap_key_at,
     hashmap_vmap_value_at,
     hashmap_vmap_destroy,
+    hashmap_vmap_trace,
 };
 
 // ============================================================================
@@ -526,25 +540,18 @@ SymbolKeyList* vmap_keys_for_item(Item vmap_item) {
 // GC Bridge: tracing and finalization for VMap backing data
 // ============================================================================
 
-// Trace all Item keys and values stored in a VMap's HashMapData.
-// Called by gc_trace_object() during the mark phase.
-extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc) {
-    HashMapData* hd = (HashMapData*)data;
-    if (!hd || !hd->table) return;
-
-    // iterate all entries in the HashMap and mark both keys and values
-    size_t iter = 0;
-    void* entry;
-    while (hashmap_iter(hd->table, &iter, &entry)) {
-        HashMapEntry* e = (HashMapEntry*)entry;
-        gc_mark_item(gc, e->key.item);
-        gc_mark_item(gc, e->value.item);
-    }
+// Dispatch precise Item tracing through the immutable VMap backend vtable.
+extern "C" void vmap_gc_trace(void* obj, gc_heap_t* gc) {
+    VMap* vm = (VMap*)obj;
+    if (!vm || !vm->data || !gc || !vm->vtable || !vm->vtable->trace) return;
+    vm->vtable->trace(vm->data, gc);
 }
 
 // Destroy VMap's HashMapData backing store.
 // Called by gc_finalize_dead_object() during the sweep phase.
 extern "C" void vmap_gc_destroy(void* obj, void* data) {
-    (void)obj;
-    hashmap_data_free((HashMapData*)data);
+    VMap* vm = (VMap*)obj;
+    if (vm && vm->vtable && vm->vtable->destroy) {
+        vm->vtable->destroy(data);
+    }
 }

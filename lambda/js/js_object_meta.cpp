@@ -3,6 +3,8 @@
 #include "js_object_meta.h"
 #include "../lambda.hpp"
 
+extern "C" bool js_promise_vmap_is(Item value);
+
 // The array order is the frozen JsClass order. Metadata is static data: it has
 // no Items, realm prototypes, mutable caches, or module-owned callbacks.
 #define JS_META(id) { id, JS_CLASS_FAMILY_ORDINARY, JS_CLASS_FLAG_INTRINSIC_PROTO, \
@@ -122,6 +124,16 @@ static const JsClassMeta js_class_meta_table[JS_CLASS__COUNT] = {
 
 static TypeMap js_error_carrier_type = {};
 
+// Promise instances use the VMap carrier, while Promise.prototype remains an
+// ordinary shape-backed Map. Keep the exotic callbacks on the carrier-only
+// metadata view so prototype bootstrap writes are not intercepted as payload
+// operations (D7.4.1v2).
+static const JsClassMeta js_promise_vmap_meta = {
+    JS_CLASS_PROMISE, JS_CLASS_FAMILY_ORDINARY,
+    JS_CLASS_FLAG_INTRINSIC_PROTO | JS_CLASS_FLAG_NATIVE_PAYLOAD,
+    JS_PROTO_POLICY_INTRINSIC, &js_promise_property_ops,
+};
+
 extern "C" TypeMap* js_error_carrier_type_map(void) {
     js_object_metadata_initialize();
     if (!js_error_carrier_type.js_meta) {
@@ -175,6 +187,9 @@ const JsClassMeta* js_object_meta(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_ERROR) {
         return js_class_meta_for_id(js_error_class_id(value));
+    }
+    if (type == LMD_TYPE_VMAP && js_promise_vmap_is(value)) {
+        return &js_promise_vmap_meta;
     }
     if (type == LMD_TYPE_VMAP && value.vmap && value.vmap->host_type) {
         return js_class_meta_for_id(JS_CLASS_WEB_API_RESOURCE);

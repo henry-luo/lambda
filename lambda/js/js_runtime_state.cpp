@@ -144,6 +144,14 @@ bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
         // so restore non-zero queue identities that C++ default initializers
         // would otherwise provide only for a constructed object.
         runtime_context->js_state->event_loop.next_raf_id = 1;
+        runtime_async_deque_init(
+            &runtime_context->js_state->event_loop.next_tick_deque,
+            &runtime_context->js_state->event_loop.queue_storage[0], 4);
+        runtime_async_deque_init(
+            &runtime_context->js_state->event_loop.microtask_deque,
+            &runtime_context->js_state->event_loop.queue_storage[1], 4);
+        runtime_async_deque_init(&runtime_context->js_state->promises.unhandled_deque,
+            &runtime_context->js_state->promises.unhandled_storage, 1);
         runtime_context->js_state->timers.next_id = 1;
         runtime_context->js_state->current_private_home_class_index = -1;
         runtime_context->js_state->call_stack_limit = js_initial_call_stack_limit();
@@ -255,12 +263,8 @@ void js_runtime_state_destroy_context(void) {
     if (runtime_context->js_state->operations.symbol_description_registry) {
         hashmap_free(runtime_context->js_state->operations.symbol_description_registry);
     }
-    // Promise records are allocated lazily outside the fixed state capsule.
-    // They must leave with their owning context so another context cannot
-    // inherit semantic state or retain a multi-megabyte unused table.
-    if (runtime_context->js_state->promises.records) {
-        mem_free(runtime_context->js_state->promises.records);
-    }
+    // Promise carriers are GC-owned; context teardown only drops queue and
+    // async owners before the heap itself is released.
     mem_free(runtime_context->js_state);
     runtime_context->js_state = NULL;
     if (was_active) js_active_runtime_state = NULL;
@@ -405,8 +409,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
         2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX,
         "async hooks state");
     js_root_range_set_storage(&state->promises.roots,
-        state->promises.unhandled_queue,
-        JS_PROMISE_UNHANDLED_QUEUE_MAX + 2 + JS_DOMAIN_STACK_MAX,
+        &state->promises.unhandled_storage, 3,
         "Promise unhandled queue and domain state");
     js_root_range_set_storage(&state->promises.domain_stack.roots,
         state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack");
@@ -419,6 +422,8 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     js_root_range_set_storage(&state->async_local_storage.roots,
         state->async_local_storage.instances, JS_MAX_ALS_INSTANCES,
         "AsyncLocalStorage instances");
+    js_root_range_set_storage(&state->event_loop_queue_roots,
+        state->event_loop.queue_storage, 2, "JS async queue storage");
 }
 
 bool js_root_range_register_reset(JsRootRange* range, void* owner,

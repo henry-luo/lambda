@@ -1645,13 +1645,29 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_VMAP_: {
-        // VMap: { Container(2), data*(8@8), vtable*(8@16) }
-        // VMap entries (Item keys/values) are stored in a malloc'd HashMap.
-        // Delegate tracing to the runtime-provided callback.
-        uint8_t* p = (uint8_t*)obj;
-        void* data = *(void**)(p + 8);
-        if (data && gc->vmap_trace) {
-            gc->vmap_trace(data, gc);
+        // Backend-specific VMaps trace through their immutable vtable. Keep
+        // the legacy data-first hook for test/custom HashMap payloads whose
+        // vtable predates the precise callback.
+        // lambda.h intentionally keeps VMap opaque in C; mirror only its
+        // stable Container/data/vtable prefix to reach the optional precise
+        // callback without making the collector depend on C++ headers.
+        typedef void (*gc_vmap_precise_trace_fn)(void*, gc_heap_t*);
+        typedef struct {
+            void* slots[7];
+            gc_vmap_precise_trace_fn trace;
+        } GcVMapVtableLayout;
+        typedef struct {
+            uint8_t container_header[8];
+            void* data;
+            GcVMapVtableLayout* vtable;
+        } GcVMapLayout;
+        GcVMapLayout* vm = (GcVMapLayout*)obj;
+        if (vm && vm->vtable && vm->vtable->trace) {
+            vm->vtable->trace(vm->data, gc);
+        } else if (gc->vmap_trace) {
+            uint8_t* p = (uint8_t*)obj;
+            void* data = *(void**)(p + 8);
+            if (data) gc->vmap_trace(data, gc);
         }
         break;
     }
