@@ -10199,23 +10199,6 @@ JS_CONSOLE_SPAN_ADAPTER(js_console_debug_span, js_console_debug_multi)
 
 #undef JS_CONSOLE_SPAN_ADAPTER
 
-// Per ES spec §9.2.2: if constructor returns an Object, use that instead of `this`
-extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
-    // a constructor throw is an abrupt completion, not a primitive return;
-    // replacing it with the allocation would make derived-constructor TDZ and
-    // every other constructor exception appear to succeed.
-    if (item_is_error(result)) return result;
-    if (js_construct_result_is_object(result)) {
-        return result;
-    }
-    return obj;
-}
-
-extern "C" void js_set_internal_class_name(Item obj, Item class_name) {
-    (void)obj;
-    (void)class_name;
-}
-
 // =============================================================================
 // Function Functions
 // =============================================================================
@@ -34607,11 +34590,11 @@ static Item js_promise_all_settled_iterable(Item iterable) {
 // v14: ES Module Runtime
 // =============================================================================
 
-// Module record layout lives in JsModuleRuntimeState.  This source keeps the
-// detailed TLA behavior below while state ownership stays explicit in the
-// context capsule.
-#define js_modules (js_runtime_state.modules.modules)
-#define js_module_count_v14 (js_runtime_state.modules.module_count)
+// Module records live in a growable context-owned list.  Namespace Items and
+// TLA edges therefore keep stable addresses across imports (D5.4.3), while
+// the scheduler remains local to the active JS realm.
+#define js_module_first (js_runtime_state.modules.first)
+#define js_module_last (js_runtime_state.modules.last)
 #define js_active_module_namespace (js_runtime_state.modules.active_namespace)
 #define g_tla_module_depth (js_runtime_state.modules.module_depth)
 #define g_async_eval_order_counter (js_runtime_state.modules.async_eval_order_counter)
@@ -34621,15 +34604,10 @@ static void js_module_ensure_roots() {
     if (!js_active_runtime_state || !context || !context->heap || !context->heap->gc) return;
     JsModuleRuntimeState* state = &js_runtime_state.modules;
     uint64_t epoch = js_get_heap_epoch();
-    if (state->roots_epoch == epoch) return;
-    for (int i = 0; i < JS_MAX_MODULES; i++) {
-        heap_register_gc_root(&state->modules[i].specifier_item.item);
-        heap_register_gc_root(&state->modules[i].namespace_obj.item);
-        heap_register_gc_root(&state->modules[i].awaited_target.item);
-        heap_register_gc_root(&state->modules[i].evaluation_error.item);
+    if (state->roots_epoch != epoch) {
+        heap_register_gc_root(&state->active_namespace.item);
+        state->roots_epoch = epoch;
     }
-    heap_register_gc_root(&state->active_namespace.item);
-    state->roots_epoch = epoch;
 }
 
 static void js_ensure_active_module_namespace_rooted() {
@@ -34640,8 +34618,21 @@ static void js_ensure_active_module_namespace_rooted() {
 void js_module_cache_reset() {
     if (!js_active_runtime_state) return;
     js_module_ensure_roots();
-    memset(js_modules, 0, sizeof(js_runtime_state.modules.modules));
-    js_module_count_v14 = 0;
+    JsModule* module = js_module_first;
+    while (module) {
+        JsModule* next = module->next;
+        if (module->roots_epoch == js_get_heap_epoch()) {
+            heap_unregister_gc_root(&module->specifier_item.item);
+            heap_unregister_gc_root(&module->namespace_obj.item);
+            heap_unregister_gc_root(&module->awaited_target.item);
+            heap_unregister_gc_root(&module->evaluation_error.item);
+        }
+        mem_free(module->async_parents);
+        mem_free(module);
+        module = next;
+    }
+    js_module_first = NULL;
+    js_module_last = NULL;
     js_active_module_namespace = ItemNull;
     g_tla_module_depth = 0;
     g_async_eval_order_counter = 0;
@@ -34704,9 +34695,9 @@ extern "C" void js_tla_enter_module(void) {
 static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
     typedef Item (*js_main_fn)(Context*);
     while (1) {
-        int best = -1, best_aeo = -1;
-        for (int i = 0; i < js_module_count_v14; i++) {
-            JsModule* m = &js_modules[i];
+        JsModule* best = NULL;
+        int best_aeo = -1;
+        for (JsModule* m = js_module_first; m; m = m->next) {
             if (!m->post_await_pending || m->body_executed) continue;
             if (!m->deferred_main_ptr) continue;
             if (m->pending_async_deps > 0) continue;
@@ -34720,13 +34711,13 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
                     continue;
                 }
             }
-            if (best < 0 || m->async_eval_order < best_aeo) {
-                best = i;
+            if (!best || m->async_eval_order < best_aeo) {
+                best = m;
                 best_aeo = m->async_eval_order;
             }
         }
-        if (best < 0) break;
-        JsModule* m = &js_modules[best];
+        if (!best) break;
+        JsModule* m = best;
         log_debug("P7d: depth-0 drain firing post-await for '%.*s' (AEO=%d)",
             (int)m->specifier->len, m->specifier->chars, m->async_eval_order);
         js_main_fn main_fn = (js_main_fn)m->deferred_main_ptr;
@@ -34837,27 +34828,32 @@ extern "C" Item js_get_live_binding_default(Item specifier) {
 }
 
 extern "C" void js_module_register(Item specifier, Item namespace_obj) {
-    if (js_module_count_v14 >= JS_MAX_MODULES) {
-        log_error("module: exceeded max modules (%d)", JS_MAX_MODULES);
-        return;
-    }
-    if (js_module_count_v14 >= JS_MAX_MODULES - 4) {
-        log_info("module: approaching capacity limit (%d/%d)", js_module_count_v14, JS_MAX_MODULES);
-    }
     if (get_type_id(specifier) != LMD_TYPE_STRING) return;
 
     String* spec = it2s(specifier);
     // Check for existing registration
-    for (int i = 0; i < js_module_count_v14; i++) {
-        if (js_modules[i].specifier->len == spec->len &&
-            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
-            js_modules[i].specifier_item = specifier;
-            js_modules[i].namespace_obj = namespace_obj;
+    for (JsModule* module = js_module_first; module; module = module->next) {
+        if (module->specifier->len == spec->len &&
+            memcmp(module->specifier->chars, spec->chars, spec->len) == 0) {
+            module->specifier_item = specifier;
+            module->namespace_obj = namespace_obj;
+            js_module_ensure_roots();
+            if (module->roots_epoch != js_get_heap_epoch()) {
+                heap_register_gc_root(&module->specifier_item.item);
+                heap_register_gc_root(&module->namespace_obj.item);
+                heap_register_gc_root(&module->awaited_target.item);
+                heap_register_gc_root(&module->evaluation_error.item);
+                module->roots_epoch = js_get_heap_epoch();
+            }
             return;
         }
     }
 
-    JsModule* m = &js_modules[js_module_count_v14++];
+    JsModule* m = (JsModule*)mem_calloc(1, sizeof(JsModule), MEM_CAT_JS_RUNTIME);
+    if (!m) {
+        log_error("module: failed to allocate module record");
+        return;
+    }
     m->specifier_item = specifier;
     m->specifier = spec;
     m->namespace_obj = namespace_obj;
@@ -34872,6 +34868,17 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     m->body_state = 0;
     m->async_eval_order = -1;
     m->saved_module_state_id = UINT32_MAX;
+    js_module_ensure_roots();
+    if (context && context->heap && context->heap->gc) {
+        heap_register_gc_root(&m->specifier_item.item);
+        heap_register_gc_root(&m->namespace_obj.item);
+        heap_register_gc_root(&m->awaited_target.item);
+        heap_register_gc_root(&m->evaluation_error.item);
+        m->roots_epoch = js_get_heap_epoch();
+    }
+    if (js_module_last) js_module_last->next = m;
+    else js_module_first = m;
+    js_module_last = m;
 }
 
 // Js57 P5 (fulfillment/rejection-order): module TLA awaited-target tracking.
@@ -34882,16 +34889,14 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
 static JsModule* js_module_find(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return NULL;
     String* spec = it2s(specifier);
-    for (int i = 0; i < js_module_count_v14; i++) {
-        if (js_modules[i].specifier->len == spec->len &&
-            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
-            return &js_modules[i];
+    for (JsModule* module = js_module_first; module; module = module->next) {
+        if (module->specifier->len == spec->len &&
+            memcmp(module->specifier->chars, spec->chars, spec->len) == 0) {
+            return module;
         }
     }
     return NULL;
 }
-
-static int js_module_find_index(Item specifier);
 
 extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
     JsModule* m = js_module_find(specifier);
@@ -34909,9 +34914,8 @@ extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
     // completion; dropping this propagation lets the importer run as if the
     // dependency fulfilled, which is observable as a missing module throw.
     for (int i = 0; i < m->async_parent_count; i++) {
-        int parent_index = m->async_parents[i];
-        if (parent_index < 0 || parent_index >= js_module_count_v14) continue;
-        JsModule* parent = &js_modules[parent_index];
+        JsModule* parent = m->async_parents[i];
+        if (!parent) continue;
         if (parent->body_executed) continue;
         if (parent->pending_async_deps > 0) parent->pending_async_deps--;
         js_module_record_evaluation_error(parent->specifier_item, observed);
@@ -34984,18 +34988,6 @@ extern "C" void js_module_inherit_awaited_target(Item current_specifier, Item de
 // `[[HasTLA]]`, `[[PendingAsyncDependencies]]`, `[[AsyncParentModules]]`.
 // =============================================================================
 
-static int js_module_find_index(Item specifier) {
-    if (get_type_id(specifier) != LMD_TYPE_STRING) return -1;
-    String* spec = it2s(specifier);
-    for (int i = 0; i < js_module_count_v14; i++) {
-        if (js_modules[i].specifier->len == spec->len &&
-            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 extern "C" void js_module_mark_has_tla(Item specifier) {
     JsModule* m = js_module_find(specifier);
     if (!m) return;
@@ -35033,23 +35025,32 @@ extern "C" int js_module_needs_async_settle(Item specifier) {
 // the parent's pending_async_deps counter. The parent will be notified when
 // the dep's body fully completes via js_module_complete_tla_body.
 extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_specifier) {
-    int dep_idx = js_module_find_index(dep_specifier);
-    int par_idx = js_module_find_index(parent_specifier);
-    if (dep_idx < 0 || par_idx < 0) return;
-    if (dep_idx == par_idx) return;  // ignore self
-    JsModule* dep = &js_modules[dep_idx];
-    JsModule* par = &js_modules[par_idx];
+    JsModule* dep = js_module_find(dep_specifier);
+    JsModule* par = js_module_find(parent_specifier);
+    if (!dep || !par || dep == par) return;  // ignore missing/self edges
     // Avoid duplicate parent entries — the spec counts each requested dep at
     // most once per importer.
     for (int i = 0; i < dep->async_parent_count; i++) {
-        if (dep->async_parents[i] == par_idx) return;
+        if (dep->async_parents[i] == par) return;
     }
-    if (dep->async_parent_count >= JS_MAX_ASYNC_PARENTS) {
-        log_error("P7d: module '%.*s' async_parents overflow (%d)",
-            (int)dep->specifier->len, dep->specifier->chars, JS_MAX_ASYNC_PARENTS);
-        return;
+    if (dep->async_parent_count >= dep->async_parent_capacity) {
+        int next_capacity = dep->async_parent_capacity == 0
+            ? 4 : dep->async_parent_capacity * 2;
+        JsModule** next = (JsModule**)mem_calloc(next_capacity,
+            sizeof(JsModule*), MEM_CAT_JS_RUNTIME);
+        if (!next) {
+            log_error("P7d: failed to grow async parent list");
+            return;
+        }
+        if (dep->async_parents && dep->async_parent_count > 0) {
+            memcpy(next, dep->async_parents,
+                (size_t)dep->async_parent_count * sizeof(JsModule*));
+        }
+        mem_free(dep->async_parents);
+        dep->async_parents = next;
+        dep->async_parent_capacity = next_capacity;
     }
-    dep->async_parents[dep->async_parent_count++] = par_idx;
+    dep->async_parents[dep->async_parent_count++] = par;
     par->pending_async_deps++;
     log_debug("P7d: module '%.*s' registered as async parent of '%.*s' (par pending=%d)",
         (int)par->specifier->len, par->specifier->chars,
@@ -35110,24 +35111,32 @@ extern "C" int js_module_assign_async_eval_order(Item specifier) {
 // the single scheduler; a second ready queue only duplicated that eligibility
 // state and could diverge from the scan during nested completion.
 extern "C" void js_module_complete_tla_body(Item specifier) {
-    int idx = js_module_find_index(specifier);
-    if (idx < 0) return;
-    JsModule* m = &js_modules[idx];
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
     if (m->body_executed) return;  // idempotent
+    // Snapshot parent list because js_module_register_async_parent may run
+    // during deferred-body invocation if a parent itself triggers more imports.
+    int parent_count = m->async_parent_count;
+    JsModule** parents = NULL;
+    if (parent_count > 0) {
+        parents = (JsModule**)mem_alloc((size_t)parent_count * sizeof(JsModule*),
+            MEM_CAT_JS_RUNTIME);
+        if (!parents) {
+            log_error("P7d: failed to snapshot async parent list");
+            return;
+        }
+        memcpy(parents, m->async_parents,
+            (size_t)parent_count * sizeof(JsModule*));
+    }
     m->body_executed = 1;
     m->post_await_pending = 0;
     log_debug("P7d: module '%.*s' body_executed=1, notifying %d parents",
         (int)m->specifier->len, m->specifier->chars, m->async_parent_count);
-    // Snapshot parent list because js_module_register_async_parent may run
-    // during deferred-body invocation if a parent itself triggers more imports.
-    int parents[JS_MAX_ASYNC_PARENTS];
-    int parent_count = m->async_parent_count;
-    for (int i = 0; i < parent_count; i++) parents[i] = m->async_parents[i];
 
     // First pass: just decrement parent dependency counts. Do not execute
     // bodies while the parent list is being traversed.
     for (int i = 0; i < parent_count; i++) {
-        JsModule* par = &js_modules[parents[i]];
+        JsModule* par = parents[i];
         if (par->pending_async_deps > 0) par->pending_async_deps--;
         if (par->pending_async_deps == 0 && !par->body_executed && par->deferred_main_ptr) {
             log_debug("P7d: module '%.*s' all deps settled — eligible for AEO drain",
@@ -35137,10 +35146,14 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
 
     // Drain the same AEO-ordered module scan used at module-exit. Nested calls
     // only update dependency counters; the outer scan observes them.
-    if (g_tla_draining_depth > 0) return;
+    if (g_tla_draining_depth > 0) {
+        mem_free(parents);
+        return;
+    }
     g_tla_draining_depth++;
     js_tla_flush_pending_modules(false);
     g_tla_draining_depth--;
+    mem_free(parents);
 }
 
 // P5's old 64-slot thunk bank made namespace capture a global mutable table.
@@ -40406,10 +40419,10 @@ extern "C" Item js_module_get(Item specifier) {
     if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
     if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
     String* spec = it2s(specifier);
-    for (int i = 0; i < js_module_count_v14; i++) {
-        if (js_modules[i].specifier->len == spec->len &&
-            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
-            return js_modules[i].namespace_obj;
+    for (JsModule* module = js_module_first; module; module = module->next) {
+        if (module->specifier->len == spec->len &&
+            memcmp(module->specifier->chars, spec->chars, spec->len) == 0) {
+            return module->namespace_obj;
         }
     }
     return ItemNull;

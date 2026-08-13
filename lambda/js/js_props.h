@@ -77,15 +77,8 @@ Item js_get(Item target, JsPropertyLane lane, Item observable_key,
             Item receiver);
 Item js_set(Item target, JsPropertyLane lane, Item observable_key,
             Item value, Item receiver);
-Item js_define_own(Item target, JsPropertyLane lane, Item observable_key,
-                   uint32_t descriptor_bits, Item value, Item getter,
-                   Item setter);
 Item js_delete(Item target, JsPropertyLane lane, Item observable_key);
 Item js_has_property(Item target, JsPropertyLane lane, Item observable_key);
-Item js_has_own(Item target, JsPropertyLane lane, Item observable_key);
-Item js_get_own_property_descriptor_lane(Item target, JsPropertyLane lane,
-                                         Item observable_key);
-Item js_own_keys(Item target);
 
 // Tune5 P3: one operation-tagged seam for all non-ordinary receivers.  The
 // adapter reports handled/not-handled through its return value and carries the

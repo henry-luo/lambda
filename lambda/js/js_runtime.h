@@ -363,11 +363,7 @@ void js_finalize_function(Item fn_item, const char* name_chars,
                           const char* source_chars, uint64_t span_lengths,
                           int64_t formal_length, int64_t init_flags);
 void js_set_function_home_class(Item fn_item, Item home_class);
-void js_mark_generator_func(Item fn_item);
-void js_mark_async_generator_func(Item fn_item);
-void js_mark_async_func(Item fn_item);
 void js_mark_derived_constructor_func(Item fn_item);
-void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_get_typed_array_per_type_proto(int element_type);
@@ -410,7 +406,6 @@ Item js_super_call_class_into(Item callee, Item this_val, Item* args, int argc,
 Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
                                uint64_t* result_home);
 Item js_construct_array_like(Item constructor, Item args_array, Item new_target);
-void js_set_internal_class_name(Item obj, Item class_name);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 void js_function_root_item_if_needed(void* fn, Item* slot);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
@@ -522,7 +517,6 @@ Item js_toFixed(Item num_item, Item digits_item);
 
 Item js_string_charCodeAt(Item str_item, Item index_item);
 Item js_string_fromCharCode(Item code_item);
-Item js_string_fromCharCode_int(int64_t code_value);
 Item js_string_fromCharCode_array(Item arr_item);
 Item js_string_fromCodePoint(Item code_item);
 Item js_string_fromCodePoint_array(Item arr_item);
@@ -552,7 +546,6 @@ Item js_for_in_keys(Item object);
 Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
-Item js_number_property(Item prop_name);
 // Phase-5C: js_make_getter_key/js_make_setter_key removed (no callers).
 
 
@@ -563,7 +556,6 @@ Item js_number_property(Item prop_name);
 Item js_object_create(Item proto);
 Item js_object_define_property(Item obj, Item name, Item descriptor);
 Item js_object_define_properties(Item obj, Item props);
-Item js_object_create_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
 Item js_array_is_array(Item value);
@@ -589,7 +581,6 @@ Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
-Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 void js_object_proto_setter(Item object, Item value);
 void js_mark_non_enumerable(Item object, Item name);
@@ -642,7 +633,6 @@ Item js_object_is_sealed(Item obj);
 Item js_build_template_object(Item* cooked, Item* raw, int count);
 Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
 void js_reset_template_registry(void);
-Item js_new_check_constructor_return(Item obj, Item result);
 Item js_object_prevent_extensions(Item obj);
 Item js_object_is_extensible(Item obj);
 
@@ -667,7 +657,6 @@ Item js_json_parse_full(Item str_item, Item reviver);
 Item js_json_stringify(Item value);
 Item js_json_stringify_full(Item value, Item replacer, Item space);
 Item js_delete_property(Item obj, Item key);
-Item js_delete_property_strict(Item obj, Item key);
 
 // v15: fetch() API
 Item js_fetch(Item url, Item options);
@@ -992,8 +981,6 @@ Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int6
 // URL constructor
 Item js_url_construct(Item input);
 Item js_url_construct_with_base(Item input, Item base);
-Item js_url_parse(Item input, Item base);
-Item js_url_can_parse(Item input);
 Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
 

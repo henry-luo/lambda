@@ -1090,11 +1090,6 @@ bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op) {
     return true;
 }
 
-extern "C" int64_t js_discard_value(Item value) {
-    (void)value;
-    return 0;
-}
-
 // =============================================================================
 // Helper: Get numeric value as double
 // =============================================================================
@@ -2003,10 +1998,6 @@ extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     if (bigint_cmp(mod, bigint_from_int64(0)) < 0)
         mod = bigint_add(mod, modulus);
     return mod;
-}
-
-extern "C" Item js_bigint_not_constructor(void) {
-    return js_throw_type_error("BigInt is not a constructor");
 }
 
 extern "C" Item js_unary_plus(Item operand) {

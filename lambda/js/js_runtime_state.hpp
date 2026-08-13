@@ -34,8 +34,6 @@
 #define JS_ASYNC_HOOK_STATE_MAX 256
 #define JS_ASYNC_PENDING_DESTROY_STATE_MAX 1024
 #define JS_DOMAIN_STACK_MAX 64
-#define JS_MAX_MODULES 64
-#define JS_MAX_ASYNC_PARENTS 16
 #define JS_MAX_ALS_INSTANCES 256
 #define JS_TRACE_MAX_CATEGORIES 64
 #define JS_TRACE_MAX_EVENTS 2048
@@ -693,6 +691,7 @@ struct JsPromiseRuntimeState {
 // Module records are context-owned because namespace identity, TLA ordering,
 // and saved module-variable slabs are observable within one realm only.
 struct JsModule {
+    JsModule* next = NULL;
     Item specifier_item = {};
     String* specifier = NULL;
     Item namespace_obj = {};
@@ -701,18 +700,20 @@ struct JsModule {
     int has_tla = 0;
     int pending_async_deps = 0;
     int async_parent_count = 0;
-    int async_parents[JS_MAX_ASYNC_PARENTS] = {};
+    int async_parent_capacity = 0;
+    JsModule** async_parents = NULL;
     void* deferred_main_ptr = NULL;
     int body_executed = 0;
     int post_await_pending = 0;
     int body_state = 0;
     int async_eval_order = -1;
     uint32_t saved_module_state_id = UINT32_MAX;
+    uint64_t roots_epoch = 0;
 };
 
 struct JsModuleRuntimeState {
-    JsModule modules[JS_MAX_MODULES] = {};
-    int module_count = 0;
+    JsModule* first = NULL;
+    JsModule* last = NULL;
     Item active_namespace = {};
     int module_depth = 0;
     int async_eval_order_counter = 0;

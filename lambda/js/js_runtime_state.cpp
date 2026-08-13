@@ -1257,7 +1257,7 @@ extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
     return js_throw_named_error_text("TypeError", buf);
 }
 
-// forward declaration for js_batch_reset (defined near js_module_count_v14)
+// forward declaration for js_batch_reset (defined near the module runtime)
 // forward declaration for array custom prototype check
 // forward declarations for module namespace cache resets
 extern "C" void js_fs_runtime_detach();
