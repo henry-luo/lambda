@@ -364,19 +364,6 @@ static void release_grid_prop(GridProp* grid) {
     }
 }
 
-static void release_pseudo_content_prop(DomElement* elem) {
-    if (!elem || !elem->pseudo) {
-        return;
-    }
-    elem->pseudo->before = nullptr;
-    elem->pseudo->after = nullptr;
-    elem->pseudo->marker = nullptr;
-}
-
-static void release_pseudo_content_prop_entry(DomElement* elem, ViewTree*) {
-    release_pseudo_content_prop(elem);
-}
-
 void release_dom_owned_embed_images(DomElement* elem) {
     if (!elem || !elem->embed) {
         return;
@@ -498,8 +485,9 @@ static void reset_block_or_marker_prop(DomElement* elem, ViewTree*) {
 }
 
 static void reset_pseudo_content_prop(DomElement*, ViewTree*) {
-    // Generated pseudo nodes remain linked in the retained DOM tree, so their
-    // structural owner and generation flags must survive the matching reset.
+    // Generated nodes remain linked in the retained DOM tree. Their pointers
+    // and flags must survive together; clearing only the pointers strands a
+    // live ::marker that can no longer refresh after list-style mutation.
 }
 
 static void free_inline_prop(DomElement* elem, ViewTree* tree) {
@@ -545,7 +533,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr,       &MULTICOL_PROP_DEFAULT,      sizeof(MultiColumnProp),   nullptr },
     { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr,       nullptr,                      0,                         nullptr },
     { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop, nullptr,                   0,                         free_item_prop },
-    { "pseudo",          release_pseudo_content_prop_entry, nullptr,             view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
+    { "pseudo",          nullptr,                   nullptr,                   view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path",     nullptr,                   free_vector_path_payload,  view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr,       &VECTOR_PATH_PROP_DEFAULT,   sizeof(VectorPathProp),    nullptr },
     { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr,       nullptr,                      sizeof(radiant::LayoutCache), reset_layout_cache },
 };
@@ -909,6 +897,16 @@ void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root) {
     view_teardown_visit_node(tree, root,
         VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL |
         VIEW_TEARDOWN_CLEAR_POINTERS,
+        false);
+}
+
+void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root) {
+    if (!tree || !root) return;
+
+    // A style mutation invalidates the target's materialized layout properties,
+    // but resetting the whole tree also resets anonymous table fixup owners.
+    view_teardown_visit_node(tree, root,
+        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_RESET_IN_PLACE,
         false);
 }
 

@@ -4274,6 +4274,76 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
         pool, css_engine, matcher);
 }
 
+static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current == ancestor) return true;
+    }
+    return false;
+}
+
+static bool dom_js_node_has_table_fixup_context(DomNode* node) {
+    for (DomNode* current = node; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* element = lam::dom_require_element(current);
+        if (element->tag() == MARKUP_NAME_TABLE ||
+            layout_element_is_anonymous_table_fixup(element) ||
+            is_table_internal_display(element->display.inner)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc) {
+    if (!doc || !doc->view_tree) return;
+
+    DomElement* roots[DOM_JS_MUTATION_RECORD_CAP] = {};
+    int root_count = 0;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        if (record->kind != DOM_JS_MUTATION_STYLE &&
+            record->kind != DOM_JS_MUTATION_STYLE_REPAINT &&
+            record->kind != DOM_JS_MUTATION_ATTRIBUTE) {
+            continue;
+        }
+        DomElement* candidate = dom_js_record_cascade_root(doc, record);
+        if (!candidate) continue;
+        if (dom_js_node_has_table_fixup_context(
+                static_cast<DomNode*>(candidate))) {
+            // Table-internal style changes are repaired as one anonymous-box
+            // structure; resetting only the real row/cell strands old fixups.
+            continue;
+        }
+
+        bool covered = false;
+        for (int j = 0; j < root_count; j++) {
+            if (dom_js_node_contains(static_cast<DomNode*>(roots[j]),
+                                     static_cast<DomNode*>(candidate))) {
+                covered = true;
+                break;
+            }
+        }
+        if (covered) continue;
+
+        for (int j = 0; j < root_count;) {
+            if (dom_js_node_contains(static_cast<DomNode*>(candidate),
+                                     static_cast<DomNode*>(roots[j]))) {
+                roots[j] = roots[--root_count];
+            } else {
+                j++;
+            }
+        }
+        roots[root_count++] = candidate;
+    }
+
+    for (int i = 0; i < root_count; i++) {
+        // Computed style is stored in retained view properties; merely clearing
+        // styles_resolved leaves removed borders/sizes live across the reflow.
+        view_pool_reset_retained_subtree(
+            doc->view_tree, static_cast<DomNode*>(roots[i]));
+    }
+}
+
 typedef struct DomJsDirtyBound {
     DomNode* node;
     float x;
@@ -4436,6 +4506,8 @@ static bool post_html_handler_incremental_rebuild(
         }
     }
 
+    dom_js_reset_mutated_layout_subtrees(doc);
+
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
@@ -4537,6 +4609,13 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t0 = high_resolution_clock::now();
     dom_js_mutation_log_records(doc);
+
+    if (doc->root && doc->root->is_element()) {
+        // Anonymous table boxes are layout-only. Reconcile from the authored
+        // tree so a display mutation cannot accumulate wrappers from old states.
+        layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
+            lam::dom_require_element(doc->root));
+    }
 
     const char* fallback_reason = "none";
     if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,

@@ -1550,10 +1550,17 @@ static void store_document_stylesheets(DomDocument* dom_doc,
                                        Pool* pool) {
     if (!dom_doc || !pool) return;
     int count = 0;
-    dom_doc->stylesheets = layout_merge_css_sources(
+    CssStylesheet** merged = layout_merge_css_sources(
         pool, first, first_count, second, second_count, &count);
+    bool stylesheet_set_changed = count != dom_doc->stylesheet_count;
+    for (int i = 0; !stylesheet_set_changed && i < count; i++) {
+        stylesheet_set_changed = dom_doc->stylesheets[i] != merged[i];
+    }
+    dom_doc->stylesheets = merged;
     dom_doc->stylesheet_count = count;
     dom_doc->stylesheet_capacity = count;
+    // A new parsed sheet set invalidates the matching document-font registry.
+    if (stylesheet_set_changed) dom_doc->font_faces_processed = false;
 }
 
 static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
@@ -4854,11 +4861,14 @@ static bool layout_single_file(
     process_document_font_faces(ui_context, doc);
     EnhancedFileCache* layout_file_cache = layout_prepare_network_resources(ui_context, doc);
 
-    if (doc->view_tree && doc->view_tree->root) {
-        log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
+    if (!doc->root && doc->view_tree && doc->view_tree->root) {
+        log_info("[Layout] Document already has non-DOM view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
         auto event_layout_start = std::chrono::high_resolution_clock::now();
         layout_start = event_layout_start;
+        // A script geometry read can create a provisional DOM view tree before
+        // font-face loading and post-script cascade; DOM documents still need
+        // this final commit to replace that stale layout-resource epoch.
         layout_html_doc(ui_context, doc, false);
         auto event_layout_end = std::chrono::high_resolution_clock::now();
         layout_end = event_layout_end;

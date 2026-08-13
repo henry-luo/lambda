@@ -835,24 +835,10 @@ static bool table_empty_inline_atomic_line_top(LayoutContext* lycon,
 
 static float measure_cell_content_block_extent(ViewTableCell* tcell) {
     if (!tcell) return 0.0f;
-    bool has_content = false;
-    float min_x = 0.0f;
-    float max_x = 0.0f;
-    for_each_table_cell_vertical_align_child(
-        lam::view_require_element(tcell), [&](View* child) {
-            if (!child || !child->view_type) return;
-            float child_left = child->x;
-            float child_right = child->x + child->width;
-            ViewBlock* block = lam::view_as_block(child);
-            if (block && block->bound) {
-                child_left -= block->boundary()->margin.left;
-                child_right += block->boundary()->margin.right;
-            }
-            if (!has_content || child_left < min_x) min_x = child_left;
-            if (!has_content || child_right > max_x) max_x = child_right;
-            has_content = true;
-        });
-    return has_content ? max(max_x - min_x, 0.0f) : 0.0f;
+    // Cell content is still in the horizontal surrogate coordinate space until
+    // the vertical table grid is published. Its accumulated line-stack height,
+    // not the overlapping surrogate x bounds, is the logical block contribution.
+    return max(tcell->content_height, 0.0f);
 }
 
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
@@ -3628,9 +3614,15 @@ static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
     }
     arraylist_free(children);
     detach_table_node(static_cast<DomNode*>(fixup));
+    // Fixup nodes are view-pool owned. Once their authored children have been
+    // restored, retire the empty wrapper in the same layout ownership epoch.
+    if (fixup->doc && fixup->doc->view_tree) {
+        view_tree_release_retired_subtree(
+            fixup->doc->view_tree, static_cast<DomNode*>(fixup));
+    }
 }
 
-void layout_unwrap_anonymous_table_fixups_for_child_insertion(DomElement* parent) {
+void layout_unwrap_anonymous_table_fixups_for_dom_mutation(DomElement* parent) {
     if (!parent) return;
     for (DomNode* child = parent->first_child; child; ) {
         DomNode* next = child->next_sibling;
@@ -3640,6 +3632,17 @@ void layout_unwrap_anonymous_table_fixups_for_child_insertion(DomElement* parent
             unwrap_anonymous_table_fixup(child->as_element(), parent, next);
         }
         child = next;
+    }
+}
+
+void layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(DomElement* root) {
+    if (!root) return;
+    layout_unwrap_anonymous_table_fixups_for_dom_mutation(root);
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
+                lam::dom_require_element(child));
+        }
     }
 }
 
@@ -4558,7 +4561,42 @@ static bool table_needs_vertical_geometry_publication(ViewTable* table) {
     return !has_explicit_physical_width && !has_logical_block_size;
 }
 
-static void table_publish_vertical_geometry(ViewTable* table) {
+static void table_publish_vertical_cell_content(LayoutContext* lycon,
+                                                ViewTableCell* cell) {
+    if (!lycon || !cell || !cell->blk || !cell->is_element()) return;
+    LayoutContextScope context_scope(lycon);
+    if (cell->font) setup_font(lycon->ui_context, &lycon->font, cell->font);
+    setup_line_height(lycon, cell);
+    BoxMetrics box = layout_box_metrics(cell);
+    WritingMode mode = layout_block_writing_mode(cell);
+    float surrogate_inline_origin = box.border.left + box.padding.left;
+    float physical_inline_origin = box.border.top + box.padding.top;
+    float surrogate_block_origin = physical_inline_origin;
+    float physical_block_origin = mode == WM_VERTICAL_RL
+        ? box.border.right + box.padding.right
+        : box.border.left + box.padding.left;
+    float physical_inline_extent = layout_content_size_from_border_box(
+        cell, cell->height, false);
+    bool reverse_inline =
+        (layout_element_css_writing_mode(cell->as_element()) == CSS_VALUE_SIDEWAYS_LR &&
+         cell->block()->direction == CSS_VALUE_LTR) ||
+        layout_element_css_writing_mode(cell->as_element()) == CSS_VALUE_SIDEWAYS_RL;
+    // Table-cell flow is laid out in surrogate coordinates before track sizing;
+    // publish its inline descendants only after the logical grid has become a
+    // physical cell box, or forced vertical line breaks remain horizontal.
+    layout_map_vertical_writing_text_geometry(
+        static_cast<View*>(cell->first_child), mode, cell->width,
+        physical_inline_extent, lycon->block.line_height, 0.0f,
+        surrogate_inline_origin, physical_inline_origin,
+        surrogate_block_origin, physical_block_origin, false,
+        cell->block()->dominant_baseline == CSS_VALUE_AUTO ||
+            cell->block()->dominant_baseline == CSS_VALUE_CENTRAL,
+        reverse_inline);
+    layout_publish_vertical_children(cell, mode, false);
+    layout_normalize_vertical_breaks(cell);
+}
+
+static void table_publish_vertical_geometry(LayoutContext* lycon, ViewTable* table) {
     if (!table_needs_vertical_geometry_publication(table)) return;
     TableCaptionCollection captions = table_collect_captions(table);
     float logical_width = table->width;
@@ -4630,6 +4668,10 @@ static void table_publish_vertical_geometry(ViewTable* table) {
             }
         });
     }
+    table->each_cell([&](ViewTableRow* row, ViewTableCell* cell) {
+        (void)row;
+        table_publish_vertical_cell_content(lycon, cell);
+    });
     table->width = max(physical_width, 0.0f);
     table->height = max(physical_height, 0.0f);
     table->content_width = table->width;
@@ -6996,6 +7038,10 @@ bool layout_element_is_anonymous_table_fixup(const DomElement* element) {
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     if (!lycon || !parent || !parent->first_child) return false;
     remerge_stale_anonymous_table_runs(parent);
+    // Retained outer anonymous tables can be the parent's only direct child;
+    // refresh them before the early no-orphan return so descendants inherit
+    // the current authored parent rather than reset-time font defaults.
+    refresh_anonymous_table_fixup_inheritance(lycon, parent);
     bool has_table_internal = false;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
@@ -7141,7 +7187,14 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                         target = row_wrapper;
                     }
                 }
-                                append_detached_table_node(target, move_node);
+                if (move_node->is_text() &&
+                    !layout_dom_text_has_non_whitespace(move_node->as_text()) &&
+                    !table_text_node_has_preserved_whitespace_content(move_node)) {
+                    // Collapsible whitespace absorbed to join adjacent cell runs
+                    // has no table box; clear any inline view retained before fixup.
+                    layout_suppress_ignorable_container_text(move_node);
+                }
+                append_detached_table_node(target, move_node);
                 if (is_last) break;
                 move_node = next_to_move;
             }
@@ -7207,7 +7260,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     table_auto_layout(lycon, table);
     // Auto table grids publish their logical tracks after sizing.
     if (table_needs_vertical_geometry_publication(table)) {
-        table_publish_vertical_geometry(table);
+        table_publish_vertical_geometry(lycon, table);
     }
     // CRITICAL: Set advance_y to table height so finalize_block_flow works correctly
     lycon->block.advance_y = table->height;

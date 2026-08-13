@@ -3157,9 +3157,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         float remembered_width = element->last_remembered_width();
         float padding_border = layout_intrinsic_padding_border_axis(
             lycon, element, true, lycon->block.content_width);
-        float intrinsic_width = layout_uses_border_box(resolved_width_view)
-            ? max(remembered_width - padding_border, 0.0f)
-            : remembered_width;
+        float intrinsic_width = remembered_width;
         // The remembered fragment width must replace hidden content's missing
         // max-content contribution before the containing multicol is sized.
         return {intrinsic_width + padding_border, intrinsic_width + padding_border};
@@ -6092,14 +6090,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         contain_intrinsic_height_auto && element->has_last_remembered_height() &&
         !intrinsic_has_definite_css_height(lycon, element, view)) {
         float remembered_height = element->last_remembered_height();
-        float padding_border = layout_intrinsic_padding_border_axis(
-            lycon, element, false, lycon->block.content_width);
-        float intrinsic_height = intrinsic_view_uses_border_box(view, element)
-            ? max(remembered_height - padding_border, 0.0f)
-            : remembered_height;
         // The remembered flow height includes every fragment, while the
         // hidden box otherwise measures only the empty fallback.
-        return intrinsic_height;
+        return remembered_height;
     }
     bool has_empty_size_containment =
         layout_block_has_size_containment_in_axis(view, false) &&

@@ -383,7 +383,15 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
 }
 
 static void reset_non_inherited_style_cache(ViewSpan* view) {
-    if (!view || !view->bound) return;
+    if (!view) return;
+
+    if (view->position) {
+        // Removed positioning declarations otherwise survive retained recascade
+        // and leave a now-static table cell excluded from normal row sizing.
+        memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
+    }
+
+    if (!view->bound) return;
 
     if (view->boundary()->outline) {
         view->boundary_mut()->outline->width = 0.0f;
@@ -3474,6 +3482,13 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
                 remembered_height += fragment->height;
             }
         }
+        // Intrinsic inline-size substitution consumes a content-box contribution;
+        // retaining the border-box width made every hidden layout add horizontal
+        // padding and borders a second time. The remembered block size stays the
+        // fragmented border-box extent consumed by the hidden-flow path.
+        ViewBlock* remembered_block = lam::unsafe_view_block_element_storage(element);
+        remembered_width = layout_content_size_from_border_box(
+            remembered_block, remembered_width, true);
         // first fragment's clipped border box; hidden sizing otherwise loses
         if (element->block()->contain_intrinsic_width_auto) {
             element->set_last_remembered_width(remembered_width);

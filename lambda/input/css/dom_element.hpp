@@ -195,6 +195,7 @@ struct DomDocument {
     struct CssStylesheet** stylesheets;  // Array of parsed stylesheets
     int stylesheet_count;                // Number of stylesheets
     int stylesheet_capacity;             // Capacity of stylesheet array
+    bool font_faces_processed;            // @font-face registry matches stylesheets
 
     // Layout and state
     ViewTree* view_tree;         // View tree after layout
@@ -261,6 +262,7 @@ struct DomDocument {
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
+                    font_faces_processed(false),
                     view_tree(nullptr), state_store(nullptr), state(nullptr),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), resources(nullptr),
