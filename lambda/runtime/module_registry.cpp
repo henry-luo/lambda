@@ -12,6 +12,8 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/file.h"
+#include "../../lib/path_str.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -33,7 +35,65 @@ bool is_sys_func_name(const char* name, int name_len);
 // Registry hashmap
 // =============================================================================
 
-static struct hashmap* registry_map = NULL;
+struct ModuleRegistry {
+    Runtime* runtime;
+    struct hashmap* map;
+};
+
+// hashmap entry for module descriptors
+typedef struct {
+    const char* path;       // key (not owned — points to ModuleDescriptor.path)
+    ModuleDescriptor* desc; // value (owned)
+} RegistryEntry;
+HASHMAP_DEFINE_STRKEY(registry, RegistryEntry, path)
+
+static Runtime* module_registry_active_runtime(void) {
+    return context ? context->runtime : NULL;
+}
+
+static ModuleRegistry* module_registry_for_runtime(Runtime* runtime) {
+    Runtime* owner = runtime ? runtime : module_registry_active_runtime();
+    return owner ? owner->module_registry : NULL;
+}
+
+static ModuleRegistry* module_registry_ensure(Runtime* runtime) {
+    Runtime* owner = runtime ? runtime : module_registry_active_runtime();
+    if (!owner) return NULL;
+    if (owner->module_registry) return owner->module_registry;
+
+    ModuleRegistry* registry = (ModuleRegistry*)mem_calloc(
+        1, sizeof(ModuleRegistry), MEM_CAT_SYSTEM);
+    if (!registry) return NULL;
+    registry->runtime = owner;
+    registry->map = registry_new(32);
+    if (!registry->map) {
+        mem_free(registry);
+        return NULL;
+    }
+    owner->module_registry = registry;
+    return registry;
+}
+
+// Canonical module keys collapse aliases before a descriptor is inserted or
+// queried. This keeps one definition per resolved file and prevents a
+// relative spelling from retaining a namespace in a different registry slot.
+static char* module_registry_key_dup(const char* path) {
+    if (!path || !*path) return NULL;
+
+    char lexical[4096];
+    path_str_normalize_lexical_posix(path, lexical, (int)sizeof(lexical), false);
+    if (!lexical[0]) path_str_copy(lexical, (int)sizeof(lexical), path);
+
+    char* resolved = file_realpath(lexical);
+    const char* source = resolved ? resolved : lexical;
+    char normalized[4096];
+    path_str_normalize_lexical_posix(source, normalized, (int)sizeof(normalized), false);
+    if (!normalized[0]) path_str_copy(normalized, (int)sizeof(normalized), source);
+
+    char* key = mem_strdup(normalized, MEM_CAT_SYSTEM);
+    if (resolved) mem_free(resolved);
+    return key;
+}
 
 static Item js_namespace_get(Item namespace_obj, const char* name) {
     RootFrame roots(2);
@@ -50,57 +110,82 @@ static const ModuleNamespaceOps js_namespace_ops = {
     js_function_get_ptr,
 };
 
-// hashmap entry for module descriptors
-typedef struct {
-    const char* path;       // key (not owned — points to ModuleDescriptor.path)
-    ModuleDescriptor* desc; // value (owned)
-} RegistryEntry;
-HASHMAP_DEFINE_STRKEY(registry, RegistryEntry, path)
-
-void module_registry_init(void) {
-    if (registry_map) return;
-    registry_map = registry_new(32);
+void module_registry_init_for_runtime(Runtime* runtime) {
+    (void)module_registry_ensure(runtime);
 }
 
-void module_registry_cleanup(void) {
-    if (!registry_map) return;
+void module_registry_cleanup_for_runtime(Runtime* runtime) {
+    Runtime* owner = runtime ? runtime : module_registry_active_runtime();
+    ModuleRegistry* registry = module_registry_for_runtime(owner);
+    if (!registry) return;
+
     // free all descriptors
     size_t iter = 0;
     void* item;
-    while (hashmap_iter(registry_map, &iter, &item)) {
+    while (hashmap_iter(registry->map, &iter, &item)) {
         RegistryEntry* entry = (RegistryEntry*)item;
         if (entry->desc) {
+            // Descriptors are native allocations, so unregister their exact
+            // namespace roots before the owning heap is retired.
             heap_unregister_gc_root(&entry->desc->namespace_obj.item);
             mem_free((void*)entry->desc->path);
             mem_free(entry->desc);
         }
     }
-    hashmap_free(registry_map);
-    registry_map = NULL;
+    hashmap_free(registry->map);
+    owner->module_registry = NULL;
+    mem_free(registry);
 }
 
-void module_register_with_namespace_ops(const char* path, const char* lang,
-                                        Item namespace_obj, void* mir_ctx,
-                                        const ModuleNamespaceOps* namespace_ops) {
-    if (!path) return;
-    if (!registry_map) module_registry_init();
+void module_registry_init(void) {
+    Runtime* runtime = module_registry_active_runtime();
+    if (!runtime) {
+        log_error("module_registry: init requested without an active Runtime");
+        return;
+    }
+    module_registry_init_for_runtime(runtime);
+}
+
+void module_registry_cleanup(void) {
+    Runtime* runtime = module_registry_active_runtime();
+    if (!runtime) {
+        log_error("module_registry: cleanup requested without an active Runtime");
+        return;
+    }
+    module_registry_cleanup_for_runtime(runtime);
+}
+
+void module_register_with_namespace_ops_for_runtime(
+        Runtime* runtime, const char* path, const char* lang,
+        Item namespace_obj, void* mir_ctx,
+        const ModuleNamespaceOps* namespace_ops) {
+    if (!path || !lang) return;
+    ModuleRegistry* registry = module_registry_ensure(runtime);
+    if (!registry) {
+        log_error("module_registry: cannot register '%s' without a Runtime", path);
+        return;
+    }
+    char* key_path = module_registry_key_dup(path);
+    if (!key_path) return;
 
     // check if already registered — update if so
-    RegistryEntry lookup = { .path = path, .desc = NULL };
-    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry_map, &lookup);
+    RegistryEntry lookup = { .path = key_path, .desc = NULL };
+    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry->map, &lookup);
     if (existing && existing->desc) {
         existing->desc->namespace_obj = namespace_obj;
         existing->desc->mir_ctx = mir_ctx;
+        existing->desc->source_lang = lang;
         existing->desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
         existing->desc->profile = lang_profile_for_name(lang);
         existing->desc->initialized = true;
         existing->desc->loading = false;
-        log_debug("module_registry: updated module '%s' (lang=%s)", path, lang);
+        log_debug("module_registry: updated module '%s' (lang=%s)", key_path, lang);
+        mem_free(key_path);
         return;
     }
 
     ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
-    desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
+    desc->path = key_path;
     desc->source_lang = lang;  // static string, not owned
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_obj;
@@ -113,18 +198,40 @@ void module_register_with_namespace_ops(const char* path, const char* lang,
     desc->loading = false;
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
-    hashmap_set(registry_map, &entry);
-    log_info("module_registry: registered '%s' (lang=%s)", path, lang);
+    hashmap_set(registry->map, &entry);
+    log_info("module_registry: registered '%s' (lang=%s)", desc->path, lang);
+}
+
+void module_register_with_namespace_ops(const char* path, const char* lang,
+                                        Item namespace_obj, void* mir_ctx,
+                                        const ModuleNamespaceOps* namespace_ops) {
+    module_register_with_namespace_ops_for_runtime(
+        module_registry_active_runtime(), path, lang, namespace_obj, mir_ctx, namespace_ops);
 }
 
 void module_register(const char* path, const char* lang, Item namespace_obj, void* mir_ctx) {
-    module_register_with_namespace_ops(path, lang, namespace_obj, mir_ctx, &js_namespace_ops);
+    module_register_for_runtime(
+        module_registry_active_runtime(), path, lang, namespace_obj, mir_ctx);
+}
+
+void module_register_for_runtime(Runtime* runtime, const char* path, const char* lang,
+                                 Item namespace_obj, void* mir_ctx) {
+    module_register_with_namespace_ops_for_runtime(
+        runtime, path, lang, namespace_obj, mir_ctx, &js_namespace_ops);
 }
 
 ModuleDescriptor* module_get(const char* path) {
-    if (!path || !registry_map) return NULL;
-    RegistryEntry lookup = { .path = path, .desc = NULL };
-    const RegistryEntry* found = (const RegistryEntry*)hashmap_get(registry_map, &lookup);
+    return module_get_for_runtime(module_registry_active_runtime(), path);
+}
+
+ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path) {
+    ModuleRegistry* registry = module_registry_for_runtime(runtime);
+    if (!path || !registry) return NULL;
+    char* key_path = module_registry_key_dup(path);
+    if (!key_path) return NULL;
+    RegistryEntry lookup = { .path = key_path, .desc = NULL };
+    const RegistryEntry* found = (const RegistryEntry*)hashmap_get(registry->map, &lookup);
+    mem_free(key_path);
     return found ? found->desc : NULL;
 }
 
@@ -133,23 +240,32 @@ bool module_is_loaded(const char* path) {
     return desc && desc->initialized;
 }
 
-ModuleDescriptor* module_register_loading_with_namespace_ops(
-        const char* path, const char* lang, const ModuleNamespaceOps* namespace_ops) {
-    if (!path) return NULL;
-    if (!registry_map) module_registry_init();
+ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
+        Runtime* runtime, const char* path, const char* lang,
+        const ModuleNamespaceOps* namespace_ops) {
+    if (!path || !lang) return NULL;
+    ModuleRegistry* registry = module_registry_ensure(runtime);
+    if (!registry) {
+        log_error("module_registry: cannot mark '%s' loading without a Runtime", path);
+        return NULL;
+    }
+    char* key_path = module_registry_key_dup(path);
+    if (!key_path) return NULL;
 
     // check if already registered
-    RegistryEntry lookup = { .path = path, .desc = NULL };
-    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry_map, &lookup);
+    RegistryEntry lookup = { .path = key_path, .desc = NULL };
+    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry->map, &lookup);
     if (existing && existing->desc) {
         existing->desc->loading = true;
+        existing->desc->source_lang = lang;
         existing->desc->profile = lang_profile_for_name(lang);
         existing->desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
+        mem_free(key_path);
         return existing->desc;
     }
 
     ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
-    desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
+    desc->path = key_path;
     desc->source_lang = lang;
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_ops && namespace_ops->create
@@ -163,9 +279,15 @@ ModuleDescriptor* module_register_loading_with_namespace_ops(
     desc->loading = true;
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
-    hashmap_set(registry_map, &entry);
-    log_info("module_registry: marked '%s' as loading (lang=%s)", path, lang);
+    hashmap_set(registry->map, &entry);
+    log_info("module_registry: marked '%s' as loading (lang=%s)", desc->path, lang);
     return desc;
+}
+
+ModuleDescriptor* module_register_loading_with_namespace_ops(
+        const char* path, const char* lang, const ModuleNamespaceOps* namespace_ops) {
+    return module_register_loading_with_namespace_ops_for_runtime(
+        module_registry_active_runtime(), path, lang, namespace_ops);
 }
 
 ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
@@ -279,7 +401,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
 
 void* create_module_import_script(const char* resolved_path, Item namespace_obj, void* runtime_ptr) {
     Runtime* runtime = (Runtime*)runtime_ptr;
-    ModuleDescriptor* module = module_get(resolved_path);
+    ModuleDescriptor* module = module_get_for_runtime(runtime, resolved_path);
     TypeId ns_type = get_type_id(namespace_obj);
     if (ns_type != LMD_TYPE_MAP) {
         log_error("module_registry: hosted namespace is not a map (type=%d)", ns_type);

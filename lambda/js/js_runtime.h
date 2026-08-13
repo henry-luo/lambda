@@ -298,9 +298,7 @@ Item js_array_new_numeric(int length);
 Item js_elements_set_numeric_direct(Item array, int64_t index, Item value);
 bool js_is_ordinary_numeric_array(Item value);
 bool js_array_promote_numeric(Item array);
-bool js_array_validate_elements_kind(Item value);
 Item js_array_new_from_item(Item arg);
-Item js_create_arguments(void);
 Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 Item js_elements_get_int(Item array, int64_t index);
@@ -528,13 +526,6 @@ Item js_string_fromCharCode_int(int64_t code_value);
 Item js_string_fromCharCode_array(Item arr_item);
 Item js_string_fromCodePoint(Item code_item);
 Item js_string_fromCodePoint_array(Item arr_item);
-
-// =============================================================================
-// v5: Array fill (regular + typed)
-// =============================================================================
-
-Item js_array_fill(Item arr_item, Item value);
-Item js_array_slice_from(Item arr, Item start_item);
 
 // =============================================================================
 // v5: Console multi-argument log
@@ -1233,7 +1224,6 @@ Item js_get_live_binding_default(Item specifier);
  * Js57 P4 (Track B3): register a post-await chunk to be invoked after the
  * outermost module-load call unwinds. See js_runtime.cpp for details.
  */
-void js_tla_register_continuation(Item func);
 void js_tla_enter_module(void);
 void js_tla_exit_module(void);
 void js_tla_flush_for_dynamic_import(void);
@@ -1265,15 +1255,8 @@ void js_module_mark_post_await_pending(Item specifier);
 int  js_module_get_body_state(Item specifier);
 void js_module_set_body_state(Item specifier, int state);
 int  js_module_assign_async_eval_order(Item specifier);
-void js_module_reset_aeo_counter(void);
 void js_module_complete_tla_body(Item specifier);
 void js_module_save_context(Item specifier, uint32_t module_state_id);
-uint32_t js_module_get_saved_module_state_id(Item specifier);
-
-/**
- * Create a module namespace object from an export map.
- */
-Item js_module_namespace_create(Item exports_map);
 
 /**
  * Current namespace object for the module being evaluated.

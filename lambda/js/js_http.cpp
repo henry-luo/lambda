@@ -1387,10 +1387,6 @@ static Item http_response_writeHead(Item self, Item status_item, Item reason_or_
     return self;
 }
 
-extern "C" Item js_http_res_writeHead(Item self, Item status_item, Item headers_item) {
-    return http_response_writeHead(self, status_item, headers_item, make_js_undefined());
-}
-
 // response.setHeader(name, value)
 extern "C" Item js_http_res_setHeader(Item self, Item name_item, Item value_item) {
     if (http_response_headers_committed(self)) {
@@ -2039,10 +2035,6 @@ static Item http_res_end_ex(Item self, Item data_item, Item encoding_item, Item 
 }
 
 // response.end([data], [callback]) — finalize and send
-extern "C" Item js_http_res_end(Item self, Item data_item, Item callback_item) {
-    return http_res_end_ex(self, data_item, make_js_undefined(), callback_item);
-}
-
 static Item js_http_res_inst_writeHead(Item maybe_self, Item status_item, Item headers_item) {
     Item self = js_http_receiver(maybe_self, "__conn__");
     if (self.item != maybe_self.item) {
@@ -4919,10 +4911,6 @@ static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, 
 }
 
 // ClientRequest.write(data) — for request body
-extern "C" Item js_http_client_write(Item self, Item data_item) {
-    return http_client_write_ex(self, data_item, make_js_undefined(), make_js_undefined());
-}
-
 static Item http_client_end_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {
     if (js_http_is_callable(data_item)) {
         callback_item = data_item;

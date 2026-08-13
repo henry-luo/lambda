@@ -1859,14 +1859,6 @@ extern "C" Item js_tls_socket_isSessionReused(void) {
     return (Item){.item = b2it(sock && sock->session_reused)};
 }
 
-// authorized property
-extern "C" Item js_tls_socket_getAuthorized(void) {
-    Item self = js_get_this();
-    JsTlsSocket* sock = tls_socket_from_object(self);
-    if (!sock || !sock->tls_conn) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(sock->authorized)};
-}
-
 // create a JS TLSSocket object
 static Item make_tls_socket_object(JsTlsSocket* sock) {
     if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;

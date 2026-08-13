@@ -77,10 +77,13 @@ typedef struct Runner {
     EvalContext* context;  // runtime-owned execution context
 } Runner;
 
+struct ModuleRegistry;
+
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
     uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
     struct hashmap* script_index;  // canonical script path -> Script*
+    ModuleRegistry* module_registry; // runtime-owned cross-language module definitions
     TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)

@@ -7617,7 +7617,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     js_module_register(spec_item, namespace_obj);
 
     // Also register in unified module registry for cross-language access
-    module_register(filename, "js", namespace_obj, ctx);
+    module_register_for_runtime(runtime, filename, "js", namespace_obj, ctx);
 
     log_debug("js-mir: module '%s' loaded successfully", filename);
 
@@ -7712,7 +7712,8 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                         // Register in JS module system (replaces placeholder)
                         js_module_register(spec_item, ns);
                         // Register in unified module registry
-                        module_register(resolved, "lambda", ns, lambda_script->jit_context);
+                        module_register_for_runtime(
+                            runtime, resolved, "lambda", ns, lambda_script->jit_context);
                         log_info("js-mir: Lambda module '%s' loaded as JS namespace", resolved);
                     } else {
                         log_error("js-mir: failed to compile Lambda module '%s'", resolved);
