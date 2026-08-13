@@ -4732,8 +4732,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     if (block->is_element()) {
         layout_materialize_pseudo_content(lycon, block, true, true);
     }
+    // Buttons are form controls for intrinsic sizing but their CSS flow inner
+    // box still owns authored children; treating them as replaced drops that subtree.
     bool is_replaced_element = block->display.inner == RDT_DISPLAY_REPLACED ||
-        layout_element_is_replaced(block->as_element());
+        (block->tag() != MARKUP_NAME_BUTTON &&
+         layout_element_is_replaced(block->as_element()));
     if (is_replaced_element) {  // image, iframe, hr, form controls, SVG
         NameId elmt_name = block->tag();
         bool canvas_width_is_contained = elmt_name == MARKUP_NAME_CANVAS &&

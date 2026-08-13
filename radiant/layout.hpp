@@ -3064,7 +3064,7 @@ void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* 
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
 bool is_table_internal_display(CssEnum display);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
-void layout_unwrap_anonymous_table_fixups_for_child_insertion(struct DomElement* parent);
+void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
 
 inline bool layout_display_is_table_row_group(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW_GROUP ||

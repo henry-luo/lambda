@@ -3630,7 +3630,7 @@ static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
     detach_table_node(static_cast<DomNode*>(fixup));
 }
 
-void layout_unwrap_anonymous_table_fixups_for_child_insertion(DomElement* parent) {
+void layout_unwrap_anonymous_table_fixups_for_dom_mutation(DomElement* parent) {
     if (!parent) return;
     for (DomNode* child = parent->first_child; child; ) {
         DomNode* next = child->next_sibling;
@@ -7141,7 +7141,14 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                         target = row_wrapper;
                     }
                 }
-                                append_detached_table_node(target, move_node);
+                if (move_node->is_text() &&
+                    !layout_dom_text_has_non_whitespace(move_node->as_text()) &&
+                    !table_text_node_has_preserved_whitespace_content(move_node)) {
+                    // Collapsible whitespace absorbed to join adjacent cell runs
+                    // has no table box; clear any inline view retained before fixup.
+                    layout_suppress_ignorable_container_text(move_node);
+                }
+                append_detached_table_node(target, move_node);
                 if (is_last) break;
                 move_node = next_to_move;
             }

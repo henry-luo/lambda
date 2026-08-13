@@ -383,7 +383,15 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
 }
 
 static void reset_non_inherited_style_cache(ViewSpan* view) {
-    if (!view || !view->bound) return;
+    if (!view) return;
+
+    if (view->position) {
+        // Removed positioning declarations otherwise survive retained recascade
+        // and leave a now-static table cell excluded from normal row sizing.
+        memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
+    }
+
+    if (!view->bound) return;
 
     if (view->boundary()->outline) {
         view->boundary_mut()->outline->width = 0.0f;

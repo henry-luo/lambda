@@ -417,9 +417,9 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
                                                  (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
         marker_prop->width = extents.width;
     } else if (is_bullet_marker) {
-        // BackCompat orphan markers reserve Blink's full marker-plus-gap box;
-        // regular outside markers retain their independent marker geometry.
-        marker_prop->width = marker_prop->reserves_first_line
+        // Inside bullets participate in inline flow using Blink's full
+        // marker-plus-gap box; the smaller paint box otherwise shifts split text.
+        marker_prop->width = (!is_outside || marker_prop->reserves_first_line)
             ? font_size * 1.375f
             : bullet_size + font_size * 0.5f;
     } else {
@@ -470,8 +470,15 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     // Set default list-style-position to outside if not specified
     // CSS 2.1 Section 12.5.1: Initial value is 'outside'
     bool is_outside_position = !is_inline_list_item;  // Default is outside, but inside for inline
-    if (block->blk && block->block_mut()->list_style_position != 0) {
-        if (block->block()->list_style_position == 1) {
+    CssEnum list_style_position = block->blk
+        ? block->block()->list_style_position : (CssEnum)0;
+    for (DomElement* ancestor = dom_elem ? dom_elem->parent_element() : nullptr;
+         list_style_position == 0 && ancestor;
+         ancestor = ancestor->parent_element()) {
+        if (ancestor->blk) list_style_position = ancestor->block()->list_style_position;
+    }
+    if (list_style_position != 0) {
+        if (list_style_position == 1) {
             is_outside_position = false;
         } else if (!is_inline_list_item) {
             is_outside_position = true;
@@ -529,6 +536,15 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     if (!block->pseudo) {
         block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
         memset(block->pseudo, 0, sizeof(PseudoContentProp));
+    }
+
+    if (block->pseudo->marker_generated && block->pseudo->marker &&
+        block->pseudo->marker->blk) {
+        // Retained marker boxes outlive style-only reflows, so refresh inherited
+        // placement instead of leaving the marker in its pre-mutation mode.
+        MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(
+            block->pseudo->marker->blk);
+        marker_prop->is_outside = is_outside_position;
     }
 
     if (!block->pseudo->marker_generated) {

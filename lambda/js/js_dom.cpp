@@ -337,6 +337,24 @@ static DomDocument* js_dom_mutation_document(DomNode* target, DomNode* parent) {
     return doc ? doc : _js_current_document;
 }
 
+static DomNode* js_dom_mutation_source_parent(DomNode* parent) {
+    // Table fixup boxes are layout-only and have no lifecycle identity; mutation
+    // records must retain the nearest source-DOM ancestor instead of pinning them.
+    while (parent && parent->is_element() && parent->as_element()->is_table_fixup()) {
+        parent = parent->parent;
+    }
+    return parent;
+}
+
+static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent) {
+    DomNode* source_parent = js_dom_mutation_source_parent(
+        static_cast<DomNode*>(parent));
+    if (!source_parent || !source_parent->is_element()) return nullptr;
+    DomElement* source_element = source_parent->as_element();
+    layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+    return source_element;
+}
+
 static DocState* js_dom_state_for_nodes(DomNode* target, DomNode* parent) {
     DomDocument* doc = js_dom_mutation_document(target, parent);
     return doc ? doc->state : nullptr;
@@ -346,6 +364,7 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
                                                  DomNode* target,
                                                  DomNode* parent,
                                                  uint32_t sequence) {
+    parent = js_dom_mutation_source_parent(parent);
     DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
 
@@ -390,12 +409,9 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
                                           DomNode* parent = nullptr,
                                           const char* attribute_name = nullptr,
                                           const char* old_value = nullptr) {
+    parent = js_dom_mutation_source_parent(parent);
     DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
-
-    if (kind == DOM_JS_MUTATION_CHILD_INSERT && parent && parent->is_element()) {
-        layout_unwrap_anonymous_table_fixups_for_child_insertion(parent->as_element());
-    }
 
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
@@ -5519,6 +5535,8 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation) {
     if (!elem || !html_str) return false;
+    elem = js_dom_prepare_children_for_mutation(elem);
+    if (!elem) return false;
     DomDocument* doc = elem->doc;
 
     js_dom_collapse_selection_before_child_replace(elem, "innerHTML");
@@ -13126,6 +13144,8 @@ static bool js_dom_remove_backed_element_item(DomElement* parent,
 
 static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->is_element()) return false;
+    parent = js_dom_prepare_children_for_mutation(parent);
+    if (!parent) return false;
     DomElement* child_elem = child->as_element();
     int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
     if (backed_index >= 0) {
@@ -13181,6 +13201,8 @@ static int64_t js_dom_backed_insertion_index(DomElement* parent,
 static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
                                          DomNode* ref_child) {
     if (!parent || !child || !child->is_element()) return false;
+    parent = js_dom_prepare_children_for_mutation(parent);
+    if (!parent) return false;
     if (ref_child && ref_child->parent != (DomNode*)parent) return false;
     DomElement* child_elem = child->as_element();
     if (parent->is_synthetic() || child_elem->is_synthetic()) {
@@ -13231,6 +13253,8 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
                                       DomNode* ref_child) {
     if (!parent || !text || !text->native_string || !parent->doc ||
         !parent->doc->input) return false;
+    parent = js_dom_prepare_children_for_mutation(parent);
+    if (!parent) return false;
     String* native_string = text->native_string;
 
     if (text->parent) {
@@ -13280,9 +13304,18 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
     if (text->parent != (DomNode*)parent) {
         // MarkEditor can update the backing list before the wrapper relink;
         // complete the DOM-side link without creating a second Mark string.
-        return ((DomNode*)parent)->append_child((DomNode*)text);
+        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
     }
-    return text->parent == (DomNode*)parent;
+    bool at_requested_position = ref_child
+        ? text->next_sibling == ref_child
+        : parent->last_child == (DomNode*)text;
+    if (!at_requested_position) {
+        // Backing relink ignores layout-only pseudos, so restore the requested
+        // live-DOM position without editing the already-correct Mark order.
+        if (!((DomNode*)parent)->remove_child((DomNode*)text)) return false;
+        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
+    }
+    return true;
 }
 
 static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
@@ -13379,7 +13412,9 @@ static bool js_dom_text_is_backed_child(DomElement* parent, DomText* text) {
 }
 
 static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
-    if (!parent || !child || child->parent != parent) return false;
+    if (!parent || !child) return false;
+    parent = js_dom_prepare_children_for_mutation(parent);
+    if (!parent || child->parent != parent) return false;
     if (!child->is_element()) {
         if (child->is_text()) {
             DomText* text = (DomText*)child;
