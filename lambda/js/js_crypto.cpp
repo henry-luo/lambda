@@ -35,6 +35,9 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 
 extern "C" Item bigint_from_string(const char* str, int len);
 
+#define JS_CRYPTO_THROW_CODE(name, code, message) \
+    static Item name(void) { return js_throw_error_with_code(code, message); }
+
 extern __thread EvalContext* context;
 
 #ifdef _WIN32
@@ -113,7 +116,8 @@ static bool crypto_digest_compute_name(const char* alg, const uint8_t* data, int
 static bool crypto_string_equals(Item item, const char* expected);
 static Item crypto_throw_invalid_property_value(const char* prop, const char* expected);
 static Item crypto_item_to_integer(Item item, const char* name, int* out_value);
-static Item make_string_item_crypto(const char* str);
+#define make_string_item_crypto make_string_item
+#define make_js_undefined_crypto make_js_undefined
 static const char* crypto_detect_unsupported_asymmetric_key_type(const uint8_t* key,
                                                                 int key_len);
 static bool crypto_detect_ed_key_material(const uint8_t* key, int key_len,
@@ -423,73 +427,42 @@ static bool get_uint8_buffer(Item ta_item, const uint8_t** out_data, int* out_le
 // and return a new Uint8Array with the hash result.
 // ============================================================================
 
-extern "C" Item js_native_sha256(Item data_item, Item offset_item, Item length_item) {
+static Item js_native_sha(Item data_item, Item offset_item, Item length_item,
+        int bits) {
     int offset = (int)it2i(offset_item);
     int length = (int)it2i(length_item);
 
     const uint8_t* buf = NULL;
     int buf_len = 0;
     if (!get_uint8_buffer(data_item, &buf, &buf_len)) {
-        log_error("js_native_sha256: data is not a typed array");
+        log_error("js_native_sha: data is not a typed array");
         return (Item){.item = ITEM_NULL};
     }
     if (offset < 0) offset = 0;
     if (offset + length > buf_len) length = buf_len - offset;
     if (length < 0) length = 0;
 
-    uint8_t hash[32];
-    sha256_compute(buf, offset, length, hash);
+    int hash_len = bits == DIGEST_SHA256 ? 32 : bits == DIGEST_SHA384 ? 48 : 64;
+    uint8_t hash[64];
+    if (bits == DIGEST_SHA256) sha256_compute(buf, offset, length, hash);
+    else sha512_compute(buf, offset, length, bits == DIGEST_SHA384, hash);
 
-    Item result = js_typed_array_new(JS_TYPED_UINT8, 32);
+    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
     uint8_t* out = (uint8_t*)js_typed_array_prepare_write_ptr(result);
-    if (out) memcpy(out, hash, 32);
+    if (out) memcpy(out, hash, (size_t)hash_len);
     return result;
+}
+
+extern "C" Item js_native_sha256(Item data_item, Item offset_item, Item length_item) {
+    return js_native_sha(data_item, offset_item, length_item, DIGEST_SHA256);
 }
 
 extern "C" Item js_native_sha384(Item data_item, Item offset_item, Item length_item) {
-    int offset = (int)it2i(offset_item);
-    int length = (int)it2i(length_item);
-
-    const uint8_t* buf = NULL;
-    int buf_len = 0;
-    if (!get_uint8_buffer(data_item, &buf, &buf_len)) {
-        log_error("js_native_sha384: data is not a typed array");
-        return (Item){.item = ITEM_NULL};
-    }
-    if (offset < 0) offset = 0;
-    if (offset + length > buf_len) length = buf_len - offset;
-    if (length < 0) length = 0;
-
-    uint8_t hash[48];
-    sha512_compute(buf, offset, length, true, hash);
-
-    Item result = js_typed_array_new(JS_TYPED_UINT8, 48);
-    uint8_t* out = (uint8_t*)js_typed_array_prepare_write_ptr(result);
-    if (out) memcpy(out, hash, 48);
-    return result;
+    return js_native_sha(data_item, offset_item, length_item, DIGEST_SHA384);
 }
 
 extern "C" Item js_native_sha512(Item data_item, Item offset_item, Item length_item) {
-    int offset = (int)it2i(offset_item);
-    int length = (int)it2i(length_item);
-
-    const uint8_t* buf = NULL;
-    int buf_len = 0;
-    if (!get_uint8_buffer(data_item, &buf, &buf_len)) {
-        log_error("js_native_sha512: data is not a typed array");
-        return (Item){.item = ITEM_NULL};
-    }
-    if (offset < 0) offset = 0;
-    if (offset + length > buf_len) length = buf_len - offset;
-    if (length < 0) length = 0;
-
-    uint8_t hash[64];
-    sha512_compute(buf, offset, length, false, hash);
-
-    Item result = js_typed_array_new(JS_TYPED_UINT8, 64);
-    uint8_t* out = (uint8_t*)js_typed_array_prepare_write_ptr(result);
-    if (out) memcpy(out, hash, 64);
-    return result;
+    return js_native_sha(data_item, offset_item, length_item, DIGEST_SHA512);
 }
 
 // ============================================================================
@@ -516,16 +489,6 @@ static bool crypto_random_bytes(uint8_t* buf, size_t len) {
 // ============================================================================
 // randomBytes(size) → Uint8Array
 // ============================================================================
-
-static Item make_string_item_crypto(const char* str) {
-    if (!str) return ItemNull;
-    String* s = heap_create_name(str, strlen(str));
-    return (Item){.item = s2it(s)};
-}
-
-static inline Item make_js_undefined_crypto() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
 
 static const int64_t CRYPTO_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
 
@@ -1398,6 +1361,52 @@ static bool crypto_string_bytes_for_encoding(String* s, const char* enc, bool ha
     return false;
 }
 
+// Keep the three streaming crypto families on one input conversion path; their
+// only semantic differences are string encoding and whether unsupported input
+// is rejected (HMAC historically ignores it).
+static Item crypto_stream_input_bytes(Item value, Item encoding_item,
+                                      bool raw_string, bool reject_invalid,
+                                      const uint8_t** out_bytes, int* out_len,
+                                      bool* out_owned) {
+    if (!out_bytes || !out_len || !out_owned) return ItemError;
+    *out_bytes = NULL;
+    *out_len = 0;
+    *out_owned = false;
+    if (get_type_id(value) == LMD_TYPE_STRING) {
+        String* string = it2s(value);
+        if (raw_string) {
+            *out_bytes = (const uint8_t*)string->chars;
+            *out_len = (int)string->len;
+            return js_status_ok();
+        }
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) {
+            return ItemNull;
+        }
+        uint8_t* bytes = NULL;
+        if (!crypto_string_bytes_for_encoding(string, enc, has_encoding, &bytes, out_len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
+        }
+        *out_bytes = bytes;
+        *out_owned = true;
+        return js_status_ok();
+    }
+    if (js_is_typed_array(value)) {
+        if (get_uint8_buffer(value, out_bytes, out_len)) return js_status_ok();
+    } else if (js_is_dataview(value) || js_is_arraybuffer(value)) {
+        uint8_t* bytes = NULL;
+        if (extract_bytes(value, &bytes, out_len)) {
+            *out_bytes = bytes;
+            *out_owned = true;
+            return js_status_ok();
+        }
+    }
+    return reject_invalid
+        ? js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", value)
+        : js_status_ok();
+}
+
 // ============================================================================
 // createHmac(algorithm, key) → object with update(data)/digest(encoding)
 // ============================================================================
@@ -1414,27 +1423,29 @@ struct HmacCtx {
 #define crypto_live_hmac_contexts ((HmacCtx**)crypto_native_state.hmac_contexts)
 #define crypto_live_hmac_context_count (crypto_native_state.hmac_context_count)
 
-static void crypto_track_hmac_context(HmacCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_hmac_context_count; i++) {
-        if (crypto_live_hmac_contexts[i] == ctx) return;
-    }
-    if (crypto_live_hmac_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
-        crypto_live_hmac_contexts[crypto_live_hmac_context_count++] = ctx;
+static void crypto_track_context(void** contexts, int* count, void* ctx) {
+    if (!contexts || !count || !ctx) return;
+    for (int i = 0; i < *count; i++) if (contexts[i] == ctx) return;
+    if (*count < JS_CRYPTO_MAX_LIVE_CONTEXTS) contexts[(*count)++] = ctx;
+}
+
+static void crypto_untrack_context(void** contexts, int* count, void* ctx) {
+    if (!contexts || !count || !ctx) return;
+    for (int i = 0; i < *count; i++) if (contexts[i] == ctx) {
+            contexts[i] = contexts[*count - 1];
+            contexts[--*count] = NULL;
+            return;
     }
 }
 
+static void crypto_track_hmac_context(HmacCtx* ctx) {
+    crypto_track_context(crypto_native_state.hmac_contexts,
+        &crypto_native_state.hmac_context_count, ctx);
+}
+
 static void crypto_untrack_hmac_context(HmacCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_hmac_context_count; i++) {
-        if (crypto_live_hmac_contexts[i] == ctx) {
-            crypto_live_hmac_contexts[i] =
-                crypto_live_hmac_contexts[crypto_live_hmac_context_count - 1];
-            crypto_live_hmac_contexts[crypto_live_hmac_context_count - 1] = NULL;
-            crypto_live_hmac_context_count--;
-            return;
-        }
-    }
+    crypto_untrack_context(crypto_native_state.hmac_contexts,
+        &crypto_native_state.hmac_context_count, ctx);
 }
 
 static void hmac_ctx_release(HmacCtx* ctx) {
@@ -1450,17 +1461,22 @@ static void hmac_ctx_free(HmacCtx* ctx) {
     hmac_ctx_release(ctx);
 }
 
-static void hmac_ctx_append(HmacCtx* ctx, const uint8_t* buf, int len) {
-    if (!ctx || len <= 0) return;
-    int need = ctx->data_len + len;
-    if (need > ctx->data_cap) {
-        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+static void crypto_append_bytes(uint8_t** data, int* data_len, int* data_cap,
+        const uint8_t* buf, int len) {
+    if (!data || !data_len || !data_cap || len <= 0) return;
+    int need = *data_len + len;
+    if (need > *data_cap) {
+        int cap = *data_cap == 0 ? 1024 : *data_cap;
         while (cap < need) cap *= 2;
-        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-        ctx->data_cap = cap;
+        *data = (uint8_t*)mem_realloc(*data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+        *data_cap = cap;
     }
-    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
-    ctx->data_len += len;
+    memcpy(*data + *data_len, buf, (size_t)len);
+    *data_len += len;
+}
+
+static void hmac_ctx_append(HmacCtx* ctx, const uint8_t* buf, int len) {
+    if (ctx) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, buf, len);
 }
 
 static void crypto_link_instance_to_constructor(Item obj, const char* constructor_name) {
@@ -1478,20 +1494,14 @@ extern "C" Item js_hmac_update(Item data_item) {
     HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx) return self;
 
-    if (get_type_id(data_item) == LMD_TYPE_STRING) {
-        String* s = it2s(data_item);
-        hmac_ctx_append(ctx, (const uint8_t*)s->chars, (int)s->len);
-    } else if (js_is_typed_array(data_item)) {
-        const uint8_t* buf; int len;
-        if (get_uint8_buffer(data_item, &buf, &len)) hmac_ctx_append(ctx, buf, len);
-    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (extract_bytes(data_item, &bytes, &len)) {
-            hmac_ctx_append(ctx, bytes, len);
-            mem_free(bytes);
-        }
-    }
+    const uint8_t* bytes = NULL;
+    int len = 0;
+    bool owned = false;
+    Item status = crypto_stream_input_bytes(data_item, make_js_undefined_crypto(),
+        true, false, &bytes, &len, &owned);
+    if (item_is_error(status) || status.item == ItemNull.item) return status;
+    if (bytes) hmac_ctx_append(ctx, bytes, len);
+    if (owned) mem_free((void*)bytes);
     return self;
 }
 
@@ -1595,26 +1605,13 @@ struct HashCtx {
 #define crypto_live_hash_context_count (crypto_native_state.hash_context_count)
 
 static void crypto_track_hash_context(HashCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_hash_context_count; i++) {
-        if (crypto_live_hash_contexts[i] == ctx) return;
-    }
-    if (crypto_live_hash_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
-        crypto_live_hash_contexts[crypto_live_hash_context_count++] = ctx;
-    }
+    crypto_track_context(crypto_native_state.hash_contexts,
+        &crypto_native_state.hash_context_count, ctx);
 }
 
 static void crypto_untrack_hash_context(HashCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_hash_context_count; i++) {
-        if (crypto_live_hash_contexts[i] == ctx) {
-            crypto_live_hash_contexts[i] =
-                crypto_live_hash_contexts[crypto_live_hash_context_count - 1];
-            crypto_live_hash_contexts[crypto_live_hash_context_count - 1] = NULL;
-            crypto_live_hash_context_count--;
-            return;
-        }
-    }
+    crypto_untrack_context(crypto_native_state.hash_contexts,
+        &crypto_native_state.hash_context_count, ctx);
 }
 
 static void hash_ctx_release(HashCtx* ctx) {
@@ -1630,26 +1627,14 @@ static void hash_ctx_free(HashCtx* ctx) {
 }
 
 static void hash_ctx_append(HashCtx* ctx, const uint8_t* buf, int len) {
-    if (!ctx || len <= 0) return;
-    int need = ctx->data_len + len;
-    if (need > ctx->data_cap) {
-        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-        while (cap < need) cap *= 2;
-        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-        ctx->data_cap = cap;
-    }
-    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
-    ctx->data_len += len;
+    if (ctx) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, buf, len);
 }
 
-static Item crypto_throw_hash_finalized(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_HASH_FINALIZED", "Digest already called");
-}
-
-static Item crypto_throw_invalid_xof_length(void) {
-    return js_throw_error_with_code("ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH",
-        "error:030000B2:digital envelope routines::not XOF or invalid length");
-}
+JS_CRYPTO_THROW_CODE(crypto_throw_hash_finalized,
+    "ERR_CRYPTO_HASH_FINALIZED", "Digest already called")
+JS_CRYPTO_THROW_CODE(crypto_throw_invalid_xof_length,
+    "ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH",
+    "error:030000B2:digital envelope routines::not XOF or invalid length")
 
 extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     Item self = js_get_current_this();
@@ -1658,31 +1643,14 @@ extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
-    if (get_type_id(data_item) == LMD_TYPE_STRING) {
-        String* s = it2s(data_item);
-        char enc[32];
-        bool has_encoding = false;
-        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
-            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
-        }
-        hash_ctx_append(ctx, bytes, len);
-        mem_free(bytes);
-    } else if (js_is_typed_array(data_item)) {
-        const uint8_t* buf; int len;
-        if (get_uint8_buffer(data_item, &buf, &len)) hash_ctx_append(ctx, buf, len);
-    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (extract_bytes(data_item, &bytes, &len)) {
-            hash_ctx_append(ctx, bytes, len);
-            mem_free(bytes);
-        }
-    } else {
-        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
-    }
+    const uint8_t* bytes = NULL;
+    int len = 0;
+    bool owned = false;
+    Item status = crypto_stream_input_bytes(data_item, encoding_item,
+        false, true, &bytes, &len, &owned);
+    if (item_is_error(status) || status.item == ItemNull.item) return status;
+    if (bytes) hash_ctx_append(ctx, bytes, len);
+    if (owned) mem_free((void*)bytes);
     return self;
 }
 
@@ -1976,9 +1944,8 @@ static void sign_verify_ctx_append(SignVerifyCtx* ctx, const uint8_t* buf, int l
     ctx->data_len += len;
 }
 
-static Item crypto_throw_sign_verify_finalized(void) {
-    return js_throw_error_with_code(JS_ERR_CRYPTO_INVALID_STATE, "Sign or Verify already finalized");
-}
+JS_CRYPTO_THROW_CODE(crypto_throw_sign_verify_finalized,
+    JS_ERR_CRYPTO_INVALID_STATE, "Sign or Verify already finalized")
 
 static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
     Item ctx_item = js_get_key_default(self, make_string_item_crypto("__sign_verify_ctx__"));
@@ -2396,31 +2363,14 @@ extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
     SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
     if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
 
-    if (get_type_id(data_item) == LMD_TYPE_STRING) {
-        String* s = it2s(data_item);
-        char enc[32];
-        bool has_encoding = false;
-        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
-            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
-        }
-        sign_verify_ctx_append(ctx, bytes, len);
-        mem_free(bytes);
-    } else if (js_is_typed_array(data_item)) {
-        const uint8_t* buf; int len;
-        if (get_uint8_buffer(data_item, &buf, &len)) sign_verify_ctx_append(ctx, buf, len);
-    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (extract_bytes(data_item, &bytes, &len)) {
-            sign_verify_ctx_append(ctx, bytes, len);
-            mem_free(bytes);
-        }
-    } else {
-        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
-    }
+    const uint8_t* bytes = NULL;
+    int len = 0;
+    bool owned = false;
+    Item status = crypto_stream_input_bytes(data_item, encoding_item,
+        false, true, &bytes, &len, &owned);
+    if (item_is_error(status) || status.item == ItemNull.item) return status;
+    if (bytes) sign_verify_ctx_append(ctx, bytes, len);
+    if (owned) mem_free((void*)bytes);
     return self;
 }
 
@@ -2711,7 +2661,7 @@ extern "C" Item js_crypto_createVerify(Item alg_item) {
     return js_crypto_create_sign_verify(alg_item, true);
 }
 
-static Item js_crypto_sign_verify_emit(Item env_item) {
+static Item js_crypto_callback_result_emit(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined_crypto();
     Item callback = env[0];
@@ -2811,7 +2761,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
             Item* env = js_alloc_env(2);
             env[0] = callback_item;
             env[1] = result;
-            Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
+            Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
             js_next_tick_enqueue(fn);
             return make_js_undefined_crypto();
         }
@@ -2832,7 +2782,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
         Item* env = js_alloc_env(2);
         env[0] = callback_item;
         env[1] = result;
-        Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
+        Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
         js_next_tick_enqueue(fn);
         return make_js_undefined_crypto();
     }
@@ -2852,7 +2802,7 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
             Item* env = js_alloc_env(2);
             env[0] = callback_item;
             env[1] = result;
-            Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
+            Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
             js_next_tick_enqueue(fn);
             return make_js_undefined_crypto();
         }
@@ -2873,7 +2823,7 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
         Item* env = js_alloc_env(2);
         env[0] = callback_item;
         env[1] = result;
-        Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
+        Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
         js_next_tick_enqueue(fn);
         return make_js_undefined_crypto();
     }
@@ -3023,13 +2973,10 @@ static const CryptoDhGroupDef* crypto_dh_group_lookup(Item name_item) {
     return NULL;
 }
 
-static Item crypto_throw_unknown_dh_group(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_UNKNOWN_DH_GROUP", "Unknown DH group");
-}
-
-static Item crypto_throw_bad_dh_generator(void) {
-    return js_throw_error_with_code("ERR_OSSL_DH_BAD_GENERATOR", "bad generator");
-}
+JS_CRYPTO_THROW_CODE(crypto_throw_unknown_dh_group,
+    "ERR_CRYPTO_UNKNOWN_DH_GROUP", "Unknown DH group")
+JS_CRYPTO_THROW_CODE(crypto_throw_bad_dh_generator,
+    "ERR_OSSL_DH_BAD_GENERATOR", "bad generator")
 
 static Item crypto_item_to_integer(Item item, const char* name, int* out_value) {
     if (!out_value) return js_throw_type_error("Crypto integer output is unavailable");
@@ -3246,13 +3193,10 @@ static Item crypto_output_temp_bytes(const uint8_t* bytes, int len, Item encodin
     return crypto_digest_output_for_encoding(bytes, len, enc, has_encoding);
 }
 
-static Item crypto_throw_dh_key_too_small(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_INVALID_KEYLEN", "Supplied key is too small");
-}
-
-static Item crypto_throw_dh_compute_failed(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_OPERATION_FAILED", "Failed to compute Diffie-Hellman secret");
-}
+JS_CRYPTO_THROW_CODE(crypto_throw_dh_key_too_small,
+    "ERR_CRYPTO_INVALID_KEYLEN", "Supplied key is too small")
+JS_CRYPTO_THROW_CODE(crypto_throw_dh_compute_failed,
+    "ERR_CRYPTO_OPERATION_FAILED", "Failed to compute Diffie-Hellman secret")
 
 static bool crypto_dh_public_from_private(Item self, const uint8_t* private_bytes,
                                           int private_len, uint8_t** out_public,
@@ -3794,20 +3738,12 @@ static bool crypto_ecdh_store_keypair(Item self, mbedtls_ecp_group* group,
     return true;
 }
 
-static Item crypto_throw_ecdh_invalid_public_key(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY",
-        "Public key is not valid for specified curve");
-}
-
-static Item crypto_throw_ecdh_convert_public_key(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY",
-        "Failed to convert Buffer to EC_POINT");
-}
-
-static Item crypto_throw_ecdh_invalid_private_key(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_INVALID_KEYTYPE",
-        "Private key is not valid for specified curve");
-}
+JS_CRYPTO_THROW_CODE(crypto_throw_ecdh_invalid_public_key,
+    "ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Public key is not valid for specified curve")
+JS_CRYPTO_THROW_CODE(crypto_throw_ecdh_convert_public_key,
+    "ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Failed to convert Buffer to EC_POINT")
+JS_CRYPTO_THROW_CODE(crypto_throw_ecdh_invalid_private_key,
+    "ERR_CRYPTO_INVALID_KEYTYPE", "Private key is not valid for specified curve")
 
 static void crypto_emit_ecdh_set_public_key_warning(void) {
     Item warning = js_new_object();
@@ -4208,9 +4144,8 @@ static bool is_known_cipher_name(const char* alg) {
            strcmp(alg, "des-ede3-cbc") == 0;
 }
 
-static Item crypto_throw_unknown_cipher(void) {
-    return js_throw_error_with_code("ERR_CRYPTO_UNKNOWN_CIPHER", "Unknown cipher");
-}
+JS_CRYPTO_THROW_CODE(crypto_throw_unknown_cipher,
+    "ERR_CRYPTO_UNKNOWN_CIPHER", "Unknown cipher")
 
 static Item crypto_throw_invalid_key_length(void) {
     return js_throw_range_error_code("ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
@@ -6828,16 +6763,6 @@ extern "C" Item js_crypto_generateKeySync(Item type_item, Item options_item) {
     return result;
 }
 
-static Item js_crypto_generateKey_emit(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined_crypto();
-    Item callback = env[0];
-    Item result = env[1];
-    Item args[2] = { ItemNull, result };
-    js_call_function(callback, make_js_undefined_crypto(), args, 2);
-    return make_js_undefined_crypto();
-}
-
 static Item js_crypto_generateKeyPair_emit(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined_crypto();
@@ -6879,7 +6804,7 @@ extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item ca
     Item* env = js_alloc_env(2);
     env[0] = callback_item;
     env[1] = result;
-    Item fn = js_new_native_closure(js_crypto_generateKey_emit, 0, env, 2);
+    Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
     js_next_tick_enqueue(fn);
     return make_js_undefined_crypto();
 }
@@ -7634,16 +7559,6 @@ extern "C" Item js_crypto_hkdfSync(Item digest_item, Item ikm_item, Item salt_it
     return result;
 }
 
-static Item js_crypto_hkdf_emit(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined_crypto();
-    Item callback = env[0];
-    Item result = env[1];
-    Item args[2] = { ItemNull, result };
-    js_call_function(callback, make_js_undefined_crypto(), args, 2);
-    return make_js_undefined_crypto();
-}
-
 extern "C" Item js_crypto_hkdf(Item digest_item, Item ikm_item, Item salt_item,
                                 Item info_item, Item length_item, Item callback_item) {
     JS_ASSIGN_OR_RETURN(result, js_crypto_hkdfSync(digest_item, ikm_item, salt_item, info_item, length_item));
@@ -7656,7 +7571,7 @@ extern "C" Item js_crypto_hkdf(Item digest_item, Item ikm_item, Item salt_item,
     Item* env = js_alloc_env(2);
     env[0] = callback_item;
     env[1] = result;
-    Item fn = js_new_native_closure(js_crypto_hkdf_emit, 0, env, 2);
+    Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
     js_next_tick_enqueue(fn);
     return make_js_undefined_crypto();
 }

@@ -1446,10 +1446,6 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
     return event_root.get();
 }
 
-Item js_create_custom_event(const char* type, bool bubbles, bool cancelable, Item detail) {
-    return js_create_custom_event_init(type, bubbles, cancelable, false, detail);
-}
-
 // ============================================================================
 // Generic EventTarget — plain JS object with addEventListener / removeEventListener
 // / dispatchEvent methods bound such that `this` is the storage key.
@@ -1826,38 +1822,32 @@ extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
-extern "C" Item js_ctor_transition_event_fn(Item type_arg, Item init_arg) {
+static Item js_ctor_timing_event(Item type_arg, Item init_arg, JsClass class_id,
+                                 const char* name_key) {
     RootFrame roots(3);
     Rooted<Item> type_root(roots, type_arg);
     Rooted<Item> init_root(roots, init_arg);
     Rooted<Item> event_root(roots, js_create_event_init_with_class(fn_to_cstr(type_root.get()),
         init_bool(init_root.get(), "bubbles", false),
         init_bool(init_root.get(), "cancelable", false),
-        init_bool(init_root.get(), "composed", false), JS_CLASS_TRANSITION_EVENT));
+        init_bool(init_root.get(), "composed", false), class_id));
     // Subclass property writes allocate after the Event initializer's root
     // frame closes, so the partially built receiver needs its own precise root (D5.4.3).
     Item ev = event_root.get();
-    event_set_str(ev, "propertyName", init_str(init_root.get(), "propertyName", ""));
+    event_set_str(ev, name_key, init_str(init_root.get(), name_key, ""));
     event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
     event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
     return ev;
 }
 
+extern "C" Item js_ctor_transition_event_fn(Item type_arg, Item init_arg) {
+    return js_ctor_timing_event(type_arg, init_arg, JS_CLASS_TRANSITION_EVENT,
+        "propertyName");
+}
+
 extern "C" Item js_ctor_animation_event_fn(Item type_arg, Item init_arg) {
-    RootFrame roots(3);
-    Rooted<Item> type_root(roots, type_arg);
-    Rooted<Item> init_root(roots, init_arg);
-    Rooted<Item> event_root(roots, js_create_event_init_with_class(fn_to_cstr(type_root.get()),
-        init_bool(init_root.get(), "bubbles", false),
-        init_bool(init_root.get(), "cancelable", false),
-        init_bool(init_root.get(), "composed", false), JS_CLASS_ANIMATION_EVENT));
-    // AnimationEvent has the same post-base-initialization allocation window
-    // as TransitionEvent and must preserve the receiver precisely (D5.4.3).
-    Item ev = event_root.get();
-    event_set_str(ev, "animationName", init_str(init_root.get(), "animationName", ""));
-    event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
-    event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
-    return ev;
+    return js_ctor_timing_event(type_arg, init_arg, JS_CLASS_ANIMATION_EVENT,
+        "animationName");
 }
 
 // Build a synthetic click MouseEvent (composed=true, bubbles=true, cancelable=true)

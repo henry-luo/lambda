@@ -89,11 +89,6 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
 Item js_create_click_mouse_event(void);
 
 /**
- * Create a CustomEvent object with a detail property.
- */
-Item js_create_custom_event(const char* type, bool bubbles, bool cancelable, Item detail);
-
-/**
  * Create a CustomEvent with full EventInit (composed flag) plus detail.
  */
 Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable,

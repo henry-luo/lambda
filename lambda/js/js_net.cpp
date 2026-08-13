@@ -43,9 +43,7 @@ extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern Item js_make_number(double d);
 
-static Item make_undefined_item(void) {
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
+#define make_undefined_item make_js_undefined
 
 static bool is_undefined_item(Item item) {
     return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
@@ -2416,14 +2414,8 @@ static Item parse_local_port(Item value, int* out_port) {
     return parse_port(value, out_port);
 }
 
-static bool copy_string_item(Item value, char* out, int out_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return false;
-    String* s = it2s(value);
-    int len = (int)s->len < out_size - 1 ? (int)s->len : out_size - 1;
-    memcpy(out, s->chars, (size_t)len);
-    out[len] = '\0';
-    return true;
-}
+#define copy_string_item(value, out, out_size) \
+    (js_item_to_cstr((value), (out), (out_size)) != NULL)
 
 static bool string_item_has_nul(Item value) {
     if (get_type_id(value) != LMD_TYPE_STRING) return false;

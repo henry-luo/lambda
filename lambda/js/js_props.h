@@ -39,12 +39,6 @@ static inline bool js_property_lane_is_valid(JsPropertyLane lane) {
         : payload != NAME_ID_NONE;
 }
 
-// ItemNull is not a result of ToPropertyKey (which returns a String or
-// Symbol), so it is the empty observable-materialization marker.
-static inline Item js_property_observable_key_empty(void) {
-    return ItemNull;
-}
-
 #ifdef __cplusplus
 extern "C" {
 #endif

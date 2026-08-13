@@ -443,20 +443,14 @@ int jm_count_yields(JsAstNode* node) {
 // Returns the allocated env slot index.
 int jm_gen_spill_save(JsMirTranspiler* mt, MIR_reg_t reg) {
     int slot = mt->gen_spill_slot_next++;
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
-        MIR_new_reg_op(mt->ctx, reg)));
+    jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->gen_env_reg, reg);
     return slot;
 }
 
 // Generator yield spill: restore a register from an env slot after a yield-containing
 // sub-expression has been evaluated.
 void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+    jm_emit_load_i64(mt, reg, slot * (int)sizeof(uint64_t), mt->gen_env_reg);
 }
 
 // Check if an expression subtree contains a yield (for generator spill decisions)
@@ -1703,9 +1697,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
             continue;
         }
         MIR_reg_t tdz_reg = jm_new_reg(mt, e->name, MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, tdz_reg),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+        jm_emit_reg_op(mt, MIR_MOV, tdz_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
         jm_set_var(mt, e->name, tdz_reg);
         JsAstNode* binding_node = jm_find_block_lexical_binding_node(block, e->name);
         JsMirVarEntry* ve = jm_find_var(mt, e->name);
@@ -1740,9 +1732,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
                     const char* vname = jm_format_name("_js_%.*s",
                         (int)fn->name->len, fn->name->chars);
                     MIR_reg_t binding_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, binding_reg),
-                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                    jm_emit_reg_op(mt, MIR_MOV, binding_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
                     JsMirVarEntry* ve = jm_set_current_scope_var_fresh(mt, vname, binding_reg, MIR_T_I64, LMD_TYPE_ANY);
                     if (ve) {
                         ve->is_let_const = true;
@@ -1750,9 +1740,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
                         ve->from_block_func_decl = true;
                     }
                     MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, binding_reg),
-                        MIR_new_reg_op(mt->ctx, fn_reg)));
+                    jm_emit_mov(mt, binding_reg, fn_reg);
                     jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
                 }
             }
@@ -1771,9 +1759,7 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
     while (hashmap_iter(let_consts, &iter, &item)) {
         JsNameSetEntry* e = (JsNameSetEntry*)item;
         MIR_reg_t tdz_reg = jm_new_reg(mt, e->name, MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, tdz_reg),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+        jm_emit_reg_op(mt, MIR_MOV, tdz_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
         jm_set_var(mt, e->name, tdz_reg);
         JsMirVarEntry* ve = jm_find_var(mt, e->name);
         if (ve) {
@@ -1784,10 +1770,7 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
                 ve->in_scope_env = true;
                 ve->scope_env_slot = slot;
                 ve->scope_env_reg = mt->scope_env_reg;
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
-                        mt->scope_env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, tdz_reg)));
+                jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->scope_env_reg, tdz_reg);
             }
         }
         slot++;
@@ -1807,9 +1790,7 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
             const char* vname = jm_format_name("_js_%.*s",
                 (int)fn->name->len, fn->name->chars);
             MIR_reg_t binding_reg = jm_new_reg(mt, vname, MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, binding_reg),
-                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+            jm_emit_reg_op(mt, MIR_MOV, binding_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
             JsMirVarEntry* ve = jm_set_current_scope_var_fresh(mt, vname, binding_reg, MIR_T_I64, LMD_TYPE_ANY);
             if (ve) {
                 ve->is_let_const = true;
@@ -1817,9 +1798,7 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
                 ve->from_block_func_decl = true;
             }
             MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, binding_reg),
-                MIR_new_reg_op(mt->ctx, fn_reg)));
+            jm_emit_mov(mt, binding_reg, fn_reg);
             jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
         }
     }

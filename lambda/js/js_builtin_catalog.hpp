@@ -218,13 +218,6 @@ struct JsBuiltinGlobalSpec {
 };
 
 const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner, const char* name, int len);
-const JsBuiltinMethodSpec* js_builtin_catalog_find_id(int builtin_id);
-int js_builtin_catalog_lookup_id(JsBuiltinOwner owner, const char* name, int len);
-int js_builtin_catalog_lookup_constructor_id(const char* ctor_name, int ctor_len,
-                                             const char* prop_name, int prop_len);
-int js_builtin_catalog_lookup_member_id(const char* owner_name, int owner_len,
-                                        const char* prop_name, int prop_len);
-JsBuiltinMirLoweringKind js_builtin_mir_kind(int builtin_id);
 const JsBuiltinGlobalSpec* js_builtin_global_find(const char* name, int len);
 bool js_builtin_global_has_flag(const char* name, int len, int flag);
 int js_builtin_global_count();

@@ -89,15 +89,8 @@ static Item js_perm_string_item(const char* str) {
     return (Item){.item = s2it(heap_create_name(str, strlen(str)))};
 }
 
-static bool js_perm_item_to_cstr(Item value, char* buf, int buf_size) {
-    if (buf_size <= 0 || get_type_id(value) != LMD_TYPE_STRING) return false;
-    String* s = it2s(value);
-    int len = (int)s->len;
-    if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    return true;
-}
+#define js_perm_item_to_cstr(value, buf, buf_size) \
+    (js_item_to_cstr((value), (buf), (buf_size)) != NULL)
 
 static bool js_perm_scope_equals(Item value, const char* lit) {
     if (get_type_id(value) != LMD_TYPE_STRING || !lit) return false;

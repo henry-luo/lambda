@@ -84,7 +84,7 @@ extern "C" bool js_event_loop_is_shutting_down(void) {
     return event_loop_shutting_down;
 }
 
-static bool next_tick_push(Item cb) {
+static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
     if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
@@ -95,29 +95,7 @@ static bool next_tick_push(Item cb) {
     Rooted<Item> domain_root(roots, js_domain_capture_async_stack());
     Item record[4] = {callback_root.get(), resource_root.get(),
         als_root.get(), domain_root.get()};
-    return runtime_async_deque_push(&next_tick_deque, record);
-}
-
-static bool next_tick_pop(Item* record) {
-    return runtime_async_deque_pop(&next_tick_deque, record);
-}
-
-static bool microtask_push(Item cb) {
-    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
-        return false;
-    }
-    RootFrame roots(4);
-    Rooted<Item> callback_root(roots, cb);
-    Rooted<Item> resource_root(roots, js_async_hooks_get_current_resource());
-    Rooted<Item> als_root(roots, js_als_capture_context());
-    Rooted<Item> domain_root(roots, js_domain_capture_async_stack());
-    Item record[4] = {callback_root.get(), resource_root.get(),
-        als_root.get(), domain_root.get()};
-    return runtime_async_deque_push(&microtask_deque, record);
-}
-
-static bool microtask_pop(Item* record) {
-    return runtime_async_deque_pop(&microtask_deque, record);
+    return runtime_async_deque_push(queue, record);
 }
 
 extern "C" void js_microtask_enqueue(Item callback) {
@@ -125,7 +103,7 @@ extern "C" void js_microtask_enqueue(Item callback) {
         log_error("event_loop: microtask_enqueue called with non-function (type=%d)", get_type_id(callback));
         return;
     }
-    if (!microtask_push(callback)) {
+    if (!js_async_queue_push(&microtask_deque, callback)) {
         log_error("event_loop: failed to grow Promise microtask deque");
     }
 }
@@ -135,7 +113,7 @@ extern "C" void js_next_tick_enqueue(Item callback) {
         log_error("event_loop: nextTick enqueue called with non-function (type=%d)", get_type_id(callback));
         return;
     }
-    if (!next_tick_push(callback)) {
+    if (!js_async_queue_push(&next_tick_deque, callback)) {
         log_error("event_loop: failed to grow nextTick deque");
     }
 }
@@ -176,6 +154,23 @@ extern "C" void js_microtask_flush(void) {
     (void)js_microtask_flush_result();
 }
 
+static void js_drain_async_queue(RuntimeAsyncDeque* queue,
+        Rooted<Item>& first_error_root, int& safety) {
+    while (runtime_async_deque_size(queue) > 0 &&
+            safety < TASK_FLUSH_WORK_BUDGET) {
+        Item record[4] = {};
+        if (!runtime_async_deque_pop(queue, record)) break;
+        bool previous_running = microtask_running;
+        microtask_running = true;
+        Item result = js_run_queued_callback(record[0], record[1], record[2], record[3]);
+        microtask_running = previous_running;
+        if (item_is_error(result) && !item_is_error(first_error_root.get())) {
+            first_error_root.set(result);
+        }
+        safety++;
+    }
+}
+
 extern "C" Item js_microtask_flush_result(void) {
     RootFrame roots(1);
     Rooted<Item> first_error_root(roots, ItemNull);
@@ -183,32 +178,8 @@ extern "C" Item js_microtask_flush_result(void) {
     while ((runtime_async_deque_size(&next_tick_deque) > 0 ||
             runtime_async_deque_size(&microtask_deque) > 0) &&
            safety < TASK_FLUSH_WORK_BUDGET) {
-        while (runtime_async_deque_size(&next_tick_deque) > 0 &&
-               safety < TASK_FLUSH_WORK_BUDGET) {
-            Item record[4] = {};
-            if (!next_tick_pop(record)) break;
-            bool previous_running = microtask_running;
-            microtask_running = true;
-            Item result = js_run_queued_callback(record[0], record[1], record[2], record[3]);
-            microtask_running = previous_running;
-            if (item_is_error(result) && !item_is_error(first_error_root.get())) {
-                first_error_root.set(result);
-            }
-            safety++;
-        }
-        while (runtime_async_deque_size(&microtask_deque) > 0 &&
-               safety < TASK_FLUSH_WORK_BUDGET) {
-            Item record[4] = {};
-            if (!microtask_pop(record)) break;
-            bool previous_running = microtask_running;
-            microtask_running = true;
-            Item result = js_run_queued_callback(record[0], record[1], record[2], record[3]);
-            microtask_running = previous_running;
-            if (item_is_error(result) && !item_is_error(first_error_root.get())) {
-                first_error_root.set(result);
-            }
-            safety++;
-        }
+        js_drain_async_queue(&next_tick_deque, first_error_root, safety);
+        js_drain_async_queue(&microtask_deque, first_error_root, safety);
     }
     if (runtime_async_deque_size(&next_tick_deque) == 0 &&
             runtime_async_deque_size(&microtask_deque) == 0) {

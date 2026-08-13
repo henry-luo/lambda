@@ -2798,21 +2798,6 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
     return 1; // one match found
 }
 
-bool js_regex_wrapper_test(JsRegexCompiled* compiled, const char* input, int input_len, int start_pos) {
-    if (!compiled || !compiled->re2) return false;
-
-    // Fast path: no filters, just test
-    if (!compiled->has_filters) {
-        re2::StringPiece text(input, input_len);
-        return compiled->re2->Match(text, start_pos, input_len, re2::RE2::UNANCHORED, nullptr, 0);
-    }
-
-    // Slow path: need to do full exec to apply filters
-    int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
-    return js_regex_wrapper_exec(compiled, input, input_len, start_pos, false,
-                         starts, ends, JS_REGEX_MAX_GROUPS) > 0;
-}
-
 void js_regex_compiled_free(JsRegexCompiled* compiled) {
     if (!compiled) return;
     if (compiled->re2) lam::re2_glue_release(compiled->re2);

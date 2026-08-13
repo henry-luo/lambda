@@ -1118,172 +1118,17 @@ extern Item js_active_module_name_item(uint32_t module_name_index,
                                        NameId direct_name_id);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
-// Debug tracing helpers
-
-// v24: strict mode flag setter (js_runtime.cpp)
-extern void js_set_strict_mode(int64_t strict);
-
-// with-statement scope support (js_globals.cpp)
-extern Item js_with_push(Item obj);
-extern void js_with_pop(void);
-extern int js_with_save_depth(void);
-extern void js_with_restore_depth(int depth);
-extern int64_t js_with_depth_active(void);
-extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
-extern Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
-extern Item js_get_last_with_binding_base_or_undefined(Item key);
-extern Item js_probe_with_binding(Item key);
-extern Item js_capture_with_binding(Item key);
-extern Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
-extern Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
-extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
-extern int64_t js_global_binding_exists(Item key);
-// Tune8 §2.2: js_set_global_property absorbs js_set_global_property_strict
-// (strict is now an explicit constant operand).
-extern Item js_set_global_property(Item key, Item value, int64_t strict);
-extern Item js_set_global_var_property_fast(Item key, Item value);
-extern Item js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
-extern void js_register_global_var_module_binding(Item key, int64_t index);
-extern void js_init_module_vars_undefined_bulk(const int* indices,
-    const uint32_t* module_name_indices, const NameId* direct_name_ids,
-    int count, int define_global_var_properties);
-extern void js_mark_private_method_non_writable(Item object, Item name);
-extern void js_set_method_home_from_target(Item target, Item fn_item);
-extern void js_refresh_prototype_method_homes(Item prototype, Item class_item);
-extern Item js_init_class_instance_fields(Item callee, Item object);
-extern Item js_init_class_instance_fields_after_super(Item callee, Item object);
-extern void js_init_class_instance_field_metadata(Item class_item, int count);
-extern void js_set_class_instance_field_metadata_name_id_range(Item class_item,
-    int index, uint32_t module_name_base, int count, uint64_t method_mask);
-extern void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
-extern void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
-extern void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
-    Item initializer);
-extern Item js_private_key_for_class(Item class_item, Item source_name);
-extern Item js_private_key_for_current_class(Item source_name);
-extern Item js_private_home_class_enter(Item class_item);
-extern void js_private_home_class_leave(Item previous_class);
-extern Item js_private_home_class_leave_result(Item previous_class, Item result);
-extern Item js_private_brand_add(Item object, Item private_key, Item callee);
-extern Item js_private_field_define(Item object, Item private_key, Item value);
-extern void js_set_private_class_index(Item class_item, int index);
-// Tune8 §2.2: define_global_{var,eval_var,function}_property collapsed into
-// js_define_global_property_v(kind, key, value). C functions kept as named
-// symbols; only the JIT import is unified.
-extern void js_define_global_property_v(int64_t kind, Item key, Item value);
-extern void js_global_lexical_declare(Item key, Item value, int64_t immutable);
-extern int64_t js_global_lexical_binding_exists(Item key);
-extern Item js_global_lexical_get_or_fallback(Item key, Item fallback);
-extern Item js_global_lexical_set_if_exists(Item key, Item value);
-extern Item js_evalscript_check_global_var_decl(Item key);
-extern Item js_evalscript_check_global_function_decl(Item key);
-extern Item js_evalscript_check_global_lex_decl(Item key);
-extern void js_eval_env_push_frame(void);
-extern void js_eval_global_lexical_push_frame(void);
-extern void js_eval_env_bind(Item key, Item value);
-extern void js_eval_env_bridge_journal_vars(void);
-extern void js_eval_global_lexical_bind(Item key, Item value);
-extern int64_t js_eval_env_has_binding(Item key);
-extern int64_t js_eval_env_is_active(void);
-extern void js_eval_env_track_global_binding(Item key);
-extern void js_eval_env_pop_frame(void);
-extern void js_eval_global_lexical_pop_frame(void);
-extern int64_t js_eval_local_push_frame(void);
-extern void js_eval_local_pop_frame(void);
-extern void js_eval_private_push_frame(void);
-extern void js_eval_private_pop_frame(void);
-extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
-extern Item js_eval_private_resolve(Item unscoped_key);
-extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
-extern void js_eval_local_export_var(Item key, Item value);
-extern Item js_check_unresolved_capture(Item value, uint32_t name_id, int64_t len);
-extern Item js_resolve_unresolved_binding(Item value, uint32_t name_id, int64_t len, int64_t in_typeof);
-extern int64_t js_262_eval_script_is_active(void);
-
-// Object.groupBy / Map.groupBy (ES2024)
-extern Item js_object_group_by(Item items, Item callback);
-extern Item js_map_group_by(Item items, Item callback);
-
-// Function formal length (ES spec .length)
-extern void js_set_formal_length(Item fn_item, int length);
-extern void* js_function_get_ptr(Item fn_item);
-
-// v25: Reflect API wrappers (js_globals.cpp)
-extern Item js_reflect_own_keys(Item obj);
-extern Item js_reflect_set(Item obj, Item key, Item value, Item receiver);
-extern Item js_reflect_define_property(Item obj, Item key, Item desc);
-extern Item js_reflect_delete_property(Item obj, Item key);
-extern Item js_reflect_set_prototype_of(Item obj, Item proto);
-extern Item js_object_set_prototype_of(Item obj, Item proto);
-extern Item js_reflect_prevent_extensions(Item obj);
-extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
-extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
-extern Item js_reflect_get_prototype_of(Item target);
-extern Item js_reflect_is_extensible(Item target);
-extern Item js_reflect_get_own_property_descriptor(Item target, Item key);
-extern Item js_get(Item target, uint64_t lane, Item observable_key, Item receiver);
+// Property-kernel declarations live in C++ headers with the exact ABI typedefs;
+// keep these C-registry prototypes local so the C import table does not create
+// a second linkage declaration through js_runtime.h.
+extern Item js_to_property_key(Item key);
 extern uint64_t js_property_lane_for_canonical_key(Item key);
+extern Item js_get(Item target, uint64_t lane, Item observable_key, Item receiver);
 extern Item js_set(Item target, uint64_t lane, Item observable_key, Item value, Item receiver);
 extern Item js_delete(Item target, uint64_t lane, Item observable_key);
 extern Item js_has_property(Item target, uint64_t lane, Item observable_key);
-extern Item js_assignment_set_result(Item value, Item key, Item set_result,
-    int64_t strict, Item target);
-extern Item js_delete_reference_result(Item key, Item delete_result, int64_t strict);
-extern Item js_get_reflect_object_value();
-extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
-extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
-extern void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
-extern void js_set_class_name(Item cls_item, Item name_item);
-extern Item js_new_class_function(void);
-extern void js_set_class_constructor(Item class_function, Item constructor_body);
-extern void js_set_class_instance_prototype(Item class_function, Item prototype);
-extern void js_set_class_superclass(Item class_function, Item superclass);
-extern Item js_get_class_superclass(Item class_function);
-extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
-extern Item js_prepare_class_prototype_property(Item cls_item);
-extern Item js_check_class_static_field_key(Item key_item);
-extern void js_mark_non_configurable(Item object, Item name);
-extern Item js_to_property_key(Item key);
-
-// v23: Performance facade functions (js_runtime.cpp)
-extern int64_t js_typeof_is(Item value, uint32_t type_name_id);
-#if LAMBDA_INLINE_CACHE
-extern Item js_get_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
-extern Item js_set_name_id_ic(Item object, NameId name_id, Item value,
-    int64_t strict, JsStoreIC* ic);
-extern void* js_active_module_ic(uint32_t index);
-#endif
-extern Item js_using_dispose(Item resource);
-extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
-extern Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
-// v23b: Comparison facades returning raw int64_t 0/1.
-// Tune8 §2.1:
-//   - ne/loose_ne removed — the transpiler emits eq + XOR-with-1 inline.
-//   - lt/gt/le/ge collapsed into js_cmp_raw(op, l, r); op is a constant operand.
-extern int64_t js_cmp_raw(int64_t op, Item left, Item right);
-extern int64_t js_eq_raw(Item left, Item right);
-extern int64_t js_loose_eq_raw(Item left, Item right);
-
-// native test262 harness functions for batch performance
-extern Item js_assert_same_value(Item actual, Item expected, Item message);
-extern Item js_assert_not_same_value(Item actual, Item unexpected, Item message);
-extern Item js_assert_compare_array(Item actual, Item expected, Item message);
-extern Item js_assert_deep_equal(Item actual, Item expected, Item message);
-extern Item js_compare_array(Item a, Item b);
-extern Item js_verify_property(Item obj, Item name, Item desc, Item options);
-extern Item js_assert_throws(Item expected_ctor, Item func, Item message);
-extern Item js_assert_base(Item must_be_true, Item message);
-extern Item js_donotevaluate(void);
-extern Item js_is_constructor(Item fn);
-extern Item js_decimal_to_percent_hex_string(Item n);
-extern Item js_test262_build_string(Item args);
-extern uint64_t lambda_mir_double_bits(double dval);
-extern double lambda_mir_bits_double(uint64_t bits);
-
-// always available: emitted unconditionally by JS class transpiler
-extern void js_private_field_init_begin(void);
-extern void js_private_field_init_end(void);
+extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 
 JitImport jit_runtime_imports[] = {
     // C library functions

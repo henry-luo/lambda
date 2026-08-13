@@ -2211,11 +2211,8 @@ static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
                                            Item count_arg);
 static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg);
-static Item js_text_replace_data_method(Item offset_arg, Item count_arg, Item data_arg);
-static Item js_text_insert_data_method(Item offset_arg, Item data_arg);
-static Item js_text_append_data_method(Item data_arg);
-static Item js_text_delete_data_method(Item offset_arg, Item count_arg);
-static Item js_text_substring_data_method(Item offset_arg, Item count_arg);
+static Item js_text_data_body(Item callee, Item this_value, Item* args,
+                              int argc, uint64_t* result_home);
 static void _value_mark_dirty(DomElement* elem);
 static void _select_refresh_options_collection(Item collection, DomElement* sel);
 static void _select_refresh_selected_options_collection(Item collection, DomElement* sel);
@@ -6696,39 +6693,37 @@ extern "C" Item js_dom_text_substring_data_bridge(void* text_ptr, Item offset_ar
     return js_dom_text_substring_data_method((DomText*)text_ptr, offset_arg, count_arg);
 }
 
-static Item js_text_replace_data_method(Item offset_arg, Item count_arg, Item data_arg) {
-    Item self = js_get_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
-    if (!node || !node->is_text()) return make_js_undefined();
-    return js_dom_text_replace_data_method(node->as_text(), offset_arg, count_arg, data_arg);
-}
+enum JsTextDataOperation {
+    JS_TEXT_DATA_REPLACE,
+    JS_TEXT_DATA_INSERT,
+    JS_TEXT_DATA_APPEND,
+    JS_TEXT_DATA_DELETE,
+    JS_TEXT_DATA_SUBSTRING,
+};
 
-static Item js_text_insert_data_method(Item offset_arg, Item data_arg) {
-    Item self = js_get_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
-    if (!node || !node->is_text()) return make_js_undefined();
-    return js_dom_text_insert_data_method(node->as_text(), offset_arg, data_arg);
-}
-
-static Item js_text_append_data_method(Item data_arg) {
-    Item self = js_get_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
-    if (!node || !node->is_text()) return make_js_undefined();
-    return js_dom_text_append_data_method(node->as_text(), data_arg);
-}
-
-static Item js_text_delete_data_method(Item offset_arg, Item count_arg) {
-    Item self = js_get_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
-    if (!node || !node->is_text()) return make_js_undefined();
-    return js_dom_text_delete_data_method(node->as_text(), offset_arg, count_arg);
-}
-
-static Item js_text_substring_data_method(Item offset_arg, Item count_arg) {
-    Item self = js_get_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
-    if (!node || !node->is_text()) return make_js_undefined();
-    return js_dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
+static Item js_text_data_body(Item callee, Item this_value, Item* args,
+                              int argc, uint64_t* result_home) {
+    (void)this_value; (void)result_home;
+    JsFunction* fn = (JsFunction*)callee.function;
+    DomNode* node = (DomNode*)js_dom_unwrap_element(js_get_this());
+    if (!node || !node->is_text() || !fn) return make_js_undefined();
+    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
+    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    Item arg2 = argc > 2 ? args[2] : make_js_undefined();
+    switch ((JsTextDataOperation)fn->native_target.bits) {
+    case JS_TEXT_DATA_REPLACE:
+        return js_dom_text_replace_data_method(node->as_text(), arg0, arg1, arg2);
+    case JS_TEXT_DATA_INSERT:
+        return js_dom_text_insert_data_method(node->as_text(), arg0, arg1);
+    case JS_TEXT_DATA_APPEND:
+        return js_dom_text_append_data_method(node->as_text(), arg0);
+    case JS_TEXT_DATA_DELETE:
+        return js_dom_text_delete_data_method(node->as_text(), arg0, arg1);
+    case JS_TEXT_DATA_SUBSTRING:
+        return js_dom_text_substring_data_method(node->as_text(), arg0, arg1);
+    default:
+        return ItemError;
+    }
 }
 
 // ============================================================================
@@ -6988,36 +6983,37 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
     return value;
 }
 
-extern "C" Item js_dom_text_control_set_selection_start_bridge(void* dom_elem, Item value) {
+static Item js_dom_text_control_set_selection_edge(void* dom_elem, Item value,
+                                                   bool start_edge) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     tc_ensure_init(elem);
     int64_t v = it2i(value);
     if (v < 0) v = 0;
-    uint32_t start = (uint32_t)v;
+    uint32_t edge = (uint32_t)v;
+    uint32_t start = 0;
     uint32_t end = 0;
     uint8_t direction = 0;
     DocState* state = js_dom_current_state();
-    form_control_get_selection(state, (View*)elem, NULL, &end, &direction);
-    if (start > end) end = start;
+    form_control_get_selection(state, (View*)elem,
+        start_edge ? NULL : &start, start_edge ? &end : NULL, &direction);
+    if (start_edge) {
+        start = edge;
+        if (start > end) end = start;
+    } else {
+        end = edge;
+        if (start > end) start = end;
+    }
     form_control_set_selection(state, (View*)elem, start, end, direction);
     return value;
 }
 
+extern "C" Item js_dom_text_control_set_selection_start_bridge(void* dom_elem, Item value) {
+    return js_dom_text_control_set_selection_edge(dom_elem, value, true);
+}
+
 extern "C" Item js_dom_text_control_set_selection_end_bridge(void* dom_elem, Item value) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem || !tc_is_text_control_elem(elem)) return value;
-    tc_ensure_init(elem);
-    int64_t v = it2i(value);
-    if (v < 0) v = 0;
-    uint32_t end = (uint32_t)v;
-    uint32_t start = 0;
-    uint8_t direction = 0;
-    DocState* state = js_dom_current_state();
-    form_control_get_selection(state, (View*)elem, &start, NULL, &direction);
-    if (start > end) start = end;
-    form_control_set_selection(state, (View*)elem, start, end, direction);
-    return value;
+    return js_dom_text_control_set_selection_edge(dom_elem, value, false);
 }
 
 extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* dom_elem, Item value) {
@@ -8649,23 +8645,28 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return js_dom_owner_document_from_node(text_node->parent);
         }
         if (strcmp(prop, "replaceData") == 0) {
-            return js_bind_function(js_new_native_function(js_text_replace_data_method),
+            return js_bind_function(js_new_native_payload_function(
+                js_text_data_body, JS_TEXT_DATA_REPLACE, 3),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "insertData") == 0) {
-            return js_bind_function(js_new_native_function(js_text_insert_data_method),
+            return js_bind_function(js_new_native_payload_function(
+                js_text_data_body, JS_TEXT_DATA_INSERT, 2),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "appendData") == 0) {
-            return js_bind_function(js_new_native_function(js_text_append_data_method),
+            return js_bind_function(js_new_native_payload_function(
+                js_text_data_body, JS_TEXT_DATA_APPEND, 1),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "deleteData") == 0) {
-            return js_bind_function(js_new_native_function(js_text_delete_data_method),
+            return js_bind_function(js_new_native_payload_function(
+                js_text_data_body, JS_TEXT_DATA_DELETE, 2),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "substringData") == 0) {
-            return js_bind_function(js_new_native_function(js_text_substring_data_method),
+            return js_bind_function(js_new_native_payload_function(
+                js_text_data_body, JS_TEXT_DATA_SUBSTRING, 2),
                 elem_item, NULL, 0);
         }
         Item expando_value = ItemNull;
@@ -10742,62 +10743,72 @@ static Item js_dom_svg_make_matrix(RdtMatrix matrix) {
     return js_dom_svg_make_matrix_with_interface(matrix, "SVGMatrix");
 }
 
-static Item js_dom_svg_matrix_multiply(Item other) {
-    RdtMatrix left = js_dom_svg_matrix_from_item(js_get_this());
-    RdtMatrix right = js_dom_svg_matrix_from_item(other);
-    return js_dom_svg_make_matrix(rdt_matrix_multiply(&left, &right));
-}
+enum JsSvgMatrixOperation {
+    JS_SVG_MATRIX_MULTIPLY,
+    JS_SVG_MATRIX_INVERSE,
+    JS_SVG_MATRIX_TRANSLATE,
+    JS_SVG_MATRIX_SCALE,
+    JS_SVG_MATRIX_ROTATE,
+    JS_SVG_MATRIX_FLIP_X,
+    JS_SVG_MATRIX_FLIP_Y,
+};
 
-static Item js_dom_svg_matrix_inverse(void) {
+static Item js_dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
+                                        int argc, uint64_t* result_home) {
+    (void)this_value;
+    (void)result_home;
+    JsFunction* fn = (JsFunction*)callee.function;
+    JsSvgMatrixOperation operation = fn
+        ? (JsSvgMatrixOperation)fn->native_target.bits : JS_SVG_MATRIX_INVERSE;
+    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
+    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
     RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
-    float determinant = matrix.e11 * matrix.e22 - matrix.e21 * matrix.e12;
-    if (fabsf(determinant) < 0.000001f) {
-        return js_throw_type_error("SVGMatrix is not invertible");
+    switch (operation) {
+    case JS_SVG_MATRIX_MULTIPLY: {
+        RdtMatrix right = js_dom_svg_matrix_from_item(arg0);
+        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &right));
     }
-    float reciprocal = 1.0f / determinant;
-    RdtMatrix inverse = {
-        matrix.e22 * reciprocal, -matrix.e12 * reciprocal,
-        (matrix.e12 * matrix.e23 - matrix.e22 * matrix.e13) * reciprocal,
-        -matrix.e21 * reciprocal, matrix.e11 * reciprocal,
-        (matrix.e21 * matrix.e13 - matrix.e11 * matrix.e23) * reciprocal,
-        0, 0, 1
-    };
-    return js_dom_svg_make_matrix(inverse);
-}
-
-static Item js_dom_svg_matrix_translate(Item x, Item y) {
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
-    RdtMatrix translation = rdt_matrix_translate(js_dom_svg_number(x, 0.0f),
-                                                  js_dom_svg_number(y, 0.0f));
-    return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &translation));
-}
-
-static Item js_dom_svg_matrix_scale(Item factor) {
-    float value = js_dom_svg_number(factor, 1.0f);
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
-    RdtMatrix scale = {value, 0, 0, 0, value, 0, 0, 0, 1};
-    return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &scale));
-}
-
-static Item js_dom_svg_matrix_rotate(Item degrees) {
-    float radians = js_dom_svg_number(degrees, 0.0f) * 0.01745329251994329577f;
-    float cosine = cosf(radians);
-    float sine = sinf(radians);
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
-    RdtMatrix rotation = {cosine, -sine, 0, sine, cosine, 0, 0, 0, 1};
-    return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &rotation));
-}
-
-static Item js_dom_svg_matrix_flip_x(void) {
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
-    RdtMatrix flip = {-1, 0, 0, 0, 1, 0, 0, 0, 1};
-    return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
-}
-
-static Item js_dom_svg_matrix_flip_y(void) {
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
-    RdtMatrix flip = {1, 0, 0, 0, -1, 0, 0, 0, 1};
-    return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
+    case JS_SVG_MATRIX_INVERSE: {
+        float determinant = matrix.e11 * matrix.e22 - matrix.e21 * matrix.e12;
+        if (fabsf(determinant) < 0.000001f)
+            return js_throw_type_error("SVGMatrix is not invertible");
+        float reciprocal = 1.0f / determinant;
+        RdtMatrix inverse = {
+            matrix.e22 * reciprocal, -matrix.e12 * reciprocal,
+            (matrix.e12 * matrix.e23 - matrix.e22 * matrix.e13) * reciprocal,
+            -matrix.e21 * reciprocal, matrix.e11 * reciprocal,
+            (matrix.e21 * matrix.e13 - matrix.e11 * matrix.e23) * reciprocal,
+            0, 0, 1
+        };
+        return js_dom_svg_make_matrix(inverse);
+    }
+    case JS_SVG_MATRIX_TRANSLATE: {
+        RdtMatrix translation = rdt_matrix_translate(js_dom_svg_number(arg0, 0.0f),
+                                                      js_dom_svg_number(arg1, 0.0f));
+        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &translation));
+    }
+    case JS_SVG_MATRIX_SCALE: {
+        float value = js_dom_svg_number(arg0, 1.0f);
+        RdtMatrix scale = {value, 0, 0, 0, value, 0, 0, 0, 1};
+        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &scale));
+    }
+    case JS_SVG_MATRIX_ROTATE: {
+        float radians = js_dom_svg_number(arg0, 0.0f) * 0.01745329251994329577f;
+        float cosine = cosf(radians);
+        float sine = sinf(radians);
+        RdtMatrix rotation = {cosine, -sine, 0, sine, cosine, 0, 0, 0, 1};
+        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &rotation));
+    }
+    case JS_SVG_MATRIX_FLIP_X: {
+        RdtMatrix flip = {-1, 0, 0, 0, 1, 0, 0, 0, 1};
+        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
+    }
+    case JS_SVG_MATRIX_FLIP_Y: {
+        RdtMatrix flip = {1, 0, 0, 0, -1, 0, 0, 0, 1};
+        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
+    }
+    }
+    return ItemNull;
 }
 
 static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
@@ -10810,19 +10821,26 @@ static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
     js_dom_set_number_property(result, "e", matrix.e13);
     js_dom_set_number_property(result, "f", matrix.e23);
     js_set_key_default(result, js_string_key("multiply"),
-        js_new_native_function(js_dom_svg_matrix_multiply));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_MULTIPLY, 1));
     js_set_key_default(result, js_string_key("inverse"),
-        js_new_native_function(js_dom_svg_matrix_inverse));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_INVERSE, 0));
     js_set_key_default(result, js_string_key("translate"),
-        js_new_native_function(js_dom_svg_matrix_translate));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_TRANSLATE, 2));
     js_set_key_default(result, js_string_key("scale"),
-        js_new_native_function(js_dom_svg_matrix_scale));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_SCALE, 1));
     js_set_key_default(result, js_string_key("rotate"),
-        js_new_native_function(js_dom_svg_matrix_rotate));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_ROTATE, 1));
     js_set_key_default(result, js_string_key("flipX"),
-        js_new_native_function(js_dom_svg_matrix_flip_x));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_FLIP_X, 0));
     js_set_key_default(result, js_string_key("flipY"),
-        js_new_native_function(js_dom_svg_matrix_flip_y));
+        js_new_native_payload_function(js_dom_svg_matrix_operation,
+            JS_SVG_MATRIX_FLIP_Y, 0));
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(interface_name));
     Item proto = js_get_key_default(ctor, js_string_key("prototype"));
