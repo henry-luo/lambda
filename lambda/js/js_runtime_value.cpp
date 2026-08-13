@@ -1359,25 +1359,14 @@ extern "C" Item js_add(Item left, Item right) {
     return js_numeric_binary(left_root.get(), right_root.get(), JS_NUMERIC_ADD);
 }
 
-extern "C" Item js_subtract(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_SUBTRACT);
-}
-
-extern "C" Item js_multiply(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_MULTIPLY);
-}
-
-extern "C" Item js_divide(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_DIVIDE);
-}
-
-extern "C" Item js_modulo(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_MODULO);
-}
-
-extern "C" Item js_power(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_POWER);
-}
+#define JS_DEFINE_NUMERIC_BINARY(name, op) \
+    extern "C" Item js_##name(Item left, Item right) { \
+        return js_numeric_binary(left, right, JS_NUMERIC_##op); \
+    }
+JS_DEFINE_NUMERIC_BINARY(subtract, SUBTRACT) JS_DEFINE_NUMERIC_BINARY(multiply, MULTIPLY)
+JS_DEFINE_NUMERIC_BINARY(divide, DIVIDE) JS_DEFINE_NUMERIC_BINARY(modulo, MODULO)
+JS_DEFINE_NUMERIC_BINARY(power, POWER)
+#undef JS_DEFINE_NUMERIC_BINARY
 
 // =============================================================================
 // Comparison Operators
@@ -1832,17 +1821,13 @@ extern "C" int64_t js_double_to_int32(double d) {
     return (int64_t)js_to_int32(d);
 }
 
-extern "C" Item js_bitwise_and(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_BITWISE_AND);
-}
-
-extern "C" Item js_bitwise_or(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_BITWISE_OR);
-}
-
-extern "C" Item js_bitwise_xor(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_BITWISE_XOR);
-}
+#define JS_DEFINE_BITWISE_BINARY(name, op) \
+    extern "C" Item js_##name(Item left, Item right) { \
+        return js_numeric_binary(left, right, JS_NUMERIC_##op); \
+    }
+JS_DEFINE_BITWISE_BINARY(bitwise_and, BITWISE_AND) JS_DEFINE_BITWISE_BINARY(bitwise_or, BITWISE_OR)
+JS_DEFINE_BITWISE_BINARY(bitwise_xor, BITWISE_XOR)
+#undef JS_DEFINE_BITWISE_BINARY
 
 extern "C" Item js_bitwise_not(Item operand) {
     JS_ASSIGN_OR_RETURN_INTO(operand, js_numeric_operand(operand));
@@ -1854,17 +1839,13 @@ extern "C" Item js_bitwise_not(Item operand) {
     return js_make_number((double)(~val));
 }
 
-extern "C" Item js_left_shift(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_LEFT_SHIFT);
-}
-
-extern "C" Item js_right_shift(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_RIGHT_SHIFT);
-}
-
-extern "C" Item js_unsigned_right_shift(Item left, Item right) {
-    return js_numeric_binary(left, right, JS_NUMERIC_UNSIGNED_RIGHT_SHIFT);
-}
+#define JS_DEFINE_SHIFT_BINARY(name, op) \
+    extern "C" Item js_##name(Item left, Item right) { \
+        return js_numeric_binary(left, right, JS_NUMERIC_##op); \
+    }
+JS_DEFINE_SHIFT_BINARY(left_shift, LEFT_SHIFT) JS_DEFINE_SHIFT_BINARY(right_shift, RIGHT_SHIFT)
+JS_DEFINE_SHIFT_BINARY(unsigned_right_shift, UNSIGNED_RIGHT_SHIFT)
+#undef JS_DEFINE_SHIFT_BINARY
 
 // =============================================================================
 // Unary Operators

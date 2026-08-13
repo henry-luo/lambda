@@ -1900,36 +1900,16 @@ static Item js_buffer_read_fixed_integer(Item buf, Item offset_item, int byte_le
     return (Item){.item = i2it((int64_t)value)};
 }
 
-extern "C" Item js_buffer_readUInt8(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 1, false, false);
-}
-extern "C" Item js_buffer_readUInt16BE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 2, false, false);
-}
-extern "C" Item js_buffer_readUInt16LE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 2, true, false);
-}
-extern "C" Item js_buffer_readUInt32BE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 4, false, false);
-}
-extern "C" Item js_buffer_readUInt32LE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 4, true, false);
-}
-extern "C" Item js_buffer_readInt8(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 1, false, true);
-}
-extern "C" Item js_buffer_readInt16BE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 2, false, true);
-}
-extern "C" Item js_buffer_readInt16LE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 2, true, true);
-}
-extern "C" Item js_buffer_readInt32BE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 4, false, true);
-}
-extern "C" Item js_buffer_readInt32LE(Item buf, Item offset_item) {
-    return js_buffer_read_fixed_integer(buf, offset_item, 4, true, true);
-}
+#define JS_BUFFER_READ_FIXED(name, bytes, little, signed_value) \
+    extern "C" Item js_buffer_##name(Item buf, Item offset_item) { \
+        return js_buffer_read_fixed_integer(buf, offset_item, bytes, little, signed_value); \
+    }
+JS_BUFFER_READ_FIXED(readUInt8, 1, false, false) JS_BUFFER_READ_FIXED(readUInt16BE, 2, false, false)
+JS_BUFFER_READ_FIXED(readUInt16LE, 2, true, false) JS_BUFFER_READ_FIXED(readUInt32BE, 4, false, false)
+JS_BUFFER_READ_FIXED(readUInt32LE, 4, true, false) JS_BUFFER_READ_FIXED(readInt8, 1, false, true)
+JS_BUFFER_READ_FIXED(readInt16BE, 2, false, true) JS_BUFFER_READ_FIXED(readInt16LE, 2, true, true)
+JS_BUFFER_READ_FIXED(readInt32BE, 4, false, true) JS_BUFFER_READ_FIXED(readInt32LE, 4, true, true)
+#undef JS_BUFFER_READ_FIXED
 
 static Item js_buffer_read_float(Item buf, Item offset_item, int byte_len, bool little_endian) {
     int blen = 0;
@@ -1955,18 +1935,13 @@ static Item js_buffer_read_float(Item buf, Item offset_item, int byte_len, bool 
     return js_make_number(value);
 }
 
-extern "C" Item js_buffer_readFloatBE(Item buf, Item offset_item) {
-    return js_buffer_read_float(buf, offset_item, 4, false);
-}
-extern "C" Item js_buffer_readFloatLE(Item buf, Item offset_item) {
-    return js_buffer_read_float(buf, offset_item, 4, true);
-}
-extern "C" Item js_buffer_readDoubleBE(Item buf, Item offset_item) {
-    return js_buffer_read_float(buf, offset_item, 8, false);
-}
-extern "C" Item js_buffer_readDoubleLE(Item buf, Item offset_item) {
-    return js_buffer_read_float(buf, offset_item, 8, true);
-}
+#define JS_BUFFER_READ_FLOAT(name, bytes, little) \
+    extern "C" Item js_buffer_##name(Item buf, Item offset_item) { \
+        return js_buffer_read_float(buf, offset_item, bytes, little); \
+    }
+JS_BUFFER_READ_FLOAT(readFloatBE, 4, false) JS_BUFFER_READ_FLOAT(readFloatLE, 4, true)
+JS_BUFFER_READ_FLOAT(readDoubleBE, 8, false) JS_BUFFER_READ_FLOAT(readDoubleLE, 8, true)
+#undef JS_BUFFER_READ_FLOAT
 
 // ─── Endian-aware write methods ──────────────────────────────────────────────
 static Item js_buffer_write_fixed_integer(Item buf, Item value_item, Item offset_item,
@@ -1988,38 +1963,19 @@ static Item js_buffer_write_fixed_integer(Item buf, Item value_item, Item offset
     return (Item){.item = i2it(off + byte_len)};
 }
 
-extern "C" Item js_buffer_writeUInt8(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 1, true, 0, 255);
-}
-extern "C" Item js_buffer_writeUInt16BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, false, 0, 65535);
-}
-extern "C" Item js_buffer_writeUInt16LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, true, 0, 65535);
-}
-extern "C" Item js_buffer_writeUInt32BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, false, 0, 4294967295LL);
-}
-extern "C" Item js_buffer_writeUInt32LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, true, 0, 4294967295LL);
-}
+#define JS_BUFFER_WRITE_FIXED(name, bytes, little, min_value, max_value) \
+    extern "C" Item js_buffer_##name(Item buf, Item value_item, Item offset_item) { \
+        return js_buffer_write_fixed_integer(buf, value_item, offset_item, bytes, little, min_value, max_value); \
+    }
+JS_BUFFER_WRITE_FIXED(writeUInt8, 1, true, 0, 255)
+JS_BUFFER_WRITE_FIXED(writeUInt16BE, 2, false, 0, 65535) JS_BUFFER_WRITE_FIXED(writeUInt16LE, 2, true, 0, 65535)
+JS_BUFFER_WRITE_FIXED(writeUInt32BE, 4, false, 0, 4294967295LL) JS_BUFFER_WRITE_FIXED(writeUInt32LE, 4, true, 0, 4294967295LL)
 
 // ─── Signed Integer Write Methods ────────────────────────────────────────────
-extern "C" Item js_buffer_writeInt8(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 1, true, -128, 127);
-}
-extern "C" Item js_buffer_writeInt16BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, false, -32768, 32767);
-}
-extern "C" Item js_buffer_writeInt16LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, true, -32768, 32767);
-}
-extern "C" Item js_buffer_writeInt32BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, false, -2147483648LL, 2147483647LL);
-}
-extern "C" Item js_buffer_writeInt32LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, true, -2147483648LL, 2147483647LL);
-}
+JS_BUFFER_WRITE_FIXED(writeInt8, 1, true, -128, 127)
+JS_BUFFER_WRITE_FIXED(writeInt16BE, 2, false, -32768, 32767) JS_BUFFER_WRITE_FIXED(writeInt16LE, 2, true, -32768, 32767)
+JS_BUFFER_WRITE_FIXED(writeInt32BE, 4, false, -2147483648LL, 2147483647LL) JS_BUFFER_WRITE_FIXED(writeInt32LE, 4, true, -2147483648LL, 2147483647LL)
+#undef JS_BUFFER_WRITE_FIXED
 
 // ─── Float/Double Write Methods ──────────────────────────────────────────────
 static Item js_buffer_write_float(Item buf, Item value_item, Item offset_item,
@@ -2049,18 +2005,13 @@ static Item js_buffer_write_float(Item buf, Item value_item, Item offset_item,
     return (Item){.item = i2it(off + byte_len)};
 }
 
-extern "C" Item js_buffer_writeFloatBE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_float(buf, value_item, offset_item, 4, false);
-}
-extern "C" Item js_buffer_writeFloatLE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_float(buf, value_item, offset_item, 4, true);
-}
-extern "C" Item js_buffer_writeDoubleBE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_float(buf, value_item, offset_item, 8, false);
-}
-extern "C" Item js_buffer_writeDoubleLE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_float(buf, value_item, offset_item, 8, true);
-}
+#define JS_BUFFER_WRITE_FLOAT(name, bytes, little) \
+    extern "C" Item js_buffer_##name(Item buf, Item value_item, Item offset_item) { \
+        return js_buffer_write_float(buf, value_item, offset_item, bytes, little); \
+    }
+JS_BUFFER_WRITE_FLOAT(writeFloatBE, 4, false) JS_BUFFER_WRITE_FLOAT(writeFloatLE, 4, true)
+JS_BUFFER_WRITE_FLOAT(writeDoubleBE, 8, false) JS_BUFFER_WRITE_FLOAT(writeDoubleLE, 8, true)
+#undef JS_BUFFER_WRITE_FLOAT
 
 // ─── toJSON ──────────────────────────────────────────────────────────────────
 
@@ -2219,25 +2170,13 @@ static Item js_buffer_read_integer(Item buf, Item offset_item, Item byte_len_ite
     return (Item){.item = i2it((int64_t)value)};
 }
 
-// buf.readUIntBE(offset, byteLength) — read unsigned int of 1-6 bytes, big-endian
-extern "C" Item js_buffer_readUIntBE(Item buf, Item offset_item, Item byte_len_item) {
-    return js_buffer_read_integer(buf, offset_item, byte_len_item, false, false);
-}
-
-// buf.readUIntLE(offset, byteLength)
-extern "C" Item js_buffer_readUIntLE(Item buf, Item offset_item, Item byte_len_item) {
-    return js_buffer_read_integer(buf, offset_item, byte_len_item, true, false);
-}
-
-// buf.readIntBE(offset, byteLength) — signed
-extern "C" Item js_buffer_readIntBE(Item buf, Item offset_item, Item byte_len_item) {
-    return js_buffer_read_integer(buf, offset_item, byte_len_item, false, true);
-}
-
-// buf.readIntLE(offset, byteLength)
-extern "C" Item js_buffer_readIntLE(Item buf, Item offset_item, Item byte_len_item) {
-    return js_buffer_read_integer(buf, offset_item, byte_len_item, true, true);
-}
+#define JS_BUFFER_READ_VARIABLE(name, little, signed_value) \
+    extern "C" Item js_buffer_##name(Item buf, Item offset_item, Item byte_len_item) { \
+        return js_buffer_read_integer(buf, offset_item, byte_len_item, little, signed_value); \
+    }
+JS_BUFFER_READ_VARIABLE(readUIntBE, false, false) JS_BUFFER_READ_VARIABLE(readUIntLE, true, false)
+JS_BUFFER_READ_VARIABLE(readIntBE, false, true) JS_BUFFER_READ_VARIABLE(readIntLE, true, true)
+#undef JS_BUFFER_READ_VARIABLE
 
 // buf.writeUIntBE(value, offset, byteLength)
 static Item js_buffer_write_integer(Item buf, Item value_item, Item offset_item,
@@ -2264,24 +2203,13 @@ static Item js_buffer_write_integer(Item buf, Item value_item, Item offset_item,
     return (Item){.item = i2it(offset + nbytes)};
 }
 
-extern "C" Item js_buffer_writeUIntBE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
-    return js_buffer_write_integer(buf, value_item, offset_item, byte_len_item, false);
-}
-
-// buf.writeUIntLE(value, offset, byteLength)
-extern "C" Item js_buffer_writeUIntLE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
-    return js_buffer_write_integer(buf, value_item, offset_item, byte_len_item, true);
-}
-
-// buf.writeIntBE(value, offset, byteLength)
-extern "C" Item js_buffer_writeIntBE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
-    return js_buffer_writeUIntBE(buf, value_item, offset_item, byte_len_item);
-}
-
-// buf.writeIntLE(value, offset, byteLength)
-extern "C" Item js_buffer_writeIntLE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
-    return js_buffer_writeUIntLE(buf, value_item, offset_item, byte_len_item);
-}
+#define JS_BUFFER_WRITE_VARIABLE(name, little) \
+    extern "C" Item js_buffer_##name(Item buf, Item value_item, Item offset_item, Item byte_len_item) { \
+        return js_buffer_write_integer(buf, value_item, offset_item, byte_len_item, little); \
+    }
+JS_BUFFER_WRITE_VARIABLE(writeUIntBE, false) JS_BUFFER_WRITE_VARIABLE(writeUIntLE, true)
+JS_BUFFER_WRITE_VARIABLE(writeIntBE, false) JS_BUFFER_WRITE_VARIABLE(writeIntLE, true)
+#undef JS_BUFFER_WRITE_VARIABLE
 
 // ─── BigInt64 read/write ────────────────────────────────────────────────────
 
@@ -2301,21 +2229,13 @@ static Item js_buffer_read_bigint64(Item buf, Item offset_item, bool little_endi
     return unsigned_value ? buffer_biguint64_item(raw) : bigint_from_int64((int64_t)raw);
 }
 
-extern "C" Item js_buffer_readBigInt64BE(Item buf, Item offset_item) {
-    return js_buffer_read_bigint64(buf, offset_item, false, false);
-}
-
-extern "C" Item js_buffer_readBigInt64LE(Item buf, Item offset_item) {
-    return js_buffer_read_bigint64(buf, offset_item, true, false);
-}
-
-extern "C" Item js_buffer_readBigUInt64BE(Item buf, Item offset_item) {
-    return js_buffer_read_bigint64(buf, offset_item, false, true);
-}
-
-extern "C" Item js_buffer_readBigUInt64LE(Item buf, Item offset_item) {
-    return js_buffer_read_bigint64(buf, offset_item, true, true);
-}
+#define JS_BUFFER_READ_BIGINT(name, little, unsigned_value) \
+    extern "C" Item js_buffer_##name(Item buf, Item offset_item) { \
+        return js_buffer_read_bigint64(buf, offset_item, little, unsigned_value); \
+    }
+JS_BUFFER_READ_BIGINT(readBigInt64BE, false, false) JS_BUFFER_READ_BIGINT(readBigInt64LE, true, false)
+JS_BUFFER_READ_BIGINT(readBigUInt64BE, false, true) JS_BUFFER_READ_BIGINT(readBigUInt64LE, true, true)
+#undef JS_BUFFER_READ_BIGINT
 
 static Item js_buffer_write_bigint64(Item buf, Item value_item, Item offset_item,
         bool little_endian, bool unsigned_value) {
@@ -2338,21 +2258,13 @@ static Item js_buffer_write_bigint64(Item buf, Item value_item, Item offset_item
     return (Item){.item = i2it(offset + 8)};
 }
 
-extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_bigint64(buf, value_item, offset_item, false, false);
-}
-
-extern "C" Item js_buffer_writeBigInt64LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_bigint64(buf, value_item, offset_item, true, false);
-}
-
-extern "C" Item js_buffer_writeBigUInt64BE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_bigint64(buf, value_item, offset_item, false, true);
-}
-
-extern "C" Item js_buffer_writeBigUInt64LE(Item buf, Item value_item, Item offset_item) {
-    return js_buffer_write_bigint64(buf, value_item, offset_item, true, true);
-}
+#define JS_BUFFER_WRITE_BIGINT(name, little, unsigned_value) \
+    extern "C" Item js_buffer_##name(Item buf, Item value_item, Item offset_item) { \
+        return js_buffer_write_bigint64(buf, value_item, offset_item, little, unsigned_value); \
+    }
+JS_BUFFER_WRITE_BIGINT(writeBigInt64BE, false, false) JS_BUFFER_WRITE_BIGINT(writeBigInt64LE, true, false)
+JS_BUFFER_WRITE_BIGINT(writeBigUInt64BE, false, true) JS_BUFFER_WRITE_BIGINT(writeBigUInt64LE, true, true)
+#undef JS_BUFFER_WRITE_BIGINT
 
 // ─── Static Buffer.compare(buf1, buf2) ─────────────────────────────────────
 
@@ -2438,67 +2350,40 @@ extern "C" Item js_buf_inst_entries() {
     return js_buffer_iterator_new(THIS, 2);
 }
 
-// endian read wrappers
-extern "C" Item js_buf_inst_readUInt8(Item off) { return js_buffer_readUInt8(THIS, off); }
-extern "C" Item js_buf_inst_readUInt16BE(Item off) { return js_buffer_readUInt16BE(THIS, off); }
-extern "C" Item js_buf_inst_readUInt16LE(Item off) { return js_buffer_readUInt16LE(THIS, off); }
-extern "C" Item js_buf_inst_readUInt32BE(Item off) { return js_buffer_readUInt32BE(THIS, off); }
-extern "C" Item js_buf_inst_readUInt32LE(Item off) { return js_buffer_readUInt32LE(THIS, off); }
-extern "C" Item js_buf_inst_readInt8(Item off) { return js_buffer_readInt8(THIS, off); }
-extern "C" Item js_buf_inst_readInt16BE(Item off) { return js_buffer_readInt16BE(THIS, off); }
-extern "C" Item js_buf_inst_readInt16LE(Item off) { return js_buffer_readInt16LE(THIS, off); }
-extern "C" Item js_buf_inst_readInt32BE(Item off) { return js_buffer_readInt32BE(THIS, off); }
-extern "C" Item js_buf_inst_readInt32LE(Item off) { return js_buffer_readInt32LE(THIS, off); }
-extern "C" Item js_buf_inst_readFloatBE(Item off) { return js_buffer_readFloatBE(THIS, off); }
-extern "C" Item js_buf_inst_readFloatLE(Item off) { return js_buffer_readFloatLE(THIS, off); }
-extern "C" Item js_buf_inst_readDoubleBE(Item off) { return js_buffer_readDoubleBE(THIS, off); }
-extern "C" Item js_buf_inst_readDoubleLE(Item off) { return js_buffer_readDoubleLE(THIS, off); }
+// These adapters only bind the receiver; keeping their ABI-shaped names lets
+// the prototype table pass the same native callback without another dispatch.
+#define JS_BUF_INST_READ1(name) \
+    extern "C" Item js_buf_inst_##name(Item off) { return js_buffer_##name(THIS, off); }
+#define JS_BUF_INST_READ2(name) \
+    extern "C" Item js_buf_inst_##name(Item off, Item bl) { return js_buffer_##name(THIS, off, bl); }
+#define JS_BUF_INST_WRITE2(name) \
+    extern "C" Item js_buf_inst_##name(Item value, Item off) { return js_buffer_##name(THIS, value, off); }
+#define JS_BUF_INST_WRITE3(name) \
+    extern "C" Item js_buf_inst_##name(Item value, Item off, Item bl) { return js_buffer_##name(THIS, value, off, bl); }
+#define JS_BUF_INST_VOID0(name) \
+    extern "C" Item js_buf_inst_##name() { return js_buffer_##name(THIS); }
 
-// variable-width read wrappers
-extern "C" Item js_buf_inst_readUIntBE(Item off, Item bl) { return js_buffer_readUIntBE(THIS, off, bl); }
-extern "C" Item js_buf_inst_readUIntLE(Item off, Item bl) { return js_buffer_readUIntLE(THIS, off, bl); }
-extern "C" Item js_buf_inst_readIntBE(Item off, Item bl) { return js_buffer_readIntBE(THIS, off, bl); }
-extern "C" Item js_buf_inst_readIntLE(Item off, Item bl) { return js_buffer_readIntLE(THIS, off, bl); }
+JS_BUF_INST_READ1(readUInt8) JS_BUF_INST_READ1(readUInt16BE) JS_BUF_INST_READ1(readUInt16LE) JS_BUF_INST_READ1(readUInt32BE)
+JS_BUF_INST_READ1(readUInt32LE) JS_BUF_INST_READ1(readInt8) JS_BUF_INST_READ1(readInt16BE) JS_BUF_INST_READ1(readInt16LE)
+JS_BUF_INST_READ1(readInt32BE) JS_BUF_INST_READ1(readInt32LE) JS_BUF_INST_READ1(readFloatBE) JS_BUF_INST_READ1(readFloatLE)
+JS_BUF_INST_READ1(readDoubleBE) JS_BUF_INST_READ1(readDoubleLE) JS_BUF_INST_READ2(readUIntBE) JS_BUF_INST_READ2(readUIntLE) JS_BUF_INST_READ2(readIntBE)
+JS_BUF_INST_READ2(readIntLE) JS_BUF_INST_READ1(readBigInt64BE) JS_BUF_INST_READ1(readBigInt64LE) JS_BUF_INST_READ1(readBigUInt64BE)
+JS_BUF_INST_READ1(readBigUInt64LE) JS_BUF_INST_WRITE2(writeUInt8) JS_BUF_INST_WRITE2(writeUInt16BE) JS_BUF_INST_WRITE2(writeUInt16LE)
+JS_BUF_INST_WRITE2(writeUInt32BE) JS_BUF_INST_WRITE2(writeUInt32LE) JS_BUF_INST_WRITE2(writeInt8) JS_BUF_INST_WRITE2(writeInt16BE)
+JS_BUF_INST_WRITE2(writeInt16LE) JS_BUF_INST_WRITE2(writeInt32BE) JS_BUF_INST_WRITE2(writeInt32LE) JS_BUF_INST_WRITE2(writeFloatBE) JS_BUF_INST_WRITE2(writeFloatLE)
+JS_BUF_INST_WRITE2(writeDoubleBE) JS_BUF_INST_WRITE2(writeDoubleLE) JS_BUF_INST_WRITE3(writeUIntBE) JS_BUF_INST_WRITE3(writeUIntLE) JS_BUF_INST_WRITE3(writeIntBE)
+JS_BUF_INST_WRITE3(writeIntLE) JS_BUF_INST_WRITE2(writeBigInt64BE) JS_BUF_INST_WRITE2(writeBigInt64LE) JS_BUF_INST_WRITE2(writeBigUInt64BE)
+JS_BUF_INST_WRITE2(writeBigUInt64LE)
+#undef JS_BUF_INST_READ1
+#undef JS_BUF_INST_READ2
+#undef JS_BUF_INST_WRITE2
+#undef JS_BUF_INST_WRITE3
 
-// BigInt64 read wrappers
-extern "C" Item js_buf_inst_readBigInt64BE(Item off) { return js_buffer_readBigInt64BE(THIS, off); }
-extern "C" Item js_buf_inst_readBigInt64LE(Item off) { return js_buffer_readBigInt64LE(THIS, off); }
-extern "C" Item js_buf_inst_readBigUInt64BE(Item off) { return js_buffer_readBigUInt64BE(THIS, off); }
-extern "C" Item js_buf_inst_readBigUInt64LE(Item off) { return js_buffer_readBigUInt64LE(THIS, off); }
-
-// endian write wrappers
-extern "C" Item js_buf_inst_writeUInt8(Item v, Item o) { return js_buffer_writeUInt8(THIS, v, o); }
-extern "C" Item js_buf_inst_writeUInt16BE(Item v, Item o) { return js_buffer_writeUInt16BE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeUInt16LE(Item v, Item o) { return js_buffer_writeUInt16LE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeUInt32BE(Item v, Item o) { return js_buffer_writeUInt32BE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeUInt32LE(Item v, Item o) { return js_buffer_writeUInt32LE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeInt8(Item v, Item o) { return js_buffer_writeInt8(THIS, v, o); }
-extern "C" Item js_buf_inst_writeInt16BE(Item v, Item o) { return js_buffer_writeInt16BE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeInt16LE(Item v, Item o) { return js_buffer_writeInt16LE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeInt32BE(Item v, Item o) { return js_buffer_writeInt32BE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeInt32LE(Item v, Item o) { return js_buffer_writeInt32LE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeFloatBE(Item v, Item o) { return js_buffer_writeFloatBE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeFloatLE(Item v, Item o) { return js_buffer_writeFloatLE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeDoubleBE(Item v, Item o) { return js_buffer_writeDoubleBE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeDoubleLE(Item v, Item o) { return js_buffer_writeDoubleLE(THIS, v, o); }
-
-// variable-width write wrappers
-extern "C" Item js_buf_inst_writeUIntBE(Item v, Item o, Item bl) { return js_buffer_writeUIntBE(THIS, v, o, bl); }
-extern "C" Item js_buf_inst_writeUIntLE(Item v, Item o, Item bl) { return js_buffer_writeUIntLE(THIS, v, o, bl); }
-extern "C" Item js_buf_inst_writeIntBE(Item v, Item o, Item bl) { return js_buffer_writeIntBE(THIS, v, o, bl); }
-extern "C" Item js_buf_inst_writeIntLE(Item v, Item o, Item bl) { return js_buffer_writeIntLE(THIS, v, o, bl); }
-
-// BigInt64 write wrappers
-extern "C" Item js_buf_inst_writeBigInt64BE(Item v, Item o) { return js_buffer_writeBigInt64BE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeBigInt64LE(Item v, Item o) { return js_buffer_writeBigInt64LE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeBigUInt64BE(Item v, Item o) { return js_buffer_writeBigUInt64BE(THIS, v, o); }
-extern "C" Item js_buf_inst_writeBigUInt64LE(Item v, Item o) { return js_buffer_writeBigUInt64LE(THIS, v, o); }
-
-// other instance wrappers
-extern "C" Item js_buf_inst_toJSON() { return js_buffer_toJSON(THIS); }
-extern "C" Item js_buf_inst_swap16() { return js_buffer_swap16(THIS); }
-extern "C" Item js_buf_inst_swap32() { return js_buffer_swap32(THIS); }
-extern "C" Item js_buf_inst_swap64() { return js_buffer_swap64(THIS); }
+JS_BUF_INST_VOID0(toJSON)
+JS_BUF_INST_VOID0(swap16)
+JS_BUF_INST_VOID0(swap32)
+JS_BUF_INST_VOID0(swap64)
+#undef JS_BUF_INST_VOID0
 
 #undef THIS
 

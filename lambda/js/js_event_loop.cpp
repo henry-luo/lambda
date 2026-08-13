@@ -1047,48 +1047,31 @@ extern "C" Item js_setImmediate_timer_args(Item callback, Item args_array) {
     return js_setImmediate_impl(callback, args_array, true);
 }
 
-// Helper: create a JS array from 1-4 items (used by transpiler for setTimeout extra args)
-extern "C" Item js_pack_args_1(Item a1) {
+// Helper: create a JS array from the fixed argument packs emitted for timers.
+static Item js_pack_args(Item* values, int count) {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
     arr->length = 0;
     arr->capacity = 0;
-    array_push(arr, a1);
+    for (int i = 0; i < count; i++) array_push(arr, values[i]);
     return (Item){.array = arr};
+}
+extern "C" Item js_pack_args_1(Item a1) {
+    Item values[1] = {a1};
+    return js_pack_args(values, 1);
 }
 extern "C" Item js_pack_args_2(Item a1, Item a2) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    array_push(arr, a1);
-    array_push(arr, a2);
-    return (Item){.array = arr};
+    Item values[2] = {a1, a2};
+    return js_pack_args(values, 2);
 }
 extern "C" Item js_pack_args_3(Item a1, Item a2, Item a3) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    array_push(arr, a1);
-    array_push(arr, a2);
-    array_push(arr, a3);
-    return (Item){.array = arr};
+    Item values[3] = {a1, a2, a3};
+    return js_pack_args(values, 3);
 }
 extern "C" Item js_pack_args_4(Item a1, Item a2, Item a3, Item a4) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    array_push(arr, a1);
-    array_push(arr, a2);
-    array_push(arr, a3);
-    array_push(arr, a4);
-    return (Item){.array = arr};
+    Item values[4] = {a1, a2, a3, a4};
+    return js_pack_args(values, 4);
 }
 
 extern "C" Item js_setInterval(Item callback, Item delay) {
