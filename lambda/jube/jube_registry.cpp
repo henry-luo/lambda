@@ -3866,7 +3866,8 @@ static int jube_host_module_loading_namespace(void* execution_context,
                                               Item* out_namespace) {
     if (!execution_context || !source_path || !*source_path || !out_namespace) return -1;
     *out_namespace = ItemNull;
-    ModuleDescriptor* module = module_get(source_path);
+    Runtime* runtime = (Runtime*)jube_execution_runtime_handle(execution_context);
+    ModuleDescriptor* module = module_get_for_runtime(runtime, source_path);
     if (!module || !module->loading) return 0;
     // The registry owns partial namespaces so hosted compilers do not depend
     // on ModuleDescriptor layout when preserving circular-import semantics.
@@ -3901,7 +3902,8 @@ static int jube_host_module_state(void* execution_context, const char* source_pa
                                   Item* out_namespace) {
     if (!execution_context || !source_path || !*source_path || !out_namespace) return -1;
     *out_namespace = ItemNull;
-    ModuleDescriptor* module = module_get(source_path);
+    Runtime* runtime = (Runtime*)jube_execution_runtime_handle(execution_context);
+    ModuleDescriptor* module = module_get_for_runtime(runtime, source_path);
     if (!module) return 0;
     *out_namespace = module->namespace_obj;
     return module->initialized ? 2 : module->loading ? 1 : 0;
@@ -3912,8 +3914,9 @@ static int jube_host_module_begin_loading(void* execution_context, const char* s
                                           const JubeModuleNamespaceOps* namespace_ops) {
     if (!execution_context || !source_path || !*source_path || !language || !*language ||
         !namespace_ops) return -1;
-    ModuleDescriptor* module = module_register_loading_with_namespace_ops(
-        source_path, language, jube_host_namespace_ops(namespace_ops));
+    Runtime* runtime = (Runtime*)jube_execution_runtime_handle(execution_context);
+    ModuleDescriptor* module = module_register_loading_with_namespace_ops_for_runtime(
+        runtime, source_path, language, jube_host_namespace_ops(namespace_ops));
     return module ? 0 : -1;
 }
 
@@ -3922,8 +3925,10 @@ static int jube_host_module_publish(void* execution_context, const char* source_
                                     const JubeModuleNamespaceOps* namespace_ops) {
     if (!execution_context || !source_path || !*source_path || !language || !*language ||
         !namespace_ops || namespace_obj.item == ItemNull.item) return -1;
-    module_register_with_namespace_ops(source_path, language, namespace_obj, mir_context,
-                                       jube_host_namespace_ops(namespace_ops));
+    Runtime* runtime = (Runtime*)jube_execution_runtime_handle(execution_context);
+    module_register_with_namespace_ops_for_runtime(
+        runtime, source_path, language, namespace_obj, mir_context,
+        jube_host_namespace_ops(namespace_ops));
     return 0;
 }
 

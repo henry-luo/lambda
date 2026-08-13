@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-13
 
-**Status:** PROPOSED — implementation has not started
+**Status:** IN PROGRESS — JR9 foundation slice implemented; semantic loader
+migration and legacy-cache deletion remain pending
 
 **Redesign target:** **JR9**, phase R8 of
 [`JS_Runtime_Redesign.md`](JS_Runtime_Redesign.md). The `Tune8` label is the
@@ -15,6 +16,25 @@ prerequisite for the optional reusable-JS-module-artifact slice described in
 Promise/job ownership gates are green. Tune8 must re-run the T0 census against
 the actual handoff because Tune7 and any intervening JR8 work can move symbols
 and ownership seams.
+
+### Current implementation slice (2026-08-13)
+
+The first JR9 slice now gives each `Runtime` an explicit
+`ModuleRegistry*`. `lambda/runtime/module_registry.cpp` owns the registry map
+and its GC roots through that Runtime, canonicalizes lexical/real paths before
+lookup, and releases descriptors before heap reset or Runtime teardown. Lambda,
+JS, and Jube publication/lookup paths now use the explicit Runtime APIs; the
+old no-argument functions remain only as thin active-context compatibility
+adapters. This enforces the ownership part of **D5.4.3** without changing JS
+ESM/CJS/TLA semantics yet. The Jube specifier catalog remains provider metadata
+only under **D5.4.4**/**D7.3**.
+
+Verification for this slice: `make build`, `make build-test`, direct
+`./lambda.exe js --no-log test/js/module_main.js`, and
+`JavaScriptRegression.ModuleEntryPrelinksOwnAndImportNameTables` pass. The
+remaining JR9 gates—one definition/instance transaction API, JS cache and CJS
+state migration, dynamic import/TLA graph growth, and predecessor-cache
+deletion—are intentionally not claimed by this slice.
 
 **Design authority:** JR1 and JR9 in
 [`JS_Runtime_Redesign.md`](JS_Runtime_Redesign.md). Governing formal rulings

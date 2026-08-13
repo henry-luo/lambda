@@ -545,7 +545,8 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 mod_def += sizeof(init_vars_fn);
 
                 // Look up namespace from unified module registry
-                ModuleDescriptor* desc = module_get(import->script->reference);
+                ModuleDescriptor* desc = module_get_for_runtime(
+                    tp->runtime, import->script->reference);
                 if (!desc) {
                     log_error("Error: cross-lang module '%s' not found in registry",
                         import->script->reference);
@@ -1327,7 +1328,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // context before calling load_script, so registration works there.
     if (!new_script->is_main && context && context->heap) {
         Item ns = module_build_lambda_namespace(new_script);
-        module_register(new_script->reference, "lambda", ns, new_script->jit_context);
+        module_register_for_runtime(
+            runtime, new_script->reference, "lambda", ns, new_script->jit_context);
     }
 
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
@@ -1643,7 +1645,7 @@ void runtime_init(Runtime* runtime) {
     if (runtime->mir_cache_disabled) {
         log_info("mir cache index: retained module cache disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
     }
-    module_registry_init();
+    module_registry_init_for_runtime(runtime);
     jube_register_builtin_modules();
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
@@ -1747,6 +1749,11 @@ void runtime_reset_heap(Runtime* runtime) {
             runtime->js_runtime_used = false;
         }
 
+        // Every module namespace is a heap Item owned by this Runtime.  Drop
+        // the registry even for Lambda-only batches, which do not enter the JS
+        // reset path that historically happened to clear the global cache.
+        module_registry_cleanup_for_runtime(runtime);
+
         // Batch heap replacement invalidates module-owned callback Items just
         // as final runtime teardown does; release those roots before the GC.
         jube_notify_heap_cleanup(runtime->heap);
@@ -1797,7 +1804,7 @@ void runtime_cleanup(Runtime* runtime) {
     js_exec_profile_dump();
 
     js_canvas_cleanup();
-    module_registry_cleanup();
+    module_registry_cleanup_for_runtime(runtime);
     TemplateRegistry* template_registry = runtime->eval_context
         ? runtime->eval_context->template_registry : NULL;
     if (runtime->eval_context) runtime->eval_context->template_registry = NULL;

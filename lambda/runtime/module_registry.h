@@ -11,6 +11,9 @@
 typedef struct LangProfile LangProfile;
 #endif
 
+typedef struct Runtime Runtime;
+typedef struct ModuleRegistry ModuleRegistry;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,20 +39,33 @@ typedef struct ModuleDescriptor {
     bool loading;               // true while module is being loaded (circular import detection)
 } ModuleDescriptor;
 
-// Initialize the module registry (call once at startup)
-void module_registry_init(void);
+// Initialize the registry owned by one Runtime.  Module namespace Items are
+// rooted for this runtime only; they must never be shared across runtimes.
+void module_registry_init_for_runtime(Runtime* runtime);
 
-// Clean up the module registry
+// Release the registry owned by one Runtime before its heap is destroyed.
+void module_registry_cleanup_for_runtime(Runtime* runtime);
+
+// Compatibility lifecycle hooks resolve the Runtime from the active
+// EvalContext.  New host code should use the explicit Runtime variants.
+void module_registry_init(void);
 void module_registry_cleanup(void);
 
 // Register a compiled + executed module
 void module_register(const char* path, const char* lang, Item namespace_obj, void* mir_ctx);
+void module_register_for_runtime(Runtime* runtime, const char* path, const char* lang,
+                                 Item namespace_obj, void* mir_ctx);
 void module_register_with_namespace_ops(const char* path, const char* lang,
                                         Item namespace_obj, void* mir_ctx,
                                         const ModuleNamespaceOps* namespace_ops);
 
+void module_register_with_namespace_ops_for_runtime(
+    Runtime* runtime, const char* path, const char* lang, Item namespace_obj,
+    void* mir_ctx, const ModuleNamespaceOps* namespace_ops);
+
 // Look up a module by resolved path. Returns NULL if not found.
 ModuleDescriptor* module_get(const char* path);
+ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path);
 
 // Check if a module is already loaded
 bool module_is_loaded(const char* path);
@@ -60,6 +76,9 @@ bool module_is_loaded(const char* path);
 ModuleDescriptor* module_register_loading(const char* path, const char* lang);
 ModuleDescriptor* module_register_loading_with_namespace_ops(
     const char* path, const char* lang, const ModuleNamespaceOps* namespace_ops);
+ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
+    Runtime* runtime, const char* path, const char* lang,
+    const ModuleNamespaceOps* namespace_ops);
 
 // Check if a module is currently being loaded (circular import in progress)
 bool module_is_loading(const char* path);

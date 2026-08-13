@@ -24784,12 +24784,12 @@ static void register_module_pub_fns(AstImportNode* imp) {
 // this reads native function pointers directly from the JS namespace object stored in the
 // unified module registry, then registers them with module-prefixed names so that
 // import_resolver() can resolve them during MIR_link().
-static void register_cross_lang_pub_fns(AstImportNode* imp) {
+static void register_cross_lang_pub_fns(Runtime* runtime, AstImportNode* imp) {
     if (!imp->script || !imp->script->reference) return;
     AstNode* mod_node = imp->script->ast_root;
     if (!mod_node || mod_node->node_type != AST_SCRIPT) return;
 
-    ModuleDescriptor* desc = module_get(imp->script->reference);
+    ModuleDescriptor* desc = module_get_for_runtime(runtime, imp->script->reference);
     if (!desc) {
         log_error("mir: cross-lang module '%s' not found in registry", imp->script->reference);
         return;
@@ -24950,7 +24950,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
             AstImportNode* imp = (AstImportNode*)child;
             if (imp->is_cross_lang) {
                 tp->cache_cross_lang_tainted = true;
-                register_cross_lang_pub_fns(imp);
+                register_cross_lang_pub_fns(tp->runtime, imp);
             } else {
                 if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
                 if (imp->script) {

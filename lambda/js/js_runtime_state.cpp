@@ -1315,7 +1315,7 @@ extern "C" void js_batch_reset() {
     // reset module variable table and active pointer
     js_reset_module_vars();
     // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
-    module_registry_cleanup();
+    module_registry_cleanup_for_runtime(context ? context->runtime : NULL);
     // clear JS module cache (specifier String* pointers become dangling after heap reset)
     js_module_cache_reset();
     // clear CommonJS metadata (filenames/modules are heap Items from the prior script)
@@ -1381,7 +1381,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset strict mode — prevents strict-mode test from poisoning subsequent non-strict tests
     js_strict_mode = false;
     // clear module registry (frees strdup/calloc per registered module)
-    module_registry_cleanup();
+    module_registry_cleanup_for_runtime(context ? context->runtime : NULL);
     // clear JS module cache counter
     js_module_cache_reset();
     js_cjs_metadata_reset();
