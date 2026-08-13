@@ -24906,6 +24906,56 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
     }
 }
 
+// LambdaJS avoids eager native code generation for very large cold modules;
+// Lambda uses the same instruction-count policy so a generated test/oracle
+// module cannot turn one top-level function into a multi-second MIR_gen job.
+static const uint64_t LAMBDA_MIR_LARGE_MODULE_INSN_THRESHOLD = 100000;
+static const size_t LAMBDA_MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT = 15000;
+
+static bool lambda_mir_large_interp_enabled(void) {
+    const char* flag = getenv("LAMBDA_JS_LARGE_INTERP");
+    return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
+}
+
+static size_t lambda_mir_large_source_interp_threshold(void) {
+    const char* value = getenv("LAMBDA_JS_LARGE_INTERP_BYTES");
+    if (!value || !value[0]) return LAMBDA_MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT;
+    char* end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || parsed <= 0) return LAMBDA_MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT;
+    return (size_t)parsed;
+}
+
+static bool lambda_mir_interp_env_enabled(void) {
+    const char* env = getenv("JS_MIR_INTERP");
+    return env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0);
+}
+
+static void count_lambda_mir_volume(MIR_context_t ctx,
+        uint64_t* out_module_count, uint64_t* out_function_count,
+        uint64_t* out_instruction_count) {
+    uint64_t module_count = 0;
+    uint64_t function_count = 0;
+    uint64_t instruction_count = 0;
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+            module; module = DLIST_NEXT(MIR_module_t, module)) {
+        module_count++;
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
+                item; item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type != MIR_func_item) continue;
+            function_count++;
+            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
+                    insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                // finalized MIR volume counts executable instructions, not labels.
+                if (insn->code != MIR_LABEL) instruction_count++;
+            }
+        }
+    }
+    if (out_module_count) *out_module_count = module_count;
+    if (out_function_count) *out_function_count = function_count;
+    if (out_instruction_count) *out_instruction_count = instruction_count;
+}
+
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms,
                                    double* out_transpile_ms,
@@ -24974,9 +25024,21 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (timing) clock_gettime(CLOCK_MONOTONIC, &pt0);
 #endif
 
-    // Transpile the AST directly to MIR (no C code generated)
+    // Transpile the AST directly to MIR (no C code generated). LambdaJS uses
+    // the interpreter for large source at O0 before JIT initialization; mirror
+    // that early decision while retaining the explicit --mir-interp/env mode.
     unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
+    bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
+    bool auto_interp_for_large_source = !explicit_interp && opt_level == 0 &&
+        lambda_mir_large_interp_enabled() && tp->source &&
+        strlen(tp->source) >= lambda_mir_large_source_interp_threshold();
+    bool force_interp_init = !g_mir_interp_mode &&
+        (lambda_mir_interp_env_enabled() || auto_interp_for_large_source);
+    int saved_mir_interp_mode = g_mir_interp_mode;
+    bool mir_gen_initialized = saved_mir_interp_mode == 0 && !force_interp_init;
+    if (force_interp_init) g_mir_interp_mode = 1;
     MIR_context_t ctx = jit_init(opt_level);
+    if (force_interp_init) g_mir_interp_mode = saved_mir_interp_mode;
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt1);
@@ -24987,7 +25049,35 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     ArrayList* property_keys = NULL;
     transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
         tp->pool, tp->name_pool, &property_keys);
-    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface :
+    uint64_t mir_module_count = 0;
+    uint64_t mir_function_count = 0;
+    uint64_t mir_instruction_count = 0;
+    count_lambda_mir_volume(ctx, &mir_module_count, &mir_function_count,
+        &mir_instruction_count);
+
+    bool use_mir_interp_for_script = explicit_interp || auto_interp_for_large_source;
+    bool large_interp_enabled = lambda_mir_large_interp_enabled();
+    if (!use_mir_interp_for_script && large_interp_enabled &&
+            mir_instruction_count > LAMBDA_MIR_LARGE_MODULE_INSN_THRESHOLD) {
+        use_mir_interp_for_script = true;
+        log_info("lambda-mir: large module (%llu insns) -> MIR interpreter (skip JIT codegen)",
+            (unsigned long long)mir_instruction_count);
+    }
+
+    // If the interpreter escape hatch is disabled, match LambdaJS's fallback:
+    // retain native execution but lower large-module optimization to O0 because
+    // the expensive optimizer passes do not pay back on cold generated code.
+    unsigned int effective_opt = opt_level;
+    if (!use_mir_interp_for_script && !large_interp_enabled &&
+            effective_opt >= 2 &&
+            mir_instruction_count > LAMBDA_MIR_LARGE_MODULE_INSN_THRESHOLD) {
+        log_info("lambda-mir: large module (%llu insns) -> opt=0 (was %u)",
+            (unsigned long long)mir_instruction_count, effective_opt);
+        MIR_gen_set_optimize_level(ctx, 0);
+        effective_opt = 0;
+    }
+
+    MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface :
         (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface :
             MIR_set_gen_interface), import_resolver);
 
@@ -24999,7 +25089,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 
     // Store results in the transpiler and propagate back to script
     tp->jit_context = ctx;
-    tp->main_func = (main_func_t)(g_mir_interp_mode ? find_func(ctx, "main") : jit_gen_func(ctx, "main"));
+    tp->mir_gen_initialized = mir_gen_initialized;
+    tp->main_func = (main_func_t)(use_mir_interp_for_script ? find_func(ctx, "main") : jit_gen_func(ctx, "main"));
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt3);
@@ -25143,33 +25234,13 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (!tp->main_func) {
         log_error("MIR Direct: failed to generate 'main' for '%s'",
                   script_path ? script_path : "<unknown>");
-        jit_cleanup(ctx);
+        jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         tp->jit_context = NULL;
     }
 
-    if (out_mir_module_count || out_mir_function_count || out_mir_instruction_count) {
-        uint64_t module_count = 0;
-        uint64_t function_count = 0;
-        uint64_t instruction_count = 0;
-        for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
-                module; module = DLIST_NEXT(MIR_module_t, module)) {
-            module_count++;
-            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
-                    item; item = DLIST_NEXT(MIR_item_t, item)) {
-                if (item->item_type != MIR_func_item) continue;
-                function_count++;
-                for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
-                        insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
-                    // finalized MIR volume matches MT7: labels are structural,
-                    // while executable MIR instructions are counted.
-                    if (insn->code != MIR_LABEL) instruction_count++;
-                }
-            }
-        }
-        if (out_mir_module_count) *out_mir_module_count = module_count;
-        if (out_mir_function_count) *out_mir_function_count = function_count;
-        if (out_mir_instruction_count) *out_mir_instruction_count = instruction_count;
-    }
+    if (out_mir_module_count) *out_mir_module_count = mir_module_count;
+    if (out_mir_function_count) *out_mir_function_count = mir_function_count;
+    if (out_mir_instruction_count) *out_mir_instruction_count = mir_instruction_count;
 
     // Lambda MIR currently consumes the indexed AST during the compiler pass;
     // release its malloc-backed table before transferring the Script fields so

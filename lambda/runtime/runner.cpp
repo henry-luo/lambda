@@ -1673,7 +1673,9 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (script->pool) pool_destroy(script->pool);
     if (script->type_list) arraylist_free(script->type_list);
     if (script->direct_imports) arraylist_free(script->direct_imports);
-    if (script->jit_context) jit_cleanup(script->jit_context);
+    if (script->jit_context) {
+        jit_cleanup_mode(script->jit_context, script->mir_gen_initialized ? 1 : 0);
+    }
     // decimal context is shared global; cached/free paths only clear the borrowed pointer
     script->decimal_ctx = NULL;
     mem_free(script);

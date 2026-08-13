@@ -174,6 +174,7 @@ void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_func_prefix(MIR_context_t ctx, const char *prefix);
 void* find_data(MIR_context_t ctx, const char *data_name);
 void jit_cleanup(MIR_context_t ctx);
+void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
 }
