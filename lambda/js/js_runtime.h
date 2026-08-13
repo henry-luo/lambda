@@ -1247,6 +1247,7 @@ Item js_module_get_evaluation_error(Item specifier);
 void js_module_mark_has_tla(Item specifier);
 int  js_module_get_has_tla(Item specifier);
 int  js_module_needs_async_settle(Item specifier);
+void js_tla_drain_pending_modules(void);
 void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
 void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr);
 int  js_module_pending_async_deps(Item specifier);

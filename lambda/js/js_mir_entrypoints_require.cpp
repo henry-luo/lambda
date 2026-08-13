@@ -2483,6 +2483,17 @@ extern "C" Item js_dynamic_import(Item specifier) {
     // (importing modules' callbacks fire after the underlying TLA settles).
     extern Item js_p5_chain_dynamic_import(Item, Item);
     Item awaited = js_module_get_awaited_target(specifier_string);
+    if (get_type_id(awaited) == LMD_TYPE_NULL &&
+            js_module_needs_async_settle(specifier_string)) {
+        // A nested module can suspend at a non-Promise await (for example
+        // `await 1`) and therefore has no awaited target to chain.  The
+        // importer is still required to see the module only after its deferred
+        // post-await body publishes exports; finish that local continuation
+        // before resolving the dynamic-import Promise (ECMA-262
+        // ContinueDynamicImport).
+        js_tla_drain_pending_modules();
+        awaited = js_module_get_awaited_target(specifier_string);
+    }
     if (get_type_id(awaited) != LMD_TYPE_NULL) {
         return js_p5_chain_dynamic_import(awaited, ns);
     }

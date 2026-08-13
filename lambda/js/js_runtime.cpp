@@ -1071,7 +1071,7 @@ extern "C" bool js_has_call_capability(Item target) {
         JsProxyData* pd = js_get_proxy_data(target);
         return pd && pd->callable;
     }
-    if (type == LMD_TYPE_MAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
         // The temporary JR4 class-map representation models a class function:
         // it has [[Call]] (which rejects ordinary invocation) and [[Construct]].
         bool own_instance_proto = false;
@@ -1947,9 +1947,13 @@ extern "C" Item js_proxy_trap_get_prototype_of(Item proxy) {
     // returns, so the temporary home cannot escape this native frame.
     JS_ASSIGN_OR_RETURN(result, js_call_function_into(trap, PD_HANDLER(pd), args, 1,
         &get_prototype_trap_home));
+    // Packed numeric arrays are ordinary object values too; rejecting them
+    // here made the proxy boundary disagree with the shared object test
+    // (D4.6.1v2), so only primitive trap results are invalid.
     // ES2020 §9.5.1 invariant: result must be Object or null
     TypeId rt = get_type_id(result);
-    if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC &&
+    if (rt != LMD_TYPE_MAP && !js_is_ordinary_numeric_array(result) &&
+        rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC &&
         rt != LMD_TYPE_ELEMENT && result.item != ItemNull.item && rt != LMD_TYPE_NULL) {
         return js_throw_type_error("'getPrototypeOf' on proxy: trap returned neither object nor null");
     }
@@ -2426,11 +2430,12 @@ extern "C" void js_set_class_instance_field_metadata_key(
 
 static Item js_init_class_instance_field(Item callee, Item object, Item field_key,
     bool value_found, Item field_value, bool brand_only) {
-    RootFrame roots(4);
+    RootFrame roots(5);
     Rooted<Item> callee_root(roots, callee);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> key_root(roots, field_key);
     Rooted<Item> value_root(roots, field_value);
+    Rooted<Item> private_storage_root(roots, object);
     if (!roots.valid()) return js_status_ok();
 
     bool private_key = get_type_id(key_root.get()) == LMD_TYPE_STRING &&
@@ -2449,12 +2454,22 @@ static Item js_init_class_instance_field(Item callee, Item object, Item field_ke
             }
             return js_throw_type_error("Cannot initialize private member twice on the same object");
         }
+        if (js_is_proxy(object_root.get())) {
+            // Class field definition is PrivateFieldAdd, so a proxy receiver's
+            // brand and value belong to its hidden private-slot map rather than
+            // the public [[Set]] path (S#7.3.32).
+            private_storage_root.set(js_proxy_private_slots(object_root.get(), true));
+            if (get_type_id(private_storage_root.get()) != LMD_TYPE_MAP) {
+                return js_throw_type_error("Cannot initialize private member on a revoked proxy");
+            }
+        }
     }
     if (!brand_only) {
         if (!value_found) value_root.set(make_js_undefined());
         if (private_key) {
             ScopedPrivateDefineActive define_guard;
-            JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(object_root.get(), key_root.get(), value_root.get()));
+            JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(private_storage_root.get(),
+                key_root.get(), value_root.get()));
         } else {
             // Each public field record performs DefineField in source order;
             // duplicate spellings intentionally replace the earlier own value.
@@ -2465,7 +2480,8 @@ static Item js_init_class_instance_field(Item callee, Item object, Item field_ke
         key_root.set(js_private_brand_key_for_class(callee_root.get()));
         if (key_root.get().item == ItemNull.item) return js_status_ok();
         ScopedPrivateDefineActive define_guard;
-        JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(object_root.get(), key_root.get(), callee_root.get()));
+        JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(private_storage_root.get(),
+            key_root.get(), callee_root.get()));
     }
     return js_status_ok();
 }
@@ -2654,7 +2670,13 @@ extern "C" Item js_private_brand_add(Item object, Item private_key, Item callee)
     // key; ordinary private writes must remain subject to the brand check.
     bool saved_define = js_private_define_active;
     js_private_define_active = true;
-    Item set_result = js_set_key_default(object, brand_key_item, callee);
+    // PrivateFieldAdd bypasses Proxy [[Set]] entirely: the proxy is the
+    // branded receiver, and its hidden private-slot map owns the brand
+    // record (S#7.3.32). Routing this write through the public proxy trap
+    // loses the brand before a derived method can read it.
+    Item brand_storage = js_is_proxy(object)
+        ? js_proxy_private_slots(object, true) : object;
+    Item set_result = js_set_key_default(brand_storage, brand_key_item, callee);
     js_private_define_active = saved_define;
     if (item_is_error(set_result)) return set_result;
     return js_status_ok();
@@ -2670,7 +2692,11 @@ extern "C" Item js_private_field_define(Item object, Item private_key, Item valu
     }
     bool saved = js_private_define_active;
     js_private_define_active = true;
-    Item set_result = js_set_key_default(object, private_key, value);
+    // PrivateFieldAdd is an internal slot write, not an ordinary property Set;
+    // a Proxy must not observe it or forward it to its target (S#7.3.32).
+    Item field_storage = js_is_proxy(object)
+        ? js_proxy_private_slots(object, true) : object;
+    Item set_result = js_set_key_default(field_storage, private_key, value);
     js_private_define_active = saved;
     if (item_is_error(set_result)) return set_result;
     return value;
@@ -7139,7 +7165,7 @@ static Item js_set_storage_mode(Item object, Item key,
 
     TypeId type = get_type_id(object);
 
-    if (type == LMD_TYPE_MAP && object.map->data_cap == 0) {
+    if ((type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) && object.map->data_cap == 0) {
         const char* native_tag = js_native_backed_property_tag(object.map);
         if (native_tag && object.map->data) {
             // Prototype initialization uses define-own storage before the
@@ -7220,7 +7246,7 @@ static Item js_set_storage_mode(Item object, Item key,
         JS_PROPERTY_SET_BRANCH("top_symbol");
         return value;
     }
-    if (type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+    if ((type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) && get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
         Item resolved_private_key = js_eval_initializer_resolve_private_key(object, private_key);
         if (resolved_private_key.item != ItemNull.item) {
@@ -7277,7 +7303,7 @@ static Item js_set_storage_mode(Item object, Item key,
         // fall through for non-numeric string keys (e.g. __proto__)
     }
 
-    if (type == LMD_TYPE_MAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
         JS_PROPERTY_SET_BRANCH("top_map");
         Item result = js_set_map_core(object, key, value,
                                           receiver_root.get(),
@@ -7475,15 +7501,68 @@ static Item js_private_property_set_checked(Item object, Item key, Item value,
             }
         }
     }
-    return strict ? js_set_key_strict_policy(object, key, value)
-                  : js_set_key_default(object, key, value);
+    RootFrame roots(4);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> storage_root(roots, object);
+    if (!roots.valid()) return ItemError;
+    if (js_is_proxy(object_root.get())) {
+        // PrivateSet addresses the proxy's private environment directly; the
+        // public Proxy [[Set]] trap is not part of this operation (S#7.3.32).
+        storage_root.set(js_proxy_private_slots(object_root.get(), false));
+    }
+    if (get_type_id(storage_root.get()) == LMD_TYPE_MAP &&
+            property_key_id(it2s(key_root.get())) != NAME_ID_NONE) {
+        Item own_slot = ItemNull;
+        ShapeEntry* own_se = NULL;
+        JsShapeSlotStatus own_status = js_own_shape_slot_status_name_id(
+            storage_root.get(), property_key_id(it2s(key_root.get())), &own_slot, &own_se);
+        if (own_status == JS_SHAPE_SLOT_DATA) {
+            if (!js_props_query_writable(storage_root.get().map, own_se,
+                    it2s(key_root.get())->chars, (int)it2s(key_root.get())->len)) {
+                // Private methods are immutable PrivateElements; bypassing
+                // OrdinarySet must still preserve their non-writable invariant
+                // (S#7.3.32).
+                return js_throw_type_error("Cannot assign to private method");
+            }
+            // Private field writes update the existing slot directly. Going
+            // through OrdinarySet would expose a private name to the public
+            // descriptor kernel and incorrectly return a Set=false error.
+            fn_map_set(storage_root.get(), key_root.get(), value_root.get());
+            return value_root.get();
+        }
+        if (own_status == JS_SHAPE_SLOT_ACCESSOR) {
+            JsAccessorPair* pair = NULL;
+            pair = js_item_to_accessor_pair(own_slot);
+            if (pair && pair->setter.item != ItemNull.item &&
+                    js_is_callable(pair->setter)) {
+                Item setter_args[1] = { value_root.get() };
+                Item setter_result = js_call_function(pair->setter,
+                    object_root.get(), setter_args, 1);
+                return item_is_error(setter_result) ? setter_result : value_root.get();
+            }
+            return js_throw_type_error("Private accessor was defined without a setter");
+        }
+    }
+    JsSetterDispatchResult inherited = js_ordinary_set_via_accessor_name_id(
+        object_root.get(), property_key_id(it2s(key_root.get())),
+        value_root.get(), object_root.get());
+    if (inherited.status == JS_SET_DISPATCH_ERROR) return inherited.error_lane;
+    if (inherited.status == JS_SET_DISPATCHED) return value_root.get();
+    if (inherited.status == JS_SET_NO_SETTER) {
+        return js_throw_type_error("Private accessor was defined without a setter");
+    }
+    return js_throw_type_error("Cannot write private member to an object whose class did not declare it");
 }
 
 // Tune8 §2.2: private-property validation and strict Set policy share the
 // explicit core mode; ambient strictness cannot leak across a nested call.
 extern "C" Item js_private_property_set(Item object, Item key, Item value, int64_t strict) {
-    Item result = js_private_property_set_checked(object, key, value, strict != 0);
-    return js_assignment_set_result(value, key, result, strict, object);
+    // PrivateSet already returns the assignment value on success. Applying the
+    // ordinary Set boolean adapter here would misread an assigned `false` as a
+    // failed completion and throw (S#7.3.32).
+    return js_private_property_set_checked(object, key, value, strict != 0);
 }
 
 // v23: Force-store a property on a function's properties_map, bypassing writability checks.
@@ -9219,16 +9298,35 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
                                   bool bypass_accessor_dispatch, bool strict) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_SET_INT);
     if (js_is_ordinary_numeric_array(array)) {
+        ArrayNum* numeric = array.array_num;
+        // numeric arrays share the direct storage lane, but an append still
+        // creates an own property and therefore must honor the ordinary
+        // extensibility/length guards before growing the raw buffer.
+        bool numeric_extensible = true;
+        if (index >= 0 && index >= numeric->length) {
+            numeric_extensible = js_is_extensible(array);
+        }
+        if (index >= 0 && index >= numeric->length &&
+                !numeric_extensible) {
+            js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+                JS_OPT_REASON_NOT_EXTENSIBLE,
+                JS_OPT_OUTCOME_FALLBACK);
+            return value;
+        }
         if (index >= 0 && index <= 0xFFFFFFFELL && index <= array.array_num->length &&
                 !js_array_companion_has_numeric_slot((Array*)array.array_num, index) &&
                 js_array_value_is_numeric(value) &&
                 js_array_numeric_store(array, index, value)) {
+            js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             return value;
         }
         if (!js_array_promote_numeric_to_tagged(array)) return value;
         return js_elements_set_int_mode(array, index, value, bypass_accessor_dispatch, strict);
     }
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
         // fast path for typed arrays
         if (js_is_typed_array(array)) {
             return js_typed_array_set(array, (Item){.item = i2it(index)}, value);
@@ -9238,6 +9336,8 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
             : js_set_key_default(array, (Item){.item = i2it(index)}, value);
     }
     if (index < 0 || index > 0xFFFFFFFELL) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
         int idx_len = 0;
         const char* idx_buf = js_property_index_chars(index, &idx_len);
         Item key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
@@ -9249,14 +9349,27 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
     // Fast path: overwrite an existing own dense data element. Per ES OrdinarySet
     // this is a direct write with no accessor / prototype-chain / typed-array-proto
     // consultation, so it short-circuits the per-write work below.
-    if (js_array_fast_own_dense_set(array, index, value)) return value;
+    if (js_array_fast_own_dense_set(array, index, value)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        return value;
+    }
     Item index_key = (Item){.item = i2it((int)index)};
     bool ta_proto_bypass_accessor = false;
     if (!js_array_set_index_preflight(array, index, index_key,
-            bypass_accessor_dispatch, strict, &ta_proto_bypass_accessor)) return value;
+            bypass_accessor_dispatch, strict, &ta_proto_bypass_accessor)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            js_array_proto_index_guard_is_dirty(array)
+                ? JS_OPT_REASON_PROTOTYPE_ACCESSOR
+                : JS_OPT_REASON_LENGTH_NOT_WRITABLE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return value;
+    }
     // check companion map for accessor/non-writable markers — must check even when idx >= length
     bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
     if (companion_has_index_shape && index >= 0) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_PROTOTYPE_ACCESSOR, JS_OPT_OUTCOME_FALLBACK);
         Map* pm = js_array_props(arr);
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         int idx_len = 0;
@@ -9342,7 +9455,27 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
             }
         }
     }
-    return js_array_store_index_value(array, index, value, "js_elements_set_int");
+    int64_t old_length = arr->length;
+    bool was_hole = index < old_length && index < js_array_dense_capacity(arr) &&
+        arr->items[index].item == JS_DELETED_SENTINEL_VAL;
+    Item result = js_array_store_index_value(array, index, value,
+        "js_elements_set_int");
+    if (index == old_length && arr->length > old_length) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    } else if (was_hole && index < arr->length &&
+            index < js_array_dense_capacity(arr) &&
+            arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_TAKEN);
+    } else if (index >= old_length && !js_is_extensible(array)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_NOT_EXTENSIBLE, JS_OPT_OUTCOME_FALLBACK);
+    } else {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
+    }
+    return result;
 }
 
 extern "C" Item js_elements_set_int(Item array, int64_t index, Item value) {
@@ -9352,31 +9485,66 @@ extern "C" Item js_elements_set_int(Item array, int64_t index, Item value) {
 extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
                                                  Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0 ||
-            index > 0xFFFFFFFELL) return ItemNull;
+            index > 0xFFFFFFFELL) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
+        return ItemNull;
+    }
     Array* arr = array.array;
     if (!arr || arr->is_content == 1 ||
             js_array_companion_has_array_index_shape(arr) ||
-            js_array_proto_index_guard_is_dirty(array)) return ItemNull;
-
+            js_array_proto_index_guard_is_dirty(array)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            js_array_proto_index_guard_is_dirty(array)
+                ? JS_OPT_REASON_PROTOTYPE_ACCESSOR : JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return ItemNull;
+    }
     // A present dense own element is writable in this narrow path: descriptor
     // overlays and prototype numeric hooks were excluded above.
     if (index < arr->length && index < js_array_dense_capacity(arr)) {
         if (arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
             js_array_store_owned(arr, index, value);
+            js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             return (Item){.item = b2it(true)};
         }
         // Filling a hole creates an own element, so the ordinary extensibility
         // check still applies even though the array length is unchanged.
-        if (!js_is_extensible(array)) return ItemNull;
+        if (!js_is_extensible(array)) {
+            js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+                JS_OPT_REASON_NOT_EXTENSIBLE, JS_OPT_OUTCOME_FALLBACK);
+            return ItemNull;
+        }
         js_array_store_owned(arr, index, value);
+        js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_TAKEN);
         return (Item){.item = b2it(true)};
     }
-
     // Only a contiguous append is safe without the full gap/sparse policy.
-    if (index != arr->length || !js_is_extensible(array) ||
-            js_array_length_is_non_writable(array) ||
-            js_array_should_store_sparse_for_index(arr, index)) return ItemNull;
+    if (index != arr->length) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
+        return ItemNull;
+    }
+    if (!js_is_extensible(array)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_NOT_EXTENSIBLE, JS_OPT_OUTCOME_FALLBACK);
+        return ItemNull;
+    }
+    if (js_array_length_is_non_writable(array)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_LENGTH_NOT_WRITABLE, JS_OPT_OUTCOME_FALLBACK);
+        return ItemNull;
+    }
+    if (js_array_should_store_sparse_for_index(arr, index)) {
+        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
+        return ItemNull;
+    }
     js_array_push_item_direct(arr, value);
+    js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     return (Item){.item = b2it(true)};
 }
 
@@ -15779,7 +15947,11 @@ struct JsRegexData {
     bool unicode;             // 'u' or 'v' flag: indices are reported as UTF-16 code units
     bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
+    bool cache_owned;         // compile cache retains native matcher lifetime
 };
+
+struct JsRegexCacheEntry;
+static bool js_regex_cache_owns_data(const JsRegexData* rd);
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
@@ -15795,6 +15967,11 @@ extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_nativ
     int64_t ptr_val = it2i(rd_item);
     if (ptr_val == 0) return;
     JsRegexData* rd = (JsRegexData*)(uintptr_t)ptr_val;
+    // Content-keyed literal reuse lets several GC maps point at one compiled
+    // JsRegexData.  The compile cache owns that native payload until its realm
+    // reset; finalizing the first dead literal here would leave later literals
+    // with a dangling matcher (S#22.2.3.1).
+    if (js_regex_cache_owns_data(rd)) return;
     if (gc_native_seen_seen_or_add(seen_native, rd)) return;
 
     JsRegexCompiled* wrapper = rd->wrapper;
@@ -15805,9 +15982,9 @@ extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_nativ
     }
 }
 
-// Regex compilation cache: avoids re-compiling the same regex literal in loops.
-// Keyed by (pattern_ptr, flags_ptr) — pointer identity from AST nodes.
-// Only benefits regex literals (constant AST pointers), not new RegExp() with runtime strings.
+// Regex compilation cache: avoids re-compiling the same large regex literal in
+// loops. Keys use pattern/flag content because evaluated literals may allocate
+// fresh GC strings; runtime RegExp strings remain uncached.
 struct JsRegexCacheEntry {
     JsRegexData* rd;
     const char* source;          // heap-allocated source string
@@ -15833,6 +16010,10 @@ static JsRegexCompileCache* js_regex_compile_cache_get(bool create) {
     return cache;
 }
 
+static bool js_regex_cache_owns_data(const JsRegexData* rd) {
+    return rd && rd->cache_owned;
+}
+
 #define g_regex_compile_cache (*js_regex_compile_cache_get(true))
 #define g_regex_property_cache_chars (js_runtime_state.operations.regex_property_cache_chars)
 #define g_regex_property_cache_len (js_runtime_state.operations.regex_property_cache_len)
@@ -15840,14 +16021,24 @@ static JsRegexCompileCache* js_regex_compile_cache_get(bool create) {
 #define g_regex_property_cache_result (js_runtime_state.operations.regex_property_cache_result)
 #define g_regex_instance_shape (js_runtime_state.operations.regex_instance_shape)
 
-static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags) {
-    return (uint64_t)(uintptr_t)pattern ^ ((uint64_t)(uintptr_t)flags * 2654435761ULL);
+static inline uint64_t js_regex_content_hash(const char* pat, int plen,
+        const char* flg, int flen);
+static const char* js_regex_copy_stable_span(const char* text, int length);
+
+static inline uint64_t js_regex_cache_key(const char* pattern, int pattern_len,
+        const char* flags, int flags_len) {
+    // Literal operands arrive through fresh GC strings at each evaluation, so
+    // pointer identity cannot identify the same AST literal.  Content identity
+    // keeps the compiled Unicode matcher reusable across calls and batches.
+    return js_regex_content_hash(pattern, pattern_len, flags, flags_len);
 }
 
 static bool js_regex_permanent_cache_contains_re2(re2::RE2* re);
 
 static void js_regex_cache_entry_release_native(JsRegexCacheEntry* ce) {
-    if (!ce || !ce->rd || !ce->rd->wrapper) return;
+    if (!ce || !ce->rd) return;
+    ce->rd->cache_owned = false;
+    if (!ce->rd->wrapper) return;
     JsRegexCompiled* wrapper = ce->rd->wrapper;
     // Batch resets clear stale AST-keyed cache entries before the heap may run
     // RegExp map finalizers; release wrapper native state here and poison the
@@ -15862,6 +16053,16 @@ static void js_regex_cache_entry_release_native(JsRegexCacheEntry* ce) {
     }
     if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
     js_regex_compiled_free(wrapper);
+}
+
+static void js_regex_cache_store(uint64_t key, const JsRegexCacheEntry& entry) {
+    JsRegexCompileCache* cache = js_regex_compile_cache_get(true);
+    if (!cache) return;
+    auto old = cache->find(key);
+    if (old != cache->end() && old->second.rd != entry.rd) {
+        js_regex_cache_entry_release_native(&old->second);
+    }
+    (*cache)[key] = entry;
 }
 
 void js_regex_cache_reset() {
@@ -16311,7 +16512,10 @@ static int js_regex_detect_regexpu_identifier_class(const char* pattern, int pat
     if (pattern_len >= 10 && strncmp(pattern, "(?:[A-Za-z", 10) == 0) {
         return JS_REGEX_PROP_IDENTIFIER_START;
     }
-    if (pattern_len >= 15 && strncmp(pattern, "(?:[0-9A-Z_a-z", 15) == 0) {
+    // The ASCII prefix is 14 bytes (`(?:[` + `0-9A-Z_a-z`); the previous
+    // 15-byte probe missed UnicodeIDContinue and routed every identifier
+    // validation through the full RE2 matcher.
+    if (pattern_len >= 14 && strncmp(pattern, "(?:[0-9A-Z_a-z", 14) == 0) {
         return JS_REGEX_PROP_IDENTIFIER_CONTINUE;
     }
     return 0;
@@ -18041,6 +18245,34 @@ static void js_regex_apply_casefold_fixups(std::string& pat, bool has_unicode, b
 
 static Item js_create_regex_impl(const char* pattern, int pattern_len,
         const char* flags, int flags_len, bool cache_static_literal) {
+    // Short literals still benefit from the permanent RE2 cache in hot loops,
+    // but sharing their mutable JsRegexData across unrelated AST literals can
+    // change object-local state. Only compile-cache the expensive large
+    // literals; small literals receive fresh data wrappers from permanent RE2.
+    bool literal_cache_requested = cache_static_literal;
+    if (cache_static_literal && pattern_len < 1024) cache_static_literal = false;
+    uint64_t cache_key = cache_static_literal
+        ? js_regex_cache_key(pattern, pattern_len, flags, flags_len) : 0;
+    if (cache_static_literal) {
+        auto cache_it = g_regex_compile_cache.find(cache_key);
+        if (cache_it != g_regex_compile_cache.end()) {
+            auto& ce = cache_it->second;
+            bool same_source = ce.source_len == pattern_len && ce.source &&
+                memcmp(ce.source, pattern, (size_t)pattern_len) == 0;
+            bool same_flags = ce.canonical_flags_len == flags_len &&
+                (!flags_len || (ce.canonical_flags &&
+                    memcmp(ce.canonical_flags, flags, (size_t)flags_len) == 0));
+            if (same_source && same_flags) {
+                // The cached JsRegexData is immutable; each evaluation still
+                // receives a fresh RegExp object with its own lastIndex.
+                js_opt_trace_record(JS_OPT_REGEX_COMPILE_CACHE_HIT,
+                    JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+                return js_regex_build_object_from_cache(ce, false);
+            }
+        }
+        js_opt_trace_record(JS_OPT_REGEX_COMPILE_CACHE_MISS,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
+    }
     char* literal_buf = NULL;
     int literal_len = 0;
     int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
@@ -18060,24 +18292,15 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
             JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
             rd->special_property_kind = special_property_kind;
             rd->has_indices = has_indices;
-            JsRegexCacheEntry ce = {rd, pattern, pattern_len, canonical_flags,
+            const char* stable_flags = js_regex_copy_stable_span(canonical_flags,
+                canonical_flags_len);
+            JsRegexCacheEntry ce = {rd, pattern, pattern_len, stable_flags,
                                     canonical_flags_len, false, has_indices, has_unicode, false};
-            return js_regex_build_object_from_cache(ce, !cache_static_literal);
-        }
-    }
-
-    uint64_t cache_key = 0;
-    if (cache_static_literal) {
-        cache_key = js_regex_cache_key(pattern, flags);
-        auto cache_it = g_regex_compile_cache.find(cache_key);
-        if (special_property_kind == 0 && cache_it != g_regex_compile_cache.end()) {
-            // Regex literals reuse the same AST-owned pattern/flags pointers every
-            // time the literal is evaluated.  If this exact literal was already
-            // compiled successfully, skip the expensive frontend validation pass.
-            auto& ce = cache_it->second;
-            if (ce.source_len == pattern_len && ce.source == pattern) {
-                return js_regex_build_object_from_cache(ce, false);
+            if (cache_static_literal) {
+                rd->cache_owned = true;
+                js_regex_cache_store(cache_key, ce);
             }
+            return js_regex_build_object_from_cache(ce, !cache_static_literal);
         }
     }
 
@@ -18128,9 +18351,21 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
          js_regex_pattern_has_dot_atom(pattern, pattern_len));
 
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
-    uint64_t perm_key = cache_static_literal
+    // Direct RE2 reuse is safe for large generated property classes and for
+    // capture-free scalar literals; capture-bearing short regexps can carry
+    // JS-specific result normalization state and must retain fresh engines.
+    bool capture_free_short_literal = pattern_len <= 8 &&
+        !memchr(pattern, '(', (size_t)pattern_len);
+    if (literal_cache_requested && !cache_static_literal &&
+            !capture_free_short_literal) {
+        js_opt_trace_record(JS_OPT_REGEX_FRESH_WRAPPER,
+            JS_OPT_REASON_CAPTURE_BEARING_SHORT_REGEX, JS_OPT_OUTCOME_TAKEN);
+    }
+    bool permanent_cache_requested = literal_cache_requested &&
+        (pattern_len >= 1024 || capture_free_short_literal);
+    uint64_t perm_key = permanent_cache_requested
         ? js_regex_content_hash(pattern, pattern_len, flags, flags_len) : 0;
-    if (cache_static_literal && special_property_kind == 0 &&
+    if (permanent_cache_requested && special_property_kind == 0 &&
             !has_re2_name_alias && !needs_utf16_subject) {
         auto perm_it = g_re2_permanent_cache.find(perm_key);
         if (perm_it != g_re2_permanent_cache.end()) {
@@ -18148,7 +18383,20 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 rd->unicode = pe.has_unicode;
                 JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len,
                                         pe.dot_all, pe.has_indices, pe.has_unicode, pe.has_unicode_sets};
-                g_regex_compile_cache[cache_key] = ce;
+                rd->cache_owned = true;
+                // Short literals deliberately skip the compile-cache key so
+                // each RegExp gets a fresh wrapper.  The permanent RE2 owner
+                // must not route that keyless entry through compile-cache key
+                // zero, whose replacement path releases an unrelated regex
+                // (S#22.2.3.1).
+                if (cache_static_literal) {
+                    js_regex_cache_store(cache_key, ce);
+                } else {
+                    js_opt_trace_record(JS_OPT_REGEX_KEYLESS_REJECT,
+                        JS_OPT_REASON_KEYLESS_CACHE_ENTRY, JS_OPT_OUTCOME_TAKEN);
+                }
+                js_opt_trace_record(JS_OPT_REGEX_PERMANENT_CACHE_HIT,
+                    JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
                 return js_regex_build_object_from_cache(ce, false);
             }
         }
@@ -18936,7 +19184,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Wrapper metadata owns its RE2 engine, so only direct RE2 compilations
     // may enter this cache. This keeps one unambiguous native owner.
-    if (cache_static_literal && !bt && special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
+    if (permanent_cache_requested && !bt && special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
         !needs_utf16_subject && !wrapper) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
@@ -18953,9 +19201,12 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
         // alias a recycled string address; only AST-owned literal spellings persist.
         char* cached_flags = (char*)pool_calloc(js_input->pool, flags_len + 1);
         memcpy(cached_flags, canonical_flags, flags_len + 1);
-        g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, cached_flags,
-                                             (int)strlen(cached_flags), dot_all, compile_info.has_indices,
-                                             has_unicode, compile_info.unicode_sets};
+        rd->cache_owned = true;
+        if (cache_static_literal) {
+            js_regex_cache_store(cache_key, {rd, pattern, pattern_len, cached_flags,
+                                                 (int)strlen(cached_flags), dot_all, compile_info.has_indices,
+                                                 has_unicode, compile_info.unicode_sets});
+        }
     }
     return regex_obj_root.get();
 }
@@ -19770,7 +20021,10 @@ static Item js_regexp_exec_dispatch(Item rx, Item str) {
         if (get_type_id(result) == LMD_TYPE_NULL) return ItemNull;
         // Object → matched result
         TypeId rtid = get_type_id(result);
-        if (rtid == LMD_TYPE_MAP || rtid == LMD_TYPE_ARRAY ||
+        // Lambda's empty JS array literal may use the numeric-array carrier;
+        // it is still an ECMAScript Object and therefore a valid RegExpExec
+        // result (S#22.2.5.2.1), even though it has no numeric elements yet.
+        if (rtid == LMD_TYPE_MAP || rtid == LMD_TYPE_ARRAY_NUM || rtid == LMD_TYPE_ARRAY ||
             rtid == LMD_TYPE_ELEMENT || rtid == LMD_TYPE_FUNC) return result;
         // Primitive (not null) → throw TypeError per spec
         return js_throw_type_error("RegExpExec: exec must return null or an object");
@@ -20487,7 +20741,11 @@ static Item js_collection_canonical_key(Item key) {
 
 static bool js_can_be_held_weakly(Item key) {
     TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY ||
+    // Numeric arrays use the packed representation but remain ordinary
+    // object keys; excluding them made WeakMap reject valid object values at
+    // the representation seam (D4.6.1v2).
+    if (kt == LMD_TYPE_MAP || js_is_ordinary_numeric_array(key) ||
+        kt == LMD_TYPE_ARRAY ||
         kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT ||
         kt == LMD_TYPE_OBJECT || kt == LMD_TYPE_VMAP) {
         // DOM host objects are VMAP-backed; WeakMap must accept every
@@ -33939,6 +34197,8 @@ extern "C" void js_tla_register_continuation(Item func) {
         log_error("TLA: continuation queue overflow (%d)", JS_TLA_MAX_CONTINUATIONS);
         return;
     }
+    js_opt_trace_record(JS_OPT_TLA_DEFERRED_BODY,
+        JS_OPT_REASON_TLA_PENDING, JS_OPT_OUTCOME_TAKEN);
     g_tla_continuations[g_tla_continuation_count++] = func;
 }
 
@@ -33949,9 +34209,10 @@ extern "C" void js_tla_enter_module(void) {
 // Forward declarations for module-vars/namespace state accessors defined in
 // js_runtime_state.cpp. Avoids including js_mir_internal.hpp here.
 
-extern "C" void js_tla_exit_module(void) {
-    if (g_tla_module_depth > 0) g_tla_module_depth--;
-    if (g_tla_module_depth != 0) return;
+static void js_tla_drain_post_await_modules(void) {
+    js_opt_trace_record(JS_OPT_TLA_DRAIN,
+        g_tla_continuation_count > 0 ? JS_OPT_REASON_TLA_PENDING : JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
     // Outermost transpile_js_module_to_mir is unwinding: flush queued post-
     // await chunks in registration order. Snapshot the list because each
     // continuation may itself register more (rare in practice, but supported).
@@ -34039,6 +34300,21 @@ extern "C" void js_tla_exit_module(void) {
             js_module_complete_tla_body(spec);
         }
     }
+}
+
+extern "C" void js_tla_drain_pending_modules(void) {
+    // Dynamic import is entered from an already-running module while the
+    // module-depth guard intentionally suppresses the normal depth-zero drain.
+    // If the imported graph has no unresolved awaited target, finish its
+    // deferred post-await body now so the importing module's synchronous await
+    // observes a complete namespace (ECMA-262 ContinueDynamicImport).
+    js_tla_drain_post_await_modules();
+}
+
+extern "C" void js_tla_exit_module(void) {
+    if (g_tla_module_depth > 0) g_tla_module_depth--;
+    if (g_tla_module_depth != 0) return;
+    js_tla_drain_post_await_modules();
 }
 
 // Js57 P3 (Track B2): read a live default-binding for the given module

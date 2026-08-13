@@ -208,123 +208,6 @@ first eliminate crash/retry work, then compare source-to-linked-MIR time with
 identical complete manifests; a timeout reduction caused only by fewer crashed
 workers is not compiler credit.
 
-### 3.4 Regression root cause: scalar re-homing on every property read
-
-The next timeout was a genuine compiler/runtime performance regression from the
-GC-lifetime fix merged in `f29e93c75`. `js_get_key_core` began routing every
-ordinary shaped-property result through `scalar_storage_read`. That helper is
-correct for an interior pointer into a packed wide scalar lane, but it boxes a
-new number home for `int64`/`uint64`/`float` values. Large libraries perform
-millions of ordinary property reads, so the fix changed a cheap load into
-repeated number-home allocation and GC pressure. The observed symptom was a
-worker running for hundreds of seconds and exceeding the RSS limit, which
-surfaced as a batch timeout or missing-result retry.
-
-The property boundary now returns a borrowed-storage bit from
-`js_ordinary_get_own_ex`: only a packed, wide scalar slot is re-homed; narrow
-values, strings, extension-map entries, and accessor results return directly.
-The semantic safety rule remains **D5.3.4**—a movable interior scalar never
-crosses the property boundary un-rehomed—while the hot path no longer allocates
-for already-stable Items. The direct `lib_fast_diff.js` release probe dropped
-from a 653-second / 4.8-GB run to about 53 seconds with the same output and
-status. This is the root-cause fix for the performance timeout, not a harness
-timeout adjustment.
-
-### 3.5 Regression root cause: successful hot boundaries skipped reclamation
-
-The large-library worker had a second lifetime defect. Successful hot-reload
-boundaries used `heap_discard_unfinalized()`, the signal-safe recovery path.
-That path deliberately skips finalizers and native cache teardown, so module
-roots and JS state accumulated across otherwise successful libraries. The
-worker then paid an increasing GC/transpile cost and eventually reported a
-timeout or lost batch result. Crash recovery must keep the discard path, but a
-successful boundary must use the ordinary `js_batch_reset()` /
-`runtime_reset_heap()` lifecycle so finalizers, module roots, and heap-bound
-caches are released under **D5.3.4**.
-
-The batch controller also checked its 4-GB RSS stop before attempting that
-successful recycle. A single large library could therefore make the reclaim
-branch unreachable. The normal path now recycles first and applies the hard
-cap to the post-recycle RSS. This preserves the OOM guard without mistaking a
-reclaimable transient heap for a persistent leak. The seven-library sequence
-(`acorn`, `ajv`, `alpine`, `bn`, `chalk`, `codemirror`, `fast_diff`) now reaches
-the final test with all expected output/status markers and no `BATCH_EXIT`.
-Remote commit `f0d079e` then regressed the cleanup watermark from 1 GB to the
-4-GB crash cap, recreating the same retention cliff for successful tests.
-Restoring the 1-GB watermark reduced the complete Test262 batch phase from
-**427.5 s to 153.0 s** and peak RSS from **1,376.9 MB to 800.4 MB**. These are
-source/runtime lifetime improvements, not timeout-policy changes.
-
-The GC fix also exposed two relocation hazards that are part of the same
-boundary contract: generator state-result code refreshed its `Array*` after
-number re-homing, and array-key enumeration refreshes the companion `Map*`
-after result-array growth. Native container pointers must never survive an
-allocation/compaction boundary unless they are reacquired from an exact root.
-
-### 3.6 Regression root cause: unified Set routed dynamic array writes through the slow kernel
-
-The remaining large-library timeout was a separate **D8.4.3** lowering
-regression. Tune5 correctly moved ordinary member writes to the shared
-`js_set` lane shell, but the shell treated a canonical numeric lane like an
-arbitrary property. A loop such as
-
-```js
-var a = new Array(10000);
-for (var j = 0; j < 10000; j++) a[j] = 0;
-```
-
-therefore paid key bridging, completion bookkeeping, descriptor/prototype
-dispatch, and generic array storage on every write, even though the receiver
-was the same ordinary array and the key was a canonical index. The current
-release control took about **7.4 s** versus **0.05 s** on the pre-regression
-binary; `lib_fast_diff.js` took about **30.8 s** versus **3.0 s**. Compiler
-timing showed parse/AST/MIR/link changes were small; generated-code execution
-and repeated indexed writes dominated the timeout.
-
-The fix keeps one semantic Set entry point and adds a narrow runtime completion
-probe, `js_elements_set_int_completion`. It handles only an ordinary tagged
-Array with a canonical non-negative index, no numeric companion descriptor,
-no dirty prototype numeric guard, no arguments/DOM exotic state, and writable
-extensibility/length conditions. It writes an existing dense value or hole, or
-appends contiguously, and returns the normal boolean Set completion. Any
-descriptor, accessor, prototype, sparse-gap, proxy, strict-policy, or exotic
-case returns `ItemNull` from the probe and stays on `js_set_completion_with_key`.
-Thus strict assignment still receives a false completion for
-`js_assignment_set_result`, while the hot path avoids repeating semantic work.
-This is a shared numeric-index dispatch contract, not a JS-only bypass: the
-same lane is available to the common MIR assignment boundary and falls back
-without changing observable behavior.
-
-Focused controls after the fix: the hole-array loop is about **0.65 s** in the
-release executable, `lib_fast_diff.js` is about **2.6–2.9 s**, and strict/sloppy
-non-writable-array probes retain their expected TypeError/no-op behavior. The
-MIR diagnostic remains informational; the timing gate credits only the
-source-to-linked-MIR interval defined in §2.2 and separately records execution
-to prevent this regression from being misdiagnosed as test orchestration.
-
-### 3.7 Semantic regressions from the same unified Set/Get migration
-
-The initial 118 Test262 regressions were not runner instability. They were
-observable omissions in the new shared property boundary (**D8.4.3**, **D6.2.2v2**):
-
-- primitive-base assignment rejected the base before prototype Proxy/accessor
-  dispatch; a boolean completion adapter now boxes it and leaves strict
-  throwing to the assignment policy;
-- String wrapper `length` was synthesized for reads but not own-descriptor and
-  `hasOwn` queries;
-- generic Array-method keys were limited to the 32-bit array-index lane, losing
-  valid `2^32-1..2^53-1` keys on array-like objects;
-- compact numeric-array prototypes were accepted by storage but dropped by
-  `js_set_prototype`, and Error objects bypassed their special property store.
-
-Focused probes for these kernels pass. The current merged tree's complete run
-executes all **40,261** baseline tests; after the 1-GB recycle it reaches
-**34,632 fully passing / 54 regressions / 359 non-fully-passing entries**. The
-recycle fixes the timeout/RSS regression, but the remaining failures reproduce
-in a fresh single-test process (for example, the TypedArray length-descriptor
-case), so they are semantic baseline work rather than batch scheduling noise.
-No baseline or partial manifest was changed to hide them.
-
 ---
 
 ## 4. Target compiler process
@@ -490,7 +373,208 @@ For each baseline/candidate capture:
 9. compare cache-state and frozen large-library manifests. A new cache hit, missing compilation, retry, renamed sample, or changed batch corpus invalidates the run unless explicitly reported as a separate experiment;
 10. keep raw TSV, summary Markdown, and manifest under `temp/ast_tune/`; copy final gate numbers into §13 of this checked-in plan.
 
-### 5.5 Phase 0 exit
+### 5.5 Optimization Contract Testing (Phase 0.5)
+
+**Purpose:** make compiler/runtime tuning decisions observable as testable
+contracts, not only as elapsed time or final semantic output. The ordinary JS
+tests remain the semantic gate; this phase adds a small deterministic suite
+that proves which cache, guard, IC, lowering demand, and fallback was selected.
+This gives the debugging/recovery work a durable regression oracle without
+coupling tests to MIR register names, pointer addresses, or incidental helper
+layout. The phase implements the measurement intent of **D8.6.4** at the
+decision level and preserves the common pass/lowering structure required by
+**D8.2.5–D8.2.6**.
+
+#### 5.5.1 `JsOptEvent` and `JsOptTrace` contract
+
+Add a test-facing, C-compatible trace API in the JS runtime/compiler layer.
+The exact file split may follow the existing runtime/profile modules, but the
+public shape is:
+
+```c
+typedef enum JsOptEvent {
+    JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
+    JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
+    JS_OPT_FACT_CACHE_HIT,
+    JS_OPT_FACT_CACHE_MISS,
+    JS_OPT_LOAD_IC_HIT_MONO,
+    JS_OPT_LOAD_IC_HIT_POLY,
+    JS_OPT_LOAD_IC_MISS,
+    JS_OPT_LOAD_IC_INSTALL_MONO,
+    JS_OPT_LOAD_IC_INSTALL_POLY,
+    JS_OPT_STORE_IC_HIT_MONO,
+    JS_OPT_STORE_IC_HIT_POLY,
+    JS_OPT_STORE_IC_MISS,
+    JS_OPT_STORE_IC_INSTALL_MONO,
+    JS_OPT_STORE_IC_INSTALL_POLY,
+    JS_OPT_REGEX_COMPILE_CACHE_HIT,
+    JS_OPT_REGEX_COMPILE_CACHE_MISS,
+    JS_OPT_REGEX_PERMANENT_CACHE_HIT,
+    JS_OPT_REGEX_FRESH_WRAPPER,
+    JS_OPT_REGEX_KEYLESS_REJECT,
+    JS_OPT_REGEX_CACHE_INVALIDATE,
+    JS_OPT_ARRAY_SET_FAST_HIT,
+    JS_OPT_ARRAY_SET_GUARD_FAIL,
+    JS_OPT_DYNAMIC_FUNCTION_FASTPATH,
+    JS_OPT_DYNAMIC_FUNCTION_CACHE_HIT,
+    JS_OPT_DYNAMIC_FUNCTION_CACHE_MISS,
+    JS_OPT_MIR_DIRECT_DESTINATION,
+    JS_OPT_MIR_DISCARD_ELISION,
+    JS_OPT_MIR_BRANCH_DIRECT,
+    JS_OPT_MIR_GENERIC_FALLBACK,
+    JS_OPT_MIR_BOX_VALUE,
+    JS_OPT_MIR_UNBOX_VALUE,
+    JS_OPT_MIR_ROOT_STORE,
+    JS_OPT_MODULE_CACHE_HIT,
+    JS_OPT_MODULE_CACHE_MISS,
+    JS_OPT_TLA_DEFERRED_BODY,
+    JS_OPT_TLA_DRAIN,
+    JS_OPT_EVENT_COUNT
+} JsOptEvent;
+
+typedef enum JsOptReason {
+    JS_OPT_REASON_NONE,
+    JS_OPT_REASON_HOLE_OR_SPARSE,
+    JS_OPT_REASON_PROTOTYPE_ACCESSOR,
+    JS_OPT_REASON_NOT_EXTENSIBLE,
+    JS_OPT_REASON_LENGTH_NOT_WRITABLE,
+    JS_OPT_REASON_CAPTURE_BEARING_SHORT_REGEX,
+    JS_OPT_REASON_KEYLESS_CACHE_ENTRY,
+    JS_OPT_REASON_SHAPE_CHANGED,
+    JS_OPT_REASON_REPRESENTATION_MISMATCH,
+    JS_OPT_REASON_TLA_PENDING,
+    JS_OPT_REASON_COUNT
+} JsOptReason;
+
+typedef enum JsOptTraceOutcome {
+    JS_OPT_OUTCOME_ATTEMPT,
+    JS_OPT_OUTCOME_TAKEN,
+    JS_OPT_OUTCOME_FALLBACK,
+    JS_OPT_OUTCOME_INVALIDATED
+} JsOptTraceOutcome;
+
+typedef struct JsOptTraceCounter {
+    uint64_t attempts;
+    uint64_t taken;
+    uint64_t fallback;
+    uint64_t invalidated;
+} JsOptTraceCounter;
+
+typedef struct JsOptTraceSnapshot {
+    uint32_t schema;
+    uint32_t enabled;
+    JsOptTraceCounter events[JS_OPT_EVENT_COUNT];
+    uint64_t reason_counts[JS_OPT_REASON_COUNT];
+} JsOptTraceSnapshot;
+
+void js_opt_trace_set_enabled(int enabled);
+void js_opt_trace_reset(void);
+void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
+                         JsOptTraceOutcome outcome);
+void js_opt_trace_snapshot(JsOptTraceSnapshot* out);
+```
+
+`JsOptReason` is a stable enum for guard/fallback causes, including
+`HOLE_OR_SPARSE`, `PROTOTYPE_ACCESSOR`, `NOT_EXTENSIBLE`,
+`LENGTH_NOT_WRITABLE`, `CAPTURE_BEARING_SHORT_REGEX`, `KEYLESS_CACHE_ENTRY`,
+`SHAPE_CHANGED`, `REPRESENTATION_MISMATCH`, and `TLA_PENDING`. The event and
+reason values are schema-versioned; adding a value is compatible, renumbering
+one is not.
+
+The first implementation stores the snapshot in the profile-enabled child
+process. This is safe for the isolated fixture harness (one child is one
+runtime/compilation sample); move ownership into `JsRuntimeState` before any
+in-process parallel contract runner is enabled. A test begins with reset, runs
+one isolated fixture, snapshots the counters, and then disables the trace. The
+existing `JS_EXEC_PROFILE` implementation remains the
+broad runtime profiler and its IC/shape counters should be reused rather than
+duplicated; `JsOptTrace` adds deterministic decision/fallback contracts that
+the broad profiler does not provide.
+
+Rules for the implementation:
+
+- normal/release execution has no allocation, clock read, file I/O, or string
+  formatting on the disabled path;
+- contract tests use a profile-enabled test binary or explicit test mode;
+  release timing captures remain instrumentation-free so G2/G3 are not
+  contaminated;
+- counters are per runtime/compilation sample, not process-global accumulators
+  shared by parallel GTests;
+- counters record decisions and reason IDs, never MIR register numbers,
+  addresses, hash-table iteration order, or helper symbol spelling;
+- an optional bounded event ring is available only for state-machine tests
+  (for example TLA drain ordering); bulk corpus runs use counters only;
+- trace records are emitted as a validated machine-readable protocol line and
+  are stripped before golden-output comparison, like `MIR_VOLUME`.
+
+#### 5.5.2 Optimization contract matrix
+
+Every optimization must have one row in the implementation ledger with these
+columns: `optimization_id`, precondition, guard, fast action, fallback,
+`JsOptEvent`/reason values, fixture, semantic invariant, and MIR/timing metric.
+The first required rows are:
+
+| Optimization | Positive fixture assertion | Required guard/fallback assertion |
+|---|---|---|
+| Regex compile/permanent cache | repeated large literal has one compile and a subsequent cache hit | short capture-bearing literal creates a fresh wrapper; no keyless entry is stored in the compile cache; invalidation releases only its own entry |
+| Dense array indexed store | dense contiguous array takes the direct store path | hole/sparse, prototype setter, non-extensible array, or non-writable length records the reason and uses the generic path |
+| Named load/store IC | first access installs mono/polymorphic state and later accesses hit it | shape/key/type change records a miss and invalidation/transition |
+| Dynamic `Function` fast path | simple eligible body records the parser fast path | comments, ASI-sensitive, reserved/complex syntax records the normal-parser fallback |
+| Demand-driven MIR lowering | discard, direct branch, and direct destination avoid unnecessary value materialization | representation mismatch records generic `VALUE_ANY` fallback; boxing/unboxing and root stores remain explicit under **D2.4.1–D2.4.3** and **D5.3.4** |
+| Module/TLA settlement | deferred body is drained before namespace resolution | pending async module is not resolved early and a module is not drained twice |
+| Scope/fact indexes | repeated lookups/fact requests hit the indexed cache | mutation or unavailable fact records a miss and rebuild/fallback |
+
+Each positive case must also assert the ordinary result. Each negative case
+must assert the result/error and the reasoned fallback. This is important for
+**D8.4.3**: an optimization may not hide or replace the merged JS `Item` error
+lane merely to make a fast-path counter increase.
+
+#### 5.5.3 Contract-test harness
+
+- [x] Add `test/test_js_opt_gtest.cpp`; its inline fixture sources are written
+  to `temp/js_opt_contract/` so each decision remains child-isolated without a
+  second source-of-truth fixture tree.
+- [x] Run each fixture in an isolated runtime/child process, enable the trace,
+  parse exactly one `JS_OPT_TRACE schema=1 ...` record, and fail on missing,
+  duplicate, malformed, unknown-schema, or unknown-event records.
+- [x] Assert semantic output/error plus the expected `attempts`, `taken`,
+  `fallback`, `invalidated`, and reason counters. Use inequalities only where
+  repeated execution legitimately changes counts.
+- [x] Add trace-on/trace-off differential checks for semantic output and
+  fail-closed trace-file creation. Both child runs keep the same profile mode,
+  toggle only `JS_OPT_TRACE`, and compare their finalized `LAMBDA_MIR_DUMP_PATH`
+  artifacts after canonicalizing process-local MIR addresses.
+- [ ] Add a bounded event-sequence assertion for TLA/module settlement and any
+  future cache ownership state machine; do not use sequence assertions for
+  ordinary hot-loop counts.
+- [x] Add parser tests for duplicated, schema-mismatched, unknown-event, and
+  truncated trace records, reusing the fail-closed timing/MIR protocol policy
+  from §5.2–§5.3.
+- [ ] Run a single trace-enabled smoke sample for each frozen large JS library
+  (`lib_*` plus `underscore_lib`) to prove the intended optimization is
+  exercised. Do not run the full Test262 corpus with tracing enabled by
+  default.
+- [ ] Keep `test_js_gtest` and `test262-baseline` as semantic gates; contract
+  tests are additional internal-path gates, not replacements for them.
+
+#### 5.5.4 Phase 0.5 exit
+
+- [ ] Every optimization row has one positive and one guard/fallback fixture.
+- [x] The contract executable passes with tracing enabled and disabled, with
+  identical semantic results and equivalent finalized MIR for every fixture in
+  the current matrix. The comparison is structural after removing only
+  process-local addresses; register names, helper calls, control flow, and
+  constants remain checked.
+- [ ] All trace records are deterministic, per-sample, schema-validated, and
+  isolated across sequential and parallel test execution.
+- [ ] Existing `JS_EXEC_PROFILE`, timing, and MIR-volume diagnostics continue
+  to parse without schema drift.
+- [ ] Release timing captures contain no contract instrumentation and remain
+  eligible for G2/G3.
+- [ ] Each tuning change updates the contract matrix before changing the
+  optimization or cache policy; a missing contract row blocks that slice.
+
+### 5.6 Phase 0 exit
 
 - [ ] Instrumentation-on versus instrumentation-off wall time differs by ≤1% on both suites.
 - [x] Instrumentation changes no AST dump, MIR budget, output, or test result (`utils/check_ast_tune_instrumentation.sh`).
@@ -732,6 +816,7 @@ make release
 make build-test
 ./test/test_lambda_gtest.exe
 ./test/test_js_gtest.exe
+./test/test_js_opt_gtest.exe
 ./test/test_mir_emission_gtest.exe
 ./test/test_js_mir_emission_gtest.exe
 ./test/test_mir_ratchet_gtest.exe
@@ -745,6 +830,7 @@ Use the real executable names produced by `make build-test`; if a target is filt
 ```bash
 make test-lambda-baseline
 make test262-baseline
+make test-js-opt
 ```
 
 `make node-baseline` is not part of this plan's default closeout. Run it only if a slice intentionally changes Node compatibility or the user separately requests that gate.
@@ -795,6 +881,8 @@ The comparison must print and the final plan update must record:
 | timing noise | internal timers, release mode, manifest validation, 5/9-run median | invalidate capture and repeat; never relax percentages |
 | LOC gate gamed by file moves/formatting | anchor-tree union counter + source-scope audit + deletion ledger | add moved path back to scope or reject the claimed reduction |
 | cache/lazy path hides work | cache-state/sample manifest, explicit lazy/interpreter policy, and cold rollback comparison | report deferred native generation separately; only source-to-linked-MIR work contributes to G2/G3 |
+| optimization trace changes the selected path or adds hot-loop cost | trace-on/trace-off differential fixtures, disabled fast path, separate profile-enabled contract binary | disable the trace at the runtime boundary; keep release timing captures instrumentation-free and revert only the affected event hook |
+| internal contract overfits implementation details | stable event/reason IDs, no register/pointer/helper-name assertions, positive plus guard/fallback fixtures | replace the assertion with a semantic decision contract or remove the event; do not freeze incidental MIR layout |
 
 Every implementation slice is independently revertible and leaves one authoritative path. Do not keep two production implementations behind permanent flags. Temporary equivalence flags/assertions are removed in the same phase that deletes the old path.
 
@@ -847,19 +935,12 @@ MIR's post-finish operand mutation contract is not established for all
 backends. The safe fallback is retained until a demand producer can prove the
 full **D8.4.3** error/root contract.
 
-The Tune5 indexed-write repair is now included in the diagnostic ledger: the
-release `new Array(10000)` dynamic-write control is **~0.65 s** after the
-completion probe (about **7.4 s** before it), and `test/js/lib_fast_diff.js`
-is **~2.6–2.9 s** (about **30.8 s** before it). The emitted MIR record for the
-library remains deterministic at `functions=73`, `insns=36848`; the reduction
-is deliberately attributed to runtime execution of the generated indexed
-write path, not claimed as MIR-volume credit.
-
 ### 13.2 Phase status
 
 | Phase | Status | Evidence |
 |---|---|---|
 | 0 — measurement/guardrails | completed | Common timing/MIR protocol, GTest parsers, TSV capture summaries, clean five-run Lambda/JS manifests, instrumentation equivalence, and finalized-artifact equivalence are recorded |
+| 0.5 — optimization contract testing | core implementation landed; matrix expansion remains | `test_js_opt_gtest` passes 8/8 with profile tracing, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; runtime ownership migration and the remaining optimization rows remain |
 | 1 — traversal/index/binding | in progress | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
 | 2 — facts/pass manager | in progress | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
 | 3 — demand-driven `MirValue` | in progress | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
@@ -877,7 +958,7 @@ write path, not claimed as MIR-volume credit.
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | historical captures retained for diagnosis only; incomplete captures are rejected | exact timing manifest | open until post-rejection recapture |
-| G0 regressions | current baselines | `make test-lambda-baseline` passed 2104/2104 input, 1597/1597 runtime, 38/38 MIR, 16/16 ratchet, 16/16 JS MIR, 19/19 TS, 62/62 GC, 341/341 JS GTest, 716/716 Lambda GTest; Test262 executed 40261 with 40161 fully passing, 80 regressions, 20 retry-only partials; focused property probes and performance controls pass | open | remaining Test262 semantic clusters must be fixed and both real baseline gates rerun |
+| G0 regressions | current baselines | `make test-lambda-baseline` verified input 2104/2104 plus Lambda runtime 1598/1598 (3702/3702 total); focused MIR ratchet 16/16 and contract 8/8 also pass | Lambda baseline green; Test262 still open | the release Test262 runner remains unverified: a single-worker capture collected 40,082/40,261 results before the typed-array `slice` batch worker crashed and recovery was interrupted; no partial result is accepted as a baseline pass |
 
 ### 13.4 Deletion ledger
 
@@ -909,7 +990,8 @@ This plan is complete only when all statements are true:
 - [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4**).
 - [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4**).
 - [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4**).
-- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Lambda baseline is currently green; Test262 is explicitly non-green at 40161/40261 fully passing with 80 regressions and 20 retry-only partials, so semantic follow-up remains open.
+- [ ] Optimization Contract Testing passes: each material tuning path has a positive and guard/fallback fixture with deterministic `JsOptTrace` events; trace-on/trace-off output, errors, and finalized MIR are identical (**D8.2.5–D8.2.6**, **D8.6.4**).
+- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3702/3702 (input 2104/2104 plus Lambda runtime 1598/1598), while `make test262-baseline` remains open because its runner hit a typed-array `slice` batch-worker crash before completing recovery; the incomplete 40,082/40,261 capture is not treated as a pass.
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 
 Until every item is checked, the unified-AST tuning continuation remains open.

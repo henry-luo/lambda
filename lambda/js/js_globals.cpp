@@ -6944,6 +6944,17 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         return js_set_primitive_completion(target_root.get(), key_root.get(),
             value_root.get());
     }
+    if ((target_type == LMD_TYPE_ERROR || js_is_resting_error(target_root.get())) &&
+        receiver_root.get().item == target_root.get().item) {
+        // Error values use a tagged carrier plus a traced property side-map;
+        // they are ECMAScript Objects even though they are not ordinary Maps.
+        // Handle their own Set before the generic object-type guard (S#7.3.2).
+        JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key_root.get()));
+        key_root.set(key);
+        Item stored = js_set_error_property_completion(target_root.get(),
+            key_root.get(), value_root.get());
+        return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
+    }
     JS_RETURN_IF_ERROR(js_require_object_type(target_root.get(), "set"));
     // 3-arg call sites (old transpiler path) pass ItemNull; treat as receiver = target.
     if (receiver.item == ItemNull.item) {
@@ -7029,6 +7040,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
     }
     if (receiver.item == target.item && js_is_js_array(target) &&
+        !js_is_arguments_exotic_array(target) &&
         get_type_id(key) == LMD_TYPE_STRING) {
         String* set_key = it2s(key);
         if (set_key && set_key->len == 6 && strncmp(set_key->chars, "length", 6) == 0) {
@@ -7473,12 +7485,15 @@ static Item js_make_data_descriptor(Item value, bool writable, bool enumerable,
     Rooted<Item> desc_root(roots, js_new_object());
     // Descriptor construction changes object shapes; root the result and value
     // so a GC during any property transition cannot invalidate either handle.
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, value_root.get());
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))},
+    // Descriptor construction is DefineOwn storage, not another ordinary Set:
+    // routing these fields through completion would recursively create a
+    // receiver descriptor for the descriptor object itself.
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, value_root.get());
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))},
                     (Item){.item = b2it(writable)});
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))},
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))},
                     (Item){.item = b2it(enumerable)});
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))},
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))},
                     (Item){.item = b2it(configurable)});
     return desc_root.get();
 }
@@ -7491,19 +7506,22 @@ static Item js_make_accessor_descriptor(Item getter, Item setter, bool enumerabl
     Rooted<Item> desc_root(roots, js_new_object());
     // Accessor values can be heap objects too, so keep both callbacks rooted
     // while descriptor shape transitions allocate.
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("get", 3))}, getter_root.get());
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("set", 3))}, setter_root.get());
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))},
+    // Accessor descriptor fields are installed directly to avoid invoking an
+    // inherited setter from a polluted Object.prototype (S#7.3.2).
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("get", 3))}, getter_root.get());
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("set", 3))}, setter_root.get());
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))},
                     (Item){.item = b2it(enumerable)});
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))},
+    js_define_own_key_storage(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))},
                     (Item){.item = b2it(configurable)});
     return desc_root.get();
 }
 
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
-    RootFrame roots(4);
+    RootFrame roots(5);
     Rooted<Item> object_root(roots, obj);
     Rooted<Item> name_root(roots, name);
+    Rooted<Item> original_name_root(roots, name);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> descriptor_root(roots, ItemNull);
     // v20: GOPD should accept primitives (ES spec uses ToObject internally)
@@ -7513,28 +7531,17 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         (obj.item == 0 && type != LMD_TYPE_INT)) {
         return js_throw_type_error("Cannot convert undefined or null to object");
     }
-    {
-        Item proxy_result = ItemNull;
-        if (js_property_exotic_adapter(
-                JS_EXOTIC_GET_OWN_PROPERTY_DESCRIPTOR, object_root.get(), 0,
-                name_root.get(), object_root.get(),
-                ItemNull, ItemNull, false, &proxy_result)) return proxy_result;
-    }
-
-    // Exotic descriptor hooks may allocate while inspecting the original key;
-    // reload both operands before ToPropertyKey so no pre-hook Item points at
-    // a compacted heap string (D5.4.3).
-    obj = object_root.get();
-    name = name_root.get();
-
-    // Property reflection preserves Symbol identity; ToString would turn it
-    // into a user-visible spelling and merge it with an ordinary string key.
+    // Object.getOwnPropertyDescriptor performs ToPropertyKey before it calls
+    // the target's [[GetOwnProperty]].  Passing a raw nullish key to an
+    // exotic adapter first incorrectly raises instead of using the "null"
+    // property name (S#7.1.19).
+    bool original_name_is_symbol = js_key_is_symbol(name);
     Item name_str_item = js_to_property_key(name);
     name_root.set(name_str_item);
     if (item_is_error(name_str_item)) return name_str_item;
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
-    // D5.1.1: ToPropertyKey may collect; reload both operands from their exact
-    // roots before any exotic-object hook observes them.
+    // ToPropertyKey may collect; reload both operands from their exact roots
+    // before any exotic-object hook observes them (D5.1.1).
     obj = object_root.get();
     name = name_root.get();
     type = get_type_id(obj);
@@ -7545,6 +7552,15 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // whose toString returns the actual key — see test
     // built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-2-42).
     name = name_str_item;
+
+    {
+        Item proxy_result = ItemNull;
+        if (js_property_exotic_adapter(
+                JS_EXOTIC_GET_OWN_PROPERTY_DESCRIPTOR, object_root.get(), 0,
+                original_name_is_symbol ? original_name_root.get() : name_root.get(),
+                object_root.get(),
+                ItemNull, ItemNull, false, &proxy_result)) return proxy_result;
+    }
 
     if (property_key_requires_identity(name_str)) {
         JsPropertyDescriptor pd = {};
@@ -7605,12 +7621,6 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             return make_js_undefined();
         }
         // fall through: explicit own accessor — return real descriptor below
-    }
-
-    if (type == LMD_TYPE_MAP && js_class_id(obj) == JS_CLASS_REGEXP &&
-        js_regexp_virtual_prop_name(name_str->chars, (int)name_str->len)) {
-        ShapeEntry* regexp_prop = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-        if (!regexp_prop || !jspd_is_accessor(regexp_prop)) return make_js_undefined();
     }
 
     // Function properties: length, name, prototype
@@ -8176,7 +8186,11 @@ static bool js_string_exotic_index_in_range(Item obj, String* key) {
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) {
     // Proxy [[DefineOwnProperty]] trap
     if (js_is_proxy(obj)) {
-        JS_ASSIGN_OR_RETURN_INTO(name, js_to_property_key(name));
+        // Proxy [[DefineOwnProperty]] observes Symbol keys by identity; only
+        // ordinary targets canonicalize them to NameRecords (S#10.5.6).
+        if (!js_key_is_symbol(name)) {
+            JS_ASSIGN_OR_RETURN_INTO(name, js_to_property_key(name));
+        }
         Item proxy_result = ItemNull;
         if (js_property_exotic_adapter(JS_EXOTIC_DEFINE_OWN, obj, 0, name,
                 obj, descriptor, ItemNull, false, &proxy_result)) {
@@ -12661,7 +12675,11 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         for (int64_t i = 0; i < len; i++) {
             if (i > 0) strbuf_append_char(sb, ',');
             js_stringify_indent(sb, gap, depth + 1);
-            Item idx_key = js_json_array_index_key(i);
+            // SerializeJSONProperty receives the array index as a String key;
+            // the numeric carrier is only an internal lookup optimization.
+            // Keeping the string form here preserves the observable replacer
+            // and toJSON argument contract (S#24.5.2.1).
+            JS_ASSIGN_OR_RETURN(idx_key, js_to_property_key(js_json_array_index_key(i)));
             JS_ASSIGN_OR_RETURN(elem, js_get_reference(value, idx_key));
             // serialize element; if undefined/function/symbol, write "null" in array context
             bool wrote = false;
@@ -15611,7 +15629,8 @@ extern "C" Item js_get_global_property(Item key) {
     Item lex = js_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
     Item global = js_get_global_this();
-    return js_get_key_default(global, key);
+    Item result = js_get_key_default(global, key);
+    return result;
 }
 
 static Item js_get_global_property_strict_without_with(Item key) {
@@ -15659,7 +15678,8 @@ extern "C" Item js_get_global_property_reference(Item key, int64_t strict_refere
     // This entry already performed Object Environment Record HasBinding.
     // Calling the public strict lookup repeated the same Proxy [[Has]] trap
     // before reaching the global environment fallback.
-    return js_get_global_property_strict_without_with(key);
+    Item result = js_get_global_property_strict_without_with(key);
+    return result;
 }
 
 extern "C" int64_t js_global_binding_exists(Item key) {
@@ -15686,6 +15706,19 @@ static Item js_throw_binding_reference_error(Item key) {
     return js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
 }
 
+static Item js_set_global_target_property(Item target, Item key, Item value,
+        bool strict) {
+    Item set_result = js_set_completion_with_key(target, key, value, target);
+    if (item_is_error(set_result)) return set_result;
+    if (strict && !it2b(set_result)) {
+        // The old global-assignment bridge discarded OrdinarySet's false
+        // completion by calling the value-returning Set adapter, so strict
+        // writes to read-only globals silently succeeded (S#7.4).
+        return js_throw_type_error("Cannot set read-only global property");
+    }
+    return js_status_ok();
+}
+
 static Item js_set_global_property_impl(Item key, Item value, bool strict) {
     // Check with-scope stack first — assignments inside 'with' resolve to scope object
     if (js_with_stack_depth > 0) {
@@ -15698,14 +15731,12 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
                     js_last_with_binding_valid = false;
                     JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
                     if (it2b(in_result)) {
-                        Item set_result = js_set_key_default(scope_obj, key, value);
-                        return item_is_error(set_result) ? set_result : js_status_ok();
+                        return js_set_global_target_property(scope_obj, key, value, strict);
                     }
                     if (strict) {
                         return js_throw_binding_reference_error(key);
                     }
-                    Item set_result = js_set_key_default(scope_obj, key, value);
-                    return item_is_error(set_result) ? set_result : js_status_ok();
+                    return js_set_global_target_property(scope_obj, key, value, strict);
                 }
                 JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
                 if (it2b(in_result)) {
@@ -15721,8 +15752,7 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
                     if (!it2b(second_in)) {
                         continue;
                     }
-                    Item set_result = js_set_key_default(scope_obj, key, value);
-                    return item_is_error(set_result) ? set_result : js_status_ok();
+                    return js_set_global_target_property(scope_obj, key, value, strict);
                 }
             }
         }
@@ -15735,8 +15765,7 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
     if (strict && !it2b(global_in)) {
         return js_throw_binding_reference_error(key);
     }
-    Item set_result = js_set_key_default(global, key, value);
-    return item_is_error(set_result) ? set_result : js_status_ok();
+    return js_set_global_target_property(global, key, value, strict);
 }
 
 // Tune8 §2.2: js_set_global_property absorbs js_set_global_property_strict.
@@ -16391,7 +16420,13 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 #define global_builtin_fn_cache (js_runtime_state.constructors.global_builtin_functions)
 #define global_builtin_fn_cache_init (js_runtime_state.constructors.global_builtin_initialized)
 
+// The preamble snapshot owns the realm's catalog-backed global functions too;
+// partial reset must keep their identity alongside Number.parseFloat and the
+// Function.prototype restricted accessors (D6.2.2v2).
+extern "C" bool js_proto_snapshot_is_valid();
+
 void js_global_builtin_fn_cache_reset() {
+    if (js_proto_snapshot_is_valid()) return;
     global_builtin_fn_cache_init = false;
 }
 

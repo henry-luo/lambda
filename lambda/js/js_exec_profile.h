@@ -6,6 +6,84 @@
 extern "C" {
 #endif
 
+// Stable optimization decisions consumed by focused JS contract tests. The
+// broad execution profiler below remains the source for elapsed-time and
+// aggregate IC reports.
+typedef enum JsOptEvent {
+    JS_OPT_SCOPE_LOOKUP_CACHE_HIT = 0,
+    JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
+    JS_OPT_FACT_CACHE_HIT,
+    JS_OPT_FACT_CACHE_MISS,
+    JS_OPT_LOAD_IC_HIT_MONO,
+    JS_OPT_LOAD_IC_HIT_POLY,
+    JS_OPT_LOAD_IC_MISS,
+    JS_OPT_LOAD_IC_INSTALL_MONO,
+    JS_OPT_LOAD_IC_INSTALL_POLY,
+    JS_OPT_STORE_IC_HIT_MONO,
+    JS_OPT_STORE_IC_HIT_POLY,
+    JS_OPT_STORE_IC_MISS,
+    JS_OPT_STORE_IC_INSTALL_MONO,
+    JS_OPT_STORE_IC_INSTALL_POLY,
+    JS_OPT_REGEX_COMPILE_CACHE_HIT,
+    JS_OPT_REGEX_COMPILE_CACHE_MISS,
+    JS_OPT_REGEX_PERMANENT_CACHE_HIT,
+    JS_OPT_REGEX_FRESH_WRAPPER,
+    JS_OPT_REGEX_KEYLESS_REJECT,
+    JS_OPT_REGEX_CACHE_INVALIDATE,
+    JS_OPT_ARRAY_SET_FAST_HIT,
+    JS_OPT_ARRAY_SET_GUARD_FAIL,
+    JS_OPT_DYNAMIC_FUNCTION_FASTPATH,
+    JS_OPT_DYNAMIC_FUNCTION_CACHE_HIT,
+    JS_OPT_DYNAMIC_FUNCTION_CACHE_MISS,
+    JS_OPT_MIR_DIRECT_DESTINATION,
+    JS_OPT_MIR_DISCARD_ELISION,
+    JS_OPT_MIR_BRANCH_DIRECT,
+    JS_OPT_MIR_GENERIC_FALLBACK,
+    JS_OPT_MIR_BOX_VALUE,
+    JS_OPT_MIR_UNBOX_VALUE,
+    JS_OPT_MIR_ROOT_STORE,
+    JS_OPT_MODULE_CACHE_HIT,
+    JS_OPT_MODULE_CACHE_MISS,
+    JS_OPT_TLA_DEFERRED_BODY,
+    JS_OPT_TLA_DRAIN,
+    JS_OPT_EVENT_COUNT
+} JsOptEvent;
+
+typedef enum JsOptReason {
+    JS_OPT_REASON_NONE = 0,
+    JS_OPT_REASON_HOLE_OR_SPARSE,
+    JS_OPT_REASON_PROTOTYPE_ACCESSOR,
+    JS_OPT_REASON_NOT_EXTENSIBLE,
+    JS_OPT_REASON_LENGTH_NOT_WRITABLE,
+    JS_OPT_REASON_CAPTURE_BEARING_SHORT_REGEX,
+    JS_OPT_REASON_KEYLESS_CACHE_ENTRY,
+    JS_OPT_REASON_SHAPE_CHANGED,
+    JS_OPT_REASON_REPRESENTATION_MISMATCH,
+    JS_OPT_REASON_TLA_PENDING,
+    JS_OPT_REASON_COUNT
+} JsOptReason;
+
+typedef enum JsOptTraceOutcome {
+    JS_OPT_OUTCOME_ATTEMPT = 0,
+    JS_OPT_OUTCOME_TAKEN,
+    JS_OPT_OUTCOME_FALLBACK,
+    JS_OPT_OUTCOME_INVALIDATED
+} JsOptTraceOutcome;
+
+typedef struct JsOptTraceCounter {
+    uint64_t attempts;
+    uint64_t taken;
+    uint64_t fallback;
+    uint64_t invalidated;
+} JsOptTraceCounter;
+
+typedef struct JsOptTraceSnapshot {
+    uint32_t schema;
+    uint32_t enabled;
+    JsOptTraceCounter events[JS_OPT_EVENT_COUNT];
+    uint64_t reason_counts[JS_OPT_REASON_COUNT];
+} JsOptTraceSnapshot;
+
 typedef enum JsExecProfileEvent {
     JS_EXEC_PROF_PROPERTY_GET = 0,
     JS_EXEC_PROF_PROPERTY_SET,
@@ -92,6 +170,14 @@ typedef enum JsStoreICProfileReason {
 
 extern int g_js_exec_profile_mode;
 
+int js_opt_trace_is_enabled(void);
+void js_opt_trace_set_enabled(int enabled);
+void js_opt_trace_reset(void);
+void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
+                         JsOptTraceOutcome outcome);
+void js_opt_trace_snapshot(JsOptTraceSnapshot* out);
+void js_opt_trace_dump(void);
+
 int js_exec_profile_mode(void);
 void js_exec_profile_reset(void);
 uint64_t js_exec_profile_enter(JsExecProfileEvent event);
@@ -137,6 +223,17 @@ static inline void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_
 }
 static inline void js_exec_profile_name_lookup_bypassed(void) {}
 static inline void js_exec_profile_dump(void) {}
+static inline int js_opt_trace_is_enabled(void) { return 0; }
+static inline void js_opt_trace_set_enabled(int enabled) { (void)enabled; }
+static inline void js_opt_trace_reset(void) {}
+static inline void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
+        JsOptTraceOutcome outcome) {
+    (void)event;
+    (void)reason;
+    (void)outcome;
+}
+static inline void js_opt_trace_snapshot(JsOptTraceSnapshot* out) { (void)out; }
+static inline void js_opt_trace_dump(void) {}
 static inline void js_profile_property_set_site(uint32_t label_name_id) { (void)label_name_id; }
 static inline uint64_t js_profile_property_set_branch_enter(const char* label) {
     (void)label;

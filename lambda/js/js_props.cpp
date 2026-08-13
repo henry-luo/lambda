@@ -167,7 +167,9 @@ extern void fn_map_set(Item map_item, Item key, Item value);
 
 static Map* js_props_storage_map(Item object) {
     TypeId t = get_type_id(object);
-    if (t == LMD_TYPE_MAP) return object.map;
+    // Typed Lambda objects share Map's shape/data layout; treating them as a
+    // separate storage kind made private-field Set skip the actual slot (D4.2).
+    if (t == LMD_TYPE_MAP || t == LMD_TYPE_OBJECT) return object.map;
     if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
         Array* arr = object.array;
         return js_array_props(arr);
@@ -260,13 +262,20 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item k
     if (!name) return JS_SHAPE_SLOT_ABSENT;
     NameId name_id = name && string_is_pooled(name) ? name_ref_id(name)
         : NAME_ID_NONE;
-    // Keep this path on the same NameId/byte-confirmed seam as the legacy
-    // wrapper, while preserving the packed-data provenance for the hot Get.
-    return name_id != NAME_ID_NONE
-        ? js_own_shape_slot_status_impl(object, NULL, 0, name_id, false,
-            out_slot, out_se, out_borrowed)
-        : js_own_shape_slot_status_impl(object, name->chars, (int)name->len,
-            NAME_ID_NONE, true, out_slot, out_se, out_borrowed);
+    // Preserve the legacy extension-map allowance for pooled NameIds.  A
+    // pooled key may move from the primary shape to the extension map after a
+    // shape transition; disabling that probe loses valid properties.
+    if (name_id != NAME_ID_NONE) {
+        NameRef resolved = name_pool_resolve_id(context ? context->name_pool : NULL,
+            name_id);
+        bool allow_ext = resolved && property_key_kind(resolved) == NAME_KEY_STRING;
+        return js_own_shape_slot_status_impl(object,
+            allow_ext ? resolved->chars : NULL,
+            allow_ext ? (int)resolved->len : 0, name_id, allow_ext,
+            out_slot, out_se, out_borrowed);
+    }
+    return js_own_shape_slot_status_impl(object, name->chars, (int)name->len,
+        NAME_ID_NONE, true, out_slot, out_se, out_borrowed);
 }
 
 extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
@@ -1391,7 +1400,10 @@ extern "C" Item js_delete(Item target, JsPropertyLane lane,
     Rooted<Item> key_root(roots,
         js_property_lane_bridge_key_or_error(lane, observable_key));
     if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
-    return js_reflect_delete_property(target_root.get(), key_root.get());
+    // The delete operator may hold a Reference whose base is a primitive;
+    // Reflect.deleteProperty's public object check would incorrectly turn an
+    // out-of-range string element into a TypeError object (D6.2.2v2).
+    return js_delete_property(target_root.get(), key_root.get());
 }
 
 extern "C" Item js_has_property(Item target, JsPropertyLane lane,

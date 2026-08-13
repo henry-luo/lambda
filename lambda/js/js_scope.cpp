@@ -1,5 +1,6 @@
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
+#include "js_exec_profile.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
@@ -286,9 +287,13 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
             hashmap_get(tp->scope_lookup_cache, &probe);
         if (cached) {
             if (g_js_scope_counters_enabled) g_js_scope_counters.cache_hits++;
+            js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             return cached->found ? cached->result : NULL;
         }
         if (g_js_scope_counters_enabled) g_js_scope_counters.cache_misses++;
+        js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
         NameEntry* result = NULL;
         JsScope* scan_scope = scope;
         while (scan_scope && !result) {
@@ -338,9 +343,13 @@ NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
             hashmap_get(tp->scope_lookup_cache, &probe);
         if (cached) {
             if (g_js_scope_counters_enabled) g_js_scope_counters.cache_hits++;
+            js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             return cached->found ? cached->result : NULL;
         }
         if (g_js_scope_counters_enabled) g_js_scope_counters.cache_misses++;
+        js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
     }
     if (!tp->current_scope) return NULL;
 

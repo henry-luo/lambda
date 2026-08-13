@@ -2360,6 +2360,12 @@ int main(int argc, char *argv[]) {
             const char* tune6_timing_env = getenv("JS_TRANSPILE_TIMING");
             bool tune6_timing = tune6_timing_env && tune6_timing_env[0] &&
                                 strcmp(tune6_timing_env, "0") != 0;
+            if (getenv("JS_OPT_TRACE")) {
+                // Initialize the profile lifecycle even when a fixture takes
+                // no instrumented branch; otherwise a zero-event contract
+                // sample would never register its final trace record.
+                (void)js_exec_profile_mode();
+            }
             const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
             bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
                                    strcmp(compiler_timing_env, "0") != 0;

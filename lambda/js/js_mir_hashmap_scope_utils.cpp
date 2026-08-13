@@ -695,6 +695,12 @@ void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLan
         log_error("js-mir: attempt to emit NULL structured label — skipping");
         return;
     }
+    // Structured labels can be entered from an abrupt edge.  A cached property
+    // key register defined in an unreachable predecessor therefore does not
+    // dominate the handler (for example `throw x; p = 1;` followed by `catch`
+    // reading `p`).  Re-materialize the key at every merged label so MIR never
+    // consumes an uninitialized root slot (D8.4.3).
+    jm_clear_boxed_float_const_cache(mt);
     if (mt->in_async && !mt->in_generator && state != JS_ERROR_LANE_SET)
         mt->last_call_result_reg = 0;
     jm_error_lane_set_state(mt, state == JS_ERROR_LANE_UNREACHABLE ? JS_ERROR_LANE_UNKNOWN : state);

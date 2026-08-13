@@ -4687,6 +4687,21 @@
             "icon": "🟨"
           },
           {
+            "source": "test/test_js_opt_gtest.cpp",
+            "name": "JavaScript Optimization Contract Tests",
+            "category": "extended",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_js_opt_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "⚙️"
+          },
+          {
             "source": "test/test_compiler_pass_gtest.cpp",
             "name": "Compiler Pass Manager Tests",
             "dependencies": [

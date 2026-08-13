@@ -527,7 +527,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
-	    ensure-test262-gtest test-js-exception-catalog test-js-callable-catalog test262-baseline test262-full \
+	    ensure-test262-gtest test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
@@ -607,6 +607,7 @@ help:
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
+	@echo "  test-js-opt   - Run JS optimization contract tests with the profile child"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
@@ -2566,6 +2567,10 @@ test-extended: build-test
 	@echo "Running EXTENDED test suites only..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=extended --parallel
 	@$(MAKE) dom-ui-run
+
+test-js-opt: build-test build-debug-profile
+	@echo "Running JavaScript optimization contract tests..."
+	@LAMBDA_JS_OPT_EXE=./lambda-debug-profile.exe ./test/test_js_opt_gtest.exe --gtest_color=no
 
 test-library: build
 	@echo "Running library test suite..."
