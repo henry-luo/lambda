@@ -56,8 +56,10 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
 # known-failure inventories are not part of the fast Radiant baseline gate.
 RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
-# These are the native projects selected by test-lambda-baseline. The
-# concurrency and Node preliminary projects remain excluded by that runner.
+# These are the native projects selected by test-lambda-baseline. Keep this
+# list aligned with the runner's non-extended config projects; otherwise a
+# clean baseline run reports a missing executable. The concurrency and Node
+# preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_gtest \
 	test_mir_gc_stress_gtest \
@@ -72,6 +74,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \
+	test_compiler_pass_gtest \
 	test_js_bt_regex_gtest \
 	test_js_coerce_gtest \
 	test_lambda_std_gtest \

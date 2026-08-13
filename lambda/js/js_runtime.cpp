@@ -645,6 +645,19 @@ static inline Item js_native_function_source_item() {
     return (Item){.item = s2it(heap_create_name(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN))};
 }
 
+static Item js_named_native_function_source_item(const String* name) {
+    if (!name || name->len == 0) return js_native_function_source_item();
+    // Native constructor source must retain its callable identity: libraries
+    // compare this text to distinguish Object, DataView, and other builtins.
+    StrBuf* source = strbuf_new_cap((size_t)name->len + JS_NATIVE_FUNCTION_SOURCE_LEN);
+    strbuf_append_str(source, "function ");
+    strbuf_append_str_n(source, name->chars, name->len);
+    strbuf_append_str(source, "() { [native code] }");
+    Item result = (Item){.item = s2it(heap_create_name(source->str, source->length))};
+    strbuf_free(source);
+    return result;
+}
+
 static Item js_function_prototype_call_target() {
     return make_js_undefined();
 }
@@ -12191,6 +12204,9 @@ Item js_intrinsic_function_to_string_body(Item callee, Item this_value,
             return (Item){.item = s2it(fn->source_text)};
         }
 #undef JS_VALID_SOURCE_PTR
+        if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || fn->bound_args)) {
+            return js_named_native_function_source_item(fn->name);
+        }
     }
     return js_native_function_source_item();
 }
