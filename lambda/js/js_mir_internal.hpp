@@ -5,6 +5,7 @@
 #include "js_mir_context.hpp"
 #include "js_runtime_state.hpp"
 #include "../runtime/heap_api.h"
+#include "../runtime/mir_policy.hpp"
 
 extern "C" void *import_resolver(const char *name);
 extern __thread EvalContext* context;
@@ -21,10 +22,10 @@ extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
 extern int g_js_force_document_interp;
 #define JM_LARGE_FUNC_INSN_THRESHOLD 10000
-#define JM_LARGE_MODULE_INSN_THRESHOLD 100000
+#define JM_LARGE_MODULE_INSN_THRESHOLD MIR_LARGE_MODULE_INSN_THRESHOLD
 // Tune6: in a document/Radiant context (cold vendor JS), use the MIR interpreter
 // for modules above this (moderate) insn count — see Transpile_Js_Tune6_AST.md §0.2d.
-#define JM_RADIANT_INTERP_INSN_THRESHOLD 20000
+#define JM_RADIANT_INTERP_INSN_THRESHOLD MIR_RADIANT_INTERP_INSN_THRESHOLD
 extern "C" int g_mir_interp_mode;
 extern "C" const TSLanguage* tree_sitter_typescript(void);
 extern "C" const TSLanguage* tree_sitter_javascript(void);

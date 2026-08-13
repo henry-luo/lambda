@@ -8,6 +8,7 @@
 #include "type_contract.hpp"
 #include "mir_emitter_shared.hpp"
 #include "mir_dump.h"
+#include "mir_policy.hpp"
 
 extern "C" int lambda_mir_lazy_enabled(void);
 #include "../js/js_runtime.h"
@@ -75,6 +76,7 @@ extern "C" {
                                       void* type_list);
     extern int g_mir_interp_mode;
 }
+extern int g_js_force_document_interp;
 
 // ============================================================================
 // MIR Transpiler Context
@@ -24906,26 +24908,6 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
     }
 }
 
-// LambdaJS avoids eager native code generation for very large cold modules;
-// Lambda uses the same instruction-count policy so a generated test/oracle
-// module cannot turn one top-level function into a multi-second MIR_gen job.
-static const uint64_t LAMBDA_MIR_LARGE_MODULE_INSN_THRESHOLD = 100000;
-static const size_t LAMBDA_MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT = 15000;
-
-static bool lambda_mir_large_interp_enabled(void) {
-    const char* flag = getenv("LAMBDA_JS_LARGE_INTERP");
-    return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
-}
-
-static size_t lambda_mir_large_source_interp_threshold(void) {
-    const char* value = getenv("LAMBDA_JS_LARGE_INTERP_BYTES");
-    if (!value || !value[0]) return LAMBDA_MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT;
-    char* end = NULL;
-    long parsed = strtol(value, &end, 10);
-    if (end == value || parsed <= 0) return LAMBDA_MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT;
-    return (size_t)parsed;
-}
-
 static bool lambda_mir_interp_env_enabled(void) {
     const char* env = getenv("JS_MIR_INTERP");
     return env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0);
@@ -25030,8 +25012,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
     bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
     bool auto_interp_for_large_source = !explicit_interp && opt_level == 0 &&
-        lambda_mir_large_interp_enabled() && tp->source &&
-        strlen(tp->source) >= lambda_mir_large_source_interp_threshold();
+        mir_large_interp_enabled() && tp->source &&
+        strlen(tp->source) >= mir_large_source_interp_threshold();
     bool force_interp_init = !g_mir_interp_mode &&
         (lambda_mir_interp_env_enabled() || auto_interp_for_large_source);
     int saved_mir_interp_mode = g_mir_interp_mode;
@@ -25056,12 +25038,18 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         &mir_instruction_count);
 
     bool use_mir_interp_for_script = explicit_interp || auto_interp_for_large_source;
-    bool large_interp_enabled = lambda_mir_large_interp_enabled();
+    bool large_interp_enabled = mir_large_interp_enabled();
+    bool document_context = tp->runtime && tp->runtime->dom_doc != nullptr;
     if (!use_mir_interp_for_script && large_interp_enabled &&
-            mir_instruction_count > LAMBDA_MIR_LARGE_MODULE_INSN_THRESHOLD) {
+            (mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD ||
+             (document_context && (g_js_force_document_interp ||
+                                   mir_instruction_count > MIR_RADIANT_INTERP_INSN_THRESHOLD)))) {
         use_mir_interp_for_script = true;
-        log_info("lambda-mir: large module (%llu insns) -> MIR interpreter (skip JIT codegen)",
-            (unsigned long long)mir_instruction_count);
+        log_info("lambda-mir: %s module (%llu insns)%s -> MIR interpreter (skip JIT codegen)",
+            mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD
+                ? "large" : "cold-document",
+            (unsigned long long)mir_instruction_count,
+            document_context ? " [document]" : "");
     }
 
     // If the interpreter escape hatch is disabled, match LambdaJS's fallback:
@@ -25070,7 +25058,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     unsigned int effective_opt = opt_level;
     if (!use_mir_interp_for_script && !large_interp_enabled &&
             effective_opt >= 2 &&
-            mir_instruction_count > LAMBDA_MIR_LARGE_MODULE_INSN_THRESHOLD) {
+            mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD) {
         log_info("lambda-mir: large module (%llu insns) -> opt=0 (was %u)",
             (unsigned long long)mir_instruction_count, effective_opt);
         MIR_gen_set_optimize_level(ctx, 0);

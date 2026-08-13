@@ -48,13 +48,6 @@ extern "C" int js_is_diagnose_enabled(void) {
 // Threshold: 10K MIR insns → functions above this use opt=1.
 #define JM_LARGE_FUNC_INSN_THRESHOLD 10000
 
-// Threshold for total MIR instructions in a module. Modules above this
-// (e.g., lodash with 272K insns) use opt=0 for the entire context because
-// MIR's SSA/GVN passes have super-linear cost for very large functions.
-#define JM_LARGE_MODULE_INSN_THRESHOLD 100000
-
-
-
 // POC: MIR interpreter mode — set from mir.c
 extern "C" int g_mir_interp_mode;
 

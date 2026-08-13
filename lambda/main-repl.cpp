@@ -220,7 +220,7 @@ void print_help() {
     printf("  lambda --transpile-only [script.ls] - Compile without execution\n");
     printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
     printf("  lambda --no-drain [script.ls]       - Return without draining spawned tasks\n");
-    printf("  lambda --optimize=N [script.ls]     - Set MIR JIT optimization level (0-2, default: 2)\n");
+    printf("  lambda --optimize=N [script.ls]     - Set MIR optimization level (0-3, default: 2)\n");
     printf("  lambda run <script.ls>              - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");

@@ -62,14 +62,14 @@ several optimization controls are enabled by default and use `=0` to disable.
 `log_debug()` output.  `LAMBDA_GC_STATS` deliberately uses a notice-level log,
 so it remains useful under `NDEBUG`.
 
-## LambdaJS compilation, optimization, and diagnostics
+## Lambda/LambdaJS compilation, optimization, and diagnostics
 
 | Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
 |---|---|:---:|:---:|:---:|:---:|
-| `LAMBDA_JS_LARGE_INTERP` | Default on; `0`/`false` keeps JIT for large document scripts instead of MIR interface interpretation. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_LARGE_INTERP_BYTES` | Positive source-size threshold; default 15000 bytes. | ✓ | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_LARGE_INTERP` | Default on; `0`/`false` disables automatic large-module/document MIR interpretation for Lambda and LambdaJS. | ✓ | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_LARGE_INTERP_BYTES` | Positive source-size threshold for automatic O0 interpretation; default 15000 bytes. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_DISABLE_JS_MIR_CACHE` | Presence disables Radiant batch JS-MIR cache. | ✓ | ✓ | ✓ | ✓ |
-| `JS_MIR_INTERP` | `1`/`true`: force JS MIR interpreter path. | ✓ | ✓ | ✓ | ✓ |
+| `JS_MIR_INTERP` | `1`/`true`: force the MIR interpreter path for Lambda and LambdaJS. | ✓ | ✓ | ✓ | ✓ |
 | `JS_LAZY_MIR` | Non-zero: select per-function lazy MIR code generation. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_CONST_FOLD` | Default on; `0` disables JS MIR constant folding. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_LOAD_IC` | Default on; `0` disables named-property load inline caches. | ✓ | ✓ | ✓ | ✓ |
