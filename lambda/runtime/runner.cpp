@@ -1645,7 +1645,10 @@ void runtime_init(Runtime* runtime) {
     if (runtime->mir_cache_disabled) {
         log_info("mir cache index: retained module cache disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
     }
-    module_registry_init_for_runtime(runtime);
+    // The CLI creates a short-lived selector Runtime before some language
+    // subcommands create their execution Runtime. Keep the registry lazy so
+    // that selector never owns a module-registry allocation it cannot use;
+    // module registration paths create it on their first real module.
     jube_register_builtin_modules();
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
