@@ -14,7 +14,7 @@
   text_content: "Alpha",
   document_root: "HTML",
   document_query: "P",
-  keys: ['node_name', 'class_name', 'owner_document', 'first_child'],
+  keys: ['node_name', 'owner_document', 'first_child', 'class_name'],
   document_keys: ['document_element', 'ready_state', 'node_name'],
   text_keys: ['node_name', 'data', 'node_value', 'text_content'],
   node: map,

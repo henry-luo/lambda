@@ -3,8 +3,8 @@
 // DOM3 form: the script-facing shape is declared once in Lambda type syntax
 // (interface_decl) and behavior is a binding table of handler pointers; the
 // generic engine dispatch (member records + expando store + prototype) does
-// everything the hand-written JubeHostObjectOps used to do. host_ops is NULL —
-// that absence is the falsifiable proof of the DOM3 design promise.
+// everything the hand-written host dispatch used to do. The type's finalizer
+// lives on JubeTypeDef.destroy.
 
 #include "../../lambda.hpp"
 #include "../../jube/jube_registry.h"
@@ -156,9 +156,8 @@ static void hostobj_demo_destroy(void* payload) {
 // ---- descriptors ----
 
 const JubeTypeDef s_hostobj_demo_types[1] = {
-    // host_ops intentionally NULL: dispatch is fully record-driven; the owning
-    // finalizer moves to JubeTypeDef.destroy
-    {"hostobj_demo", JUBE_TYPE_OWNING_NATIVE, NULL, NULL, hostobj_demo_destroy},
+    // dispatch is fully record-driven; the owning finalizer lives on the typedef
+    {"hostobj_demo", JUBE_TYPE_OWNING_NATIVE, NULL, hostobj_demo_destroy},
 };
 
 static const char s_hostobj_demo_interface[] =
@@ -169,15 +168,15 @@ static const char s_hostobj_demo_interface[] =
     "}\n";
 
 static const JubeMemberBind s_hostobj_demo_members[] = {
-    {"value", NULL, NULL, NULL, hostobj_demo_value_get, hostobj_demo_value_set, NULL, NULL},
-    {"label", NULL, NULL, NULL, hostobj_demo_label_get, NULL, NULL, NULL},
-    {"bump",  NULL, NULL, NULL, NULL, NULL, hostobj_demo_bump_call, NULL},
+    {"value", NULL, hostobj_demo_value_get, hostobj_demo_value_set, NULL, NULL, 0},
+    {"label", NULL, hostobj_demo_label_get, NULL, NULL, NULL, 0},
+    {"bump",  NULL, NULL, NULL, hostobj_demo_bump_call, NULL, 0},
 };
 
 static const JubeTypeBinding s_hostobj_demo_bindings[] = {
     {"hostobj_demo", &s_hostobj_demo_types[0], s_hostobj_demo_members,
      (int32_t)(sizeof(s_hostobj_demo_members) / sizeof(s_hostobj_demo_members[0])),
-     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
 };
 
 extern "C" Item hostobj_demo_namespace(void) {

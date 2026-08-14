@@ -49,7 +49,7 @@ and reflection use the architecture in `JS_Runtime_Object_Property.md`.
 | Callable boundary | Legacy callable class Maps are `JsFunction` values with explicit call/construct capabilities. Metadata never grants callability. | Zero class-map callable bridge and `__instance_proto__` references; callable tests. |
 | Map layout | Every ordinary/exotic Map reaching shape code has a valid TypeMap and `Map.data` described by it. Native payloads use typed trailing storage; fake TypeMap markers and pointer-valued backing properties are gone. | Debug assertions, GC/layout tests, storage census. |
 | `map_kind` | Remaining reads are confined to allocation, trace/finalize, and checked payload accessors. No property, prototype, brand, `instanceof`, coercion, or builtin dispatch reads it. | Allowlisted source ratchet by file/function/category. |
-| Host objects | VMap/Jube host operations enter through one bridge while `JubeTypeDef.host_ops` remains authoritative. No duplicate JS host registry or DOM-only dispatch route remains. | Host/DOM adapter census and integration tests. |
+| Host objects | VMap/Jube host operations enter through one bridge while declared member records and record-owned hooks remain authoritative under D7.4.4. No duplicate JS host registry or DOM-only dispatch route remains. | Host/DOM adapter census and integration tests. |
 | Sentinels | All Tune6-owned class/prototype/native-payload sentinels are absent. `__promise_idx` is restricted to an explicit JR7 Promise allowlist. | String/reference census and reflection tests. |
 | GC/ownership | All trailing payload Items and expando/prototype edges are precisely traced; metadata has no GC or realm edges. | Forced-GC matrix, finalizer tests, two-context/realm reset tests. |
 | Source size | Aggregate production C/C++ delta is net negative; `lambda/js` is at least 1,000 lines below clean O0, with a 2,000-line reduction target. | Unmodified `./utils/count_loc.sh` at O0/O9 plus deletion ledger. |
@@ -811,7 +811,7 @@ can allocate/re-enter | GC owner | test owner | final allowlist status
 #### Work
 
 1. Implement the static host-bridge metadata/table. Resolve exact operations
-   from the existing `JubeTypeDef.host_ops`/VMap type at the callback boundary.
+   from declared member records and the VMap type at the callback boundary.
 2. Consolidate current `js_host_object_get/set/has/delete/own_property_names/
    own_property_descriptor/prototype` helpers behind that bridge.
 3. Preserve host expando backing, descriptors, symbols, key order, and

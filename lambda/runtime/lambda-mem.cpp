@@ -192,10 +192,7 @@ static void gc_finalize_vmap_host_payload(VMap* vm) {
     if (!vm || !vm->host_type || !vm->host_data) return;
     const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
     if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE)) return;
-    // DOM3 declared-interface types carry no host_ops; their finalizer lives on
-    // the typedef itself, so fall back to JubeTypeDef.destroy.
-    void (*destroy)(void*) = (type->host_ops && type->host_ops->destroy)
-        ? type->host_ops->destroy : type->destroy;
+    void (*destroy)(void*) = type->destroy;
     if (!destroy) return;
     void* native = vm->host_data;
     // owning host VMAPs store native payload beside the backing map, so GC must

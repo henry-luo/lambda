@@ -19,12 +19,6 @@
 
 extern __thread EvalContext* context;
 
-static const JubeHostObjectOps* vmap_host_ops(VMap* vm) {
-    if (!vm || !vm->host_type) return nullptr;
-    const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
-    return type ? type->host_ops : nullptr;
-}
-
 static bool item_key_chars(Item key, const char** chars, uint32_t* len) {
     TypeId type_id = get_type_id(key);
     if (!is_text_type_id(type_id)) return false;
@@ -35,49 +29,14 @@ static bool item_key_chars(Item key, const char** chars, uint32_t* len) {
     return true;
 }
 
-static Item string_key_item(const char* chars, uint32_t len) {
-    return (Item){.item = s2it(heap_strcpy((char*)chars, len))};
-}
-
-static bool host_item_is_absent(Item item) {
-    return item.item == ITEM_JS_UNDEFINED;  // RAW_ITEM_EQ_OK: sentinel identity only.
-}
-
 static bool vmap_host_get_by_item(VMap* vm, Item key, Item* out) {
-    // DOM3: declared-interface types resolve through compiled member records
-    // (dual-keyed snake/camel index), ahead of any hand-written host ops.
     if (out && jube_member_get((Item){.vmap = vm}, key, out)) return true;
-    const JubeHostObjectOps* ops = vmap_host_ops(vm);
-    if (!ops || !ops->get_property || !out) return false;
-
-    Item receiver = (Item){.vmap = vm};
-    Item result = ItemNull;
-    const char* chars = nullptr;
-    uint32_t len = 0;
-    bool has_chars = item_key_chars(key, &chars, &len);
-    Item lookup_key = has_chars ? string_key_item(chars, len) : key;
-    if (ops->get_property(receiver, lookup_key, &result) && !host_item_is_absent(result)) {
-        *out = result;
-        return true;
-    }
-
-    *out = ItemNull;
-    return true;
+    return false;
 }
 
 static bool vmap_host_set_by_item(VMap* vm, Item key, Item value, Item* out) {
     if (out && jube_member_set((Item){.vmap = vm}, key, value, out)) return true;
-    const JubeHostObjectOps* ops = vmap_host_ops(vm);
-    if (!ops || !ops->set_property || !out) return false;
-
-    Item receiver = (Item){.vmap = vm};
-    const char* chars = nullptr;
-    uint32_t len = 0;
-    if (item_key_chars(key, &chars, &len)) {
-        Item lookup_key = string_key_item(chars, len);
-        return ops->set_property(receiver, lookup_key, value, out) != 0;
-    }
-    return ops->set_property(receiver, key, value, out) != 0;
+    return false;
 }
 
 static void append_host_key(SymbolKeyList* keys, Item key_item) {
@@ -517,9 +476,7 @@ SymbolKeyList* vmap_keys_for_item(Item vmap_item) {
     // out of generic string transforms prevents DOM-only snake/camel policy
     // from leaking into ordinary VMap host fallback.
     if (!jube_member_projection_keys(rooted_vmap.get(), &result)) {
-        const JubeHostObjectOps* ops = vmap_host_ops(vm);
-        if (!ops || !ops->own_property_keys) return nullptr;
-        if (!ops->own_property_keys(rooted_vmap.get(), &result)) return nullptr;
+        return nullptr;
     }
     rooted_result.set(result);
     if (get_type_id(rooted_result.get()) != LMD_TYPE_ARRAY ||

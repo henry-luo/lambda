@@ -177,7 +177,7 @@ outcome contracts.
 | **JOP12** | **`map_kind` is physical only.** Allocation, tracing, finalization, and checked payload accessors may inspect it. Property, prototype, branding, `instanceof`, coercion, and builtin semantics may not. |
 | **JOP13** | **Callability remains per value.** A class ID, metadata pointer, or ops table cannot make an object callable or constructable. Callable Proxies keep explicit per-value capabilities; class constructor Maps are retired in favor of `JsFunction`. |
 | **JOP14** | **Brand and `instanceof` are distinct.** Internal-slot brand checks use class/family metadata. JavaScript `instanceof` follows `Symbol.hasInstance` and the prototype chain; class ID is not a substitute, except where an existing formal error-carrier ruling explicitly maps error code to prototype. |
-| **JOP15** | **Host authority is not copied.** A single VMap/Jube bridge delegates to `JubeTypeDef.host_ops`; module vtables remain the brand and lifecycle authority under **D7.4.1–D7.4.3**. |
+| **JOP15** | **Host authority is not copied.** A single VMap/Jube bridge delegates to declared member records and record-owned hooks; module vtables remain the brand and lifecycle authority under **D7.4.1–D7.4.4**. |
 | **JOP16** | **No hidden string protocol.** Internal slots use typed payload fields, capability fields, or NamePool private identities. Prefix/spelling tests do not identify engine state. |
 | **JOP17** | **Promise exception is narrowly owned.** Until JR7, a legacy Promise wrapper may retain `__promise_idx` only inside the Promise adapter. Metadata, prototype lookup, generic private-property code, and all other object kinds must not inspect it. |
 | **JOP18** | **Deletion is part of the feature.** Tune6 is incomplete while `js_property_exotic_adapter`, class stamping, `js_get_implicit_proto`, `__instance_proto__`, fake TypeMap sentinels, or semantic `map_kind` switches remain. |
@@ -376,8 +376,8 @@ may be round-tripped through a string-keyed property.
 
 Host/module-native objects remain VMaps under **D7.4.1**. Their vtable owns
 tracing, finalization, and exact native brand. The JS property kernel sees one
-host-bridge metadata record whose ops delegate to the resolved
-`JubeTypeDef.host_ops`.
+host-bridge metadata record whose operations delegate to the resolved declared
+member records and record-owned hooks.
 
 Tune6 must not copy module callback pointers into per-object TypeMaps, invent a
 second host registry, or make JS responsible for module payload lifetime.

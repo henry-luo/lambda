@@ -535,7 +535,7 @@ static Item radiant_velmt_project_property(const Velmt* velmt, int depth, const 
     return ItemNull;
 }
 
-static int radiant_velmt_host_get_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_velmt_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     RadiantVelmtHost* host = radiant_velmt_host_active_from_item(object);
     if (!host) {
@@ -552,26 +552,26 @@ static int radiant_velmt_host_get_property(Item object, Item key, Item* out) {
     return 1;
 }
 
-static int radiant_velmt_host_set_property(Item object, Item key, Item value, Item* out) {
+RADIANT_C_API int radiant_velmt_host_set_property(Item object, Item key, Item value, Item* out) {
     (void)object; (void)key; (void)value;
     if (out) *out = ItemNull;
     return 0;
 }
 
-static int radiant_velmt_host_has_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_velmt_host_has_property(Item object, Item key, Item* out) {
     Item value = ItemNull;
     if (!radiant_velmt_host_get_property(object, key, &value)) return 0;
     if (out) *out = radiant_bool_item(!radiant_item_is_missing(value));
     return 1;
 }
 
-static int radiant_velmt_host_delete_property(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_velmt_host_delete_property(Item object, Item key, Item* out) {
     (void)object; (void)key;
     if (out) *out = radiant_bool_item(false);
     return 1;
 }
 
-static int radiant_velmt_host_own_property_names(Item object, Item* out) {
+RADIANT_C_API int radiant_velmt_host_own_property_names(Item object, Item* out) {
     (void)object;
     if (!out) return 0;
     static const char* keys[] = {
@@ -587,7 +587,7 @@ static int radiant_velmt_host_own_property_names(Item object, Item* out) {
     return 1;
 }
 
-static int radiant_velmt_host_own_property_descriptor(Item object, Item key, Item* out) {
+RADIANT_C_API int radiant_velmt_host_own_property_descriptor(Item object, Item key, Item* out) {
     Item value = ItemNull;
     if (!out || !radiant_velmt_host_get_property(object, key, &value) ||
         radiant_item_is_missing(value)) {
@@ -1352,47 +1352,26 @@ static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
     }
 }
 
-extern const JubeHostObjectOps radiant_dom_node_host_ops;
-const JubeHostObjectOps radiant_dom_node_host_ops = {
-    radiant_dom_host_get_property,
-    radiant_dom_host_set_property,
-    NULL,
-    radiant_dom_host_has_property,
-    radiant_dom_host_delete_property,
-    radiant_dom_host_own_property_descriptor,
-    radiant_dom_host_own_property_names,
-    radiant_dom_host_prototype,
-    radiant_dom_host_invalidate,
-    NULL,
-};
-
-static const JubeHostObjectOps radiant_velmt_host_ops = {
-    radiant_velmt_host_get_property,
-    radiant_velmt_host_set_property,
-    NULL,
-    radiant_velmt_host_has_property,
-    radiant_velmt_host_delete_property,
-    radiant_velmt_host_own_property_descriptor,
-    radiant_velmt_host_own_property_names,
-    NULL,
-    NULL,
-    radiant_velmt_host_destroy,
-};
-
-
 static const JubeTypeDef radiant_types[] = {
-    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
-    {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, &radiant_dom_node_host_ops, NULL},
+    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     // DOM3: style hosts are record-driven; no hand-written host ops remain
-    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL, NULL},
-    {"velmt", JUBE_TYPE_OWNING_NATIVE, NULL, &radiant_velmt_host_ops, NULL},
+    {"inline_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"computed_style", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"velmt", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_velmt_host_destroy},
+    {"character_data", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"svg_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"input_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"select_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"textarea_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"option_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"html_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
 };
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
@@ -1437,6 +1416,34 @@ RADIANT_C_API const void* radiant_dom_foreign_document_host_type(void) {
 
 RADIANT_C_API const void* radiant_velmt_host_type(void) {
     return &radiant_types[10];
+}
+
+RADIANT_C_API const void* radiant_dom_character_data_host_type(void) {
+    return &radiant_types[11];
+}
+
+RADIANT_C_API const void* radiant_dom_svg_element_host_type(void) {
+    return &radiant_types[12];
+}
+
+RADIANT_C_API const void* radiant_dom_input_element_host_type(void) {
+    return &radiant_types[13];
+}
+
+RADIANT_C_API const void* radiant_dom_select_element_host_type(void) {
+    return &radiant_types[14];
+}
+
+RADIANT_C_API const void* radiant_dom_textarea_element_host_type(void) {
+    return &radiant_types[15];
+}
+
+RADIANT_C_API const void* radiant_dom_option_element_host_type(void) {
+    return &radiant_types[16];
+}
+
+RADIANT_C_API const void* radiant_dom_html_element_host_type(void) {
+    return &radiant_types[17];
 }
 
 #pragma clang diagnostic push
@@ -1516,7 +1523,7 @@ static const JubeModuleDef radiant_module = {
     radiant_module_shutdown,
     radiant_dom_interface_decl,
     radiant_dom_type_bindings,
-    10,  // DOM3 Phase 4e: document/foreign_document are binding-hook driven
+    radiant_dom_type_binding_count,
     NULL,
     radiant_custom_layout_heap_cleanup,
 };

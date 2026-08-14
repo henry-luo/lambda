@@ -15,6 +15,7 @@
 #include "../../lib/memtrack.h"
 
 struct JsClassEntry;
+struct JubeTypeDef;
 
 // Imported MIR calls share Core Lambda's user-operand ceiling. Keeping this
 // storage below LAMBDA_MAX_FUNCTION_ARGS silently rejected valid 9..16-arg
@@ -40,6 +41,9 @@ struct VarEntry {
     int async_slot;
     MIR_type_t mir_type;
     TypeId type_id;
+    // DOM4 flow fact: a declared Jube carrier type proven for this binding.
+    // It is compiler metadata only; generated MIR carries slot/ordinal ints.
+    const JubeTypeDef* jube_type;
     TypeId elem_type;
     // elem_type came from a declared annotation rather than from local fill()
     // narrowing, so the representation is only guaranteed at function entry.

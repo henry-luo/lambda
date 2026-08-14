@@ -15,6 +15,8 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/jube/jube_interface.h"
+#include "../lambda/jube/jube_registry.h"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/name_pool.hpp"
 #include "../lambda/input/input.hpp"
@@ -24,6 +26,10 @@
 #include "../lib/url.h"
 
 extern __thread EvalContext* context;
+
+extern "C" Item vmap_new(void);
+extern const JubeTypeBinding radiant_dom_type_bindings[];
+extern const int32_t radiant_dom_type_binding_count;
 
 #ifndef _WIN32
 extern __thread Context* input_context;
@@ -35,6 +41,98 @@ struct CallableRealmSnapshot {
     bool stable_lookup = false;
     bool iterator_alias = false;
 };
+
+TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    uint64_t result_home = 0;
+    Item warmup = transpile_js_to_mir(&runtime, "0;", "<dom4-parity>", &result_home);
+    ASSERT_FALSE(item_is_error(warmup));
+
+    const JubeModuleDef* radiant = jube_find_static_module("radiant");
+    ASSERT_NE(radiant, nullptr);
+    ASSERT_TRUE(jube_activate_module(radiant));
+
+    for (int type_index = 0; type_index < radiant_dom_type_binding_count; type_index++) {
+        const JubeTypeBinding* binding = &radiant_dom_type_bindings[type_index];
+        const JubeTypeDef* type = jube_iface_type_by_name(
+            binding->type_name, (uint32_t)strlen(binding->type_name));
+        ASSERT_NE(type, nullptr) << binding->type_name;
+        int slot = jube_iface_type_slot(type);
+        ASSERT_GE(slot, 0) << binding->type_name;
+        int member_count = jube_member_count(type);
+        ASSERT_GE(member_count, 0) << binding->type_name;
+        Item husk = vmap_new();
+        ASSERT_EQ(get_type_id(husk), LMD_TYPE_VMAP);
+        husk.vmap->host_type = type;
+        husk.vmap->host_data = nullptr;
+
+        for (int ordinal = 0; ordinal < member_count; ordinal++) {
+            const char* snake_name = jube_member_name_at(type, ordinal, false);
+            const char* camel_name = jube_member_name_at(type, ordinal, true);
+            ASSERT_NE(snake_name, nullptr) << binding->type_name << " ordinal " << ordinal;
+            ASSERT_NE(camel_name, nullptr) << binding->type_name << " ordinal " << ordinal;
+            ASSERT_EQ(jube_member_ordinal(type, snake_name,
+                (uint32_t)strlen(snake_name)), ordinal) << binding->type_name;
+            ASSERT_EQ(jube_member_ordinal(type, camel_name,
+                (uint32_t)strlen(camel_name)), ordinal) << binding->type_name;
+            Item key = js_make_string(snake_name);
+            Item camel_key = js_make_string(camel_name);
+            const char* member_name = camel_name;
+            Item by_name = ItemNull;
+            Item by_ordinal = ItemNull;
+            int name_handled = jube_member_get(husk, key, &by_name);
+            int ordinal_handled = jube_member_get_by_ordinal(
+                husk, slot, (uint32_t)ordinal, &by_ordinal);
+            EXPECT_EQ(name_handled, ordinal_handled)
+                << binding->type_name << "." << member_name;
+            EXPECT_EQ(by_name.item, by_ordinal.item)
+                << binding->type_name << "." << member_name;
+
+            Item camel_by_name = ItemNull;
+            EXPECT_EQ(jube_member_get(husk, camel_key, &camel_by_name), name_handled);
+            EXPECT_EQ(camel_by_name.item, by_name.item)
+                << binding->type_name << "." << member_name;
+
+            Item name_set = ItemNull;
+            Item ordinal_set = ItemNull;
+            Item value = js_make_string("dom4-parity");
+            EXPECT_EQ(jube_member_set(husk, key, value, &name_set),
+                jube_member_set_by_ordinal(husk, slot, (uint32_t)ordinal,
+                    value, &ordinal_set));
+            EXPECT_EQ(name_set.item, ordinal_set.item)
+                << binding->type_name << "." << member_name;
+
+            Item ordinal_call = ItemNull;
+            int ordinal_called = jube_member_call_by_ordinal(
+                husk, slot, (uint32_t)ordinal, nullptr, 0, &ordinal_call);
+            Item name_method = ItemNull;
+            int name_method_handled = jube_member_get(husk, key, &name_method);
+            int name_called = 0;
+            if (name_method_handled && get_type_id(name_method) == LMD_TYPE_FUNC) {
+                name_called = 1;
+                name_method = js_call_function(name_method, husk, nullptr, 0);
+            }
+            EXPECT_EQ(name_called, ordinal_called)
+                << binding->type_name << "." << member_name;
+            if (jube_member_kind_at(type, ordinal) != JUBE_MEMBER_KIND_METHOD) {
+                EXPECT_EQ(ordinal_called, 0);
+            }
+        }
+
+        // A valid family slot with a non-method ordinal must never enter the
+        // call binding; this is the mismatched kind × member guard sweep.
+        for (int ordinal = 0; ordinal < member_count; ordinal++) {
+            if (jube_member_kind_at(type, ordinal) == JUBE_MEMBER_KIND_METHOD) continue;
+            Item out = ItemNull;
+            EXPECT_EQ(jube_member_call_by_ordinal(
+                husk, slot, (uint32_t)ordinal, nullptr, 0, &out), 0)
+                << binding->type_name << " ordinal " << ordinal;
+        }
+    }
+
+    runtime_cleanup(&runtime);
+}
 
 static bool capture_callable_realm(Runtime* runtime,
                                    CallableRealmSnapshot* snapshot) {

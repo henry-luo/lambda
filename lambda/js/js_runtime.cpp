@@ -157,18 +157,13 @@ const JubeTypeDef* js_host_object_type(Item object) {
 }
 
 bool js_host_object_get_property(Item object, Item key, Item* out) {
-    // DOM3: declared-interface types dispatch through compiled member records
     if (jube_member_get(object, key, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    return type && type->host_ops && type->host_ops->get_property &&
-        type->host_ops->get_property(object, key, out);
+    return false;
 }
 
 bool js_host_object_set_property(Item object, Item key, Item value, Item* out) {
     if (jube_member_set(object, key, value, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    return type && type->host_ops && type->host_ops->set_property &&
-        type->host_ops->set_property(object, key, value, out);
+    return false;
 }
 
 static inline void js_note_event_handler_property_set(Item object,
@@ -189,10 +184,7 @@ static inline void js_note_event_handler_property_set(Item object, Item key,
 
 bool js_host_object_prototype(Item object, Item* out) {
     if (jube_member_prototype(object, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
-    *out = type->host_ops->prototype(object);
-    return true;
+    return false;
 }
 
 extern "C" Item js_using_dispose(Item resource) {
@@ -8143,6 +8135,69 @@ static Item js_super_lookup_base(Item receiver) {
         if (parent_proto.item != ItemNull.item) return parent_proto;
     }
     return proto;
+}
+
+static bool js_jube_ordinal_disabled(void) {
+    static int disabled = -1;
+    if (disabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_NO_JUBE_ORDINAL");
+        disabled = flag && flag[0] && strcmp(flag, "0") != 0 ? 1 : 0;
+    }
+    return disabled != 0;
+}
+
+// DOM4's MIR entry keeps the ABI Item-shaped while moving the ordinal guard
+// and exact generic fallback into one runtime boundary. This preserves the
+// ordinary property semantics when a flow fact is stale or the kill switch is
+// enabled, including expandos, prototypes, and nullish errors.
+extern "C" Item js_jube_member_get_by_ordinal(Item receiver, int64_t slot,
+                                               int64_t ordinal, Item key) {
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Item out = ItemNull;
+    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+            jube_member_get_by_ordinal(receiver_root.get(), (int)slot,
+                (uint32_t)ordinal, &out)) {
+        return out;
+    }
+    return js_get_reference(receiver_root.get(), key_root.get());
+}
+
+extern "C" Item js_jube_member_set_by_ordinal(Item receiver, int64_t slot,
+                                               int64_t ordinal, Item key,
+                                               Item value, int64_t strict) {
+    RootFrame roots(4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    Item out = ItemNull;
+    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+            jube_member_set_by_ordinal(receiver_root.get(), (int)slot,
+                (uint32_t)ordinal, value_root.get(), &out)) {
+        return js_assignment_set_result(value_root.get(), key_root.get(), out,
+            strict, receiver_root.get());
+    }
+    return js_set_key_policy(receiver_root.get(), key_root.get(),
+        value_root.get(), strict);
+}
+
+extern "C" Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
+                                                int64_t ordinal, Item key,
+                                                Item* args, int64_t argc) {
+    RootFrame roots(4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Item out = ItemNull;
+    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+            jube_member_call_by_ordinal(receiver_root.get(), (int)slot,
+                (uint32_t)ordinal, args, argc > 0 ? (int)argc : 0, &out)) {
+        return out;
+    }
+    Rooted<Item> fn_root(roots, js_get_reference(receiver_root.get(), key_root.get()));
+    if (item_is_error(fn_root.get())) return fn_root.get();
+    return js_call_function(fn_root.get(), receiver_root.get(), args,
+        argc > 0 ? (int)argc : 0);
 }
 
 // super.x property read: look up property on [[GetPrototypeOf]](receiver),

@@ -1011,6 +1011,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->from_catch_param) {
                 entry.var.from_catch_param = true;
             }
+            entry.var.jube_type = existing->jube_type;
             entry.var.binding_start = existing->binding_start;
             entry.var.binding_end = existing->binding_end;
             entry.var.gc_home_id = existing->gc_home_id;
