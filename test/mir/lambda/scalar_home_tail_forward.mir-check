@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
-  "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Tail-home forwarding: the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark directly, then returns (Stack API #15/#16/#21).",
+  "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Return convention 2: tail-home forwarding — the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark directly, then returns (Stack API #15/#16/#21). Return convention 3 (RV1 shape 2): the body takes no caller home at all and hands the wide payload back on a second MIR result, so the adopt cluster is replaced by the pending-pair classify (ursh/sub/ubgt) and a two-lane `ret`.",
   "checks": [
     {
       "in_func": "_accumulate_#",
+      "return_convention": 2,
       "expect": [
         ":\tfunc\ti64, p:runtime, i64:%p1, i64:%p2, p:_scalar_home"
       ],
@@ -15,6 +16,24 @@
       "count": {
         ", _scalar_home": 1
       }
+    },
+    {
+      "in_func": "_accumulate_#",
+      "return_convention": 3,
+      "expect": [
+        ":\tfunc\ti64, i64, p:runtime, i64:%p1, i64:%p2"
+      ],
+      "forbid": [
+        "_scalar_home",
+        "lambda_item_adopt_scalar_home"
+      ],
+      "expect_seq": [
+        { "pattern": "ursh\t" },
+        { "pattern": "sub\t" },
+        { "pattern": "ubgt\t" },
+        { "pattern": "mov\ti64:" },
+        { "pattern": "ret\t" }
+      ]
     }
   ]
 }

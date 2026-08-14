@@ -1096,6 +1096,8 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
             "_js.public_scalar_home", wrapper_func);
         mt->em.frame.plan.accepts_caller_scalar_home = true;
         mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+        // v3 descriptor (RV13); LJS emission migrates in P2.5.
+        mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
     }
 
     MIR_reg_t* args = call_param_count > 0
@@ -2357,6 +2359,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             "_js.scalar_home", func);
         mt->em.frame.plan.accepts_caller_scalar_home = true;
         mt->em.frame.plan.scalar_home_lane_mask = 1u;
+        // v3 descriptor (RV13); LJS emission migrates in P2.5.
+        mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
     }
     if (has_captures) {
         MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);

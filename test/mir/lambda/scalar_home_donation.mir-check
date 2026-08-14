@@ -1,11 +1,23 @@
 {
   "schema_version": 1,
-  "description": "The caller now saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so the int64 argument stays native at the callsite. Caller-donated scalar home: the deferred int64 argument is boxed and adopted before its number watermark is restored directly, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21).",
+  "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so the int64 argument stays native at the callsite. Return convention 2: caller-donated scalar home — the deferred int64 argument is boxed and adopted before its number watermark is restored directly, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21). Return convention 3 (RV1 shape 2): the body carries no home parameter and returns two lanes instead. The `main` group is convention-independent: argument boxing still goes through a helper-call adopt, which v3 does not change (RV12/SF6 — C helpers never speak the pair protocol).",
   "checks": [
     {
       "in_func": "_twice_#",
+      "return_convention": 2,
       "expect": [
         ":\tfunc\ti64, p:runtime, i64:%p1, p:_scalar_home"
+      ]
+    },
+    {
+      "in_func": "_twice_#",
+      "return_convention": 3,
+      "expect": [
+        ":\tfunc\ti64, i64, p:runtime, i64:%p1"
+      ],
+      "forbid": [
+        "_scalar_home",
+        "lambda_item_adopt_scalar_home"
       ]
     },
     {
