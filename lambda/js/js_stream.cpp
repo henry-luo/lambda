@@ -104,6 +104,9 @@ extern "C" void js_async_hooks_restore_resource(Item previous);
 #define js_stream_default_byte_hwm (js_runtime_state.stream.default_byte_hwm)
 #define js_stream_default_object_hwm (js_runtime_state.stream.default_object_hwm)
 
+template <typename Target>
+JS_FORWARD_STATIC_VOID( js_stream_set_default_method, (Item object, const char* name, Target target), js_set_native_method, (object, name, target))
+
 static bool stream_ensure_roots(void) {
     return js_active_runtime_state &&
         js_root_range_ensure_registered(&js_runtime_state.stream.roots);
@@ -503,14 +506,8 @@ static bool js_readable_remove_pipe(Item self, Item dest, bool emit_unpipe) {
     }
     return removed;
 }
-
-static bool js_item_is_true(Item item) {
-    return get_type_id(item) == LMD_TYPE_BOOL && it2b(item);
-}
-
-static bool js_stream_item_to_int64(Item value, int64_t* out) {
-    return js_item_to_integral_int64(value, out, false);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_item_is_true, (Item item), get_type_id, (item) == LMD_TYPE_BOOL && it2b(item))
+JS_FORWARD_STATIC_RETURN(bool, js_stream_item_to_int64, (Item value, int64_t* out), js_item_to_integral_int64, (value, out, false))
 
 static Item js_readable_pipe_on_drain(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -747,12 +744,21 @@ static void js_stream_adjust_writable_pendingcb(Item self, int64_t delta) {
     js_stream_set_writable_pendingcb(self, current + delta);
 }
 
-static int64_t js_stream_chunk_length(Item self, Item chunk) {
-    Item state = js_get_key_default(self, key_writable_state);
+static int64_t js_stream_chunk_length(Item self, Item chunk, bool readable) {
+    Item state = js_get_key_default(self, readable ? key_readable_state : key_writable_state);
     if (js_state_get_bool(state, "objectMode")) return 1;
     if (get_type_id(chunk) == LMD_TYPE_STRING) {
         String* str = it2s(chunk);
         return str ? (int64_t)str->len : 0;
+    }
+    if (readable) {
+        Item byte_length = js_get_key_default(chunk, make_string_item("byteLength"));
+        int64_t byte_length_int = 0;
+        if (js_stream_item_to_int64(byte_length, &byte_length_int)) return byte_length_int;
+        Item length = js_get_key_default(chunk, make_string_item("length"));
+        int64_t length_int = 0;
+        if (js_stream_item_to_int64(length, &length_int)) return length_int;
+        return 0;
     }
     Item length = js_get_key_default(chunk, make_string_item("length"));
     int64_t length_int = 0;
@@ -762,11 +768,13 @@ static int64_t js_stream_chunk_length(Item self, Item chunk) {
     if (js_stream_item_to_int64(byte_length, &byte_length_int)) return byte_length_int;
     return 1;
 }
+JS_FORWARD_STATIC_RETURN(int64_t, js_stream_writable_chunk_length, (Item self, Item chunk), js_stream_chunk_length, (self, chunk, false))
+JS_FORWARD_STATIC_RETURN(int64_t, js_stream_readable_chunk_length, (Item self, Item chunk), js_stream_chunk_length, (self, chunk, true))
 
 static bool js_stream_begin_write(Item self, Item chunk) {
     Item state = js_get_key_default(self, key_writable_state);
     int64_t current = js_stream_state_get_int(state, "length", 0);
-    int64_t chunk_len = js_stream_chunk_length(self, chunk);
+    int64_t chunk_len = js_stream_writable_chunk_length(self, chunk);
     int64_t next = current + chunk_len;
     int64_t hwm = js_stream_state_get_int(state, "highWaterMark", 16 * 1024);
     js_state_set_item(state, "length", (Item){.item = i2it(next)});
@@ -774,10 +782,7 @@ static bool js_stream_begin_write(Item self, Item chunk) {
     if (need_drain) js_state_set_bool(state, "needDrain", true);
     return !need_drain;
 }
-
-static Item js_stream_side_state(Item self, bool readable) {
-    return js_get_key_default(self, readable ? key_readable_state : key_writable_state);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_side_state, (Item self, bool readable), js_get_key_default, (self, readable ? key_readable_state : key_writable_state))
 
 static void js_stream_set_side_object_mode(Item obj, bool readable, bool value) {
     js_set_key_default(obj, make_string_item(readable ? "readableObjectMode" : "writableObjectMode"),
@@ -799,10 +804,7 @@ static void js_stream_init_writable_options(Item obj) {
     js_stream_set_side_object_mode(obj, false, false);
     js_stream_set_side_high_water_mark(obj, false, (Item){.item = i2it(js_stream_default_byte_hwm)});
 }
-
-static void js_stream_set_side_open(Item self, bool readable, bool open) {
-    js_set_key_default(self, readable ? key_readable : key_writable, js_bool_item(open));
-}
+JS_FORWARD_STATIC_VOID( js_stream_set_side_open, (Item self, bool readable, bool open), js_set_key_default, (self, readable ? key_readable : key_writable, js_bool_item(open)))
 
 static bool js_stream_side_enabled(Item self, bool readable) {
     Item enabled = js_get_key_default(self,
@@ -830,10 +832,7 @@ static void js_stream_set_side_enabled(Item self, bool readable, bool enabled) {
 #define js_stream_writable_side_enabled(self) js_stream_side_enabled(self, false)
 #define js_stream_set_readable_side_enabled(self, enabled) js_stream_set_side_enabled(self, true, enabled)
 #define js_stream_set_writable_side_enabled(self, enabled) js_stream_set_side_enabled(self, false, enabled)
-
-static bool js_stream_destroy_pending(Item self) {
-    return js_item_is_true(js_get_key_default(self, key_destroy_pending));
-}
+JS_FORWARD_STATIC_RETURN(bool, js_stream_destroy_pending, (Item self), js_item_is_true, (js_get_key_default(self, key_destroy_pending)))
 
 static void js_stream_mark_destroyed(Item self) {
     js_set_key_default(self, key_destroyed, js_bool_item(true));
@@ -849,15 +848,8 @@ static void js_stream_set_error_state(Item self, Item err) {
     Item writable_state = js_get_key_default(self, key_writable_state);
     js_state_set_item(writable_state, "errored", err);
 }
-
-static bool js_stream_error_value_present(Item err) {
-    return err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
-           get_type_id(err) != LMD_TYPE_NULL;
-}
-
-static bool js_stream_stored_error_value_present(Item err) {
-    return js_stream_error_value_present(err) && get_type_id(err) != LMD_TYPE_BOOL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_error_value_present, (Item err), (err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED && get_type_id(err) != LMD_TYPE_NULL))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_stored_error_value_present, (Item err), (js_stream_error_value_present(err) && get_type_id(err) != LMD_TYPE_BOOL))
 
 static Item js_stream_get_stored_error(Item self) {
     Item err = js_get_key_default(self, make_string_item("errored"));
@@ -876,10 +868,7 @@ static Item js_stream_get_stored_error(Item self) {
 
     return make_js_undefined();
 }
-
-static bool js_stream_has_stored_error(Item self) {
-    return js_stream_stored_error_value_present(js_stream_get_stored_error(self));
-}
+JS_FORWARD_STATIC_RETURN(bool, js_stream_has_stored_error, (Item self), js_stream_stored_error_value_present, (js_stream_get_stored_error(self)))
 
 static bool js_stream_is_finished_for_destroy_export(Item self) {
     if (js_item_is_true(js_get_key_default(self, key_destroyed))) return true;
@@ -898,32 +887,22 @@ static bool js_stream_is_finished_for_destroy_export(Item self) {
 
     return true;
 }
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_has_readable_side, (Item self), (get_type_id(js_get_key_default(self, key_readable_state)) == LMD_TYPE_MAP))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_has_writable_side, (Item self), (get_type_id(js_get_key_default(self, key_writable_state)) == LMD_TYPE_MAP))
 
-static bool js_stream_has_readable_side(Item self) {
-    return get_type_id(js_get_key_default(self, key_readable_state)) == LMD_TYPE_MAP;
-}
-
-static bool js_stream_has_writable_side(Item self) {
-    return get_type_id(js_get_key_default(self, key_writable_state)) == LMD_TYPE_MAP;
-}
-
-static bool js_stream_can_auto_destroy_after_readable_end(Item self) {
+static bool js_stream_can_auto_destroy(Item self, bool after_readable_end) {
     if (!js_item_is_true(js_get_key_default(self, key_auto_destroy)) ||
         js_item_is_true(js_get_key_default(self, key_destroyed))) {
         return false;
     }
-    return !js_stream_has_writable_side(self) ||
-           js_item_is_true(js_get_key_default(self, key_finish_emitted));
+    return after_readable_end
+        ? (!js_stream_has_writable_side(self) ||
+            js_item_is_true(js_get_key_default(self, key_finish_emitted)))
+        : (!js_stream_has_readable_side(self) ||
+            js_item_is_true(js_get_key_default(self, key_end_emitted)));
 }
-
-static bool js_stream_can_auto_destroy_after_writable_finish(Item self) {
-    if (!js_item_is_true(js_get_key_default(self, key_auto_destroy)) ||
-        js_item_is_true(js_get_key_default(self, key_destroyed))) {
-        return false;
-    }
-    return !js_stream_has_readable_side(self) ||
-           js_item_is_true(js_get_key_default(self, key_end_emitted));
-}
+JS_FORWARD_STATIC_RETURN(bool, js_stream_can_auto_destroy_after_readable_end, (Item self), js_stream_can_auto_destroy, (self, true))
+JS_FORWARD_STATIC_RETURN(bool, js_stream_can_auto_destroy_after_writable_finish, (Item self), js_stream_can_auto_destroy, (self, false))
 
 static void js_stream_set_error_emitted(Item self, bool emitted) {
     Item readable_state = js_get_key_default(self, key_readable_state);
@@ -952,11 +931,21 @@ static Item js_stream_end_writable_side_tick(Item self) {
     return js_writable_end(self, make_js_undefined(), make_js_undefined());
 }
 
-static Item js_stream_end_writable_side_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_end_writable_side_tick(env[0]);
+#define JS_STREAM_ENV_UNARY_CLOSURE(name, target) \
+static Item name(Item env_item) { \
+    Item* env = (Item*)(uintptr_t)env_item.item; \
+    if (!env) return make_js_undefined(); \
+    return target(env[0]); \
 }
+#define JS_STREAM_ENV_BINARY_CLOSURE(name, target) \
+static Item name(Item env_item) { \
+    Item* env = (Item*)(uintptr_t)env_item.item; \
+    if (!env) return make_js_undefined(); \
+    return target(env[0], env[1]); \
+}
+
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_end_writable_side_tick_closure,
+    js_stream_end_writable_side_tick)
 
 static void js_stream_maybe_end_writable_after_readable_end(Item self) {
     ensure_keys();
@@ -1132,15 +1121,8 @@ static Item js_stream_emit_drain_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_emit_drain_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_emit_drain_tick(env[0]);
-}
-
-static Item js_stream_transform_deferred_drain_key(void) {
-    return make_string_item("__transform_deferred_drain__");
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_drain_tick_closure, js_stream_emit_drain_tick)
+JS_FORWARD_STATIC_ITEM(js_stream_transform_deferred_drain_key, (void), make_string_item, ("__transform_deferred_drain__"))
 
 static Item js_stream_transform_deferred_drain_tick(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -1167,10 +1149,7 @@ static void js_stream_defer_transform_drain(Item self) {
     Item tick = js_new_native_closure(js_stream_transform_deferred_drain_tick, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
-
-static Item js_stream_drain_on_listener_key(void) {
-    return make_string_item("__drain_on_listener__");
-}
+JS_FORWARD_STATIC_ITEM(js_stream_drain_on_listener_key, (void), make_string_item, ("__drain_on_listener__"))
 
 extern "C" void js_stream_transform_flush_drained(Item self) {
     ensure_keys();
@@ -1238,11 +1217,7 @@ static Item js_stream_emit_readable_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_emit_readable_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_emit_readable_tick(env[0]);
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_readable_tick_closure, js_stream_emit_readable_tick)
 
 static void js_stream_emit_readable(Item self) {
     Item state = js_get_key_default(self, key_readable_state);
@@ -1269,10 +1244,7 @@ static void js_stream_mark_readable_needed(Item self, bool needed) {
     Item state = js_get_key_default(self, key_readable_state);
     js_state_set_bool(state, "needReadable", needed);
 }
-
-static void js_stream_mark_readable_did_read(Item self) {
-    js_state_set_bool(js_get_key_default(self, key_readable_state), "didRead", true);
-}
+JS_FORWARD_STATIC_VOID( js_stream_mark_readable_did_read, (Item self), js_state_set_bool, (js_get_key_default(self, key_readable_state), "didRead", true))
 
 static void js_stream_set_reading(Item self, bool reading) {
     js_set_key_default(self, key_reading, js_bool_item(reading));
@@ -1326,11 +1298,7 @@ static Item js_stream_decode_object_readable_chunk(Item self, Item chunk) {
     if (!js_stream_chunk_is_arraybuffer_view(chunk)) return chunk;
     return js_buffer_toString(chunk, encoding, make_js_undefined(), make_js_undefined());
 }
-
-static bool js_stream_has_callback_error(Item err) {
-    return err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
-           get_type_id(err) != LMD_TYPE_NULL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_has_callback_error, (Item err), (err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED && get_type_id(err) != LMD_TYPE_NULL))
 
 static Item js_stream_make_write_request(Item chunk, Item encoding, Item callback) {
     Item request = js_new_object();
@@ -1370,7 +1338,8 @@ static void js_stream_buffer_write_request(Item self, Item chunk, Item encoding,
     js_stream_set_buffered_request_count(self, js_array_length(pending));
 }
 
-static Item js_stream_after_write(Item self, Item callback, Item err) {
+static Item js_stream_prepare_write_completion(Item self, Item err,
+        bool* need_drain_out, bool* has_error_out) {
     ensure_keys();
     Item state = js_get_key_default(self, key_writable_state);
     bool need_drain = js_state_get_bool(state, "needDrain");
@@ -1383,6 +1352,16 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
         js_stream_set_writable_open(self, false);
         js_stream_schedule_error(self, err);
     }
+    *need_drain_out = need_drain;
+    *has_error_out = has_error;
+    return state;
+}
+
+static Item js_stream_after_write(Item self, Item callback, Item err) {
+    bool need_drain = false;
+    bool has_error = false;
+    Item state = js_stream_prepare_write_completion(self, err,
+        &need_drain, &has_error);
 
     if (js_is_callable(callback)) {
         if (has_error) {
@@ -1415,11 +1394,15 @@ static Item* js_stream_alloc_once_callback_env(Item self, Item payload) {
     return env;
 }
 
-static Item js_stream_write_callback_once(Item env_item, Item err) {
+typedef Item (*JsStreamOnceOperation)(Item, Item, Item);
+
+static Item js_stream_once_callback(Item env_item, Item err,
+                                    JsStreamOnceOperation operation) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!js_stream_claim_once_callback(env)) return make_js_undefined();
-    return js_stream_after_write(env[0], env[1], err);
+    return operation(env[0], env[1], err);
 }
+JS_FORWARD_STATIC_ITEM(js_stream_write_callback_once, (Item env_item, Item err), js_stream_once_callback, (env_item, err, js_stream_after_write))
 
 static Item js_stream_make_write_callback(Item self, Item callback) {
     js_stream_adjust_writable_pendingcb(self, 1);
@@ -1451,18 +1434,10 @@ static Item js_stream_make_transform_write_callback(Item self, Item callback) {
 }
 
 static Item js_stream_after_writev(Item self, Item pending, Item err) {
-    ensure_keys();
-    Item state = js_get_key_default(self, key_writable_state);
-    bool need_drain = js_state_get_bool(state, "needDrain");
-    bool has_error = js_stream_has_callback_error(err);
-    js_set_key_default(self, make_string_item("_writing"), js_bool_item(false));
-    js_stream_adjust_writable_pendingcb(self, -1);
-    js_state_set_item(state, "length", (Item){.item = i2it(0)});
-    js_state_set_bool(state, "needDrain", false);
-    if (has_error) {
-        js_stream_set_writable_open(self, false);
-        js_stream_schedule_error(self, err);
-    }
+    bool need_drain = false;
+    bool has_error = false;
+    Item state = js_stream_prepare_write_completion(self, err,
+        &need_drain, &has_error);
 
     if (get_type_id(pending) == LMD_TYPE_ARRAY) {
         int64_t plen = js_array_length(pending);
@@ -1481,12 +1456,7 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
     js_stream_finish_write_cycle(self, state, need_drain, has_error, err);
     return make_js_undefined();
 }
-
-static Item js_stream_writev_callback_once(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!js_stream_claim_once_callback(env)) return make_js_undefined();
-    return js_stream_after_writev(env[0], env[1], err);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_writev_callback_once, (Item env_item, Item err), js_stream_once_callback, (env_item, err, js_stream_after_writev))
 
 static Item js_stream_make_writev_callback(Item self, Item pending) {
     js_stream_adjust_writable_pendingcb(self, 1);
@@ -1588,31 +1558,20 @@ static Item js_stream_emit_close_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_emit_end_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_emit_end_tick(env[0]);
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_end_tick_closure, js_stream_emit_end_tick)
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_close_tick_closure, js_stream_emit_close_tick)
 
-static Item js_stream_emit_close_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_emit_close_tick(env[0]);
-}
-
-static void js_stream_schedule_close(Item self) {
+static void js_stream_schedule_unary(Item self, JsNativeP1 target) {
     Item* env = js_alloc_env(1);
     env[0] = self;
-    Item tick = js_new_native_closure(js_stream_emit_close_tick_closure, 0, env, 1);
+    Item tick = js_new_native_closure(target, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
+JS_FORWARD_STATIC_VOID( js_stream_schedule_close, (Item self), js_stream_schedule_unary, (self, js_stream_emit_close_tick_closure))
 
 static void js_stream_schedule_end(Item self) {
     if (js_item_is_true(js_get_key_default(self, key_end_emitted))) return;
-    Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_native_closure(js_stream_emit_end_tick_closure, 0, env, 1);
-    js_next_tick_enqueue(tick);
+    js_stream_schedule_unary(self, js_stream_emit_end_tick_closure);
 }
 
 static Item js_stream_emit_error_tick(Item self, Item err) {
@@ -1622,11 +1581,7 @@ static Item js_stream_emit_error_tick(Item self, Item err) {
     return make_js_undefined();
 }
 
-static Item js_stream_emit_error_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_emit_error_tick(env[0], env[1]);
-}
+JS_STREAM_ENV_BINARY_CLOSURE(js_stream_emit_error_tick_closure, js_stream_emit_error_tick)
 
 static void js_stream_schedule_error(Item self, Item err) {
     js_stream_set_error_state(self, err);
@@ -1724,14 +1679,8 @@ static void js_stream_auto_destroy(Item self, Item err, bool error_emit) {
 
         js_stream_schedule_close(self);
 }
-
-static void js_stream_auto_destroy_after_terminal(Item self) {
-    js_stream_auto_destroy(self, ItemNull, false);
-}
-
-static void js_stream_auto_destroy_after_error_emit(Item self, Item err) {
-    js_stream_auto_destroy(self, err, true);
-}
+JS_FORWARD_STATIC_VOID( js_stream_auto_destroy_after_terminal, (Item self), js_stream_auto_destroy, (self, ItemNull, false))
+JS_FORWARD_STATIC_VOID( js_stream_auto_destroy_after_error_emit, (Item self, Item err), js_stream_auto_destroy, (self, err, true))
 
 static int64_t js_stream_read_size_hint(Item self, Item size_item) {
     Item state = js_get_key_default(self, key_readable_state);
@@ -1796,18 +1745,8 @@ static Item js_stream_call_read_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_call_read_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_call_read_tick(env[0]);
-}
-
-static void js_stream_schedule_read(Item self) {
-    Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_native_closure(js_stream_call_read_tick_closure, 0, env, 1);
-    js_next_tick_enqueue(tick);
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_call_read_tick_closure, js_stream_call_read_tick)
+JS_FORWARD_STATIC_VOID( js_stream_schedule_read, (Item self), js_stream_schedule_unary, (self, js_stream_call_read_tick_closure))
 
 static bool js_stream_encoding_is_utf8(Item encoding) {
     if (get_type_id(encoding) != LMD_TYPE_STRING) return false;
@@ -2012,11 +1951,7 @@ static Item js_stream_flush_data_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_flush_data_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_flush_data_tick(env[0]);
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_flush_data_tick_closure, js_stream_flush_data_tick)
 
 static void js_stream_schedule_data_flush(Item self) {
     RootFrame roots(3);
@@ -2045,11 +1980,7 @@ static Item js_stream_resume_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_resume_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_resume_tick(env[0]);
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_resume_tick_closure, js_stream_resume_tick)
 
 static void js_stream_schedule_resume(Item self) {
     Item state = js_get_key_default(self, key_readable_state);
@@ -2520,10 +2451,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     }
     return js_bool_item(js_stream_readable_accepts_more(self, buf));
 }
-
-extern "C" Item js_readable_push(Item self, Item chunk) {
-    return js_readable_push_encoded(self, chunk, make_js_undefined());
-}
+JS_FORWARD_ITEM(js_readable_push, (Item self, Item chunk), js_readable_push_encoded, (self, chunk, make_js_undefined()))
 
 // unshift(chunk) — prepend data to readable stream
 extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding) {
@@ -2571,21 +2499,6 @@ extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding
     return js_bool_item(js_stream_readable_accepts_more(self, new_buf));
 }
 
-static int64_t js_stream_readable_chunk_length(Item self, Item chunk) {
-    Item state = js_get_key_default(self, key_readable_state);
-    if (js_state_get_bool(state, "objectMode")) return 1;
-    if (get_type_id(chunk) == LMD_TYPE_STRING) {
-        String* str = it2s(chunk);
-        return str ? (int64_t)str->len : 0;
-    }
-    Item byte_length = js_get_key_default(chunk, make_string_item("byteLength"));
-    int64_t byte_length_int = 0;
-    if (js_stream_item_to_int64(byte_length, &byte_length_int)) return byte_length_int;
-    Item length = js_get_key_default(chunk, make_string_item("length"));
-    int64_t length_int = 0;
-    if (js_stream_item_to_int64(length, &length_int)) return length_int;
-    return 0;
-}
 
 static int64_t js_stream_readable_buffer_length(Item self, Item buf) {
     if (get_type_id(buf) != LMD_TYPE_ARRAY) return 0;
@@ -2959,10 +2872,7 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
     js_stream_maybe_drain_transform_readable_backpressure(self);
     return js_stream_maybe_emit_manual_data(self, result);
 }
-
-extern "C" Item js_readable_read(Item self) {
-    return js_readable_read_size(self, make_js_undefined());
-}
+JS_FORWARD_ITEM(js_readable_read, (Item self), js_readable_read_size, (self, make_js_undefined()))
 
 static Item js_stream_iterator_result(Item value, bool done) {
     Item result = js_new_object();
@@ -2970,19 +2880,8 @@ static Item js_stream_iterator_result(Item value, bool done) {
     js_set_key_default(result, make_string_item("done"), js_bool_item(done));
     return result;
 }
-
-static bool js_stream_async_iterator_has_value(Item value) {
-    return value.item != 0 &&
-           get_type_id(value) != LMD_TYPE_NULL &&
-           get_type_id(value) != LMD_TYPE_UNDEFINED;
-}
-
-static bool js_stream_async_iterator_stream_done(Item stream) {
-    return !js_item_is_true(js_get_key_default(stream, key_readable)) ||
-           js_item_is_true(js_get_key_default(stream, key_end_pending)) ||
-           js_item_is_true(js_get_key_default(stream, key_end_emitted)) ||
-           js_item_is_true(js_get_key_default(stream, key_ended));
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_async_iterator_has_value, (Item value), (value.item != 0 && get_type_id(value) != LMD_TYPE_NULL && get_type_id(value) != LMD_TYPE_UNDEFINED))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_async_iterator_stream_done, (Item stream), (!js_item_is_true(js_get_key_default(stream, key_readable)) || js_item_is_true(js_get_key_default(stream, key_end_pending)) || js_item_is_true(js_get_key_default(stream, key_end_emitted)) || js_item_is_true(js_get_key_default(stream, key_ended))))
 
 static Item js_stream_async_iterator_pending_queue(Item iterator) {
     Item key = make_string_item("__pending_queue__");
@@ -3052,30 +2951,22 @@ static void js_stream_async_iterator_clear_pending(Item iterator) {
     js_set_key_default(iterator, make_string_item("__pending_queue__"), js_array_new(0));
 }
 
-static void js_stream_async_iterator_resolve(Item iterator, Item result) {
+static void js_stream_async_iterator_settle(Item iterator, Item result, bool reject) {
     Item capability = js_stream_async_iterator_shift_pending(iterator);
-    Item resolve = js_get_key_default(capability, make_string_item("resolve"));
-    if (!js_is_callable(resolve)) {
-        resolve = js_get_key_default(iterator, make_string_item("__resolve__"));
+    const char* method = reject ? "reject" : "resolve";
+    const char* fallback = reject ? "__reject__" : "__resolve__";
+    Item callback = js_get_key_default(capability, make_string_item(method));
+    if (!js_is_callable(callback)) {
+        callback = js_get_key_default(iterator, make_string_item(fallback));
     }
-    if (js_is_callable(resolve)) {
+    if (reject) js_set_key_default(iterator, make_string_item("__done__"), js_bool_item(true));
+    if (js_is_callable(callback)) {
         Item args[1] = { result };
-        js_call_function(resolve, make_js_undefined(), args, 1);
+        js_call_function(callback, make_js_undefined(), args, 1);
     }
 }
-
-static void js_stream_async_iterator_reject(Item iterator, Item err) {
-    Item capability = js_stream_async_iterator_shift_pending(iterator);
-    Item reject = js_get_key_default(capability, make_string_item("reject"));
-    if (!js_is_callable(reject)) {
-        reject = js_get_key_default(iterator, make_string_item("__reject__"));
-    }
-    js_set_key_default(iterator, make_string_item("__done__"), js_bool_item(true));
-    if (js_is_callable(reject)) {
-        Item args[1] = { err };
-        js_call_function(reject, make_js_undefined(), args, 1);
-    }
-}
+JS_FORWARD_STATIC_VOID( js_stream_async_iterator_resolve, (Item iterator, Item result), js_stream_async_iterator_settle, (iterator, result, false))
+JS_FORWARD_STATIC_VOID( js_stream_async_iterator_reject, (Item iterator, Item err), js_stream_async_iterator_settle, (iterator, err, true))
 
 static void js_stream_async_iterator_resolve_all_done(Item iterator) {
     js_set_key_default(iterator, make_string_item("__done__"), js_bool_item(true));
@@ -3384,14 +3275,8 @@ static Item js_stream_async_iterator_next(Item iterator) {
     js_stream_async_iterator_detach(iterator);
     return js_promise_resolve(js_stream_iterator_result(make_js_undefined(), true));
 }
-
-static Item js_stream_async_iterator_inst_next(void) {
-    return js_stream_async_iterator_next(js_get_this());
-}
-
-static Item js_stream_iterator_identity(void) {
-    return js_get_this();
-}
+JS_FORWARD_STATIC_ITEM(js_stream_async_iterator_inst_next, (void), js_stream_async_iterator_next, (js_get_this()))
+JS_FORWARD_STATIC_ITEM(js_stream_iterator_identity, (void), js_get_this, ())
 
 static Item js_stream_async_iterator_inst_return(void) {
     Item iterator = js_get_this();
@@ -3449,12 +3334,9 @@ static Item js_stream_async_iterator(Item self) {
     js_set_key_default(iterator, make_string_item("__destroy_on_return__"), js_bool_item(true));
     js_set_key_default(iterator, make_string_item("__error__"),
                     js_get_key_default(self, make_string_item("__error__")));
-    js_set_key_default(iterator, make_string_item("next"),
-                    js_new_native_function(js_stream_async_iterator_inst_next));
-    js_set_key_default(iterator, make_string_item("return"),
-                    js_new_native_function(js_stream_async_iterator_inst_return));
-    js_set_key_default(iterator, make_string_item("throw"),
-                    js_new_native_function(js_stream_async_iterator_inst_throw));
+    js_set_native_key(iterator, make_string_item("next"), js_stream_async_iterator_inst_next);
+    js_set_native_key(iterator, make_string_item("return"), js_stream_async_iterator_inst_return);
+    js_set_native_key(iterator, make_string_item("throw"), js_stream_async_iterator_inst_throw);
 
     Item iterators = js_get_key_default(self, make_string_item("__async_iterators__"));
     if (get_type_id(iterators) != LMD_TYPE_ARRAY) {
@@ -3521,12 +3403,7 @@ static Item js_stream_collect_reject(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     env[5] = js_bool_item(true);
-    Item reject = env[2];
-    if (js_is_callable(reject)) {
-        Item args[1] = { err };
-        js_call_function(reject, make_js_undefined(), args, 1);
-    }
-    return make_js_undefined();
+    return js_stream_reject_with_error(env[2], err);
 }
 
 static Item js_stream_collect_step(Item env_item, Item result) {
@@ -3770,17 +3647,17 @@ static Item js_readable_transform_helper(Item readable, Item fn, Item options, i
     return out;
 }
 
-static Item js_readable_map(Item readable, Item fn, Item options) {
-    return js_readable_transform_helper(readable, fn, options, 0);
+#define JS_READABLE_TRANSFORM_HELPER(name, mode) \
+static Item name(Item readable, Item fn, Item options) { \
+    return js_readable_transform_helper(readable, fn, options, mode); \
 }
-
-static Item js_readable_filter(Item readable, Item fn, Item options) {
-    return js_readable_transform_helper(readable, fn, options, 1);
-}
+JS_READABLE_TRANSFORM_HELPER(js_readable_map, 0)
+JS_READABLE_TRANSFORM_HELPER(js_readable_filter, 1)
+#undef JS_READABLE_TRANSFORM_HELPER
 
 static Item js_readable_forEach_next(Item env_item);
 
-static Item js_readable_forEach_fail(Item env_item, Item err) {
+static Item js_readable_async_helper_fail(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     Item reject = env[2];
@@ -3789,6 +3666,24 @@ static Item js_readable_forEach_fail(Item env_item, Item err) {
         js_call_function(reject, make_js_undefined(), args, 1);
     }
     return make_js_undefined();
+}
+
+static Item js_readable_validate_helper(Item fn, Item options,
+        bool validate_concurrency, Item* signal_out) {
+    Item validation = js_stream_validate_helper_fn(fn);
+    if (item_is_error(validation)) return validation;
+    validation = js_stream_validate_helper_options(options);
+    if (item_is_error(validation)) return validation;
+    validation = js_stream_validate_helper_signal(options);
+    if (item_is_error(validation)) return validation;
+    if (validate_concurrency) {
+        validation = js_stream_validate_concurrency(options);
+        if (item_is_error(validation)) return validation;
+    }
+    *signal_out = make_js_undefined();
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
+        *signal_out = js_get_key_default(options, make_string_item("signal"));
+    return ItemNull;
 }
 
 static Item js_readable_forEach_continue(Item env_item, Item ignored) {
@@ -3814,7 +3709,7 @@ static Item js_readable_forEach_step(Item env_item, Item result) {
     if (item_is_error(call_result)) return js_stream_reject_with_error(env[2], call_result);
     Item promise = js_promise_resolve(call_result);
     Item on_done = js_new_native_closure(js_readable_forEach_continue, 1, env, 5);
-    Item on_error = js_new_native_closure(js_readable_forEach_fail, 1, env, 5);
+    Item on_error = js_new_native_closure(js_readable_async_helper_fail, 1, env, 5);
     js_promise_then(promise, on_done, on_error);
     return make_js_undefined();
 }
@@ -3825,23 +3720,15 @@ static Item js_readable_forEach_next(Item env_item) {
     Item step = js_stream_async_iterator_next(env[0]);
     if (item_is_error(step)) return js_stream_reject_with_error(env[2], step);
     Item on_step = js_new_native_closure(js_readable_forEach_step, 1, env, 5);
-    Item on_error = js_new_native_closure(js_readable_forEach_fail, 1, env, 5);
+    Item on_error = js_new_native_closure(js_readable_async_helper_fail, 1, env, 5);
     js_promise_then(step, on_step, on_error);
     return make_js_undefined();
 }
 
 static Item js_readable_forEach(Item readable, Item fn, Item options) {
-    Item validation = js_stream_validate_helper_fn(fn);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
-    validation = js_stream_validate_helper_options(options);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
-    validation = js_stream_validate_helper_signal(options);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
-    validation = js_stream_validate_concurrency(options);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
     Item signal = make_js_undefined();
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
-        signal = js_get_key_default(options, make_string_item("signal"));
+    Item validation = js_readable_validate_helper(fn, options, true, &signal);
+    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
     JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
     Item* env = js_alloc_env(5);
     env[0] = js_stream_async_iterator(readable);
@@ -3854,17 +3741,6 @@ static Item js_readable_forEach(Item readable, Item fn, Item options) {
 }
 
 static Item js_readable_reduce_next(Item env_item);
-
-static Item js_readable_reduce_fail(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item reject = env[2];
-    if (js_is_callable(reject)) {
-        Item args[1] = { err };
-        js_call_function(reject, make_js_undefined(), args, 1);
-    }
-    return make_js_undefined();
-}
 
 static Item js_readable_reduce_continue(Item env_item, Item value) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -3902,7 +3778,7 @@ static Item js_readable_reduce_step(Item env_item, Item result) {
     if (item_is_error(call_result)) return js_stream_reject_with_error(env[2], call_result);
     Item promise = js_promise_resolve(call_result);
     Item on_done = js_new_native_closure(js_readable_reduce_continue, 1, env, 7);
-    Item on_error = js_new_native_closure(js_readable_reduce_fail, 1, env, 7);
+    Item on_error = js_new_native_closure(js_readable_async_helper_fail, 1, env, 7);
     js_promise_then(promise, on_done, on_error);
     return make_js_undefined();
 }
@@ -3913,21 +3789,15 @@ static Item js_readable_reduce_next(Item env_item) {
     Item step = js_stream_async_iterator_next(env[0]);
     if (item_is_error(step)) return js_stream_reject_with_error(env[2], step);
     Item on_step = js_new_native_closure(js_readable_reduce_step, 1, env, 7);
-    Item on_error = js_new_native_closure(js_readable_reduce_fail, 1, env, 7);
+    Item on_error = js_new_native_closure(js_readable_async_helper_fail, 1, env, 7);
     js_promise_then(step, on_step, on_error);
     return make_js_undefined();
 }
 
 static Item js_readable_reduce(Item readable, Item fn, Item initial, Item options) {
-    Item validation = js_stream_validate_helper_fn(fn);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
-    validation = js_stream_validate_helper_options(options);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
-    validation = js_stream_validate_helper_signal(options);
-    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
     Item signal = make_js_undefined();
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
-        signal = js_get_key_default(options, make_string_item("signal"));
+    Item validation = js_readable_validate_helper(fn, options, false, &signal);
+    if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
     JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
     Item* env = js_alloc_env(7);
     env[0] = js_stream_async_iterator(readable);
@@ -4023,25 +3893,16 @@ static Item js_readable_compose_bridge_end(Item env_item, Item chunk, Item callb
     return env[1];
 }
 
-static Item js_readable_compose_bridge_cork(Item env_item) {
+static Item js_readable_compose_bridge_flush(Item env_item, const char* method) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     Item source = env[0];
-    Item cork_fn = js_get_key_default(source, make_string_item("cork"));
-    if (js_is_callable(cork_fn))
-        js_call_function(cork_fn, source, NULL, 0);
+    Item callback = js_get_key_default(source, make_string_item(method));
+    if (js_is_callable(callback)) js_call_function(callback, source, NULL, 0);
     return env[1];
 }
-
-static Item js_readable_compose_bridge_uncork(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item source = env[0];
-    Item uncork_fn = js_get_key_default(source, make_string_item("uncork"));
-    if (js_is_callable(uncork_fn))
-        js_call_function(uncork_fn, source, NULL, 0);
-    return env[1];
-}
+JS_FORWARD_STATIC_ITEM(js_readable_compose_bridge_cork, (Item env_item), js_readable_compose_bridge_flush, (env_item, "cork"))
+JS_FORWARD_STATIC_ITEM(js_readable_compose_bridge_uncork, (Item env_item), js_readable_compose_bridge_flush, (env_item, "uncork"))
 
 static Item js_readable_compose_bridge_destroy(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -4160,13 +4021,6 @@ static Item js_readable_compose_result_on_step(Item env_item, Item result) {
     return js_readable_compose_result_pump(env_item);
 }
 
-static Item js_readable_compose_result_on_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    js_stream_destroy(env[0], err);
-    return make_js_undefined();
-}
-
 static Item js_readable_compose_result_pump(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
@@ -4182,7 +4036,7 @@ static Item js_readable_compose_result_pump(Item env_item) {
     }
 
     Item on_step = js_new_native_closure(js_readable_compose_result_on_step, 1, env, 3);
-    Item on_error = js_new_native_closure(js_readable_compose_result_on_error, 1, env, 3);
+    Item on_error = js_new_native_closure(js_readable_compose_forward_error, 1, env, 3);
     js_promise_then(step, on_step, on_error);
     return make_js_undefined();
 }
@@ -4393,38 +4247,23 @@ static Item js_stream_consumer(Item readable, int64_t mode) {
     return js_promise_then(promise, finish, make_js_undefined());
 }
 
-static Item js_stream_consumer_text(Item readable) {
-    return js_stream_consumer(readable, 0);
+#define JS_STREAM_CONSUMER(name, mode) \
+static Item name(Item readable) { \
+    return js_stream_consumer(readable, mode); \
 }
-
-static Item js_stream_consumer_arrayBuffer(Item readable) {
-    return js_stream_consumer(readable, 1);
-}
-
-static Item js_stream_consumer_buffer(Item readable) {
-    return js_stream_consumer(readable, 2);
-}
-
-static Item js_stream_consumer_bytes(Item readable) {
-    return js_stream_consumer(readable, 3);
-}
-
-static Item js_stream_consumer_json(Item readable) {
-    return js_stream_consumer(readable, 4);
-}
-
-static Item js_stream_consumer_blob(Item readable) {
-    return js_stream_consumer(readable, 5);
-}
+JS_STREAM_CONSUMER(js_stream_consumer_text, 0)
+JS_STREAM_CONSUMER(js_stream_consumer_arrayBuffer, 1)
+JS_STREAM_CONSUMER(js_stream_consumer_buffer, 2)
+JS_STREAM_CONSUMER(js_stream_consumer_bytes, 3)
+JS_STREAM_CONSUMER(js_stream_consumer_json, 4)
+JS_STREAM_CONSUMER(js_stream_consumer_blob, 5)
+#undef JS_STREAM_CONSUMER
 
 static Item js_stream_iter_to_readable(Item source) {
     if (js_stream_is_stream_like(source)) return source;
     return js_readable_from(source);
 }
-
-static Item js_stream_iter_identity(void) {
-    return js_get_this();
-}
+JS_FORWARD_STATIC_ITEM(js_stream_iter_identity, (void), js_get_this, ())
 
 static bool js_stream_iter_has_method(Item value, Item key) {
     TypeId tid = get_type_id(value);
@@ -4536,9 +4375,9 @@ static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable,
 
     Item obj = js_new_object();
     js_set_key_default(obj, make_string_item("next"), js_new_native_closure(js_stream_iter_batch_next, 0, env, 5));
-    js_set_key_default(obj, js_well_known_symbol_key(1), js_new_native_function(js_stream_iter_identity));
+    js_set_native_key(obj, js_well_known_symbol_key(1), js_stream_iter_identity);
     if (async_iterable)
-        js_set_key_default(obj, js_well_known_symbol_key(5), js_new_native_function(js_stream_iter_identity));
+        js_set_native_key(obj, js_well_known_symbol_key(5), js_stream_iter_identity);
     return obj;
 }
 
@@ -4646,44 +4485,24 @@ static Item js_stream_iter_check_limit(Item chunks, Item options) {
     return make_js_undefined();
 }
 
-static Item js_stream_iter_textSync(Item source, Item options) {
+static Item js_stream_iter_sync_consumer(Item source, Item options,
+        JsNativeP1 finish, bool flatten) {
     JS_ASSIGN_OR_RETURN(chunks, js_stream_iter_sync_array(source));
-    chunks = js_stream_iter_flatten_for_bytes(chunks);
+    if (flatten) chunks = js_stream_iter_flatten_for_bytes(chunks);
     Item err = js_stream_iter_check_limit(chunks, options);
-    if (js_stream_has_error(err)) {
-        return js_throw_value(err);
-    }
-    return js_stream_consumer_text_finish(chunks);
+    if (js_stream_has_error(err)) return js_throw_value(err);
+    return finish ? finish(chunks) : chunks;
 }
 
-static Item js_stream_iter_bytesSync(Item source, Item options) {
-    JS_ASSIGN_OR_RETURN(chunks, js_stream_iter_sync_array(source));
-    chunks = js_stream_iter_flatten_for_bytes(chunks);
-    Item err = js_stream_iter_check_limit(chunks, options);
-    if (js_stream_has_error(err)) {
-        return js_throw_value(err);
-    }
-    return js_stream_consumer_bytes_finish(chunks);
+#define JS_STREAM_ITER_SYNC_CONSUMER(name, finish, flatten) \
+static Item name(Item source, Item options) { \
+    return js_stream_iter_sync_consumer(source, options, finish, flatten); \
 }
-
-static Item js_stream_iter_arrayBufferSync(Item source, Item options) {
-    JS_ASSIGN_OR_RETURN(chunks, js_stream_iter_sync_array(source));
-    chunks = js_stream_iter_flatten_for_bytes(chunks);
-    Item err = js_stream_iter_check_limit(chunks, options);
-    if (js_stream_has_error(err)) {
-        return js_throw_value(err);
-    }
-    return js_stream_consumer_arrayBuffer_finish(chunks);
-}
-
-static Item js_stream_iter_arraySync(Item source, Item options) {
-    JS_ASSIGN_OR_RETURN(chunks, js_stream_iter_sync_array(source));
-    Item err = js_stream_iter_check_limit(chunks, options);
-    if (js_stream_has_error(err)) {
-        return js_throw_value(err);
-    }
-    return chunks;
-}
+JS_STREAM_ITER_SYNC_CONSUMER(js_stream_iter_textSync, js_stream_consumer_text_finish, true)
+JS_STREAM_ITER_SYNC_CONSUMER(js_stream_iter_bytesSync, js_stream_consumer_bytes_finish, true)
+JS_STREAM_ITER_SYNC_CONSUMER(js_stream_iter_arrayBufferSync, js_stream_consumer_arrayBuffer_finish, true)
+JS_STREAM_ITER_SYNC_CONSUMER(js_stream_iter_arraySync, nullptr, false)
+#undef JS_STREAM_ITER_SYNC_CONSUMER
 
 static Item js_stream_iter_consumer_done(Item env_item, Item chunks) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -4723,21 +4542,15 @@ static Item js_stream_iter_consumer_async(Item source, Item options, int64_t mod
     return js_promise_then(promise, finish, make_js_undefined());
 }
 
-static Item js_stream_iter_text_consume(Item source, Item options) {
-    return js_stream_iter_consumer_async(source, options, 0);
+#define JS_STREAM_ITER_CONSUMER(name, mode) \
+static Item name(Item source, Item options) { \
+    return js_stream_iter_consumer_async(source, options, mode); \
 }
-
-static Item js_stream_iter_bytes(Item source, Item options) {
-    return js_stream_iter_consumer_async(source, options, 1);
-}
-
-static Item js_stream_iter_arrayBuffer(Item source, Item options) {
-    return js_stream_iter_consumer_async(source, options, 2);
-}
-
-static Item js_stream_iter_array(Item source, Item options) {
-    return js_stream_iter_consumer_async(source, options, 3);
-}
+JS_STREAM_ITER_CONSUMER(js_stream_iter_text_consume, 0)
+JS_STREAM_ITER_CONSUMER(js_stream_iter_bytes, 1)
+JS_STREAM_ITER_CONSUMER(js_stream_iter_arrayBuffer, 2)
+JS_STREAM_ITER_CONSUMER(js_stream_iter_array, 3)
+#undef JS_STREAM_ITER_CONSUMER
 
 static Item js_stream_iter_tap_callback(Item env_item, Item chunks) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -4747,10 +4560,7 @@ static Item js_stream_iter_tap_callback(Item env_item, Item chunks) {
     (void)result;
     return chunks;
 }
-
-static Item js_stream_iter_tap_async_done(Item chunks) {
-    return chunks;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_stream_iter_tap_async_done, (Item chunks), (chunks))
 
 static Item js_stream_iter_tap_async_callback(Item env_item, Item chunks) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -4763,21 +4573,15 @@ static Item js_stream_iter_tap_async_callback(Item env_item, Item chunks) {
     return js_promise_then(promise, done, make_js_undefined());
 }
 
-static Item js_stream_iter_tapSync(Item callback) {
+static Item js_stream_iter_tap_make(Item callback, JsNativeP2 target) {
     if (!js_is_callable(callback))
         return js_throw_invalid_arg_type("fn", "function", callback);
     Item* env = js_alloc_env(1);
     env[0] = callback;
-    return js_new_native_closure(js_stream_iter_tap_callback, 1, env, 1);
+    return js_new_native_closure(target, 1, env, 1);
 }
-
-static Item js_stream_iter_tap(Item callback) {
-    if (!js_is_callable(callback))
-        return js_throw_invalid_arg_type("fn", "function", callback);
-    Item* env = js_alloc_env(1);
-    env[0] = callback;
-    return js_new_native_closure(js_stream_iter_tap_async_callback, 1, env, 1);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_iter_tapSync, (Item callback), js_stream_iter_tap_make, (callback, js_stream_iter_tap_callback))
+JS_FORWARD_STATIC_ITEM(js_stream_iter_tap, (Item callback), js_stream_iter_tap_make, (callback, js_stream_iter_tap_async_callback))
 
 static bool js_stream_iter_is_transform_object(Item transform, Item* method) {
     TypeId tid = get_type_id(transform);
@@ -4787,10 +4591,7 @@ static bool js_stream_iter_is_transform_object(Item transform, Item* method) {
     if (method) *method = fn;
     return true;
 }
-
-static bool js_stream_iter_transform_is_present(Item transform) {
-    return transform.item != 0 && get_type_id(transform) != LMD_TYPE_UNDEFINED;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_iter_transform_is_present, (Item transform), (transform.item != 0 && get_type_id(transform) != LMD_TYPE_UNDEFINED))
 
 static Item js_stream_iter_validate_transform(Item transform) {
     if (!js_stream_iter_transform_is_present(transform)) return js_status_ok();
@@ -4933,51 +4734,29 @@ static int64_t js_stream_iter_chunk_byte_length(Item chunk) {
     return 0;
 }
 
-static void js_stream_iter_resolve_drain(Item writer, Item value) {
-    Item capability = js_get_key_default(writer, make_string_item("__drain__"));
+static void js_stream_iter_settle_capability(Item writer, const char* capability_name,
+        const char* method_name, Item value) {
+    Item capability = js_get_key_default(writer, make_string_item(capability_name));
     if (get_type_id(capability) != LMD_TYPE_MAP && get_type_id(capability) != LMD_TYPE_ELEMENT) return;
-    js_set_key_default(writer, make_string_item("__drain__"), make_js_undefined());
-    Item resolve = js_get_key_default(capability, make_string_item("resolve"));
-    if (js_is_callable(resolve)) {
+    js_set_key_default(writer, make_string_item(capability_name), make_js_undefined());
+    Item settle = js_get_key_default(capability, make_string_item(method_name));
+    if (js_is_callable(settle)) {
         Item args[1] = { value };
-        js_call_function(resolve, make_js_undefined(), args, 1);
+        js_call_function(settle, make_js_undefined(), args, 1);
     }
 }
-
-static void js_stream_iter_reject_drain(Item writer, Item err) {
-    Item capability = js_get_key_default(writer, make_string_item("__drain__"));
-    if (get_type_id(capability) != LMD_TYPE_MAP && get_type_id(capability) != LMD_TYPE_ELEMENT) return;
-    js_set_key_default(writer, make_string_item("__drain__"), make_js_undefined());
-    Item reject = js_get_key_default(capability, make_string_item("reject"));
-    if (js_is_callable(reject)) {
-        Item args[1] = { err };
-        js_call_function(reject, make_js_undefined(), args, 1);
-    }
-}
+JS_FORWARD_STATIC_VOID( js_stream_iter_resolve_drain, (Item writer, Item value), js_stream_iter_settle_capability, (writer, "__drain__", "resolve", value))
+JS_FORWARD_STATIC_VOID( js_stream_iter_reject_drain, (Item writer, Item err), js_stream_iter_settle_capability, (writer, "__drain__", "reject", err))
 
 static void js_stream_iter_resolve_end_if_drained(Item writer) {
     Item capability = js_get_key_default(writer, make_string_item("__end__"));
     if (get_type_id(capability) != LMD_TYPE_MAP && get_type_id(capability) != LMD_TYPE_ELEMENT) return;
     Item readable = js_get_key_default(writer, make_string_item("__readable__"));
     if (!js_stream_iter_readable_buffer_empty(readable)) return;
-    js_set_key_default(writer, make_string_item("__end__"), make_js_undefined());
-    Item resolve = js_get_key_default(capability, make_string_item("resolve"));
-    if (js_is_callable(resolve)) {
-        Item args[1] = { js_stream_iter_writer_total(writer) };
-        js_call_function(resolve, make_js_undefined(), args, 1);
-    }
+    js_stream_iter_settle_capability(writer, "__end__", "resolve",
+        js_stream_iter_writer_total(writer));
 }
-
-static void js_stream_iter_reject_end(Item writer, Item err) {
-    Item capability = js_get_key_default(writer, make_string_item("__end__"));
-    if (get_type_id(capability) != LMD_TYPE_MAP && get_type_id(capability) != LMD_TYPE_ELEMENT) return;
-    js_set_key_default(writer, make_string_item("__end__"), make_js_undefined());
-    Item reject = js_get_key_default(capability, make_string_item("reject"));
-    if (js_is_callable(reject)) {
-        Item args[1] = { err };
-        js_call_function(reject, make_js_undefined(), args, 1);
-    }
-}
+JS_FORWARD_STATIC_VOID( js_stream_iter_reject_end, (Item writer, Item err), js_stream_iter_settle_capability, (writer, "__end__", "reject", err))
 
 static void js_stream_iter_reject_pending_writes(Item writer, Item err) {
     Item pending = js_get_key_default(writer, make_string_item("__pending_writes__"));
@@ -5062,38 +4841,25 @@ static bool js_stream_iter_signal_aborted(Item options, Item* reason_out) {
 
 static Item js_stream_iter_pipe_next(Item env_item);
 
-static Item js_stream_iter_pipe_reject(Item env_item, Item err) {
+static Item js_stream_iter_pipe_settle(Item env_item, Item value, bool reject) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || js_item_is_true(env[6])) return make_js_undefined();
     env[6] = js_bool_item(true);
-    Item reject = env[5];
-    if (js_is_callable(reject)) {
-        Item args[1] = { err };
-        js_call_function(reject, make_js_undefined(), args, 1);
-    }
-    return make_js_undefined();
-}
-
-static Item js_stream_iter_pipe_resolve(Item env_item, Item value) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env || js_item_is_true(env[6])) return make_js_undefined();
-    env[6] = js_bool_item(true);
-    Item resolve = env[4];
-    if (js_is_callable(resolve)) {
+    Item callback = env[reject ? 5 : 4];
+    if (js_is_callable(callback)) {
         Item args[1] = { value };
-        js_call_function(resolve, make_js_undefined(), args, 1);
+        js_call_function(callback, make_js_undefined(), args, 1);
     }
     return make_js_undefined();
 }
+JS_FORWARD_STATIC_ITEM(js_stream_iter_pipe_reject, (Item env_item, Item err), js_stream_iter_pipe_settle, (env_item, err, true))
+JS_FORWARD_STATIC_ITEM(js_stream_iter_pipe_resolve, (Item env_item, Item value), js_stream_iter_pipe_settle, (env_item, value, false))
 
 static Item js_stream_iter_pipe_after_write(Item env_item, Item ignored) {
     (void)ignored;
     return js_stream_iter_pipe_next(env_item);
 }
-
-static Item js_stream_iter_pipe_finish(Item env_item, Item result) {
-    return js_stream_iter_pipe_resolve(env_item, result);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_iter_pipe_finish, (Item env_item, Item result), js_stream_iter_pipe_resolve, (env_item, result))
 
 static Item js_stream_iter_pipe_end(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -5311,29 +5077,26 @@ static Item js_stream_iter_writer_write(Item chunk, Item options) {
     js_stream_iter_writer_emit(writer, chunk);
     return js_promise_resolve(js_bool_item(true));
 }
-
-static Item js_stream_iter_writer_writeSync(Item chunk) {
-    return js_stream_iter_writer_emit(js_get_this(), chunk);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_iter_writer_writeSync, (Item chunk), js_stream_iter_writer_emit, (js_get_this(), chunk))
 
 static Item js_stream_iter_writer_writev(Item chunks) {
+    Item writer = js_get_this();
     if (get_type_id(chunks) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(chunks);
-        for (int64_t i = 0; i < len; i++) {
-            js_stream_iter_writer_emit(js_get_this(), js_elements_get_int(chunks, i));
-        }
+        for (int64_t i = 0; i < len; i++)
+            js_stream_iter_writer_emit(writer, js_elements_get_int(chunks, i));
     }
     return js_promise_resolve(js_bool_item(true));
 }
 
 static Item js_stream_iter_writer_writevSync(Item chunks) {
+    Item writer = js_get_this();
     if (get_type_id(chunks) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(chunks);
-        for (int64_t i = 0; i < len; i++) {
-            js_stream_iter_writer_emit(js_get_this(), js_elements_get_int(chunks, i));
-        }
+        for (int64_t i = 0; i < len; i++)
+            js_stream_iter_writer_emit(writer, js_elements_get_int(chunks, i));
     }
-    return js_bool_item(!js_stream_iter_closed(js_get_this()));
+    return js_bool_item(!js_stream_iter_closed(writer));
 }
 
 static Item js_stream_iter_writer_end(void) {
@@ -5396,15 +5159,12 @@ static Item js_stream_iter_writer_fail(Item err) {
     return make_js_undefined();
 }
 
-static Item js_stream_iter_writer_async_dispose(void) {
+static Item js_stream_iter_writer_dispose(bool asynchronous) {
     js_stream_iter_writer_fail(make_js_undefined());
-    return js_promise_resolve(make_js_undefined());
+    return asynchronous ? js_promise_resolve(make_js_undefined()) : make_js_undefined();
 }
-
-static Item js_stream_iter_writer_sync_dispose(void) {
-    js_stream_iter_writer_fail(make_js_undefined());
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_stream_iter_writer_async_dispose, (void), js_stream_iter_writer_dispose, (true))
+JS_FORWARD_STATIC_ITEM(js_stream_iter_writer_sync_dispose, (void), js_stream_iter_writer_dispose, (false))
 
 static Item js_stream_iter_ondrain(Item writer) {
     if (get_type_id(writer) != LMD_TYPE_MAP && get_type_id(writer) != LMD_TYPE_ELEMENT) return ItemNull;
@@ -5450,10 +5210,8 @@ extern "C" Item js_transform_stream_new(Item transformer) {
     Item writer = js_get_key_default(pair, make_string_item("writer"));
     Item readable = js_get_key_default(pair, make_string_item("readable"));
     js_set_key_default(readable, make_string_item("__web_readable__"), js_bool_item(true));
-    js_set_key_default(writer, make_string_item("close"),
-                    js_new_native_function(js_stream_iter_writer_end));
-    js_set_key_default(writer, make_string_item("abort"),
-                    js_new_native_function(js_stream_iter_writer_fail));
+    js_set_native_key(writer, make_string_item("close"), js_stream_iter_writer_end);
+    js_set_native_key(writer, make_string_item("abort"), js_stream_iter_writer_fail);
 
     Item writable = js_writable_stream_new(make_js_undefined());
     Item* env = js_alloc_env(1);
@@ -5577,17 +5335,15 @@ static Item js_stream_iter_push(Item options_or_transform) {
     js_set_key_default(writer, make_string_item("__total__"), (Item){.item = i2it(0)});
     js_set_key_default(writer, make_string_item("__hwm__"), (Item){.item = i2it(js_stream_iter_hwm(options))});
     js_set_key_default(readable, make_string_item("__iter_writer__"), writer);
-    js_set_key_default(writer, make_string_item("write"), js_new_native_function(js_stream_iter_writer_write));
-    js_set_key_default(writer, make_string_item("writeSync"), js_new_native_function(js_stream_iter_writer_writeSync));
-    js_set_key_default(writer, make_string_item("writev"), js_new_native_function(js_stream_iter_writer_writev));
-    js_set_key_default(writer, make_string_item("writevSync"), js_new_native_function(js_stream_iter_writer_writevSync));
-    js_set_key_default(writer, make_string_item("end"), js_new_native_function(js_stream_iter_writer_end));
-    js_set_key_default(writer, make_string_item("endSync"), js_new_native_function(js_stream_iter_writer_endSync));
-    js_set_key_default(writer, make_string_item("fail"), js_new_native_function(js_stream_iter_writer_fail));
-    js_set_key_default(writer, js_well_known_symbol_key(14),
-                    js_new_native_function(js_stream_iter_writer_async_dispose));
-    js_set_key_default(writer, js_well_known_symbol_key(15),
-                    js_new_native_function(js_stream_iter_writer_sync_dispose));
+    js_stream_set_default_method(writer, "write", js_stream_iter_writer_write);
+    js_stream_set_default_method(writer, "writeSync", js_stream_iter_writer_writeSync);
+    js_stream_set_default_method(writer, "writev", js_stream_iter_writer_writev);
+    js_stream_set_default_method(writer, "writevSync", js_stream_iter_writer_writevSync);
+    js_stream_set_default_method(writer, "end", js_stream_iter_writer_end);
+    js_stream_set_default_method(writer, "endSync", js_stream_iter_writer_endSync);
+    js_stream_set_default_method(writer, "fail", js_stream_iter_writer_fail);
+    js_set_native_key(writer, js_well_known_symbol_key(14), js_stream_iter_writer_async_dispose);
+    js_set_native_key(writer, js_well_known_symbol_key(15), js_stream_iter_writer_sync_dispose);
     js_install_native_accessor(writer, make_string_item("desiredSize"),
                                js_new_native_function(js_stream_iter_writer_desired_size),
                                ItemNull, 0);
@@ -5896,10 +5652,7 @@ static bool js_stream_chunk_is_buffer(Item chunk) {
     Item result = js_buffer_isBuffer(chunk);
     return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
 }
-
-static bool js_stream_chunk_is_arraybuffer_view(Item chunk) {
-    return js_is_typed_array(chunk) || js_is_dataview(chunk);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_stream_chunk_is_arraybuffer_view, (Item chunk), js_is_typed_array, (chunk) || js_is_dataview(chunk))
 
 static bool js_stream_readable_is_object_mode(Item self) {
     Item state = js_get_key_default(self, key_readable_state);
@@ -6022,16 +5775,8 @@ extern "C" Item js_stream_setDefaultEncoding(Item self, Item encoding) {
                     js_stream_canonical_encoding(next_encoding));
     return self;
 }
-
-static bool js_stream_hwm_object_mode_arg(Item object_mode) {
-    return get_type_id(object_mode) == LMD_TYPE_BOOL && it2b(object_mode);
-}
-
-extern "C" Item js_stream_getDefaultHighWaterMark(Item object_mode) {
-    return (Item){.item = i2it(js_stream_hwm_object_mode_arg(object_mode)
-                               ? js_stream_default_object_hwm
-                               : js_stream_default_byte_hwm)};
-}
+JS_FORWARD_STATIC_RETURN(bool, js_stream_hwm_object_mode_arg, (Item object_mode), get_type_id, (object_mode) == LMD_TYPE_BOOL && it2b(object_mode))
+JS_FORWARD_EXPRESSION(Item, js_stream_getDefaultHighWaterMark, (Item object_mode), ((Item){.item = i2it(js_stream_hwm_object_mode_arg(object_mode) ? js_stream_default_object_hwm : js_stream_default_byte_hwm)}))
 
 extern "C" Item js_stream_setDefaultHighWaterMark(Item object_mode, Item value) {
     TypeId tid = get_type_id(value);
@@ -6070,10 +5815,7 @@ static Item js_stream_validate_hwm_option(const char* name, Item value) {
              "The property 'options.%s' is invalid. Received NaN", name);
     return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
 }
-
-static void js_stream_define_bool(Item obj, const char* name, bool value) {
-    js_create_data_property(obj, make_string_item(name), js_bool_item(value));
-}
+JS_FORWARD_STATIC_VOID( js_stream_define_bool, (Item obj, const char* name, bool value), js_create_data_property, (obj, make_string_item(name), js_bool_item(value)))
 
 static bool js_stream_is_object_like(Item item) {
     TypeId type = get_type_id(item);
@@ -6106,37 +5848,21 @@ static bool js_stream_ordinary_has_instance(Item value) {
     return js_item_is_true(result);
 }
 
-static Item js_stream_readable_has_instance(Item value) {
+static Item js_stream_has_instance_classes(Item value, int class_count,
+        JsClass class1, JsClass class2, JsClass class3, JsClass class4) {
     if (js_stream_ordinary_has_instance(value)) return js_bool_item(true);
     JsClass cls = js_class_id(value);
-    return js_bool_item(cls == JS_CLASS_READABLE || cls == JS_CLASS_DUPLEX ||
-                        cls == JS_CLASS_TRANSFORM || cls == JS_CLASS_PASS_THROUGH);
+    bool match = (class_count > 0 && cls == class1) ||
+                 (class_count > 1 && cls == class2) ||
+                 (class_count > 2 && cls == class3) ||
+                 (class_count > 3 && cls == class4);
+    return js_bool_item(match);
 }
-
-static Item js_stream_writable_has_instance(Item value) {
-    if (js_stream_ordinary_has_instance(value)) return js_bool_item(true);
-    JsClass cls = js_class_id(value);
-    return js_bool_item(cls == JS_CLASS_WRITABLE || cls == JS_CLASS_DUPLEX ||
-                        cls == JS_CLASS_TRANSFORM || cls == JS_CLASS_PASS_THROUGH);
-}
-
-static Item js_stream_duplex_has_instance(Item value) {
-    if (js_stream_ordinary_has_instance(value)) return js_bool_item(true);
-    JsClass cls = js_class_id(value);
-    return js_bool_item(cls == JS_CLASS_DUPLEX || cls == JS_CLASS_TRANSFORM ||
-                        cls == JS_CLASS_PASS_THROUGH);
-}
-
-static Item js_stream_transform_has_instance(Item value) {
-    if (js_stream_ordinary_has_instance(value)) return js_bool_item(true);
-    JsClass cls = js_class_id(value);
-    return js_bool_item(cls == JS_CLASS_TRANSFORM || cls == JS_CLASS_PASS_THROUGH);
-}
-
-static Item js_stream_passthrough_has_instance(Item value) {
-    if (js_stream_ordinary_has_instance(value)) return js_bool_item(true);
-    return js_bool_item(js_class_id(value) == JS_CLASS_PASS_THROUGH);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_readable_has_instance, (Item value), js_stream_has_instance_classes, (value, 4, JS_CLASS_READABLE, JS_CLASS_DUPLEX, JS_CLASS_TRANSFORM, JS_CLASS_PASS_THROUGH))
+JS_FORWARD_STATIC_ITEM(js_stream_writable_has_instance, (Item value), js_stream_has_instance_classes, (value, 4, JS_CLASS_WRITABLE, JS_CLASS_DUPLEX, JS_CLASS_TRANSFORM, JS_CLASS_PASS_THROUGH))
+JS_FORWARD_STATIC_ITEM(js_stream_duplex_has_instance, (Item value), js_stream_has_instance_classes, (value, 3, JS_CLASS_DUPLEX, JS_CLASS_TRANSFORM, JS_CLASS_PASS_THROUGH, JS_CLASS_NONE))
+JS_FORWARD_STATIC_ITEM(js_stream_transform_has_instance, (Item value), js_stream_has_instance_classes, (value, 2, JS_CLASS_TRANSFORM, JS_CLASS_PASS_THROUGH, JS_CLASS_NONE, JS_CLASS_NONE))
+JS_FORWARD_STATIC_ITEM(js_stream_passthrough_has_instance, (Item value), js_stream_has_instance_classes, (value, 1, JS_CLASS_PASS_THROUGH, JS_CLASS_NONE, JS_CLASS_NONE, JS_CLASS_NONE))
 
 // Helper: propagate stream constructor options to instance methods
 static Item propagate_stream_options(Item obj, Item opts) {
@@ -6309,9 +6035,7 @@ static Item js_readable_inst_unpipe(Item dest) {
     js_readable_remove_pipe(js_get_this(), dest, true);
     return js_get_this();
 }
-static Item js_stream_base_constructor(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_stream_base_constructor, (void), make_js_undefined, ())
 static Item js_stream_inst_destroy(Item err, Item callback) {
     if (js_is_callable(callback)) {
         js_set_key_default(js_get_this(), make_string_item("__destroy_callback__"), callback);
@@ -6577,23 +6301,9 @@ static Item js_stream_emit_finish_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_emit_finish_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_emit_finish_tick(env[0]);
-}
-
-static void js_stream_schedule_finish(Item self) {
-    Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_native_closure(js_stream_emit_finish_tick_closure, 0, env, 1);
-    js_next_tick_enqueue(tick);
-}
-
-static bool js_stream_has_error(Item err) {
-    return err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
-           get_type_id(err) != LMD_TYPE_NULL;
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_finish_tick_closure, js_stream_emit_finish_tick)
+JS_FORWARD_STATIC_VOID( js_stream_schedule_finish, (Item self), js_stream_schedule_unary, (self, js_stream_emit_finish_tick_closure))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_has_error, (Item err), (err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED && get_type_id(err) != LMD_TYPE_NULL))
 
 static Item js_stream_make_error_with_code(const char* code, const char* message) {
     Item err = js_new_error(make_string_item(message));
@@ -6614,11 +6324,8 @@ static Item js_stream_call_callback_error_tick(Item callback, Item err) {
     return make_js_undefined();
 }
 
-static Item js_stream_call_callback_error_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_call_callback_error_tick(env[0], env[1]);
-}
+JS_STREAM_ENV_BINARY_CLOSURE(js_stream_call_callback_error_tick_closure,
+    js_stream_call_callback_error_tick)
 
 static void js_stream_schedule_callback_error(Item callback, Item err) {
     if (!js_is_callable(callback)) return;
@@ -6681,12 +6388,7 @@ static Item js_stream_finish_after_final(Item self, Item callback, Item err) {
     js_stream_emit_finish_tick(self);
     return make_js_undefined();
 }
-
-static Item js_stream_final_callback_once(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!js_stream_claim_once_callback(env)) return make_js_undefined();
-    return js_stream_finish_after_final(env[0], env[1], err);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_final_callback_once, (Item env_item, Item err), js_stream_once_callback, (env_item, err, js_stream_finish_after_final))
 
 static Item js_stream_make_final_callback(Item self, Item callback) {
     Item* env = js_stream_alloc_once_callback_env(self, callback);
@@ -6705,18 +6407,12 @@ static Item js_stream_complete_finish_tick(Item self) {
     return make_js_undefined();
 }
 
-static Item js_stream_complete_finish_tick_closure(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    return js_stream_complete_finish_tick(env[0]);
-}
+JS_STREAM_ENV_UNARY_CLOSURE(js_stream_complete_finish_tick_closure,
+    js_stream_complete_finish_tick)
+JS_FORWARD_STATIC_VOID( js_stream_schedule_finish_ready, (Item self), js_stream_schedule_unary, (self, js_stream_complete_finish_tick_closure))
 
-static void js_stream_schedule_finish_ready(Item self) {
-    Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_native_closure(js_stream_complete_finish_tick_closure, 0, env, 1);
-    js_next_tick_enqueue(tick);
-}
+#undef JS_STREAM_ENV_BINARY_CLOSURE
+#undef JS_STREAM_ENV_UNARY_CLOSURE
 
 static void js_writable_finish_now(Item self, Item callback) {
     ensure_keys();
@@ -6848,6 +6544,42 @@ extern "C" Item js_writable_uncork(Item self) {
     return make_js_undefined();
 }
 
+static void js_stream_install_event_methods(Item obj) {
+    js_stream_set_default_method(obj, "on", js_stream_inst_on);
+    js_stream_set_default_method(obj, "once", js_stream_inst_once);
+    Item off_fn = js_new_native_function(js_stream_inst_off);
+    js_set_key_default(obj, make_string_item("off"), off_fn);
+    js_set_key_default(obj, make_string_item("removeListener"), off_fn);
+    js_stream_set_default_method(obj, "removeAllListeners", js_stream_inst_removeAllListeners);
+    js_stream_set_default_method(obj, "emit", js_stream_inst_emit);
+    js_stream_set_default_method(obj, "eventNames", js_stream_inst_eventNames);
+    js_stream_set_default_method(obj, "listeners", js_stream_inst_listeners);
+    js_stream_set_default_method(obj, "listenerCount", js_stream_inst_listenerCount);
+}
+
+static void js_stream_install_writable_methods(Item obj, JsNativeP3 write_target,
+        JsNativeP2 end_target) {
+    js_stream_set_default_method(obj, "write", write_target);
+    js_stream_set_default_method(obj, "end", end_target);
+    js_stream_set_default_method(obj, "destroy", js_stream_inst_destroy);
+    js_stream_set_default_method(obj, "_undestroy", js_stream_inst_undestroy);
+    js_stream_set_default_method(obj, "cork", js_writable_inst_cork);
+    js_stream_set_default_method(obj, "uncork", js_writable_inst_uncork);
+    js_stream_set_default_method(obj, "setEncoding", js_stream_inst_setEncoding);
+    js_stream_set_default_method(obj, "setDefaultEncoding", js_stream_inst_setDefaultEncoding);
+}
+
+static void js_stream_install_readable_methods(Item obj) {
+    js_stream_set_default_method(obj, "push", js_readable_inst_push);
+    js_stream_set_default_method(obj, "unshift", js_readable_inst_unshift);
+    js_stream_set_default_method(obj, "read", js_readable_inst_read);
+    js_stream_set_default_method(obj, "pipe", js_readable_inst_pipe);
+    js_stream_set_default_method(obj, "unpipe", js_readable_inst_unpipe);
+    js_stream_set_default_method(obj, "resume", js_readable_inst_resume);
+    js_stream_set_default_method(obj, "pause", js_readable_inst_pause);
+    js_stream_set_default_method(obj, "isPaused", js_readable_inst_isPaused);
+}
+
 // Writable constructor
 extern "C" Item js_writable_new(Item opts) {
     ensure_keys();
@@ -6875,37 +6607,15 @@ extern "C" Item js_writable_new(Item opts) {
     js_set_key_default(obj, make_string_item("_events"), js_new_object());
     js_stream_init_writable_options(obj);
 
-    js_set_key_default(obj, key_on, js_new_native_function(js_stream_inst_on));
-    js_set_key_default(obj, make_string_item("once"), js_new_native_function(js_stream_inst_once));
-    Item off_fn = js_new_native_function(js_stream_inst_off);
-    js_set_key_default(obj, make_string_item("off"), off_fn);
-    js_set_key_default(obj, make_string_item("removeListener"), off_fn);
-    js_set_key_default(obj, make_string_item("removeAllListeners"), js_new_native_function(js_stream_inst_removeAllListeners));
-    js_set_key_default(obj, key_emit, js_new_native_function(js_stream_inst_emit));
-    js_set_key_default(obj, make_string_item("eventNames"), js_new_native_function(js_stream_inst_eventNames));
-    js_set_key_default(obj, make_string_item("listeners"), js_new_native_function(js_stream_inst_listeners));
-    js_set_key_default(obj, make_string_item("listenerCount"), js_new_native_function(js_stream_inst_listenerCount));
-    js_set_key_default(obj, key_write, js_new_native_function(js_writable_inst_write));
-    js_set_key_default(obj, key_end, js_new_native_function(js_writable_inst_end));
-    js_set_key_default(obj, key_destroy, js_new_native_function(js_stream_inst_destroy));
-    js_set_key_default(obj, make_string_item("_undestroy"), js_new_native_function(js_stream_inst_undestroy));
-    js_set_key_default(obj, make_string_item("cork"), js_new_native_function(js_writable_inst_cork));
-    js_set_key_default(obj, make_string_item("uncork"), js_new_native_function(js_writable_inst_uncork));
-    js_set_key_default(obj, make_string_item("setEncoding"), js_new_native_function(js_stream_inst_setEncoding));
-    js_set_key_default(obj, make_string_item("setDefaultEncoding"), js_new_native_function(js_stream_inst_setDefaultEncoding));
+    js_stream_install_event_methods(obj);
+    js_stream_install_writable_methods(obj, js_writable_inst_write, js_writable_inst_end);
 
     JS_RETURN_IF_ERROR(propagate_stream_options(obj, opts));
     js_stream_call_construct(obj);
     return obj;
 }
-
-extern "C" Item js_readable_new(Item opts) {
-    return js_readable_new_internal(opts, JS_CLASS_READABLE);
-}
-
-extern "C" Item js_readable_new_with_class(Item opts, int class_id) {
-    return js_readable_new_internal(opts, (JsClass)class_id);
-}
+JS_FORWARD_ITEM(js_readable_new, (Item opts), js_readable_new_internal, (opts, JS_CLASS_READABLE))
+JS_FORWARD_ITEM(js_readable_new_with_class, (Item opts, int class_id), js_readable_new_internal, (opts, (JsClass)class_id))
 
 // =============================================================================
 // Duplex stream (Readable + Writable)
@@ -6947,37 +6657,14 @@ static void js_stream_init_duplex_like(Item obj, bool transform) {
     js_stream_init_readable_options(obj);
     js_stream_init_writable_options(obj);
 
-    js_set_key_default(obj, key_on, js_new_native_function(js_stream_inst_on));
-    js_set_key_default(obj, make_string_item("once"), js_new_native_function(js_stream_inst_once));
-    Item off_fn = js_new_native_function(js_stream_inst_off);
-    js_set_key_default(obj, make_string_item("off"), off_fn);
-    js_set_key_default(obj, make_string_item("removeListener"), off_fn);
-    js_set_key_default(obj, make_string_item("removeAllListeners"), js_new_native_function(js_stream_inst_removeAllListeners));
-    js_set_key_default(obj, key_emit, js_new_native_function(js_stream_inst_emit));
-    js_set_key_default(obj, make_string_item("eventNames"), js_new_native_function(js_stream_inst_eventNames));
-    js_set_key_default(obj, make_string_item("listeners"), js_new_native_function(js_stream_inst_listeners));
-    js_set_key_default(obj, make_string_item("listenerCount"), js_new_native_function(js_stream_inst_listenerCount));
-    js_set_key_default(obj, key_push, js_new_native_function(js_readable_inst_push));
-    js_set_key_default(obj, make_string_item("unshift"), js_new_native_function(js_readable_inst_unshift));
-    js_set_key_default(obj, key_read, js_new_native_function(js_readable_inst_read));
-    js_set_key_default(obj, key_pipe, js_new_native_function(js_readable_inst_pipe));
-    js_set_key_default(obj, make_string_item("unpipe"), js_new_native_function(js_readable_inst_unpipe));
-    js_set_key_default(obj, make_string_item("resume"), js_new_native_function(js_readable_inst_resume));
-    js_set_key_default(obj, make_string_item("pause"), js_new_native_function(js_readable_inst_pause));
-    js_set_key_default(obj, make_string_item("isPaused"), js_new_native_function(js_readable_inst_isPaused));
+    js_stream_install_event_methods(obj);
+    js_stream_install_readable_methods(obj);
 
     JsNativeP3 write_target = transform ? js_transform_inst_write :
         js_writable_inst_write;
     JsNativeP2 end_target = transform ? js_transform_inst_end :
         js_writable_inst_end;
-    js_set_key_default(obj, key_write, js_new_native_function(write_target));
-    js_set_key_default(obj, key_end, js_new_native_function(end_target));
-    js_set_key_default(obj, key_destroy, js_new_native_function(js_stream_inst_destroy));
-    js_set_key_default(obj, make_string_item("_undestroy"), js_new_native_function(js_stream_inst_undestroy));
-    js_set_key_default(obj, make_string_item("cork"), js_new_native_function(js_writable_inst_cork));
-    js_set_key_default(obj, make_string_item("uncork"), js_new_native_function(js_writable_inst_uncork));
-    js_set_key_default(obj, make_string_item("setEncoding"), js_new_native_function(js_stream_inst_setEncoding));
-    js_set_key_default(obj, make_string_item("setDefaultEncoding"), js_new_native_function(js_stream_inst_setDefaultEncoding));
+    js_stream_install_writable_methods(obj, write_target, end_target);
     js_stream_install_async_iterator(obj);
     js_stream_install_readable_helpers(obj);
 }
@@ -7014,10 +6701,7 @@ static Item js_stream_duplex_pair_final(Item env_item, Item callback) {
     }
     return make_js_undefined();
 }
-
-static Item js_stream_duplex_pair_read(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_stream_duplex_pair_read, (void), make_js_undefined, ())
 
 static void js_stream_duplex_pair_attach(Item endpoint, Item peer) {
     Item* env = js_alloc_env(1);
@@ -7026,8 +6710,7 @@ static void js_stream_duplex_pair_attach(Item endpoint, Item peer) {
                     js_new_native_closure(js_stream_duplex_pair_write, 3, env, 1));
     js_set_key_default(endpoint, make_string_item("_final"),
                     js_new_native_closure(js_stream_duplex_pair_final, 1, env, 1));
-    js_set_key_default(endpoint, make_string_item("_read"),
-                    js_new_native_function(js_stream_duplex_pair_read));
+    js_set_native_key(endpoint, make_string_item("_read"), js_stream_duplex_pair_read);
 }
 
 static Item js_stream_duplex_pair(void) {
@@ -7198,8 +6881,7 @@ static Item js_duplex_from_promise(Item promise) {
     js_set_key_default(opts, make_string_item("readable"), js_bool_item(true));
     js_set_key_default(opts, make_string_item("writable"), js_bool_item(false));
     JS_ASSIGN_OR_RETURN(duplex, js_duplex_new(opts));
-    js_set_key_default(duplex, make_string_item("_read"),
-                    js_new_native_function(js_stream_duplex_pair_read));
+    js_set_native_key(duplex, make_string_item("_read"), js_stream_duplex_pair_read);
 
     Item* env = js_alloc_env(1);
     env[0] = duplex;
@@ -7214,8 +6896,7 @@ static Item js_duplex_from_readable_value(Item value) {
     js_set_key_default(opts, make_string_item("readable"), js_bool_item(true));
     js_set_key_default(opts, make_string_item("writable"), js_bool_item(false));
     JS_ASSIGN_OR_RETURN(duplex, js_duplex_new(opts));
-    js_set_key_default(duplex, make_string_item("_read"),
-                    js_new_native_function(js_stream_duplex_pair_read));
+    js_set_native_key(duplex, make_string_item("_read"), js_stream_duplex_pair_read);
     if (get_type_id(value) != LMD_TYPE_UNDEFINED && get_type_id(value) != LMD_TYPE_NULL) {
         js_readable_push(duplex, value);
     }
@@ -7247,8 +6928,7 @@ static Item js_duplex_from_web_readable(Item readable_stream) {
     js_set_key_default(opts, make_string_item("readable"), js_bool_item(true));
     js_set_key_default(opts, make_string_item("writable"), js_bool_item(false));
     JS_ASSIGN_OR_RETURN(duplex, js_duplex_new(opts));
-    js_set_key_default(duplex, make_string_item("_read"),
-                    js_new_native_function(js_stream_duplex_pair_read));
+    js_set_native_key(duplex, make_string_item("_read"), js_stream_duplex_pair_read);
 
     Item chunks = js_get_key_default(readable_stream, make_string_item("__chunks__"));
     if (get_type_id(chunks) == LMD_TYPE_ARRAY) {
@@ -7408,8 +7088,7 @@ static Item js_duplex_from(Item source) {
                         js_bool_item(js_state_get_bool(writable_state, "objectMode")));
     }
     JS_ASSIGN_OR_RETURN(duplex, js_duplex_new(opts));
-    js_set_key_default(duplex, make_string_item("_read"),
-                    js_new_native_function(js_stream_duplex_pair_read));
+    js_set_native_key(duplex, make_string_item("_read"), js_stream_duplex_pair_read);
 
     if (has_readable) js_duplex_from_attach_readable(duplex, readable, has_writable ? writable : ItemNull);
     if (has_writable) js_duplex_from_attach_writable(duplex, writable);
@@ -7604,10 +7283,7 @@ static Item js_transform_new_internal(Item opts, JsClass class_id) {
     js_stream_call_construct(obj);
     return obj;
 }
-
-extern "C" Item js_transform_new(Item opts) {
-    return js_transform_new_internal(opts, JS_CLASS_TRANSFORM);
-}
+JS_FORWARD_ITEM(js_transform_new, (Item opts), js_transform_new_internal, (opts, JS_CLASS_TRANSFORM))
 
 // =============================================================================
 // PassThrough — Transform that passes data unchanged
@@ -7630,8 +7306,7 @@ extern "C" Item js_passthrough_new(Item opts) {
         js_set_prototype(obj, stream_passthrough_prototype);
     }
     // set default _transform for pass-through behavior
-    js_set_key_default(obj, make_string_item("_transform"),
-                    js_new_native_function(js_passthrough_transform));
+    js_set_native_key(obj, make_string_item("_transform"), js_passthrough_transform);
     return obj;
 }
 
@@ -7652,11 +7327,7 @@ static Item js_stream_pipeline_pair_streams(Item source, Item dest) {
     js_array_push(streams, dest);
     return streams;
 }
-
-static bool js_stream_pipeline_is_undefined(Item value) {
-    return value.item == 0 || value.item == ITEM_JS_UNDEFINED ||
-           get_type_id(value) == LMD_TYPE_UNDEFINED;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_stream_pipeline_is_undefined, (Item value), (value.item == 0 || value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED))
 
 static bool js_stream_pipeline_is_readable_input(Item value) {
     TypeId type = get_type_id(value);
@@ -7665,11 +7336,7 @@ static bool js_stream_pipeline_is_readable_input(Item value) {
            type == LMD_TYPE_STRING ||
            js_readable_from_is_iterable(value);
 }
-
-static Item js_stream_pipeline_invalid_return_value(void) {
-    return js_throw_type_error_code("ERR_INVALID_RETURN_VALUE",
-        "Expected a stream, iterable, or promise to be returned from the function");
-}
+JS_FORWARD_STATIC_ITEM(js_stream_pipeline_invalid_return_value, (void), js_throw_type_error_code, ("ERR_INVALID_RETURN_VALUE", "Expected a stream, iterable, or promise to be returned from the function"))
 
 static Item js_stream_pipeline_to_stream(Item value) {
     if (js_stream_pipeline_is_undefined(value) ||
@@ -7865,11 +7532,7 @@ static Item js_stream_pipeline_pair_impl(Item source, Item dest, Item callback, 
     }
     return actual_dest;
 }
-
-static Item js_stream_pipeline_pair(Item source, Item dest, Item callback) {
-    return js_stream_pipeline_pair_impl(source, dest, callback, true,
-                                        js_stream_pipeline_pair_streams(source, dest));
-}
+JS_FORWARD_STATIC_ITEM(js_stream_pipeline_pair, (Item source, Item dest, Item callback), js_stream_pipeline_pair_impl, (source, dest, callback, true, js_stream_pipeline_pair_streams(source, dest)))
 
 static Item js_stream_pipeline_function_sink_call_done(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -7890,10 +7553,7 @@ static Item js_stream_pipeline_function_sink_call_done(Item env_item, Item err) 
     }
     return make_js_undefined();
 }
-
-static Item js_stream_pipeline_function_sink_on_error(Item env_item, Item err) {
-    return js_stream_pipeline_function_sink_call_done(env_item, err);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_pipeline_function_sink_on_error, (Item env_item, Item err), js_stream_pipeline_function_sink_call_done, (env_item, err))
 
 static Item js_stream_pipeline_function_dest(Item source, Item dest, Item callback, Item streams) {
     Item args[1] = { source };
@@ -8131,9 +7791,7 @@ extern "C" Item js_readable_from(Item iterable) {
 // ─── stream.finished(stream, callback) ──────────────────────────────────────
 // Detect when a stream is no longer readable/writable/errored. Calls callback
 // when the stream is consumed or an error occurs.
-static Item js_stream_finished_wrapper_key(void) {
-    return make_string_item("__lambda_stream_finished_context_callback__");
-}
+JS_FORWARD_STATIC_ITEM(js_stream_finished_wrapper_key, (void), make_string_item, ("__lambda_stream_finished_context_callback__"))
 
 static Item js_stream_finished_context_callback(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -8389,10 +8047,7 @@ static Item js_stream_finished_on_end(Item env_item) {
     }
     return js_stream_finished_emit_callback(env, make_js_undefined());
 }
-
-static Item js_stream_finished_on_finish(Item env_item) {
-    return js_stream_finished_on_end(env_item);
-}
+JS_FORWARD_STATIC_ITEM(js_stream_finished_on_finish, (Item env_item), js_stream_finished_on_end, (env_item))
 
 static Item js_stream_finished_on_error(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -8646,7 +8301,7 @@ static bool js_stream_compose_is_async_sink_function(Item stream) {
            !(fn->flags & JS_STREAM_FUNC_FLAG_ASYNC_GEN);
 }
 
-static Item js_stream_compose_sink_maybe_complete(Item* env) {
+static Item js_stream_compose_maybe_complete(Item* env, bool emit_finish) {
     if (!env || js_item_is_true(env[5])) return make_js_undefined();
     if (!js_item_is_true(env[3])) return make_js_undefined();
     if (!js_item_is_true(env[4])) return make_js_undefined();
@@ -8656,19 +8311,16 @@ static Item js_stream_compose_sink_maybe_complete(Item* env) {
     Item callback = env[2];
     Item err = env[6];
     js_set_key_default(out, make_string_item("__compose_pending__"), js_bool_item(false));
-    if (js_stream_has_error(err)) {
-        if (js_is_callable(callback)) {
-            js_call_function(callback, make_js_undefined(), &err, 1);
-        }
-        js_stream_destroy(out, err);
-        return make_js_undefined();
-    }
-
     if (js_is_callable(callback)) {
-        js_call_function(callback, make_js_undefined(), NULL, 0);
-    } else {
+        if (js_stream_has_error(err)) {
+            js_call_function(callback, make_js_undefined(), &err, 1);
+        } else {
+            js_call_function(callback, make_js_undefined(), NULL, 0);
+        }
+    } else if (emit_finish && !js_stream_has_error(err)) {
         stream_emit(out, "finish", NULL, 0);
     }
+    if (js_stream_has_error(err)) js_stream_destroy(out, err);
     return make_js_undefined();
 }
 
@@ -8680,7 +8332,7 @@ static Item js_stream_compose_sink_fulfilled(Item env_item, Item value) {
         env[6] = js_stream_make_type_error_with_code("ERR_INVALID_RETURN_VALUE",
             "Expected undefined to be returned from the function");
     }
-    return js_stream_compose_sink_maybe_complete(env);
+    return js_stream_compose_maybe_complete(env, true);
 }
 
 static Item js_stream_compose_sink_rejected(Item env_item, Item err) {
@@ -8688,25 +8340,29 @@ static Item js_stream_compose_sink_rejected(Item env_item, Item err) {
     if (!env || js_item_is_true(env[3])) return make_js_undefined();
     env[3] = js_bool_item(true);
     env[6] = err;
-    return js_stream_compose_sink_maybe_complete(env);
+    return js_stream_compose_maybe_complete(env, true);
 }
 
-static Item js_stream_compose_sink_write(Item env_item, Item chunk, Item encoding, Item callback) {
+static Item js_stream_compose_write(Item env_item, Item chunk, Item encoding,
+        Item callback, bool forward_callback) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
-    Item writable = env[1];
-    Item write_fn = js_get_key_default(writable, key_write);
+    Item write_fn = js_get_key_default(env[1], key_write);
     if (!js_is_callable(write_fn)) {
         if (js_is_callable(callback))
             js_call_function(callback, make_js_undefined(), NULL, 0);
         return make_js_undefined();
     }
-    Item args[3] = { chunk, encoding, callback };
-    js_call_function(write_fn, writable, args, 3);
+    Item args[3] = { chunk, encoding,
+        forward_callback ? js_duplex_from_make_forward_callback(callback) : callback };
+    js_call_function(write_fn, env[1], args, 3);
     return make_js_undefined();
 }
+JS_FORWARD_STATIC_ITEM(js_stream_compose_sink_write, (Item env_item, Item chunk, Item encoding, Item callback), js_stream_compose_write, (env_item, chunk, encoding, callback, false))
+JS_FORWARD_STATIC_ITEM(js_stream_compose_tail_write, (Item env_item, Item chunk, Item encoding, Item callback), js_stream_compose_write, (env_item, chunk, encoding, callback, true))
 
-static Item js_stream_compose_sink_final(Item env_item, Item callback) {
+static Item js_stream_compose_final_common(Item env_item, Item callback,
+        bool emit_finish) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     env[2] = callback;
@@ -8717,8 +8373,10 @@ static Item js_stream_compose_sink_final(Item env_item, Item callback) {
         Item args[1] = { make_js_undefined() };
         JS_ASSIGN_OR_RETURN(end_result, js_call_function(end_fn, writable, args, 1));
     }
-    return js_stream_compose_sink_maybe_complete(env);
+    return js_stream_compose_maybe_complete(env, emit_finish);
 }
+JS_FORWARD_STATIC_ITEM(js_stream_compose_sink_final, (Item env_item, Item callback), js_stream_compose_final_common, (env_item, callback, true))
+JS_FORWARD_STATIC_ITEM(js_stream_compose_tail_final, (Item env_item, Item callback), js_stream_compose_final_common, (env_item, callback, false))
 
 static Item js_stream_compose_sink_destroy(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -8763,7 +8421,7 @@ static Item js_stream_compose_async_sink(Item first, Item source, Item sink) {
     if (item_is_error(result)) {
         env[3] = js_bool_item(true);
         env[6] = js_error_lane_payload(result);
-        js_stream_compose_sink_maybe_complete(env);
+        js_stream_compose_maybe_complete(env, true);
         return out;
     }
     Item then_fn = js_get_key_default(result, make_string_item("then"));
@@ -8771,7 +8429,7 @@ static Item js_stream_compose_async_sink(Item first, Item source, Item sink) {
         env[3] = js_bool_item(true);
         env[6] = js_stream_make_type_error_with_code("ERR_INVALID_RETURN_VALUE",
             "Expected a promise to be returned from the function");
-        js_stream_compose_sink_maybe_complete(env);
+        js_stream_compose_maybe_complete(env, true);
         return out;
     }
 
@@ -8781,28 +8439,11 @@ static Item js_stream_compose_async_sink(Item first, Item source, Item sink) {
     return out;
 }
 
-static Item js_stream_compose_tail_maybe_complete(Item* env) {
-    if (!env || js_item_is_true(env[5])) return make_js_undefined();
-    if (!js_item_is_true(env[3]) || !js_item_is_true(env[4])) return make_js_undefined();
-    env[5] = js_bool_item(true);
-    Item callback = env[2];
-    Item err = env[6];
-    if (js_is_callable(callback)) {
-        if (js_stream_has_error(err)) {
-            js_call_function(callback, make_js_undefined(), &err, 1);
-        } else {
-            js_call_function(callback, make_js_undefined(), NULL, 0);
-        }
-    }
-    if (js_stream_has_error(err)) js_stream_destroy(env[0], err);
-    return make_js_undefined();
-}
-
 static Item js_stream_compose_tail_on_finish(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     env[3] = js_bool_item(true);
-    return js_stream_compose_tail_maybe_complete(env);
+    return js_stream_compose_maybe_complete(env, false);
 }
 
 static Item js_stream_compose_tail_on_error(Item env_item, Item err) {
@@ -8810,34 +8451,7 @@ static Item js_stream_compose_tail_on_error(Item env_item, Item err) {
     if (!env) return make_js_undefined();
     env[3] = js_bool_item(true);
     env[6] = err;
-    return js_stream_compose_tail_maybe_complete(env);
-}
-
-static Item js_stream_compose_tail_write(Item env_item, Item chunk, Item encoding, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item write_fn = js_get_key_default(env[1], key_write);
-    if (!js_is_callable(write_fn)) {
-        if (js_is_callable(callback))
-            js_call_function(callback, make_js_undefined(), NULL, 0);
-        return make_js_undefined();
-    }
-    Item args[3] = { chunk, encoding, js_duplex_from_make_forward_callback(callback) };
-    js_call_function(write_fn, env[1], args, 3);
-    return make_js_undefined();
-}
-
-static Item js_stream_compose_tail_final(Item env_item, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    env[2] = callback;
-    env[4] = js_bool_item(true);
-    Item end_fn = js_get_key_default(env[1], key_end);
-    if (js_is_callable(end_fn)) {
-        Item args[1] = { make_js_undefined() };
-        JS_ASSIGN_OR_RETURN(end_result, js_call_function(end_fn, env[1], args, 1));
-    }
-    return js_stream_compose_tail_maybe_complete(env);
+    return js_stream_compose_maybe_complete(env, false);
 }
 
 static Item js_stream_compose_writable_tail(Item first, Item last) {
@@ -8944,14 +8558,26 @@ extern "C" Item js_stream_addAbortSignal(Item signal, Item stream) {
     return js_stream_addAbortSignalNoValidate(signal, stream);
 }
 
-extern "C" Item js_stream_get_readableEnded(void) {
+static Item js_stream_state_bool_get(Item state_key, const char* field,
+        Item fallback_key) {
     ensure_keys();
     Item self = js_get_this();
-    Item state = js_get_key_default(self, key_readable_state);
-    bool ended = js_state_get_bool(state, "endEmitted") ||
-                 js_item_is_true(js_get_key_default(self, key_end_emitted));
-    return js_bool_item(ended);
+    Item state = js_get_key_default(self, state_key);
+    bool value = js_state_get_bool(state, field);
+    if (fallback_key.item != 0 && fallback_key.item != ITEM_NULL) {
+        value = value || js_item_is_true(js_get_key_default(self, fallback_key));
+    }
+    return js_bool_item(value);
 }
+
+static Item js_stream_state_int_get(Item state_key, const char* field) {
+    ensure_keys();
+    Item state = js_get_key_default(js_get_this(), state_key);
+    Item value = js_get_key_default(state, make_string_item(field));
+    return get_type_id(value) == LMD_TYPE_INT ? value
+        : (Item){.item = i2it(0)};
+}
+JS_FORWARD_ITEM(js_stream_get_readableEnded, (void), js_stream_state_bool_get, (key_readable_state, "endEmitted", key_end_emitted))
 
 extern "C" Item js_stream_get_readableLength(void) {
     ensure_keys();
@@ -8970,38 +8596,10 @@ extern "C" Item js_stream_get_readableFlowing(void) {
     }
     return ItemNull;
 }
-
-extern "C" Item js_stream_get_readableDidRead(void) {
-    ensure_keys();
-    Item self = js_get_this();
-    return js_bool_item(js_state_get_bool(js_get_key_default(self, key_readable_state), "didRead"));
-}
-
-extern "C" Item js_stream_get_writableEnded(void) {
-    ensure_keys();
-    Item self = js_get_this();
-    Item state = js_get_key_default(self, key_writable_state);
-    bool ended = js_state_get_bool(state, "ended");
-    return js_bool_item(ended);
-}
-
-extern "C" Item js_stream_get_writableFinished(void) {
-    ensure_keys();
-    Item self = js_get_this();
-    Item state = js_get_key_default(self, key_writable_state);
-    bool finished = js_state_get_bool(state, "finished") ||
-                    js_item_is_true(js_get_key_default(self, key_finished));
-    return js_bool_item(finished);
-}
-
-extern "C" Item js_stream_get_writableCorked(void) {
-    ensure_keys();
-    Item self = js_get_this();
-    Item state = js_get_key_default(self, key_writable_state);
-    Item corked = js_get_key_default(state, make_string_item("corked"));
-    if (get_type_id(corked) == LMD_TYPE_INT) return corked;
-    return (Item){.item = i2it(0)};
-}
+JS_FORWARD_ITEM(js_stream_get_readableDidRead, (void), js_stream_state_bool_get, (key_readable_state, "didRead", ItemNull))
+JS_FORWARD_ITEM(js_stream_get_writableEnded, (void), js_stream_state_bool_get, (key_writable_state, "ended", ItemNull))
+JS_FORWARD_ITEM(js_stream_get_writableFinished, (void), js_stream_state_bool_get, (key_writable_state, "finished", key_finished))
+JS_FORWARD_ITEM(js_stream_get_writableCorked, (void), js_stream_state_int_get, (key_writable_state, "corked"))
 
 extern "C" Item js_stream_get_writableNeedDrain(void) {
     ensure_keys();
@@ -9012,15 +8610,7 @@ extern "C" Item js_stream_get_writableNeedDrain(void) {
                       !js_item_is_true(js_get_key_default(self, key_destroyed));
     return js_bool_item(need_drain);
 }
-
-extern "C" Item js_stream_get_writableLength(void) {
-    ensure_keys();
-    Item self = js_get_this();
-    Item state = js_get_key_default(self, key_writable_state);
-    Item length = js_get_key_default(state, make_string_item("length"));
-    if (get_type_id(length) == LMD_TYPE_INT) return length;
-    return (Item){.item = i2it(0)};
-}
+JS_FORWARD_ITEM(js_stream_get_writableLength, (void), js_stream_state_int_get, (key_writable_state, "length"))
 
 extern "C" Item js_stream_isDisturbed(Item stream) {
     ensure_keys();
@@ -9030,27 +8620,24 @@ extern "C" Item js_stream_isDisturbed(Item stream) {
     return js_bool_item(js_item_is_true(js_get_key_default(stream, make_string_item("__web_disturbed__"))));
 }
 
-extern "C" Item js_stream_isReadable(Item stream) {
+static Item js_stream_is_active(Item stream, bool readable) {
     ensure_keys();
-    if (!js_stream_is_stream_like(stream) || !js_stream_has_readable_side(stream)) return ItemNull;
+    if (!js_stream_is_stream_like(stream) ||
+            !(readable ? js_stream_has_readable_side(stream) :
+                js_stream_has_writable_side(stream))) return ItemNull;
     if (js_item_is_true(js_get_key_default(stream, key_destroyed))) return js_bool_item(false);
-    if (js_item_is_true(js_get_key_default(stream, key_end_emitted)) ||
-        js_state_get_bool(js_get_key_default(stream, key_readable_state), "endEmitted")) {
+    Item terminal_key = readable ? key_end_emitted : key_finished;
+    const char* terminal_state = readable ? "endEmitted" : "finished";
+    Item state_key = readable ? key_readable_state : key_writable_state;
+    if (js_item_is_true(js_get_key_default(stream, terminal_key)) ||
+        js_state_get_bool(js_get_key_default(stream, state_key), terminal_state)) {
         return js_bool_item(false);
     }
-    return js_bool_item(js_item_is_true(js_get_key_default(stream, key_readable)));
+    return js_bool_item(js_item_is_true(js_get_key_default(stream,
+        readable ? key_readable : key_writable)));
 }
-
-extern "C" Item js_stream_isWritable(Item stream) {
-    ensure_keys();
-    if (!js_stream_is_stream_like(stream) || !js_stream_has_writable_side(stream)) return ItemNull;
-    if (js_item_is_true(js_get_key_default(stream, key_destroyed))) return js_bool_item(false);
-    if (js_item_is_true(js_get_key_default(stream, key_finished)) ||
-        js_state_get_bool(js_get_key_default(stream, key_writable_state), "finished")) {
-        return js_bool_item(false);
-    }
-    return js_bool_item(js_item_is_true(js_get_key_default(stream, key_writable)));
-}
+JS_FORWARD_ITEM(js_stream_isReadable, (Item stream), js_stream_is_active, (stream, true))
+JS_FORWARD_ITEM(js_stream_isWritable, (Item stream), js_stream_is_active, (stream, false))
 
 extern "C" Item js_stream_isErrored(Item stream) {
     ensure_keys();
@@ -9113,41 +8700,28 @@ static void js_stream_install_accessor(Item ctor, const char* name,
 
 static void js_stream_install_state_accessors(Item readable_ctor, Item writable_ctor,
                                              Item duplex_ctor, Item transform_ctor) {
-    js_stream_install_accessor(readable_ctor, "readableEnded", js_stream_get_readableEnded);
-    js_stream_install_accessor(duplex_ctor, "readableEnded", js_stream_get_readableEnded);
-    js_stream_install_accessor(transform_ctor, "readableEnded", js_stream_get_readableEnded);
-
-    js_stream_install_accessor(readable_ctor, "readableLength", js_stream_get_readableLength);
-    js_stream_install_accessor(duplex_ctor, "readableLength", js_stream_get_readableLength);
-    js_stream_install_accessor(transform_ctor, "readableLength", js_stream_get_readableLength);
-
-    js_stream_install_accessor(readable_ctor, "readableFlowing", js_stream_get_readableFlowing);
-    js_stream_install_accessor(duplex_ctor, "readableFlowing", js_stream_get_readableFlowing);
-    js_stream_install_accessor(transform_ctor, "readableFlowing", js_stream_get_readableFlowing);
-
-    js_stream_install_accessor(readable_ctor, "readableDidRead", js_stream_get_readableDidRead);
-    js_stream_install_accessor(duplex_ctor, "readableDidRead", js_stream_get_readableDidRead);
-    js_stream_install_accessor(transform_ctor, "readableDidRead", js_stream_get_readableDidRead);
-
-    js_stream_install_accessor(writable_ctor, "writableEnded", js_stream_get_writableEnded);
-    js_stream_install_accessor(duplex_ctor, "writableEnded", js_stream_get_writableEnded);
-    js_stream_install_accessor(transform_ctor, "writableEnded", js_stream_get_writableEnded);
-
-    js_stream_install_accessor(writable_ctor, "writableFinished", js_stream_get_writableFinished);
-    js_stream_install_accessor(duplex_ctor, "writableFinished", js_stream_get_writableFinished);
-    js_stream_install_accessor(transform_ctor, "writableFinished", js_stream_get_writableFinished);
-
-    js_stream_install_accessor(writable_ctor, "writableCorked", js_stream_get_writableCorked);
-    js_stream_install_accessor(duplex_ctor, "writableCorked", js_stream_get_writableCorked);
-    js_stream_install_accessor(transform_ctor, "writableCorked", js_stream_get_writableCorked);
-
-    js_stream_install_accessor(writable_ctor, "writableNeedDrain", js_stream_get_writableNeedDrain);
-    js_stream_install_accessor(duplex_ctor, "writableNeedDrain", js_stream_get_writableNeedDrain);
-    js_stream_install_accessor(transform_ctor, "writableNeedDrain", js_stream_get_writableNeedDrain);
-
-    js_stream_install_accessor(writable_ctor, "writableLength", js_stream_get_writableLength);
-    js_stream_install_accessor(duplex_ctor, "writableLength", js_stream_get_writableLength);
-    js_stream_install_accessor(transform_ctor, "writableLength", js_stream_get_writableLength);
+    struct JsStreamAccessorSpec {
+        const char* name;
+        Item (*getter)(void);
+        bool writable;
+    } specs[] = {
+        {"readableEnded", js_stream_get_readableEnded, false},
+        {"readableLength", js_stream_get_readableLength, false},
+        {"readableFlowing", js_stream_get_readableFlowing, false},
+        {"readableDidRead", js_stream_get_readableDidRead, false},
+        {"writableEnded", js_stream_get_writableEnded, true},
+        {"writableFinished", js_stream_get_writableFinished, true},
+        {"writableCorked", js_stream_get_writableCorked, true},
+        {"writableNeedDrain", js_stream_get_writableNeedDrain, true},
+        {"writableLength", js_stream_get_writableLength, true},
+    };
+    for (size_t i = 0; i < sizeof(specs) / sizeof(specs[0]); i++) {
+        const JsStreamAccessorSpec* spec = &specs[i];
+        js_stream_install_accessor(spec->writable ? writable_ctor : readable_ctor,
+            spec->name, spec->getter);
+        js_stream_install_accessor(duplex_ctor, spec->name, spec->getter);
+        js_stream_install_accessor(transform_ctor, spec->name, spec->getter);
+    }
 }
 
 // =============================================================================
@@ -9171,24 +8745,24 @@ static Item stream_set_method(Item ns, const char* name, Target target,
     js_set_key_default(ns, key, fn);
     return fn;
 }
+JS_FORWARD_STATIC_ITEM(js_stream_promisify_custom_symbol, (void), js_symbol_for, (make_string_item("nodejs.util.promisify.custom")))
 
-static Item js_stream_promisify_custom_symbol(void) {
-    return js_symbol_for(make_string_item("nodejs.util.promisify.custom"));
+static void js_stream_promises_remove_abort_listener(Item* env) {
+    if (!env) return;
+    Item signal = env[3];
+    Item abort_listener = env[4];
+    Item remove_event = js_get_key_default(signal, make_string_item("removeEventListener"));
+    if (js_is_callable(remove_event) && js_is_callable(abort_listener)) {
+        Item remove_args[2] = { make_string_item("abort"), abort_listener };
+        js_call_function(remove_event, signal, remove_args, 2);
+    }
 }
 
 static Item js_stream_promises_callback(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || js_item_is_true(env[2])) return make_js_undefined();
     env[2] = js_bool_item(true);
-
-    Item signal = env[3];
-    Item abort_listener = env[4];
-    Item remove_event = js_get_key_default(signal, make_string_item("removeEventListener"));
-    if (js_is_callable(remove_event) &&
-        js_is_callable(abort_listener)) {
-        Item remove_args[2] = { make_string_item("abort"), abort_listener };
-        js_call_function(remove_event, signal, remove_args, 2);
-    }
+    js_stream_promises_remove_abort_listener(env);
 
     Item resolve = env[0];
     Item reject = env[1];
@@ -9204,16 +8778,9 @@ static Item js_stream_promises_pipeline_on_abort(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || js_item_is_true(env[2])) return make_js_undefined();
     env[2] = js_bool_item(true);
+    js_stream_promises_remove_abort_listener(env);
 
     Item signal = env[3];
-    Item abort_listener = env[4];
-    Item remove_event = js_get_key_default(signal, make_string_item("removeEventListener"));
-    if (js_is_callable(remove_event) &&
-        js_is_callable(abort_listener)) {
-        Item remove_args[2] = { make_string_item("abort"), abort_listener };
-        js_call_function(remove_event, signal, remove_args, 2);
-    }
-
     Item err = js_stream_finished_abort_error(signal);
     Item reject = env[1];
     if (js_is_callable(reject)) {
@@ -9592,10 +9159,8 @@ static Item js_readable_to_web_get_reader(Item options) {
                     js_get_key_default(web, make_string_item("__node_readable__")));
     js_set_key_default(reader, make_string_item("__byob__"),
                     js_bool_item(get_type_id(js_get_key_default(options, make_string_item("mode"))) == LMD_TYPE_STRING));
-    js_set_key_default(reader, make_string_item("read"),
-                    js_new_native_function(js_readable_to_web_reader_read));
-    js_set_key_default(reader, make_string_item("cancel"),
-                    js_new_native_function(js_readable_to_web_reader_cancel));
+    js_set_native_key(reader, make_string_item("read"), js_readable_to_web_reader_read);
+    js_set_native_key(reader, make_string_item("cancel"), js_readable_to_web_reader_cancel);
     return reader;
 }
 
@@ -9612,8 +9177,7 @@ static Item js_readable_toWeb(Item readable, Item options) {
         js_set_prototype(web, proto);
     }
     js_set_key_default(web, make_string_item("__node_readable__"), readable);
-    js_set_key_default(web, make_string_item("getReader"),
-                    js_new_native_function(js_readable_to_web_get_reader));
+    js_set_native_key(web, make_string_item("getReader"), js_readable_to_web_get_reader);
     return web;
 }
 
@@ -9695,9 +9259,8 @@ extern "C" Item js_get_stream_namespace(void) {
     if (js_stream_is_object_like(events_ctor)) {
         js_set_prototype(stream_base, events_ctor);
     }
-    js_set_key_default(stream_base_proto, key_pipe, js_new_native_function(js_readable_inst_pipe));
-    js_set_key_default(stream_base_proto, make_string_item("unpipe"),
-                    js_new_native_function(js_readable_inst_unpipe));
+    js_set_native_key(stream_base_proto, key_pipe, js_readable_inst_pipe);
+    js_set_native_key(stream_base_proto, make_string_item("unpipe"), js_readable_inst_unpipe);
     // legacy Stream instances have no readable state, so for-await must enter
     // the event-listener iterator path from the base prototype.
     js_stream_install_async_iterator(stream_base_proto);
@@ -9709,18 +9272,14 @@ extern "C" Item js_get_stream_namespace(void) {
     js_set_key_default(stream_namespace, make_string_item("Stream"), stream_base);
 
     if (get_type_id(readable_constructor) == LMD_TYPE_FUNC) {
-        js_set_key_default(readable_constructor, make_string_item("from"),
-                        js_new_native_function(js_readable_from));
-        js_set_key_default(readable_constructor, make_string_item("toWeb"),
-                        js_new_native_function(js_readable_toWeb));
+        js_set_native_key(readable_constructor, make_string_item("from"), js_readable_from);
+        js_set_native_key(readable_constructor, make_string_item("toWeb"), js_readable_toWeb);
     }
     if (get_type_id(writable_constructor) == LMD_TYPE_FUNC) {
-        js_set_key_default(writable_constructor, make_string_item("toWeb"),
-                        js_new_native_function(js_writable_toWeb));
+        js_set_native_key(writable_constructor, make_string_item("toWeb"), js_writable_toWeb);
     }
     if (get_type_id(duplex_constructor) == LMD_TYPE_FUNC) {
-        js_set_key_default(duplex_constructor, make_string_item("from"),
-                        js_new_native_function(js_duplex_from));
+        js_set_native_key(duplex_constructor, make_string_item("from"), js_duplex_from);
     }
 
     if (get_type_id(readable_constructor) == LMD_TYPE_FUNC &&
@@ -9739,8 +9298,7 @@ extern "C" Item js_get_stream_namespace(void) {
         stream_passthrough_prototype = js_stream_constructor_prototype(passthrough_constructor,
             JS_CLASS_PASS_THROUGH);
         js_stream_install_async_iterator(stream_readable_prototype);
-        js_set_key_default(stream_readable_prototype, make_string_item("iterator"),
-                        js_new_native_function(js_readable_inst_iterator));
+        js_set_native_key(stream_readable_prototype, make_string_item("iterator"), js_readable_inst_iterator);
         js_stream_install_readable_helpers(stream_readable_prototype);
 
         js_stream_mark_constructor_prototype(readable_constructor, stream_readable_prototype);
@@ -9826,8 +9384,7 @@ extern "C" Item js_get_internal_stream_add_abort_signal_namespace(void) {
     static Item add_abort_ns = {0};
     if (add_abort_ns.item != 0) return add_abort_ns;
     add_abort_ns = js_new_object();
-    js_set_key_default(add_abort_ns, make_string_item("addAbortSignalNoValidate"),
-                    js_new_native_function(js_stream_addAbortSignalNoValidate));
+    js_set_native_key(add_abort_ns, make_string_item("addAbortSignalNoValidate"), js_stream_addAbortSignalNoValidate);
     js_set_key_default(add_abort_ns, make_string_item("default"), add_abort_ns);
     return add_abort_ns;
 }
@@ -9835,10 +9392,8 @@ extern "C" Item js_get_internal_stream_add_abort_signal_namespace(void) {
 extern "C" Item js_get_internal_stream_state_namespace(void) {
     if (internal_stream_state_namespace.item != 0) return internal_stream_state_namespace;
     internal_stream_state_namespace = js_new_object();
-    js_set_key_default(internal_stream_state_namespace, make_string_item("getDefaultHighWaterMark"),
-                    js_new_native_function(js_stream_getDefaultHighWaterMark));
-    js_set_key_default(internal_stream_state_namespace, make_string_item("setDefaultHighWaterMark"),
-                    js_new_native_function(js_stream_setDefaultHighWaterMark));
+    js_set_native_key(internal_stream_state_namespace, make_string_item("getDefaultHighWaterMark"), js_stream_getDefaultHighWaterMark);
+    js_set_native_key(internal_stream_state_namespace, make_string_item("setDefaultHighWaterMark"), js_stream_setDefaultHighWaterMark);
     js_set_key_default(internal_stream_state_namespace, make_string_item("default"),
                     internal_stream_state_namespace);
     return internal_stream_state_namespace;

@@ -130,10 +130,7 @@ static Item throw_dom_exception(const char* name, const char* msg) {
 // Translate dom_range exception strings (e.g. "InvalidNodeTypeError",
 // "IndexSizeError", "WrongDocumentError", "HierarchyRequestError",
 // "InvalidStateError") into a JS DOMException-like throw.
-static Item throw_from_dom_exc(const char* exc, const char* fallback_msg) {
-    return throw_dom_exception(exc ? exc : "InvalidStateError",
-                               fallback_msg ? fallback_msg : "");
-}
+JS_FORWARD_STATIC_ITEM(throw_from_dom_exc, (const char* exc, const char* fallback_msg), throw_dom_exception, (exc ? exc : "InvalidStateError", fallback_msg ? fallback_msg : ""))
 
 // ============================================================================
 // Per-document DocState (lazy in headless JS mode)
@@ -189,15 +186,16 @@ extern "C" bool js_dom_item_is_selection(Item item) {
     return false;
 }
 
+static inline void* js_dom_host_data(Item obj, bool (*is_type)(Item)) {
+    if (!is_type(obj)) return nullptr;
+    if (get_type_id(obj) == LMD_TYPE_VMAP) return obj.vmap->host_data;
+    return obj.map->data;
+}
 static inline DomRange* range_from(Item obj) {
-    if (!js_dom_item_is_range(obj)) return nullptr;
-    if (get_type_id(obj) == LMD_TYPE_VMAP) return (DomRange*)obj.vmap->host_data;
-    return (DomRange*)obj.map->data;
+    return (DomRange*)js_dom_host_data(obj, js_dom_item_is_range);
 }
 static inline DomSelection* selection_from(Item obj) {
-    if (!js_dom_item_is_selection(obj)) return nullptr;
-    if (get_type_id(obj) == LMD_TYPE_VMAP) return (DomSelection*)obj.vmap->host_data;
-    return (DomSelection*)obj.map->data;
+    return (DomSelection*)js_dom_host_data(obj, js_dom_item_is_selection);
 }
 
 static bool selection_state_set(DomSelection* s,
@@ -210,11 +208,7 @@ static bool selection_state_set(DomSelection* s,
     }
     return state_store_set_selection(s->state, anchor, focus, out_exception);
 }
-
-static bool selection_state_clear(DomSelection* s,
-                                  const char** out_exception) {
-    return selection_state_set(s, nullptr, nullptr, out_exception);
-}
+JS_FORWARD_STATIC_RETURN(bool, selection_state_clear, (DomSelection* s,                                   const char** out_exception), selection_state_set, (s, nullptr, nullptr, out_exception))
 
 static Item get_dom_constructor_prototype(const char* ctor_name) {
     Item global = js_get_global_this();
@@ -224,13 +218,11 @@ static Item get_dom_constructor_prototype(const char* ctor_name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
-extern "C" Item js_dom_range_get_prototype_value(void) {
-    return get_dom_constructor_prototype("Range");
-}
-
-extern "C" Item js_dom_selection_get_prototype_value(void) {
-    return get_dom_constructor_prototype("Selection");
-}
+#define JS_DOM_PROTOTYPE_VALUE(name, class_name) \
+    extern "C" Item name(void) { return get_dom_constructor_prototype(class_name); }
+JS_DOM_PROTOTYPE_VALUE(js_dom_range_get_prototype_value, "Range")
+JS_DOM_PROTOTYPE_VALUE(js_dom_selection_get_prototype_value, "Selection")
+#undef JS_DOM_PROTOTYPE_VALUE
 
 // Reuse cached JS wrapper if the native object already has one; else build.
 static Item js_object_for_range(DomRange* r) {
@@ -360,9 +352,7 @@ static bool node_in_selection_doc(DomNode* n, DomSelection* s) {
 
 // Backwards-compatible wrapper: when no selection is available at the call
 // site, fall back to the thread-local active document.
-static bool node_in_active_document(DomNode* n, DomSelection* s) {
-    return node_in_selection_doc(n, s);
-}
+JS_FORWARD_STATIC_RETURN(bool, node_in_active_document, (DomNode* n, DomSelection* s), node_in_selection_doc, (n, s))
 
 // ============================================================================
 // Range methods
@@ -383,16 +373,8 @@ static Item js_range_set_offset(Item self_v, Item node_arg_v, Item offset_arg_v,
     range_sync_props(self_v, r);
     return make_undef();
 }
-
-extern "C" Item js_range_set_start(Item self_v, Item node_arg_v, Item offset_arg_v) {
-    return js_range_set_offset(self_v, node_arg_v, offset_arg_v,
-        dom_range_set_start, "Range.setStart failed");
-}
-
-extern "C" Item js_range_set_end(Item self_v, Item node_arg_v, Item offset_arg_v) {
-    return js_range_set_offset(self_v, node_arg_v, offset_arg_v,
-        dom_range_set_end, "Range.setEnd failed");
-}
+JS_FORWARD_ITEM(js_range_set_start, (Item self_v, Item node_arg_v, Item offset_arg_v), js_range_set_offset, (self_v, node_arg_v, offset_arg_v, dom_range_set_start, "Range.setStart failed"))
+JS_FORWARD_ITEM(js_range_set_end, (Item self_v, Item node_arg_v, Item offset_arg_v), js_range_set_offset, (self_v, node_arg_v, offset_arg_v, dom_range_set_end, "Range.setEnd failed"))
 
 #define JS_RANGE_NODE_MUTATOR(name, operation, message) \
     extern "C" Item name(Item self_v, Item node_v) { \
@@ -426,29 +408,23 @@ extern "C" Item js_range_collapse(Item self_v, Item to_start_v) {
     return make_undef();
 }
 
-extern "C" Item js_range_select_node(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_select_node(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "Range.selectNode failed");
-    }
-    range_sync_props(self_v, r);
-    return make_undef();
-}
+typedef bool (*DomRangeNodeOperation)(DomRange*, DomNode*, const char**);
 
-extern "C" Item js_range_select_node_contents(Item self_v, Item node_v) {
+static Item js_range_node_operation(Item self_v, Item node_v,
+                                    DomRangeNodeOperation operation,
+                                    const char* message) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
     if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
-    if (!dom_range_select_node_contents(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "Range.selectNodeContents failed");
+    if (!operation(r, n, &exc)) {
+        return throw_from_dom_exc(exc, message);
     }
     range_sync_props(self_v, r);
     return make_undef();
 }
+JS_FORWARD_ITEM(js_range_select_node, (Item self_v, Item node_v), js_range_node_operation, (self_v, node_v, dom_range_select_node, "Range.selectNode failed"))
+JS_FORWARD_ITEM(js_range_select_node_contents, (Item self_v, Item node_v), js_range_node_operation, (self_v, node_v, dom_range_select_node_contents, "Range.selectNodeContents failed"))
 
 extern "C" Item js_range_clone_range(Item self_v) {
     DomRange* r = range_from(self_v); if (!r) return ItemNull;
@@ -498,9 +474,9 @@ extern "C" Item js_range_detach(Item self_v) {
     return make_undef();
 }
 
-extern "C" Item js_range_to_string(Item self_v) {
-    return js_dom_range_to_string_value(self_v);
-}
+#define JS_DOM_SELF_ALIAS(name, target) \
+    extern "C" Item name(Item self_v) { return target(self_v); }
+JS_DOM_SELF_ALIAS(js_range_to_string, js_dom_range_to_string_value)
 
 struct RangeClientRectCollector {
     Item array;
@@ -591,43 +567,22 @@ extern "C" Item js_range_delete_contents(Item self_v) {
     return make_undef();
 }
 
-extern "C" Item js_range_extract_contents(Item self_v) {
+typedef DomElement* (*DomRangeFragmentOperation)(DomRange*, const char**);
+
+static Item js_range_fragment_operation(Item self_v,
+                                        DomRangeFragmentOperation operation,
+                                        const char* message, bool undefined_on_invalid) {
     DomRange* r = range_from(self_v); if (!r) return ItemNull;
     const char* exc = nullptr;
-    DomElement* frag = dom_range_extract_contents(r, &exc);
-    if (exc && !frag) return throw_from_dom_exc(exc, "extractContents failed");
+    DomElement* frag = operation(r, &exc);
+    if (exc && !frag) return throw_from_dom_exc(exc, message);
+    if (undefined_on_invalid && !frag) return make_undef();
     return frag ? js_dom_wrap_element(frag) : ItemNull;
 }
-
-extern "C" Item js_range_clone_contents(Item self_v) {
-    DomRange* r = range_from(self_v); if (!r) return ItemNull;
-    const char* exc = nullptr;
-    DomElement* frag = dom_range_clone_contents(r, &exc);
-    if (exc && !frag) return throw_from_dom_exc(exc, "cloneContents failed");
-    return frag ? js_dom_wrap_element(frag) : ItemNull;
-}
-
-extern "C" Item js_range_insert_node(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_insert_node(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "insertNode failed");
-    }
-    return make_undef();
-}
-
-extern "C" Item js_range_surround_contents(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_surround_contents(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "surroundContents failed");
-    }
-    return make_undef();
-}
+JS_FORWARD_ITEM(js_range_extract_contents, (Item self_v), js_range_fragment_operation, (self_v, dom_range_extract_contents, "extractContents failed", false))
+JS_FORWARD_ITEM(js_range_clone_contents, (Item self_v), js_range_fragment_operation, (self_v, dom_range_clone_contents, "cloneContents failed", false))
+JS_FORWARD_ITEM(js_range_insert_node, (Item self_v, Item node_v), js_range_node_operation, (self_v, node_v, dom_range_insert_node, "insertNode failed"))
+JS_FORWARD_ITEM(js_range_surround_contents, (Item self_v, Item node_v), js_range_node_operation, (self_v, node_v, dom_range_surround_contents, "surroundContents failed"))
 
 // ============================================================================
 // Range constructor / property dispatch
@@ -789,9 +744,12 @@ extern "C" Item js_selection_collapse(Item self_v, Item node_v, Item offset_v) {
     return make_undef();
 }
 
-extern "C" Item js_selection_set_position(Item self_v, Item node_v, Item offset_v) {
-    return js_selection_collapse(self_v, node_v, offset_v);
-}
+#define JS_DOM_SELECTION_ALIAS(name, target) \
+    extern "C" Item name(Item self_v, Item node_v, Item offset_v) { \
+        return target(self_v, node_v, offset_v); \
+    }
+JS_DOM_SELECTION_ALIAS(js_selection_set_position, js_selection_collapse)
+#undef JS_DOM_SELECTION_ALIAS
 
 static Item js_selection_collapse_to_edge(Item self_v, bool to_end) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
@@ -820,13 +778,13 @@ static Item js_selection_collapse_to_edge(Item self_v, bool to_end) {
     return make_undef();
 }
 
-extern "C" Item js_selection_collapse_to_start(Item self_v) {
-    return js_selection_collapse_to_edge(self_v, false);
-}
-
-extern "C" Item js_selection_collapse_to_end(Item self_v) {
-    return js_selection_collapse_to_edge(self_v, true);
-}
+#define JS_DOM_SELECTION_EDGE_ALIAS(name, to_end) \
+    extern "C" Item name(Item self_v) { \
+        return js_selection_collapse_to_edge(self_v, to_end); \
+    }
+JS_DOM_SELECTION_EDGE_ALIAS(js_selection_collapse_to_start, false)
+JS_DOM_SELECTION_EDGE_ALIAS(js_selection_collapse_to_end, true)
+#undef JS_DOM_SELECTION_EDGE_ALIAS
 
 extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
@@ -997,9 +955,10 @@ extern "C" Item js_selection_delete_from_document(Item self_v) {
     return make_undef();
 }
 
-extern "C" Item js_selection_to_string(Item self_v) {
-    return js_dom_selection_to_string_value(self_v);
-}
+#define JS_DOM_SELF_ALIAS(name, target) \
+    extern "C" Item name(Item self_v) { return target(self_v); }
+JS_DOM_SELF_ALIAS(js_selection_to_string, js_dom_selection_to_string_value)
+#undef JS_DOM_SELF_ALIAS
 
 extern "C" Item js_dom_selection_to_string_value(Item obj) {
     DomSelection* s = selection_from(obj);
@@ -1073,13 +1032,14 @@ static Item build_selection_object(DomSelection* s) {
         DomSelection* s = selection_from(self_v); \
         return s ? (expression) : ItemNull; \
     }
+static Item js_selection_node_value(DomNode* node) {
+    return node ? js_dom_wrap_element(node) : ItemNull;
+}
 static Item js_selection_anchor_node_value(DomSelection* s) {
-    DomNode* n = dom_selection_anchor_node(s);
-    return n ? js_dom_wrap_element(n) : ItemNull;
+    return js_selection_node_value(dom_selection_anchor_node(s));
 }
 static Item js_selection_focus_node_value(DomSelection* s) {
-    DomNode* n = dom_selection_focus_node(s);
-    return n ? js_dom_wrap_element(n) : ItemNull;
+    return js_selection_node_value(dom_selection_focus_node(s));
 }
 JS_SELECTION_GETTER(js_selection_get_anchor_node,
     js_selection_anchor_node_value(s))
@@ -1178,26 +1138,12 @@ extern "C" Item js_dom_get_selection(void) {
     }
     return js_object_for_selection(state->dom_selection);
 }
+JS_FORWARD_ITEM(js_dom_wrap_range, (void* dom_range), js_object_for_range, ((DomRange*)dom_range))
+JS_FORWARD_RETURN(bool, js_dom_is_range_object, (Item item), js_dom_item_is_range, (item))
+JS_FORWARD_RETURN(bool, js_dom_is_selection_object, (Item item), js_dom_item_is_selection, (item))
 
-extern "C" Item js_dom_wrap_range(void* dom_range) {
-    return js_object_for_range((DomRange*)dom_range);
-}
-
-extern "C" bool js_dom_is_range_object(Item item) {
-    return js_dom_item_is_range(item);
-}
-
-extern "C" bool js_dom_is_selection_object(Item item) {
-    return js_dom_item_is_selection(item);
-}
-
-extern "C" void* js_dom_unwrap_range(Item item) {
-    return (void*)range_from(item);
-}
-
-extern "C" void* js_dom_unwrap_selection(Item item) {
-    return (void*)selection_from(item);
-}
+JS_FORWARD_RETURN(void*, js_dom_unwrap_range, (Item item), range_from, (item))
+JS_FORWARD_RETURN(void*, js_dom_unwrap_selection, (Item item), selection_from, (item))
 
 // ============================================================================
 // Global installation
@@ -1330,10 +1276,7 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     js_dom_dispatch_event(doc_item, ev);
     return ItemNull;
 }
-
-static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc) {
-    return _wpt_selectionchange_fire(this_val, args, argc);
-}
+JS_FORWARD_STATIC_ITEM(js_dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))
 
 extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;

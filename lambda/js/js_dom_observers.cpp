@@ -106,18 +106,9 @@ static void observer_register_roots(void) {
     }
     observer_roots_epoch = epoch;
 }
-
-static Item observer_key(const char* name) {
-    return js_make_string(name);
-}
-
-static Item observer_pending(JsObserverState* observer) {
-    return js_get_key_default(observer->object, observer_key("__lambdaObserverRecords"));
-}
-
-static void observer_replace_pending(JsObserverState* observer) {
-    js_set_key_default(observer->object, observer_key("__lambdaObserverRecords"), js_array_new(0));
-}
+JS_FORWARD_STATIC_ITEM(observer_key, (const char* name), js_make_string, (name))
+JS_FORWARD_STATIC_ITEM(observer_pending, (JsObserverState* observer), js_get_key_default, (observer->object, observer_key("__lambdaObserverRecords")))
+JS_FORWARD_STATIC_VOID( observer_replace_pending, (JsObserverState* observer), js_set_key_default, (observer->object, observer_key("__lambdaObserverRecords"), js_array_new(0)))
 
 static JsObserverState* observer_from_this(void) {
     Item receiver = js_get_this();
@@ -480,21 +471,17 @@ static void observer_install_common_methods(JsObserverState* observer, bool muta
     }
 }
 
-extern "C" Item js_mutation_observer_new(Item callback) {
+static Item js_observer_new(JsObserverKind kind, Item callback, bool mutation) {
     JsObserverState* observer = nullptr;
-    JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_MUTATION, callback, &observer));
+    JS_RETURN_IF_ERROR(observer_create(kind, callback, &observer));
     if (!observer) return ItemNull;
-    observer_install_common_methods(observer, true);
+    observer_install_common_methods(observer, mutation);
     return observer->object;
 }
-
-extern "C" Item js_resize_observer_new(Item callback) {
-    JsObserverState* observer = nullptr;
-    JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_RESIZE, callback, &observer));
-    if (!observer) return ItemNull;
-    observer_install_common_methods(observer, false);
-    return observer->object;
-}
+JS_FORWARD_ITEM(js_mutation_observer_new, (Item callback), js_observer_new,
+    (JS_OBSERVER_MUTATION, callback, true))
+JS_FORWARD_ITEM(js_resize_observer_new, (Item callback), js_observer_new,
+    (JS_OBSERVER_RESIZE, callback, false))
 
 extern "C" Item js_intersection_observer_new(Item callback, Item options) {
     JsObserverState* observer = nullptr;

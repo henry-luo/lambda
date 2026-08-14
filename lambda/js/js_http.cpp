@@ -48,16 +48,15 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
 extern Item js_make_number(double d);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 
+template <typename Target>
+JS_FORWARD_STATIC_VOID( js_http_set_direct_method, (Item object, const char* name, Target target), js_set_native_key, (object, make_string_item(name), target))
+
 #define http_server_prototype (js_runtime_state.http.server_prototype)
 #define http_incoming_message_prototype (js_runtime_state.http.incoming_message_prototype)
 #define http_server_response_prototype (js_runtime_state.http.server_response_prototype)
 #define http_outgoing_message_prototype (js_runtime_state.http.outgoing_message_prototype)
 #define http_namespace (js_runtime_state.http.namespace_object)
-
-static bool http_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.http.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, http_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.http.roots)))
 
 #define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
@@ -833,10 +832,7 @@ static void http_response_append_body(Item self, Item chunk_item) {
     // per write is quadratic, so keep chunks authoritative until final flush.
     js_set_key_default(self, make_string_item("__body_len__"), (Item){.item = i2it(total_len)});
 }
-
-static void http_response_append_body_encoded(Item self, Item chunk_item, Item encoding_item) {
-    http_response_append_body(self, http_encode_write_chunk(chunk_item, encoding_item));
-}
+JS_FORWARD_STATIC_VOID( http_response_append_body_encoded, (Item self, Item chunk_item, Item encoding_item), http_response_append_body, (self, http_encode_write_chunk(chunk_item, encoding_item)))
 
 static bool http_response_bool_prop(Item self, const char* name) {
     Item value = js_get_key_default(self, make_string_item(name));
@@ -1126,14 +1122,8 @@ static Item http_new_header_object(void) {
     js_set_prototype(headers, ItemNull);
     return headers;
 }
-
-static Item http_invalid_header_name_arg(Item name_item) {
-    return js_throw_invalid_arg_type("name", "string", name_item);
-}
-
-static bool http_validate_header_name_arg(Item name_item) {
-    return get_type_id(name_item) == LMD_TYPE_STRING;
-}
+JS_FORWARD_STATIC_ITEM(http_invalid_header_name_arg, (Item name_item), js_throw_invalid_arg_type, ("name", "string", name_item))
+JS_FORWARD_STATIC_EXPRESSION(bool, http_validate_header_name_arg, (Item name_item), (get_type_id(name_item) == LMD_TYPE_STRING))
 
 static Item http_headers_get_names(Item self, bool raw_names) {
     Item result = js_array_new(0);
@@ -1173,10 +1163,7 @@ static bool http_response_header_has_token(Item self, const char* name, const ch
     buf[len] = '\0';
     return http_header_has_token(buf, token);
 }
-
-static bool http_header_value_is_array(Item value) {
-    return get_type_id(value) == LMD_TYPE_ARRAY;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, http_header_value_is_array, (Item value), (get_type_id(value) == LMD_TYPE_ARRAY))
 
 static int http_append_header_value(char* resp_buf, int pos, int cap, Item name, Item value) {
     if (get_type_id(name) != LMD_TYPE_STRING) return pos;
@@ -1440,14 +1427,8 @@ extern "C" Item js_http_res_removeHeader(Item self, Item name_item) {
     }
     return self;
 }
-
-extern "C" Item js_http_res_getHeaderNames(Item self) {
-    return http_headers_get_names(self, false);
-}
-
-extern "C" Item js_http_res_getRawHeaderNames(Item self) {
-    return http_headers_get_names(self, true);
-}
+JS_FORWARD_ITEM(js_http_res_getHeaderNames, (Item self), http_headers_get_names, (self, false))
+JS_FORWARD_ITEM(js_http_res_getRawHeaderNames, (Item self), http_headers_get_names, (self, true))
 
 extern "C" Item js_http_res_hasHeader(Item self, Item name_item) {
     if (!http_validate_header_name_arg(name_item)) return http_invalid_header_name_arg(name_item);
@@ -1492,9 +1473,7 @@ static Item http_res_write_ex(Item self, Item chunk_item, Item encoding_item, It
 }
 
 // response.write(chunk) — accumulate body data
-extern "C" Item js_http_res_write(Item self, Item chunk_item, Item encoding_item) {
-    return http_res_write_ex(self, chunk_item, encoding_item, make_js_undefined());
-}
+JS_FORWARD_ITEM(js_http_res_write, (Item self, Item chunk_item, Item encoding_item), http_res_write_ex, (self, chunk_item, encoding_item, make_js_undefined()))
 
 extern "C" Item js_http_res_send_internal(Item self, Item chunk_item) {
     TypeId chunk_type = get_type_id(chunk_item);
@@ -2167,36 +2146,21 @@ static Item make_response_object(JsHttpConn* conn) {
         js_set_key_default(res, make_string_item("connection"), socket);
     }
 
-    js_set_key_default(res, make_string_item("writeHead"),
-                    js_new_native_function(js_http_res_inst_writeHead));
-    js_set_key_default(res, make_string_item("setHeader"),
-                    js_new_native_function(js_http_res_inst_setHeader));
-    js_set_key_default(res, make_string_item("getHeader"),
-                    js_new_native_function(js_http_res_inst_getHeader));
-    js_set_key_default(res, make_string_item("getHeaders"),
-                    js_new_native_function(js_http_res_inst_getHeaders));
-    js_set_key_default(res, make_string_item("getHeaderNames"),
-                    js_new_native_function(js_http_res_inst_getHeaderNames));
-    js_set_key_default(res, make_string_item("getRawHeaderNames"),
-                    js_new_native_function(js_http_res_inst_getRawHeaderNames));
-    js_set_key_default(res, make_string_item("hasHeader"),
-                    js_new_native_function(js_http_res_inst_hasHeader));
-    js_set_key_default(res, make_string_item("removeHeader"),
-                    js_new_native_function(js_http_res_inst_removeHeader));
-    js_set_key_default(res, make_string_item("write"),
-                    js_new_native_function(js_http_res_inst_write));
-    js_set_key_default(res, make_string_item("_send"),
-                    js_new_native_function(js_http_res_inst_send_internal));
-    js_set_key_default(res, make_string_item("end"),
-                    js_new_native_function(js_http_res_inst_end));
-    js_set_key_default(res, make_string_item("flushHeaders"),
-                    js_new_native_function(js_http_res_inst_flushHeaders));
-    js_set_key_default(res, make_string_item("writeContinue"),
-                    js_new_native_function(js_http_res_inst_writeContinue));
-    js_set_key_default(res, make_string_item("setTimeout"),
-                    js_new_native_function(js_http_res_inst_setTimeout));
-    js_set_key_default(res, make_string_item("on"),
-                    js_new_native_function(js_http_res_inst_on));
+    js_http_set_direct_method(res, "writeHead", js_http_res_inst_writeHead);
+    js_http_set_direct_method(res, "setHeader", js_http_res_inst_setHeader);
+    js_http_set_direct_method(res, "getHeader", js_http_res_inst_getHeader);
+    js_http_set_direct_method(res, "getHeaders", js_http_res_inst_getHeaders);
+    js_http_set_direct_method(res, "getHeaderNames", js_http_res_inst_getHeaderNames);
+    js_http_set_direct_method(res, "getRawHeaderNames", js_http_res_inst_getRawHeaderNames);
+    js_http_set_direct_method(res, "hasHeader", js_http_res_inst_hasHeader);
+    js_http_set_direct_method(res, "removeHeader", js_http_res_inst_removeHeader);
+    js_http_set_direct_method(res, "write", js_http_res_inst_write);
+    js_http_set_direct_method(res, "_send", js_http_res_inst_send_internal);
+    js_http_set_direct_method(res, "end", js_http_res_inst_end);
+    js_http_set_direct_method(res, "flushHeaders", js_http_res_inst_flushHeaders);
+    js_http_set_direct_method(res, "writeContinue", js_http_res_inst_writeContinue);
+    js_http_set_direct_method(res, "setTimeout", js_http_res_inst_setTimeout);
+    js_http_set_direct_method(res, "on", js_http_res_inst_on);
 
     if (conn && conn->server) {
         Item ctor = conn->server->server_response_ctor;
@@ -2269,10 +2233,8 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
         js_set_key_default(msg, make_string_item("connection"), socket);
         js_set_key_default(msg, make_string_item("__server_req_conn__"),
                         (Item){.item = i2it((int64_t)(uintptr_t)conn)});
-        js_set_key_default(msg, make_string_item("destroy"),
-                        js_new_native_function(js_http_server_req_destroy));
-        js_set_key_default(msg, make_string_item("setTimeout"),
-                        js_new_native_function(js_http_server_req_setTimeout));
+        js_http_set_direct_method(msg, "destroy", js_http_server_req_destroy);
+        js_http_set_direct_method(msg, "setTimeout", js_http_server_req_setTimeout);
     }
     Item async_resource = js_async_hooks_create_resource("HTTPINCOMINGMESSAGE", 19);
     js_set_key_default(msg, make_string_item("__async_resource__"), async_resource);
@@ -2825,18 +2787,12 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     }
     js_set_key_default(obj, make_string_item("__http_conn__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)conn)});
-    js_set_key_default(obj, make_string_item("on"),
-                    js_new_native_function(js_http_conn_socket_on));
-    js_set_key_default(obj, make_string_item("once"),
-                    js_new_native_function(js_http_conn_socket_on));
-    js_set_key_default(obj, make_string_item("write"),
-                    js_new_native_function(js_http_conn_socket_write));
-    js_set_key_default(obj, make_string_item("end"),
-                    js_new_native_function(js_http_conn_socket_end));
-    js_set_key_default(obj, make_string_item("destroy"),
-                    js_new_native_function(js_http_conn_socket_destroy));
-    js_set_key_default(obj, make_string_item("setTimeout"),
-                    js_new_native_function(js_http_conn_socket_setTimeout));
+    js_http_set_direct_method(obj, "on", js_http_conn_socket_on);
+    js_http_set_direct_method(obj, "once", js_http_conn_socket_on);
+    js_http_set_direct_method(obj, "write", js_http_conn_socket_write);
+    js_http_set_direct_method(obj, "end", js_http_conn_socket_end);
+    js_http_set_direct_method(obj, "destroy", js_http_conn_socket_destroy);
+    js_http_set_direct_method(obj, "setTimeout", js_http_conn_socket_setTimeout);
     js_set_key_default(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
     js_set_key_default(obj, make_string_item("bytesRead"), js_make_number((double)conn->bytes_read));
     js_set_key_default(obj, make_string_item("bytesWritten"), js_make_number((double)conn->bytes_written));
@@ -3563,29 +3519,20 @@ JS_HTTP_RECEIVER_FORWARD1(js_http_server_inst_getConnections,
 JS_HTTP_RECEIVER_FORWARD2(js_http_server_inst_on, js_http_server_on, "__server__")
 JS_HTTP_RECEIVER_FORWARD0(js_http_server_inst_address, js_http_server_address, "__server__")
 
-static Item js_http_server_inst_ref(Item maybe_self) {
+static Item js_http_server_inst_ref_or_unref(Item maybe_self, bool do_ref) {
     Item self = js_http_receiver(maybe_self, "__server__");
     Item handle_item = js_get_key_default(self, make_string_item("__server__"));
     if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
     JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
     uv_handle_t* handle = http_server_handle(srv);
     if (srv && handle && !uv_is_closing(handle)) {
-        uv_ref(handle);
+        if (do_ref) uv_ref(handle);
+        else uv_unref(handle);
     }
     return self;
 }
-
-static Item js_http_server_inst_unref(Item maybe_self) {
-    Item self = js_http_receiver(maybe_self, "__server__");
-    Item handle_item = js_get_key_default(self, make_string_item("__server__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
-    JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
-    uv_handle_t* handle = http_server_handle(srv);
-    if (srv && handle && !uv_is_closing(handle)) {
-        uv_unref(handle);
-    }
-    return self;
-}
+JS_FORWARD_STATIC_ITEM(js_http_server_inst_ref, (Item maybe_self), js_http_server_inst_ref_or_unref, (maybe_self, true))
+JS_FORWARD_STATIC_ITEM(js_http_server_inst_unref, (Item maybe_self), js_http_server_inst_ref_or_unref, (maybe_self, false))
 
 static Item js_http_server_inst_setTimeout(Item maybe_self, Item msecs_item, Item callback_item) {
     Item this_obj = js_get_this();
@@ -3638,22 +3585,14 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     }
     js_set_key_default(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
-    js_set_key_default(obj, make_string_item("listen"),
-                    js_new_native_function(js_http_server_inst_listen));
-    js_set_key_default(obj, make_string_item("close"),
-                    js_new_native_function(js_http_server_inst_close));
-    js_set_key_default(obj, make_string_item("getConnections"),
-                    js_new_native_function(js_http_server_inst_getConnections));
-    js_set_key_default(obj, make_string_item("on"),
-                    js_new_native_function(js_http_server_inst_on));
-    js_set_key_default(obj, make_string_item("setTimeout"),
-                    js_new_native_function(js_http_server_inst_setTimeout));
-    js_set_key_default(obj, make_string_item("address"),
-                    js_new_native_function(js_http_server_inst_address));
-    js_set_key_default(obj, make_string_item("ref"),
-                    js_new_native_function(js_http_server_inst_ref));
-    js_set_key_default(obj, make_string_item("unref"),
-                    js_new_native_function(js_http_server_inst_unref));
+    js_http_set_direct_method(obj, "listen", js_http_server_inst_listen);
+    js_http_set_direct_method(obj, "close", js_http_server_inst_close);
+    js_http_set_direct_method(obj, "getConnections", js_http_server_inst_getConnections);
+    js_http_set_direct_method(obj, "on", js_http_server_inst_on);
+    js_http_set_direct_method(obj, "setTimeout", js_http_server_inst_setTimeout);
+    js_http_set_direct_method(obj, "address", js_http_server_inst_address);
+    js_http_set_direct_method(obj, "ref", js_http_server_inst_ref);
+    js_http_set_direct_method(obj, "unref", js_http_server_inst_unref);
     js_set_key_default(obj, make_string_item("listening"), (Item){.item = b2it(false)});
 
     srv->js_object = obj;
@@ -3765,14 +3704,8 @@ static void http_client_metadata_from_headers(Item req_obj, Item headers_item) {
         }
     }
 }
-
-static Item js_http_client_getHeaderNames(Item self) {
-    return http_headers_get_names(self, false);
-}
-
-static Item js_http_client_getRawHeaderNames(Item self) {
-    return http_headers_get_names(self, true);
-}
+JS_FORWARD_STATIC_ITEM(js_http_client_getHeaderNames, (Item self), http_headers_get_names, (self, false))
+JS_FORWARD_STATIC_ITEM(js_http_client_getRawHeaderNames, (Item self), http_headers_get_names, (self, true))
 
 static void http_client_emit(Item req_obj, const char* event) {
     char key[64];
@@ -3807,10 +3740,7 @@ static uv_stream_t* http_client_stream(JsHttpClientReq* creq) {
 static uv_handle_t* http_client_handle(JsHttpClientReq* creq) {
     return (uv_handle_t*)http_client_stream(creq);
 }
-
-static Item http_client_async_symbol_key(const char* name, int len) {
-    return js_symbol_for(make_string_item(name, len));
-}
+JS_FORWARD_STATIC_ITEM(http_client_async_symbol_key, (const char* name, int len), js_symbol_for, (make_string_item(name, len)))
 
 static int64_t http_client_resource_int_prop(Item resource, const char* name) {
     Item value = js_get_key_default(resource, make_string_item(name));
@@ -4356,12 +4286,9 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
     Item socket = http_client_socket_object(creq);
     js_set_key_default(res, make_string_item("socket"), socket);
     js_set_key_default(creq->js_object, make_string_item("socket"), socket);
-    js_set_key_default(res, make_string_item("destroy"),
-                    js_new_native_function(js_http_client_res_inst_destroy));
-    js_set_key_default(res, make_string_item("on"),
-                    js_new_native_function(js_http_client_res_inst_on));
-    js_set_key_default(res, make_string_item("once"),
-                    js_new_native_function(js_http_client_res_inst_on));
+    js_http_set_direct_method(res, "destroy", js_http_client_res_inst_destroy);
+    js_http_set_direct_method(res, "on", js_http_client_res_inst_on);
+    js_http_set_direct_method(res, "once", js_http_client_res_inst_on);
 
     int body_len = creq->recv_len - hdr_size;
     bool chunked = strcmp(creq->method, "HEAD") != 0 &&
@@ -4507,12 +4434,9 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 js_set_key_default(res, make_string_item("statusMessage"), status_message);
                 js_set_key_default(res, make_string_item("headers"), headers);
                 js_set_key_default(res, make_string_item("rawHeaders"), raw_headers);
-                js_set_key_default(res, make_string_item("destroy"),
-                                js_new_native_function(js_http_client_res_inst_destroy));
-                js_set_key_default(res, make_string_item("on"),
-                                js_new_native_function(js_http_client_res_inst_on));
-                js_set_key_default(res, make_string_item("once"),
-                                js_new_native_function(js_http_client_res_inst_on));
+                js_http_set_direct_method(res, "destroy", js_http_client_res_inst_destroy);
+                js_http_set_direct_method(res, "on", js_http_client_res_inst_on);
+                js_http_set_direct_method(res, "once", js_http_client_res_inst_on);
 
                 int body_len = creq->recv_len - hdr_size;
                 if (body_len > 0) {
@@ -4948,9 +4872,7 @@ static Item http_client_end_ex(Item self, Item data_item, Item encoding_item, It
 }
 
 // ClientRequest.end([data]) — finalize request
-extern "C" Item js_http_client_end(Item self, Item data_item) {
-    return http_client_end_ex(self, data_item, make_js_undefined(), make_js_undefined());
-}
+JS_FORWARD_ITEM(js_http_client_end, (Item self, Item data_item), http_client_end_ex, (self, data_item, make_js_undefined(), make_js_undefined()))
 
 // ClientRequest.on(event, callback)
 extern "C" Item js_http_client_on(Item self, Item event_item, Item callback) {
@@ -5073,22 +4995,14 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
                     make_string_item((path && path[0]) ? path : "/"));
     js_set_key_default(obj, make_string_item("method"),
                     make_string_item((method && method[0]) ? method : "GET"));
-    js_set_key_default(obj, make_string_item("write"),
-                    js_new_native_function(js_http_client_inst_write));
-    js_set_key_default(obj, make_string_item("end"),
-                    js_new_native_function(js_http_client_inst_end));
-    js_set_key_default(obj, make_string_item("on"),
-                    js_new_native_function(js_http_client_inst_on));
-    js_set_key_default(obj, make_string_item("once"),
-                    js_new_native_function(js_http_client_inst_on));
-    js_set_key_default(obj, make_string_item("setHeader"),
-                    js_new_native_function(js_http_client_inst_setHeader));
-    js_set_key_default(obj, make_string_item("getHeaderNames"),
-                    js_new_native_function(js_http_client_inst_getHeaderNames));
-    js_set_key_default(obj, make_string_item("getRawHeaderNames"),
-                    js_new_native_function(js_http_client_inst_getRawHeaderNames));
-    js_set_key_default(obj, make_string_item("destroy"),
-                    js_new_native_function(js_http_client_inst_destroy));
+    js_http_set_direct_method(obj, "write", js_http_client_inst_write);
+    js_http_set_direct_method(obj, "end", js_http_client_inst_end);
+    js_http_set_direct_method(obj, "on", js_http_client_inst_on);
+    js_http_set_direct_method(obj, "once", js_http_client_inst_on);
+    js_http_set_direct_method(obj, "setHeader", js_http_client_inst_setHeader);
+    js_http_set_direct_method(obj, "getHeaderNames", js_http_client_inst_getHeaderNames);
+    js_http_set_direct_method(obj, "getRawHeaderNames", js_http_client_inst_getRawHeaderNames);
+    js_http_set_direct_method(obj, "destroy", js_http_client_inst_destroy);
     js_set_key_default(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
     js_set_key_default(obj, make_string_item("writable"), (Item){.item = b2it(true)});
     js_set_key_default(obj, make_string_item("writableEnded"), (Item){.item = b2it(false)});
@@ -5888,19 +5802,12 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
 static void js_http_agent_install_methods(Item agent) {
     // Agent instances previously omitted addRequest, so direct Node Agent users
     // called undefined even though request() itself bypasses this public entry point.
-    js_set_key_default(agent, make_string_item("getName"),
-        js_new_native_function(js_http_agent_getName));
-    js_set_key_default(agent, make_string_item("destroy"),
-        js_new_native_function(js_http_agent_destroy));
-    js_set_key_default(agent, make_string_item("createConnection"),
-        js_new_native_function(js_http_agent_createConnection));
-    js_set_key_default(agent, make_string_item("addRequest"),
-        js_new_native_function(js_http_agent_addRequest));
+    js_http_set_direct_method(agent, "getName", js_http_agent_getName);
+    js_http_set_direct_method(agent, "destroy", js_http_agent_destroy);
+    js_http_set_direct_method(agent, "createConnection", js_http_agent_createConnection);
+    js_http_set_direct_method(agent, "addRequest", js_http_agent_addRequest);
 }
-
-extern "C" Item js_http_ClientRequest(Item options_item, Item callback) {
-    return js_http_request(options_item, callback);
-}
+JS_FORWARD_ITEM(js_http_ClientRequest, (Item options_item, Item callback), js_http_request, (options_item, callback))
 
 // new http.Agent(options) constructor
 extern "C" Item js_http_Agent(Item options) {
@@ -5948,10 +5855,7 @@ extern "C" Item js_http_stub_ctor(void) {
 // =============================================================================
 
 template <typename Target>
-static void http_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
-    js_install_native_method(ns, name, target, adapter_arity);
-}
+JS_FORWARD_STATIC_VOID( http_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 static Item http_constructor_prototype(Item ctor, JsClass cls) {
     Item proto = js_get_key_default(ctor, make_string_item("prototype"));

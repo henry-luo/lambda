@@ -74,15 +74,10 @@ extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
     auto_close_mode = enabled;
 }
 
-extern "C" bool js_event_loop_auto_close_mode(void) {
-    if (!js_active_runtime_state) return false;
-    return auto_close_mode;
-}
-
-extern "C" bool js_event_loop_is_shutting_down(void) {
-    if (!js_active_runtime_state) return false;
-    return event_loop_shutting_down;
-}
+JS_FORWARD_EXPRESSION(bool, js_event_loop_auto_close_mode, (void),
+    js_active_runtime_state ? auto_close_mode : false)
+JS_FORWARD_EXPRESSION(bool, js_event_loop_is_shutting_down, (void),
+    js_active_runtime_state ? event_loop_shutting_down : false)
 
 static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
     if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
@@ -98,37 +93,27 @@ static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
     return runtime_async_deque_push(queue, record);
 }
 
-extern "C" void js_microtask_enqueue(Item callback) {
+static void js_async_queue_enqueue(RuntimeAsyncDeque* queue, Item callback,
+                                   const char* queue_name) {
     if (!js_is_callable(callback)) {
-        log_error("event_loop: microtask_enqueue called with non-function (type=%d)", get_type_id(callback));
+        log_error("event_loop: %s enqueue called with non-function (type=%d)",
+            queue_name, get_type_id(callback));
         return;
     }
-    if (!js_async_queue_push(&microtask_deque, callback)) {
-        log_error("event_loop: failed to grow Promise microtask deque");
+    if (!js_async_queue_push(queue, callback)) {
+        log_error("event_loop: failed to grow %s deque", queue_name);
     }
 }
-
-extern "C" void js_next_tick_enqueue(Item callback) {
-    if (!js_is_callable(callback)) {
-        log_error("event_loop: nextTick enqueue called with non-function (type=%d)", get_type_id(callback));
-        return;
-    }
-    if (!js_async_queue_push(&next_tick_deque, callback)) {
-        log_error("event_loop: failed to grow nextTick deque");
-    }
-}
+JS_FORWARD_VOID( js_microtask_enqueue, (Item callback), js_async_queue_enqueue, (&microtask_deque, callback, "microtask"))
+JS_FORWARD_VOID( js_next_tick_enqueue, (Item callback), js_async_queue_enqueue, (&next_tick_deque, callback, "nextTick"))
 
 // Js57 P2c: visible queue size for the bounded-await drain heuristic.
 // Returns the combined pending nextTick + microtask count so js_await_sync can
 // detect whether a drain turn made progress (no progress = give up early).
-extern "C" int js_microtask_pending_count(void) {
-    return (int)(runtime_async_deque_size(&next_tick_deque) +
-        runtime_async_deque_size(&microtask_deque));
-}
-
-extern "C" bool js_microtask_is_running(void) {
-    return js_active_runtime_state && microtask_running;
-}
+JS_FORWARD_EXPRESSION(int, js_microtask_pending_count, (void),
+    (int)(runtime_async_deque_size(&next_tick_deque) +
+        runtime_async_deque_size(&microtask_deque)))
+JS_FORWARD_EXPRESSION(bool, js_microtask_is_running, (void), (js_active_runtime_state && microtask_running))
 
 static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
     RootFrame roots(6);
@@ -242,9 +227,8 @@ extern "C" void js_cancelAnimationFrame(Item request_id) {
     }
 }
 
-extern "C" int js_animation_frame_has_pending(void) {
-    return raf_count > 0 ? 1 : 0;
-}
+JS_FORWARD_EXPRESSION(int, js_animation_frame_has_pending, (void),
+    raf_count > 0 ? 1 : 0)
 
 static void js_event_loop_render_checkpoint(void) {
     if (!js_dom_get_ui_context() || js_dom_is_host_driven_loop()) {
@@ -688,29 +672,23 @@ static Item timeout_this_or_arg(Item this_val) {
     return js_get_this();
 }
 
-// Timeout.ref()
-extern "C" Item js_timeout_ref(Item this_val) {
+static Item js_timeout_ref_or_unref(Item this_val, bool do_ref) {
     Item self = timeout_this_or_arg(this_val);
     JsTimerHandle* th = find_timer_handle(self);
     if (th && virtual_clock_enabled) {
-        th->virtual_refed = true;
+        th->virtual_refed = do_ref;
     } else if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
-        uv_ref((uv_handle_t*)&th->timer);
+        if (do_ref) uv_ref((uv_handle_t*)&th->timer);
+        else uv_unref((uv_handle_t*)&th->timer);
     }
     return self;
 }
 
+// Timeout.ref()
+JS_FORWARD_ITEM(js_timeout_ref, (Item this_val), js_timeout_ref_or_unref, (this_val, true))
+
 // Timeout.unref()
-extern "C" Item js_timeout_unref(Item this_val) {
-    Item self = timeout_this_or_arg(this_val);
-    JsTimerHandle* th = find_timer_handle(self);
-    if (th && virtual_clock_enabled) {
-        th->virtual_refed = false;
-    } else if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
-        uv_unref((uv_handle_t*)&th->timer);
-    }
-    return self;
-}
+JS_FORWARD_ITEM(js_timeout_unref, (Item this_val), js_timeout_ref_or_unref, (this_val, false))
 
 // Timeout.hasRef()
 extern "C" Item js_timeout_hasRef(Item this_val) {
@@ -723,9 +701,7 @@ extern "C" Item js_timeout_hasRef(Item this_val) {
 }
 
 // Timeout.refresh() — no-op, returns this
-extern "C" Item js_timeout_refresh(Item this_val) {
-    return timeout_this_or_arg(this_val);
-}
+JS_FORWARD_ITEM(js_timeout_refresh, (Item this_val), timeout_this_or_arg, (this_val))
 
 // Timeout[Symbol.toPrimitive]() — returns the timer id
 extern "C" Item js_timeout_toPrimitive(Item this_val) {
@@ -818,15 +794,10 @@ extern "C" void js_event_loop_set_virtual_clock(bool enabled, double monotonic_m
     js_performance_virtual_clock_set(enabled, virtual_clock_ms);
 }
 
-extern "C" bool js_event_loop_virtual_clock_enabled(void) {
-    if (!js_active_runtime_state) return false;
-    return virtual_clock_enabled;
-}
-
-extern "C" double js_event_loop_virtual_clock_now_ms(void) {
-    if (!js_active_runtime_state) return 0.0;
-    return virtual_clock_ms;
-}
+JS_FORWARD_EXPRESSION(bool, js_event_loop_virtual_clock_enabled, (void),
+    js_active_runtime_state ? virtual_clock_enabled : false)
+JS_FORWARD_EXPRESSION(double, js_event_loop_virtual_clock_now_ms, (void),
+    js_active_runtime_state ? virtual_clock_ms : 0.0)
 
 static JsTimerHandle* virtual_timer_next_due(double target_ms) {
     JsTimerHandle* next = nullptr;
@@ -977,13 +948,16 @@ static Item js_schedule_timer(Item callback, Item delay, Item args_array,
         is_interval ? ms : 0, "Timeout", 7);
 }
 
-extern "C" Item js_setTimeout(Item callback, Item delay) {
-    return js_schedule_timer(callback, delay, ItemNull, false, false);
+#define JS_TIMER_FORWARD(name, args, has_args, interval) \
+extern "C" Item name(Item callback, Item delay) { \
+    return js_schedule_timer(callback, delay, args, has_args, interval); \
 }
-
-extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
-    return js_schedule_timer(callback, delay, args_array, true, false);
+#define JS_TIMER_FORWARD_ARGS(name, interval) \
+extern "C" Item name(Item callback, Item delay, Item args_array) { \
+    return js_schedule_timer(callback, delay, args_array, true, interval); \
 }
+JS_TIMER_FORWARD(js_setTimeout, ItemNull, false, false)
+JS_TIMER_FORWARD_ARGS(js_setTimeout_args, false)
 
 static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) {
     if (!js_is_callable(callback)) {
@@ -1006,14 +980,8 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
     return js_timer_finish_create(loop, th, JS_CLASS_IMMEDIATE, 1, 0,
         "Immediate", 9);
 }
-
-extern "C" Item js_setImmediate_timer(Item callback) {
-    return js_setImmediate_impl(callback, ItemNull, false);
-}
-
-extern "C" Item js_setImmediate_timer_args(Item callback, Item args_array) {
-    return js_setImmediate_impl(callback, args_array, true);
-}
+JS_FORWARD_ITEM(js_setImmediate_timer, (Item callback), js_setImmediate_impl, (callback, ItemNull, false))
+JS_FORWARD_ITEM(js_setImmediate_timer_args, (Item callback, Item args_array), js_setImmediate_impl, (callback, args_array, true))
 
 // Helper: create a JS array from the fixed argument packs emitted for timers.
 static Item js_pack_args(Item* values, int count) {
@@ -1025,30 +993,35 @@ static Item js_pack_args(Item* values, int count) {
     for (int i = 0; i < count; i++) array_push(arr, values[i]);
     return (Item){.array = arr};
 }
-extern "C" Item js_pack_args_1(Item a1) {
-    Item values[1] = {a1};
-    return js_pack_args(values, 1);
+#define JS_PACK_ARGS_1(name, a1) \
+extern "C" Item name(Item a1) { \
+    Item values[1] = {a1}; return js_pack_args(values, 1); \
 }
-extern "C" Item js_pack_args_2(Item a1, Item a2) {
-    Item values[2] = {a1, a2};
-    return js_pack_args(values, 2);
+#define JS_PACK_ARGS_2(name, a1, a2) \
+extern "C" Item name(Item a1, Item a2) { \
+    Item values[2] = {a1, a2}; return js_pack_args(values, 2); \
 }
-extern "C" Item js_pack_args_3(Item a1, Item a2, Item a3) {
-    Item values[3] = {a1, a2, a3};
-    return js_pack_args(values, 3);
+#define JS_PACK_ARGS_3(name, a1, a2, a3) \
+extern "C" Item name(Item a1, Item a2, Item a3) { \
+    Item values[3] = {a1, a2, a3}; return js_pack_args(values, 3); \
 }
-extern "C" Item js_pack_args_4(Item a1, Item a2, Item a3, Item a4) {
-    Item values[4] = {a1, a2, a3, a4};
-    return js_pack_args(values, 4);
+#define JS_PACK_ARGS_4(name, a1, a2, a3, a4) \
+extern "C" Item name(Item a1, Item a2, Item a3, Item a4) { \
+    Item values[4] = {a1, a2, a3, a4}; return js_pack_args(values, 4); \
 }
+JS_PACK_ARGS_1(js_pack_args_1, a1)
+JS_PACK_ARGS_2(js_pack_args_2, a1, a2)
+JS_PACK_ARGS_3(js_pack_args_3, a1, a2, a3)
+JS_PACK_ARGS_4(js_pack_args_4, a1, a2, a3, a4)
+#undef JS_PACK_ARGS_4
+#undef JS_PACK_ARGS_3
+#undef JS_PACK_ARGS_2
+#undef JS_PACK_ARGS_1
 
-extern "C" Item js_setInterval(Item callback, Item delay) {
-    return js_schedule_timer(callback, delay, ItemNull, false, true);
-}
-
-extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) {
-    return js_schedule_timer(callback, delay, args_array, true, true);
-}
+JS_TIMER_FORWARD(js_setInterval, ItemNull, false, true)
+JS_TIMER_FORWARD_ARGS(js_setInterval_args, true)
+#undef JS_TIMER_FORWARD_ARGS
+#undef JS_TIMER_FORWARD
 
 // =============================================================================
 // Promise-based timers (for timers/promises module)
@@ -1135,17 +1108,13 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
     return js_status_ok();
 }
 
-extern "C" void js_mock_scheduler_enable(void) {
-    mock_scheduler_enabled = true;
+static void js_mock_scheduler_set_enabled(bool enabled) {
+    mock_scheduler_enabled = enabled;
     mock_scheduler_now_ms = 0;
     memset(mock_scheduler_waits, 0, sizeof(mock_scheduler_waits));
 }
-
-extern "C" void js_mock_scheduler_reset(void) {
-    mock_scheduler_enabled = false;
-    mock_scheduler_now_ms = 0;
-    memset(mock_scheduler_waits, 0, sizeof(mock_scheduler_waits));
-}
+JS_FORWARD_VOID( js_mock_scheduler_enable, (void), js_mock_scheduler_set_enabled, (true))
+JS_FORWARD_VOID( js_mock_scheduler_reset, (void), js_mock_scheduler_set_enabled, (false))
 
 extern "C" void js_mock_scheduler_tick(Item delay) {
     if (!mock_scheduler_enabled) return;
@@ -1290,9 +1259,7 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
 }
 
 // setTimeout(delay, value, options) → Promise that resolves to value after delay ms
-extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
-    return js_set_promise_timer(delay, value, options, "Timeout", 7, 0);
-}
+JS_FORWARD_ITEM(js_setTimeout_promise, (Item delay, Item value, Item options), js_set_promise_timer, (delay, value, options, "Timeout", 7, 0))
 
 extern "C" Item js_setTimeout_promisified(Item delay, Item value) {
     Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -1336,10 +1303,7 @@ extern "C" void js_clearTimeout(Item timer_id) {
         }
     }
 }
-
-extern "C" void js_clearInterval(Item timer_id) {
-    js_clearTimeout(timer_id);
-}
+JS_FORWARD_VOID( js_clearInterval, (Item timer_id), js_clearTimeout, (timer_id))
 
 extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
     // A timer queue is owned by its bound document Runtime.  Callers that no
@@ -1381,10 +1345,7 @@ extern "C" void js_event_loop_abandon_document_timers(void* dom_doc) {
         timer_abandon_all_without_uv("[JS_TIMER_ABANDON]");
     }
 }
-
-extern "C" void js_event_loop_abandon_all_timers(void) {
-    timer_abandon_all_without_uv("[JS_TIMER_ABANDON_ALL]");
-}
+JS_FORWARD_VOID( js_event_loop_abandon_all_timers, (void), timer_abandon_all_without_uv, ("[JS_TIMER_ABANDON_ALL]"))
 
 // =============================================================================
 // Event Loop Lifecycle

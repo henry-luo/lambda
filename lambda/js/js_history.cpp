@@ -33,10 +33,8 @@ struct JsHistoryRuntimeState {
     bool drain_scheduled = false;
 };
 
-static JsHistoryRuntimeState* js_history_runtime_state_get() {
-    if (!js_active_runtime_state) return nullptr;
-    return (JsHistoryRuntimeState*)js_runtime_state.history_state;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsHistoryRuntimeState*, js_history_runtime_state_get, (),
+    (js_active_runtime_state ? (JsHistoryRuntimeState*)js_runtime_state.history_state : nullptr))
 
 static bool js_history_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
@@ -58,10 +56,7 @@ static bool js_history_runtime_state_ensure() {
 static DomDocument* js_history_document(void) {
     return (DomDocument*)js_dom_get_document();
 }
-
-static Item js_history_string(const char* value) {
-    return make_string_item(value ? value : "");
-}
+JS_FORWARD_STATIC_ITEM(js_history_string, (const char* value), make_string_item, (value ? value : ""))
 
 static void js_history_task_destroy(JsHistoryEventTask* task) {
     if (!task) return;
@@ -169,25 +164,20 @@ static const char* js_history_optional_url(Item value) {
     return fn_to_cstr(value);
 }
 
-static Item js_history_push(Item state, Item title, Item url) {
-    (void)title;
-    DomDocument* document = js_history_document();
-    if (!document) return make_js_undefined();
-    JS_ASSIGN_OR_RETURN(cloned_state, js_structuredClone(state));
-    radiant_history_push_state(document, cloned_state, js_history_optional_url(url));
-    js_history_refresh_object();
-    return make_js_undefined();
-}
+typedef bool (*JsHistoryStateOperation)(DomDocument*, Item, const char*);
 
-static Item js_history_replace(Item state, Item title, Item url) {
+static Item js_history_update_state(Item state, Item title, Item url,
+                                    JsHistoryStateOperation operation) {
     (void)title;
     DomDocument* document = js_history_document();
     if (!document) return make_js_undefined();
     JS_ASSIGN_OR_RETURN(cloned_state, js_structuredClone(state));
-    radiant_history_replace_state(document, cloned_state, js_history_optional_url(url));
+    operation(document, cloned_state, js_history_optional_url(url));
     js_history_refresh_object();
     return make_js_undefined();
 }
+JS_FORWARD_STATIC_ITEM(js_history_push, (Item state, Item title, Item url), js_history_update_state, (state, title, url, radiant_history_push_state))
+JS_FORWARD_STATIC_ITEM(js_history_replace, (Item state, Item title, Item url), js_history_update_state, (state, title, url, radiant_history_replace_state))
 
 static Item js_history_go(Item delta_item) {
     DomDocument* document = js_history_document();
@@ -202,18 +192,9 @@ static Item js_history_go(Item delta_item) {
     }
     return make_js_undefined();
 }
-
-static Item js_history_back(void) {
-    return js_history_go((Item){.item = i2it(-1)});
-}
-
-static Item js_history_forward(void) {
-    return js_history_go((Item){.item = i2it(1)});
-}
-
-static Item js_history_window_noop(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_history_back, (void), js_history_go, ((Item){.item = i2it(-1)}))
+JS_FORWARD_STATIC_ITEM(js_history_forward, (void), js_history_go, ((Item){.item = i2it(1)}))
+JS_FORWARD_STATIC_ITEM(js_history_window_noop, (void), make_js_undefined, ())
 
 extern "C" Item js_history_set_location(Item value) {
     DomDocument* document = js_history_document();
@@ -236,23 +217,16 @@ extern "C" void js_history_install_globals(void) {
     js_set_key_default(global, make_string_item("location"), document_proxy);
 
     Item history = js_new_object();
-    js_set_key_default(history, make_string_item("pushState"),
-                    js_new_native_function(js_history_push));
-    js_set_key_default(history, make_string_item("replaceState"),
-                    js_new_native_function(js_history_replace));
-    js_set_key_default(history, make_string_item("back"),
-                    js_new_native_function(js_history_back));
-    js_set_key_default(history, make_string_item("forward"),
-                    js_new_native_function(js_history_forward));
-    js_set_key_default(history, make_string_item("go"),
-                    js_new_native_function(js_history_go));
+    js_set_native_key(history, make_string_item("pushState"), js_history_push);
+    js_set_native_key(history, make_string_item("replaceState"), js_history_replace);
+    js_set_native_key(history, make_string_item("back"), js_history_back);
+    js_set_native_key(history, make_string_item("forward"), js_history_forward);
+    js_set_native_key(history, make_string_item("go"), js_history_go);
     js_set_key_default(history, make_string_item("scrollRestoration"),
                     make_string_item(radiant_history_scroll_restoration(document)));
     js_set_key_default(global, make_string_item("history"), history);
-    js_set_key_default(global, make_string_item("focus"),
-                    js_new_native_function(js_history_window_noop));
-    js_set_key_default(global, make_string_item("blur"),
-                    js_new_native_function(js_history_window_noop));
+    js_set_native_key(global, make_string_item("focus"), js_history_window_noop);
+    js_set_native_key(global, make_string_item("blur"), js_history_window_noop);
     js_history_refresh_object();
 }
 

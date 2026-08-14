@@ -11,7 +11,4 @@ extern "C" void js_enqueue_promise_job(Item job) {
     }
     js_microtask_enqueue(job);
 }
-
-extern "C" void js_run_microtasks(void) {
-    js_microtask_flush();
-}
+JS_FORWARD_VOID( js_run_microtasks, (void), js_microtask_flush, ())

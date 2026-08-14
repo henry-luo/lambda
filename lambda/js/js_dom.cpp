@@ -96,9 +96,8 @@ static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
                                                                 DomDocument* doc);
 static void _collect_document_forms_rec(DomNode* node, Item forms);
 static void _collect_form_controls_rec(DomNode* node, Item arr);
-static void _collect_lookup_by_tag_rec(DomElement* root, const char* tag, Item collection);
-static void _collect_lookup_by_class_rec(DomElement* root, const char* cls, Item collection);
-static void _collect_lookup_by_name_rec(DomElement* root, const char* name, Item collection);
+static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
+                                int kind);
 
 static const char* js_dom_to_attr_cstr(Item value) {
     Item str_value = js_to_string(value);
@@ -110,10 +109,7 @@ static const char* js_dom_to_dom_string_cstr(Item value) {
     Item string_value = js_to_string(value);
     return fn_to_cstr(string_value);
 }
-
-extern "C" const char* js_dom_to_attribute_cstr(Item value) {
-    return js_dom_to_attr_cstr(value);
-}
+JS_FORWARD_RETURN(const char*, js_dom_to_attribute_cstr, (Item value), js_dom_to_attr_cstr, (value))
 
 // Forward declarations
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
@@ -204,11 +200,7 @@ struct JsWebAnimationHost {
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
-
-static bool dom_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.dom.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.dom.roots)))
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
 #define js_document_active_element (js_runtime_state.dom.active_element)
@@ -245,9 +237,7 @@ extern "C" void js_dom_set_host_driven_loop(bool enabled) {
     if (!js_active_runtime_state) return;
     _js_host_driven_loop = enabled;
 }
-extern "C" bool js_dom_is_host_driven_loop(void) {
-    return _js_host_driven_loop;
-}
+JS_FORWARD_EXPRESSION(bool, js_dom_is_host_driven_loop, (void), (_js_host_driven_loop))
 // The "main" document — the one bound by js_dom_set_document at page load.
 // Foreign documents created via document.implementation.create*Document are
 // distinct: they have a null defaultView and getSelection() returns null per
@@ -461,13 +451,7 @@ extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, voi
     // Module-owned DOM setters must still publish mutations through the JS DOM ledger.
     js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
 }
-
-extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* target,
-                                                void* parent, const char* attribute_name,
-                                                const char* old_value) {
-    js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent,
-                           attribute_name, old_value);
-}
+JS_FORWARD_VOID( js_dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), js_dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
 
 extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc) {
     return doc ? doc->mutation_epoch : 0;
@@ -714,86 +698,60 @@ static bool js_dom_is_anonymous_table_wrapper(DomNode* node) {
     return elem->tag_name && strncmp(elem->tag_name, "::anon-", 7) == 0;
 }
 
-static DomNode* js_dom_first_script_visible_child(DomElement* elem);
-static DomNode* js_dom_last_script_visible_child(DomElement* elem);
+static DomNode* js_dom_visible_child(DomElement* elem, bool first) {
+    DomNode* child = elem ? (first ? elem->first_child : elem->last_child) : nullptr;
+    while (child) {
+        if (!js_dom_is_generated_pseudo_node(child)) return child;
+        if (js_dom_is_anonymous_table_wrapper(child)) {
+            // layout-only wrappers are transparent in both traversal directions.
+            DomNode* nested = js_dom_visible_child(child->as_element(), first);
+            if (nested) return nested;
+        }
+        child = first ? child->next_sibling : child->prev_sibling;
+    }
+    return nullptr;
+}
 
-static DomNode* js_dom_next_script_visible_sibling(DomNode* node) {
-    DomNode* sibling = node ? node->next_sibling : nullptr;
+static DomNode* js_dom_visible_sibling(DomNode* node, bool forward) {
+    DomNode* sibling = node ? (forward ? node->next_sibling : node->prev_sibling) : nullptr;
     while (sibling) {
         if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
         if (js_dom_is_anonymous_table_wrapper(sibling)) {
-            DomNode* child = js_dom_first_script_visible_child(sibling->as_element());
+            DomNode* child = js_dom_visible_child(sibling->as_element(), forward);
             if (child) return child;
         }
-        sibling = sibling->next_sibling;
+        sibling = forward ? sibling->next_sibling : sibling->prev_sibling;
     }
     DomNode* parent = node ? node->parent : nullptr;
     while (js_dom_is_anonymous_table_wrapper(parent)) {
-        sibling = parent->next_sibling;
+        sibling = forward ? parent->next_sibling : parent->prev_sibling;
         while (sibling) {
             if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
             if (js_dom_is_anonymous_table_wrapper(sibling)) {
-                DomNode* child = js_dom_first_script_visible_child(sibling->as_element());
+                DomNode* child = js_dom_visible_child(sibling->as_element(), forward);
                 if (child) return child;
             }
-            sibling = sibling->next_sibling;
+            sibling = forward ? sibling->next_sibling : sibling->prev_sibling;
         }
         parent = parent->parent;
     }
     return nullptr;
+}
+
+static DomNode* js_dom_next_script_visible_sibling(DomNode* node) {
+    return js_dom_visible_sibling(node, true);
 }
 
 static DomNode* js_dom_prev_script_visible_sibling(DomNode* node) {
-    DomNode* sibling = node ? node->prev_sibling : nullptr;
-    while (sibling) {
-        if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
-        if (js_dom_is_anonymous_table_wrapper(sibling)) {
-            DomNode* child = js_dom_last_script_visible_child(sibling->as_element());
-            if (child) return child;
-        }
-        sibling = sibling->prev_sibling;
-    }
-    DomNode* parent = node ? node->parent : nullptr;
-    while (js_dom_is_anonymous_table_wrapper(parent)) {
-        sibling = parent->prev_sibling;
-        while (sibling) {
-            if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
-            if (js_dom_is_anonymous_table_wrapper(sibling)) {
-                DomNode* child = js_dom_last_script_visible_child(sibling->as_element());
-                if (child) return child;
-            }
-            sibling = sibling->prev_sibling;
-        }
-        parent = parent->parent;
-    }
-    return nullptr;
+    return js_dom_visible_sibling(node, false);
 }
 
 static DomNode* js_dom_first_script_visible_child(DomElement* elem) {
-    DomNode* child = elem ? elem->first_child : nullptr;
-    while (child) {
-        if (!js_dom_is_generated_pseudo_node(child)) return child;
-        if (js_dom_is_anonymous_table_wrapper(child)) {
-            // layout-only table wrappers must be transparent to script-visible child lists.
-            DomNode* nested = js_dom_first_script_visible_child(child->as_element());
-            if (nested) return nested;
-        }
-        child = child->next_sibling;
-    }
-    return nullptr;
+    return js_dom_visible_child(elem, true);
 }
 
 static DomNode* js_dom_last_script_visible_child(DomElement* elem) {
-    DomNode* child = elem ? elem->last_child : nullptr;
-    while (child) {
-        if (!js_dom_is_generated_pseudo_node(child)) return child;
-        if (js_dom_is_anonymous_table_wrapper(child)) {
-            DomNode* nested = js_dom_last_script_visible_child(child->as_element());
-            if (nested) return nested;
-        }
-        child = child->prev_sibling;
-    }
-    return nullptr;
+    return js_dom_visible_child(elem, false);
 }
 
 static uint32_t js_dom_utf16_length_from_utf8(const char* text, size_t len) {
@@ -1171,10 +1129,7 @@ static void expando_set_property(DomNode* node, Item key, Item value) {
     Item exp_map = expando_get_or_create_map(node);
     if (exp_map.item != ITEM_NULL) js_set_key_default(exp_map, key, value);
 }
-
-static bool expando_key_is_engine_internal(const char* name, int name_len) {
-    return name && name_len >= 2 && name[0] == '_' && name[1] == '_';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, expando_key_is_engine_internal, (const char* name, int name_len), (name && name_len >= 2 && name[0] == '_' && name[1] == '_'))
 
 extern "C" bool js_dom_expando_has_property(Item obj, Item key) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
@@ -1406,15 +1361,9 @@ static void _set_checkedness(DomElement* elem, bool v) {
 }
 
 // Exposed for js_dom_events.cpp pre/post-click activation.
-extern "C" bool js_dom_is_checkbox_or_radio(void* dom_elem) {
-    return _is_checkbox_or_radio((DomElement*)dom_elem);
-}
-extern "C" bool js_dom_get_checkedness(void* dom_elem) {
-    return _get_checkedness((DomElement*)dom_elem);
-}
-extern "C" void js_dom_set_checkedness(void* dom_elem, bool v) {
-    _set_checkedness((DomElement*)dom_elem, v);
-}
+JS_FORWARD_RETURN(bool, js_dom_is_checkbox_or_radio, (void* dom_elem), _is_checkbox_or_radio, ((DomElement*)dom_elem))
+JS_FORWARD_RETURN(bool, js_dom_get_checkedness, (void* dom_elem), _get_checkedness, ((DomElement*)dom_elem))
+JS_FORWARD_VOID( js_dom_set_checkedness, (void* dom_elem, bool v), _set_checkedness, ((DomElement*)dom_elem, v))
 extern "C" void js_dom_after_default_checked_set(void* dom_elem, bool checked) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
@@ -1439,9 +1388,7 @@ extern "C" void js_dom_set_checked_dirty(void* dom_elem, bool checked) {
             (Item){.item = b2it(true)});
     }
 }
-extern "C" const char* js_dom_input_type_lower(void* dom_elem) {
-    return _input_type_lower((DomElement*)dom_elem);
-}
+JS_FORWARD_RETURN(const char*, js_dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
 extern "C" const char* js_dom_tag_name_raw(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
     return e ? e->tag_name : nullptr;
@@ -1593,10 +1540,8 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         js_dom_install_xml_serializer_global();
         js_history_install_globals();
         Item global = js_get_global_this();
-        js_set_key_default(global, js_string_key("__lambda_testdriver_key"),
-            js_new_native_function(js_dom_testdriver_key));
-        js_set_key_default(global, js_string_key("__lambda_set_editing_behavior"),
-            js_new_native_function(js_dom_set_editing_behavior));
+        js_set_native_key(global, js_string_key("__lambda_testdriver_key"), js_dom_testdriver_key);
+        js_set_native_key(global, js_string_key("__lambda_set_editing_behavior"), js_dom_set_editing_behavior);
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
@@ -1685,20 +1630,14 @@ static Item doc_to_proxy_item(DomDocument* doc) {
     }
     return lookup_foreign_doc_wrapper(doc);
 }
-
-extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc_v) {
-    return doc_to_proxy_item((DomDocument*)doc_v);
-}
+JS_FORWARD_ITEM(js_dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_proxy_item, ((DomDocument*)doc_v))
 
 // ============================================================================
 // DOM Wrapping / Unwrapping
 // ============================================================================
 
 extern "C" void radiant_dom_reset_wrapper_cache(void);
-
-static void reset_dom_wrapper_cache() {
-    radiant_dom_reset_wrapper_cache();
-}
+JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), radiant_dom_reset_wrapper_cache, ())
 
 extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
@@ -1897,23 +1836,24 @@ struct JsDomCollectionRuntimeState {
     int refresh_depth = 0;
 };
 
-static JsDomCollectionRuntimeState* js_dom_collection_runtime_state_get() {
-    if (!js_active_runtime_state) return nullptr;
-    return (JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsDomCollectionRuntimeState*,
+    js_dom_collection_runtime_state_get, (),
+    (js_active_runtime_state ? (JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state : nullptr))
 
-static bool js_dom_collection_runtime_state_ensure() {
-    if (!js_active_runtime_state) return false;
-    if (js_dom_collection_runtime_state_get()) return true;
-    JsDomCollectionRuntimeState* state = (JsDomCollectionRuntimeState*)mem_calloc(1,
-        sizeof(JsDomCollectionRuntimeState), MEM_CAT_DOM);
+template <typename State>
+static State* js_dom_runtime_state_ensure(void*& slot, const char* label) {
+    if (!js_active_runtime_state) return nullptr;
+    State* state = (State*)slot;
+    if (state) return state;
+    state = (State*)mem_calloc(1, sizeof(State), MEM_CAT_DOM);
     if (!state) {
-        log_error("js-dom-collections: failed to allocate context state");
-        return false;
+        log_error("%s: failed to allocate context state", label);
+        return nullptr;
     }
-    js_runtime_state.dom_collection_state = state;
-    return true;
+    slot = state;
+    return state;
 }
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_collection_runtime_state_ensure, (), (js_dom_runtime_state_ensure<JsDomCollectionRuntimeState>(js_runtime_state.dom_collection_state, "js-dom-collections") != nullptr))
 
 #define js_dom_collection_state ((JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state)
 #define s_select_options_owners (js_dom_collection_state->select_options_owners)
@@ -1990,104 +1930,83 @@ static void reset_live_dom_collections() {
     s_live_lookup_collection_count = 0;
 }
 
-static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
-    if (!js_dom_collection_runtime_state_ensure()) return;
+template <typename Entry>
+static void js_dom_register_owner_collection(Item collection, DomElement* owner,
+        int kind, Entry* entries, int* count, int capacity) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
-    for (int i = 0; i < s_select_options_owner_count; i++) {
-        if (s_select_options_owners[i].array == collection.array) {
-            if (s_select_options_owners[i].owner != owner) {
-                DomElement* old_owner = s_select_options_owners[i].owner;
+    for (int i = 0; i < *count; i++) {
+        if (entries[i].array == collection.array) {
+            if (entries[i].owner != owner) {
+                DomElement* old_owner = entries[i].owner;
                 live_collection_unpin(old_owner ? old_owner->doc : nullptr,
-                                      &s_select_options_owners[i].owner_ref);
+                                      &entries[i].owner_ref);
                 if (!live_collection_pin(owner->doc, owner,
-                        &s_select_options_owners[i].owner_ref)) return;
+                        &entries[i].owner_ref)) return;
             }
-            s_select_options_owners[i].owner = owner;
-            s_select_options_owners[i].kind = kind;
+            entries[i].owner = owner;
+            entries[i].kind = kind;
             return;
         }
     }
-    int entry_index = s_select_options_owner_count;
-    for (int i = 0; i < s_select_options_owner_count; i++) {
-        if (!s_select_options_owners[i].array) {
-            DomElement* old_owner = s_select_options_owners[i].owner;
+    int entry_index = *count;
+    for (int i = 0; i < *count; i++) {
+        if (!entries[i].array) {
+            DomElement* old_owner = entries[i].owner;
             live_collection_unpin(old_owner ? old_owner->doc : nullptr,
-                                  &s_select_options_owners[i].owner_ref);
+                                  &entries[i].owner_ref);
             entry_index = i;
             break;
         }
     }
-    if (entry_index >= SELECT_OPTIONS_OWNER_CACHE_SIZE) return;
-    SelectOptionsOwnerEntry* entry = &s_select_options_owners[entry_index];
+    if (entry_index >= capacity) return;
+    Entry* entry = &entries[entry_index];
     if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
     entry->array = collection.array;
     entry->owner = owner;
     entry->kind = kind;
-    // The registry is native side storage, so weak-clear the raw array address
-    // before the allocator can reuse it for an unrelated ordinary array.
+    // Weak-clear the raw array address before its allocator slot can be reused.
     heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
-    if (entry_index == s_select_options_owner_count) s_select_options_owner_count++;
+    if (entry_index == *count) (*count)++;
+}
+#define JS_DOM_REGISTER_OWNER_COLLECTION(name, entries, count, capacity) \
+static void name(Item collection, DomElement* owner, int kind) { \
+    JsDomCollectionRuntimeState* state = js_dom_collection_runtime_state_get(); \
+    if (!state) state = js_dom_runtime_state_ensure<JsDomCollectionRuntimeState>( \
+        js_runtime_state.dom_collection_state, "js-dom-collections"); \
+    if (!state) return; \
+    js_dom_register_owner_collection(collection, owner, kind, state->entries, \
+        &state->count, capacity); \
+}
+JS_DOM_REGISTER_OWNER_COLLECTION(_register_select_options_owner,
+    select_options_owners, select_options_owner_count,
+    SELECT_OPTIONS_OWNER_CACHE_SIZE)
+
+template <typename Entry>
+static DomElement* js_dom_collection_owner(Entry* entries, int count,
+                                           Item collection, int* out_kind) {
+    if (!js_dom_collection_runtime_state_get()) return nullptr;
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
+    for (int i = 0; i < count; i++) {
+        if (entries[i].array == collection.array) {
+            if (out_kind) *out_kind = entries[i].kind;
+            return entries[i].owner;
+        }
+    }
+    return nullptr;
 }
 
 static DomElement* _select_options_owner(Item collection, int* out_kind) {
-    if (!js_dom_collection_runtime_state_get()) return nullptr;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
-    for (int i = 0; i < s_select_options_owner_count; i++) {
-        if (s_select_options_owners[i].array == collection.array) {
-            if (out_kind) *out_kind = s_select_options_owners[i].kind;
-            return s_select_options_owners[i].owner;
-        }
-    }
-    return nullptr;
+    return js_dom_collection_owner(s_select_options_owners,
+        s_select_options_owner_count, collection, out_kind);
 }
-
-static void _register_live_child_collection(Item collection, DomElement* owner, int kind) {
-    if (!js_dom_collection_runtime_state_ensure()) return;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
-    for (int i = 0; i < s_live_child_collection_count; i++) {
-        if (s_live_child_collections[i].array == collection.array) {
-            if (s_live_child_collections[i].owner != owner) {
-                DomElement* old_owner = s_live_child_collections[i].owner;
-                live_collection_unpin(old_owner ? old_owner->doc : nullptr,
-                                      &s_live_child_collections[i].owner_ref);
-                if (!live_collection_pin(owner->doc, owner,
-                        &s_live_child_collections[i].owner_ref)) return;
-            }
-            s_live_child_collections[i].owner = owner;
-            s_live_child_collections[i].kind = kind;
-            return;
-        }
-    }
-    int entry_index = s_live_child_collection_count;
-    for (int i = 0; i < s_live_child_collection_count; i++) {
-        if (!s_live_child_collections[i].array) {
-            DomElement* old_owner = s_live_child_collections[i].owner;
-            live_collection_unpin(old_owner ? old_owner->doc : nullptr,
-                                  &s_live_child_collections[i].owner_ref);
-            entry_index = i;
-            break;
-        }
-    }
-    if (entry_index >= LIVE_CHILD_COLLECTION_CACHE_SIZE) return;
-    LiveChildCollectionEntry* entry = &s_live_child_collections[entry_index];
-    if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
-    entry->array = collection.array;
-    entry->owner = owner;
-    entry->kind = kind;
-    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
-    if (entry_index == s_live_child_collection_count) s_live_child_collection_count++;
-}
+JS_DOM_REGISTER_OWNER_COLLECTION(_register_live_child_collection,
+    live_child_collections, live_child_collection_count,
+    LIVE_CHILD_COLLECTION_CACHE_SIZE)
+#undef JS_DOM_REGISTER_OWNER_COLLECTION
 
 static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
-    if (!js_dom_collection_runtime_state_get()) return nullptr;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
-    for (int i = 0; i < s_live_child_collection_count; i++) {
-        if (s_live_child_collections[i].array == collection.array) {
-            if (out_kind) *out_kind = s_live_child_collections[i].kind;
-            return s_live_child_collections[i].owner;
-        }
-    }
-    return nullptr;
+    return js_dom_collection_owner(s_live_child_collections,
+        s_live_child_collection_count, collection, out_kind);
 }
 
 static void _register_live_form_collection(Item collection, DomDocument* doc,
@@ -2134,15 +2053,21 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
     if (entry_index == s_live_form_collection_count) s_live_form_collection_count++;
 }
 
-static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
+template <typename Entry>
+static Entry* js_dom_collection_entry(Entry* entries, int count, Item collection) {
     if (!js_dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
-    for (int i = 0; i < s_live_form_collection_count; i++) {
-        if (s_live_form_collections[i].array == collection.array) {
-            return &s_live_form_collections[i];
+    for (int i = 0; i < count; i++) {
+        if (entries[i].array == collection.array) {
+            return &entries[i];
         }
     }
     return nullptr;
+}
+
+static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
+    return js_dom_collection_entry(s_live_form_collections,
+        s_live_form_collection_count, collection);
 }
 
 static void _register_live_lookup_collection(Item collection, DomDocument* doc,
@@ -2196,14 +2121,8 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
 }
 
 static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {
-    if (!js_dom_collection_runtime_state_get()) return nullptr;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
-    for (int i = 0; i < s_live_lookup_collection_count; i++) {
-        if (s_live_lookup_collections[i].array == collection.array) {
-            return &s_live_lookup_collections[i];
-        }
-    }
-    return nullptr;
+    return js_dom_collection_entry(s_live_lookup_collections,
+        s_live_lookup_collection_count, collection);
 }
 
 extern "C" bool js_dom_collection_has_live_property_state(Item collection) {
@@ -2263,7 +2182,7 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     Item named_key = (Item){.item = s2it(heap_create_name("namedItem"))};
     Item existing = js_get_key_default(collection, named_key);
     if (!js_is_callable(existing)) {
-        js_set_key_default(collection, named_key, js_new_native_function(_collection_named_item));
+        js_set_native_key(collection, named_key, _collection_named_item);
     }
     Item ctor = js_get_key_default(js_get_global_this(),
         (Item){.item = s2it(heap_create_name(ctor_name))});
@@ -2365,25 +2284,12 @@ static void _refresh_live_lookup_collection(Item collection, LiveLookupCollectio
     const char* query = entry->query ? entry->query->chars : "";
     if (!root) return;
     if (entry->include_root) {
-        if (entry->kind == LIVE_LOOKUP_COLLECTION_TAG) {
-            _collect_lookup_by_tag_rec(root, query, collection);
-        } else if (entry->kind == LIVE_LOOKUP_COLLECTION_CLASS) {
-            _collect_lookup_by_class_rec(root, query, collection);
-        } else if (entry->kind == LIVE_LOOKUP_COLLECTION_NAME) {
-            _collect_lookup_by_name_rec(root, query, collection);
-        }
+        _collect_lookup_rec(root, query, collection, entry->kind);
     } else {
         DomNode* child = root->first_child;
         while (child) {
             if (child->is_element()) {
-                DomElement* elem = child->as_element();
-                if (entry->kind == LIVE_LOOKUP_COLLECTION_TAG) {
-                    _collect_lookup_by_tag_rec(elem, query, collection);
-                } else if (entry->kind == LIVE_LOOKUP_COLLECTION_CLASS) {
-                    _collect_lookup_by_class_rec(elem, query, collection);
-                } else if (entry->kind == LIVE_LOOKUP_COLLECTION_NAME) {
-                    _collect_lookup_by_name_rec(elem, query, collection);
-                }
+                _collect_lookup_rec(child->as_element(), query, collection, entry->kind);
             }
             child = child->next_sibling;
         }
@@ -2442,35 +2348,30 @@ extern "C" Item js_dom_live_form_elements_bridge(void* elem_ptr) {
     return collection;
 }
 
-extern "C" Item js_dom_live_document_get_elements_by_tag_name_bridge(void* doc_ptr, Item query) {
-    DomDocument* doc = (DomDocument*)doc_ptr;
-    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr,
-        LIVE_LOOKUP_COLLECTION_TAG, true, query, "HTMLCollection");
+#define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, ctor_name) \
+extern "C" Item name(void* doc_ptr, Item query) { \
+    DomDocument* doc = (DomDocument*)doc_ptr; \
+    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr, \
+        kind, true, query, ctor_name); \
 }
-
-extern "C" Item js_dom_live_document_get_elements_by_class_name_bridge(void* doc_ptr, Item query) {
-    DomDocument* doc = (DomDocument*)doc_ptr;
-    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr,
-        LIVE_LOOKUP_COLLECTION_CLASS, true, query, "HTMLCollection");
+#define JS_DOM_ELEMENT_LOOKUP_BRIDGE(name, kind) \
+extern "C" Item name(void* elem_ptr, Item query) { \
+    DomElement* elem = (DomElement*)elem_ptr; \
+    return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem, \
+        kind, false, query, "HTMLCollection"); \
 }
-
-extern "C" Item js_dom_live_document_get_elements_by_name_bridge(void* doc_ptr, Item query) {
-    DomDocument* doc = (DomDocument*)doc_ptr;
-    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr,
-        LIVE_LOOKUP_COLLECTION_NAME, true, query, nullptr);
-}
-
-extern "C" Item js_dom_live_element_get_elements_by_tag_name_bridge(void* elem_ptr, Item query) {
-    DomElement* elem = (DomElement*)elem_ptr;
-    return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem,
-        LIVE_LOOKUP_COLLECTION_TAG, false, query, "HTMLCollection");
-}
-
-extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem_ptr, Item query) {
-    DomElement* elem = (DomElement*)elem_ptr;
-    return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem,
-        LIVE_LOOKUP_COLLECTION_CLASS, false, query, "HTMLCollection");
-}
+JS_DOM_DOCUMENT_LOOKUP_BRIDGE(js_dom_live_document_get_elements_by_tag_name_bridge,
+    LIVE_LOOKUP_COLLECTION_TAG, "HTMLCollection")
+JS_DOM_DOCUMENT_LOOKUP_BRIDGE(js_dom_live_document_get_elements_by_class_name_bridge,
+    LIVE_LOOKUP_COLLECTION_CLASS, "HTMLCollection")
+JS_DOM_DOCUMENT_LOOKUP_BRIDGE(js_dom_live_document_get_elements_by_name_bridge,
+    LIVE_LOOKUP_COLLECTION_NAME, nullptr)
+JS_DOM_ELEMENT_LOOKUP_BRIDGE(js_dom_live_element_get_elements_by_tag_name_bridge,
+    LIVE_LOOKUP_COLLECTION_TAG)
+JS_DOM_ELEMENT_LOOKUP_BRIDGE(js_dom_live_element_get_elements_by_class_name_bridge,
+    LIVE_LOOKUP_COLLECTION_CLASS)
+#undef JS_DOM_ELEMENT_LOOKUP_BRIDGE
+#undef JS_DOM_DOCUMENT_LOOKUP_BRIDGE
 
 static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent) {
@@ -2485,21 +2386,27 @@ static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
     }
 }
 
-static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
-                                                              DomNode* parent,
-                                                              DomDocument* doc) {
-    if (!js_dom_collection_runtime_state_get()) return;
-    (void)target;
-    (void)parent;
-    for (int i = 0; i < s_live_form_collection_count; i++) {
-        LiveFormCollectionEntry* entry = &s_live_form_collections[i];
-        if (!entry->array) continue;
-        DomDocument* owner_doc = entry->doc ? entry->doc : (entry->owner ? entry->owner->doc : nullptr);
-        if (doc && owner_doc && owner_doc != doc) continue;
-        Item collection = (Item){.array = entry->array};
-        _refresh_live_form_collection(collection, entry);
-    }
+#define JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(name, entries, count, EntryType, owner_doc_expr, refresh) \
+static void name(DomNode* target, DomNode* parent, DomDocument* doc) { \
+    if (!js_dom_collection_runtime_state_get()) return; \
+    (void)target; \
+    (void)parent; \
+    for (int i = 0; i < count; i++) { \
+        EntryType* entry = &entries[i]; \
+        if (!entry->array) continue; \
+        DomDocument* owner_doc = owner_doc_expr; \
+        if (doc && owner_doc && owner_doc != doc) continue; \
+        Item collection = (Item){.array = entry->array}; \
+        refresh(collection, entry); \
+    } \
 }
+
+JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
+    js_dom_refresh_live_form_collections_for_mutation,
+    s_live_form_collections, s_live_form_collection_count,
+    LiveFormCollectionEntry,
+    entry->doc ? entry->doc : (entry->owner ? entry->owner->doc : nullptr),
+    _refresh_live_form_collection)
 
 static void js_dom_refresh_select_option_collections_for_mutation(DomNode* target,
                                                                   DomNode* parent,
@@ -2523,21 +2430,14 @@ static void js_dom_refresh_select_option_collections_for_mutation(DomNode* targe
     }
 }
 
-static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
-                                                                DomNode* parent,
-                                                                DomDocument* doc) {
-    if (!js_dom_collection_runtime_state_get()) return;
-    (void)target;
-    (void)parent;
-    for (int i = 0; i < s_live_lookup_collection_count; i++) {
-        LiveLookupCollectionEntry* entry = &s_live_lookup_collections[i];
-        if (!entry->array) continue;
-        DomDocument* owner_doc = entry->doc ? entry->doc : (entry->root ? entry->root->doc : nullptr);
-        if (doc && owner_doc && owner_doc != doc) continue;
-        Item collection = (Item){.array = entry->array};
-        _refresh_live_lookup_collection(collection, entry);
-    }
-}
+JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
+    js_dom_refresh_live_lookup_collections_for_mutation,
+    s_live_lookup_collections, s_live_lookup_collection_count,
+    LiveLookupCollectionEntry,
+    entry->doc ? entry->doc : (entry->root ? entry->root->doc : nullptr),
+    _refresh_live_lookup_collection)
+
+#undef JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION
 
 // ============================================================================
 // Document Proxy Object
@@ -2711,24 +2611,10 @@ struct JsDomForeignDocumentRuntimeState {
     bool iframe_load_drain_scheduled = false;
 };
 
-static JsDomForeignDocumentRuntimeState* js_dom_foreign_document_state_get() {
-    if (!js_active_runtime_state) return nullptr;
-    return (JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state;
-}
-
-static bool js_dom_foreign_document_state_ensure() {
-    if (!js_active_runtime_state) return false;
-    if (js_dom_foreign_document_state_get()) return true;
-    JsDomForeignDocumentRuntimeState* state =
-        (JsDomForeignDocumentRuntimeState*)mem_calloc(1,
-            sizeof(JsDomForeignDocumentRuntimeState), MEM_CAT_DOM);
-    if (!state) {
-        log_error("js-dom-foreign-document: failed to allocate context state");
-        return false;
-    }
-    js_runtime_state.dom_foreign_document_state = state;
-    return true;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsDomForeignDocumentRuntimeState*,
+    js_dom_foreign_document_state_get, (),
+    (js_active_runtime_state ? (JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state : nullptr))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_foreign_document_state_ensure, (), (js_dom_runtime_state_ensure<JsDomForeignDocumentRuntimeState>(js_runtime_state.dom_foreign_document_state, "js-dom-foreign-document") != nullptr))
 
 #define js_dom_foreign_document_state ((JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state)
 #define s_foreign_doc_cache (js_dom_foreign_document_state->foreign_doc_cache)
@@ -2818,10 +2704,7 @@ static void reset_foreign_document_cache() {
     }
     s_doc_with_window_count = 0;
 }
-
-static void js_dom_destroy_adopted_document(void* data) {
-    free_document((DomDocument*)data);
-}
+JS_FORWARD_STATIC_VOID( js_dom_destroy_adopted_document, (void* data), free_document, ((DomDocument*)data))
 
 static bool js_dom_transfer_document_storage(DomDocument* source,
                                              DomDocument* destination) {
@@ -2926,10 +2809,7 @@ static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
     }
     return it;
 }
-
-static Item wrap_foreign_doc(DomDocument* doc) {
-    return wrap_foreign_doc_owned(doc, true);
-}
+JS_FORWARD_STATIC_ITEM(wrap_foreign_doc, (DomDocument* doc), wrap_foreign_doc_owned, (doc, true))
 
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
 static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
@@ -2972,10 +2852,7 @@ static Item js_dom_parent_node_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
     return parent ? js_dom_wrap_element((void*)parent) : ItemNull;
 }
-
-extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
-    return js_dom_owner_document_from_node((DomNode*)node_ptr);
-}
+JS_FORWARD_ITEM(js_dom_owner_document_for_node, (void* node_ptr), js_dom_owner_document_from_node, ((DomNode*)node_ptr))
 
 // Build a minimal HTML document tree:
 //   <html>
@@ -3199,28 +3076,31 @@ static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
     return parsed;
 }
 
-static void js_dom_install_dom_parser_global(void) {
+template <typename Method>
+static void js_dom_install_native_constructor_global(const char* ctor_name,
+        JsNativeP0 ctor_target, const char* method_name, Method method_target) {
     RootFrame roots(4);
     Rooted<Item> global_root(roots, js_get_global_this());
-    Rooted<Item> ctor_root(roots,
-        js_new_native_constructor(js_dom_parser_constructor));
-    Rooted<Item> proto_root(roots, ItemNull);
-    Rooted<Item> method_root(roots, ItemNull);
+    Rooted<Item> ctor_root(roots, js_new_native_constructor(ctor_target));
+    Rooted<Item> proto_root(roots, js_new_object());
+    Rooted<Item> method_root(roots, js_new_native_function(method_target));
     js_set_function_name(ctor_root.get(),
-        (Item){.item = s2it(heap_create_name("DOMParser"))});
-    proto_root.set(js_new_object());
+        (Item){.item = s2it(heap_create_name(ctor_name))});
     js_set_key_default(proto_root.get(), js_string_key("constructor"),
         ctor_root.get());
-    method_root.set(js_new_native_function(js_dom_parser_parse_from_string));
-    // D6.2.2v2: the prototype is now the sole owner of this capability. Keep
-    // it rooted while allocating the method or a nursery move drops the real
-    // parseFromString property and leaves only the old name-dispatch illusion.
-    js_set_key_default(proto_root.get(), js_string_key("parseFromString"),
+    js_set_key_default(proto_root.get(), js_string_key(method_name),
         method_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
-    js_set_key_default(global_root.get(), js_string_key("DOMParser"),
+    js_set_key_default(global_root.get(), js_string_key(ctor_name),
         ctor_root.get());
+}
+
+static void js_dom_install_dom_parser_global(void) {
+    // D6.2.2v2: the prototype owns the parse capability, so construction and
+    // method publication share one rooted native-constructor transaction.
+    js_dom_install_native_constructor_global("DOMParser", js_dom_parser_constructor,
+        "parseFromString", js_dom_parser_parse_from_string);
 }
 
 // iframe.contentDocument / contentWindow accessors.
@@ -3260,9 +3140,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
     }
     return wrap_foreign_doc_owned(e->doc, e->owns_doc);
 }
-extern "C" Item js_iframe_get_content_window(DomElement* iframe) {
-    return js_iframe_get_content_document(iframe);
-}
+JS_FORWARD_ITEM(js_iframe_get_content_window, (DomElement* iframe), js_iframe_get_content_document, (iframe))
 
 static void js_dom_collect_frame_windows(DomElement* elem, Item frames) {
     if (!elem) return;
@@ -3645,40 +3523,25 @@ extern "C" Item js_get_dom_implementation(void) {
 // Computed Style Wrapping
 // ============================================================================
 
-static bool js_is_computed_style(Item item) {
+typedef const void* (*JsDomStyleHostType)(void);
+
+static bool js_is_style_wrapper(Item item, const void* vmap_marker,
+        const void* map_marker, JsDomStyleHostType host_type) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP) {
         return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_computed_style_vmap_marker ||
-             item.vmap->host_type == radiant_dom_computed_style_host_type()) &&
+            (item.vmap->host_type == vmap_marker ||
+             item.vmap->host_type == host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m->type == (void*)&js_computed_style_marker;
+    return m->type == map_marker;
 }
-
-extern "C" bool js_is_computed_style_item(Item item) {
-    return js_is_computed_style(item);
-}
-
-
-static bool js_is_inline_style(Item item) {
-    TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) {
-        return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_inline_style_vmap_marker ||
-             item.vmap->host_type == radiant_dom_inline_style_host_type()) &&
-            item.vmap->host_data != nullptr;
-    }
-    if (tid != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->type == (void*)&js_inline_style_marker;
-}
-
-extern "C" bool js_is_inline_style_item(Item item) {
-    return js_is_inline_style(item);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_is_computed_style, (Item item), js_is_style_wrapper, (item, (const void*)&js_computed_style_vmap_marker, (const void*)&js_computed_style_marker, radiant_dom_computed_style_host_type))
+JS_FORWARD_RETURN(bool, js_is_computed_style_item, (Item item), js_is_computed_style, (item))
+JS_FORWARD_STATIC_RETURN(bool, js_is_inline_style, (Item item), js_is_style_wrapper, (item, (const void*)&js_inline_style_vmap_marker, (const void*)&js_inline_style_marker, radiant_dom_inline_style_host_type))
+JS_FORWARD_RETURN(bool, js_is_inline_style_item, (Item item), js_is_inline_style, (item))
 
 
 static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
@@ -3840,10 +3703,7 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
 
     return wrapper;
 }
-
-static Item js_window_get_computed_style(Item elem_item, Item pseudo_item) {
-    return js_get_computed_style(elem_item, pseudo_item);
-}
+JS_FORWARD_STATIC_ITEM(js_window_get_computed_style, (Item elem_item, Item pseudo_item), js_get_computed_style, (elem_item, pseudo_item))
 
 static void js_dom_install_window_computed_style_global(void) {
     Item global = js_get_global_this();
@@ -4542,12 +4402,7 @@ static const char* js_dom_autocapitalize_state(const char* value, bool missing_i
     if (strcasecmp(value, "words") == 0) return "words";
     return "sentences";
 }
-
-static bool js_dom_autocapitalize_inherits_from_form(DomElement* elem) {
-    return _is_tag(elem, "button") || _is_tag(elem, "fieldset") ||
-        _is_tag(elem, "input") || _is_tag(elem, "output") ||
-        _is_tag(elem, "select") || _is_tag(elem, "textarea");
-}
+JS_FORWARD_STATIC_RETURN(bool, js_dom_autocapitalize_inherits_from_form, (DomElement* elem), _is_tag, (elem, "button") || _is_tag(elem, "fieldset") || _is_tag(elem, "input") || _is_tag(elem, "output") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))
 
 static DomElement* js_dom_form_owner(DomElement* elem) {
     if (!elem) return nullptr;
@@ -4581,10 +4436,7 @@ static const char* js_dom_get_autocapitalize(DomElement* elem) {
     }
     return "";
 }
-
-static bool js_dom_autocorrect_attr_state(const char* value) {
-    return !(value && strcasecmp(value, "off") == 0);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_autocorrect_attr_state, (const char* value), (!(value && strcasecmp(value, "off") == 0)))
 
 static bool js_dom_autocorrect_disabled_by_input_type(DomElement* elem) {
     if (!_is_tag(elem, "input")) return false;
@@ -4809,10 +4661,7 @@ static void js_dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
         js_document_active_element = nullptr;
     }
 }
-
-extern "C" void js_dom_after_disabled_attribute_set(void* elem_ptr) {
-    js_dom_clear_focus_if_disabled_now((DomElement*)elem_ptr);
-}
+JS_FORWARD_VOID( js_dom_after_disabled_attribute_set, (void* elem_ptr), js_dom_clear_focus_if_disabled_now, ((DomElement*)elem_ptr))
 
 static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
     const char* style = elem ? elem->get_attribute("style") : nullptr;
@@ -4971,53 +4820,31 @@ static Item js_dom_throw_syntax_error(const char* message) {
     Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
     return js_throw_value(js_new_error_with_name(name, msg));
 }
+JS_FORWARD_ITEM(js_dom_throw_contenteditable_syntax_error, (void), js_dom_throw_syntax_error, ("Invalid contentEditable value"))
 
-extern "C" Item js_dom_throw_contenteditable_syntax_error(void) {
-    return js_dom_throw_syntax_error("Invalid contentEditable value");
-}
-
-static void _collect_lookup_by_class_rec(DomElement* root, const char* cls, Item collection) {
-    if (!root || !cls) return;
-    for (int i = 0; i < root->class_count; i++) {
-        if (root->class_names[i] && strcmp(root->class_names[i], cls) == 0) {
-            js_array_push(collection, js_dom_wrap_element(root));
-            break;
+static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
+                                int kind) {
+    if (!root || !query) return;
+    bool matches = false;
+    if (kind == LIVE_LOOKUP_COLLECTION_TAG) {
+        matches = root->tag_name && ((query[0] == '*' && query[1] == '\0') ||
+            strcasecmp(root->tag_name, query) == 0);
+    } else if (kind == LIVE_LOOKUP_COLLECTION_CLASS) {
+        for (int i = 0; i < root->class_count; i++) {
+            if (root->class_names[i] && strcmp(root->class_names[i], query) == 0) {
+                matches = true;
+                break;
+            }
         }
+    } else if (kind == LIVE_LOOKUP_COLLECTION_NAME) {
+        const char* attr = root->get_attribute("name");
+        matches = attr && strcmp(attr, query) == 0;
     }
+    if (matches) js_array_push(collection, js_dom_wrap_element(root));
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            _collect_lookup_by_class_rec(child->as_element(), cls, collection);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void _collect_lookup_by_tag_rec(DomElement* root, const char* tag, Item collection) {
-    if (!root || !tag) return;
-    if (root->tag_name && ((tag[0] == '*' && tag[1] == '\0') ||
-            strcasecmp(root->tag_name, tag) == 0)) {
-        js_array_push(collection, js_dom_wrap_element(root));
-    }
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            _collect_lookup_by_tag_rec(child->as_element(), tag, collection);
-        }
-        child = child->next_sibling;
-    }
-}
-
-static void _collect_lookup_by_name_rec(DomElement* root, const char* name, Item collection) {
-    if (!root || !name) return;
-    const char* attr = root->get_attribute("name");
-    if (attr && strcmp(attr, name) == 0) {
-        js_array_push(collection, js_dom_wrap_element(root));
-    }
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            _collect_lookup_by_name_rec(child->as_element(), name, collection);
+            _collect_lookup_rec(child->as_element(), query, collection, kind);
         }
         child = child->next_sibling;
     }
@@ -5119,10 +4946,7 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
         }
     }
 }
-
-static bool js_dom_ascii_space(char ch) {
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_ascii_space, (char ch), (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f'))
 
 static bool js_dom_style_decl_name_matches(const char* seg, const char* end,
                                            const char* prop_name,
@@ -5501,10 +5325,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     strbuf_append_str(sb, tag);
     strbuf_append_char(sb, '>');
 }
-
-static Item js_dom_xml_serializer_constructor(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
 static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
@@ -5523,30 +5344,7 @@ static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
-
-static void js_dom_install_xml_serializer_global(void) {
-    RootFrame roots(4);
-    Rooted<Item> global_root(roots, js_get_global_this());
-    Rooted<Item> ctor_root(roots,
-        js_new_native_constructor(js_dom_xml_serializer_constructor));
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> method_root(roots,
-        js_new_native_function(js_dom_xml_serializer_serialize_to_string));
-    js_set_function_name(ctor_root.get(),
-        (Item){.item = s2it(heap_create_name("XMLSerializer"))});
-    js_set_key_default(proto_root.get(), js_string_key("constructor"),
-        ctor_root.get());
-    js_set_key_default(proto_root.get(), js_string_key("serializeToString"),
-        method_root.get());
-    // Native constructors keep their own prototype descriptor non-writable;
-    // initializing it through the constructor helper is required for `new
-    // XMLSerializer()` to inherit serializeToString instead of returning a
-    // receiver with a missing method.
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), js_string_key("XMLSerializer"),
-        ctor_root.get());
-}
+JS_FORWARD_STATIC_VOID( js_dom_install_xml_serializer_global, (void), js_dom_install_native_constructor_global, ("XMLSerializer", js_dom_xml_serializer_constructor, "serializeToString", js_dom_xml_serializer_serialize_to_string))
 
 static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
                                                            const char* context) {
@@ -5872,10 +5670,7 @@ static uint32_t js_dom_tree_walker_node_mask(DomNode* node) {
     if (node_type == 0 || node_type > 32) return 0;
     return 1u << (node_type - 1u);
 }
-
-static bool js_dom_tree_walker_accepts(DomNode* node, uint32_t what_to_show) {
-    return (js_dom_tree_walker_node_mask(node) & what_to_show) != 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_tree_walker_accepts, (DomNode* node, uint32_t what_to_show), ((js_dom_tree_walker_node_mask(node) & what_to_show) != 0))
 
 static DomNode* js_dom_tree_walker_first_child_raw(DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
@@ -5951,17 +5746,17 @@ static Item js_dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep ste
     return result_root.get();
 }
 
-static Item js_dom_tree_walker_next_node_method(Item walker_item) {
-    return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_NEXT_NODE);
+#define JS_DOM_TREE_WALKER_METHOD(name, step) \
+static Item name(Item walker_item) { \
+    return js_dom_tree_walker_advance(walker_item, step); \
 }
-
-static Item js_dom_tree_walker_first_child_method(Item walker_item) {
-    return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_FIRST_CHILD);
-}
-
-static Item js_dom_tree_walker_next_sibling_method(Item walker_item) {
-    return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_NEXT_SIBLING);
-}
+JS_DOM_TREE_WALKER_METHOD(js_dom_tree_walker_next_node_method,
+    JS_TREE_WALKER_STEP_NEXT_NODE)
+JS_DOM_TREE_WALKER_METHOD(js_dom_tree_walker_first_child_method,
+    JS_TREE_WALKER_STEP_FIRST_CHILD)
+JS_DOM_TREE_WALKER_METHOD(js_dom_tree_walker_next_sibling_method,
+    JS_TREE_WALKER_STEP_NEXT_SIBLING)
+#undef JS_DOM_TREE_WALKER_METHOD
 
 extern "C" Item js_dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
     if (!js_dom_unwrap_element(root_item)) return ItemNull;
@@ -6057,10 +5852,7 @@ extern "C" Item js_dom_document_fonts_bridge(void) {
     }
     return js_document_fonts_value;
 }
-
-extern "C" Item js_dom_document_stylesheets_bridge(void) {
-    return js_cssom_get_document_stylesheets();
-}
+JS_FORWARD_ITEM(js_dom_document_stylesheets_bridge, (void), js_cssom_get_document_stylesheets, ())
 
 extern "C" Item js_dom_document_default_view_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
@@ -6076,14 +5868,8 @@ extern "C" Item js_dom_document_default_view_bridge(void* doc_ptr) {
     }
     return ItemNull;
 }
-
-extern "C" Item js_dom_document_implementation_bridge(void) {
-    return js_get_dom_implementation();
-}
-
-extern "C" Item js_dom_document_design_mode_bridge(void) {
-    return (Item){.item = s2it(heap_create_name(js_document_design_mode ? "on" : "off"))};
-}
+JS_FORWARD_ITEM(js_dom_document_implementation_bridge, (void), js_get_dom_implementation, ())
+JS_FORWARD_EXPRESSION(Item, js_dom_document_design_mode_bridge, (void), ((Item){.item = s2it(heap_create_name(js_document_design_mode ? "on" : "off"))}))
 
 extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
@@ -6659,15 +6445,7 @@ static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
     return js_dom_text_control_set_range_text_bridge((void*)elem, replacement_arg,
         start_arg, end_arg, mode_arg);
 }
-
-extern "C" Item js_dom_text_control_set_range_text_bridge(void* dom_elem,
-                                                          Item replacement_arg,
-                                                          Item start_arg,
-                                                          Item end_arg,
-                                                          Item mode_arg) {
-    return js_text_control_set_range_text_for_elem((DomElement*)dom_elem,
-        replacement_arg, start_arg, end_arg, mode_arg);
-}
+JS_FORWARD_ITEM(js_dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
 
 extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
     DomElement* elem = (DomElement*)dom_elem;
@@ -6735,19 +6513,16 @@ extern "C" Item js_dom_click_method_bridge(Item elem_item) {
     return js_dom_dispatch_event(elem_item, ev);
 }
 
-extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
-                                                 Item callback, Item opts) {
-    // EventTarget listener storage is keyed by the wrapped JS target item.
-    js_dom_add_event_listener(target_item, type, callback, opts);
-    return make_js_undefined();
+#define JS_DOM_EVENT_LISTENER_BRIDGE(name, operation) \
+extern "C" Item name(Item target_item, Item type, Item callback, Item opts) { \
+    operation(target_item, type, callback, opts); \
+    return make_js_undefined(); \
 }
-
-extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
-                                                    Item callback, Item opts) {
-    // EventTarget listener storage is keyed by the wrapped JS target item.
-    js_dom_remove_event_listener(target_item, type, callback, opts);
-    return make_js_undefined();
-}
+JS_DOM_EVENT_LISTENER_BRIDGE(js_dom_add_event_listener_bridge,
+    js_dom_add_event_listener)
+JS_DOM_EVENT_LISTENER_BRIDGE(js_dom_remove_event_listener_bridge,
+    js_dom_remove_event_listener)
+#undef JS_DOM_EVENT_LISTENER_BRIDGE
 
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item) {
     // Dispatch keeps the wrapped target identity shared with listener lookup.
@@ -6770,11 +6545,7 @@ static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
         (uint32_t)count, data_text));
     return make_js_undefined();
 }
-
-static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
-                                           Item data_arg) {
-    return js_dom_text_replace_data_method(text_node, offset_arg, (Item){.item = i2it(0)}, data_arg);
-}
+JS_FORWARD_STATIC_ITEM(js_dom_text_insert_data_method, (DomText* text_node, Item offset_arg,                                            Item data_arg), js_dom_text_replace_data_method, (text_node, offset_arg, (Item){.item = i2it(0)}, data_arg))
 
 static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg) {
     if (!text_node) return make_js_undefined();
@@ -6782,12 +6553,7 @@ static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg) {
         (Item){.item = i2it((int64_t)dom_text_utf16_length(text_node))},
         (Item){.item = i2it(0)}, data_arg);
 }
-
-static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
-                                           Item count_arg) {
-    return js_dom_text_replace_data_method(text_node, offset_arg, count_arg,
-        (Item){.item = s2it(heap_create_name(""))});
-}
+JS_FORWARD_STATIC_ITEM(js_dom_text_delete_data_method, (DomText* text_node, Item offset_arg,                                            Item count_arg), js_dom_text_replace_data_method, (text_node, offset_arg, count_arg, (Item){.item = s2it(heap_create_name(""))}))
 
 static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg) {
@@ -6827,29 +6593,26 @@ extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
     return value;
 }
 
-extern "C" Item js_dom_text_replace_data_bridge(void* text_ptr, Item offset_arg,
-                                                Item count_arg, Item data_arg) {
-    return js_dom_text_replace_data_method((DomText*)text_ptr, offset_arg, count_arg, data_arg);
-}
-
-extern "C" Item js_dom_text_insert_data_bridge(void* text_ptr, Item offset_arg,
-                                               Item data_arg) {
-    return js_dom_text_insert_data_method((DomText*)text_ptr, offset_arg, data_arg);
-}
-
-extern "C" Item js_dom_text_append_data_bridge(void* text_ptr, Item data_arg) {
-    return js_dom_text_append_data_method((DomText*)text_ptr, data_arg);
-}
-
-extern "C" Item js_dom_text_delete_data_bridge(void* text_ptr, Item offset_arg,
-                                               Item count_arg) {
-    return js_dom_text_delete_data_method((DomText*)text_ptr, offset_arg, count_arg);
-}
-
-extern "C" Item js_dom_text_substring_data_bridge(void* text_ptr, Item offset_arg,
-                                                  Item count_arg) {
-    return js_dom_text_substring_data_method((DomText*)text_ptr, offset_arg, count_arg);
-}
+#define JS_DOM_TEXT_BRIDGE_1(name, method) \
+    extern "C" Item name(void* text_ptr, Item a) { \
+        return method((DomText*)text_ptr, a); \
+    }
+#define JS_DOM_TEXT_BRIDGE_2(name, method) \
+    extern "C" Item name(void* text_ptr, Item a, Item b) { \
+        return method((DomText*)text_ptr, a, b); \
+    }
+#define JS_DOM_TEXT_BRIDGE_3(name, method) \
+    extern "C" Item name(void* text_ptr, Item a, Item b, Item c) { \
+        return method((DomText*)text_ptr, a, b, c); \
+    }
+JS_DOM_TEXT_BRIDGE_3(js_dom_text_replace_data_bridge, js_dom_text_replace_data_method)
+JS_DOM_TEXT_BRIDGE_2(js_dom_text_insert_data_bridge, js_dom_text_insert_data_method)
+JS_DOM_TEXT_BRIDGE_1(js_dom_text_append_data_bridge, js_dom_text_append_data_method)
+JS_DOM_TEXT_BRIDGE_2(js_dom_text_delete_data_bridge, js_dom_text_delete_data_method)
+JS_DOM_TEXT_BRIDGE_2(js_dom_text_substring_data_bridge, js_dom_text_substring_data_method)
+#undef JS_DOM_TEXT_BRIDGE_3
+#undef JS_DOM_TEXT_BRIDGE_2
+#undef JS_DOM_TEXT_BRIDGE_1
 
 enum JsTextDataOperation {
     JS_TEXT_DATA_REPLACE,
@@ -6999,10 +6762,7 @@ static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) 
         node = node->next_sibling;
     }
 }
-
-static void _collect_options(DomNode* node, Item arr) {
-    _collect_options_impl(node, arr, true);
-}
+JS_FORWARD_STATIC_VOID( _collect_options, (DomNode* node, Item arr), _collect_options_impl, (node, arr, true))
 
 // Get the option's text content (concatenated descendant text, trimmed
 // of leading/trailing ASCII whitespace, with internal whitespace
@@ -7049,58 +6809,41 @@ static bool _get_selectedness(DomElement* opt) {
     }
     return dom_option_is_selected(opt);
 }
-
-extern "C" bool js_dom_option_is_selected(void* dom_elem) {
-    return _get_selectedness((DomElement*)dom_elem);
-}
+JS_FORWARD_RETURN(bool, js_dom_option_is_selected, (void* dom_elem), _get_selectedness, ((DomElement*)dom_elem))
 
 // Returns true if the select's selectedness has been explicitly modified
 // (via selectedIndex/value/option.selected setter), so default-reset
 // behavior should NOT be applied.
-static bool _select_is_dirty(DomElement* sel) {
-    if (!sel) return false;
-    Item exp = expando_get_map((DomNode*)sel);
+static bool js_dom_expando_flag_is(DomElement* elem, const char* name) {
+    if (!elem) return false;
+    Item exp = expando_get_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return false;
-    Item v = js_get_key_default(exp,
-        (Item){.item = s2it(heap_create_name("__selDirty"))});
-    return v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+    Item value = js_get_key_default(exp,
+        (Item){.item = s2it(heap_create_name(name))});
+    return value.item != ITEM_NULL && !is_js_undefined(value) && js_is_truthy(value);
 }
 
-static void _select_mark_dirty(DomElement* sel) {
-    if (!sel) return;
-    Item exp = expando_get_or_create_map((DomNode*)sel);
+static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item value) {
+    if (!elem) return;
+    Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
-    js_set_key_default(exp,
-        (Item){.item = s2it(heap_create_name("__selDirty"))},
-        (Item){.item = b2it(true)});
+    js_set_key_default(exp, (Item){.item = s2it(heap_create_name(name))}, value);
+}
+JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), js_dom_expando_flag_is, (sel, "__selDirty"))
+
+static void _select_mark_dirty(DomElement* sel) {
+    js_dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
 }
 
 // Text-control dirty value flag (input/textarea), tracked via expando so we
 // can distinguish "API has been called to set value" from "value reflects
 // defaultValue". Cleared by form reset.
-static bool _value_is_dirty(DomElement* elem) {
-    if (!elem) return false;
-    Item exp = expando_get_map((DomNode*)elem);
-    if (exp.item == ITEM_NULL) return false;
-    Item v = js_get_key_default(exp,
-        (Item){.item = s2it(heap_create_name("__valueDirty"))});
-    return v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
-}
+JS_FORWARD_STATIC_RETURN(bool, _value_is_dirty, (DomElement* elem), js_dom_expando_flag_is, (elem, "__valueDirty"))
 static void _value_mark_dirty(DomElement* elem) {
-    if (!elem) return;
-    Item exp = expando_get_or_create_map((DomNode*)elem);
-    if (exp.item == ITEM_NULL) return;
-    js_set_key_default(exp,
-        (Item){.item = s2it(heap_create_name("__valueDirty"))},
-        (Item){.item = b2it(true)});
+    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
 }
 static void _value_clear_dirty(DomElement* elem) {
-    if (!elem) return;
-    Item exp = expando_get_map((DomNode*)elem);
-    if (exp.item == ITEM_NULL) return;
-    js_set_key_default(exp,
-        (Item){.item = s2it(heap_create_name("__valueDirty"))},
-        (Item){.item = ITEM_NULL});
+    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
 }
 
 extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value) {
@@ -7165,14 +6908,8 @@ static Item js_dom_text_control_set_selection_edge(void* dom_elem, Item value,
     form_control_set_selection(state, (View*)elem, start, end, direction);
     return value;
 }
-
-extern "C" Item js_dom_text_control_set_selection_start_bridge(void* dom_elem, Item value) {
-    return js_dom_text_control_set_selection_edge(dom_elem, value, true);
-}
-
-extern "C" Item js_dom_text_control_set_selection_end_bridge(void* dom_elem, Item value) {
-    return js_dom_text_control_set_selection_edge(dom_elem, value, false);
-}
+JS_FORWARD_ITEM(js_dom_text_control_set_selection_start_bridge, (void* dom_elem, Item value), js_dom_text_control_set_selection_edge, (dom_elem, value, true))
+JS_FORWARD_ITEM(js_dom_text_control_set_selection_end_bridge, (void* dom_elem, Item value), js_dom_text_control_set_selection_edge, (dom_elem, value, false))
 
 extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
@@ -7396,10 +7133,7 @@ static void _select_refresh_cached_selected_options(DomElement* sel) {
         _select_refresh_selected_options_collection(out, sel);
     }
 }
-
-static void _select_refresh_cached_selected_options_for_node(DomNode* node) {
-    _select_refresh_cached_selected_options(_nearest_select_for_node(node));
-}
+JS_FORWARD_STATIC_VOID( _select_refresh_cached_selected_options_for_node, (DomNode* node), _select_refresh_cached_selected_options, (_nearest_select_for_node(node)))
 
 extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return;
@@ -7695,10 +7429,7 @@ extern "C" void js_dom_after_default_selected_set(void* dom_elem, bool selected)
     DomElement* sel = _option_owner_select(elem);
     if (sel) _select_ask_for_reset(sel);
 }
-
-extern "C" void js_dom_after_select_multiple_removed(void* dom_elem) {
-    _select_ask_for_reset((DomElement*)dom_elem);
-}
+JS_FORWARD_VOID( js_dom_after_select_multiple_removed, (void* dom_elem), _select_ask_for_reset, ((DomElement*)dom_elem))
 
 static int js_dom_select_apply_value(DomElement* elem, const char* value,
         bool sync_native_index) {
@@ -7733,10 +7464,7 @@ extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value
     js_dom_select_apply_value(elem, sv, true);
     _select_mark_dirty(elem);
 }
-
-extern "C" void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value) {
-    _select_set_selected_index((DomElement*)dom_elem, _select_index_from_item(value));
-}
+JS_FORWARD_VOID( js_dom_select_set_selected_index_bridge, (void* dom_elem, Item value), _select_set_selected_index, ((DomElement*)dom_elem, _select_index_from_item(value)))
 
 extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
@@ -8323,10 +8051,7 @@ static Item _build_validity_state(DomElement* elem) {
     js_set_key_default(vs, (Item){.item = s2it(heap_create_name("valid"))},           _b(valid));
     return vs;
 }
-
-static bool js_dom_validity_item_is_valid(Item flag) {
-    return ((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_validity_item_is_valid, (Item flag), (((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL)))
 
 static bool js_dom_is_constraint_control(DomElement* elem) {
     if (!elem || !elem->tag_name || _elem_is_barred(elem)) return false;
@@ -8381,7 +8106,7 @@ extern "C" Item js_dom_form_reset_bridge(Item form_item) {
     return make_js_undefined();
 }
 
-extern "C" Item js_dom_check_validity_bridge(Item elem_item) {
+static Item js_dom_check_or_report_validity(Item elem_item, bool report) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
 
@@ -8396,28 +8121,12 @@ extern "C" Item js_dom_check_validity_bridge(Item elem_item) {
     Item valid_flag = js_get_key_default(vs, (Item){.item = s2it(heap_create_name("valid"))});
     bool is_valid = js_dom_validity_item_is_valid(valid_flag);
     if (!is_valid) {
-        js_dom_dispatch_invalid_event(elem_item, true);
+        js_dom_dispatch_invalid_event(elem_item, !report);
     }
     return (Item){.item = b2it(is_valid)};
 }
-
-extern "C" Item js_dom_report_validity_bridge(Item elem_item) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
-    if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
-
-    if (strcasecmp(elem->tag_name, "form") == 0) {
-        return js_dom_check_validity_bridge(elem_item);
-    }
-
-    if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
-    Item vs = _build_validity_state(elem);
-    Item valid_flag = js_get_key_default(vs, (Item){.item = s2it(heap_create_name("valid"))});
-    bool is_valid = js_dom_validity_item_is_valid(valid_flag);
-    if (!is_valid) {
-        js_dom_dispatch_invalid_event(elem_item, false);
-    }
-    return (Item){.item = b2it(is_valid)};
-}
+JS_FORWARD_ITEM(js_dom_check_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, false))
+JS_FORWARD_ITEM(js_dom_report_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, true))
 
 // ----------------------------------------------------------------------
 // F-0: IDL-name → HTML-attribute-name mapping for reflected attributes.
@@ -8618,31 +8327,23 @@ static bool _is_listed_form_control(DomElement* e) {
 
 // Walk a subtree and append each listed control to `arr` (in tree order).
 // Uses iterative-but-recursive traversal — safe given our shallow form trees.
-static void _collect_form_controls_rec(DomNode* node, Item arr) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* ce = (DomElement*)node;
-            if (_is_listed_form_control(ce)) {
-                js_array_push(arr, js_dom_wrap_element(ce));
-            }
-            _collect_form_controls_rec(ce->first_child, arr);
-        }
-        node = node->next_sibling;
-    }
-}
-
-static void _collect_document_forms_rec(DomNode* node, Item forms) {
+static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-                js_array_push(forms, js_dom_wrap_element(elem));
+            bool selected = controls
+                ? _is_listed_form_control(elem)
+                : (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0);
+            if (selected) {
+                js_array_push(arr, js_dom_wrap_element(elem));
             }
-            _collect_document_forms_rec(elem->first_child, forms);
+            _collect_form_related_rec(elem->first_child, arr, controls);
         }
         node = node->next_sibling;
     }
 }
+JS_FORWARD_STATIC_VOID( _collect_form_controls_rec, (DomNode* node, Item arr), _collect_form_related_rec, (node, arr, true))
+JS_FORWARD_STATIC_VOID( _collect_document_forms_rec, (DomNode* node, Item forms), _collect_form_related_rec, (node, forms, false))
 
 // Return the lowercased name/id key used to look up a form control by name.
 // Returns nullptr if the element has neither.
@@ -10844,10 +10545,7 @@ static RdtMatrix js_dom_svg_matrix_from_item(Item item) {
 
 static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
                                                    const char* interface_name);
-
-static Item js_dom_svg_make_matrix(RdtMatrix matrix) {
-    return js_dom_svg_make_matrix_with_interface(matrix, "SVGMatrix");
-}
+JS_FORWARD_STATIC_ITEM(js_dom_svg_make_matrix, (RdtMatrix matrix), js_dom_svg_make_matrix_with_interface, (matrix, "SVGMatrix"))
 
 enum JsSvgMatrixOperation {
     JS_SVG_MATRIX_MULTIPLY,
@@ -10953,10 +10651,7 @@ static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
     return result;
 }
-
-static Item js_dom_svg_create_matrix(void) {
-    return js_dom_svg_make_matrix(rdt_matrix_identity());
-}
+JS_FORWARD_STATIC_ITEM(js_dom_svg_create_matrix, (void), js_dom_svg_make_matrix, (rdt_matrix_identity()))
 
 static DomElement* js_dom_svg_owner_from_value(Item value) {
     Item owner = js_get_key_default(value, js_string_key("__lambda_svg_owner"));
@@ -11013,28 +10708,18 @@ static Item js_dom_svg_make_transform(Item matrix) {
     js_set_key_default(transform, js_string_key("matrix"),
                     js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix)));
     js_set_key_default(transform, js_string_key("type"), (Item){.item = i2it(1)});
-    js_set_key_default(transform, js_string_key("setMatrix"),
-                    js_new_native_function(js_dom_svg_transform_set_matrix));
-    js_set_key_default(transform, js_string_key("setTranslate"),
-                    js_new_native_function(js_dom_svg_transform_set_translate));
-    js_set_key_default(transform, js_string_key("setScale"),
-                    js_new_native_function(js_dom_svg_transform_set_scale));
-    js_set_key_default(transform, js_string_key("setRotate"),
-                    js_new_native_function(js_dom_svg_transform_set_rotate));
+    js_set_native_key(transform, js_string_key("setMatrix"), js_dom_svg_transform_set_matrix);
+    js_set_native_key(transform, js_string_key("setTranslate"), js_dom_svg_transform_set_translate);
+    js_set_native_key(transform, js_string_key("setScale"), js_dom_svg_transform_set_scale);
+    js_set_native_key(transform, js_string_key("setRotate"), js_dom_svg_transform_set_rotate);
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key("SVGTransform"));
     Item proto = js_get_key_default(ctor, js_string_key("prototype"));
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(transform, proto);
     return transform;
 }
-
-static Item js_dom_svg_create_transform(void) {
-    return js_dom_svg_make_transform(js_dom_svg_make_matrix(rdt_matrix_identity()));
-}
-
-static Item js_dom_svg_create_transform_from_matrix(Item matrix) {
-    return js_dom_svg_make_transform(matrix);
-}
+JS_FORWARD_STATIC_ITEM(js_dom_svg_create_transform, (void), js_dom_svg_make_transform, (js_dom_svg_make_matrix(rdt_matrix_identity())))
+JS_FORWARD_STATIC_ITEM(js_dom_svg_create_transform_from_matrix, (Item matrix), js_dom_svg_make_transform, (matrix))
 
 static Item js_dom_svg_transform_list_count_get(void) {
     DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
@@ -11083,16 +10768,11 @@ static Item js_dom_svg_get_transform_list(DomElement* elem) {
     js_install_native_accessor(list, js_string_key("numberOfItems"),
         js_new_native_function(js_dom_svg_transform_list_count_get), ItemNull,
         JSPD_NON_ENUMERABLE);
-    js_set_key_default(list, js_string_key("clear"),
-                    js_new_native_function(js_dom_svg_transform_list_clear));
-    js_set_key_default(list, js_string_key("appendItem"),
-                    js_new_native_function(js_dom_svg_transform_list_append));
-    js_set_key_default(list, js_string_key("initialize"),
-                    js_new_native_function(js_dom_svg_transform_list_initialize));
-    js_set_key_default(list, js_string_key("consolidate"),
-                    js_new_native_function(js_dom_svg_transform_list_consolidate));
-    js_set_key_default(list, js_string_key("getItem"),
-                    js_new_native_function(js_dom_svg_transform_list_get_item));
+    js_set_native_key(list, js_string_key("clear"), js_dom_svg_transform_list_clear);
+    js_set_native_key(list, js_string_key("appendItem"), js_dom_svg_transform_list_append);
+    js_set_native_key(list, js_string_key("initialize"), js_dom_svg_transform_list_initialize);
+    js_set_native_key(list, js_string_key("consolidate"), js_dom_svg_transform_list_consolidate);
+    js_set_native_key(list, js_string_key("getItem"), js_dom_svg_transform_list_get_item);
     Item animated = js_new_object();
     js_set_key_default(animated, js_string_key("baseVal"), list);
     js_set_key_default(animated, js_string_key("animVal"), list);
@@ -11146,18 +10826,14 @@ static Item js_dom_svg_make_point(float x, float y, const char* interface_name) 
     js_dom_set_number_property(result, "y", y);
     js_dom_set_number_property(result, "z", 0.0f);
     js_dom_set_number_property(result, "w", 1.0f);
-    js_set_key_default(result, js_string_key("matrixTransform"),
-        js_new_native_function(js_dom_svg_point_matrix_transform));
+    js_set_native_key(result, js_string_key("matrixTransform"), js_dom_svg_point_matrix_transform);
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(interface_name));
     Item proto = js_get_key_default(ctor, js_string_key("prototype"));
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
     return result;
 }
-
-static Item js_dom_svg_create_point(void) {
-    return js_dom_svg_make_point(0.0f, 0.0f, "SVGPoint");
-}
+JS_FORWARD_STATIC_ITEM(js_dom_svg_create_point, (void), js_dom_svg_make_point, (0.0f, 0.0f, "SVGPoint"))
 
 static Item js_dom_point_constructor(Item x, Item y, Item z, Item w) {
     Item result = js_dom_svg_make_point(js_dom_svg_number(x, 0.0f),
@@ -12273,10 +11949,7 @@ static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_viewport_point(DomElement* el
     if (min_scale < 0.0001f) min_scale = 0.0001f;
     return js_dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale);
 }
-
-static bool js_dom_svg_tag_is(DomElement* elem, const char* tag) {
-    return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0))
 
 static bool js_dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* top,
                                              float* right, float* bottom) {
@@ -12695,14 +12368,7 @@ static void js_dom_viewport_node_position(DomNode* node,
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
 }
-
-static bool js_dom_point_in_box(float px, float py,
-                                float x, float y,
-                                float w, float h) {
-    return w > 0.0f && h > 0.0f &&
-        x <= px && px < x + w &&
-        y <= py && py < y + h;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_point_in_box, (float px, float py,                                 float x, float y,                                 float w, float h), (w > 0.0f && h > 0.0f && x <= px && px < x + w && y <= py && py < y + h))
 
 static bool js_dom_text_contains_point(DomText* text,
                                        float abs_x,
@@ -12753,11 +12419,7 @@ static float js_dom_shadow_node_synthetic_height(DomNode* node) {
     int64_t height = js_dom_headless_dimension(node->as_element(), false);
     return height > 0 ? (float)height : 1.0f;
 }
-
-static bool js_dom_is_document_fragment_element(DomElement* elem) {
-    return elem && elem->tag_name &&
-        strcmp(elem->tag_name, "#document-fragment") == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_is_document_fragment_element, (DomElement* elem), (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0))
 
 static DomElement* js_dom_shadow_element_from_point_walk(DomNode* node,
                                                          float abs_x,
@@ -12898,10 +12560,7 @@ static float js_dom_item_to_float(Item value) {
     }
     return 0.0f;
 }
-
-static Item js_dom_float_item(float value) {
-    return js_make_number((double)value);
-}
+JS_FORWARD_STATIC_ITEM(js_dom_float_item, (float value), js_make_number, ((double)value))
 
 static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
@@ -13012,12 +12671,7 @@ static Item js_dom_document_element_from_point(DomDocument* doc,
     DomElement* hit = (DomElement*)js_dom_document_element_from_point_native(doc, x, y);
     return hit ? js_dom_wrap_element(hit) : ItemNull;
 }
-
-extern "C" Item js_dom_document_element_from_point_bridge(void* doc_ptr,
-                                                          Item x_arg,
-                                                          Item y_arg) {
-    return js_dom_document_element_from_point((DomDocument*)doc_ptr, x_arg, y_arg);
-}
+JS_FORWARD_ITEM(js_dom_document_element_from_point_bridge, (void* doc_ptr,                                                           Item x_arg,                                                           Item y_arg), js_dom_document_element_from_point, ((DomDocument*)doc_ptr, x_arg, y_arg))
 
 static Item js_dom_text_control_caret_bounds(DomElement* elem) {
     if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context) {
@@ -13089,23 +12743,9 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
         (Item){.item = i2it((int64_t)hit.offset)});
     return out;
 }
-
-extern "C" Item js_dom_text_control_caret_bounds_bridge(void* elem) {
-    return js_dom_text_control_caret_bounds((DomElement*)elem);
-}
-
-extern "C" Item js_dom_text_control_boundary_from_point_bridge(void* elem,
-                                                               Item x_arg,
-                                                               Item y_arg) {
-    return js_dom_text_control_boundary_from_point((DomElement*)elem, x_arg, y_arg);
-}
-
-extern "C" Item js_dom_boundary_from_point_bridge(void* elem,
-                                                  Item x_arg,
-                                                  Item y_arg,
-                                                  Item behavior_arg) {
-    return js_dom_boundary_from_point((DomElement*)elem, x_arg, y_arg, behavior_arg);
-}
+JS_FORWARD_ITEM(js_dom_text_control_caret_bounds_bridge, (void* elem), js_dom_text_control_caret_bounds, ((DomElement*)elem))
+JS_FORWARD_ITEM(js_dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), js_dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))
+JS_FORWARD_ITEM(js_dom_boundary_from_point_bridge, (void* elem,                                                   Item x_arg,                                                   Item y_arg,                                                   Item behavior_arg), js_dom_boundary_from_point, ((DomElement*)elem, x_arg, y_arg, behavior_arg))
 
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
@@ -15528,11 +15168,7 @@ extern "C" Item js_dom_style_remove_property_bridge(void* dom_elem, Item prop_ar
 // surface conformance but are not used for actual collection access (which
 // is satisfied by Array .item() and indexed access).
 // ============================================================================
-
-
-static Item _coll_illegal_constructor(Item /*first*/) {
-    return js_throw_type_error("Illegal constructor");
-}
+JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (Item /*first*/), js_throw_type_error, ("Illegal constructor"))
 
 static void _set_iface_to_string_tag(Item proto, const char* name) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
@@ -15579,21 +15215,23 @@ static Item _document_fragment_ctor(void) {
     return js_dom_create_document_fragment(_js_current_document);
 }
 
-static void _install_document_fragment_iface(Item global) {
+static void js_dom_install_global_constructor(Item global, const char* name,
+        JsNativeP0 target, bool set_string_tag) {
     RootFrame roots(3);
     Rooted<Item> global_root(roots, global);
     Rooted<Item> ctor_root(roots,
-        js_new_distinct_native_constructor(_document_fragment_ctor));
+        js_new_distinct_native_constructor(target));
     Rooted<Item> proto_root(roots, js_new_object());
-    js_set_function_name(ctor_root.get(), js_string_key("DocumentFragment"));
-    _set_iface_to_string_tag(proto_root.get(), "DocumentFragment");
+    Item name_key = js_string_key(name);
+    js_set_function_name(ctor_root.get(), name_key);
+    if (set_string_tag) _set_iface_to_string_tag(proto_root.get(), name);
     js_set_key_default(proto_root.get(), js_string_key("constructor"),
         ctor_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
-    js_set_key_default(global_root.get(), js_string_key("DocumentFragment"),
-        ctor_root.get());
+    js_set_key_default(global_root.get(), name_key, ctor_root.get());
 }
+JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), js_dom_install_global_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
 
 static Item _iface_proto(Item global, const char* name) {
     Item ctor = js_get_key_default(global, (Item){.item = s2it(heap_create_name(name))});
@@ -15744,21 +15382,7 @@ static Item _xpath_evaluator_ctor(void) {
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(evaluator, proto);
     return evaluator;
 }
-
-static void _install_xpath_evaluator(Item global) {
-    RootFrame roots(3);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> ctor_root(roots,
-        js_new_distinct_native_constructor(_xpath_evaluator_ctor));
-    Rooted<Item> proto_root(roots, js_new_object());
-    js_set_function_name(ctor_root.get(), js_string_key("XPathEvaluator"));
-    js_set_key_default(proto_root.get(), js_string_key("constructor"),
-        ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), js_string_key("XPathEvaluator"),
-        ctor_root.get());
-}
+JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), js_dom_install_global_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
 
 static void _install_node_iface(Item global) {
     RootFrame roots(3);
@@ -15960,8 +15584,7 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
     Item animation = js_new_object();
     js_set_key_default(animation, js_string_key("__lambda_web_animation_host"),
                     holder);
-    js_set_key_default(animation, js_string_key("pause"),
-                    js_new_native_function(js_web_animation_pause));
+    js_set_native_key(animation, js_string_key("pause"), js_web_animation_pause);
     js_install_native_accessor(animation, js_string_key("currentTime"),
         js_new_native_function(js_web_animation_current_time_get),
         js_new_native_function(js_web_animation_current_time_set),
@@ -16043,8 +15666,7 @@ extern "C" void js_dom_install_collection_globals(void) {
             (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
         js_set_key_default(element_proto_root.get(), js_string_key("querySelectorAll"),
             method_root.get());
-        js_set_key_default(element_proto_root.get(), js_string_key("animate"),
-            js_new_native_function(js_dom_element_animate));
+        js_set_native_key(element_proto_root.get(), js_string_key("animate"), js_dom_element_animate);
     }
     _install_iface(global, "Range");
     _install_iface(global, "Selection");
@@ -16108,10 +15730,7 @@ extern "C" void js_dom_install_option_constructor(void) {
     js_set_key_default(global, (Item){.item = s2it(heap_create_name("Option"))}, ctor);
     log_debug("js_dom_install_option_constructor: installed Option");
 }
-
-extern "C" void js_dom_collections_release_context(void) {
-    reset_live_dom_collections();
-}
+JS_FORWARD_VOID( js_dom_collections_release_context, (void), reset_live_dom_collections, ())
 
 #undef js_dom_collection_state
 #undef s_select_options_owners
@@ -16124,17 +15743,23 @@ extern "C" void js_dom_collections_release_context(void) {
 #undef s_live_lookup_collection_count
 #undef s_dom_collection_refresh_depth
 
+static void js_dom_destroy_context_state(void** slot, bool has_entries,
+                                         const char* label) {
+    if (!slot || !*slot) return;
+    // All weak homes and native pins are removed before heap destruction.
+    if (has_entries) log_error("%s: context destroyed before roots were released", label);
+    mem_free(*slot);
+    *slot = nullptr;
+}
+
 extern "C" void js_dom_collections_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dom_collection_state) return;
     JsDomCollectionRuntimeState* state =
         (JsDomCollectionRuntimeState*)runtime_state->dom_collection_state;
-    // All weak homes and native pins are removed before heap destruction.
-    if (state->select_options_owner_count || state->live_child_collection_count ||
-        state->live_form_collection_count || state->live_lookup_collection_count) {
-        log_error("js-dom-collections: context destroyed before collection pins were released");
-    }
-    mem_free(state);
-    runtime_state->dom_collection_state = nullptr;
+    js_dom_destroy_context_state(&runtime_state->dom_collection_state,
+        state->select_options_owner_count || state->live_child_collection_count ||
+        state->live_form_collection_count || state->live_lookup_collection_count,
+        "js-dom-collections");
 }
 
 extern "C" void js_dom_foreign_documents_release_context(void) {
@@ -16159,11 +15784,8 @@ extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* runtime
     if (!runtime_state || !runtime_state->dom_foreign_document_state) return;
     JsDomForeignDocumentRuntimeState* state =
         (JsDomForeignDocumentRuntimeState*)runtime_state->dom_foreign_document_state;
-    // Owned documents and wrapper roots are released before heap destruction.
-    if (state->foreign_doc_cache_count || state->doc_with_window_count ||
-        state->iframe_cache_count || state->pending_iframe_load_count) {
-        log_error("js-dom-foreign-document: context destroyed before wrapper roots were released");
-    }
-    mem_free(state);
-    runtime_state->dom_foreign_document_state = nullptr;
+    js_dom_destroy_context_state(&runtime_state->dom_foreign_document_state,
+        state->foreign_doc_cache_count || state->doc_with_window_count ||
+        state->iframe_cache_count || state->pending_iframe_load_count,
+        "js-dom-foreign-document");
 }

@@ -11,10 +11,7 @@
 // implies JavaScript identity; only an explicit binding alias can share a slot.
 #define js_builtin_cache (js_runtime_state.builtin_cache.entries)
 #define js_builtin_cache_init (js_runtime_state.builtin_cache.initialized)
-
-static bool js_builtin_cache_ensure_roots(void) {
-    return js_root_range_ensure_registered(&js_runtime_state.builtin_cache.roots);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_builtin_cache_ensure_roots, (void), js_root_range_ensure_registered, (&js_runtime_state.builtin_cache.roots))
 
 
 static const JsIntrinsicTargetSpec JS_INTRINSIC_TARGET_SPECS[] = {
@@ -162,10 +159,7 @@ static_assert(JS_BUILTIN_MATH_LOG1P - JS_BUILTIN_MATH_ABS == 34,
 static const JsBuiltinMethodSpec* js_builtin_lookup_index[JS_BUILTIN_LOOKUP_INDEX_SIZE];
 static const JsBuiltinMethodSpec* js_builtin_id_index[JS_BUILTIN_MAX];
 static bool js_builtin_lookup_index_initialized = false;
-
-static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec* spec) {
-    return spec->display_name ? spec->display_name : spec->name;
-}
+JS_FORWARD_STATIC_EXPRESSION(const char*, js_builtin_method_spec_display_name, (const JsBuiltinMethodSpec* spec), (spec->display_name ? spec->display_name : spec->name))
 
 static uint32_t js_builtin_spec_name_hash(JsBuiltinOwner owner, const char* name, int len) {
     return js_builtin_name_hash(2166136261u ^ (uint32_t)owner, name, len);

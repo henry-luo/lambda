@@ -473,10 +473,7 @@ void js_root_range_reset_all(void) {
         if (range->reset) range->reset(range->reset_owner);
     }
 }
-
-static void js_item_stack_reset_callback(void* owner) {
-    js_item_stack_clear((JsItemStack*)owner);
-}
+JS_FORWARD_STATIC_VOID( js_item_stack_reset_callback, (void* owner), js_item_stack_clear, ((JsItemStack*)owner))
 
 bool js_item_stack_push(JsItemStack* stack, Item value) {
     if (!stack || stack->depth < 0) return false;
@@ -596,16 +593,8 @@ static bool js_eval_source_push_mode(Item filename, Item source,
     js_eval_source_compact_stack[idx] = compact_stack;
     return true;
 }
-
-extern "C" int64_t js_eval_source_push(Item filename, Item source,
-                                         int64_t line_offset, int64_t column_offset) {
-    return js_eval_source_push_mode(filename, source, line_offset, column_offset, false) ? 1 : 0;
-}
-
-extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
-                                                 int64_t line_offset, int64_t column_offset) {
-    return js_eval_source_push_mode(filename, source, line_offset, column_offset, true) ? 1 : 0;
-}
+JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push, (Item filename, Item source,                                          int64_t line_offset, int64_t column_offset), (js_eval_source_push_mode(filename, source, line_offset, column_offset, false) ? 1 : 0))
+JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push_compact, (Item filename, Item source,                                                  int64_t line_offset, int64_t column_offset), (js_eval_source_push_mode(filename, source, line_offset, column_offset, true) ? 1 : 0))
 
 extern "C" void js_eval_source_pop(void) {
     if (js_eval_source_stack_depth <= 0) return;
@@ -849,9 +838,7 @@ Map* js_resolve_object_prototype() {
 }
 
 // extern "C" wrapper for js_key_is_symbol — callable from MIR JIT
-extern "C" int64_t js_key_is_symbol_c(Item key) {
-    return js_key_is_symbol(key) ? 1 : 0;
-}
+JS_FORWARD_EXPRESSION(int64_t, js_key_is_symbol_c, (Item key), (js_key_is_symbol(key) ? 1 : 0))
 
 extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
     JsRuntimeState* state = js_active_runtime_state;
@@ -993,33 +980,29 @@ extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count
     return true;
 }
 
-extern "C" uint32_t js_get_active_module_state_id(void) {
-    if (!context || !context->active_js_module_state) return UINT32_MAX;
-    return context->active_js_module_state->module_id;
+JS_FORWARD_EXPRESSION(uint32_t, js_get_active_module_state_id, (void),
+    context && context->active_js_module_state
+        ? context->active_js_module_state->module_id : UINT32_MAX)
+
+static LambdaModuleState* js_module_state_at(uint32_t module_state_id) {
+    if (!context || module_state_id == UINT32_MAX ||
+            module_state_id >= context->module_state_capacity) return NULL;
+    return context->module_states[module_state_id];
 }
 
 extern "C" bool js_set_active_module_state_id(uint32_t module_state_id) {
-    if (!context || module_state_id == UINT32_MAX ||
-            module_state_id >= context->module_state_capacity) return false;
-    LambdaModuleState* state = context->module_states[module_state_id];
+    LambdaModuleState* state = js_module_state_at(module_state_id);
     if (!state || !state->vars) return false;
     context->active_js_module_state = state;
     return true;
 }
+JS_FORWARD_EXPRESSION(bool, js_module_state_is_available, (uint32_t module_state_id), (context && module_state_id != UINT32_MAX && module_state_id < context->module_state_capacity && context->module_states[module_state_id] && context->module_states[module_state_id]->vars))
 
-extern "C" bool js_module_state_is_available(uint32_t module_state_id) {
-    return context && module_state_id != UINT32_MAX &&
-        module_state_id < context->module_state_capacity &&
-        context->module_states[module_state_id] &&
-        context->module_states[module_state_id]->vars;
-}
-
-extern "C" uint64_t js_active_module_name_id(uint32_t index) {
-    if (!context || !context->active_js_module_state ||
+JS_FORWARD_EXPRESSION(uint64_t, js_active_module_name_id, (uint32_t index),
+    !context || !context->active_js_module_state ||
             index >= context->active_js_module_state->property_key_count ||
-            !context->active_js_module_state->property_keys) return NAME_ID_NONE;
-    return context->active_js_module_state->property_keys[index];
-}
+            !context->active_js_module_state->property_keys ? NAME_ID_NONE
+        : context->active_js_module_state->property_keys[index])
 
 extern "C" Item js_active_module_name_item(uint32_t module_name_index,
         NameId direct_name_id) {
@@ -1030,22 +1013,17 @@ extern "C" Item js_active_module_name_item(uint32_t module_name_index,
     return lambda_name_id_to_item(name_id);
 }
 
-extern "C" uint32_t js_active_module_name_count(void) {
-    return context && context->active_js_module_state
-        ? context->active_js_module_state->property_key_count : 0;
-}
-
-extern "C" uint32_t js_active_module_ic_count(void) {
-    return context && context->active_js_module_state
-        ? context->active_js_module_state->ic_count : 0;
-}
+JS_FORWARD_EXPRESSION(uint32_t, js_active_module_name_count, (void),
+    context && context->active_js_module_state
+        ? context->active_js_module_state->property_key_count : 0)
+JS_FORWARD_EXPRESSION(uint32_t, js_active_module_ic_count, (void),
+    context && context->active_js_module_state
+        ? context->active_js_module_state->ic_count : 0)
 
 extern "C" bool js_link_module_ic_table(uint32_t module_state_id,
         uint32_t count) {
-    if (!context || module_state_id == UINT32_MAX ||
-            module_state_id >= context->module_state_capacity ||
-            !context->module_states[module_state_id]) return false;
-    LambdaModuleState* state = context->module_states[module_state_id];
+    LambdaModuleState* state = js_module_state_at(module_state_id);
+    if (!state) return false;
     if (state->ic_cells && state->ic_count != count) {
         log_error("js-ic-table: sealed count changed for module %u",
                   module_state_id);
@@ -1068,10 +1046,8 @@ extern "C" bool js_link_module_ic_table(uint32_t module_state_id,
 
 extern "C" bool js_append_module_ic_table(uint32_t module_state_id,
         uint32_t count) {
-    if (!context || module_state_id == UINT32_MAX ||
-            module_state_id >= context->module_state_capacity ||
-            !context->module_states[module_state_id]) return false;
-    LambdaModuleState* state = context->module_states[module_state_id];
+    LambdaModuleState* state = js_module_state_at(module_state_id);
+    if (!state) return false;
     if (count == 0) return true;
     if (state->ic_cell_size != 0 && state->ic_cell_size != sizeof(JsLoadIC)) {
         log_error("js-ic-table: incompatible cell size for module %u",
@@ -1092,25 +1068,16 @@ extern "C" bool js_append_module_ic_table(uint32_t module_state_id,
     return true;
 }
 
-extern "C" void* js_active_module_ic(uint32_t index) {
-    return context && context->active_js_module_state
-        ? lambda_module_ic_at(context->active_js_module_state, index) : NULL;
-}
-
-extern "C" uint32_t js_get_batch_preamble_var_count(void) {
-    return js_runtime_state.batch_preamble_var_count;
-}
+JS_FORWARD_EXPRESSION(void*, js_active_module_ic, (uint32_t index),
+    context && context->active_js_module_state
+        ? lambda_module_ic_at(context->active_js_module_state, index) : NULL)
+JS_FORWARD_EXPRESSION(uint32_t, js_get_batch_preamble_var_count, (void),
+    js_runtime_state.batch_preamble_var_count)
 
 extern "C" bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
         uint32_t destination_module_state_id, uint32_t count) {
-    if (!context || source_module_state_id == UINT32_MAX ||
-            destination_module_state_id == UINT32_MAX ||
-            source_module_state_id >= context->module_state_capacity ||
-            destination_module_state_id >= context->module_state_capacity) {
-        return false;
-    }
-    LambdaModuleState* source = context->module_states[source_module_state_id];
-    LambdaModuleState* destination = context->module_states[destination_module_state_id];
+    LambdaModuleState* source = js_module_state_at(source_module_state_id);
+    LambdaModuleState* destination = js_module_state_at(destination_module_state_id);
     if (!source || !destination || !source->vars || !destination->vars ||
             count > source->var_count || count > destination->var_count) {
         return false;
@@ -1122,10 +1089,7 @@ extern "C" bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
 // =============================================================================
 // Error-lane construction (D8.4.3)
 // =============================================================================
-
-extern "C" Item js_status_ok(void) {
-    return (Item){.item = b2it(true)};
-}
+JS_FORWARD_EXPRESSION(Item, js_status_ok, (void), ((Item){.item = b2it(true)}))
 
 // Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible)
 extern "C" Item js_require_object_coercible(Item value) {
@@ -1325,9 +1289,7 @@ extern "C" void js_batch_reset() {
 }
 
 // Get current module var count (for checkpointing)
-extern "C" int js_get_module_var_count() {
-    return js_module_var_count;
-}
+JS_FORWARD_EXPRESSION(int, js_get_module_var_count, (void), js_module_var_count)
 
 extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
     js_reset_module_vars();
@@ -1388,10 +1350,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_cjs_metadata_reset();
     js_batch_reset_runtime_caches("js_batch_reset_to pre-cleanup", false);
 }
-
-extern "C" Item js_new_error(Item message) {
-    return js_new_error_with_stack(message, (Item){.item = ITEM_JS_UNDEFINED});
-}
+JS_FORWARD_ITEM(js_new_error, (Item message), js_new_error_with_stack, (message, (Item){.item = ITEM_JS_UNDEFINED}))
 
 extern "C" Item js_new_named_error(const char* type_name, const char* message) {
     RootFrame roots(2);
@@ -1404,10 +1363,7 @@ extern "C" Item js_new_named_error(const char* type_name, const char* message) {
     // unrooted name/text pair produced anonymous [object Object] exceptions.
     return js_new_error_with_name(name_root.get(), text_root.get());
 }
-
-extern "C" Item js_throw_named_error_text(const char* type_name, const char* message) {
-    return js_throw_value(js_new_named_error(type_name, message));
-}
+JS_FORWARD_ITEM(js_throw_named_error_text, (const char* type_name, const char* message), js_throw_value, (js_new_named_error(type_name, message)))
 
 // AggregateError(errors, message): Error subclass with .errors array
 extern "C" Item js_new_aggregate_error(Item errors, Item message) {
@@ -1740,9 +1696,7 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
 }
 
 // v11: Create a typed Error (TypeError, RangeError, SyntaxError, ReferenceError)
-extern "C" Item js_new_error_with_name(Item error_name, Item message) {
-    return js_new_error_with_name_stack(error_name, message, (Item){.item = ITEM_JS_UNDEFINED});
-}
+JS_FORWARD_ITEM(js_new_error_with_name, (Item error_name, Item message), js_new_error_with_name_stack, (error_name, message, (Item){.item = ITEM_JS_UNDEFINED}))
 
 extern "C" JsClass js_error_class_id(Item value) {
     LambdaError* error = js_error_from_value(value);
@@ -1883,10 +1837,7 @@ extern "C" Item js_resolve_lexical_this(Item this_val) {
 extern "C" void js_set_this(Item this_val) {
     js_current_this = this_val;
 }
-
-extern "C" Item js_get_new_target() {
-    return js_new_target;
-}
+JS_FORWARD_EXPRESSION(Item, js_get_new_target, (), (js_new_target))
 
 extern "C" void js_set_direct_new_target(Item target) {
     // Directly set new.target (for direct calls that bypass js_call_function)

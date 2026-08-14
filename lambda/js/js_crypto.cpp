@@ -59,6 +59,9 @@ extern __thread EvalContext* context;
 static const uint8_t crypto_empty_bytes[1] = {0};
 #define crypto_namespace (js_runtime_state.crypto.namespace_object)
 
+template <typename Target>
+JS_FORWARD_STATIC_VOID( crypto_set_native, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
+
 #define JS_CRYPTO_MAX_LIVE_CONTEXTS 4096
 
 struct JsCryptoNativeState {
@@ -86,11 +89,7 @@ static JsCryptoNativeState* crypto_native_state_ensure(void) {
 
 #define crypto_native_state (*(JsCryptoNativeState*)js_runtime_state.crypto.native_state)
 #define crypto_pseudo_random_warning_emitted (crypto_native_state.pseudo_random_warning_emitted)
-
-static bool crypto_ensure_roots(void) {
-    return crypto_native_state_ensure() &&
-        js_root_range_ensure_registered(&js_runtime_state.crypto.roots);
-}
+JS_FORWARD_STATIC_RETURN(bool, crypto_ensure_roots, (void), crypto_native_state_ensure, () && js_root_range_ensure_registered(&js_runtime_state.crypto.roots))
 
 static int crypto_digest_bits_for_name_ext(const char* digest, bool allow_md5, bool allow_sha1, bool allow_sha224) {
     if (!digest) return 0;
@@ -165,10 +164,7 @@ static bool crypto_openssl_rsa_verify_message(const char* digest,
                                               bool* verified);
 static Item crypto_dsa_asymmetric_key_details(const uint8_t* key, int key_len);
 static Item crypto_throw_unsupported_asymmetric_key(const char* key_type);
-
-static bool crypto_digest_is_xof(const char* alg) {
-    return alg && (strcmp(alg, "shake128") == 0 || strcmp(alg, "shake256") == 0);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, crypto_digest_is_xof, (const char* alg), (alg && (strcmp(alg, "shake128") == 0 || strcmp(alg, "shake256") == 0)))
 
 static int crypto_digest_default_xof_len(const char* alg) {
     if (!alg) return 0;
@@ -453,17 +449,14 @@ static Item js_native_sha(Item data_item, Item offset_item, Item length_item,
     return result;
 }
 
-extern "C" Item js_native_sha256(Item data_item, Item offset_item, Item length_item) {
-    return js_native_sha(data_item, offset_item, length_item, DIGEST_SHA256);
+#define JS_NATIVE_SHA_WRAPPER(name, digest) \
+extern "C" Item name(Item data_item, Item offset_item, Item length_item) { \
+    return js_native_sha(data_item, offset_item, length_item, digest); \
 }
-
-extern "C" Item js_native_sha384(Item data_item, Item offset_item, Item length_item) {
-    return js_native_sha(data_item, offset_item, length_item, DIGEST_SHA384);
-}
-
-extern "C" Item js_native_sha512(Item data_item, Item offset_item, Item length_item) {
-    return js_native_sha(data_item, offset_item, length_item, DIGEST_SHA512);
-}
+JS_NATIVE_SHA_WRAPPER(js_native_sha256, DIGEST_SHA256)
+JS_NATIVE_SHA_WRAPPER(js_native_sha384, DIGEST_SHA384)
+JS_NATIVE_SHA_WRAPPER(js_native_sha512, DIGEST_SHA512)
+#undef JS_NATIVE_SHA_WRAPPER
 
 // ============================================================================
 // OS-level random bytes
@@ -491,10 +484,7 @@ static bool crypto_random_bytes(uint8_t* buf, size_t len) {
 // ============================================================================
 
 static const int64_t CRYPTO_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
-
-static bool crypto_item_is_undefined(Item item) {
-    return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, crypto_item_is_undefined, (Item item), (item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED))
 
 static bool extract_bytes(Item item, uint8_t** out, int* out_len);
 static int crypto_mbedtls_random(void* ctx, unsigned char* output, size_t len);
@@ -842,10 +832,7 @@ extern "C" Item js_crypto_getRandomValues(Item target_item) {
     }
     return target_item;
 }
-
-extern "C" Item js_crypto_getFips(void) {
-    return (Item){.item = i2it(0)};
-}
+JS_FORWARD_EXPRESSION(Item, js_crypto_getFips, (void), ((Item){.item = i2it(0)}))
 
 // ============================================================================
 // randomUUID/randomUUIDv7 → string "xxxxxxxx-xxxx-Vxxx-yxxx-xxxxxxxxxxxx"
@@ -1088,11 +1075,7 @@ extern "C" Item js_crypto_randomInt(Item min_item, Item max_item, Item callback_
     }
     return result;
 }
-
-extern "C" Item js_crypto_argon2_unsupported(void) {
-    return js_throw_error_with_code(JS_ERR_CRYPTO_ARGON2_NOT_SUPPORTED,
-        "Argon2 is not supported by this crypto backend");
-}
+JS_FORWARD_ITEM(js_crypto_argon2_unsupported, (void), js_throw_error_with_code, (JS_ERR_CRYPTO_ARGON2_NOT_SUPPORTED, "Argon2 is not supported by this crypto backend"))
 
 // ============================================================================
 // HMAC — hash-based message authentication code (native implementation)
@@ -1466,6 +1449,20 @@ static void crypto_append_bytes(uint8_t** data, int* data_len, int* data_cap,
     *data_len += len;
 }
 
+static Item crypto_append_stream_input(Item value, Item encoding_item,
+        bool raw_string, bool reject_invalid, uint8_t** data,
+        int* data_len, int* data_cap) {
+    const uint8_t* bytes = NULL;
+    int len = 0;
+    bool owned = false;
+    Item status = crypto_stream_input_bytes(value, encoding_item,
+        raw_string, reject_invalid, &bytes, &len, &owned);
+    if (item_is_error(status) || status.item == ItemNull.item) return status;
+    if (bytes) crypto_append_bytes(data, data_len, data_cap, bytes, len);
+    if (owned) mem_free((void*)bytes);
+    return status;
+}
+
 static void crypto_link_instance_to_constructor(Item obj, const char* constructor_name) {
     if (get_type_id(obj) != LMD_TYPE_MAP || get_type_id(crypto_namespace) != LMD_TYPE_MAP) return;
     Item ctor = js_get_key_default(crypto_namespace, make_string_item_crypto(constructor_name));
@@ -1481,14 +1478,9 @@ extern "C" Item js_hmac_update(Item data_item) {
     HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx) return self;
 
-    const uint8_t* bytes = NULL;
-    int len = 0;
-    bool owned = false;
-    Item status = crypto_stream_input_bytes(data_item, make_js_undefined_crypto(),
-        true, false, &bytes, &len, &owned);
+    Item status = crypto_append_stream_input(data_item, make_js_undefined_crypto(),
+        true, false, &ctx->data, &ctx->data_len, &ctx->data_cap);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, bytes, len);
-    if (owned) mem_free((void*)bytes);
     return self;
 }
 
@@ -1528,13 +1520,14 @@ extern "C" Item js_hmac_end(Item data_item) {
     return self;
 }
 
-extern "C" Item js_hmac_read(void) {
+static Item crypto_read_object_bytes(const char* key) {
     Item self = js_get_current_this();
-    Item digest = js_get_key_default(self, make_string_item_crypto("__hmac_read__"));
+    Item digest = js_get_key_default(self, make_string_item_crypto(key));
     if (digest.item == 0 || digest.item == ITEM_NULL) return ItemNull;
-    js_set_key_default(self, make_string_item_crypto("__hmac_read__"), ItemNull);
+    js_set_key_default(self, make_string_item_crypto(key), ItemNull);
     return digest;
 }
+JS_FORWARD_ITEM(js_hmac_read, (void), crypto_read_object_bytes, ("__hmac_read__"))
 
 extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
     if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("hmac", "string", alg_item);
@@ -1565,14 +1558,10 @@ extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
     crypto_link_instance_to_constructor(obj, "Hmac");
     js_set_key_default(obj, make_string_item_crypto("__hmac_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    js_set_key_default(obj, make_string_item_crypto("update"),
-                    js_new_native_function(js_hmac_update));
-    js_set_key_default(obj, make_string_item_crypto("digest"),
-                    js_new_native_function(js_hmac_digest));
-    js_set_key_default(obj, make_string_item_crypto("end"),
-                    js_new_native_function(js_hmac_end));
-    js_set_key_default(obj, make_string_item_crypto("read"),
-                    js_new_native_function(js_hmac_read));
+    crypto_set_native(obj, make_string_item_crypto("update"), js_hmac_update);
+    crypto_set_native(obj, make_string_item_crypto("digest"), js_hmac_digest);
+    crypto_set_native(obj, make_string_item_crypto("end"), js_hmac_end);
+    crypto_set_native(obj, make_string_item_crypto("read"), js_hmac_read);
     return obj;
 }
 
@@ -1618,14 +1607,9 @@ extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
-    const uint8_t* bytes = NULL;
-    int len = 0;
-    bool owned = false;
-    Item status = crypto_stream_input_bytes(data_item, encoding_item,
-        false, true, &bytes, &len, &owned);
+    Item status = crypto_append_stream_input(data_item, encoding_item,
+        false, true, &ctx->data, &ctx->data_len, &ctx->data_cap);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, bytes, len);
-    if (owned) mem_free((void*)bytes);
     return self;
 }
 
@@ -1701,14 +1685,7 @@ extern "C" Item js_hash_end(Item data_item) {
     }
     return self;
 }
-
-extern "C" Item js_hash_read(void) {
-    Item self = js_get_current_this();
-    Item digest = js_get_key_default(self, make_string_item_crypto("__hash_read__"));
-    if (digest.item == 0 || digest.item == ITEM_NULL) return ItemNull;
-    js_set_key_default(self, make_string_item_crypto("__hash_read__"), ItemNull);
-    return digest;
-}
+JS_FORWARD_ITEM(js_hash_read, (void), crypto_read_object_bytes, ("__hash_read__"))
 
 static Item js_hash_make_object(HashCtx* ctx);
 static Item crypto_hash_output_length_from_options(const char* alg, Item options_item,
@@ -1767,24 +1744,15 @@ static Item js_hash_make_object(HashCtx* ctx) {
     crypto_link_instance_to_constructor(obj, "Hash");
     js_set_key_default(obj, make_string_item_crypto("__hash_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    js_set_key_default(obj, make_string_item_crypto("update"),
-                    js_new_native_function(js_hash_update));
-    js_set_key_default(obj, make_string_item_crypto("write"),
-                    js_new_native_function(js_hash_update));
-    js_set_key_default(obj, make_string_item_crypto("digest"),
-                    js_new_native_function(js_hash_digest));
-    js_set_key_default(obj, make_string_item_crypto("end"),
-                    js_new_native_function(js_hash_end));
-    js_set_key_default(obj, make_string_item_crypto("read"),
-                    js_new_native_function(js_hash_read));
-    js_set_key_default(obj, make_string_item_crypto("copy"),
-                    js_new_native_function(js_hash_copy));
-    js_set_key_default(obj, make_string_item_crypto("on"),
-                    js_new_native_function(js_hash_on));
-    js_set_key_default(obj, make_string_item_crypto("once"),
-                    js_new_native_function(js_hash_on));
-    js_set_key_default(obj, make_string_item_crypto("setEncoding"),
-                    js_new_native_function(js_hash_setEncoding));
+    crypto_set_native(obj, make_string_item_crypto("update"), js_hash_update);
+    crypto_set_native(obj, make_string_item_crypto("write"), js_hash_update);
+    crypto_set_native(obj, make_string_item_crypto("digest"), js_hash_digest);
+    crypto_set_native(obj, make_string_item_crypto("end"), js_hash_end);
+    crypto_set_native(obj, make_string_item_crypto("read"), js_hash_read);
+    crypto_set_native(obj, make_string_item_crypto("copy"), js_hash_copy);
+    crypto_set_native(obj, make_string_item_crypto("on"), js_hash_on);
+    crypto_set_native(obj, make_string_item_crypto("once"), js_hash_on);
+    crypto_set_native(obj, make_string_item_crypto("setEncoding"), js_hash_setEncoding);
     return obj;
 }
 
@@ -1894,10 +1862,7 @@ static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
     if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return NULL;
     return (SignVerifyCtx*)(uintptr_t)it2i(ctx_item);
 }
-
-static bool crypto_bytes_look_like_pem(const uint8_t* bytes, int len) {
-    return bytes && len >= 10 && memcmp(bytes, "-----BEGIN", 10) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, crypto_bytes_look_like_pem, (const uint8_t* bytes, int len), (bytes && len >= 10 && memcmp(bytes, "-----BEGIN", 10) == 0))
 
 static void crypto_ensure_pem_nul(uint8_t** bytes, int* len) {
     if (!bytes || !*bytes || !len || *len <= 0) return;
@@ -1968,16 +1933,8 @@ static bool crypto_key_bytes_from_item(Item key_item, const char* first_property
     if (ok) crypto_ensure_pem_nul(out, out_len);
     return ok;
 }
-
-static bool crypto_private_key_bytes_for_sign(Item key_item, uint8_t** out, int* out_len) {
-    return crypto_key_bytes_from_item(key_item, "__crypto_private_key__", NULL,
-        out, out_len);
-}
-
-static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int* out_len) {
-    return crypto_key_bytes_from_item(key_item, "__crypto_public_key__",
-        "__crypto_private_key__", out, out_len);
-}
+JS_FORWARD_STATIC_RETURN(bool, crypto_private_key_bytes_for_sign, (Item key_item, uint8_t** out, int* out_len), crypto_key_bytes_from_item, (key_item, "__crypto_private_key__", NULL, out, out_len))
+JS_FORWARD_STATIC_RETURN(bool, crypto_public_key_bytes_for_verify, (Item key_item, uint8_t** out, int* out_len), crypto_key_bytes_from_item, (key_item, "__crypto_public_key__", "__crypto_private_key__", out, out_len))
 
 static int crypto_parse_key_for_verify(mbedtls_pk_context* pk,
                                        const uint8_t* key_bytes, int key_len) {
@@ -1991,11 +1948,7 @@ static int crypto_parse_key_for_verify(mbedtls_pk_context* pk,
     return mbedtls_pk_parse_key(pk, key_bytes, (size_t)key_len, NULL, 0,
         crypto_mbedtls_random, NULL);
 }
-
-static Item crypto_throw_sign_failed(const char* message) {
-    return js_throw_error_with_code("ERR_OSSL_CRYPTO_SIGN_FAILED",
-        message ? message : "Failed to sign data");
-}
+JS_FORWARD_STATIC_ITEM(crypto_throw_sign_failed, (const char* message), js_throw_error_with_code, ("ERR_OSSL_CRYPTO_SIGN_FAILED", message ? message : "Failed to sign data"))
 
 enum CryptoRsaPadding {
     CRYPTO_RSA_PKCS1_PADDING = 1,
@@ -2305,14 +2258,9 @@ extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
     SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
     if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
 
-    const uint8_t* bytes = NULL;
-    int len = 0;
-    bool owned = false;
-    Item status = crypto_stream_input_bytes(data_item, encoding_item,
-        false, true, &bytes, &len, &owned);
+    Item status = crypto_append_stream_input(data_item, encoding_item,
+        false, true, &ctx->data, &ctx->data_len, &ctx->data_cap);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, bytes, len);
-    if (owned) mem_free((void*)bytes);
     return self;
 }
 
@@ -2583,26 +2531,21 @@ static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
     crypto_link_instance_to_constructor(obj, verify_mode ? "Verify" : "Sign");
     js_set_key_default(obj, make_string_item_crypto("__sign_verify_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    js_set_key_default(obj, make_string_item_crypto("update"),
-                    js_new_native_function(js_sign_verify_update));
-    js_set_key_default(obj, make_string_item_crypto("write"),
-                    js_new_native_function(js_sign_verify_update));
-    js_set_key_default(obj, make_string_item_crypto("end"),
-                    js_new_native_function(js_sign_verify_end));
-    js_set_key_default(obj, make_string_item_crypto("sign"),
-                    js_new_native_function(js_sign_verify_sign));
-    js_set_key_default(obj, make_string_item_crypto("verify"),
-                    js_new_native_function(js_sign_verify_verify));
+    crypto_set_native(obj, make_string_item_crypto("update"), js_sign_verify_update);
+    crypto_set_native(obj, make_string_item_crypto("write"), js_sign_verify_update);
+    crypto_set_native(obj, make_string_item_crypto("end"), js_sign_verify_end);
+    crypto_set_native(obj, make_string_item_crypto("sign"), js_sign_verify_sign);
+    crypto_set_native(obj, make_string_item_crypto("verify"), js_sign_verify_verify);
     return obj;
 }
 
-extern "C" Item js_crypto_createSign(Item alg_item) {
-    return js_crypto_create_sign_verify(alg_item, false);
+#define JS_CRYPTO_SIGN_VERIFY_WRAPPER(name, verify_mode) \
+extern "C" Item name(Item alg_item) { \
+    return js_crypto_create_sign_verify(alg_item, verify_mode); \
 }
-
-extern "C" Item js_crypto_createVerify(Item alg_item) {
-    return js_crypto_create_sign_verify(alg_item, true);
-}
+JS_CRYPTO_SIGN_VERIFY_WRAPPER(js_crypto_createSign, false)
+JS_CRYPTO_SIGN_VERIFY_WRAPPER(js_crypto_createVerify, true)
+#undef JS_CRYPTO_SIGN_VERIFY_WRAPPER
 
 static Item js_crypto_callback_result_emit(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -2622,10 +2565,7 @@ static Item js_crypto_schedule_callback(Item callback, Item result) {
     js_next_tick_enqueue(fn);
     return make_js_undefined_crypto();
 }
-
-static bool crypto_alg_is_eddsa_default(Item alg_item) {
-    return crypto_item_is_undefined(alg_item) || get_type_id(alg_item) == LMD_TYPE_NULL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, crypto_alg_is_eddsa_default, (Item alg_item), (crypto_item_is_undefined(alg_item) || get_type_id(alg_item) == LMD_TYPE_NULL))
 
 static Item js_crypto_sign_eddsa(Item data_item, Item key_item) {
     CryptoSignVerifyOptions options;
@@ -2694,62 +2634,44 @@ static Item js_crypto_verify_eddsa(Item data_item, Item key_item, Item signature
     return (Item){.item = b2it(verified)};
 }
 
-extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Item callback_item) {
+static Item js_crypto_sign_verify(Item alg_item, Item data_item, Item key_item,
+        Item signature_item, Item callback_item, bool verify) {
     bool has_callback = !crypto_item_is_undefined(callback_item);
     if (has_callback && !js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
     if (crypto_alg_is_eddsa_default(alg_item)) {
-        JS_ASSIGN_OR_RETURN(result, js_crypto_sign_eddsa(data_item, key_item));
+        Item result = verify
+            ? js_crypto_verify_eddsa(data_item, key_item, signature_item)
+            : js_crypto_sign_eddsa(data_item, key_item);
+        if (item_is_error(result)) return result;
         if (has_callback) return js_crypto_schedule_callback(callback_item, result);
         return result;
     }
 
-    JS_ASSIGN_OR_RETURN(sign_obj, js_crypto_createSign(alg_item));
-
-    Item update_fn = js_get_key_default(sign_obj, make_string_item_crypto("update"));
+    Item operation_obj = verify
+        ? js_crypto_createVerify(alg_item)
+        : js_crypto_createSign(alg_item);
+    if (item_is_error(operation_obj)) return operation_obj;
+    Item update_fn = js_get_key_default(operation_obj, make_string_item_crypto("update"));
     Item update_args[1] = { data_item };
-    JS_ASSIGN_OR_RETURN(update_result, js_call_function(update_fn, sign_obj, update_args, 1));
+    JS_RETURN_IF_ERROR(js_call_function(update_fn, operation_obj, update_args, 1));
 
-    Item sign_fn = js_get_key_default(sign_obj, make_string_item_crypto("sign"));
-    Item sign_args[1] = { key_item };
-    JS_ASSIGN_OR_RETURN(result, js_call_function(sign_fn, sign_obj, sign_args, 1));
+    Item operation_fn = js_get_key_default(operation_obj,
+        make_string_item_crypto(verify ? "verify" : "sign"));
+    Item operation_args[2] = {key_item, signature_item};
+    Item result = js_call_function(operation_fn, operation_obj, operation_args,
+        verify ? 2 : 1);
+    if (item_is_error(result)) return result;
 
     if (has_callback) {
         return js_crypto_schedule_callback(callback_item, result);
     }
     return result;
 }
-
-extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
-                                  Item signature_item, Item callback_item) {
-    bool has_callback = !crypto_item_is_undefined(callback_item);
-    if (has_callback && !js_is_callable(callback_item)) {
-        return js_throw_invalid_arg_type("callback", "Function", callback_item);
-    }
-
-    if (crypto_alg_is_eddsa_default(alg_item)) {
-        JS_ASSIGN_OR_RETURN(result, js_crypto_verify_eddsa(data_item, key_item, signature_item));
-        if (has_callback) return js_crypto_schedule_callback(callback_item, result);
-        return result;
-    }
-
-    JS_ASSIGN_OR_RETURN(verify_obj, js_crypto_createVerify(alg_item));
-
-    Item update_fn = js_get_key_default(verify_obj, make_string_item_crypto("update"));
-    Item update_args[1] = { data_item };
-    JS_ASSIGN_OR_RETURN(update_result, js_call_function(update_fn, verify_obj, update_args, 1));
-
-    Item verify_fn = js_get_key_default(verify_obj, make_string_item_crypto("verify"));
-    Item verify_args[2] = { key_item, signature_item };
-    JS_ASSIGN_OR_RETURN(result, js_call_function(verify_fn, verify_obj, verify_args, 2));
-
-    if (has_callback) {
-        return js_crypto_schedule_callback(callback_item, result);
-    }
-    return result;
-}
+JS_FORWARD_ITEM(js_crypto_sign, (Item alg_item, Item data_item, Item key_item, Item callback_item), js_crypto_sign_verify, (alg_item, data_item, key_item, ItemNull, callback_item, false))
+JS_FORWARD_ITEM(js_crypto_verify, (Item alg_item, Item data_item, Item key_item,                                   Item signature_item, Item callback_item), js_crypto_sign_verify, (alg_item, data_item, key_item, signature_item, callback_item, true))
 
 // crypto.hash(algorithm, data[, outputEncoding]) → digest
 extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item) {
@@ -3188,29 +3110,24 @@ done:
     return ok;
 }
 
-extern "C" Item js_dh_getPrime(Item encoding_item) {
-    return crypto_output_object_bytes(js_get_current_this(), "__dh_prime__", encoding_item);
+#define JS_DH_OUTPUT_WRAPPER(name, key) \
+extern "C" Item name(Item encoding_item) { \
+    return crypto_output_object_bytes(js_get_current_this(), key, encoding_item); \
 }
+JS_DH_OUTPUT_WRAPPER(js_dh_getPrime, "__dh_prime__")
+JS_DH_OUTPUT_WRAPPER(js_dh_getGenerator, "__dh_generator__")
+#undef JS_DH_OUTPUT_WRAPPER
 
-extern "C" Item js_dh_getGenerator(Item encoding_item) {
-    return crypto_output_object_bytes(js_get_current_this(), "__dh_generator__", encoding_item);
-}
-
-extern "C" Item js_dh_getPublicKey(Item encoding_item) {
+static Item crypto_dh_output_key(const char* key, const char* error_message,
+        Item encoding_item) {
     Item self = js_get_current_this();
-    if (js_get_key_default(self, make_string_item_crypto("__dh_public__")).item == ITEM_NULL) {
-        return js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Diffie-Hellman public key is not set");
+    if (js_get_key_default(self, make_string_item_crypto(key)).item == ITEM_NULL) {
+        return js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", error_message);
     }
-    return crypto_output_object_bytes(self, "__dh_public__", encoding_item);
+    return crypto_output_object_bytes(self, key, encoding_item);
 }
-
-extern "C" Item js_dh_getPrivateKey(Item encoding_item) {
-    Item self = js_get_current_this();
-    if (js_get_key_default(self, make_string_item_crypto("__dh_private__")).item == ITEM_NULL) {
-        return js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Diffie-Hellman private key is not set");
-    }
-    return crypto_output_object_bytes(self, "__dh_private__", encoding_item);
-}
+JS_FORWARD_ITEM(js_dh_getPublicKey, (Item encoding_item), crypto_dh_output_key, ("__dh_public__", "Diffie-Hellman public key is not set", encoding_item))
+JS_FORWARD_ITEM(js_dh_getPrivateKey, (Item encoding_item), crypto_dh_output_key, ("__dh_private__", "Diffie-Hellman private key is not set", encoding_item))
 
 extern "C" Item js_dh_setPublicKey(Item key_item, Item encoding_item) {
     uint8_t* bytes = NULL;
@@ -3354,22 +3271,14 @@ static Item crypto_create_dh_object(const uint8_t* prime, int prime_len,
     js_set_key_default(obj, make_string_item_crypto("__dh_public__"), ItemNull);
     js_set_key_default(obj, make_string_item_crypto("verifyError"),
         (Item){.item = i2it(prime_len <= 1 ? 1 : 0)});
-    js_set_key_default(obj, make_string_item_crypto("getPrime"),
-        js_new_native_function(js_dh_getPrime));
-    js_set_key_default(obj, make_string_item_crypto("getGenerator"),
-        js_new_native_function(js_dh_getGenerator));
-    js_set_key_default(obj, make_string_item_crypto("generateKeys"),
-        js_new_native_function(js_dh_generateKeys));
-    js_set_key_default(obj, make_string_item_crypto("computeSecret"),
-        js_new_native_function(js_dh_computeSecret));
-    js_set_key_default(obj, make_string_item_crypto("getPublicKey"),
-        js_new_native_function(js_dh_getPublicKey));
-    js_set_key_default(obj, make_string_item_crypto("getPrivateKey"),
-        js_new_native_function(js_dh_getPrivateKey));
-    js_set_key_default(obj, make_string_item_crypto("setPublicKey"),
-        js_new_native_function(js_dh_setPublicKey));
-    js_set_key_default(obj, make_string_item_crypto("setPrivateKey"),
-        js_new_native_function(js_dh_setPrivateKey));
+    crypto_set_native(obj, make_string_item_crypto("getPrime"), js_dh_getPrime);
+    crypto_set_native(obj, make_string_item_crypto("getGenerator"), js_dh_getGenerator);
+    crypto_set_native(obj, make_string_item_crypto("generateKeys"), js_dh_generateKeys);
+    crypto_set_native(obj, make_string_item_crypto("computeSecret"), js_dh_computeSecret);
+    crypto_set_native(obj, make_string_item_crypto("getPublicKey"), js_dh_getPublicKey);
+    crypto_set_native(obj, make_string_item_crypto("getPrivateKey"), js_dh_getPrivateKey);
+    crypto_set_native(obj, make_string_item_crypto("setPublicKey"), js_dh_setPublicKey);
+    crypto_set_native(obj, make_string_item_crypto("setPrivateKey"), js_dh_setPrivateKey);
     return obj;
 }
 
@@ -3434,10 +3343,7 @@ extern "C" Item js_crypto_createDiffieHellmanGroup(Item name_item) {
     mem_free(prime);
     return obj;
 }
-
-extern "C" Item js_crypto_getDiffieHellman(Item name_item) {
-    return js_crypto_createDiffieHellmanGroup(name_item);
-}
+JS_FORWARD_ITEM(js_crypto_getDiffieHellman, (Item name_item), js_crypto_createDiffieHellmanGroup, (name_item))
 
 static mbedtls_ecp_group_id crypto_ecdh_group_id(const char* curve) {
     if (!curve) return MBEDTLS_ECP_DP_NONE;
@@ -3940,18 +3846,12 @@ extern "C" Item js_crypto_createECDH(Item curve_item) {
     js_set_key_default(obj, make_string_item_crypto("__ecdh_curve__"), make_string_item_crypto(curve));
     js_set_key_default(obj, make_string_item_crypto("__ecdh_private__"), ItemNull);
     js_set_key_default(obj, make_string_item_crypto("__ecdh_public__"), ItemNull);
-    js_set_key_default(obj, make_string_item_crypto("generateKeys"),
-        js_new_native_function(js_ecdh_generateKeys));
-    js_set_key_default(obj, make_string_item_crypto("computeSecret"),
-        js_new_native_function(js_ecdh_computeSecret));
-    js_set_key_default(obj, make_string_item_crypto("getPublicKey"),
-        js_new_native_function(js_ecdh_getPublicKey));
-    js_set_key_default(obj, make_string_item_crypto("getPrivateKey"),
-        js_new_native_function(js_ecdh_getPrivateKey));
-    js_set_key_default(obj, make_string_item_crypto("setPrivateKey"),
-        js_new_native_function(js_ecdh_setPrivateKey));
-    js_set_key_default(obj, make_string_item_crypto("setPublicKey"),
-        js_new_native_function(js_ecdh_setPublicKey));
+    crypto_set_native(obj, make_string_item_crypto("generateKeys"), js_ecdh_generateKeys);
+    crypto_set_native(obj, make_string_item_crypto("computeSecret"), js_ecdh_computeSecret);
+    crypto_set_native(obj, make_string_item_crypto("getPublicKey"), js_ecdh_getPublicKey);
+    crypto_set_native(obj, make_string_item_crypto("getPrivateKey"), js_ecdh_getPrivateKey);
+    crypto_set_native(obj, make_string_item_crypto("setPrivateKey"), js_ecdh_setPrivateKey);
+    crypto_set_native(obj, make_string_item_crypto("setPublicKey"), js_ecdh_setPublicKey);
     return obj;
 }
 
@@ -4021,60 +3921,22 @@ static mbedtls_cipher_type_t resolve_cipher_type(const char* alg, int key_len) {
     }
     return MBEDTLS_CIPHER_NONE;
 }
-
-static bool is_gcm_cipher(const char* alg) {
-    return strstr(alg, "gcm") != NULL;
-}
-
-static bool is_ecb_cipher(const char* alg) {
-    return strstr(alg, "ecb") != NULL;
-}
-
-static bool is_kw_cipher(const char* alg) {
-    return strcmp(alg, "id-aes128-wrap") == 0;
-}
-
-static bool is_padded_block_cipher(const char* alg) {
-    return is_ecb_cipher(alg) ||
-           strstr(alg, "cbc") != NULL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_gcm_cipher, (const char* alg), (strstr(alg, "gcm") != NULL))
+JS_FORWARD_STATIC_EXPRESSION(bool, is_ecb_cipher, (const char* alg), (strstr(alg, "ecb") != NULL))
+JS_FORWARD_STATIC_EXPRESSION(bool, is_kw_cipher, (const char* alg), (strcmp(alg, "id-aes128-wrap") == 0))
+JS_FORWARD_STATIC_EXPRESSION(bool, is_padded_block_cipher, (const char* alg), (is_ecb_cipher(alg) || strstr(alg, "cbc") != NULL))
 
 static int crypto_cipher_block_size(const char* alg) {
     if (strcmp(alg, "des-ede3-cbc") == 0) return 8;
     if (is_padded_block_cipher(alg)) return 16;
     return 0;
 }
-
-static bool is_known_cipher_name(const char* alg) {
-    return strcmp(alg, "aes-128-ecb") == 0 ||
-           strcmp(alg, "aes-192-ecb") == 0 ||
-           strcmp(alg, "aes-256-ecb") == 0 ||
-           strcmp(alg, "aes-128-cbc") == 0 ||
-           strcmp(alg, "aes-192-cbc") == 0 ||
-           strcmp(alg, "aes-256-cbc") == 0 ||
-           strcmp(alg, "aes-128-ctr") == 0 ||
-           strcmp(alg, "aes-192-ctr") == 0 ||
-           strcmp(alg, "aes-256-ctr") == 0 ||
-           strcmp(alg, "aes-128-gcm") == 0 ||
-           strcmp(alg, "aes-192-gcm") == 0 ||
-           strcmp(alg, "aes-256-gcm") == 0 ||
-           strcmp(alg, "aes-cbc") == 0 ||
-           strcmp(alg, "aes-ctr") == 0 ||
-           strcmp(alg, "aes-gcm") == 0 ||
-           strcmp(alg, "id-aes128-wrap") == 0 ||
-           strcmp(alg, "des-ede3-cbc") == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_known_cipher_name, (const char* alg), (strcmp(alg, "aes-128-ecb") == 0 || strcmp(alg, "aes-192-ecb") == 0 || strcmp(alg, "aes-256-ecb") == 0 || strcmp(alg, "aes-128-cbc") == 0 || strcmp(alg, "aes-192-cbc") == 0 || strcmp(alg, "aes-256-cbc") == 0 || strcmp(alg, "aes-128-ctr") == 0 || strcmp(alg, "aes-192-ctr") == 0 || strcmp(alg, "aes-256-ctr") == 0 || strcmp(alg, "aes-128-gcm") == 0 || strcmp(alg, "aes-192-gcm") == 0 || strcmp(alg, "aes-256-gcm") == 0 || strcmp(alg, "aes-cbc") == 0 || strcmp(alg, "aes-ctr") == 0 || strcmp(alg, "aes-gcm") == 0 || strcmp(alg, "id-aes128-wrap") == 0 || strcmp(alg, "des-ede3-cbc") == 0))
 
 JS_CRYPTO_THROW_CODE(crypto_throw_unknown_cipher,
     "ERR_CRYPTO_UNKNOWN_CIPHER", "Unknown cipher")
-
-static Item crypto_throw_invalid_key_length(void) {
-    return js_throw_range_error_code("ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
-}
-
-static Item crypto_throw_invalid_initialization_vector(void) {
-    return js_throw_type_error("Invalid initialization vector");
-}
+JS_FORWARD_STATIC_ITEM(crypto_throw_invalid_key_length, (void), js_throw_range_error_code, ("ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length"))
+JS_FORWARD_STATIC_ITEM(crypto_throw_invalid_initialization_vector, (void), js_throw_type_error, ("Invalid initialization vector"))
 
 static Item crypto_throw_openssl_cipher_error(const char* code, const char* message,
                                               const char* library, const char* reason) {
@@ -4089,21 +3951,9 @@ static Item crypto_throw_openssl_cipher_error(const char* code, const char* mess
         (Item){.item = s2it(heap_create_name(reason, strlen(reason)))});
     return js_throw_value(error);
 }
-
-static Item crypto_throw_wrong_final_block_length(void) {
-    return crypto_throw_openssl_cipher_error("ERR_OSSL_EVP_WRONG_FINAL_BLOCK_LENGTH",
-        "wrong final block length", "Cipher functions", "wrong final block length");
-}
-
-static Item crypto_throw_bad_decrypt(void) {
-    return crypto_throw_openssl_cipher_error("ERR_OSSL_EVP_BAD_DECRYPT",
-        "bad decrypt", "Cipher functions", "bad decrypt");
-}
-
-static Item crypto_throw_data_not_multiple_of_block_length(void) {
-    return crypto_throw_openssl_cipher_error("ERR_OSSL_EVP_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH",
-        "data not multiple of block length", "Cipher functions", "data not multiple of block length");
-}
+JS_FORWARD_STATIC_ITEM(crypto_throw_wrong_final_block_length, (void), crypto_throw_openssl_cipher_error, ("ERR_OSSL_EVP_WRONG_FINAL_BLOCK_LENGTH", "wrong final block length", "Cipher functions", "wrong final block length"))
+JS_FORWARD_STATIC_ITEM(crypto_throw_bad_decrypt, (void), crypto_throw_openssl_cipher_error, ("ERR_OSSL_EVP_BAD_DECRYPT", "bad decrypt", "Cipher functions", "bad decrypt"))
+JS_FORWARD_STATIC_ITEM(crypto_throw_data_not_multiple_of_block_length, (void), crypto_throw_openssl_cipher_error, ("ERR_OSSL_EVP_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH", "data not multiple of block length", "Cipher functions", "data not multiple of block length"))
 
 static bool crypto_cipher_iv_length_valid(const char* alg, int iv_len) {
     if (is_ecb_cipher(alg)) return iv_len == 0;
@@ -5982,7 +5832,7 @@ static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len)
     js_set_key_default(obj, make_string_item_crypto("type"), make_string_item_crypto("secret"));
     js_set_key_default(obj, make_string_item_crypto("symmetricKeySize"), (Item){.item = i2it(key_len)});
     Item export_key = make_string_item_crypto("export");
-    js_set_key_default(obj, export_key, js_new_native_function(js_crypto_secretKeyExport));
+    crypto_set_native(obj, export_key, js_crypto_secretKeyExport);
     // KeyObject methods are shared API surface, not structural key material;
     // enumerable per-instance functions make equal keys compare by pointer.
     js_mark_non_enumerable(obj, export_key);
@@ -5999,7 +5849,7 @@ static Item crypto_rsa_key_options(Item key_item, CryptoSignVerifyOptions* optio
     return js_status_ok();
 }
 
-extern "C" Item js_crypto_publicEncrypt(Item key_item, Item buffer_item) {
+static Item crypto_rsa_crypt(Item key_item, Item buffer_item, bool decrypt) {
     CryptoSignVerifyOptions options;
     JS_RETURN_IF_ERROR(crypto_rsa_key_options(key_item, &options));
 
@@ -6011,35 +5861,46 @@ extern "C" Item js_crypto_publicEncrypt(Item key_item, Item buffer_item) {
 
     uint8_t* key_bytes = NULL;
     int key_len = 0;
-    if (!crypto_public_key_bytes_for_verify(options.key, &key_bytes, &key_len) &&
-            !crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)) {
+    bool key_found = decrypt
+        ? crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)
+        : (crypto_public_key_bytes_for_verify(options.key, &key_bytes, &key_len) ||
+            crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len));
+    if (!key_found) {
         mem_free(input);
         return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
     }
 
     mbedtls_pk_context pk;
     mbedtls_pk_init(&pk);
-    int ret = crypto_mbedtls_parse_public_key(&pk, key_bytes, key_len);
-    if (ret != 0) {
+    int ret = decrypt ? crypto_mbedtls_parse_private_key(&pk, key_bytes, key_len)
+                      : crypto_mbedtls_parse_public_key(&pk, key_bytes, key_len);
+    if (!decrypt && ret != 0) {
         mbedtls_pk_free(&pk);
         mbedtls_pk_init(&pk);
         ret = crypto_mbedtls_parse_private_key(&pk, key_bytes, key_len);
     }
 
+    const char* operation = decrypt ? "privateDecrypt" : "publicEncrypt";
     Item result = ItemNull;
     if (ret != 0 || !crypto_pk_is_rsa(&pk)) {
-        log_debug("crypto: publicEncrypt RSA key parse failed: -0x%04x", -ret);
+        log_debug("crypto: %s RSA key parse failed: -0x%04x", operation, -ret);
         result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse RSA key");
     } else {
         uint8_t output[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
         size_t output_len = 0;
-        ret = mbedtls_pk_encrypt(&pk, input ? input : crypto_empty_bytes,
-            input_len > 0 ? (size_t)input_len : 0, output, &output_len,
-            sizeof(output), crypto_mbedtls_random, NULL);
+        ret = decrypt
+            ? mbedtls_pk_decrypt(&pk, input ? input : crypto_empty_bytes,
+                input_len > 0 ? (size_t)input_len : 0, output, &output_len,
+                sizeof(output), crypto_mbedtls_random, NULL)
+            : mbedtls_pk_encrypt(&pk, input ? input : crypto_empty_bytes,
+                input_len > 0 ? (size_t)input_len : 0, output, &output_len,
+                sizeof(output), crypto_mbedtls_random, NULL);
         if (ret != 0) {
-            log_debug("crypto: publicEncrypt RSA encrypt failed: -0x%04x", -ret);
-            result = js_throw_error_with_code("ERR_OSSL_RSA_ENCRYPT_FAILED",
-                "Failed to encrypt data");
+            const char* error_code = decrypt
+                ? "ERR_OSSL_RSA_DECRYPT_FAILED" : "ERR_OSSL_RSA_ENCRYPT_FAILED";
+            const char* error_message = decrypt ? "Failed to decrypt data" : "Failed to encrypt data";
+            log_debug("crypto: %s RSA crypt failed: -0x%04x", operation, -ret);
+            result = js_throw_error_with_code(error_code, error_message);
         } else {
             result = crypto_buffer_from_bytes(output, (int)output_len);
         }
@@ -6050,52 +5911,8 @@ extern "C" Item js_crypto_publicEncrypt(Item key_item, Item buffer_item) {
     mem_free(input);
     return result;
 }
-
-extern "C" Item js_crypto_privateDecrypt(Item key_item, Item buffer_item) {
-    CryptoSignVerifyOptions options;
-    JS_RETURN_IF_ERROR(crypto_rsa_key_options(key_item, &options));
-
-    uint8_t* input = NULL;
-    int input_len = 0;
-    if (!extract_bytes(buffer_item, &input, &input_len)) {
-        return js_throw_invalid_arg_type("buffer", "string, ArrayBuffer, Buffer, TypedArray, or DataView", buffer_item);
-    }
-
-    uint8_t* key_bytes = NULL;
-    int key_len = 0;
-    if (!crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)) {
-        mem_free(input);
-        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
-    }
-
-    mbedtls_pk_context pk;
-    mbedtls_pk_init(&pk);
-    int ret = crypto_mbedtls_parse_private_key(&pk, key_bytes, key_len);
-
-    Item result = ItemNull;
-    if (ret != 0 || !crypto_pk_is_rsa(&pk)) {
-        log_debug("crypto: privateDecrypt RSA key parse failed: -0x%04x", -ret);
-        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse RSA key");
-    } else {
-        uint8_t output[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
-        size_t output_len = 0;
-        ret = mbedtls_pk_decrypt(&pk, input ? input : crypto_empty_bytes,
-            input_len > 0 ? (size_t)input_len : 0, output, &output_len,
-            sizeof(output), crypto_mbedtls_random, NULL);
-        if (ret != 0) {
-            log_debug("crypto: privateDecrypt RSA decrypt failed: -0x%04x", -ret);
-            result = js_throw_error_with_code("ERR_OSSL_RSA_DECRYPT_FAILED",
-                "Failed to decrypt data");
-        } else {
-            result = crypto_buffer_from_bytes(output, (int)output_len);
-        }
-    }
-
-    mbedtls_pk_free(&pk);
-    mem_free(key_bytes);
-    mem_free(input);
-    return result;
-}
+JS_FORWARD_ITEM(js_crypto_publicEncrypt, (Item key_item, Item buffer_item), crypto_rsa_crypt, (key_item, buffer_item, false))
+JS_FORWARD_ITEM(js_crypto_privateDecrypt, (Item key_item, Item buffer_item), crypto_rsa_crypt, (key_item, buffer_item, true))
 
 extern "C" Item js_crypto_createSecretKey(Item key_item, Item encoding_item) {
     (void)encoding_item;
@@ -6197,7 +6014,7 @@ static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_
         }
     }
     Item export_key = make_string_item_crypto("export");
-    js_set_key_default(obj, export_key, js_new_native_function(js_crypto_asymmetricKeyExport));
+    crypto_set_native(obj, export_key, js_crypto_asymmetricKeyExport);
     // KeyObject methods are shared API surface, not structural key material;
     // enumerable per-instance functions make equal keys compare by pointer.
     js_mark_non_enumerable(obj, export_key);
@@ -6403,10 +6220,7 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
     mem_free(key);
     return result;
 }
-
-extern "C" Item js_crypto_KeyObject(void) {
-    return js_throw_type_error("Illegal constructor");
-}
+JS_FORWARD_ITEM(js_crypto_KeyObject, (void), js_throw_type_error, ("Illegal constructor"))
 
 // ============================================================================
 // generateKeySync/generateKey — symmetric secret key generation
@@ -7102,24 +6916,16 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     crypto_link_instance_to_constructor(obj, encrypting ? "Cipheriv" : "Decipheriv");
     js_set_key_default(obj, make_string_item_crypto("__cipher_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    js_set_key_default(obj, make_string_item_crypto("update"),
-                    js_new_native_function(js_cipher_update));
-    js_set_key_default(obj, make_string_item_crypto("final"),
-                    js_new_native_function(js_cipher_final));
-    js_set_key_default(obj, make_string_item_crypto("end"),
-                    js_new_native_function(js_cipher_end));
-    js_set_key_default(obj, make_string_item_crypto("setAutoPadding"),
-                    js_new_native_function(js_cipher_setAutoPadding));
-    js_set_key_default(obj, make_string_item_crypto("read"),
-                    js_new_native_function(js_cipher_read));
+    crypto_set_native(obj, make_string_item_crypto("update"), js_cipher_update);
+    crypto_set_native(obj, make_string_item_crypto("final"), js_cipher_final);
+    crypto_set_native(obj, make_string_item_crypto("end"), js_cipher_end);
+    crypto_set_native(obj, make_string_item_crypto("setAutoPadding"), js_cipher_setAutoPadding);
+    crypto_set_native(obj, make_string_item_crypto("read"), js_cipher_read);
     js_set_key_default(obj, make_string_item_crypto("readableLength"),
                     (Item){.item = i2it(0)});
-    js_set_key_default(obj, make_string_item_crypto("getAuthTag"),
-                    js_new_native_function(js_cipher_getAuthTag));
-    js_set_key_default(obj, make_string_item_crypto("setAuthTag"),
-                    js_new_native_function(js_cipher_setAuthTag));
-    js_set_key_default(obj, make_string_item_crypto("setAAD"),
-                    js_new_native_function(js_cipher_setAAD));
+    crypto_set_native(obj, make_string_item_crypto("getAuthTag"), js_cipher_getAuthTag);
+    crypto_set_native(obj, make_string_item_crypto("setAuthTag"), js_cipher_setAuthTag);
+    crypto_set_native(obj, make_string_item_crypto("setAAD"), js_cipher_setAAD);
     return obj;
 }
 
@@ -7174,22 +6980,19 @@ static Item js_crypto_create_cipheriv_common(Item alg_item, Item key_item, Item 
     return create_cipher_object(alg_buf, encrypting, key, key_len, iv, iv_len);
 }
 
-extern "C" Item js_crypto_createCipheriv(Item alg_item, Item key_item, Item iv_item) {
-    return js_crypto_create_cipheriv_common(alg_item, key_item, iv_item, true);
+#define JS_CRYPTO_CIPHER_IV_WRAPPER(name, encrypting) \
+extern "C" Item name(Item alg_item, Item key_item, Item iv_item) { \
+    return js_crypto_create_cipheriv_common(alg_item, key_item, iv_item, encrypting); \
 }
-
-extern "C" Item js_crypto_createDecipheriv(Item alg_item, Item key_item, Item iv_item) {
-    return js_crypto_create_cipheriv_common(alg_item, key_item, iv_item, false);
-}
+JS_CRYPTO_CIPHER_IV_WRAPPER(js_crypto_createCipheriv, true)
+JS_CRYPTO_CIPHER_IV_WRAPPER(js_crypto_createDecipheriv, false)
+#undef JS_CRYPTO_CIPHER_IV_WRAPPER
 
 // ============================================================================
 // pbkdf2Sync(password, salt, iterations, keylen, digest) → Buffer
 // pbkdf2(password, salt, iterations, keylen, digest, callback) → void
 // ============================================================================
-
-static Item crypto_pbkdf2_invalid_arg(const char* name, Item value) {
-    return js_throw_invalid_arg_type(name, "string, ArrayBuffer, Buffer, TypedArray, or DataView", value);
-}
+JS_FORWARD_STATIC_ITEM(crypto_pbkdf2_invalid_arg, (const char* name, Item value), js_throw_invalid_arg_type, (name, "string, ArrayBuffer, Buffer, TypedArray, or DataView", value))
 
 static Item crypto_pbkdf2_positive_int(Item value_item, const char* name, int* out_value) {
     if (!out_value) return js_throw_type_error("Crypto integer output is unavailable");
@@ -7412,10 +7215,7 @@ static bool crypto_hkdf_compute(int bits, const uint8_t* ikm, int ikm_len,
     }
     return generated == out_len;
 }
-
-static Item crypto_hkdf_invalid_arg(const char* name, Item value) {
-    return js_throw_invalid_arg_type(name, "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", value);
-}
+JS_FORWARD_STATIC_ITEM(crypto_hkdf_invalid_arg, (const char* name, Item value), js_throw_invalid_arg_type, (name, "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", value))
 
 extern "C" Item js_crypto_hkdfSync(Item digest_item, Item ikm_item, Item salt_item,
                                     Item info_item, Item length_item) {
@@ -8041,48 +7841,46 @@ static Item crypto_cipher_update_final(Item cipher_obj, Item data_item) {
     return result;
 }
 
-// subtle.encrypt({name, iv}, key, data) → Promise<ArrayBuffer>
-extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) {
+static Item js_subtle_cipher(Item alg_item, Item key_item, Item data_item,
+        bool encrypt) {
     CryptoCipherInputs inputs;
-    if (!crypto_prepare_cipher_inputs(alg_item, key_item, data_item, true, &inputs)) return ItemNull;
-    Item cipher_obj = create_cipher_object(inputs.full_alg, true,
+    if (!crypto_prepare_cipher_inputs(alg_item, key_item, data_item, encrypt, &inputs)) return ItemNull;
+    Item cipher_obj = create_cipher_object(inputs.full_alg, encrypt,
         inputs.key_bytes, inputs.key_len, inputs.iv_bytes, inputs.iv_len);
     if (cipher_obj.item == ITEM_NULL) return ItemNull;
 
-    // set AAD if present (for GCM)
-    Item aad = js_get_key_default(alg_item, make_string_item_crypto("additionalData"));
-    if (aad.item != ITEM_NULL) {
-        Item setAAD_fn = js_get_key_default(cipher_obj, make_string_item_crypto("setAAD"));
-        js_call_function(setAAD_fn, cipher_obj, &aad, 1);
+    if (encrypt) {
+        // set AAD if present (for GCM)
+        Item aad = js_get_key_default(alg_item, make_string_item_crypto("additionalData"));
+        if (aad.item != ITEM_NULL) {
+            Item setAAD_fn = js_get_key_default(cipher_obj, make_string_item_crypto("setAAD"));
+            js_call_function(setAAD_fn, cipher_obj, &aad, 1);
+        }
+    } else {
+        // set auth tag and AAD for GCM decryption
+        Item tag = js_get_key_default(alg_item, make_string_item_crypto("tag"));
+        if (tag.item != ITEM_NULL) {
+            Item setAuthTag_fn = js_get_key_default(cipher_obj, make_string_item_crypto("setAuthTag"));
+            js_call_function(setAuthTag_fn, cipher_obj, &tag, 1);
+        }
+        Item aad = js_get_key_default(alg_item, make_string_item_crypto("additionalData"));
+        if (aad.item != ITEM_NULL) {
+            Item setAAD_fn = js_get_key_default(cipher_obj, make_string_item_crypto("setAAD"));
+            js_call_function(setAAD_fn, cipher_obj, &aad, 1);
+        }
     }
 
     Item result = crypto_cipher_update_final(cipher_obj, data_item);
     return js_promise_resolve(result);
 }
 
-// subtle.decrypt({name, iv}, key, data) → Promise<ArrayBuffer>
-extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) {
-    CryptoCipherInputs inputs;
-    if (!crypto_prepare_cipher_inputs(alg_item, key_item, data_item, false, &inputs)) return ItemNull;
-    Item decipher_obj = create_cipher_object(inputs.full_alg, false,
-        inputs.key_bytes, inputs.key_len, inputs.iv_bytes, inputs.iv_len);
-    if (decipher_obj.item == ITEM_NULL) return ItemNull;
-
-    // set auth tag for GCM if present
-    Item tag = js_get_key_default(alg_item, make_string_item_crypto("tag"));
-    if (tag.item != ITEM_NULL) {
-        Item setAuthTag_fn = js_get_key_default(decipher_obj, make_string_item_crypto("setAuthTag"));
-        js_call_function(setAuthTag_fn, decipher_obj, &tag, 1);
-    }
-    Item aad = js_get_key_default(alg_item, make_string_item_crypto("additionalData"));
-    if (aad.item != ITEM_NULL) {
-        Item setAAD_fn = js_get_key_default(decipher_obj, make_string_item_crypto("setAAD"));
-        js_call_function(setAAD_fn, decipher_obj, &aad, 1);
-    }
-
-    Item result = crypto_cipher_update_final(decipher_obj, data_item);
-    return js_promise_resolve(result);
+#define JS_SUBTLE_CIPHER_WRAPPER(name, encrypt) \
+extern "C" Item name(Item alg_item, Item key_item, Item data_item) { \
+    return js_subtle_cipher(alg_item, key_item, data_item, encrypt); \
 }
+JS_SUBTLE_CIPHER_WRAPPER(js_subtle_encrypt, true)
+JS_SUBTLE_CIPHER_WRAPPER(js_subtle_decrypt, false)
+#undef JS_SUBTLE_CIPHER_WRAPPER
 
 // ============================================================================
 // crypto Module Namespace

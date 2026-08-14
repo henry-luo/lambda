@@ -112,12 +112,7 @@ static bool fd_utf8_decode_one(const char* s, uint32_t* out_cp, int* out_len) {
     }
     return false;
 }
-
-static bool fd_codepoint_is_rtl(uint32_t cp) {
-    return (cp >= 0x0590 && cp <= 0x08FF) ||
-           (cp >= 0xFB1D && cp <= 0xFDFF) ||
-           (cp >= 0xFE70 && cp <= 0xFEFF);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, fd_codepoint_is_rtl, (uint32_t cp), ((cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF)))
 
 static const char* fd_direction_from_auto_value(const char* value) {
     if (!value) return "ltr";
@@ -157,10 +152,7 @@ static const char* FD_ENTRIES_KEY = "_fd_entries";
 
 // Forward decls
 static Item fd_blob_to_file(Item value, Item filename_item);
-
-static Item fd_get_entries(Item this_fd) {
-    return prop_get(this_fd, FD_ENTRIES_KEY);
-}
+JS_FORWARD_STATIC_ITEM(fd_get_entries, (Item this_fd), prop_get, (this_fd, FD_ENTRIES_KEY))
 
 static void fd_entries_remove_at(Item entries, int64_t index) {
     if (get_type_id(entries) != LMD_TYPE_ARRAY || !entries.array ||
@@ -462,9 +454,7 @@ static Item js_fd_iter_next() {
 }
 
 // Symbol.iterator on the iterator itself: returns `this`
-static Item js_fd_iter_self() {
-    return js_get_this();
-}
+JS_FORWARD_STATIC_ITEM(js_fd_iter_self, (), js_get_this, ())
 
 static Item fd_make_iterator(Item entries, int mode) {
     Item iter = js_new_object();
@@ -477,17 +467,14 @@ static Item fd_make_iterator(Item entries, int mode) {
     return iter;
 }
 
-static Item js_fd_entries() {
-    return fd_make_iterator(fd_get_entries(js_get_this()), FD_ITER_MODE_ENTRIES);
+#define JS_FD_ITERATOR_WRAPPER(name, mode) \
+static Item name() { \
+    return fd_make_iterator(fd_get_entries(js_get_this()), mode); \
 }
-
-static Item js_fd_keys() {
-    return fd_make_iterator(fd_get_entries(js_get_this()), FD_ITER_MODE_KEYS);
-}
-
-static Item js_fd_values() {
-    return fd_make_iterator(fd_get_entries(js_get_this()), FD_ITER_MODE_VALUES);
-}
+JS_FD_ITERATOR_WRAPPER(js_fd_entries, FD_ITER_MODE_ENTRIES)
+JS_FD_ITERATOR_WRAPPER(js_fd_keys, FD_ITER_MODE_KEYS)
+JS_FD_ITERATOR_WRAPPER(js_fd_values, FD_ITER_MODE_VALUES)
+#undef JS_FD_ITERATOR_WRAPPER
 
 // ============================================================================
 // F-1: Populate FormData entries from an HTMLFormElement's controls
