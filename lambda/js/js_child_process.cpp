@@ -56,19 +56,13 @@ static void js_child_process_emit_or_queue_cluster_online(Item obj);
 // =============================================================================
 
 #define item_to_cstr js_item_to_cstr
-
-static bool is_undefined_item(Item item) {
-    return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_undefined_item, (Item item), (item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED))
 
 static bool is_object_item(Item item) {
     TypeId type = get_type_id(item);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
-
-static bool is_nullish_item(Item item) {
-    return item.item == ITEM_NULL || get_type_id(item) == LMD_TYPE_NULL || is_undefined_item(item);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_nullish_item, (Item item), (item.item == ITEM_NULL || get_type_id(item) == LMD_TYPE_NULL || is_undefined_item(item)))
 
 static Item make_spawn_error_args_array(Item args_array) {
     Item result = js_array_new(0);
@@ -322,16 +316,8 @@ static void child_output_read_cb(uv_stream_t* stream, ssize_t nread,
         }
     }
 }
-
-static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread,
-                                 const uv_buf_t* buf) {
-    child_output_read_cb(stream, nread, buf, false);
-}
-
-static void child_stderr_read_cb(uv_stream_t* stream, ssize_t nread,
-                                 const uv_buf_t* buf) {
-    child_output_read_cb(stream, nread, buf, true);
-}
+JS_FORWARD_STATIC_VOID( child_stdout_read_cb, (uv_stream_t* stream, ssize_t nread,                                  const uv_buf_t* buf), child_output_read_cb, (stream, nread, buf, false))
+JS_FORWARD_STATIC_VOID( child_stderr_read_cb, (uv_stream_t* stream, ssize_t nread,                                  const uv_buf_t* buf), child_output_read_cb, (stream, nread, buf, true))
 
 // =============================================================================
 // Process exit callback
@@ -424,10 +410,7 @@ static Item child_abort_with_env(Item env_item, Item event_item) {
     uv_process_kill(&cp->process, cp->abort_kill_signal ? cp->abort_kill_signal : SIGTERM);
     return make_js_undefined();
 }
-
-static Item child_abort_later(Item env_item) {
-    return child_abort_with_env(env_item, make_js_undefined());
-}
+JS_FORWARD_STATIC_ITEM(child_abort_later, (Item env_item), child_abort_with_env, (env_item, make_js_undefined()))
 
 static bool child_signal_is_abort_signal(Item signal) {
     if (!is_object_item(signal)) return false;
@@ -810,18 +793,9 @@ static bool spawn_has_event_listener(Item obj, const char* event) {
     if (is_callable(listeners)) return true;
     return get_type_id(listeners) == LMD_TYPE_ARRAY && js_array_length(listeners) > 0;
 }
-
-static Item spawn_pending_messages_key(void) {
-    return make_string_item("__pending_ipc_messages__");
-}
-
-static Item spawn_pending_cluster_listening_key(void) {
-    return make_string_item("__pending_cluster_listening__");
-}
-
-static Item spawn_pending_cluster_online_key(void) {
-    return make_string_item("__pending_cluster_online__");
-}
+JS_FORWARD_STATIC_ITEM(spawn_pending_messages_key, (void), make_string_item, ("__pending_ipc_messages__"))
+JS_FORWARD_STATIC_ITEM(spawn_pending_cluster_listening_key, (void), make_string_item, ("__pending_cluster_listening__"))
+JS_FORWARD_STATIC_ITEM(spawn_pending_cluster_online_key, (void), make_string_item, ("__pending_cluster_online__"))
 
 static void spawn_queue_ipc_message(Item obj, Item message, Item handle) {
     Item key = spawn_pending_messages_key();
@@ -866,32 +840,17 @@ static void spawn_flush_queued_ipc_messages(Item obj) {
     }
 }
 
-static bool spawn_ipc_is_cluster_listening(Item message) {
+static bool spawn_ipc_has_control(Item message, const char* key) {
     if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }
-    Item value = js_get_key_default(message, make_string_item("__lambda_cluster_listening__"));
+    Item value = js_get_key_default(message, make_string_item(key));
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
-
-static bool spawn_ipc_is_socket_closed_control(Item message) {
-    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
-        get_type_id(message) != LMD_TYPE_VMAP) {
-        return false;
-    }
-    Item value = js_get_key_default(message, make_string_item("__lambda_ipc_socket_closed__"));
-    return value.item == ITEM_TRUE || value.item == b2it(true);
-}
-
-static bool spawn_ipc_is_handle_accepted_control(Item message) {
-    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
-        get_type_id(message) != LMD_TYPE_VMAP) {
-        return false;
-    }
-    Item value = js_get_key_default(message, make_string_item("__lambda_ipc_handle_accepted__"));
-    return value.item == ITEM_TRUE || value.item == b2it(true);
-}
+JS_FORWARD_STATIC_RETURN(bool, spawn_ipc_is_cluster_listening, (Item message), spawn_ipc_has_control, (message, "__lambda_cluster_listening__"))
+JS_FORWARD_STATIC_RETURN(bool, spawn_ipc_is_socket_closed_control, (Item message), spawn_ipc_has_control, (message, "__lambda_ipc_socket_closed__"))
+JS_FORWARD_STATIC_RETURN(bool, spawn_ipc_is_handle_accepted_control, (Item message), spawn_ipc_has_control, (message, "__lambda_ipc_handle_accepted__"))
 
 static void spawn_emit_or_queue_cluster_listening(Item obj) {
     if (!spawn_has_event_listener(obj, "listening")) {
@@ -940,10 +899,7 @@ static void spawn_flush_cluster_online(Item obj) {
     // initializer's TDZ to cb instead of Node's next-turn ordering.
     spawn_schedule_cluster_online(obj);
 }
-
-static void js_child_process_emit_or_queue_cluster_online(Item obj) {
-    spawn_emit_or_queue_cluster_online(obj);
-}
+JS_FORWARD_STATIC_VOID( js_child_process_emit_or_queue_cluster_online, (Item obj), spawn_emit_or_queue_cluster_online, (obj))
 
 static Item spawn_emit_error_later(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -960,21 +916,10 @@ static Item spawn_emit_spawn_later(Item env_item) {
     return make_js_undefined();
 }
 
-static Item spawn_make_abort_error(Item reason) {
-    Item err = js_new_error_with_name(make_string_item("AbortError"),
-                                      make_string_item("The operation was aborted"));
-    js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ABORT_ERR"));
-    if (!is_nullish_item(reason)) {
-        js_set_key_default(err, make_string_item("cause"), reason);
-    }
-    return err;
-}
-
 static void spawn_emit_abort_error_once(JsSpawnProcess* sp, Item reason) {
     if (!sp || sp->abort_error_emitted || sp->process_exited) return;
     sp->abort_error_emitted = true;
-    Item err = spawn_make_abort_error(reason);
+    Item err = child_abort_error(reason);
     spawn_emit_event(sp->js_object, "error", &err, 1);
 }
 
@@ -1172,7 +1117,6 @@ static void spawn_stdin_write_cb(uv_write_t* req, int status) {
         uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
     }
 }
-
 static void spawn_sent_stream_close_cb(uv_handle_t* handle) {
     if (handle) mem_free(handle);
 }
@@ -1313,10 +1257,7 @@ static Item spawn_abort_with_env(Item env_item, Item event_item) {
     spawn_emit_abort_error_once(sp, reason);
     return make_js_undefined();
 }
-
-static Item spawn_abort_later(Item env_item) {
-    return spawn_abort_with_env(env_item, make_js_undefined());
-}
+JS_FORWARD_STATIC_ITEM(spawn_abort_later, (Item env_item), spawn_abort_with_env, (env_item, make_js_undefined()))
 
 static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item options) {
     if (!sp || !is_object_item(options)) return;
@@ -1659,16 +1600,8 @@ static void spawn_output_read_cb(uv_stream_t* stream, ssize_t nread,
         uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
     }
 }
-
-static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread,
-                                 const uv_buf_t* buf) {
-    spawn_output_read_cb(stream, nread, buf, false);
-}
-
-static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread,
-                                 const uv_buf_t* buf) {
-    spawn_output_read_cb(stream, nread, buf, true);
-}
+JS_FORWARD_STATIC_VOID( spawn_stdout_read_cb, (uv_stream_t* stream, ssize_t nread,                                  const uv_buf_t* buf), spawn_output_read_cb, (stream, nread, buf, false))
+JS_FORWARD_STATIC_VOID( spawn_stderr_read_cb, (uv_stream_t* stream, ssize_t nread,                                  const uv_buf_t* buf), spawn_output_read_cb, (stream, nread, buf, true))
 
 static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_signal) {
     JsSpawnProcess* sp = (JsSpawnProcess*)process->data;
@@ -1768,16 +1701,11 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
 // create a stream-like object with on('data', cb) / on('close', cb)
 static Item make_stream_object(void) {
     Item obj = js_new_object();
-    js_set_key_default(obj, make_string_item("on"),
-                    js_new_native_function(js_spawn_stream_on));
-    js_set_key_default(obj, make_string_item("once"),
-                    js_new_native_function(js_spawn_stream_once));
-    js_set_key_default(obj, make_string_item("setEncoding"),
-                    js_new_native_function(js_spawn_stream_set_encoding));
-    js_set_key_default(obj, make_string_item("pipe"),
-                    js_new_native_function(js_spawn_stream_pipe));
-    js_set_key_default(obj, make_string_item("resume"),
-                    js_new_native_function(js_spawn_stream_resume));
+    js_set_native_key(obj, make_string_item("on"), js_spawn_stream_on);
+    js_set_native_key(obj, make_string_item("once"), js_spawn_stream_once);
+    js_set_native_key(obj, make_string_item("setEncoding"), js_spawn_stream_set_encoding);
+    js_set_native_key(obj, make_string_item("pipe"), js_spawn_stream_pipe);
+    js_set_native_key(obj, make_string_item("resume"), js_spawn_stream_resume);
     return obj;
 }
 
@@ -1825,10 +1753,7 @@ static Item spawn_add_listener(Item self, Item event_item, Item callback, bool o
     }
     return self;
 }
-
-extern "C" Item js_spawn_on(Item event_item, Item callback) {
-    return spawn_add_listener(js_get_this(), event_item, callback, false);
-}
+JS_FORWARD_ITEM(js_spawn_on, (Item event_item, Item callback), spawn_add_listener, (js_get_this(), event_item, callback, false))
 
 extern "C" Item js_spawn_once(Item event_item, Item callback) {
     // fork cleanup commonly waits on once('message'); treating it as missing
@@ -1837,13 +1762,8 @@ extern "C" Item js_spawn_once(Item event_item, Item callback) {
 }
 
 // on() for stdout/stderr stream sub-objects
-extern "C" Item js_spawn_stream_on(Item event_item, Item callback) {
-    return spawn_add_listener(js_get_this(), event_item, callback, false);
-}
-
-extern "C" Item js_spawn_stream_once(Item event_item, Item callback) {
-    return spawn_add_listener(js_get_this(), event_item, callback, true);
-}
+JS_FORWARD_ITEM(js_spawn_stream_on, (Item event_item, Item callback), spawn_add_listener, (js_get_this(), event_item, callback, false))
+JS_FORWARD_ITEM(js_spawn_stream_once, (Item event_item, Item callback), spawn_add_listener, (js_get_this(), event_item, callback, true))
 
 static void spawn_mark_stream_destroyed(Item stream_obj) {
     js_set_key_default(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
@@ -2111,10 +2031,8 @@ static Item make_child_process_object(void) {
     js_set_key_default(obj, make_string_item("stdout"), stdout_obj);
     js_set_key_default(obj, make_string_item("stderr"), stderr_obj);
     js_set_key_default(obj, make_string_item("stdio"), stdio);
-    js_set_key_default(obj, make_string_item("on"),
-                    js_new_native_function(js_spawn_on));
-    js_set_key_default(obj, make_string_item("once"),
-                    js_new_native_function(js_spawn_once));
+    js_set_native_key(obj, make_string_item("on"), js_spawn_on);
+    js_set_native_key(obj, make_string_item("once"), js_spawn_once);
     js_set_key_default(obj, make_string_item("pid"), make_js_undefined());
     js_set_key_default(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
     js_set_key_default(obj, make_string_item("exitCode"), ItemNull);
@@ -2166,10 +2084,8 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
 
 static void install_ipc_legacy_surface(Item obj) {
     spawn_set_connected(obj, true);
-    js_set_key_default(obj, make_string_item("send"),
-                    js_new_native_function(js_spawn_send));
-    js_set_key_default(obj, make_string_item("disconnect"),
-                    js_new_native_function(js_spawn_disconnect));
+    js_set_native_key(obj, make_string_item("send"), js_spawn_send);
+    js_set_native_key(obj, make_string_item("disconnect"), js_spawn_disconnect);
 }
 
 typedef struct SpawnRequest {
@@ -2212,10 +2128,7 @@ static bool item_string_equals(Item item, const char* text) {
     size_t len = strlen(text);
     return s->len == len && memcmp(s->chars, text, len) == 0;
 }
-
-static Item throw_invalid_stdio_value(void) {
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid");
-}
+JS_FORWARD_STATIC_ITEM(throw_invalid_stdio_value, (void), js_throw_type_error_code, ("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid"))
 
 static Item apply_stdio_ipc(SpawnRequest* req) {
     if (req->ipc) {
@@ -3673,16 +3586,10 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 // =============================================================================
 
 #define cp_namespace (js_runtime_state.child_process.namespace_object)
-
-static bool js_cp_register_namespace_root(void) {
-    return js_root_range_ensure_registered(&js_runtime_state.child_process.roots);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_cp_register_namespace_root, (void), js_root_range_ensure_registered, (&js_runtime_state.child_process.roots))
 
 template <typename Target>
-static void js_cp_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
-    js_install_native_method(ns, name, target, adapter_arity);
-}
+JS_FORWARD_STATIC_VOID( js_cp_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 extern "C" Item js_get_child_process_namespace(void) {
     if (!js_active_runtime_state) return ItemError;

@@ -130,7 +130,6 @@ static void js_fetch_set_current_base_path(const char* dir_path) {
     }
     js_fetch_runtime_state_get()->base_dir = js_fetch_base_dir_from_path(dir_path);
 }
-
 extern "C" void js_fetch_apply_bootstrap_base_path(void) {
     if (js_fetch_bootstrap_base_path) (void)js_fetch_runtime_state_ensure();
 }
@@ -285,8 +284,7 @@ static Item make_blob_object(const char* bytes, int len, const char* type) {
     js_set_key_default(blob, make_string_item("size"), (Item){.item = i2it(len)});
     js_set_key_default(blob, make_string_item("type"),
         make_string_item(type ? type : "application/octet-stream"));
-    js_set_key_default(blob, make_string_item("text"),
-        js_new_native_function(js_response_blob_text));
+    js_set_native_key(blob, make_string_item("text"), js_response_blob_text);
     return blob;
 }
 
@@ -363,8 +361,7 @@ static Item build_response_object(JsFetchWork* fw) {
     js_set_key_default(resp, json_key, json_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
-    js_set_key_default(resp, make_string_item("blob"),
-        js_new_native_function(js_response_blob));
+    js_set_native_key(resp, make_string_item("blob"), js_response_blob);
 
     return resp;
 }

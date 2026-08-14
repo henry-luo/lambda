@@ -475,9 +475,7 @@ void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
 }
 
 // Check if an expression subtree contains a yield (for generator spill decisions)
-bool jm_has_yield(JsAstNode* node) {
-    return jm_count_yields(node) > 0;
-}
+bool jm_has_yield(JsAstNode* node) { return jm_count_yields(node) > 0; }
 
 // Check if an expression subtree contains an optional chain (?.),
 // meaning the result may be undefined due to short-circuiting.
@@ -497,13 +495,8 @@ bool jm_has_optional_chain(JsAstNode* node) {
 }
 
 
-int jm_count_yields(JsAstNode* node) {
-    return jm_count_suspensions(node, JS_SUSPENSION_YIELD);
-}
-
-int jm_count_awaits(JsAstNode* node) {
-    return jm_count_suspensions(node, JS_SUSPENSION_AWAIT);
-}
+int jm_count_yields(JsAstNode* node) { return jm_count_suspensions(node, JS_SUSPENSION_YIELD); }
+int jm_count_awaits(JsAstNode* node) { return jm_count_suspensions(node, JS_SUSPENSION_AWAIT); }
 
 // Collect assignment target identifiers within a single function body.
 // Does NOT recurse into nested function bodies — only collects assignments

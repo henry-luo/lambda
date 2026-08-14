@@ -5,14 +5,8 @@
 extern __thread EvalContext* context;
 
 extern "C" void* jube_host_identity(Item item);
-
-extern "C" Item js_undefined(void) {
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-extern "C" Item make_js_undefined(void) {
-    return js_undefined();
-}
+JS_FORWARD_EXPRESSION(Item, js_undefined, (void), ((Item){.item = ITEM_JS_UNDEFINED}))
+JS_FORWARD_ITEM(make_js_undefined, (void), js_undefined, ())
 
 extern "C" Item js_make_string_len(const char* str, int len) {
     if (!str) return ItemNull;
@@ -23,26 +17,15 @@ extern "C" Item js_make_string_len(const char* str, int len) {
     return (Item){.item = s2it(s)};
 }
 
-extern "C" Item js_make_string(const char* str) {
-    if (!str) return ItemNull;
-    return js_make_string_len(str, (int)strlen(str));
-}
+JS_FORWARD_EXPRESSION(Item, js_make_string, (const char* str),
+    str ? js_make_string_len(str, (int)strlen(str)) : ItemNull)
+JS_FORWARD_RETURN(bool, js_is_callable, (Item value), js_has_call_capability, (value))
+JS_FORWARD_RETURN(bool, is_callable, (Item value), js_is_callable, (value))
 
-extern "C" bool js_is_callable(Item value) {
-    return js_has_call_capability(value);
-}
-
-extern "C" bool is_callable(Item value) {
-    return js_is_callable(value);
-}
-
-Item make_string_item(const char* str, int len) {
-    return js_make_string_len(str, len);
-}
-
-Item make_string_item(const char* str) {
-    return js_make_string(str);
-}
+JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str, int len),
+    js_make_string_len, (str, len))
+JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str),
+    js_make_string, (str))
 
 static inline bool js_number_like_type(TypeId type) {
     return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
@@ -111,10 +94,7 @@ static uv_mutex_t g_js_decimal_number_egress_mutex;
 static uv_once_t g_js_decimal_number_egress_once = UV_ONCE_INIT;
 static uintptr_t g_js_decimal_number_egress_sites[256];
 static int g_js_decimal_number_egress_count = 0;
-
-static void js_decimal_number_egress_warning_init(void) {
-    uv_mutex_init(&g_js_decimal_number_egress_mutex);
-}
+JS_FORWARD_STATIC_VOID( js_decimal_number_egress_warning_init, (void), uv_mutex_init, (&g_js_decimal_number_egress_mutex))
 
 void js_decimal_number_egress_warning_reset(void) {
     uv_once(&g_js_decimal_number_egress_once, js_decimal_number_egress_warning_init);
@@ -773,10 +753,7 @@ extern "C" Item js_to_string(Item value) {
         return js_make_string("[object Object]");
     }
 }
-
-extern "C" Item js_to_boolean(Item value) {
-    return (Item){.item = b2it(js_is_truthy(value))};
-}
+JS_FORWARD_EXPRESSION(Item, js_to_boolean, (Item value), ((Item){.item = b2it(js_is_truthy(value))}))
 
 extern "C" bool js_is_truthy(Item value) {
     AutoAssertNoGC no_gc;
@@ -978,10 +955,7 @@ extern "C" int64_t js_eq_raw(Item left, Item right) {
 
 // Tune8 §2.1: js_ne_raw and js_loose_ne_raw removed. The transpiler now emits
 // js_eq_raw / js_loose_eq_raw followed by an inline MIR XOR-with-1 to invert.
-
-extern "C" int64_t js_loose_eq_raw(Item left, Item right) {
-    return (int64_t)it2b(js_equal(left, right));
-}
+JS_FORWARD_EXPRESSION(int64_t, js_loose_eq_raw, (Item left, Item right), ((int64_t)it2b(js_equal(left, right))))
 
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
     if (is_negative_zero) *is_negative_zero = false;
@@ -1332,10 +1306,7 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     }
     return result_item;
 }
-
-extern "C" Item js_string_concat(Item left, Item right) {
-    return js_concat_strings_fast(it2s(left), it2s(right));
-}
+JS_FORWARD_ITEM(js_string_concat, (Item left, Item right), js_concat_strings_fast, (it2s(left), it2s(right)))
 
 extern "C" Item js_add(Item left, Item right) {
     RootFrame roots(4);
@@ -1791,17 +1762,11 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
 //   op = 1: GT (a >  b)
 //   op = 2: LE (a <= b)
 //   op = 3: GE (a >= b)
-extern "C" Item js_compare(int64_t op, Item left, Item right) {
-    return js_compare_boxed(op, left, right);
-}
+JS_FORWARD_ITEM(js_compare, (int64_t op, Item left, Item right), js_compare_boxed, (op, left, right))
 
 // C wrappers retained for direct callers in js_runtime.cpp.
-extern "C" Item js_less_than(Item left, Item right) {
-    return js_compare(0, left, right);
-}
-extern "C" Item js_greater_than(Item left, Item right) {
-    return js_compare(1, left, right);
-}
+JS_FORWARD_ITEM(js_less_than, (Item left, Item right), js_compare, (0, left, right))
+JS_FORWARD_ITEM(js_greater_than, (Item left, Item right), js_compare, (1, left, right))
 
 // =============================================================================
 // Logical Operators
@@ -1822,10 +1787,7 @@ extern "C" Item js_logical_or(Item left, Item right) {
     }
     return right;
 }
-
-extern "C" Item js_logical_not(Item operand) {
-    return (Item){.item = b2it(!js_is_truthy(operand))};
-}
+JS_FORWARD_EXPRESSION(Item, js_logical_not, (Item operand), ((Item){.item = b2it(!js_is_truthy(operand))}))
 
 // =============================================================================
 // Bitwise Operators
@@ -1841,9 +1803,7 @@ int32_t js_to_int32(double d) {
 }
 
 // JIT-callable version of ToInt32: takes double, returns int64 for MIR compatibility
-extern "C" int64_t js_double_to_int32(double d) {
-    return (int64_t)js_to_int32(d);
-}
+JS_FORWARD_EXPRESSION(int64_t, js_double_to_int32, (double d), ((int64_t)js_to_int32(d)))
 
 #define JS_DEFINE_BITWISE_BINARY(name, op) \
     extern "C" Item js_##name(Item left, Item right) { \
@@ -1964,33 +1924,7 @@ static Item js_bigint_to_index(Item value, int64_t* out_bits) {
     return ItemNull;
 }
 
-extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
-    // BigInt.asIntN(bits, bigintValue) — clamp to signed N-bit range
-    // ES spec: mod = bigintValue mod 2^bits; if mod >= 2^(bits-1) return mod - 2^bits, else mod
-    int64_t bits = 0;
-    JS_ASSIGN_OR_RETURN(index_status, js_bigint_to_index(bits_item, &bits));
-    JS_ASSIGN_OR_RETURN(bigint_val, js_to_bigint_for_bigint_op(bigint_item));
-    if (bits == 0) return bigint_from_int64(0);
-    // 2^bits
-    Item two = bigint_from_int64(2);
-    Item exp = bigint_from_int64(bits);
-    Item modulus = bigint_pow(two, exp);  // 2^bits
-    Item mod = bigint_mod(bigint_val, modulus);
-    // mathematical mod: ensure non-negative
-    if (bigint_cmp(mod, bigint_from_int64(0)) < 0)
-        mod = bigint_add(mod, modulus);
-    // half = 2^(bits-1)
-    Item exp_half = bigint_from_int64(bits - 1);
-    Item half = bigint_pow(two, exp_half);
-    // if mod >= half, result = mod - 2^bits
-    if (bigint_cmp(mod, half) >= 0)
-        return bigint_sub(mod, modulus);
-    return mod;
-}
-
-extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
-    // BigInt.asUintN(bits, bigintValue) — clamp to unsigned N-bit range
-    // ES spec: return bigintValue mod 2^bits
+static Item js_bigint_as_n(Item bits_item, Item bigint_item, bool signed_result) {
     int64_t bits = 0;
     JS_ASSIGN_OR_RETURN(index_status, js_bigint_to_index(bits_item, &bits));
     JS_ASSIGN_OR_RETURN(bigint_val, js_to_bigint_for_bigint_op(bigint_item));
@@ -1999,11 +1933,19 @@ extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     Item exp = bigint_from_int64(bits);
     Item modulus = bigint_pow(two, exp);
     Item mod = bigint_mod(bigint_val, modulus);
-    // mathematical mod: ensure non-negative
     if (bigint_cmp(mod, bigint_from_int64(0)) < 0)
         mod = bigint_add(mod, modulus);
+    if (signed_result) {
+        Item half = bigint_pow(two, bigint_from_int64(bits - 1));
+        if (bigint_cmp(mod, half) >= 0) return bigint_sub(mod, modulus);
+    }
     return mod;
 }
+
+// BigInt.asIntN applies the sign bit after mathematical modulo.
+JS_FORWARD_ITEM(js_bigint_as_int_n, (Item bits_item, Item bigint_item),
+    js_bigint_as_n, (bits_item, bigint_item, true))
+JS_FORWARD_ITEM(js_bigint_as_uint_n, (Item bits_item, Item bigint_item), js_bigint_as_n, (bits_item, bigint_item, false))
 
 extern "C" Item js_unary_plus(Item operand) {
     // ES spec: ToNumber(Symbol) throws TypeError

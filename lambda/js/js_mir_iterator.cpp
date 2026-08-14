@@ -4,21 +4,15 @@
 // IteratorRecord-style MIR helpers
 // ============================================================================
 
-MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable) {
-    return jm_call_1(mt, "js_get_iterator", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+#define JM_EMIT_ITERATOR_CALL(name, runtime_name, parameter) \
+MIR_reg_t name(JsMirTranspiler* mt, MIR_reg_t parameter) { \
+    return jm_call_1(mt, runtime_name, MIR_T_I64, \
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, parameter)); \
 }
 
-MIR_reg_t jm_emit_get_iterator_lazy(JsMirTranspiler* mt, MIR_reg_t iterable) {
-    return jm_call_1(mt, "js_get_iterator_lazy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
-}
-
-
-MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator) {
-    return jm_call_1(mt, "js_iterator_step", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
-}
+JM_EMIT_ITERATOR_CALL(jm_emit_get_iterator, "js_get_iterator", iterable)
+JM_EMIT_ITERATOR_CALL(jm_emit_get_iterator_lazy, "js_get_iterator_lazy", iterable)
+JM_EMIT_ITERATOR_CALL(jm_emit_iterator_step, "js_iterator_step", iterator)
 
 MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix) {
     MIR_reg_t is_done = jm_new_reg(mt, prefix ? prefix : "itdone", MIR_T_I64);
@@ -26,10 +20,9 @@ MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result,
     return is_done;
 }
 
-MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator) {
-    return jm_call_1(mt, "js_iterator_collect_rest", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
-}
+JM_EMIT_ITERATOR_CALL(jm_emit_iterator_collect_rest, "js_iterator_collect_rest", iterator)
+
+#undef JM_EMIT_ITERATOR_CALL
 
 void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator) {
     jm_call_1(mt, "js_iterator_close", MIR_T_I64,

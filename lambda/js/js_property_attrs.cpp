@@ -230,12 +230,7 @@ static void js_shape_entry_update_flags_impl(Item obj, NameId name_id,
     js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
     se->flags = new_flags;
 }
-
-extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
-                                            uint8_t set_mask, uint8_t clear_mask) {
-    js_shape_entry_update_flags_impl(obj, NAME_ID_NONE, name, name_len,
-        set_mask, clear_mask);
-}
+JS_FORWARD_VOID( js_shape_entry_update_flags, (Item obj, const char* name, int name_len,                                             uint8_t set_mask, uint8_t clear_mask), js_shape_entry_update_flags_impl, (obj, NAME_ID_NONE, name, name_len, set_mask, clear_mask))
 
 extern "C" void js_shape_entry_update_flags_name_id(Item obj, NameId name_id,
         uint8_t set_mask, uint8_t clear_mask) {
@@ -246,14 +241,12 @@ extern "C" void js_shape_entry_update_flags_name_id(Item obj, NameId name_id,
 
 // Public wrapper around the file-static TypeMap clone primitive. Exposed so
 // metadata selection can detach a shared shape without duplicating it here.
-extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) {
-    return js_typemap_clone_for_mutation(obj);
-}
+JS_FORWARD_RETURN(TypeMap*, js_typemap_clone_for_mutation_pub, (Item obj),
+    js_typemap_clone_for_mutation, (obj))
 
-extern "C" bool js_typemap_detach_snapshot_for_mutation(Item obj) {
-    if (!js_proto_snapshot_requires_typemap_detach(obj)) return true;
-    return js_typemap_clone_for_mutation_ex(obj, /*force_clone=*/true) != NULL;
-}
+JS_FORWARD_EXPRESSION(bool, js_typemap_detach_snapshot_for_mutation, (Item obj),
+    !js_proto_snapshot_requires_typemap_detach(obj) ||
+        js_typemap_clone_for_mutation_ex(obj, /*force_clone=*/true) != NULL)
 
 static bool js_typemap_transition_matches(const TypeMapTransition* transition,
         const ShapeEntry* entry, NameId operation_name_id, TypeId value_type) {
@@ -534,40 +527,22 @@ static Map* js_obj_resolve_map(Item obj) {
     return nullptr;
 }
 
-extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len) {
-    if ((get_type_id(obj) == LMD_TYPE_ARRAY ||
-            js_is_ordinary_numeric_array(obj)) && name_len == 6 &&
-        strncmp(name, "length", 6) == 0) {
-        return false;
-    }
-    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
-    Map* m = js_obj_resolve_map(obj);
-    return js_props_query_enumerable(m, se, name, name_len);
-}
+typedef bool (*JsPropsQuery)(Map*, ShapeEntry*, const char*, int);
 
-extern "C" bool js_props_obj_query_writable(Item obj, const char* name, int name_len) {
+static bool js_props_obj_query(Item obj, const char* name, int name_len,
+        JsPropsQuery query, bool override_array_length, bool array_length_value) {
     if ((get_type_id(obj) == LMD_TYPE_ARRAY ||
             js_is_ordinary_numeric_array(obj)) && name_len == 6 &&
         strncmp(name, "length", 6) == 0) {
-        ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
-        Map* m = js_obj_resolve_map(obj);
-        return js_props_query_writable(m, se, name, name_len);
+        if (override_array_length) return array_length_value;
     }
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
     Map* m = js_obj_resolve_map(obj);
-    return js_props_query_writable(m, se, name, name_len);
+    return query(m, se, name, name_len);
 }
-
-extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int name_len) {
-    if ((get_type_id(obj) == LMD_TYPE_ARRAY ||
-            js_is_ordinary_numeric_array(obj)) && name_len == 6 &&
-        strncmp(name, "length", 6) == 0) {
-        return false;
-    }
-    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
-    Map* m = js_obj_resolve_map(obj);
-    return js_props_query_configurable(m, se, name, name_len);
-}
+JS_FORWARD_RETURN(bool, js_props_obj_query_enumerable, (Item obj, const char* name, int name_len), js_props_obj_query, (obj, name, name_len, js_props_query_enumerable, true, false))
+JS_FORWARD_RETURN(bool, js_props_obj_query_writable, (Item obj, const char* name, int name_len), js_props_obj_query, (obj, name, name_len, js_props_query_writable, false, false))
+JS_FORWARD_RETURN(bool, js_props_obj_query_configurable, (Item obj, const char* name, int name_len), js_props_obj_query, (obj, name, name_len, js_props_query_configurable, true, false))
 
 // =============================================================================
 // Stage A2.6 / A2-T5: attribute write helpers — shape-first, array fallback.
@@ -714,10 +689,7 @@ extern "C" Map* js_obj_underlying_map(Item obj) {
     }
     return nullptr;
 }
-
-static Item js_accessor_half_storage_value(Item value) {
-    return get_type_id(value) == LMD_TYPE_UNDEFINED ? ItemNull : value;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_accessor_half_storage_value, (Item value), (get_type_id(value) == LMD_TYPE_UNDEFINED ? ItemNull : value))
 
 static bool js_accessor_half_same(Item left, Item right) {
     left = js_accessor_half_storage_value(left);

@@ -275,14 +275,7 @@ enum JsFunctionCacheKind : uint8_t {
     JS_FUNCTION_CACHE_MIR = 1,
     JS_FUNCTION_CACHE_NATIVE = 2,
 };
-
-static bool js_function_cache_key_equal(
-        const JsRuntimeState::JsFunctionCacheKey& left,
-        const JsRuntimeState::JsFunctionCacheKey& right) {
-    return left.target_bits == right.target_bits && left.arity == right.arity &&
-        left.kind == right.kind && left.policy == right.policy &&
-        left.capabilities == right.capabilities;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_function_cache_key_equal, (const JsRuntimeState::JsFunctionCacheKey& left,         const JsRuntimeState::JsFunctionCacheKey& right), (left.target_bits == right.target_bits && left.arity == right.arity && left.kind == right.kind && left.policy == right.policy && left.capabilities == right.capabilities))
 
 static JsRuntimeState::JsFunctionCacheKey js_mir_cache_key(void* target,
         int arity) {
@@ -607,18 +600,14 @@ static Item js_new_native_adapter(JsNativeP0 target, int adapter_arity,
     return ItemError;
 }
 
-Item js_new_native_function(JsNativeP0 target, int adapter_arity) {
-    return js_new_native_adapter(target, adapter_arity, false, false);
-}
-static Item js_new_distinct_native_function(JsNativeP0 target, int adapter_arity) {
-    return js_new_native_adapter(target, adapter_arity, false, true);
-}
-Item js_new_native_constructor(JsNativeP0 target, int adapter_arity) {
-    return js_new_native_adapter(target, adapter_arity, true, false);
-}
-static Item js_new_distinct_native_constructor(JsNativeP0 target, int adapter_arity) {
-    return js_new_native_adapter(target, adapter_arity, true, true);
-}
+JS_FORWARD_LOCAL_RETURN(Item, js_new_native_function,
+    (JsNativeP0 target, int adapter_arity), js_new_native_adapter,
+    (target, adapter_arity, false, false))
+JS_FORWARD_STATIC_ITEM(js_new_distinct_native_function, (JsNativeP0 target, int adapter_arity), js_new_native_adapter, (target, adapter_arity, false, true))
+JS_FORWARD_LOCAL_RETURN(Item, js_new_native_constructor,
+    (JsNativeP0 target, int adapter_arity), js_new_native_adapter,
+    (target, adapter_arity, true, false))
+JS_FORWARD_STATIC_ITEM(js_new_distinct_native_constructor, (JsNativeP0 target, int adapter_arity), js_new_native_adapter, (target, adapter_arity, true, true))
 
 JS_DEFINE_NATIVE_ADAPTER_FACTORY(1, JsNativeP1)
 JS_DEFINE_NATIVE_ADAPTER_FACTORY(2, JsNativeP2)
@@ -875,10 +864,7 @@ JS_DEFINE_NATIVE_CLOSURE_FACTORY(3, JsNativeP4, p4)
 JS_DEFINE_NATIVE_CLOSURE_FACTORY(4, JsNativeP5, p5)
 
 #undef JS_DEFINE_NATIVE_CLOSURE_FACTORY
-
-extern "C" Item js_new_function_mir(void* func_ptr, int param_count) {
-    return js_new_function_impl(func_ptr, param_count, true);
-}
+JS_FORWARD_ITEM(js_new_function_mir, (void* func_ptr, int param_count), js_new_function_impl, (func_ptr, param_count, true))
 
 extern "C" Item js_new_distinct_function_mir(void* func_ptr, int param_count) {
     // D6.2.2v2: evaluating a function expression creates a fresh callable;
@@ -929,10 +915,7 @@ static Item js_new_method_function_impl(void* func_ptr, int param_count,
     js_function_finalize_capabilities(fn);
     return (Item){.function = (Function*)fn};
 }
-
-extern "C" Item js_new_method_function_mir(void* func_ptr, int param_count) {
-    return js_new_method_function_impl(func_ptr, param_count, true);
-}
+JS_FORWARD_ITEM(js_new_method_function_mir, (void* func_ptr, int param_count), js_new_method_function_impl, (func_ptr, param_count, true))
 
 // Create a closure (function with captured environment)
 static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
@@ -969,11 +952,7 @@ static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
     js_function_finalize_capabilities(fn);
     return (Item){.function = (Function*)fn};
 }
-
-extern "C" Item js_new_closure_mir(void* func_ptr, int param_count,
-        Item* env, int env_size) {
-    return js_new_closure_impl(func_ptr, param_count, env, env_size, true);
-}
+JS_FORWARD_ITEM(js_new_closure_mir, (void* func_ptr, int param_count,         Item* env, int env_size), js_new_closure_impl, (func_ptr, param_count, env, env_size, true))
 
 // Set the ES spec formal .length for a function (params before first default, excl rest)
 extern "C" void js_set_formal_length(Item fn_item, int length) {
@@ -985,10 +964,8 @@ extern "C" void js_set_formal_length(Item fn_item, int length) {
 
 // Allocate a traced raw Item environment. Its owning closure/function keeps the
 // allocation live; the GC header supplies the exact slot count to the tracer.
-extern "C" Item* js_alloc_env(int count) {
-    if (count <= 0) return NULL;
-    return (Item*)heap_calloc_closure_env((size_t)count * sizeof(Item));
-}
+JS_FORWARD_EXPRESSION(Item*, js_alloc_env, (int count),
+    count > 0 ? (Item*)heap_calloc_closure_env((size_t)count * sizeof(Item)) : NULL)
 
 static bool js_env_slot_is_side_number(Item item) {
     if (!context || !context->side_number_base || !context->side_number_top) return false;
@@ -1032,19 +1009,11 @@ static void js_mark_function_flags(Item fn_item, uint32_t flags) {
     fn->flags |= flags;
     js_function_finalize_capabilities(fn);
 }
-
-extern "C" void js_mark_derived_constructor_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_DERIVED_CTOR);
-}
-
-extern "C" void js_mark_method_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_METHOD);
-}
+JS_FORWARD_VOID( js_mark_derived_constructor_func, (Item fn_item), js_mark_function_flags, (fn_item, JS_FUNC_FLAG_DERIVED_CTOR))
+JS_FORWARD_VOID( js_mark_method_func, (Item fn_item), js_mark_function_flags, (fn_item, JS_FUNC_FLAG_METHOD))
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
-extern "C" void js_mark_strict_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_STRICT);
-}
+JS_FORWARD_VOID( js_mark_strict_func, (Item fn_item), js_mark_function_flags, (fn_item, JS_FUNC_FLAG_STRICT))
 
 extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
         const char* source_chars, uint64_t span_lengths,

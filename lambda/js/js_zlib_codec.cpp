@@ -148,33 +148,18 @@ static bool node_zlib_sync_codec(enum NodeZlibCodecMode mode, const uint8_t* dat
     return false;
 }
 
-bool node_zlib_gzip_encode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_GZIP, data, length, out_bytes);
+#define NODE_ZLIB_SYNC_CODEC_WRAPPER(name, mode) \
+bool name(const uint8_t* data, int length, NodeZlibBytes* out_bytes) { \
+    return node_zlib_sync_codec(mode, data, length, out_bytes); \
 }
-
-bool node_zlib_gunzip_decode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_GUNZIP, data, length, out_bytes);
-}
-
-bool node_zlib_deflate_encode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_DEFLATE, data, length, out_bytes);
-}
-
-bool node_zlib_inflate_decode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_INFLATE, data, length, out_bytes);
-}
-
-bool node_zlib_deflate_raw_encode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_DEFLATE_RAW, data, length, out_bytes);
-}
-
-bool node_zlib_inflate_raw_decode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_INFLATE_RAW, data, length, out_bytes);
-}
-
-bool node_zlib_unzip_decode(const uint8_t* data, int length, NodeZlibBytes* out_bytes) {
-    return node_zlib_sync_codec(NODE_ZLIB_CODEC_UNZIP, data, length, out_bytes);
-}
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_gzip_encode, NODE_ZLIB_CODEC_GZIP)
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_gunzip_decode, NODE_ZLIB_CODEC_GUNZIP)
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_deflate_encode, NODE_ZLIB_CODEC_DEFLATE)
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_inflate_decode, NODE_ZLIB_CODEC_INFLATE)
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_deflate_raw_encode, NODE_ZLIB_CODEC_DEFLATE_RAW)
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_inflate_raw_decode, NODE_ZLIB_CODEC_INFLATE_RAW)
+NODE_ZLIB_SYNC_CODEC_WRAPPER(node_zlib_unzip_decode, NODE_ZLIB_CODEC_UNZIP)
+#undef NODE_ZLIB_SYNC_CODEC_WRAPPER
 
 void node_zlib_bytes_free(NodeZlibBytes* bytes) {
     if (!bytes) return;

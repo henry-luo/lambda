@@ -37,23 +37,10 @@ extern Item js_make_number(double d);
 #define readline_inputs (js_runtime_state.readline.inputs)
 #define readline_interfaces (js_runtime_state.readline.interfaces)
 #define readline_input_count (js_runtime_state.readline.input_count)
-
-static bool readline_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.readline.roots);
-}
-
-static Item readline_get(Item obj, const char* name) {
-    return js_get_key_default(obj, make_string_item(name));
-}
-
-static void readline_set(Item obj, const char* name, Item value) {
-    js_set_key_default(obj, make_string_item(name), value);
-}
-
-static bool readline_has_own(Item obj, const char* name) {
-    return it2b(js_has_own_property(obj, make_string_item(name)));
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, readline_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.readline.roots)))
+JS_FORWARD_STATIC_ITEM(readline_get, (Item obj, const char* name), js_get_key_default, (obj, make_string_item(name)))
+JS_FORWARD_STATIC_VOID( readline_set, (Item obj, const char* name, Item value), js_set_key_default, (obj, make_string_item(name), value))
+JS_FORWARD_STATIC_RETURN(bool, readline_has_own, (Item obj, const char* name), it2b, (js_has_own_property(obj, make_string_item(name))))
 
 static int readline_item_eq(Item a, Item b) {
     return a.item == b.item;
@@ -1039,36 +1026,41 @@ extern "C" Item js_readline_completion_callback_bound(Item rl_item, Item tab_cou
     return readline_completion_callback_impl(rl_item, err_item, result_item, tab_count);
 }
 
-extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item) {
-    readline_completion_rl = rl_item;
+static Item js_readline_completion_direct(Item rl_item, Item err_item,
+        Item result_item, int tab_count) {
     readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_TRUE});
-    Item result = js_readline_completion_callback((Item){.item = ITEM_JS_UNDEFINED}, result_item);
+    Item result = readline_completion_callback_impl(rl_item, err_item,
+        result_item, tab_count);
     readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_JS_UNDEFINED});
     return result;
+}
+
+extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item) {
+    readline_completion_rl = rl_item;
+    Item tab_count_item = readline_get(rl_item, "__tab_count__");
+    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
+    return js_readline_completion_direct(rl_item,
+        (Item){.item = ITEM_JS_UNDEFINED}, result_item, tab_count);
 }
 
 extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item) {
     readline_completion_rl = rl_item;
-    readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_TRUE});
-    Item result = js_readline_completion_callback(err_item, (Item){.item = ITEM_JS_UNDEFINED});
-    readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_JS_UNDEFINED});
-    return result;
+    Item tab_count_item = readline_get(rl_item, "__tab_count__");
+    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
+    return js_readline_completion_direct(rl_item, err_item,
+        (Item){.item = ITEM_JS_UNDEFINED}, tab_count);
 }
 
 extern "C" Item js_readline_completion_fulfilled_bound(Item rl_item, Item tab_count_item, Item result_item) {
-    readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_TRUE});
-    Item result = js_readline_completion_callback_bound(rl_item, tab_count_item,
-        (Item){.item = ITEM_JS_UNDEFINED}, result_item);
-    readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_JS_UNDEFINED});
-    return result;
+    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
+    return js_readline_completion_direct(rl_item,
+        (Item){.item = ITEM_JS_UNDEFINED}, result_item, tab_count);
 }
 
 extern "C" Item js_readline_completion_rejected_bound(Item rl_item, Item tab_count_item, Item err_item) {
-    readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_TRUE});
-    Item result = js_readline_completion_callback_bound(rl_item, tab_count_item,
-        err_item, (Item){.item = ITEM_JS_UNDEFINED});
-    readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_JS_UNDEFINED});
-    return result;
+    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
+    return js_readline_completion_direct(rl_item, err_item,
+        (Item){.item = ITEM_JS_UNDEFINED}, tab_count);
 }
 
 // =============================================================================
@@ -1457,10 +1449,7 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
     if (heap_input_chars) mem_free(heap_input_chars);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
-
-extern "C" Item js_readline_write(Item data_item, Item key_item) {
-    return js_readline_write_impl(js_get_current_this(), data_item, key_item);
-}
+JS_FORWARD_ITEM(js_readline_write, (Item data_item, Item key_item), js_readline_write_impl, (js_get_current_this(), data_item, key_item))
 
 extern "C" Item js_readline_input_data(Item data_item) {
     Item input = js_get_current_this();
@@ -1469,15 +1458,12 @@ extern "C" Item js_readline_input_data(Item data_item) {
     return js_readline_write_impl(rl, data_item, (Item){.item = ITEM_JS_UNDEFINED});
 }
 
-extern "C" Item js_readline_bound_input_data(Item rl, Item data_item) {
+static Item js_readline_input_data(Item rl, Item data_item) {
     if (readline_get(rl, "closed").item == ITEM_TRUE) return (Item){.item = ITEM_JS_UNDEFINED};
     return js_readline_write_impl(rl, data_item, (Item){.item = ITEM_JS_UNDEFINED});
 }
-
-extern "C" Item js_readline_deferred_input_data(Item rl, Item data_item) {
-    if (readline_get(rl, "closed").item == ITEM_TRUE) return (Item){.item = ITEM_JS_UNDEFINED};
-    return js_readline_write_impl(rl, data_item, (Item){.item = ITEM_JS_UNDEFINED});
-}
+JS_FORWARD_ITEM(js_readline_bound_input_data, (Item rl, Item data_item), js_readline_input_data, (rl, data_item))
+JS_FORWARD_ITEM(js_readline_deferred_input_data, (Item rl, Item data_item), js_readline_input_data, (rl, data_item))
 
 static void readline_enqueue_input_data(Item rl, Item data_item) {
     Item write_fn = readline_get(rl, "write");
@@ -1683,23 +1669,15 @@ extern "C" Item js_readline_createInterface(Item options_item) {
 
     // methods
     Item question_fn = js_new_native_function(js_readline_question);
-    js_set_key_default(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")),
-                    js_new_native_function(js_readline_question_promisified));
+    js_set_native_key(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")), js_readline_question_promisified);
     js_set_key_default(rl, make_string_item("question"), question_fn);
-    js_set_key_default(rl, make_string_item("close"),
-                    js_new_native_function(js_readline_close));
-    js_set_key_default(rl, make_string_item("on"),
-                    js_new_native_function(js_readline_on));
-    js_set_key_default(rl, make_string_item("write"),
-                    js_new_native_function(js_readline_write));
-    js_set_key_default(rl, make_string_item("getCursorPos"),
-                    js_new_native_function(js_readline_getCursorPos));
-    js_set_key_default(rl, make_string_item("setPrompt"),
-                    js_new_native_function(js_readline_setPrompt));
-    js_set_key_default(rl, make_string_item("getPrompt"),
-                    js_new_native_function(js_readline_getPrompt));
-    js_set_key_default(rl, make_string_item("prompt"),
-                    js_new_native_function(js_readline_prompt));
+    js_set_native_key(rl, make_string_item("close"), js_readline_close);
+    js_set_native_key(rl, make_string_item("on"), js_readline_on);
+    js_set_native_key(rl, make_string_item("write"), js_readline_write);
+    js_set_native_key(rl, make_string_item("getCursorPos"), js_readline_getCursorPos);
+    js_set_native_key(rl, make_string_item("setPrompt"), js_readline_setPrompt);
+    js_set_native_key(rl, make_string_item("getPrompt"), js_readline_getPrompt);
+    js_set_native_key(rl, make_string_item("prompt"), js_readline_prompt);
 
     Item input = readline_get(rl, "input");
     if (input.item != ITEM_NULL && get_type_id(input) != LMD_TYPE_UNDEFINED) {
@@ -1752,10 +1730,7 @@ extern "C" Item js_readline_promises_createInterface(Item options_item) {
     }
     return rl;
 }
-
-static bool readline_is_missing(Item item) {
-    return item.item == ITEM_NULL || get_type_id(item) == LMD_TYPE_UNDEFINED;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, readline_is_missing, (Item item), (item.item == ITEM_NULL || get_type_id(item) == LMD_TYPE_UNDEFINED))
 
 extern "C" Item js_readline_interface_constructor(Item input_item, Item output_item,
                                                   Item completer_item, Item terminal_item) {
@@ -1786,41 +1761,26 @@ extern "C" Item js_readline_promises_interface_constructor(Item input_item, Item
 // readline Module Namespace
 // =============================================================================
 
-extern "C" Item js_get_readline_namespace(void) {
+static Item js_get_readline_namespace_impl(Item* namespace_slot,
+        JsNativeP1 create_target, JsNativeP4 interface_target) {
     if (!readline_ensure_roots()) return ItemError;
-    if (readline_namespace.item != 0) return readline_namespace;
+    if (namespace_slot->item != 0) return *namespace_slot;
 
-    readline_namespace = js_new_object();
+    *namespace_slot = js_new_object();
+    Item ns = *namespace_slot;
 
     Item key = make_string_item("createInterface");
-    Item fn = js_new_native_function(js_readline_createInterface);
-    js_set_key_default(readline_namespace, key, fn);
-    js_set_key_default(readline_namespace, make_string_item("Interface"),
-                    js_new_native_constructor(js_readline_interface_constructor));
+    js_set_native_key(ns, key, create_target);
+    js_set_key_default(ns, make_string_item("Interface"),
+                    js_new_native_constructor(interface_target));
 
     Item default_key = make_string_item("default");
-    js_set_key_default(readline_namespace, default_key, readline_namespace);
+    js_set_key_default(ns, default_key, ns);
 
-    return readline_namespace;
+    return ns;
 }
-
-extern "C" Item js_get_readline_promises_namespace(void) {
-    if (!readline_ensure_roots()) return ItemError;
-    if (readline_promises_namespace.item != 0) return readline_promises_namespace;
-
-    readline_promises_namespace = js_new_object();
-
-    Item key = make_string_item("createInterface");
-    Item fn = js_new_native_function(js_readline_promises_createInterface);
-    js_set_key_default(readline_promises_namespace, key, fn);
-    js_set_key_default(readline_promises_namespace, make_string_item("Interface"),
-                    js_new_native_constructor(js_readline_promises_interface_constructor));
-
-    Item default_key = make_string_item("default");
-    js_set_key_default(readline_promises_namespace, default_key, readline_promises_namespace);
-
-    return readline_promises_namespace;
-}
+JS_FORWARD_ITEM(js_get_readline_namespace, (void), js_get_readline_namespace_impl, (&readline_namespace, js_readline_createInterface, js_readline_interface_constructor))
+JS_FORWARD_ITEM(js_get_readline_promises_namespace, (void), js_get_readline_namespace_impl, (&readline_promises_namespace, js_readline_promises_createInterface, js_readline_promises_interface_constructor))
 
 extern "C" void js_readline_reset(void) {
     if (!js_active_runtime_state) return;

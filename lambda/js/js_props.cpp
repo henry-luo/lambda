@@ -229,11 +229,7 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     return JS_SHAPE_SLOT_DATA;
 }
 
-extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
-        const char* name, int name_len, Item* out_slot, ShapeEntry** out_se) {
-    return js_own_shape_slot_status_impl(object, name, name_len,
-        NAME_ID_NONE, true, out_slot, out_se, NULL);
-}
+JS_FORWARD_RETURN(JsShapeSlotStatus, js_own_shape_slot_status, (Item object, const char* name, int name_len, Item* out_slot, ShapeEntry** out_se), js_own_shape_slot_status_impl, (object, name, name_len, NAME_ID_NONE, true, out_slot, out_se, NULL))
 
 extern "C" JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object,
         NameId name_id, Item* out_slot, ShapeEntry** out_se) {
@@ -246,10 +242,7 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object,
         name_id, allow_ext, out_slot, out_se, NULL);
 }
 
-extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
-        Item* out_slot, ShapeEntry** out_se) {
-    return js_own_shape_slot_status_key_ex(object, key, out_slot, out_se, NULL);
-}
+JS_FORWARD_RETURN(JsShapeSlotStatus, js_own_shape_slot_status_key, (Item object, Item key, Item* out_slot, ShapeEntry** out_se), js_own_shape_slot_status_key_ex, (object, key, out_slot, out_se, NULL))
 
 extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item key,
         Item* out_slot, ShapeEntry** out_se, bool* out_borrowed) {
@@ -578,13 +571,7 @@ static bool js_props_desc_from_storage_name_id(Item obj, Map* m,
         &slot, &se);
     return js_props_desc_from_shape_slot(status, slot, se, out);
 }
-
-static bool js_props_error_standard_field(const char* name, int name_len) {
-    return (name_len == 4 && memcmp(name, "name", 4) == 0) ||
-        (name_len == 7 && memcmp(name, "message", 7) == 0) ||
-        (name_len == 5 && memcmp(name, "cause", 5) == 0) ||
-        (name_len == 5 && memcmp(name, "stack", 5) == 0);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_props_error_standard_field, (const char* name, int name_len), ((name_len == 4 && memcmp(name, "name", 4) == 0) || (name_len == 7 && memcmp(name, "message", 7) == 0) || (name_len == 5 && memcmp(name, "cause", 5) == 0) || (name_len == 5 && memcmp(name, "stack", 5) == 0)))
 
 static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
         const char* name, int name_len, JsPropertyDescriptor* out,
@@ -1258,17 +1245,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
     js_props_fill_sparse_accessor_index(object, name, name_len, is_accessor_desc);
     return js_status_ok();
 }
-
-extern "C" Item js_define_own_property_from_descriptor(Item object,
-                                                        const char* name,
-                                                        int name_len,
-                                                        const JsPropertyDescriptor* pd,
-                                                        bool is_new_property,
-                                                        bool existing_accessor) {
-    return js_define_own_property_from_descriptor_impl(object,
-        js_props_str(name, name_len), name, name_len, pd,
-        is_new_property, existing_accessor);
-}
+JS_FORWARD_ITEM(js_define_own_property_from_descriptor, (Item object,                                                         const char* name,                                                         int name_len,                                                         const JsPropertyDescriptor* pd,                                                         bool is_new_property,                                                         bool existing_accessor), js_define_own_property_from_descriptor_impl, (object, js_props_str(name, name_len), name, name_len, pd, is_new_property, existing_accessor))
 
 extern "C" Item js_define_own_property_from_descriptor_name_id(Item object,
         NameId name_id, const JsPropertyDescriptor* pd, bool is_new_property,
@@ -1284,11 +1261,7 @@ extern "C" Item js_define_own_property_from_descriptor_name_id(Item object,
 // Tune5 P1 bridge: the semantic entry points below own the lane/key boundary
 // while the old public callers are migrated.  Keeping the bridge in this
 // module prevents a second property algorithm from forming during migration.
-static Item js_property_lane_bridge_key(JsPropertyLane lane,
-                                        Item observable_key) {
-    return observable_key.item != ItemNull.item
-        ? observable_key : js_property_key_from_lane(lane);
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_property_lane_bridge_key, (JsPropertyLane lane,                                         Item observable_key), (observable_key.item != ItemNull.item ? observable_key : js_property_key_from_lane(lane)))
 
 static Item js_property_lane_bridge_key_or_error(JsPropertyLane lane,
                                                   Item observable_key) {

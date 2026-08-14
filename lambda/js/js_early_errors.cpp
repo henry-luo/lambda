@@ -109,10 +109,7 @@ static bool is_reserved_word(const char* name, bool strict) {
     if (strict && is_in_list(name, JS_STRICT_RESERVED)) return true;
     return false;
 }
-
-static bool is_private_name_string(String* name) {
-    return name && name->len > 1 && name->chars[0] == '#';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_private_name_string, (String* name), (name && name->len > 1 && name->chars[0] == '#'))
 
 static bool private_names_same_suffix(String* name, const char* declared, int declared_len) {
     if (!is_private_name_string(name) || !declared || declared_len <= 1 || declared[0] != '#') return false;

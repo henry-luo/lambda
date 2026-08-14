@@ -634,23 +634,8 @@ static void jm_function_clear_shadowed_capture_binding(JsMirVarEntry* var) {
     var->scope_env_reg = 0;
 }
 
-static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
-    if (!fn || !vname || !fn->body ||
-        fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
-        return false;
-    }
-    JsBlockNode* body = (JsBlockNode*)fn->body;
-    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
-        if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-        JsFunctionNode* decl = (JsFunctionNode*)stmt;
-        if (!decl->name) continue;
-        const char* name = jm_format_name("_js_%.*s", (int)decl->name->len, decl->name->chars);
-        if (strcmp(name, vname) == 0) return true;
-    }
-    return false;
-}
-
-static JsFunctionNode* jm_function_find_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
+static JsFunctionNode* jm_function_direct_body_function_binding(
+        JsFunctionNode* fn, const char* vname) {
     if (!fn || !vname || !fn->body ||
         fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
         return NULL;
@@ -664,6 +649,14 @@ static JsFunctionNode* jm_function_find_direct_body_function_binding(JsFunctionN
         if (strcmp(name, vname) == 0) return decl;
     }
     return NULL;
+}
+
+static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
+    return jm_function_direct_body_function_binding(fn, vname) != NULL;
+}
+
+static JsFunctionNode* jm_function_find_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
+    return jm_function_direct_body_function_binding(fn, vname);
 }
 
 static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,

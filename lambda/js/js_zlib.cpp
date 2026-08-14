@@ -37,15 +37,8 @@ enum ZlibTransformMode {
     ZLIB_TRANSFORM_INFLATE_RAW,
     ZLIB_TRANSFORM_UNZIP
 };
-
-static bool zlib_item_is_undefined(Item value) {
-    return value.item == 0 || value.item == ITEM_JS_UNDEFINED ||
-           get_type_id(value) == LMD_TYPE_UNDEFINED;
-}
-
-static bool zlib_item_is_symbol(Item value) {
-    return get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, zlib_item_is_undefined, (Item value), (value.item == 0 || value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED))
+JS_FORWARD_STATIC_EXPRESSION(bool, zlib_item_is_symbol, (Item value), (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE))
 
 static Item make_zlib_error(const char* method, int zret, const char* detail);
 static Item throw_zlib_error(const char* method, int zret, const char* detail);
@@ -151,33 +144,18 @@ static Item js_zlib_sync_codec(Item input_item, NodeZlibSyncCodec codec, const c
     return result;
 }
 
-extern "C" Item js_zlib_gzipSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_gzip_encode, "gzip");
-}
-
-extern "C" Item js_zlib_gunzipSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_gunzip_decode, "gunzip");
-}
-
-extern "C" Item js_zlib_unzipSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_unzip_decode, "unzip");
-}
-
-extern "C" Item js_zlib_deflateSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_deflate_encode, "deflate");
-}
-
-extern "C" Item js_zlib_inflateSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_inflate_decode, "inflate");
-}
-
-extern "C" Item js_zlib_deflateRawSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_deflate_raw_encode, "deflateRaw");
-}
-
-extern "C" Item js_zlib_inflateRawSync(Item input_item) {
-    return js_zlib_sync_codec(input_item, node_zlib_inflate_raw_decode, "inflateRaw");
-}
+#define JS_ZLIB_SYNC_WRAPPER(name, codec, label) \
+    extern "C" Item name(Item input_item) { \
+        return js_zlib_sync_codec(input_item, codec, label); \
+    }
+JS_ZLIB_SYNC_WRAPPER(js_zlib_gzipSync, node_zlib_gzip_encode, "gzip")
+JS_ZLIB_SYNC_WRAPPER(js_zlib_gunzipSync, node_zlib_gunzip_decode, "gunzip")
+JS_ZLIB_SYNC_WRAPPER(js_zlib_unzipSync, node_zlib_unzip_decode, "unzip")
+JS_ZLIB_SYNC_WRAPPER(js_zlib_deflateSync, node_zlib_deflate_encode, "deflate")
+JS_ZLIB_SYNC_WRAPPER(js_zlib_inflateSync, node_zlib_inflate_decode, "inflate")
+JS_ZLIB_SYNC_WRAPPER(js_zlib_deflateRawSync, node_zlib_deflate_raw_encode, "deflateRaw")
+JS_ZLIB_SYNC_WRAPPER(js_zlib_inflateRawSync, node_zlib_inflate_raw_decode, "inflateRaw")
+#undef JS_ZLIB_SYNC_WRAPPER
 
 // =============================================================================
 // brotliCompressSync / brotliDecompressSync — stubs (need brotli library)
@@ -209,14 +187,8 @@ static Item make_zlib_error(const char* method, int zret, const char* detail) {
     js_set_key_default(error, make_string_item("errno"), (Item){.item = i2it(zret)});
     return error;
 }
-
-static Item throw_zlib_error(const char* method, int zret, const char* detail) {
-    return js_throw_value(make_zlib_error(method, zret, detail));
-}
-
-extern "C" Item js_zlib_throw_error_status(const char* method, int status) {
-    return throw_zlib_error(method, status, NULL);
-}
+JS_FORWARD_STATIC_ITEM(throw_zlib_error, (const char* method, int zret, const char* detail), js_throw_value, (make_zlib_error(method, zret, detail)))
+JS_FORWARD_ITEM(js_zlib_throw_error_status, (const char* method, int status), throw_zlib_error, (method, status, NULL))
 
 static Item js_zlib_emit_callback(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
@@ -267,33 +239,18 @@ static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
     return make_js_undefined();
 }
 
-extern "C" Item js_zlib_gzip(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("gzip", js_zlib_gzipSync, input_item, options_item, callback_item);
-}
-
-extern "C" Item js_zlib_gunzip(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("gunzip", js_zlib_gunzipSync, input_item, options_item, callback_item);
-}
-
-extern "C" Item js_zlib_deflate(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("deflate", js_zlib_deflateSync, input_item, options_item, callback_item);
-}
-
-extern "C" Item js_zlib_inflate(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("inflate", js_zlib_inflateSync, input_item, options_item, callback_item);
-}
-
-extern "C" Item js_zlib_deflateRaw(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("deflateRaw", js_zlib_deflateRawSync, input_item, options_item, callback_item);
-}
-
-extern "C" Item js_zlib_inflateRaw(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("inflateRaw", js_zlib_inflateRawSync, input_item, options_item, callback_item);
-}
-
-extern "C" Item js_zlib_unzip(Item input_item, Item options_item, Item callback_item) {
-    return js_zlib_callback_result("unzip", js_zlib_unzipSync, input_item, options_item, callback_item);
-}
+#define JS_ZLIB_ASYNC_WRAPPER(name, label, sync_fn) \
+    extern "C" Item name(Item input_item, Item options_item, Item callback_item) { \
+        return js_zlib_callback_result(label, sync_fn, input_item, options_item, callback_item); \
+    }
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_gzip, "gzip", js_zlib_gzipSync)
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_gunzip, "gunzip", js_zlib_gunzipSync)
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_deflate, "deflate", js_zlib_deflateSync)
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_inflate, "inflate", js_zlib_inflateSync)
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_deflateRaw, "deflateRaw", js_zlib_deflateRawSync)
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_inflateRaw, "inflateRaw", js_zlib_inflateRawSync)
+JS_ZLIB_ASYNC_WRAPPER(js_zlib_unzip, "unzip", js_zlib_unzipSync)
+#undef JS_ZLIB_ASYNC_WRAPPER
 
 // =============================================================================
 // createGzip/createGunzip/etc. — Transform-backed one-shot chunk transforms
@@ -301,11 +258,7 @@ extern "C" Item js_zlib_unzip(Item input_item, Item options_item, Item callback_
 
 #define zlib_constructor_prototypes (js_runtime_state.zlib.constructor_prototypes)
 #define zlib_namespace (js_runtime_state.zlib.namespace_object)
-
-static bool zlib_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.zlib.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, zlib_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.zlib.roots)))
 
 struct JsZlibStreamState {
     z_stream strm;
@@ -315,11 +268,7 @@ struct JsZlibStreamState {
     bool finished;
     bool is_deflate;
 };
-
-static bool zlib_mode_is_deflate(int mode) {
-    return mode == ZLIB_TRANSFORM_GZIP || mode == ZLIB_TRANSFORM_DEFLATE ||
-           mode == ZLIB_TRANSFORM_DEFLATE_RAW;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, zlib_mode_is_deflate, (int mode), (mode == ZLIB_TRANSFORM_GZIP || mode == ZLIB_TRANSFORM_DEFLATE || mode == ZLIB_TRANSFORM_DEFLATE_RAW))
 
 static bool zlib_stream_should_reset_member(JsZlibStreamState* state, const uint8_t* data, int len) {
     if (!state || state->is_deflate) return false;
@@ -576,10 +525,7 @@ static void zlib_stream_state_free(JsZlibStreamState* state) {
     zlib_stream_state_close(state);
     mem_free(state);
 }
-
-static Item zlib_state_key(void) {
-    return make_string_item("__zlib_state__");
-}
+JS_FORWARD_STATIC_ITEM(zlib_state_key, (void), make_string_item, ("__zlib_state__"))
 
 static Item zlib_stream_state_item(JsZlibStreamState* state) {
     if (!state) return ItemNull;
@@ -874,14 +820,10 @@ static Item js_zlib_create_transform(int mode, Item options_item) {
     js_set_key_default(stream, make_string_item("__zlib_mode__"), (Item){.item = i2it(mode)});
     js_set_key_default(stream, zlib_state_key(), zlib_stream_state_item(state));
     js_mark_non_enumerable(stream, zlib_state_key());
-    js_set_key_default(stream, make_string_item("_transform"),
-                    js_new_native_function(js_zlib_transform_chunk));
-    js_set_key_default(stream, make_string_item("_flush"),
-                    js_new_native_function(js_zlib_transform_flush));
-    js_set_key_default(stream, make_string_item("_destroy"),
-                    js_new_native_function(js_zlib_transform_destroy));
-    js_set_key_default(stream, make_string_item("flush"),
-                    js_new_native_function(js_zlib_stream_flush_method));
+    js_set_native_key(stream, make_string_item("_transform"), js_zlib_transform_chunk);
+    js_set_native_key(stream, make_string_item("_flush"), js_zlib_transform_flush);
+    js_set_native_key(stream, make_string_item("_destroy"), js_zlib_transform_destroy);
+    js_set_native_key(stream, make_string_item("flush"), js_zlib_stream_flush_method);
 
     if (mode >= ZLIB_TRANSFORM_GZIP && mode <= ZLIB_TRANSFORM_UNZIP) {
         Item proto = zlib_constructor_prototypes[mode];
@@ -890,33 +832,18 @@ static Item js_zlib_create_transform(int mode, Item options_item) {
     return stream;
 }
 
-extern "C" Item js_zlib_createGzip(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_GZIP, options_item);
-}
-
-extern "C" Item js_zlib_createGunzip(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_GUNZIP, options_item);
-}
-
-extern "C" Item js_zlib_createDeflate(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_DEFLATE, options_item);
-}
-
-extern "C" Item js_zlib_createInflate(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_INFLATE, options_item);
-}
-
-extern "C" Item js_zlib_createDeflateRaw(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_DEFLATE_RAW, options_item);
-}
-
-extern "C" Item js_zlib_createInflateRaw(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_INFLATE_RAW, options_item);
-}
-
-extern "C" Item js_zlib_createUnzip(Item options_item) {
-    return js_zlib_create_transform(ZLIB_TRANSFORM_UNZIP, options_item);
-}
+#define JS_ZLIB_TRANSFORM_WRAPPER(name, mode) \
+    extern "C" Item name(Item options_item) { \
+        return js_zlib_create_transform(mode, options_item); \
+    }
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createGzip, ZLIB_TRANSFORM_GZIP)
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createGunzip, ZLIB_TRANSFORM_GUNZIP)
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createDeflate, ZLIB_TRANSFORM_DEFLATE)
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createInflate, ZLIB_TRANSFORM_INFLATE)
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createDeflateRaw, ZLIB_TRANSFORM_DEFLATE_RAW)
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createInflateRaw, ZLIB_TRANSFORM_INFLATE_RAW)
+JS_ZLIB_TRANSFORM_WRAPPER(js_zlib_createUnzip, ZLIB_TRANSFORM_UNZIP)
+#undef JS_ZLIB_TRANSFORM_WRAPPER
 
 // =============================================================================
 // zlib Module Namespace
@@ -939,10 +866,7 @@ extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
 }
 
 template <typename Target>
-static void zlib_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
-    js_install_native_method(ns, name, target, adapter_arity);
-}
+JS_FORWARD_STATIC_VOID( zlib_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 template <typename Target>
 static Item zlib_set_constructor(Item ns, const char* name, Target target,
