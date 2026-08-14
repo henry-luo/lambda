@@ -22,6 +22,7 @@
 #include "../../lib/mem.h"
 
 #define MAX_FETCH_RESPONSES 256
+#define item_to_cstr js_item_to_cstr
 
 // --document is parsed before its EvalContext exists. This is bootstrap input
 // only: the first context copies it into its fetch capsule and clears it.
@@ -40,16 +41,6 @@ extern "C" void js_fetch_set_base_path(const char* dir_path) {
     if (dir_path && dir_path[0]) {
         js_fetch_bootstrap_base_path = mem_strdup(dir_path, MEM_CAT_JS_RUNTIME);
     }
-}
-
-static const char* item_to_cstr(Item value, char* buf, int buf_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
-    String* s = it2s(value);
-    int len = (int)s->len;
-    if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    return buf;
 }
 
 // =============================================================================

@@ -63,6 +63,8 @@ extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_get_buffer_namespace(void);
 extern "C" Item js_get_crypto_namespace(void);
+extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
+                                                       Item value);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
 
@@ -2996,6 +2998,8 @@ static void js_process_set_method(Item ns, const char* name, Target target,
 
 static void js_process_ipc_refresh_ref(void);
 static void js_process_ipc_flush_pending(void);
+static void js_process_update_events_count(void);
+static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener);
 
 static Item get_process_listener_map() {
     if (process_listener_map.item == 0) {
@@ -3009,6 +3013,37 @@ static bool process_event_name_equals(Item event_name, const char* name, int nam
     if (get_type_id(event_name) != LMD_TYPE_STRING) return false;
     String* ev = it2s(event_name);
     return ev && ev->len == (uint64_t)name_len && memcmp(ev->chars, name, (size_t)name_len) == 0;
+}
+
+static bool js_process_is_ipc_event(Item event_name) {
+    return process_event_name_equals(event_name, "message", 7) ||
+           process_event_name_equals(event_name, "disconnect", 10);
+}
+
+static void js_process_update_fixed_list(Item event_name, Item listener, bool add) {
+    Item* listeners = NULL;
+    int* count = NULL;
+    if (process_event_name_equals(event_name, "exit", 4)) {
+        listeners = process_exit_listeners;
+        count = &process_exit_listener_count;
+    } else if (process_event_name_equals(event_name, "uncaughtException", 17)) {
+        listeners = process_uncaught_listeners;
+        count = &process_uncaught_listener_count;
+    }
+    if (!count) return;
+    if (add) {
+        if (*count < MAX_PROCESS_LISTENERS) listeners[(*count)++] = listener;
+    } else {
+        js_process_remove_from_fixed_list(listeners, count, listener);
+    }
+}
+
+static void js_process_clear_fixed_list(Item event_name) {
+    if (process_event_name_equals(event_name, "exit", 4)) {
+        process_exit_listener_count = 0;
+    } else if (process_event_name_equals(event_name, "uncaughtException", 17)) {
+        process_uncaught_listener_count = 0;
+    }
 }
 
 static void js_process_record_uncaught_handler_failure(void) {
@@ -3026,18 +3061,7 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (!js_is_callable(listener)) return js_process_object;
-    if (etype == LMD_TYPE_STRING) {
-        String* ev = it2s(event_name);
-        if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
-            if (process_exit_listener_count < MAX_PROCESS_LISTENERS) {
-                process_exit_listeners[process_exit_listener_count++] = listener;
-            }
-        } else if (ev->len == 17 && memcmp(ev->chars, "uncaughtException", 17) == 0) {
-            if (process_uncaught_listener_count < MAX_PROCESS_LISTENERS) {
-                process_uncaught_listeners[process_uncaught_listener_count++] = listener;
-            }
-        }
-    }
+    js_process_update_fixed_list(event_name, listener, true);
 
     // also store in general listener map
     Item map = get_process_listener_map();
@@ -3048,14 +3072,9 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     }
     js_array_push(arr, listener);
     process_total_listener_count++;
+    js_process_update_events_count();
 
-    // update _eventsCount on process object
-    js_set_key_default(js_process_object,
-        (Item){.item = s2it(heap_create_name("_eventsCount", 12))},
-        (Item){.item = i2it((int64_t)process_total_listener_count)});
-
-    if (process_event_name_equals(event_name, "message", 7) ||
-        process_event_name_equals(event_name, "disconnect", 10)) {
+    if (js_process_is_ipc_event(event_name)) {
         // IPC message/disconnect listeners are liveness roots; delayed
         // fork().send() must not lose the child before the parent writes.
         process_ipc_liveness_listener_count++;
@@ -3188,14 +3207,7 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (!js_is_callable(listener)) return js_process_object;
 
-    if (etype == LMD_TYPE_STRING) {
-        String* ev = it2s(event_name);
-        if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
-            js_process_remove_from_fixed_list(process_exit_listeners, &process_exit_listener_count, listener);
-        } else if (ev->len == 17 && memcmp(ev->chars, "uncaughtException", 17) == 0) {
-            js_process_remove_from_fixed_list(process_uncaught_listeners, &process_uncaught_listener_count, listener);
-        }
-    }
+    js_process_update_fixed_list(event_name, listener, false);
 
     Item map = get_process_listener_map();
     Item arr = js_get_key_default(map, event_name);
@@ -3218,8 +3230,7 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
         process_total_listener_count -= (int)removed;
         if (process_total_listener_count < 0) process_total_listener_count = 0;
         js_process_update_events_count();
-        if (process_event_name_equals(event_name, "message", 7) ||
-            process_event_name_equals(event_name, "disconnect", 10)) {
+        if (js_process_is_ipc_event(event_name)) {
             process_ipc_liveness_listener_count -= (int)removed;
             if (process_ipc_liveness_listener_count < 0) process_ipc_liveness_listener_count = 0;
             js_process_ipc_refresh_ref();
@@ -3248,12 +3259,8 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
 
     if (etype == LMD_TYPE_STRING) {
-        String* ev = it2s(event_name);
-        if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
-            process_exit_listener_count = 0;
-        } else if (ev->len == 17 && memcmp(ev->chars, "uncaughtException", 17) == 0) {
-            process_uncaught_listener_count = 0;
-        } else if (ev->len == 18 && memcmp(ev->chars, "unhandledRejection", 18) == 0) {
+        js_process_clear_fixed_list(event_name);
+        if (process_event_name_equals(event_name, "unhandledRejection", 18)) {
             js_promise_note_unhandled_listener_reset();
         }
     }
@@ -3267,8 +3274,7 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
         if (process_total_listener_count < 0) process_total_listener_count = 0;
         js_process_update_events_count();
     }
-    if (process_event_name_equals(event_name, "message", 7) ||
-        process_event_name_equals(event_name, "disconnect", 10)) {
+    if (js_process_is_ipc_event(event_name)) {
         process_ipc_liveness_listener_count = 0;
         js_process_ipc_refresh_ref();
     }
@@ -5177,67 +5183,26 @@ static int encode_charcode_utf8(char* buf, int code) {
 
 static int encode_codepoint_utf8(char* buf, int code);
 
-// Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
-// Takes a Lambda Array or TypedArray of code points and returns a concatenated string
-extern "C" Item js_string_fromCharCode_array(Item arr_item) {
-    TypeId type = get_type_id(arr_item);
-
-    // Handle TypedArray (Uint8Array, Int32Array, etc.)
-    if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        int len = js_typed_array_length(arr_item);
-        if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-        char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
-        int pos = 0;
-        for (int i = 0; i < len; i++) {
-            Item code_item = js_typed_array_get(arr_item, (Item){.item = i2it(i)});
-            Item code_value = js_from_char_code_to_uint16(code_item);
-            if (item_is_error(code_value)) {
-                mem_free(buf);
-                return code_value;
-            }
-            int code = (int)it2i(code_value);
-            // combine adjacent surrogate pairs into a single supplementary codepoint
-            if (utf_is_high_surrogate((uint32_t)code) && i + 1 < len) {
-                Item lo_item = js_typed_array_get(arr_item, (Item){.item = i2it(i + 1)});
-                Item lo_value = js_from_char_code_to_uint16(lo_item);
-                if (item_is_error(lo_value)) {
-                    mem_free(buf);
-                    return lo_value;
-                }
-                int lo = (int)it2i(lo_value);
-                uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
-                if (cp != 0) {
-                    pos += encode_codepoint_utf8(buf + pos, (int)cp);
-                    i++; // skip the low surrogate
-                    continue;
-                }
-            }
-            pos += encode_charcode_utf8(buf + pos, code);
-        }
-        buf[pos] = '\0';
-        Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-        mem_free(buf);
-        return result;
-    }
-
-    if (!js_is_js_array(arr_item)) {
-        return js_string_fromCharCode(arr_item); // fallback: single arg
-    }
-    Array* arr = arr_item.array;
-    int len = arr->length;
+static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
+    int len = typed_array ? js_typed_array_length(source) : source.array->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
     char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
-        Item code_value = js_from_char_code_to_uint16(arr->items[i]);
+        Item index = (Item){.item = i2it(i)};
+        Item code_item = typed_array ? js_typed_array_get(source, index)
+            : source.array->items[i];
+        Item code_value = js_from_char_code_to_uint16(code_item);
         if (item_is_error(code_value)) {
             mem_free(buf);
             return code_value;
         }
         int code = (int)it2i(code_value);
-        // combine adjacent surrogate pairs into a single supplementary codepoint
         if (utf_is_high_surrogate((uint32_t)code) && i + 1 < len) {
-            Item lo_value = js_from_char_code_to_uint16(arr->items[i + 1]);
+            Item next_index = (Item){.item = i2it(i + 1)};
+            Item lo_item = typed_array ? js_typed_array_get(source, next_index)
+                : source.array->items[i + 1];
+            Item lo_value = js_from_char_code_to_uint16(lo_item);
             if (item_is_error(lo_value)) {
                 mem_free(buf);
                 return lo_value;
@@ -5256,6 +5221,16 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
     mem_free(buf);
     return result;
+}
+
+// Multi-argument String.fromCharCode accepts both ordinary arrays and typed arrays.
+extern "C" Item js_string_fromCharCode_array(Item arr_item) {
+    TypeId type = get_type_id(arr_item);
+    if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
+        return js_string_from_char_code_sequence(arr_item, true);
+    }
+    if (!js_is_js_array(arr_item)) return js_string_fromCharCode(arr_item);
+    return js_string_from_char_code_sequence(arr_item, false);
 }
 
 // Helper: encode a full Unicode code point to UTF-8 (up to 4 bytes)
@@ -6994,6 +6969,13 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     key = key_root.get();
     value = value_root.get();
     receiver = receiver_root.get();
+    if (receiver.item == target.item &&
+            js_dom_dataset_set_object_property(target_root.get(), key_root.get(),
+                                               value_root.get())) {
+        // Dataset assignment otherwise takes the ordinary Map fast path and
+        // only mutates the temporary object returned by the getter.
+        return (Item){.item = b2it(true)};
+    }
     if ((get_type_id(target_root.get()) == LMD_TYPE_ERROR ||
          js_is_resting_error(target_root.get())) &&
         receiver_root.get().item == target_root.get().item) {
@@ -15375,18 +15357,20 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     return make_js_undefined();
 }
 
-extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
+static Item js_get_with_binding_or_fallback_impl(Item key, Item fallback,
+        bool strict) {
     if (js_with_stack_depth <= 0) return fallback;
     bool found = false;
-    Item result = js_with_scope_lookup(key, &found, false);
+    Item result = js_with_scope_lookup(key, &found, strict);
     return found ? result : fallback;
 }
 
+extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
+    return js_get_with_binding_or_fallback_impl(key, fallback, false);
+}
+
 extern "C" Item js_get_with_binding_or_fallback_strict(Item key, Item fallback) {
-    if (js_with_stack_depth <= 0) return fallback;
-    bool found = false;
-    Item result = js_with_scope_lookup(key, &found, true);
-    return found ? result : fallback;
+    return js_get_with_binding_or_fallback_impl(key, fallback, true);
 }
 
 extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
@@ -16050,12 +16034,18 @@ extern "C" Item js_evalscript_check_global_lex_decl(Item key) {
 #define js_eval_lexical_binding_count (js_eval_local.lexical_count)
 #define js_eval_immutable_binding_count (js_eval_local.immutable_count)
 
-extern "C" void js_eval_env_push_frame(void) {
-    if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
-        log_error("js-eval-env: frame stack overflow");
+static void js_eval_push_bridge_frame(int* depth, int* marks, int count,
+        const char* label) {
+    if (*depth >= JS_EVAL_ENV_FRAME_MAX) {
+        log_error("js-eval-%s: frame stack overflow", label);
         return;
     }
-    js_eval_env_frame_stack[js_eval_env_frame_depth++] = js_eval_env_binding_count;
+    marks[(*depth)++] = count;
+}
+
+extern "C" void js_eval_env_push_frame(void) {
+    js_eval_push_bridge_frame(&js_eval_env_frame_depth,
+        js_eval_env_frame_stack, js_eval_env_binding_count, "env");
 }
 
 // Bridge vars introduced by a PRIOR direct eval in this function scope
@@ -16091,12 +16081,9 @@ extern "C" void js_eval_env_bridge_journal_vars(void) {
 }
 
 extern "C" void js_eval_global_lexical_push_frame(void) {
-    if (js_eval_global_lexical_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
-        log_error("js-eval-global-lexical: frame stack overflow");
-        return;
-    }
-    js_eval_global_lexical_frame_stack[js_eval_global_lexical_frame_depth++] =
-        js_eval_global_lexical_binding_count;
+    js_eval_push_bridge_frame(&js_eval_global_lexical_frame_depth,
+        js_eval_global_lexical_frame_stack,
+        js_eval_global_lexical_binding_count, "global-lexical");
 }
 
 extern "C" int64_t js_eval_local_push_frame(void) {
@@ -16193,85 +16180,96 @@ extern "C" void js_eval_local_export_var(Item key, Item value) {
     js_eval_local.values[binding_idx] = value;
 }
 
-extern "C" void js_eval_local_note_lexical_binding(Item key) {
-    if (js_eval_local_frame_depth <= 0) return;
-    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark;
-    for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_local.lexical_keys[i], key)) return;
+static void js_eval_local_note_binding(Item key, Item* keys, int* count,
+        int capacity, int frame_start, JsRootRange* roots, const char* label) {
+    for (int i = *count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(keys[i], key)) return;
     }
-    if (js_eval_lexical_binding_count >= JS_EVAL_LEXICAL_BIND_MAX) {
-        log_error("js-eval-lexical: binding stack overflow");
+    if (*count >= capacity) {
+        log_error("js-eval-%s: binding stack overflow", label);
         return;
     }
-    if (!js_root_range_ensure_registered(&js_eval_local.lexical_key_roots)) return;
-    js_eval_local.lexical_keys[js_eval_lexical_binding_count++] = key;
+    if (!js_root_range_ensure_registered(roots)) return;
+    keys[(*count)++] = key;
+}
+
+static int64_t js_eval_local_has_binding(Item* keys, int count, int frame_start,
+        Item key) {
+    for (int i = count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(keys[i], key)) return 1;
+    }
+    return 0;
+}
+
+extern "C" void js_eval_local_note_lexical_binding(Item key) {
+    if (js_eval_local_frame_depth <= 0) return;
+    js_eval_local_note_binding(key, js_eval_local.lexical_keys,
+        &js_eval_lexical_binding_count, JS_EVAL_LEXICAL_BIND_MAX,
+        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark,
+        &js_eval_local.lexical_key_roots, "lexical");
 }
 
 extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return 0;
-    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark;
-    for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_local.lexical_keys[i], key)) return 1;
-    }
-    return 0;
+    return js_eval_local_has_binding(js_eval_local.lexical_keys,
+        js_eval_lexical_binding_count,
+        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark,
+        key);
 }
 
 extern "C" void js_eval_local_note_immutable_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return;
-    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark;
-    for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_local.immutable_keys[i], key)) return;
-    }
-    if (js_eval_immutable_binding_count >= JS_EVAL_IMMUTABLE_BIND_MAX) {
-        log_error("js-eval-immutable: binding stack overflow");
-        return;
-    }
-    if (!js_root_range_ensure_registered(&js_eval_local.immutable_key_roots)) return;
-    js_eval_local.immutable_keys[js_eval_immutable_binding_count++] = key;
+    js_eval_local_note_binding(key, js_eval_local.immutable_keys,
+        &js_eval_immutable_binding_count, JS_EVAL_IMMUTABLE_BIND_MAX,
+        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark,
+        &js_eval_local.immutable_key_roots, "immutable");
 }
 
 extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return 0;
-    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark;
-    for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same(js_eval_local.immutable_keys[i], key)) return 1;
-    }
-    return 0;
+    return js_eval_local_has_binding(js_eval_local.immutable_keys,
+        js_eval_immutable_binding_count,
+        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark,
+        key);
 }
 
-extern "C" void js_eval_env_bind(Item key, Item value) {
-    if (js_eval_env_frame_depth <= 0) return;
-    if (js_eval_env_binding_count >= JS_EVAL_ENV_BIND_MAX) {
-        log_error("js-eval-env: binding stack overflow");
+static void js_eval_bridge_bind(Item key, Item value, int* frame_depth,
+        int* count, Item* keys, bool* had_own, Item* old_values,
+        bool* from_journal, JsRootRange* key_roots, JsRootRange* old_roots,
+        const char* label) {
+    if (*frame_depth <= 0) return;
+    if (*count >= JS_EVAL_ENV_BIND_MAX) {
+        log_error("js-eval-%s: binding stack overflow", label);
         return;
     }
-    if (!js_root_range_ensure_registered(&js_eval_bridge.env_key_roots) ||
-        !js_root_range_ensure_registered(&js_eval_bridge.env_old_value_roots)) return;
+    if (!js_root_range_ensure_registered(key_roots) ||
+        !js_root_range_ensure_registered(old_roots)) return;
     Item global = js_get_global_this();
-    int binding_idx = js_eval_env_binding_count++;
-    js_eval_bridge.env_keys[binding_idx] = key;
-    js_eval_bridge.env_from_journal[binding_idx] = false;
-    js_eval_bridge.env_had_own[binding_idx] = it2b(js_has_own_property(global, key));
-    js_eval_bridge.env_old_values[binding_idx] = js_eval_bridge.env_had_own[binding_idx] ?
+    int binding_idx = (*count)++;
+    keys[binding_idx] = key;
+    if (from_journal) from_journal[binding_idx] = false;
+    had_own[binding_idx] = it2b(js_has_own_property(global, key));
+    old_values[binding_idx] = had_own[binding_idx] ?
         js_get_key_default(global, key) : make_js_undefined();
     js_set_key_default(global, key, value);
 }
 
+extern "C" void js_eval_env_bind(Item key, Item value) {
+    js_eval_bridge_bind(key, value, &js_eval_env_frame_depth,
+        &js_eval_env_binding_count, js_eval_bridge.env_keys,
+        js_eval_bridge.env_had_own, js_eval_bridge.env_old_values,
+        js_eval_bridge.env_from_journal, &js_eval_bridge.env_key_roots,
+        &js_eval_bridge.env_old_value_roots, "env");
+}
+
 extern "C" void js_eval_global_lexical_bind(Item key, Item value) {
-    if (js_eval_global_lexical_frame_depth <= 0) return;
-    if (js_eval_global_lexical_binding_count >= JS_EVAL_ENV_BIND_MAX) {
-        log_error("js-eval-global-lexical: binding stack overflow");
-        return;
-    }
-    if (!js_root_range_ensure_registered(&js_eval_bridge.global_lexical_key_roots) ||
-        !js_root_range_ensure_registered(&js_eval_bridge.global_lexical_old_value_roots)) return;
-    Item global = js_get_global_this();
-    int binding_idx = js_eval_global_lexical_binding_count++;
-    js_eval_bridge.global_lexical_keys[binding_idx] = key;
-    js_eval_bridge.global_lexical_had_own[binding_idx] = it2b(js_has_own_property(global, key));
-    js_eval_bridge.global_lexical_old_values[binding_idx] =
-        js_eval_bridge.global_lexical_had_own[binding_idx] ? js_get_key_default(global, key) : make_js_undefined();
-    js_set_key_default(global, key, value);
+    js_eval_bridge_bind(key, value, &js_eval_global_lexical_frame_depth,
+        &js_eval_global_lexical_binding_count,
+        js_eval_bridge.global_lexical_keys,
+        js_eval_bridge.global_lexical_had_own,
+        js_eval_bridge.global_lexical_old_values, NULL,
+        &js_eval_bridge.global_lexical_key_roots,
+        &js_eval_bridge.global_lexical_old_value_roots, "global-lexical");
 }
 
 extern "C" int64_t js_eval_env_has_binding(Item key) {

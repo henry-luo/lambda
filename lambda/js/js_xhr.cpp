@@ -22,9 +22,7 @@
 #include <cstring>
 #include <cstdlib>
 
-static inline Item make_js_undef() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
+#define make_js_undef make_js_undefined
 
 static Item js_xhr_noop(void) {
     return make_js_undef();

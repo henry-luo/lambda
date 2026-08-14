@@ -1,0 +1,9 @@
+deliveries:1
+records:1
+names:data-empty
+old:false
+feedback:0
+value:true
+toggle-records:1
+toggle-name:data-enabled
+toggle-old:null

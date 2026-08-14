@@ -4753,28 +4753,6 @@ static JsAstNode* build_ts_variable_decl_u(JsTranspiler* tp, TSNode var_node) {
     return (JsAstNode*)var_decl;
 }
 
-// ============================================================================
-// TS error handling
-// ============================================================================
-
-void ts_error(JsTranspiler* tp, TSNode node, const char* format, ...) {
-    tp->has_errors = true;
-    TSPoint pos = ts_node_start_point(node);
-    char prefix[128];
-    snprintf(prefix, sizeof(prefix), "ts error [%d:%d]: ", pos.row + 1, pos.column + 1);
-    if (tp->error_buf) {
-        strbuf_append_str(tp->error_buf, prefix);
-    }
-    log_error("%s", prefix);
-    (void)format;
-}
-
-void ts_warning(JsTranspiler* tp, TSNode node, const char* format, ...) {
-    TSPoint pos = ts_node_start_point(node);
-    log_debug("ts warning [%d:%d]", pos.row + 1, pos.column + 1);
-    (void)format;
-}
-
 // Main AST building entry point
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root) {
     const char* node_type = ts_node_type(root);

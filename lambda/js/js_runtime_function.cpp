@@ -571,95 +571,66 @@ static Item js_new_distinct_native_rest_constructor(JsNativeP8 target);
 // private overloads preserve the adapter contract while forcing one function
 // object per installed property; D6.2.2v2 permits body sharing but JC7 makes
 // distinct identity the default unless an owner explicitly publishes an alias.
-#define JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(arity, type) \
-    static Item js_new_distinct_native_function(type target, int adapter_arity) { \
-        if (adapter_arity == arity) return js_new_distinct_native_function(target); \
-        if (arity > 0 && adapter_arity == -arity) \
-            return js_new_distinct_native_rest_function(target); \
-        log_error("js-distinct-native-factory: target arity %d mismatches adapter %d", \
-            arity, adapter_arity); \
+#define JS_DEFINE_NATIVE_ADAPTER_FACTORY(arity, type) \
+    static Item js_new_native_adapter(type target, int adapter_arity, \
+            bool constructor, bool distinct) { \
+        if (adapter_arity == arity) { \
+            if (constructor) return distinct ? js_new_distinct_native_constructor(target) : js_new_native_constructor(target); \
+            return distinct ? js_new_distinct_native_function(target) : js_new_native_function(target); \
+        } \
+        if (arity > 0 && adapter_arity == -arity) { \
+            if (constructor) return distinct ? js_new_distinct_native_rest_constructor(target) : js_new_native_rest_constructor(target); \
+            return distinct ? js_new_distinct_native_rest_function(target) : js_new_native_rest_function(target); \
+        } \
+        log_error("js-native-adapter: target arity %d mismatches adapter %d", arity, adapter_arity); \
         return ItemError; \
     } \
-    static Item js_new_distinct_native_constructor(type target, int adapter_arity) { \
-        if (adapter_arity == arity) return js_new_distinct_native_constructor(target); \
-        if (arity > 0 && adapter_arity == -arity) \
-            return js_new_distinct_native_rest_constructor(target); \
-        log_error("js-distinct-native-constructor-factory: target arity %d mismatches adapter %d", \
-            arity, adapter_arity); \
-        return ItemError; \
-    }
-
-static Item js_new_distinct_native_function(JsNativeP0 target,
-        int adapter_arity) {
-    if (adapter_arity == 0) return js_new_distinct_native_function(target);
-    log_error("js-distinct-native-factory: target arity 0 mismatches adapter %d",
-        adapter_arity);
-    return ItemError;
-}
-
-static Item js_new_distinct_native_constructor(JsNativeP0 target,
-        int adapter_arity) {
-    if (adapter_arity == 0) return js_new_distinct_native_constructor(target);
-    log_error("js-distinct-native-constructor-factory: target arity 0 mismatches adapter %d",
-        adapter_arity);
-    return ItemError;
-}
-
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(1, JsNativeP1)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(2, JsNativeP2)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(3, JsNativeP3)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(4, JsNativeP4)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(5, JsNativeP5)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(6, JsNativeP6)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(7, JsNativeP7)
-JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(8, JsNativeP8)
-
-#undef JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY
-
-#define JS_DEFINE_NATIVE_ARITY_FACTORY(arity, type) \
     Item js_new_native_function(type target, int adapter_arity) { \
-        if (adapter_arity == arity) return js_new_native_function(target); \
-        if (arity > 0 && adapter_arity == -arity) \
-            return js_new_native_rest_function(target); \
-        /* D6.2.2v2: reject ABI/adapter disagreement at publication so call \
-         * dispatch never reinterprets the target from mutable metadata. */ \
-        log_error("js-native-factory: target arity %d mismatches adapter %d", \
-            arity, adapter_arity); \
-        return ItemError; \
+        return js_new_native_adapter(target, adapter_arity, false, false); \
+    } \
+    static Item js_new_distinct_native_function(type target, int adapter_arity) { \
+        return js_new_native_adapter(target, adapter_arity, false, true); \
     } \
     Item js_new_native_constructor(type target, int adapter_arity) { \
-        if (adapter_arity == arity) return js_new_native_constructor(target); \
-        if (arity > 0 && adapter_arity == -arity) \
-            return js_new_native_rest_constructor(target); \
-        log_error("js-native-constructor-factory: target arity %d mismatches adapter %d", \
-            arity, adapter_arity); \
-        return ItemError; \
+        return js_new_native_adapter(target, adapter_arity, true, false); \
+    } \
+    static Item js_new_distinct_native_constructor(type target, int adapter_arity) { \
+        return js_new_native_adapter(target, adapter_arity, true, true); \
     }
 
-Item js_new_native_function(JsNativeP0 target, int adapter_arity) {
-    if (adapter_arity == 0) return js_new_native_function(target);
-    // D6.2.2v2 rejects metadata that would reinterpret a zero-arity target.
-    log_error("js-native-factory: target arity 0 mismatches adapter %d",
-        adapter_arity);
+static Item js_new_native_adapter(JsNativeP0 target, int adapter_arity,
+        bool constructor, bool distinct) {
+    if (adapter_arity == 0) {
+        if (constructor) return distinct ? js_new_distinct_native_constructor(target) : js_new_native_constructor(target);
+        return distinct ? js_new_distinct_native_function(target) : js_new_native_function(target);
+    }
+    log_error("js-native-adapter: target arity 0 mismatches adapter %d", adapter_arity);
     return ItemError;
+}
+
+Item js_new_native_function(JsNativeP0 target, int adapter_arity) {
+    return js_new_native_adapter(target, adapter_arity, false, false);
+}
+static Item js_new_distinct_native_function(JsNativeP0 target, int adapter_arity) {
+    return js_new_native_adapter(target, adapter_arity, false, true);
 }
 Item js_new_native_constructor(JsNativeP0 target, int adapter_arity) {
-    if (adapter_arity == 0) return js_new_native_constructor(target);
-    // D6.2.2v2 rejects metadata that would reinterpret a zero-arity target.
-    log_error("js-native-constructor-factory: target arity 0 mismatches adapter %d",
-        adapter_arity);
-    return ItemError;
+    return js_new_native_adapter(target, adapter_arity, true, false);
 }
-JS_DEFINE_NATIVE_ARITY_FACTORY(1, JsNativeP1)
-JS_DEFINE_NATIVE_ARITY_FACTORY(2, JsNativeP2)
-JS_DEFINE_NATIVE_ARITY_FACTORY(3, JsNativeP3)
-JS_DEFINE_NATIVE_ARITY_FACTORY(4, JsNativeP4)
-JS_DEFINE_NATIVE_ARITY_FACTORY(5, JsNativeP5)
-JS_DEFINE_NATIVE_ARITY_FACTORY(6, JsNativeP6)
-JS_DEFINE_NATIVE_ARITY_FACTORY(7, JsNativeP7)
-JS_DEFINE_NATIVE_ARITY_FACTORY(8, JsNativeP8)
+static Item js_new_distinct_native_constructor(JsNativeP0 target, int adapter_arity) {
+    return js_new_native_adapter(target, adapter_arity, true, true);
+}
 
-#undef JS_DEFINE_NATIVE_ARITY_FACTORY
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(1, JsNativeP1)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(2, JsNativeP2)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(3, JsNativeP3)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(4, JsNativeP4)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(5, JsNativeP5)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(6, JsNativeP6)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(7, JsNativeP7)
+JS_DEFINE_NATIVE_ADAPTER_FACTORY(8, JsNativeP8)
+
+#undef JS_DEFINE_NATIVE_ADAPTER_FACTORY
 
 #define JS_DEFINE_NATIVE_INSTALLER(name_suffix, factory, arity, type, adapter_param, adapter_arg) \
     Item js_install_native_##name_suffix(Item object, const char* name, \
@@ -813,14 +784,6 @@ Item js_new_native_this_span_function(JsNativeThisSpan target) {
         JS_NATIVE_CALL_THIS_SPAN, false, false);
 }
 
-Item js_new_native_span_constructor(JsNativeSpan target) {
-    JsNativeTarget stored = {};
-    stored.span = target;
-    return js_new_native_function_impl(stored, js_native_call_span, NULL,
-        js_native_cache_key(target, 0, JS_NATIVE_CALL_SPAN, true), 0,
-        JS_NATIVE_CALL_SPAN, true, false);
-}
-
 Item js_new_native_body_constructor(JsNativeCallBody call_body,
         JsNativeConstructBody construct_body, int formal_length) {
     JsNativeTarget stored = {};
@@ -839,38 +802,6 @@ Item js_new_native_payload_function(JsNativeCallBody call_body,
     return js_new_native_function_impl(stored, call_body, NULL,
         js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY),
         formal_length, JS_NATIVE_CALL_BODY, false, true);
-}
-
-static Item js_native_call_env_span(Item fn_item, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)this_value; (void)result_home;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    if (!fn || !fn->native_target.env_span) return ItemError;
-    Item env_item = {.item = (uint64_t)(uintptr_t)fn->env};
-    return fn->native_target.env_span(env_item, args, argc);
-}
-
-Item js_new_native_env_span_closure(JsNativeEnvSpan target, int formal_length,
-        Item* env, int env_size) {
-    JsNativeTarget stored = {};
-    stored.env_span = target;
-    RootFrame roots(2);
-    Rooted<Item> env_owner_root(roots,
-        (Item){.item = (uint64_t)(uintptr_t)env});
-    Rooted<Item> fn_root(roots, js_new_native_function_impl(stored,
-        js_native_call_env_span, NULL,
-        js_native_cache_key(target, 0, JS_NATIVE_CALL_ENV_SPAN), 0,
-        JS_NATIVE_CALL_ENV_SPAN, false, true));
-    if (get_type_id(fn_root.get()) != LMD_TYPE_FUNC) return fn_root.get();
-    JsFunction* fn = (JsFunction*)fn_root.get().function;
-    // D5.3.3/D6.2.2v2: attach the precisely traced environment before any
-    // scalar rehoming while the unpublished wrapper remains rooted.
-    fn->env = env;
-    fn->env_size = env_size;
-    js_set_formal_length(fn_root.get(), formal_length);
-    js_env_rehome_scalars(fn->env);
-    js_function_finalize_capabilities(fn);
-    return fn_root.get();
 }
 
 #define JS_DEFINE_NATIVE_CLOSURE_ADAPTER(exposed_arity, member, call_args) \

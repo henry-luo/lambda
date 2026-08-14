@@ -1651,7 +1651,6 @@ static bool js_eval_strict_assigns_restricted_name(String* code_str) {
     size_t pos = 0;
     while (pos < len) {
         if (js_eval_skip_string_or_comment(source, len, &pos)) continue;
-        char ch = source[pos];
         size_t name_len = 0;
         if (js_eval_at_word(source, len, pos, "arguments", 9)) name_len = 9;
         else if (js_eval_at_word(source, len, pos, "eval", 4)) name_len = 4;

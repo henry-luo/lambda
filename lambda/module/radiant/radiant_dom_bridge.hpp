@@ -48,6 +48,7 @@ typedef enum RadiantDocumentOperation {
     RADIANT_DOCUMENT_DISPATCH_EVENT,
     RADIANT_DOCUMENT_CREATE_TREE_WALKER,
     RADIANT_DOCUMENT_CREATE_EVENT,
+    RADIANT_DOCUMENT_EXEC_COMMAND,
 } RadiantDocumentOperation;
 
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);

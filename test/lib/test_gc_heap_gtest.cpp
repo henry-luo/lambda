@@ -108,6 +108,8 @@ static int external_destroy_calls = 0;
 static uint16_t external_destroy_last_tag = 0;
 static int weak_clear_calls = 0;
 static void* weak_clear_context = nullptr;
+static int ephemeron_clear_calls = 0;
+static uint64_t ephemeron_cleared_key = 0;
 
 static void test_external_destroy(void* data, uint16_t type_tag) {
     external_destroy_calls++;
@@ -119,6 +121,12 @@ static void test_weak_clear(uint64_t* slot, void* context) {
     weak_clear_calls++;
     weak_clear_context = context;
     EXPECT_EQ(*slot, 0u);
+}
+
+static void test_ephemeron_clear(uint64_t key, void* context) {
+    ephemeron_clear_calls++;
+    ephemeron_cleared_key = key;
+    EXPECT_EQ(context, &ephemeron_clear_calls);
 }
 
 TEST(SideStackRootFrameTest, NestedFramesRestoreExactWatermarks) {
@@ -803,6 +811,136 @@ TEST_F(GCHeapTest, UnregisteredWeakSlotIsNotTouched) {
 
     EXPECT_NE(weak, 0u);
     EXPECT_EQ(weak_clear_calls, 0);
+}
+
+TEST_F(GCHeapTest, EphemeronRetainsValueForReachableKey) {
+    ephemeron_clear_calls = 0;
+    uint64_t key = string_item(make_string("key"));
+    uint64_t value = string_item(make_string("value"));
+    uint64_t root = key;
+    gc_register_root(gc, &root);
+    ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value,
+        test_ephemeron_clear, &ephemeron_clear_calls));
+
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_NE(key, 0u);
+    EXPECT_NE(value, 0u);
+    EXPECT_EQ(ephemeron_clear_calls, 0);
+    EXPECT_EQ(gc->object_count, 2u);
+    EXPECT_EQ(gc->ephemeron_count, 0);
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, EphemeronClearsValueForDeadKey) {
+    ephemeron_clear_calls = 0;
+    ephemeron_cleared_key = 0;
+    uint64_t key = string_item(make_string("dead-key"));
+    uint64_t original_key = key;
+    uint64_t value = string_item(make_string("dead-value"));
+    ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value,
+        test_ephemeron_clear, &ephemeron_clear_calls));
+
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_EQ(ephemeron_clear_calls, 1);
+    EXPECT_EQ(ephemeron_cleared_key, original_key);
+    EXPECT_EQ(key, 0u);
+    EXPECT_EQ(value, 0u);
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(gc->ephemeron_count, 0);
+}
+
+TEST_F(GCHeapTest, EphemeronReachabilityConvergesTransitively) {
+    ephemeron_clear_calls = 0;
+    uint64_t first_key = string_item(make_string("first-key"));
+    uint64_t second_key = string_item(make_string("second-key"));
+    uint64_t final_value = string_item(make_string("final-value"));
+    uint64_t root = first_key;
+    gc_register_root(gc, &root);
+    // Reverse registration proves that a newly marked key triggers another pass.
+    ASSERT_TRUE(gc_register_ephemeron(gc, &second_key, &final_value,
+        test_ephemeron_clear, &ephemeron_clear_calls));
+    ASSERT_TRUE(gc_register_ephemeron(gc, &first_key, &second_key,
+        test_ephemeron_clear, &ephemeron_clear_calls));
+
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_NE(second_key, 0u);
+    EXPECT_NE(final_value, 0u);
+    EXPECT_EQ(ephemeron_clear_calls, 0);
+    EXPECT_EQ(gc->object_count, 3u);
+    EXPECT_EQ(gc->ephemeron_count, 0);
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, EphemeronValueCannotKeepItsOwnKeyAlive) {
+    ephemeron_clear_calls = 0;
+    void* key_object = make_list(0, 1);
+    void* value_object = make_list(1, 1);
+    uint64_t key = list_item(key_object);
+    uint64_t value = list_item(value_object);
+    uint64_t* value_items = *(uint64_t**)((uint8_t*)value_object + 8);
+    ASSERT_NE(value_items, nullptr);
+    value_items[0] = key;
+    ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value,
+        test_ephemeron_clear, &ephemeron_clear_calls));
+
+    gc_collect(gc, NULL, 0);
+
+    // A WeakMap value-to-key cycle has no independent root and must not turn
+    // the ephemeron into the strong edge that caused retained editor state.
+    EXPECT_EQ(key, 0u);
+    EXPECT_EQ(value, 0u);
+    EXPECT_EQ(ephemeron_clear_calls, 1);
+    EXPECT_EQ(gc->object_count, 0u);
+}
+
+TEST_F(GCHeapTest, EphemeronRegistryGrowsAndClearsManyDeadEntries) {
+    static const int entry_count = 128;
+    uint64_t keys[entry_count] = {};
+    uint64_t values[entry_count] = {};
+    ephemeron_clear_calls = 0;
+
+    for (int i = 0; i < entry_count; i++) {
+        keys[i] = string_item(make_string("dead-key"));
+        values[i] = string_item(make_string("dead-value"));
+        ASSERT_TRUE(gc_register_ephemeron(gc, &keys[i], &values[i],
+            test_ephemeron_clear, &ephemeron_clear_calls));
+    }
+    ASSERT_GE(gc->ephemeron_capacity, entry_count);
+
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_EQ(ephemeron_clear_calls, entry_count);
+    EXPECT_EQ(gc->ephemeron_count, 0);
+    EXPECT_EQ(gc->object_count, 0u);
+    for (int i = 0; i < entry_count; i++) {
+        EXPECT_EQ(keys[i], 0u);
+        EXPECT_EQ(values[i], 0u);
+    }
+}
+
+TEST_F(GCHeapTest, EphemeronRegistryDoesNotRootAcrossCollections) {
+    ephemeron_clear_calls = 0;
+    uint64_t key = string_item(make_string("one-cycle-key"));
+    uint64_t value = string_item(make_string("one-cycle-value"));
+    uint64_t root = key;
+    gc_register_root(gc, &root);
+    ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value,
+        test_ephemeron_clear, &ephemeron_clear_calls));
+
+    gc_collect(gc, NULL, 0);
+    ASSERT_EQ(gc->object_count, 2u);
+    ASSERT_EQ(gc->ephemeron_count, 0);
+
+    gc_unregister_root(gc, &root);
+    gc_collect(gc, NULL, 0);
+
+    // Registrations describe one mark graph only; retaining them would keep
+    // otherwise dead WeakMap keys and values alive on every later collection.
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(gc->ephemeron_count, 0);
 }
 
 TEST_F(GCHeapTest, RegisterRoot) {

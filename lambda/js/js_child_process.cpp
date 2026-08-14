@@ -303,11 +303,15 @@ static void child_append_buffer(JsChildProcess* cp, const char* stream_name,
     }
 }
 
-static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+static void child_output_read_cb(uv_stream_t* stream, ssize_t nread,
+                                 const uv_buf_t* buf, bool is_stderr) {
     JsChildProcess* cp = (JsChildProcess*)stream->data;
     if (nread > 0 && cp) {
-        child_append_buffer(cp, "stdout", &cp->stdout_buf, &cp->stdout_len,
-                            &cp->stdout_cap, buf->base, (size_t)nread);
+        child_append_buffer(cp, is_stderr ? "stderr" : "stdout",
+            is_stderr ? &cp->stderr_buf : &cp->stdout_buf,
+            is_stderr ? &cp->stderr_len : &cp->stdout_len,
+            is_stderr ? &cp->stderr_cap : &cp->stdout_cap,
+            buf->base, (size_t)nread);
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0) { // EOF or error
@@ -319,20 +323,14 @@ static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
     }
 }
 
-static void child_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
-    JsChildProcess* cp = (JsChildProcess*)stream->data;
-    if (nread > 0 && cp) {
-        child_append_buffer(cp, "stderr", &cp->stderr_buf, &cp->stderr_len,
-                            &cp->stderr_cap, buf->base, (size_t)nread);
-    }
-    if (buf->base) mem_free(buf->base);
-    if (nread < 0) { // EOF or error
-        uv_close((uv_handle_t*)stream, child_handle_close_cb);
-        if (cp) {
-            cp->pipes_closed++;
-            maybe_complete(cp);
-        }
-    }
+static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread,
+                                 const uv_buf_t* buf) {
+    child_output_read_cb(stream, nread, buf, false);
+}
+
+static void child_stderr_read_cb(uv_stream_t* stream, ssize_t nread,
+                                 const uv_buf_t* buf) {
+    child_output_read_cb(stream, nread, buf, true);
 }
 
 // =============================================================================
@@ -1636,42 +1634,40 @@ static void spawn_emit_data(Item stream_obj, const char* data, int len) {
     spawn_emit_event(stream_obj, "data", &data_str, 1);
 }
 
-static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+static void spawn_output_read_cb(uv_stream_t* stream, ssize_t nread,
+                                 const uv_buf_t* buf, bool is_stderr) {
     JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
-    Item stdout_obj = sp ? js_get_key_default(sp->js_object, make_string_item("stdout")) : ItemNull;
+    Item output_obj = sp ? js_get_key_default(sp->js_object,
+        make_string_item(is_stderr ? "stderr" : "stdout")) : ItemNull;
     if (nread > 0 && sp) {
-        spawn_emit_data(stdout_obj, buf->base, (int)nread);
+        spawn_emit_data(output_obj, buf->base, (int)nread);
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0) {
         if (sp) {
-            sp->stdout_pipe_active = false;
-            sp->stdout_pipe_reading = false;
-            spawn_emit_event(stdout_obj, "end", NULL, 0);
-            spawn_emit_event(stdout_obj, "close", NULL, 0);
+            if (is_stderr) {
+                sp->stderr_pipe_active = false;
+                sp->stderr_pipe_reading = false;
+            } else {
+                sp->stdout_pipe_active = false;
+                sp->stdout_pipe_reading = false;
+            }
+            spawn_emit_event(output_obj, "end", NULL, 0);
+            spawn_emit_event(output_obj, "close", NULL, 0);
             spawn_maybe_emit_process_close(sp);
         }
         uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
     }
 }
 
-static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
-    JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
-    Item stderr_obj = sp ? js_get_key_default(sp->js_object, make_string_item("stderr")) : ItemNull;
-    if (nread > 0 && sp) {
-        spawn_emit_data(stderr_obj, buf->base, (int)nread);
-    }
-    if (buf->base) mem_free(buf->base);
-    if (nread < 0) {
-        if (sp) {
-            sp->stderr_pipe_active = false;
-            sp->stderr_pipe_reading = false;
-            spawn_emit_event(stderr_obj, "end", NULL, 0);
-            spawn_emit_event(stderr_obj, "close", NULL, 0);
-            spawn_maybe_emit_process_close(sp);
-        }
-        uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
-    }
+static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread,
+                                 const uv_buf_t* buf) {
+    spawn_output_read_cb(stream, nread, buf, false);
+}
+
+static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread,
+                                 const uv_buf_t* buf) {
+    spawn_output_read_cb(stream, nread, buf, true);
 }
 
 static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_signal) {

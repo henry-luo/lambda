@@ -472,22 +472,6 @@ void js_error(JsTranspiler* tp, TSNode node, const char* format, ...) {
     log_error("JavaScript transpiler error: %s", buffer);
 }
 
-void js_warning(JsTranspiler* tp, TSNode node, const char* format, ...) {
-    // Add location information
-    uint32_t start_row = ts_node_start_point(node).row;
-    uint32_t start_col = ts_node_start_point(node).column;
-
-    // Format warning message
-    va_list args;
-    va_start(args, format);
-    char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), format, args);
-    va_end(args);
-
-    log_warn("JavaScript transpiler warning at line %u, column %u: %s",
-             start_row + 1, start_col + 1, buffer);
-}
-
 // Transpiler lifecycle functions
 
 JsTranspiler* js_transpiler_create(Runtime* runtime) {

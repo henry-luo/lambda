@@ -1543,14 +1543,8 @@ extern "C" Item js_dns_setServers(Item servers_item) {
     return make_js_undefined();
 }
 
-static bool dns_copy_string_value(Item value, char* out, int out_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return false;
-    String* str = it2s(value);
-    int len = (int)str->len < out_size - 1 ? (int)str->len : out_size - 1;
-    memcpy(out, str->chars, (size_t)len);
-    out[len] = '\0';
-    return true;
-}
+#define dns_copy_string_value(value, out, out_size) \
+    (js_item_to_cstr((value), (out), (out_size)) != NULL)
 
 static int dns_ip_address_family(const char* address) {
     struct sockaddr_in addr4;

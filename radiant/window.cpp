@@ -1236,7 +1236,15 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
-                    radiant_pump_js_event_loop(&ui_context, retry_wait_ms);
+                    if (js_event_loop_virtual_clock_enabled()) {
+                        // Assertion retries run on the virtual headless clock;
+                        // a wall-clock pump would wait without advancing the
+                        // timers that complete asynchronous editor startup.
+                        radiant_advance_js_event_loop(&ui_context,
+                                                      (double)retry_wait_ms, 0);
+                    } else {
+                        radiant_pump_js_event_loop(&ui_context, retry_wait_ms);
+                    }
                     current_time += retry_wait_ms / 1000.0;
                     continue;
                 }

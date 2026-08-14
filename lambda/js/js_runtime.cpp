@@ -39,6 +39,7 @@ typedef struct JsRegExpMapCarrier JsRegExpMapCarrier;
 static JsRegexData* js_get_regex_data(Item obj);
 static void js_regexp_transfer_payload(Item destination, Item source);
 static Item js_get_regexp_prototype();
+static Item js_make_iter_result(Item value, bool done);
 
 extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING || !buf || buf_size <= 0) return NULL;
@@ -87,6 +88,8 @@ extern "C" void js_dom_event_handler_property_set(Item target,
                                                     const char* property_name,
                                                     int property_name_len,
                                                     Item value);
+extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
+                                                     Item value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
@@ -2137,6 +2140,14 @@ extern "C" Item js_proxy_trap_prevent_extensions(Item proxy) {
 }
 
 // Proxy [[Call]](thisArg, args)
+static Item js_proxy_args_array(Item* args, int arg_count) {
+    Item args_array = js_array_new(0);
+    for (int i = 0; i < arg_count; i++) {
+        js_array_push(args_array, args[i]);
+    }
+    return args_array;
+}
+
 extern "C" Item js_proxy_trap_apply(Item proxy, Item this_val, Item* args, int arg_count) {
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return ItemNull;
@@ -2145,11 +2156,7 @@ extern "C" Item js_proxy_trap_apply(Item proxy, Item this_val, Item* args, int a
     if (trap.item == ItemNull.item) {
         return js_call_function(PD_TARGET(pd), this_val, args, arg_count);
     }
-    // build args array
-    Item args_array = js_array_new(0);
-    for (int i = 0; i < arg_count; i++) {
-        js_array_push(args_array, args[i]);
-    }
+    Item args_array = js_proxy_args_array(args, arg_count);
     Item trap_args[3] = { PD_TARGET(pd), this_val, args_array };
     return js_call_function(trap, PD_HANDLER(pd), trap_args, 3);
 }
@@ -2160,18 +2167,11 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
     if (!pd) return ItemNull;
     JS_ASSIGN_OR_RETURN(trap, js_proxy_get_trap(pd, "construct", 9));
     if (trap.item == ItemNull.item) {
-        Item args_array = js_array_new(0);
-        for (int i = 0; i < arg_count; i++) {
-            js_array_push(args_array, args[i]);
-        }
+        Item args_array = js_proxy_args_array(args, arg_count);
         Item nt = new_target.item != ItemNull.item ? new_target : proxy;
         return js_reflect_construct(PD_TARGET(pd), args_array, nt);
     }
-    // build args array
-    Item args_array = js_array_new(0);
-    for (int i = 0; i < arg_count; i++) {
-        js_array_push(args_array, args[i]);
-    }
+    Item args_array = js_proxy_args_array(args, arg_count);
     Item trap_args[3] = { PD_TARGET(pd), args_array, new_target.item != ItemNull.item ? new_target : proxy };
     JS_ASSIGN_OR_RETURN(result, js_call_function(trap, PD_HANDLER(pd), trap_args, 3));
     if (get_type_id(result) != LMD_TYPE_MAP && !js_is_js_array(result) &&
@@ -3347,32 +3347,28 @@ Item js_intrinsic_ctor_string_call_body(Item callee, Item this_value,
     return js_to_string(value);
 }
 
-Item js_intrinsic_ctor_number_call_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    // D6.2.2v2: the direct Number call target must retain Number's explicit
-    // BigInt conversion; generic ToNumber rejects BigInt by design.
-    return argc > 0 && args ? js_number_function(args[0]) : js_make_number(0.0);
-}
+#define JS_CONSTRUCTOR_UNARY_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        Item arg0 = argc > 0 && args ? args[0] : make_js_undefined(); \
+        bool has_arg = argc > 0 && args; \
+        return (expression); \
+    }
 
-Item js_intrinsic_ctor_boolean_call_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return argc > 0 && args ? js_to_boolean(args[0]) : (Item){.item = ITEM_FALSE};
-}
-
-Item js_intrinsic_ctor_symbol_call_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_symbol_create(argc > 0 && args ? args[0] : make_js_undefined());
-}
+// D6.2.2v2: Number keeps its explicit BigInt conversion; generic ToNumber
+// rejects BigInt by design.
+JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_number_call_body,
+    has_arg ? js_number_function(arg0) : js_make_number(0.0))
+JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_boolean_call_body,
+    has_arg ? js_to_boolean(arg0) : (Item){.item = ITEM_FALSE})
+JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_symbol_call_body,
+    js_symbol_create(arg0))
 
 extern "C" Item js_bigint_constructor(Item value);
-Item js_intrinsic_ctor_bigint_call_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_bigint_constructor(argc > 0 && args ? args[0] : make_js_undefined());
-}
+JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_bigint_call_body,
+    js_bigint_constructor(arg0))
+#undef JS_CONSTRUCTOR_UNARY_BODY
 
 Item js_intrinsic_ctor_regexp_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -3396,11 +3392,15 @@ Item js_intrinsic_ctor_regexp_call_body(Item callee, Item this_value,
     return js_regexp_construct(pattern, flags);
 }
 
-Item js_intrinsic_ctor_date_call_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
-    return js_date_now_string();
-}
+#define JS_CONSTRUCTOR_NOARG_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)args; (void)argc; \
+        (void)result_home; \
+        return (expression); \
+    }
+JS_CONSTRUCTOR_NOARG_BODY(js_intrinsic_ctor_date_call_body, js_date_now_string())
+#undef JS_CONSTRUCTOR_NOARG_BODY
 
 #define JS_DEFINE_ERROR_CTOR_CALL_BODY(token, policy) \
     Item js_intrinsic_ctor_##token##_call_body(Item callee, Item this_value, \
@@ -6969,6 +6969,9 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         // new String("x") must address property "x", not an unnameable slot.
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
+    if (!bypass_accessor_dispatch && js_dom_dataset_set_object_property(object, key, value)) {
+        return value;
+    }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -10340,6 +10343,9 @@ static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_co
 // formals; keep this broader boxed-call ABI separate from that optimization.
 enum { JS_MIR_CONTEXT_CALL_MAX_ARITY = 32 };
 
+#define JS_MIR_CALL_ARITIES_0_15(X) X(0) X(1) X(2) X(3) X(4) X(5) X(6) X(7) X(8) X(9) X(10) X(11) X(12) X(13) X(14) X(15)
+#define JS_MIR_CALL_ARITIES_0_32(X) X(0) X(1) X(2) X(3) X(4) X(5) X(6) X(7) X(8) X(9) X(10) X(11) X(12) X(13) X(14) X(15) X(16) X(17) X(18) X(19) X(20) X(21) X(22) X(23) X(24) X(25) X(26) X(27) X(28) X(29) X(30) X(31) X(32)
+
 template <size_t... Indices>
 struct JsMirCallArgSequence {};
 
@@ -10371,6 +10377,25 @@ static Item js_invoke_mir_context_wrapper(void* func_ptr, Context* runtime,
     return js_invoke_mir_context_wrapper_impl<HasEnv>(func_ptr, runtime,
         args, env, scalar_result_home,
         typename JsMirMakeCallArgSequence<Count>::Type());
+}
+
+template <bool HasEnv, size_t... Indices>
+static Item js_invoke_public_wrapper_impl(void* func_ptr, const Item* args,
+        Item env, uint64_t* scalar_result_home,
+        JsMirCallArgSequence<Indices...>) {
+    if constexpr (HasEnv) {
+        typedef Item (*Fn)(Item, decltype((void)Indices, Item{})..., uint64_t*);
+        return ((Fn)func_ptr)(env, args[Indices]..., scalar_result_home);
+    }
+    typedef Item (*Fn)(decltype((void)Indices, Item{})..., uint64_t*);
+    return ((Fn)func_ptr)(args[Indices]..., scalar_result_home);
+}
+
+template <size_t Count, bool HasEnv>
+static Item js_invoke_public_wrapper(void* func_ptr, const Item* args,
+        Item env, uint64_t* scalar_result_home) {
+    return js_invoke_public_wrapper_impl<HasEnv>(func_ptr, args, env,
+        scalar_result_home, typename JsMirMakeCallArgSequence<Count>::Type());
 }
 
 static Item* js_root_span_items(RootSpan& span) {
@@ -10458,45 +10483,31 @@ JS_GLOBAL_UNARY_BODY(js_intrinsic_global_btoa_body, js_btoa(arg0))
 #undef JS_GLOBAL_BINARY_BODY
 #undef JS_GLOBAL_UNARY_BODY
 
+#define JS_GLOBAL_VOID_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        expression; \
+        return make_js_undefined(); \
+    }
+
+JS_GLOBAL_VOID_BODY(js_intrinsic_global_clear_timeout_body,
+    js_clearTimeout(argc > 0 ? args[0] : ItemNull))
+JS_GLOBAL_VOID_BODY(js_intrinsic_global_clear_interval_body,
+    js_clearInterval(argc > 0 ? args[0] : ItemNull))
+JS_GLOBAL_VOID_BODY(js_intrinsic_global_clear_immediate_body,
+    js_clearImmediate(argc > 0 ? args[0] : ItemNull))
+JS_GLOBAL_VOID_BODY(js_intrinsic_global_cancel_animation_frame_body,
+    js_cancelAnimationFrame(argc > 0 ? args[0] : ItemNull))
+JS_GLOBAL_VOID_BODY(js_intrinsic_global_queue_microtask_body,
+    js_microtask_enqueue(argc > 0 ? args[0] : ItemNull))
+
+#undef JS_GLOBAL_VOID_BODY
+
 Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
     (void)callee; (void)this_value; (void)result_home;
     js_console_log(argc > 0 ? args[0] : ItemNull);
-    return make_js_undefined();
-}
-
-Item js_intrinsic_global_clear_timeout_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    js_clearTimeout(argc > 0 ? args[0] : ItemNull);
-    return make_js_undefined();
-}
-
-Item js_intrinsic_global_clear_interval_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    js_clearInterval(argc > 0 ? args[0] : ItemNull);
-    return make_js_undefined();
-}
-
-Item js_intrinsic_global_clear_immediate_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    js_clearImmediate(argc > 0 ? args[0] : ItemNull);
-    return make_js_undefined();
-}
-
-Item js_intrinsic_global_cancel_animation_frame_body(Item callee,
-        Item this_value, Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    js_cancelAnimationFrame(argc > 0 ? args[0] : ItemNull);
-    return make_js_undefined();
-}
-
-Item js_intrinsic_global_queue_microtask_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    js_microtask_enqueue(argc > 0 ? args[0] : ItemNull);
     return make_js_undefined();
 }
 
@@ -10509,8 +10520,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     }
 
     if (fn->native_call && (fn->native_policy == JS_NATIVE_CALL_SPAN ||
-            fn->native_policy == JS_NATIVE_CALL_THIS_SPAN ||
-            fn->native_policy == JS_NATIVE_CALL_ENV_SPAN)) {
+            fn->native_policy == JS_NATIVE_CALL_THIS_SPAN)) {
         // Span callbacks declare ownership of the original actual list. They
         // intentionally bypass fixed/rest adaptation, but still enter through
         // the stored typed body selected by their factory.
@@ -10518,23 +10528,6 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
             js_current_this, args, arg_count, scalar_result_home);
     }
 
-    typedef Item (*P0H)(uint64_t*);
-    typedef Item (*P1H)(Item, uint64_t*);
-    typedef Item (*P2H)(Item, Item, uint64_t*);
-    typedef Item (*P3H)(Item, Item, Item, uint64_t*);
-    typedef Item (*P4H)(Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P5H)(Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P6H)(Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P7H)(Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P8H)(Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P9H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P10H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P11H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P12H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P13H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P14H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P15H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-    typedef Item (*P16H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
 
     // Rest params: negative param_count signals last param is ...rest
     bool has_rest = (fn->param_count < 0);
@@ -10623,103 +10616,26 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
             return ItemError;
         }
         if (!fn->func_ptr) return make_js_undefined();
-        typedef Item (*C0H)(Context*, uint64_t*);
-        typedef Item (*C1H)(Context*, Item, uint64_t*);
-        typedef Item (*C2H)(Context*, Item, Item, uint64_t*);
-        typedef Item (*C3H)(Context*, Item, Item, Item, uint64_t*);
-        typedef Item (*C4H)(Context*, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C5H)(Context*, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C6H)(Context*, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C7H)(Context*, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C8H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C9H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C10H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C11H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C12H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C13H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C14H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C15H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
-        typedef Item (*C16H)(Context*, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
         Context* runtime = fn->runtime_context;
 #define JS_MIR_CONTEXT_CALL_CASE(count, has_env, env_value) \
         case count: return js_invoke_mir_context_wrapper<count, has_env>( \
             fn->func_ptr, runtime, effective_args, env_value, scalar_result_home)
+#define JS_MIR_CONTEXT_ENV_CALL(count) JS_MIR_CONTEXT_CALL_CASE(count, true, env);
+#define JS_MIR_CONTEXT_NO_ENV_CALL(count) JS_MIR_CONTEXT_CALL_CASE(count, false, ItemNull);
         if (fn->env) {
             Item env = {.item = (uint64_t)fn->env};
             switch (effective_count) {
-            case 0: return ((C1H)fn->func_ptr)(runtime, env, scalar_result_home);
-            case 1: return ((C2H)fn->func_ptr)(runtime, env, effective_args[0], scalar_result_home);
-            case 2: return ((C3H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], scalar_result_home);
-            case 3: return ((C4H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], scalar_result_home);
-            case 4: return ((C5H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], scalar_result_home);
-            case 5: return ((C6H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], scalar_result_home);
-            case 6: return ((C7H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], scalar_result_home);
-            case 7: return ((C8H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], scalar_result_home);
-            case 8: return ((C9H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], scalar_result_home);
-            case 9: return ((C10H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], scalar_result_home);
-            case 10: return ((C11H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], scalar_result_home);
-            case 11: return ((C12H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], scalar_result_home);
-            case 12: return ((C13H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], scalar_result_home);
-            case 13: return ((C14H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
-            case 14: return ((C15H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
-            case 15: return ((C16H)fn->func_ptr)(runtime, env, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
-            JS_MIR_CONTEXT_CALL_CASE(16, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(17, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(18, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(19, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(20, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(21, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(22, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(23, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(24, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(25, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(26, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(27, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(28, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(29, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(30, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(31, true, env);
-            JS_MIR_CONTEXT_CALL_CASE(32, true, env);
+            JS_MIR_CALL_ARITIES_0_32(JS_MIR_CONTEXT_ENV_CALL)
             default: return ItemError;
             }
         }
         switch (effective_count) {
-        case 0: return ((C0H)fn->func_ptr)(runtime, scalar_result_home);
-        case 1: return ((C1H)fn->func_ptr)(runtime, effective_args[0], scalar_result_home);
-        case 2: return ((C2H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], scalar_result_home);
-        case 3: return ((C3H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], scalar_result_home);
-        case 4: return ((C4H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], scalar_result_home);
-        case 5: return ((C5H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], scalar_result_home);
-        case 6: return ((C6H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], scalar_result_home);
-        case 7: return ((C7H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], scalar_result_home);
-        case 8: return ((C8H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], scalar_result_home);
-        case 9: return ((C9H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], scalar_result_home);
-        case 10: return ((C10H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], scalar_result_home);
-        case 11: return ((C11H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], scalar_result_home);
-        case 12: return ((C12H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], scalar_result_home);
-        case 13: return ((C13H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
-        case 14: return ((C14H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
-        case 15: return ((C15H)fn->func_ptr)(runtime, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
-        JS_MIR_CONTEXT_CALL_CASE(16, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(17, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(18, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(19, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(20, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(21, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(22, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(23, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(24, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(25, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(26, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(27, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(28, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(29, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(30, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(31, false, ItemNull);
-        JS_MIR_CONTEXT_CALL_CASE(32, false, ItemNull);
+        JS_MIR_CALL_ARITIES_0_32(JS_MIR_CONTEXT_NO_ENV_CALL)
         default: return ItemError;
         }
 #undef JS_MIR_CONTEXT_CALL_CASE
+#undef JS_MIR_CONTEXT_ENV_CALL
+#undef JS_MIR_CONTEXT_NO_ENV_CALL
     }
 
     if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
@@ -10731,42 +10647,18 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         if (fn->env) {
             Item env_item = {.item = (uint64_t)fn->env};
             switch (effective_count) {
-            case 0: return ((P1H)fn->func_ptr)(env_item, scalar_result_home);
-            case 1: return ((P2H)fn->func_ptr)(env_item, effective_args[0], scalar_result_home);
-            case 2: return ((P3H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], scalar_result_home);
-            case 3: return ((P4H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], scalar_result_home);
-            case 4: return ((P5H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], scalar_result_home);
-            case 5: return ((P6H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], scalar_result_home);
-            case 6: return ((P7H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], scalar_result_home);
-            case 7: return ((P8H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], scalar_result_home);
-            case 8: return ((P9H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], scalar_result_home);
-            case 9: return ((P10H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], scalar_result_home);
-            case 10: return ((P11H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], scalar_result_home);
-            case 11: return ((P12H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], scalar_result_home);
-            case 12: return ((P13H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], scalar_result_home);
-            case 13: return ((P14H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
-            case 14: return ((P15H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
-            case 15: return ((P16H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+            #define JS_MIR_PUBLIC_ENV_CALL(count) \
+                case count: return js_invoke_public_wrapper<count, true>(fn->func_ptr, effective_args, env_item, scalar_result_home);
+            JS_MIR_CALL_ARITIES_0_15(JS_MIR_PUBLIC_ENV_CALL)
+            #undef JS_MIR_PUBLIC_ENV_CALL
             default: return ItemError;
             }
         }
         switch (effective_count) {
-        case 0: return ((P0H)fn->func_ptr)(scalar_result_home);
-        case 1: return ((P1H)fn->func_ptr)(effective_args[0], scalar_result_home);
-        case 2: return ((P2H)fn->func_ptr)(effective_args[0], effective_args[1], scalar_result_home);
-        case 3: return ((P3H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], scalar_result_home);
-        case 4: return ((P4H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], scalar_result_home);
-        case 5: return ((P5H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], scalar_result_home);
-        case 6: return ((P6H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], scalar_result_home);
-        case 7: return ((P7H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], scalar_result_home);
-        case 8: return ((P8H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], scalar_result_home);
-        case 9: return ((P9H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], scalar_result_home);
-        case 10: return ((P10H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], scalar_result_home);
-        case 11: return ((P11H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], scalar_result_home);
-        case 12: return ((P12H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], scalar_result_home);
-        case 13: return ((P13H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
-        case 14: return ((P14H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
-        case 15: return ((P15H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+        #define JS_MIR_PUBLIC_NO_ENV_CALL(count) \
+            case count: return js_invoke_public_wrapper<count, false>(fn->func_ptr, effective_args, ItemNull, scalar_result_home);
+        JS_MIR_CALL_ARITIES_0_15(JS_MIR_PUBLIC_NO_ENV_CALL)
+        #undef JS_MIR_PUBLIC_NO_ENV_CALL
         default: return ItemError;
         }
     }
@@ -10782,6 +10674,9 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     return lambda_hosted_item_invoke_by_count((void*)fn->func_ptr,
         effective_args, effective_count, fn->env != NULL, env_item);
 }
+
+#undef JS_MIR_CALL_ARITIES_0_15
+#undef JS_MIR_CALL_ARITIES_0_32
 
 static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
@@ -11940,35 +11835,35 @@ static Item js_intrinsic_symbol_value(Item this_value, const char* error) {
     return js_throw_type_error(error);
 }
 
-Item js_intrinsic_symbol_to_string_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
+static Item js_intrinsic_symbol_to_string(Item this_value) {
     JS_ASSIGN_OR_RETURN(symbol, js_intrinsic_symbol_value(this_value,
         "Symbol.prototype.toString requires that 'this' be a Symbol"));
     return js_symbol_to_string(symbol);
 }
 
-Item js_intrinsic_symbol_value_of_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
-    return js_intrinsic_symbol_value(this_value,
-        "Symbol.prototype.valueOf requires that 'this' be a Symbol");
-}
-
-Item js_intrinsic_symbol_to_primitive_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
-    return js_intrinsic_symbol_value(this_value,
-        "Symbol.prototype[Symbol.toPrimitive] requires that 'this' be a Symbol");
-}
-
-Item js_intrinsic_symbol_description_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
+static Item js_intrinsic_symbol_description(Item this_value) {
     JS_ASSIGN_OR_RETURN(symbol, js_intrinsic_symbol_value(this_value,
         "Symbol.prototype.description requires that 'this' be a Symbol"));
     return js_symbol_get_description(symbol);
 }
+
+#define JS_SYMBOL_VALUE_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)args; (void)argc; (void)result_home; \
+        return (expression); \
+    }
+JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_to_string_body,
+    js_intrinsic_symbol_to_string(this_value))
+JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_value_of_body,
+    js_intrinsic_symbol_value(this_value,
+        "Symbol.prototype.valueOf requires that 'this' be a Symbol"))
+JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_to_primitive_body,
+    js_intrinsic_symbol_value(this_value,
+        "Symbol.prototype[Symbol.toPrimitive] requires that 'this' be a Symbol"))
+JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_description_body,
+    js_intrinsic_symbol_description(this_value))
+#undef JS_SYMBOL_VALUE_BODY
 
 #define JS_UNARY_INTRINSIC_BODY(body_name, expression) \
     Item body_name(Item callee, Item this_value, Item* args, int argc, \
@@ -12056,14 +11951,7 @@ Item js_intrinsic_string_iterator_next_body(Item callee, Item this_value,
     String* text = it2s(string);
     int index = (int)it2i(index_item);
     if (!text || index >= (int)text->len) {
-        Item result = js_new_object();
-        js_set_key_default(result,
-            (Item){.item = s2it(heap_create_name("value", 5))},
-            make_js_undefined());
-        js_set_key_default(result,
-            (Item){.item = s2it(heap_create_name("done", 4))},
-            (Item){.item = b2it(true)});
-        return result;
+        return js_make_iter_result(make_js_undefined(), true);
     }
     const unsigned char* cursor =
         (const unsigned char*)text->chars + index;
@@ -12083,13 +11971,7 @@ Item js_intrinsic_string_iterator_next_body(Item callee, Item this_value,
         (Item){.item = i2it(index + codepoint_len)});
     Item value = (Item){.item = s2it(
         heap_create_name(text->chars + index, codepoint_len))};
-    Item result = js_new_object();
-    js_set_key_default(result,
-        (Item){.item = s2it(heap_create_name("value", 5))}, value);
-    js_set_key_default(result,
-        (Item){.item = s2it(heap_create_name("done", 4))},
-        (Item){.item = b2it(false)});
-    return result;
+    return js_make_iter_result(value, false);
 }
 
 static Item js_intrinsic_collection_method(int collection_type, bool is_weak,
@@ -12203,13 +12085,55 @@ static Item js_intrinsic_arg(Item* args, int argc, int index) {
     return args && index >= 0 && index < argc ? args[index] : make_js_undefined();
 }
 
-Item js_intrinsic_object_has_own_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee;
-    (void)result_home;
-    return js_object_prototype_has_own_property(this_value,
-        js_intrinsic_arg(args, argc, 0));
-}
+#define JS_RUNTIME_NOARG_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)args; (void)argc; \
+        (void)result_home; \
+        return (expression); \
+    }
+
+#define JS_RUNTIME_THIS_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)args; (void)argc; (void)result_home; \
+        return (expression); \
+    }
+
+#define JS_RUNTIME_UNARY_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        Item arg0 = js_intrinsic_arg(args, argc, 0); \
+        return (expression); \
+    }
+
+#define JS_RUNTIME_THIS_UNARY_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)result_home; \
+        Item arg0 = js_intrinsic_arg(args, argc, 0); \
+        return (expression); \
+    }
+
+#define JS_RUNTIME_BINARY_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        Item arg0 = js_intrinsic_arg(args, argc, 0); \
+        Item arg1 = js_intrinsic_arg(args, argc, 1); \
+        return (expression); \
+    }
+
+#define JS_RUNTIME_ARGS_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        return (expression); \
+    }
+
+JS_RUNTIME_THIS_UNARY_BODY(js_intrinsic_object_has_own_body,
+    js_object_prototype_has_own_property(this_value, arg0))
 
 Item js_intrinsic_object_property_enumerable_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -12324,19 +12248,15 @@ static Item js_intrinsic_object_define_accessor(Item this_value, Item* args,
     return make_js_undefined();
 }
 
-Item js_intrinsic_object_define_getter_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
-    (void)result_home;
-    return js_intrinsic_object_define_accessor(this_value, args, argc, true);
-}
-
-Item js_intrinsic_object_define_setter_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
-    (void)result_home;
-    return js_intrinsic_object_define_accessor(this_value, args, argc, false);
-}
+#define JS_OBJECT_ACCESSOR_BODY(body_name, getter) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)result_home; \
+        return js_intrinsic_object_define_accessor(this_value, args, argc, getter); \
+    }
+JS_OBJECT_ACCESSOR_BODY(js_intrinsic_object_define_getter_body, true)
+JS_OBJECT_ACCESSOR_BODY(js_intrinsic_object_define_setter_body, false)
+#undef JS_OBJECT_ACCESSOR_BODY
 
 static Item js_intrinsic_object_lookup_accessor(Item this_value, Item* args,
         int argc, bool getter) {
@@ -12367,19 +12287,15 @@ static Item js_intrinsic_object_lookup_accessor(Item this_value, Item* args,
     return make_js_undefined();
 }
 
-Item js_intrinsic_object_lookup_getter_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
-    (void)result_home;
-    return js_intrinsic_object_lookup_accessor(this_value, args, argc, true);
-}
-
-Item js_intrinsic_object_lookup_setter_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
-    (void)result_home;
-    return js_intrinsic_object_lookup_accessor(this_value, args, argc, false);
-}
+#define JS_OBJECT_LOOKUP_ACCESSOR_BODY(body_name, getter) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)result_home; \
+        return js_intrinsic_object_lookup_accessor(this_value, args, argc, getter); \
+    }
+JS_OBJECT_LOOKUP_ACCESSOR_BODY(js_intrinsic_object_lookup_getter_body, true)
+JS_OBJECT_LOOKUP_ACCESSOR_BODY(js_intrinsic_object_lookup_setter_body, false)
+#undef JS_OBJECT_LOOKUP_ACCESSOR_BODY
 
 Item js_intrinsic_object_proto_getter_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -13057,10 +12973,7 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
         if (js_is_typed_array(tarr_item)) {
             Item done_state = js_get_key_default(this_val, (Item){.item = s2it(done_state_key)});
             if (get_type_id(done_state) == LMD_TYPE_BOOL && it2b(done_state)) {
-                Item result = js_new_object();
-                js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-                js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-                return result;
+                return js_make_iter_result(make_js_undefined(), true);
             }
             if (js_typed_array_is_out_of_bounds_item(tarr_item)) {
                 return js_throw_type_error("Cannot perform %TypedArray%.prototype iterator on an out-of-bounds ArrayBuffer");
@@ -13068,10 +12981,7 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
             int len = js_typed_array_length(tarr_item);
             if (idx >= len) {
                 js_set_key_default(this_val, (Item){.item = s2it(done_state_key)}, (Item){.item = b2it(true)});
-                Item result = js_new_object();
-                js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-                js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-                return result;
+                return js_make_iter_result(make_js_undefined(), true);
             }
             js_set_key_default(this_val, (Item){.item = s2it(idx_key)}, (Item){.item = i2it(idx + 1)});
             Item val;
@@ -13088,10 +12998,7 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
                 js_array_store_owned(pair.array, 1, elem);
                 val = pair;
             }
-            Item result = js_new_object();
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, val);
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
-            return result;
+            return js_make_iter_result(val, false);
         }
         JS_ASSIGN_OR_RETURN(iter_len_item, js_array_iterator_source_length(arr_item));
         int64_t iter_len = it2i(iter_len_item);
@@ -13100,11 +13007,7 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
             // undefined so subsequent calls keep returning done=true even if
             // new elements are pushed onto the original array afterwards.
             js_set_key_default(this_val, (Item){.item = s2it(arr_key)}, make_js_undefined());
-            // return {value: undefined, done: true}
-            Item result = js_new_object();
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-            return result;
+            return js_make_iter_result(make_js_undefined(), true);
         }
         // advance index
         js_set_key_default(this_val, (Item){.item = s2it(idx_key)}, (Item){.item = i2it(idx + 1)});
@@ -13122,11 +13025,7 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
             js_array_store_owned(pair.array, 1, elem);
             val = pair;
         }
-        // return {value: val, done: false}
-        Item result = js_new_object();
-        js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, val);
-        js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
-        return result;
+        return js_make_iter_result(val, false);
 
 }
 
@@ -13231,196 +13130,122 @@ Item js_intrinsic_typed_array_of_body(Item callee, Item this_value, Item* args, 
 
 }
 
-Item js_intrinsic_arraybuffer_isview_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        // ArrayBuffer.isView(arg): returns true if arg is a TypedArray or DataView
+#define JS_ARRAYBUFFER_BODY(body_name, operation) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)result_home; \
+        return js_intrinsic_arraybuffer_operation(operation, this_value, args, argc); \
+    }
+
+enum JsArrayBufferIntrinsicOp {
+    JS_ARRAYBUFFER_IS_VIEW,
+    JS_ARRAYBUFFER_SLICE,
+    JS_ARRAYBUFFER_RESIZE,
+    JS_ARRAYBUFFER_TRANSFER,
+    JS_ARRAYBUFFER_TRANSFER_FIXED,
+    JS_ARRAYBUFFER_BYTE_LENGTH,
+    JS_ARRAYBUFFER_RESIZABLE,
+    JS_ARRAYBUFFER_MAX_BYTE_LENGTH,
+    JS_ARRAYBUFFER_DETACHED,
+    JS_SHAREDARRAYBUFFER_SLICE,
+    JS_SHAREDARRAYBUFFER_GROW,
+    JS_SHAREDARRAYBUFFER_BYTE_LENGTH,
+    JS_SHAREDARRAYBUFFER_GROWABLE,
+    JS_SHAREDARRAYBUFFER_MAX_BYTE_LENGTH,
+};
+
+static Item js_intrinsic_arraybuffer_operation(JsArrayBufferIntrinsicOp operation,
+        Item this_val, Item* args, int argc) {
+    Item arg0 = js_intrinsic_arg(args, argc, 0);
+    Item arg1 = js_intrinsic_arg(args, argc, 1);
+    switch (operation) {
+    case JS_ARRAYBUFFER_IS_VIEW:
         return (Item){.item = b2it(js_is_typed_array(arg0) || js_is_dataview(arg0))};
-
-}
-
-Item js_intrinsic_arraybuffer_slice_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        // ArrayBuffer.prototype.slice(begin, end)
-        Item obj = this_val;
-        if (!js_is_arraybuffer(obj) || js_is_sharedarraybuffer(obj)) {
+    case JS_ARRAYBUFFER_SLICE:
+        if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("ArrayBuffer.prototype.slice requires an ArrayBuffer as receiver");
         }
-        return js_arraybuffer_slice_items(obj, arg0, arg1, arg_count);
-
-}
-
-Item js_intrinsic_arraybuffer_resize_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+        return js_arraybuffer_slice_items(this_val, arg0, arg1, argc);
+    case JS_ARRAYBUFFER_RESIZE:
         return js_arraybuffer_resize(this_val, arg0);
-
-}
-
-Item js_intrinsic_arraybuffer_transfer_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        // Js54 P8: ArrayBuffer.prototype.transfer(newLength?)
-        return js_arraybuffer_transfer(this_val, arg0, arg_count);
-
-}
-
-Item js_intrinsic_arraybuffer_transfer_to_fixed_length_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        // Js54 P8: ArrayBuffer.prototype.transferToFixedLength(newLength?)
-        return js_arraybuffer_transfer_to_fixed_length(this_val, arg0, arg_count);
-
-}
-
-Item js_intrinsic_arraybuffer_get_byte_length_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    case JS_ARRAYBUFFER_TRANSFER:
+        return js_arraybuffer_transfer(this_val, arg0, argc);
+    case JS_ARRAYBUFFER_TRANSFER_FIXED:
+        return js_arraybuffer_transfer_to_fixed_length(this_val, arg0, argc);
+    case JS_ARRAYBUFFER_BYTE_LENGTH:
         if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("ArrayBuffer.prototype.byteLength requires an ArrayBuffer receiver");
         }
         return (Item){.item = i2it(js_arraybuffer_byte_length(this_val))};
-
-}
-
-Item js_intrinsic_arraybuffer_get_resizable_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    case JS_ARRAYBUFFER_RESIZABLE:
         if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("ArrayBuffer.prototype.resizable requires an ArrayBuffer receiver");
         }
         return (Item){.item = b2it(js_arraybuffer_is_resizable(this_val))};
-
-}
-
-Item js_intrinsic_arraybuffer_get_max_byte_length_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    case JS_ARRAYBUFFER_MAX_BYTE_LENGTH:
         if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("ArrayBuffer.prototype.maxByteLength requires an ArrayBuffer receiver");
         }
         return (Item){.item = i2it(js_arraybuffer_max_byte_length(this_val))};
-
-}
-
-Item js_intrinsic_arraybuffer_get_detached_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        // Js54 P8: ES2024 §25.1.5.5 — get ArrayBuffer.prototype.detached.
-        // TypeError on non-ArrayBuffer receivers and on SharedArrayBuffer.
+    case JS_ARRAYBUFFER_DETACHED:
         if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("ArrayBuffer.prototype.detached requires an ArrayBuffer receiver");
         }
         return (Item){.item = b2it(js_arraybuffer_is_detached(this_val) ? BOOL_TRUE : BOOL_FALSE)};
-
-}
-
-Item js_intrinsic_sharedarraybuffer_slice_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        Item method_args[2] = { arg0, arg1 };
-        return js_sharedarraybuffer_operation(this_val,
-            JS_SHARED_ARRAY_BUFFER_SLICE, method_args,
-            arg_count > 1 ? 2 : (arg_count > 0 ? 1 : 0));
-
-}
-
-Item js_intrinsic_sharedarraybuffer_grow_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-        Item method_args[1] = { arg0 };
-        return js_sharedarraybuffer_operation(this_val,
-            JS_SHARED_ARRAY_BUFFER_GROW, method_args,
-            arg_count > 0 ? 1 : 0);
-
-}
-
-Item js_intrinsic_sharedarraybuffer_get_byte_length_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    case JS_SHAREDARRAYBUFFER_SLICE: {
+        Item method_args[2] = {arg0, arg1};
+        return js_sharedarraybuffer_operation(this_val, JS_SHARED_ARRAY_BUFFER_SLICE,
+            method_args, argc > 1 ? 2 : (argc > 0 ? 1 : 0));
+    }
+    case JS_SHAREDARRAYBUFFER_GROW: {
+        Item method_args[1] = {arg0};
+        return js_sharedarraybuffer_operation(this_val, JS_SHARED_ARRAY_BUFFER_GROW,
+            method_args, argc > 0 ? 1 : 0);
+    }
+    case JS_SHAREDARRAYBUFFER_BYTE_LENGTH:
         if (!js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("SharedArrayBuffer.prototype.byteLength requires a SharedArrayBuffer receiver");
         }
         return (Item){.item = i2it(js_arraybuffer_byte_length(this_val))};
-
-}
-
-Item js_intrinsic_sharedarraybuffer_get_growable_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    case JS_SHAREDARRAYBUFFER_GROWABLE:
         if (!js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("SharedArrayBuffer.prototype.growable requires a SharedArrayBuffer receiver");
         }
         return (Item){.item = b2it(js_arraybuffer_is_resizable(this_val))};
-
-}
-
-Item js_intrinsic_sharedarraybuffer_get_max_byte_length_body(Item callee, Item this_value, Item* args, int argc,
-        uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item this_val = this_value;
-    int arg_count = argc;
-    Item arg0 = argc > 0 ? args[0] : make_js_undefined();
-    Item arg1 = argc > 1 ? args[1] : make_js_undefined();
+    case JS_SHAREDARRAYBUFFER_MAX_BYTE_LENGTH:
         if (!js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("SharedArrayBuffer.prototype.maxByteLength requires a SharedArrayBuffer receiver");
         }
         return (Item){.item = i2it(js_arraybuffer_max_byte_length(this_val))};
-
+    }
+    return ItemError;
 }
+
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_isview_body, JS_ARRAYBUFFER_IS_VIEW)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_slice_body, JS_ARRAYBUFFER_SLICE)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_resize_body, JS_ARRAYBUFFER_RESIZE)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_transfer_body, JS_ARRAYBUFFER_TRANSFER)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_transfer_to_fixed_length_body,
+    JS_ARRAYBUFFER_TRANSFER_FIXED)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_get_byte_length_body,
+    JS_ARRAYBUFFER_BYTE_LENGTH)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_get_resizable_body,
+    JS_ARRAYBUFFER_RESIZABLE)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_get_max_byte_length_body,
+    JS_ARRAYBUFFER_MAX_BYTE_LENGTH)
+JS_ARRAYBUFFER_BODY(js_intrinsic_arraybuffer_get_detached_body,
+    JS_ARRAYBUFFER_DETACHED)
+JS_ARRAYBUFFER_BODY(js_intrinsic_sharedarraybuffer_slice_body,
+    JS_SHAREDARRAYBUFFER_SLICE)
+JS_ARRAYBUFFER_BODY(js_intrinsic_sharedarraybuffer_grow_body,
+    JS_SHAREDARRAYBUFFER_GROW)
+JS_ARRAYBUFFER_BODY(js_intrinsic_sharedarraybuffer_get_byte_length_body,
+    JS_SHAREDARRAYBUFFER_BYTE_LENGTH)
+JS_ARRAYBUFFER_BODY(js_intrinsic_sharedarraybuffer_get_growable_body,
+    JS_SHAREDARRAYBUFFER_GROWABLE)
+JS_ARRAYBUFFER_BODY(js_intrinsic_sharedarraybuffer_get_max_byte_length_body,
+    JS_SHAREDARRAYBUFFER_MAX_BYTE_LENGTH)
+#undef JS_ARRAYBUFFER_BODY
 
 #define JS_ATOMICS_OPERATION_BODY(body_name, operation, fourth_arg) \
     Item body_name(Item callee, Item this_value, Item* args, int argc, \
@@ -13575,19 +13400,10 @@ JS_SET_OPERATION_BODY(js_intrinsic_set_is_superset_body, JS_SET_INTRINSIC_IS_SUP
 JS_SET_OPERATION_BODY(js_intrinsic_set_is_disjoint_body, JS_SET_INTRINSIC_IS_DISJOINT)
 #undef JS_SET_OPERATION_BODY
 
-Item js_intrinsic_map_group_by_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    Item items = argc > 0 ? args[0] : make_js_undefined();
-    Item callback = argc > 1 ? args[1] : make_js_undefined();
-    return js_map_group_by(items, callback);
-}
-
-Item js_intrinsic_weakref_deref_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
-    return js_weakref_deref(this_value);
-}
+JS_RUNTIME_BINARY_BODY(js_intrinsic_map_group_by_body,
+    js_map_group_by(arg0, arg1))
+JS_RUNTIME_THIS_BODY(js_intrinsic_weakref_deref_body,
+    js_weakref_deref(this_value))
 
 Item js_intrinsic_finalization_register_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -13599,12 +13415,8 @@ Item js_intrinsic_finalization_register_body(Item callee, Item this_value,
         token, argc);
 }
 
-Item js_intrinsic_finalization_unregister_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    Item token = argc > 0 ? args[0] : make_js_undefined();
-    return js_finalization_registry_unregister(this_value, token);
-}
+JS_RUNTIME_THIS_UNARY_BODY(js_intrinsic_finalization_unregister_body,
+    js_finalization_registry_unregister(this_value, arg0))
 
 enum JsCollectionSizeKind {
     JS_COLLECTION_SIZE_ANY,
@@ -13668,11 +13480,8 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
         JsCollectionOrderNode* last_node = (JsCollectionOrderNode*)(uintptr_t)it2i(last_item);
         int mode = (int)it2i(mode_item);
         int coll_type = (int)it2i(ctype_item);
-        Item result = js_new_object();
         if (js_is_truthy(done_item)) {
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-            return result;
+            return js_make_iter_result(make_js_undefined(), true);
         }
         if (!node && cd) {
             node = last_node ? last_node->next : cd->order_head;
@@ -13690,9 +13499,7 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
             // iterator exhausted
             js_set_key_default(this_val, (Item){.item = s2it(heap_create_name("__iter_done__", 13))},
                             (Item){.item = b2it(true)});
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-            return result;
+            return js_make_iter_result(make_js_undefined(), true);
         }
         // get value based on mode
         Item val;
@@ -13713,14 +13520,12 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
             // values: for Set, key IS the value; for Map, node->value
             val = (coll_type == JS_COLLECTION_SET) ? node->key : node->value;
         }
-        js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, val);
-        js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
         // advance to next node
         js_set_key_default(this_val, (Item){.item = s2it(heap_create_name("__last_node__", 13))},
                 (Item){.item = i2it((int64_t)(uintptr_t)node)});
         js_set_key_default(this_val, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
                         (Item){.item = i2it((int64_t)(uintptr_t)node->next)});
-        return result;
+        return js_make_iter_result(val, false);
 
 }
 
@@ -13792,18 +13597,9 @@ Item js_intrinsic_json_stringify_body(Item callee, Item this_value, Item* args,
     return js_json_stringify_full(value, args[1], space);
 }
 
-Item js_intrinsic_json_raw_json_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_json_raw_json(argc > 0 ? args[0] : make_js_undefined());
-}
-
-Item js_intrinsic_json_is_raw_json_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_json_is_raw_json_builtin(
-        argc > 0 ? args[0] : make_js_undefined());
-}
+JS_RUNTIME_UNARY_BODY(js_intrinsic_json_raw_json_body, js_json_raw_json(arg0))
+JS_RUNTIME_UNARY_BODY(js_intrinsic_json_is_raw_json_body,
+    js_json_is_raw_json_builtin(arg0))
 
 // D6.2.2v2: each Date property stores a distinct direct target; the selected
 // operation is immutable target policy and never comes from function metadata.
@@ -13947,17 +13743,8 @@ Item js_intrinsic_date_to_primitive_body(Item callee, Item this_value,
     return js_throw_type_error("Cannot convert object to primitive value");
 }
 
-Item js_intrinsic_date_now_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
-    return js_date_now();
-}
-
-Item js_intrinsic_date_parse_body(Item callee, Item this_value, Item* args,
-        int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_date_parse(argc > 0 ? args[0] : make_js_undefined());
-}
+JS_RUNTIME_NOARG_BODY(js_intrinsic_date_now_body, js_date_now())
+JS_RUNTIME_UNARY_BODY(js_intrinsic_date_parse_body, js_date_parse(arg0))
 
 Item js_intrinsic_date_utc_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
@@ -14207,31 +13994,19 @@ JS_GENERATOR_INTRINSIC_BODY(js_intrinsic_async_generator_throw_body,
     JS_GENERATOR_INTRINSIC_THROW, true)
 #undef JS_GENERATOR_INTRINSIC_BODY
 
-Item js_intrinsic_iterator_identity_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
-    return this_value;
-}
+JS_RUNTIME_THIS_BODY(js_intrinsic_iterator_identity_body, this_value)
+JS_RUNTIME_BINARY_BODY(js_intrinsic_proxy_revocable_body,
+    js_proxy_revocable(arg0, arg1))
+JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
+    js_css_supports_operation(args, argc))
+JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
+    js_css_escape_operation(args, argc))
 
-Item js_intrinsic_proxy_revocable_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    Item target = argc > 0 ? args[0] : make_js_undefined();
-    Item handler = argc > 1 ? args[1] : make_js_undefined();
-    return js_proxy_revocable(target, handler);
-}
-
-Item js_intrinsic_css_supports_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_css_supports_operation(args, argc);
-}
-
-Item js_intrinsic_css_escape_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
-    return js_css_escape_operation(args, argc);
-}
+#undef JS_RUNTIME_BINARY_BODY
+#undef JS_RUNTIME_THIS_UNARY_BODY
+#undef JS_RUNTIME_UNARY_BODY
+#undef JS_RUNTIME_THIS_BODY
+#undef JS_RUNTIME_NOARG_BODY
 
 enum JsRegExpIntrinsicOp {
     JS_REGEXP_INTRINSIC_EXEC,
@@ -14406,10 +14181,7 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
         }
         if (done_found && it2b(done_val)) {
             // Already done
-            Item result = js_new_object();
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-            return result;
+            return js_make_iter_result(make_js_undefined(), true);
         }
         bool is_global = it2b(global_val);
         // Call RegExpExec(regex, string) — per ES spec, check for custom exec first
@@ -14428,10 +14200,7 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
         if (match.item == ItemNull.item || get_type_id(match) == LMD_TYPE_NULL) {
             // No more matches — mark done
             js_set_key_default(this_val, (Item){.item = s2it(heap_create_name("__done__", 8))}, (Item){.item = b2it(true)});
-            Item result = js_new_object();
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-            js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-            return result;
+            return js_make_iter_result(make_js_undefined(), true);
         }
         if (!is_global) {
             // Non-global: return the single match and mark done
@@ -14448,10 +14217,7 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
                 js_set_key_default(regex, (Item){.item = s2it(heap_create_name("lastIndex", 9))}, (Item){.item = i2it(cur_li + 1)});
             }
         }
-        Item result = js_new_object();
-        js_set_key_default(result, (Item){.item = s2it(heap_create_name("value", 5))}, match);
-        js_set_key_default(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
-        return result;
+        return js_make_iter_result(match, false);
     }
 
     // Annex B: RegExp.prototype.compile(pattern, flags)
@@ -21316,11 +21082,32 @@ extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_
     ((JsCollectionMap*)map)->collection_data = NULL;
 }
 
+static void js_collection_weak_entry_clear(uint64_t key_item, void* context) {
+    JsCollectionData* cd = (JsCollectionData*)context;
+    if (!cd || !cd->hmap || key_item == 0) return;
+    Item key = (Item){.item = key_item};
+    JsCollectionEntry probe = {.key = key};
+    hashmap_delete(cd->hmap, &probe);
+    js_collection_order_remove(cd, key);
+}
+
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc || map->map_kind != MAP_KIND_COLLECTION) return;
     JsCollectionData* cd = ((JsCollectionMap*)map)->collection_data;
     if (!cd) return;
-    if (cd->is_weak) return;
+    if (cd->is_weak) {
+        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+            if (node->deleted) continue;
+            // A weak value is retained only after its key is independently
+            // reachable; dead keys are removed before sweep can reuse identity.
+            if (!gc_register_ephemeron(gc, &node->key.item, &node->value.item,
+                                       js_collection_weak_entry_clear, cd)) {
+                gc_mark_item(gc, node->key.item);
+                gc_mark_item(gc, node->value.item);
+            }
+        }
+        return;
+    }
 
     // Strong collection entries live in native insertion-order storage, which
     // the managed Map payload scan cannot see.
@@ -35299,7 +35086,6 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              int64_t line_offset,
                                              int64_t column_offset);
 extern "C" Item js_vm_swap_global_this(Item next_global);
-extern "C" void js_with_push(Item obj);
 extern "C" void js_with_set_stack(Item* stack, int depth);
 extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
 

@@ -52,28 +52,14 @@ static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
 // Helpers
 // ============================================================================
 
-static inline Item make_undef() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
+#define make_undef make_js_undefined
+#define make_bool(v) ((Item){.item = b2it((v) ? 1 : 0)})
+#define make_int(v) ((Item){.item = i2it(v)})
 
-static inline Item make_bool(bool v) {
-    return (Item){.item = b2it(v ? 1 : 0)};
-}
+#define make_number_from_float(v) ((Item){.item = i2it((int64_t)(v))})
 
-static inline Item make_int(int64_t v) {
-    return (Item){.item = i2it(v)};
-}
-
-static inline Item make_number_from_float(float v) {
-    return (Item){.item = i2it((int64_t)v)};
-}
-
-static inline Item make_str(const char* s) {
-    if (!s) return ItemNull;
-    return (Item){.item = s2it(heap_create_name(s))};
-}
-
-static inline Item make_key(const char* s) { return make_str(s); }
+#define make_str make_string_item
+#define make_key make_string_item
 
 struct JsDocRuntimeScope {
     EvalContext* runtime_ctx;
@@ -382,79 +368,51 @@ static bool node_in_active_document(DomNode* n, DomSelection* s) {
 // Range methods
 // ============================================================================
 
-extern "C" Item js_range_set_start(Item self_v, Item node_arg_v, Item offset_arg_v) {
+typedef bool (*DomRangeOffsetSetter)(DomRange*, DomNode*, uint32_t, const char**);
+
+static Item js_range_set_offset(Item self_v, Item node_arg_v, Item offset_arg_v,
+        DomRangeOffsetSetter setter, const char* message) {
     DomRange* r = range_from(self_v);
     if (!r) return make_undef();
     DomNode* n = node_arg(node_arg_v);
     if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
-    if (!dom_range_set_start(r, n, (uint32_t)item_to_int(offset_arg_v), &exc)) {
-        return throw_from_dom_exc(exc, "Range.setStart failed");
+    if (!setter(r, n, (uint32_t)item_to_int(offset_arg_v), &exc)) {
+        return throw_from_dom_exc(exc, message);
     }
     range_sync_props(self_v, r);
     return make_undef();
+}
+
+extern "C" Item js_range_set_start(Item self_v, Item node_arg_v, Item offset_arg_v) {
+    return js_range_set_offset(self_v, node_arg_v, offset_arg_v,
+        dom_range_set_start, "Range.setStart failed");
 }
 
 extern "C" Item js_range_set_end(Item self_v, Item node_arg_v, Item offset_arg_v) {
-    DomRange* r = range_from(self_v);
-    if (!r) return make_undef();
-    DomNode* n = node_arg(node_arg_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_set_end(r, n, (uint32_t)item_to_int(offset_arg_v), &exc)) {
-        return throw_from_dom_exc(exc, "Range.setEnd failed");
-    }
-    range_sync_props(self_v, r);
-    return make_undef();
+    return js_range_set_offset(self_v, node_arg_v, offset_arg_v,
+        dom_range_set_end, "Range.setEnd failed");
 }
 
-extern "C" Item js_range_set_start_before(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_set_start_before(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "Range.setStartBefore failed");
+#define JS_RANGE_NODE_MUTATOR(name, operation, message) \
+    extern "C" Item name(Item self_v, Item node_v) { \
+        DomRange* r = range_from(self_v); if (!r) return make_undef(); \
+        DomNode* n = node_arg(node_v); \
+        if (!n) return throw_dom_exception("TypeError", "node is not a Node"); \
+        const char* exc = nullptr; \
+        if (!operation(r, n, &exc)) return throw_from_dom_exc(exc, message); \
+        range_sync_props(self_v, r); \
+        return make_undef(); \
     }
-    range_sync_props(self_v, r);
-    return make_undef();
-}
-
-extern "C" Item js_range_set_start_after(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_set_start_after(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "Range.setStartAfter failed");
-    }
-    range_sync_props(self_v, r);
-    return make_undef();
-}
-
-extern "C" Item js_range_set_end_before(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_set_end_before(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "Range.setEndBefore failed");
-    }
-    range_sync_props(self_v, r);
-    return make_undef();
-}
-
-extern "C" Item js_range_set_end_after(Item self_v, Item node_v) {
-    DomRange* r = range_from(self_v); if (!r) return make_undef();
-    DomNode* n = node_arg(node_v);
-    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
-    const char* exc = nullptr;
-    if (!dom_range_set_end_after(r, n, &exc)) {
-        return throw_from_dom_exc(exc, "Range.setEndAfter failed");
-    }
-    range_sync_props(self_v, r);
-    return make_undef();
-}
+JS_RANGE_NODE_MUTATOR(js_range_set_start_before, dom_range_set_start_before,
+    "Range.setStartBefore failed")
+JS_RANGE_NODE_MUTATOR(js_range_set_start_after, dom_range_set_start_after,
+    "Range.setStartAfter failed")
+JS_RANGE_NODE_MUTATOR(js_range_set_end_before, dom_range_set_end_before,
+    "Range.setEndBefore failed")
+JS_RANGE_NODE_MUTATOR(js_range_set_end_after, dom_range_set_end_after,
+    "Range.setEndAfter failed")
+#undef JS_RANGE_NODE_MUTATOR
 
 extern "C" Item js_range_collapse(Item self_v, Item to_start_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
@@ -707,37 +665,21 @@ static Item js_range_wrap_boundary_node(DomNode* node) {
     return js_dom_wrap_element(node);
 }
 
-extern "C" Item js_range_get_start_container(Item self_v) {
-    DomRange* r = range_from(self_v);
-    return r ? js_range_wrap_boundary_node(r->start.node) : ItemNull;
-}
-
-extern "C" Item js_range_get_start_offset(Item self_v) {
-    DomRange* r = range_from(self_v);
-    return r ? make_int((int64_t)r->start.offset) : ItemNull;
-}
-
-extern "C" Item js_range_get_end_container(Item self_v) {
-    DomRange* r = range_from(self_v);
-    return r ? js_range_wrap_boundary_node(r->end.node) : ItemNull;
-}
-
-extern "C" Item js_range_get_end_offset(Item self_v) {
-    DomRange* r = range_from(self_v);
-    return r ? make_int((int64_t)r->end.offset) : ItemNull;
-}
-
-extern "C" Item js_range_get_collapsed(Item self_v) {
-    DomRange* r = range_from(self_v);
-    return r ? make_bool(dom_range_collapsed(r)) : ItemNull;
-}
-
-extern "C" Item js_range_get_common_ancestor(Item self_v) {
-    DomRange* r = range_from(self_v);
-    if (!r) return ItemNull;
-    DomNode* anc = dom_range_common_ancestor(r);
-    return js_range_wrap_boundary_node(anc);
-}
+#define JS_RANGE_GETTER(name, expression) \
+    extern "C" Item name(Item self_v) { \
+        DomRange* r = range_from(self_v); \
+        return r ? (expression) : ItemNull; \
+    }
+JS_RANGE_GETTER(js_range_get_start_container,
+    js_range_wrap_boundary_node(r->start.node))
+JS_RANGE_GETTER(js_range_get_start_offset, make_int((int64_t)r->start.offset))
+JS_RANGE_GETTER(js_range_get_end_container,
+    js_range_wrap_boundary_node(r->end.node))
+JS_RANGE_GETTER(js_range_get_end_offset, make_int((int64_t)r->end.offset))
+JS_RANGE_GETTER(js_range_get_collapsed, make_bool(dom_range_collapsed(r)))
+JS_RANGE_GETTER(js_range_get_common_ancestor,
+    js_range_wrap_boundary_node(dom_range_common_ancestor(r)))
+#undef JS_RANGE_GETTER
 
 // ============================================================================
 // Selection methods
@@ -793,25 +735,19 @@ extern "C" Item js_selection_remove_range(Item self_v, Item range_v) {
     return make_undef();
 }
 
-extern "C" Item js_selection_remove_all_ranges(Item self_v) {
-    DomSelection* s = selection_from(self_v); if (!s) return make_undef();
-    const char* exc = nullptr;
-    if (!selection_state_clear(s, &exc)) {
-        return throw_from_dom_exc(exc, "removeAllRanges failed");
-    }
-    selection_sync_props(self_v, s);
-    return make_undef();
+#define JS_SELECTION_CLEAR(name, message) \
+extern "C" Item name(Item self_v) { \
+    DomSelection* s = selection_from(self_v); if (!s) return make_undef(); \
+    const char* exc = nullptr; \
+    if (!selection_state_clear(s, &exc)) { \
+        return throw_from_dom_exc(exc, message); \
+    } \
+    selection_sync_props(self_v, s); \
+    return make_undef(); \
 }
-
-extern "C" Item js_selection_empty(Item self_v) {
-    DomSelection* s = selection_from(self_v); if (!s) return make_undef();
-    const char* exc = nullptr;
-    if (!selection_state_clear(s, &exc)) {
-        return throw_from_dom_exc(exc, "empty failed");
-    }
-    selection_sync_props(self_v, s);
-    return make_undef();
-}
+JS_SELECTION_CLEAR(js_selection_remove_all_ranges, "removeAllRanges failed")
+JS_SELECTION_CLEAR(js_selection_empty, "empty failed")
+#undef JS_SELECTION_CLEAR
 
 extern "C" Item js_selection_collapse(Item self_v, Item node_v, Item offset_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
@@ -857,54 +793,39 @@ extern "C" Item js_selection_set_position(Item self_v, Item node_v, Item offset_
     return js_selection_collapse(self_v, node_v, offset_v);
 }
 
-extern "C" Item js_selection_collapse_to_start(Item self_v) {
+static Item js_selection_collapse_to_edge(Item self_v, bool to_end) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     DomElement* control = active_text_control_for_selection(s);
     if (control) {
         tc_ensure_init(control);
         FormControlProp* form = control->form;
-        uint32_t start = form ? form->selection_start : 0;
+        uint32_t edge = form ? (to_end ? form->selection_end : form->selection_start) : 0;
         DocState* state = state_for_text_control_selection(s, control);
         state_store_set_text_control_selection(state, control,
-            start, start, 0);
+            edge, edge, 0);
         selection_sync_props(self_v, s);
         return make_undef();
     }
     if (s->range_count == 0 || !s->ranges[0]) {
-        return throw_from_dom_exc("InvalidStateError", "collapseToStart failed");
+        return throw_from_dom_exc("InvalidStateError",
+            to_end ? "collapseToEnd failed" : "collapseToStart failed");
     }
-    DomBoundary start = s->ranges[0]->start;
+    DomBoundary edge = to_end ? s->ranges[0]->end : s->ranges[0]->start;
     const char* exc = nullptr;
-    if (!selection_state_set(s, &start, &start, &exc)) {
-        return throw_from_dom_exc(exc, "collapseToStart failed");
+    if (!selection_state_set(s, &edge, &edge, &exc)) {
+        return throw_from_dom_exc(exc,
+            to_end ? "collapseToEnd failed" : "collapseToStart failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
 }
 
+extern "C" Item js_selection_collapse_to_start(Item self_v) {
+    return js_selection_collapse_to_edge(self_v, false);
+}
+
 extern "C" Item js_selection_collapse_to_end(Item self_v) {
-    DomSelection* s = selection_from(self_v); if (!s) return make_undef();
-    DomElement* control = active_text_control_for_selection(s);
-    if (control) {
-        tc_ensure_init(control);
-        FormControlProp* form = control->form;
-        uint32_t end = form ? form->selection_end : 0;
-        DocState* state = state_for_text_control_selection(s, control);
-        state_store_set_text_control_selection(state, control,
-            end, end, 0);
-        selection_sync_props(self_v, s);
-        return make_undef();
-    }
-    if (s->range_count == 0 || !s->ranges[0]) {
-        return throw_from_dom_exc("InvalidStateError", "collapseToEnd failed");
-    }
-    DomBoundary end = s->ranges[0]->end;
-    const char* exc = nullptr;
-    if (!selection_state_set(s, &end, &end, &exc)) {
-        return throw_from_dom_exc(exc, "collapseToEnd failed");
-    }
-    selection_sync_props(self_v, s);
-    return make_undef();
+    return js_selection_collapse_to_edge(self_v, true);
 }
 
 extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
@@ -1147,42 +1068,31 @@ static Item build_selection_object(DomSelection* s) {
 }
 
 // Receiver-explicit per-property getters (DOM3 declared-interface bindings).
-extern "C" Item js_selection_get_anchor_node(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    DomNode* n = s ? dom_selection_anchor_node(s) : nullptr;
+#define JS_SELECTION_GETTER(name, expression) \
+    extern "C" Item name(Item self_v) { \
+        DomSelection* s = selection_from(self_v); \
+        return s ? (expression) : ItemNull; \
+    }
+static Item js_selection_anchor_node_value(DomSelection* s) {
+    DomNode* n = dom_selection_anchor_node(s);
     return n ? js_dom_wrap_element(n) : ItemNull;
 }
-
-extern "C" Item js_selection_get_anchor_offset(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    return s ? make_int((int64_t)dom_selection_anchor_offset(s)) : ItemNull;
-}
-
-extern "C" Item js_selection_get_focus_node(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    DomNode* n = s ? dom_selection_focus_node(s) : nullptr;
+static Item js_selection_focus_node_value(DomSelection* s) {
+    DomNode* n = dom_selection_focus_node(s);
     return n ? js_dom_wrap_element(n) : ItemNull;
 }
-
-extern "C" Item js_selection_get_focus_offset(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    return s ? make_int((int64_t)dom_selection_focus_offset(s)) : ItemNull;
-}
-
-extern "C" Item js_selection_get_is_collapsed(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    return s ? make_bool(dom_selection_is_collapsed(s)) : ItemNull;
-}
-
-extern "C" Item js_selection_get_range_count(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    return s ? make_int((int64_t)dom_selection_range_count(s)) : ItemNull;
-}
-
-extern "C" Item js_selection_get_type(Item self_v) {
-    DomSelection* s = selection_from(self_v);
-    return s ? make_str(dom_selection_type(s)) : ItemNull;
-}
+JS_SELECTION_GETTER(js_selection_get_anchor_node,
+    js_selection_anchor_node_value(s))
+JS_SELECTION_GETTER(js_selection_get_anchor_offset,
+    make_int((int64_t)dom_selection_anchor_offset(s)))
+JS_SELECTION_GETTER(js_selection_get_focus_node, js_selection_focus_node_value(s))
+JS_SELECTION_GETTER(js_selection_get_focus_offset,
+    make_int((int64_t)dom_selection_focus_offset(s)))
+JS_SELECTION_GETTER(js_selection_get_is_collapsed,
+    make_bool(dom_selection_is_collapsed(s)))
+JS_SELECTION_GETTER(js_selection_get_range_count,
+    make_int((int64_t)dom_selection_range_count(s)))
+JS_SELECTION_GETTER(js_selection_get_type, make_str(dom_selection_type(s)))
 
 extern "C" Item js_selection_get_direction(Item self_v) {
     DomSelection* s = selection_from(self_v);
@@ -1196,6 +1106,7 @@ extern "C" Item js_selection_get_direction(Item self_v) {
         default:                   return make_str("none");
     }
 }
+#undef JS_SELECTION_GETTER
 
 // ============================================================================
 // Public entry points

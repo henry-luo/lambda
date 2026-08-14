@@ -775,69 +775,61 @@ static bool js_stream_begin_write(Item self, Item chunk) {
     return !need_drain;
 }
 
-static void js_stream_set_readable_object_mode(Item obj, bool value) {
-    js_set_key_default(obj, make_string_item("readableObjectMode"), js_bool_item(value));
-    js_state_set_bool(js_get_key_default(obj, key_readable_state), "objectMode", value);
+static Item js_stream_side_state(Item self, bool readable) {
+    return js_get_key_default(self, readable ? key_readable_state : key_writable_state);
 }
 
-static void js_stream_set_writable_object_mode(Item obj, bool value) {
-    js_set_key_default(obj, make_string_item("writableObjectMode"), js_bool_item(value));
-    js_state_set_bool(js_get_key_default(obj, key_writable_state), "objectMode", value);
+static void js_stream_set_side_object_mode(Item obj, bool readable, bool value) {
+    js_set_key_default(obj, make_string_item(readable ? "readableObjectMode" : "writableObjectMode"),
+                       js_bool_item(value));
+    js_state_set_bool(js_stream_side_state(obj, readable), "objectMode", value);
 }
 
-static void js_stream_set_readable_high_water_mark(Item obj, Item value) {
-    js_set_key_default(obj, make_string_item("readableHighWaterMark"), value);
-    js_state_set_item(js_get_key_default(obj, key_readable_state), "highWaterMark", value);
-}
-
-static void js_stream_set_writable_high_water_mark(Item obj, Item value) {
-    js_set_key_default(obj, make_string_item("writableHighWaterMark"), value);
-    js_state_set_item(js_get_key_default(obj, key_writable_state), "highWaterMark", value);
+static void js_stream_set_side_high_water_mark(Item obj, bool readable, Item value) {
+    js_set_key_default(obj, make_string_item(readable ? "readableHighWaterMark" : "writableHighWaterMark"), value);
+    js_state_set_item(js_stream_side_state(obj, readable), "highWaterMark", value);
 }
 
 static void js_stream_init_readable_options(Item obj) {
-    js_stream_set_readable_object_mode(obj, false);
-    js_stream_set_readable_high_water_mark(obj, (Item){.item = i2it(js_stream_default_byte_hwm)});
+    js_stream_set_side_object_mode(obj, true, false);
+    js_stream_set_side_high_water_mark(obj, true, (Item){.item = i2it(js_stream_default_byte_hwm)});
 }
 
 static void js_stream_init_writable_options(Item obj) {
-    js_stream_set_writable_object_mode(obj, false);
-    js_stream_set_writable_high_water_mark(obj, (Item){.item = i2it(js_stream_default_byte_hwm)});
+    js_stream_set_side_object_mode(obj, false, false);
+    js_stream_set_side_high_water_mark(obj, false, (Item){.item = i2it(js_stream_default_byte_hwm)});
 }
 
-static void js_stream_set_readable_open(Item self, bool open) {
-    js_set_key_default(self, key_readable, js_bool_item(open));
+static void js_stream_set_side_open(Item self, bool readable, bool open) {
+    js_set_key_default(self, readable ? key_readable : key_writable, js_bool_item(open));
 }
 
-static void js_stream_set_writable_open(Item self, bool open) {
-    js_set_key_default(self, key_writable, js_bool_item(open));
-}
-
-static bool js_stream_readable_side_enabled(Item self) {
-    Item enabled = js_get_key_default(self, key_readable_side_enabled);
+static bool js_stream_side_enabled(Item self, bool readable) {
+    Item enabled = js_get_key_default(self,
+        readable ? key_readable_side_enabled : key_writable_side_enabled);
     if (get_type_id(enabled) == LMD_TYPE_BOOL) return it2b(enabled);
-    Item readable = js_get_key_default(self, key_readable);
-    if (get_type_id(readable) == LMD_TYPE_BOOL) return it2b(readable);
-    return get_type_id(js_get_key_default(self, key_readable_state)) == LMD_TYPE_MAP;
+    Item side = js_get_key_default(self, readable ? key_readable : key_writable);
+    if (get_type_id(side) == LMD_TYPE_BOOL) return it2b(side);
+    return get_type_id(js_stream_side_state(self, readable)) == LMD_TYPE_MAP;
 }
 
-static bool js_stream_writable_side_enabled(Item self) {
-    Item enabled = js_get_key_default(self, key_writable_side_enabled);
-    if (get_type_id(enabled) == LMD_TYPE_BOOL) return it2b(enabled);
-    Item writable = js_get_key_default(self, key_writable);
-    if (get_type_id(writable) == LMD_TYPE_BOOL) return it2b(writable);
-    return get_type_id(js_get_key_default(self, key_writable_state)) == LMD_TYPE_MAP;
+static void js_stream_set_side_enabled(Item self, bool readable, bool enabled) {
+    js_set_key_default(self,
+        readable ? key_readable_side_enabled : key_writable_side_enabled,
+        js_bool_item(enabled));
+    js_stream_set_side_open(self, readable, enabled);
 }
 
-static void js_stream_set_readable_side_enabled(Item self, bool enabled) {
-    js_set_key_default(self, key_readable_side_enabled, js_bool_item(enabled));
-    js_stream_set_readable_open(self, enabled);
-}
-
-static void js_stream_set_writable_side_enabled(Item self, bool enabled) {
-    js_set_key_default(self, key_writable_side_enabled, js_bool_item(enabled));
-    js_stream_set_writable_open(self, enabled);
-}
+#define js_stream_set_readable_object_mode(obj, value) js_stream_set_side_object_mode(obj, true, value)
+#define js_stream_set_writable_object_mode(obj, value) js_stream_set_side_object_mode(obj, false, value)
+#define js_stream_set_readable_high_water_mark(obj, value) js_stream_set_side_high_water_mark(obj, true, value)
+#define js_stream_set_writable_high_water_mark(obj, value) js_stream_set_side_high_water_mark(obj, false, value)
+#define js_stream_set_readable_open(self, open) js_stream_set_side_open(self, true, open)
+#define js_stream_set_writable_open(self, open) js_stream_set_side_open(self, false, open)
+#define js_stream_readable_side_enabled(self) js_stream_side_enabled(self, true)
+#define js_stream_writable_side_enabled(self) js_stream_side_enabled(self, false)
+#define js_stream_set_readable_side_enabled(self, enabled) js_stream_set_side_enabled(self, true, enabled)
+#define js_stream_set_writable_side_enabled(self, enabled) js_stream_set_side_enabled(self, false, enabled)
 
 static bool js_stream_destroy_pending(Item self) {
     return js_item_is_true(js_get_key_default(self, key_destroy_pending));
@@ -1636,16 +1628,6 @@ static void js_stream_schedule_end(Item self) {
     js_next_tick_enqueue(tick);
 }
 
-static void js_stream_schedule_end_immediate(Item self) {
-    if (js_item_is_true(js_get_key_default(self, key_end_emitted))) return;
-    Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_native_closure(js_stream_emit_end_tick_closure, 0, env, 1);
-    // flowing EOF is stream-internal nextTick work; routing it through timers
-    // allocates libuv handles per stream and strands large read-stream batches.
-    js_next_tick_enqueue(tick);
-}
-
 static Item js_stream_emit_error_tick(Item self, Item err) {
     ensure_keys();
     js_stream_set_error_emitted(self, true);
@@ -1674,28 +1656,6 @@ static bool js_stream_schedule_error_once(Item self, Item err) {
     if (js_stream_has_stored_error(self)) return false;
     js_stream_schedule_error(self, err);
     return true;
-}
-
-static void js_stream_schedule_error_immediate(Item self, Item err) {
-    js_stream_set_error_state(self, err);
-    js_set_key_default(self, make_string_item("__error__"), err);
-    js_stream_async_iterators_drain(self, err);
-    Item* env = js_alloc_env(2);
-    env[0] = self;
-    env[1] = err;
-    Item tick = js_new_native_closure(js_stream_emit_error_tick_closure, 0, env, 2);
-    // destroy() queues terminal events before user nextTicks registered after
-    // destroy; timers let late listeners observe close/error incorrectly.
-    js_next_tick_enqueue(tick);
-}
-
-static void js_stream_schedule_close_immediate(Item self) {
-    Item* env = js_alloc_env(1);
-    env[0] = self;
-    Item tick = js_new_native_closure(js_stream_emit_close_tick_closure, 0, env, 1);
-    // destroy() close is a terminal nextTick, not a timer, so late nextTick
-    // listeners attached after destroy() do not see stale close events.
-    js_next_tick_enqueue(tick);
 }
 
 static void js_stream_invoke_destroy_callback(Item self, Item err) {
@@ -1740,9 +1700,10 @@ static Item js_stream_after_destroy(Item self, Item err) {
     return make_js_undefined();
 }
 
-static void js_stream_auto_destroy_after_terminal(Item self) {
+static void js_stream_auto_destroy(Item self, Item err, bool error_emit) {
     ensure_keys();
-    if (js_item_is_true(js_get_key_default(self, key_destroyed))) return;
+    if ((error_emit && !js_item_is_true(js_get_key_default(self, key_auto_destroy))) ||
+        js_item_is_true(js_get_key_default(self, key_destroyed))) return;
 
     bool readable_aborted = js_stream_has_readable_side(self) &&
                             !js_item_is_true(js_get_key_default(self, key_end_emitted));
@@ -1751,62 +1712,38 @@ static void js_stream_auto_destroy_after_terminal(Item self) {
     js_stream_mark_destroyed(self);
     js_set_key_default(self, make_string_item("readableAborted"), js_bool_item(readable_aborted));
     js_set_key_default(self, make_string_item("writableAborted"), js_bool_item(writable_aborted));
+    if (error_emit) {
+        js_stream_set_error_state(self, err);
+        js_set_key_default(self, make_string_item("__error__"), err);
+        js_stream_async_iterators_drain(self, err);
+    }
 
     Item destroy_fn = js_get_key_default(self, make_string_item("_destroy"));
     if (js_is_callable(destroy_fn)) {
         js_set_key_default(self, key_destroy_pending, js_bool_item(true));
         Item destroy_cb = js_bind_function(js_new_native_function(js_stream_after_destroy),
                                            make_js_undefined(), &self, 1);
-        Item args[2] = { ItemNull, destroy_cb };
+        Item destroy_err = error_emit && js_stream_has_callback_error(err) ? err : ItemNull;
+        Item args[2] = { destroy_err, destroy_cb };
         Item destroy_result = js_call_function(destroy_fn, self, args, 2);
         if (item_is_error(destroy_result)) {
             Item err = js_error_lane_payload(destroy_result);
             js_set_key_default(self, key_destroy_pending, js_bool_item(false));
-            js_stream_schedule_error_immediate(self, err);
-            js_stream_schedule_close_immediate(self);
+            js_stream_schedule_error(self, err);
+            js_stream_schedule_close(self);
         }
         return;
     }
 
-    js_stream_schedule_close_immediate(self);
+        js_stream_schedule_close(self);
+}
+
+static void js_stream_auto_destroy_after_terminal(Item self) {
+    js_stream_auto_destroy(self, ItemNull, false);
 }
 
 static void js_stream_auto_destroy_after_error_emit(Item self, Item err) {
-    ensure_keys();
-    if (!js_item_is_true(js_get_key_default(self, key_auto_destroy)) ||
-        js_item_is_true(js_get_key_default(self, key_destroyed))) {
-        return;
-    }
-
-    bool readable_aborted = js_stream_has_readable_side(self) &&
-                            !js_item_is_true(js_get_key_default(self, key_end_emitted));
-    bool writable_aborted = js_stream_has_writable_side(self) &&
-                            !js_item_is_true(js_get_key_default(self, key_finish_emitted));
-    js_stream_mark_destroyed(self);
-    js_set_key_default(self, make_string_item("readableAborted"), js_bool_item(readable_aborted));
-    js_set_key_default(self, make_string_item("writableAborted"), js_bool_item(writable_aborted));
-    js_stream_set_error_state(self, err);
-    js_set_key_default(self, make_string_item("__error__"), err);
-    js_stream_async_iterators_drain(self, err);
-
-    Item destroy_fn = js_get_key_default(self, make_string_item("_destroy"));
-    if (js_is_callable(destroy_fn)) {
-        js_set_key_default(self, key_destroy_pending, js_bool_item(true));
-        Item destroy_cb = js_bind_function(js_new_native_function(js_stream_after_destroy),
-                                           make_js_undefined(), &self, 1);
-        Item destroy_err = js_stream_has_callback_error(err) ? err : ItemNull;
-        Item args[2] = { destroy_err, destroy_cb };
-        Item destroy_result = js_call_function(destroy_fn, self, args, 2);
-        if (item_is_error(destroy_result)) {
-            Item thrown = js_error_lane_payload(destroy_result);
-            js_set_key_default(self, key_destroy_pending, js_bool_item(false));
-            js_stream_schedule_error_immediate(self, thrown);
-            js_stream_schedule_close_immediate(self);
-        }
-        return;
-    }
-
-    js_stream_schedule_close_immediate(self);
+    js_stream_auto_destroy(self, err, true);
 }
 
 static int64_t js_stream_read_size_hint(Item self, Item size_item) {
@@ -2031,18 +1968,12 @@ static void js_stream_flush_buffered_data(Item self) {
             if (js_item_is_true(js_get_key_default(self, key_end_pending)) &&
                 !js_item_is_true(js_get_key_default(self, key_end_emitted))) {
                 js_stream_flush_pending_decode(self);
-                Item flowing = js_get_key_default(self, key_flowing);
-                if (flowing.item != 0 && it2b(flowing)) {
-                    js_stream_schedule_end_immediate(self);
-                } else {
-                    js_stream_schedule_end(self);
-                }
+                js_stream_schedule_end(self);
             }
             return;
         }
 
         chunk_root.set(js_elements_get_int(buf, 0));
-        Item chunk = chunk_root.get();
         next_buffer_root.set(js_array_new(0));
         Item next_buf = next_buffer_root.get();
         for (int64_t i = 1; i < blen; i++) {
@@ -2438,7 +2369,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
                 js_stream_emit_readable(self);
             }
         } else if (flowing.item != 0 && it2b(flowing)) {
-            js_stream_schedule_end_immediate(self);
+            js_stream_schedule_end(self);
         } else if (readable_listening &&
                    js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm) == 0) {
             js_stream_emit_readable(self);
@@ -4504,13 +4435,6 @@ static Item js_stream_iter_to_readable(Item source) {
     return js_readable_from(source);
 }
 
-static Item js_stream_iter_result(Item value, bool done) {
-    Item result = js_new_object();
-    js_set_key_default(result, make_string_item("value"), value);
-    js_set_key_default(result, make_string_item("done"), js_bool_item(done));
-    return result;
-}
-
 static Item js_stream_iter_identity(void) {
     return js_get_this();
 }
@@ -4585,13 +4509,13 @@ static Item js_stream_iter_append_normalized(Item batch, Item value) {
 static Item js_stream_iter_batch_next(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || js_item_is_true(env[2]))
-        return js_stream_iter_result(make_js_undefined(), true);
+        return js_stream_iterator_result(make_js_undefined(), true);
 
     Item batch = js_array_new(0);
     if (js_item_is_true(env[3])) {
         env[2] = js_bool_item(true);
         JS_RETURN_IF_ERROR(js_stream_iter_append_normalized(batch, env[0]));
-        return js_stream_iter_result(batch, false);
+        return js_stream_iterator_result(batch, false);
     }
 
     bool collect_all = js_item_is_true(env[4]);
@@ -4605,8 +4529,8 @@ static Item js_stream_iter_batch_next(Item env_item) {
     }
 
     if (js_array_length(batch) == 0)
-        return js_stream_iter_result(make_js_undefined(), true);
-    return js_stream_iter_result(batch, false);
+        return js_stream_iterator_result(make_js_undefined(), true);
+    return js_stream_iterator_result(batch, false);
 }
 
 static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable, bool collect_all_sync) {
@@ -5837,10 +5761,10 @@ extern "C" Item js_stream_destroy(Item self, Item err) {
                     // Synchronous _destroy(cb) errors have the same iterator
                     // contract as async callbacks: pending next() observes cb_err.
                     js_stream_async_iterators_drain(self, cb_err);
-                    js_stream_schedule_error_immediate(self, cb_err);
+                    js_stream_schedule_error(self, cb_err);
                 }
                 js_stream_invoke_destroy_callback(self, cb_err);
-                js_stream_schedule_close_immediate(self);
+                js_stream_schedule_close(self);
             }
             return self;
         }
@@ -5849,10 +5773,10 @@ extern "C" Item js_stream_destroy(Item self, Item err) {
 
     if (err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
         get_type_id(err) != LMD_TYPE_NULL) {
-        js_stream_schedule_error_immediate(self, err);
+        js_stream_schedule_error(self, err);
     }
     js_stream_invoke_destroy_callback(self, err);
-    js_stream_schedule_close_immediate(self);
+    js_stream_schedule_close(self);
     return self;
 }
 
@@ -6371,42 +6295,29 @@ extern "C" Item js_writable_uncork(Item self);
 extern "C" Item js_transform_write(Item self, Item chunk, Item encoding, Item callback);
 extern "C" Item js_transform_end(Item self, Item chunk, Item callback);
 
-static Item js_stream_inst_on(Item event_item, Item listener) {
-    return js_stream_on(js_get_this(), event_item, listener);
-}
-static Item js_stream_inst_once(Item event_item, Item listener) {
-    return js_stream_once(js_get_this(), event_item, listener);
-}
-static Item js_stream_inst_off(Item event_item, Item listener) {
-    return js_stream_off(js_get_this(), event_item, listener);
-}
-static Item js_stream_inst_removeAllListeners(Item event_item) {
-    return js_stream_removeAllListeners(js_get_this(), event_item);
-}
-static Item js_stream_inst_emit(Item event_item, Item arg1) {
-    return js_stream_emit(js_get_this(), event_item, arg1);
-}
-static Item js_stream_inst_eventNames(void) {
-    return js_stream_eventNames(js_get_this());
-}
-static Item js_stream_inst_listeners(Item event_item) {
-    return js_stream_listeners(js_get_this(), event_item);
-}
-static Item js_stream_inst_listenerCount(Item event_item, Item listener) {
-    return js_stream_listenerCount(js_get_this(), event_item, listener);
-}
-static Item js_readable_inst_push(Item chunk, Item encoding) {
-    return js_readable_push_encoded(js_get_this(), chunk, encoding);
-}
-static Item js_readable_inst_unshift(Item chunk, Item encoding) {
-    return js_readable_unshift_encoded(js_get_this(), chunk, encoding);
-}
-static Item js_readable_inst_read(Item size_item) {
-    return js_readable_read_size(js_get_this(), size_item);
-}
-static Item js_readable_inst_pipe(Item dest) {
-    return js_readable_pipe(js_get_this(), dest);
-}
+#define JS_STREAM_THIS0(name, target) \
+    static Item name(void) { return target(js_get_this()); }
+#define JS_STREAM_THIS1(name, target) \
+    static Item name(Item a1) { return target(js_get_this(), a1); }
+#define JS_STREAM_THIS2(name, target) \
+    static Item name(Item a1, Item a2) { return target(js_get_this(), a1, a2); }
+#define JS_STREAM_THIS3(name, target) \
+    static Item name(Item a1, Item a2, Item a3) { \
+        return target(js_get_this(), a1, a2, a3); \
+    }
+
+JS_STREAM_THIS2(js_stream_inst_on, js_stream_on)
+JS_STREAM_THIS2(js_stream_inst_once, js_stream_once)
+JS_STREAM_THIS2(js_stream_inst_off, js_stream_off)
+JS_STREAM_THIS1(js_stream_inst_removeAllListeners, js_stream_removeAllListeners)
+JS_STREAM_THIS2(js_stream_inst_emit, js_stream_emit)
+JS_STREAM_THIS0(js_stream_inst_eventNames, js_stream_eventNames)
+JS_STREAM_THIS1(js_stream_inst_listeners, js_stream_listeners)
+JS_STREAM_THIS2(js_stream_inst_listenerCount, js_stream_listenerCount)
+JS_STREAM_THIS2(js_readable_inst_push, js_readable_push_encoded)
+JS_STREAM_THIS2(js_readable_inst_unshift, js_readable_unshift_encoded)
+JS_STREAM_THIS1(js_readable_inst_read, js_readable_read_size)
+JS_STREAM_THIS1(js_readable_inst_pipe, js_readable_pipe)
 static Item js_readable_inst_unpipe(Item dest) {
     js_readable_remove_pipe(js_get_this(), dest, true);
     return js_get_this();
@@ -6465,45 +6376,19 @@ static Item js_stream_inst_undestroy(void) {
 
     return make_js_undefined();
 }
-static Item js_readable_inst_resume(void) {
-    return js_readable_resume(js_get_this());
-}
-static Item js_readable_inst_pause(void) {
-    return js_readable_pause(js_get_this());
-}
-static Item js_readable_inst_isPaused(void) {
-    return js_readable_isPaused(js_get_this());
-}
-static Item js_stream_inst_setEncoding(Item encoding) {
-    return js_stream_setEncoding(js_get_this(), encoding);
-}
-static Item js_stream_inst_setDefaultEncoding(Item encoding) {
-    return js_stream_setDefaultEncoding(js_get_this(), encoding);
-}
-static Item js_readable_inst_iterator(Item options) {
-    return js_readable_iterator(js_get_this(), options);
-}
-static Item js_readable_inst_toArray(Item options) {
-    return js_readable_toArray(js_get_this(), options);
-}
-static Item js_readable_inst_map(Item fn, Item options) {
-    return js_readable_map(js_get_this(), fn, options);
-}
-static Item js_readable_inst_filter(Item fn, Item options) {
-    return js_readable_filter(js_get_this(), fn, options);
-}
-static Item js_readable_inst_forEach(Item fn, Item options) {
-    return js_readable_forEach(js_get_this(), fn, options);
-}
-static Item js_readable_inst_reduce(Item fn, Item initial, Item options) {
-    return js_readable_reduce(js_get_this(), fn, initial, options);
-}
-static Item js_readable_inst_compose(Item stream, Item options) {
-    return js_readable_compose(js_get_this(), stream, options);
-}
-static Item js_stream_inst_asyncIterator(void) {
-    return js_stream_async_iterator(js_get_this());
-}
+JS_STREAM_THIS0(js_readable_inst_resume, js_readable_resume)
+JS_STREAM_THIS0(js_readable_inst_pause, js_readable_pause)
+JS_STREAM_THIS0(js_readable_inst_isPaused, js_readable_isPaused)
+JS_STREAM_THIS1(js_stream_inst_setEncoding, js_stream_setEncoding)
+JS_STREAM_THIS1(js_stream_inst_setDefaultEncoding, js_stream_setDefaultEncoding)
+JS_STREAM_THIS1(js_readable_inst_iterator, js_readable_iterator)
+JS_STREAM_THIS1(js_readable_inst_toArray, js_readable_toArray)
+JS_STREAM_THIS2(js_readable_inst_map, js_readable_map)
+JS_STREAM_THIS2(js_readable_inst_filter, js_readable_filter)
+JS_STREAM_THIS2(js_readable_inst_forEach, js_readable_forEach)
+JS_STREAM_THIS3(js_readable_inst_reduce, js_readable_reduce)
+JS_STREAM_THIS2(js_readable_inst_compose, js_readable_compose)
+JS_STREAM_THIS0(js_stream_inst_asyncIterator, js_stream_async_iterator)
 
 static void js_stream_install_async_iterator(Item obj) {
     RootFrame roots(4);
@@ -6525,24 +6410,17 @@ static void js_stream_install_readable_helpers(Item obj) {
     js_stream_set_method(obj, make_string_item("reduce"), js_readable_inst_reduce, 3);
     js_stream_set_method(obj, make_string_item("compose"), js_readable_inst_compose, 2);
 }
-static Item js_writable_inst_write(Item chunk, Item encoding, Item callback) {
-    return js_writable_write(js_get_this(), chunk, encoding, callback);
-}
-static Item js_writable_inst_end(Item chunk, Item callback) {
-    return js_writable_end(js_get_this(), chunk, callback);
-}
-static Item js_writable_inst_cork(void) {
-    return js_writable_cork(js_get_this());
-}
-static Item js_writable_inst_uncork(void) {
-    return js_writable_uncork(js_get_this());
-}
-static Item js_transform_inst_write(Item chunk, Item encoding, Item callback) {
-    return js_transform_write(js_get_this(), chunk, encoding, callback);
-}
-static Item js_transform_inst_end(Item chunk, Item callback) {
-    return js_transform_end(js_get_this(), chunk, callback);
-}
+JS_STREAM_THIS3(js_writable_inst_write, js_writable_write)
+JS_STREAM_THIS2(js_writable_inst_end, js_writable_end)
+JS_STREAM_THIS0(js_writable_inst_cork, js_writable_cork)
+JS_STREAM_THIS0(js_writable_inst_uncork, js_writable_uncork)
+JS_STREAM_THIS3(js_transform_inst_write, js_transform_write)
+JS_STREAM_THIS2(js_transform_inst_end, js_transform_end)
+
+#undef JS_STREAM_THIS0
+#undef JS_STREAM_THIS1
+#undef JS_STREAM_THIS2
+#undef JS_STREAM_THIS3
 
 template <typename Target>
 static void js_stream_set_method(Item object, Item key, Target target,
