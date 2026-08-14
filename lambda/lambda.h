@@ -1039,6 +1039,9 @@ void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
 Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
+// v3 (RV5): resolve a shape-2 call result whose lane 1 came back pending.
+// Boxes the lane-2 payload into the CALLING frame's number extent.
+Item lambda_item_resolve_pending(Item pending, uint64_t payload);
 int64_t lambda_restore_number_frame_top(uint64_t* top);
 // A terminal native consumer owns this word only until it unboxes, discards, or
 // copies the result into destination-owned storage; never return its Item.
@@ -1266,6 +1269,71 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_SENTINEL_TAG   UINT64_C(0x1F)
 #define ITEM_JS_DELETED_SENTINEL   ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00DEAD00))
 #define ITEM_JS_ITER_DONE_SENTINEL ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00000000))
+
+// ---------------------------------------------------------------------------
+// Pending Items — return-value convention v3 (RV3, see
+// `vibe/Lambda_Design_Compiling_Return_Value.md`, formal spec D5.2.1v2 /
+// D8.4.2v2).
+//
+// A shape-2 return is the pair `[item, scalar]`: lane 1 carries an ordinary
+// Item unless the returned value is a WIDE scalar (int64 / uint64 /
+// out-of-band double), in which case lane 1 is a PENDING Item and lane 2
+// carries the raw 64-bit payload. The caller resolves the pair at the first
+// resolution point (consume, patch on escape, or tail-forward).
+//
+// Two protocol invariants (RV4) that every consumer may rely on:
+//   1. A pending Item NEVER lives in memory. It exists only in registers
+//      between a call returning and its first resolution point, so anything
+//      loaded from a variable, container, field or constant is resolved by
+//      construction.
+//   2. At most one pending value is live at any point — lane 2 is a single
+//      location clobbered by the next call.
+//
+// 0x1E is the last free byte of the `000` octant (TypeIds run through 0x1B,
+// COUNT/HEAP_START take 0x1C-0x1D, ITEM_SENTINEL_TAG takes 0x1F). Spending it
+// exhausts the octant; the next tag-byte consumer must take the reserved
+// 0x80-0x9F headroom (`Lambda_Type_Double_Boxing.md` Part 8).
+//
+// The tag sits above every TypeId, so a leaked pending Item indexes outside
+// the valid TypeId range and dies loudly at the first per-tag table bound —
+// this is a guard property, not an accident.
+//
+// LAMBDA_RETURN_V3 gates emission, at WHOLE-MODULE granularity: a module is
+// compiled entirely v2 (trailing caller-donated scalar homes) or entirely v3 —
+// never mixed. Cross-module and dynamic calls always go through entries whose
+// shape descriptor says what they speak, so the flag flips emission, not
+// dispatch correctness. The L1 MIR module cache key carries the convention
+// revision so a v2-cached module can never be linked against v3 callers.
+#ifndef LAMBDA_RETURN_V3
+#define LAMBDA_RETURN_V3 0
+#endif
+// Convention revision, folded into the MIR cache key (RV10).
+#define LAMBDA_RETURN_CONVENTION_REVISION (LAMBDA_RETURN_V3 ? 3 : 2)
+
+#define ITEM_PENDING_TAG    UINT64_C(0x1E)
+#define ITEM_PENDING        (ITEM_PENDING_TAG << 56)
+// Payload kind lives in the low bits of lane 1; lane 2 holds the raw bits.
+// Kind 3 stays reserved: RV8 rules DTIME in-band (pointer Item, GC-managed),
+// and every other pointer-backed scalar is likewise never pending.
+#define PENDING_KIND_INT64   UINT64_C(0)
+#define PENDING_KIND_UINT64  UINT64_C(1)
+#define PENDING_KIND_FLOAT   UINT64_C(2)  // out-of-band double, raw bits on lane 2
+#define PENDING_KIND_MASK    UINT64_C(3)
+#define ITEM_PENDING_INT64   (ITEM_PENDING | PENDING_KIND_INT64)
+#define ITEM_PENDING_UINT64  (ITEM_PENDING | PENDING_KIND_UINT64)
+#define ITEM_PENDING_FLOAT   (ITEM_PENDING | PENDING_KIND_FLOAT)
+
+// The discriminator the JIT mirrors in two instructions:
+//   and t, item, ITEM_HIGH_BYTE_MASK; beq L_pending, t, ITEM_PENDING
+static inline bool lambda_item_is_pending(uint64_t bits) {
+    return (bits & ITEM_HIGH_BYTE_MASK) == ITEM_PENDING;
+}
+
+static inline uint64_t lambda_item_pending_kind(uint64_t bits) {
+    return bits & PENDING_KIND_MASK;
+}
+// ---------------------------------------------------------------------------
+
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_INT64          ((uint64_t)LMD_TYPE_INT64 << 56)
 // BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
@@ -1373,6 +1441,43 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NOT_INLINE_INT((uint8_t)ITEM_SENTINEL_TAG),
                      "sentinel tag must stay out of the inline-int octant");
 LAMBDA_STATIC_ASSERT(ITEM_JS_DELETED_SENTINEL != ITEM_JS_ITER_DONE_SENTINEL,
                      "internal sentinels must stay distinct");
+// The pending tag (RV3) has the same unreachability requirements as the
+// sentinel tag, plus it must stay distinct from the sentinel family: JS
+// deleted/iter-done sentinels are legitimately STORED (sparse arrays), so a
+// shared high byte would false-positive the 2-instruction pending test.
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)ITEM_PENDING_TAG),
+                     "pending tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NOT_INLINE_INT((uint8_t)ITEM_PENDING_TAG),
+                     "pending tag must stay out of the inline-int octant");
+LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG >= LMD_CONTAINER_HEAP_START,
+                     "pending tag must sit above every TypeId");
+LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG < LAMBDA_TAG_SPACE_SIZE,
+                     "pending tag must stay inside the 000 octant tag space");
+LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG != ITEM_SENTINEL_TAG,
+                     "pending tag must stay distinct from the sentinel tag");
+LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56) != (uint8_t)ITEM_PENDING_TAG &&
+                     (uint8_t)(ITEM_JS_ITER_DONE_SENTINEL >> 56) != (uint8_t)ITEM_PENDING_TAG,
+                     "storable JS sentinels must not share the pending high byte");
+LAMBDA_STATIC_ASSERT(PENDING_KIND_FLOAT <= PENDING_KIND_MASK,
+                     "pending kinds must fit the reserved low bits");
+// The four wide-scalar tags are CONTIGUOUS, and the JIT's pending-pair builder
+// depends on it: `(unsigned)(tag - LMD_TYPE_INT64) <= 3` is the whole fast-path
+// test, and `tag - LMD_TYPE_INT64` IS the pending kind for the two integer
+// tags. Reordering EnumTypeId without preserving this run silently
+// mis-classifies returns, so pin it here.
+LAMBDA_STATIC_ASSERT(LMD_TYPE_UINT64 == LMD_TYPE_INT64 + 1 &&
+                     LMD_TYPE_FLOAT == LMD_TYPE_INT64 + 2 &&
+                     LMD_TYPE_FLOAT64 == LMD_TYPE_INT64 + 3,
+                     "wide scalar tags must stay contiguous from LMD_TYPE_INT64");
+LAMBDA_STATIC_ASSERT((uint64_t)(LMD_TYPE_INT64 - LMD_TYPE_INT64) == PENDING_KIND_INT64 &&
+                     (uint64_t)(LMD_TYPE_UINT64 - LMD_TYPE_INT64) == PENDING_KIND_UINT64,
+                     "integer pending kinds must equal their tag offset");
+// Tags 0x06-0x09 have bits 6 and 5 clear, so an Item whose high byte lands in
+// the wide-scalar run can never be an inline double. The pair builder relies on
+// that to skip the ITEM_DBL_MASK test on the wide arm.
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_INT64) &&
+                     ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_FLOAT64),
+                     "wide scalar tags must be outside inline-double space");
 
 static inline void lambda_item_debug_trap(void) {
 #if defined(_MSC_VER)
@@ -1381,6 +1486,19 @@ static inline void lambda_item_debug_trap(void) {
     __builtin_trap();
 #else
     *((volatile int*)0) = 0;
+#endif
+}
+
+// Tripwire for RV4.1: a pending Item must never reach a value accessor. It is
+// a return-lane transport, resolved by the caller before any consume/store, so
+// seeing one here means an emitter site skipped its resolution point.
+static inline void assert_item_not_pending(uint64_t bits) {
+#if !defined(NDEBUG)
+    if (lambda_item_is_pending(bits)) {
+        lambda_item_debug_trap();
+    }
+#else
+    (void)bits;
 #endif
 }
 

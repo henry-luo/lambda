@@ -37,6 +37,11 @@
 #include <vector>
 #include <utility>
 
+// LAMBDA_RETURN_CONVENTION_REVISION: the harness and lambda.exe are built from
+// one tree with one set of flags, so this compile-time constant is exactly the
+// convention the binary under test emits.
+#include "../lambda/lambda.h"
+
 #ifdef _WIN32
     #include <windows.h>
     #include <process.h>
@@ -376,6 +381,12 @@ struct CheckGroup {
     bool whole_module = false;     // in_func == "*"
     bool has_occurrence = false;
     long long occurrence = 0;
+    // Return-value convention this group asserts (0 = every convention).
+    // A fixture that pins emission shapes belonging to one convention carries
+    // one group per convention rather than being skipped wholesale, so both
+    // builds keep real coverage and a fixture whose every group is filtered out
+    // fails loudly instead of quietly asserting nothing.
+    long long return_convention = 0;
     std::vector<std::string> expect;
     std::vector<std::string> forbid;
     std::vector<SeqExpectation> expect_seq;
@@ -466,6 +477,7 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
 
     static const char* kCheckKeys[] = {
         "in_module", "in_func", "occurrence", "expect", "forbid", "expect_seq", "count",
+        "return_convention",
     };
     static const char* kSeqKeys[] = { "pattern", "next_line" };
     static const char* kBoundKeys[] = { "min", "max" };
@@ -500,6 +512,15 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
             }
             group.has_occurrence = true;
             group.occurrence = occurrence->int_value;
+        }
+        const JsonValue* convention = group_json.find("return_convention");
+        if (convention) {
+            if (convention->kind != JsonValue::KInt ||
+                    (convention->int_value != 2 && convention->int_value != 3)) {
+                *error = "'return_convention' must be 2 or 3";
+                return false;
+            }
+            group.return_convention = convention->int_value;
         }
 
         const JsonValue* expect = group_json.find("expect");
@@ -1075,8 +1096,17 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
         << "\n" << compiled.error
         << "\n--- lambda.exe output ---\n" << compiled.output;
 
+    size_t applicable_groups = 0;
     for (size_t c = 0; c < sidecar.checks.size(); c++) {
         const CheckGroup& group = sidecar.checks[c];
+        // Groups pinned to the other return-value convention describe emission
+        // this binary does not produce. Filtering them is not a skip: the
+        // assertion below fails the fixture if NOTHING applied.
+        if (group.return_convention != 0 &&
+                group.return_convention != LAMBDA_RETURN_CONVENTION_REVISION) {
+            continue;
+        }
+        applicable_groups++;
         std::vector<MirLine> lines;
         std::string label;
         std::string scope_error;
@@ -1149,6 +1179,12 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
                 << "expect_seq did not match in order\n" << trace << context;
         }
     }
+    // A fixture whose every group targets another convention would otherwise
+    // report green while asserting nothing at all.
+    EXPECT_GT(applicable_groups, (size_t)0)
+        << "sidecar " << sidecar_path << " has no checks for return convention "
+        << LAMBDA_RETURN_CONVENTION_REVISION
+        << "; every group is pinned to a different one";
 }
 
 // ---------------------------------------------------------------------------
