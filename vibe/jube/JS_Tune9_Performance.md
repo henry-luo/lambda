@@ -2,7 +2,9 @@
 
 **Date:** 2026-08-14
 
-**Status:** ANALYSIS COMPLETE; recovery is partially implemented; canonical post-tuning benchmark is pending
+**Status:** ANALYSIS COMPLETE; P1 and P2.1 recovery slices are implemented
+with zero verified semantic regressions; canonical post-tuning benchmark and
+zero-retry Test262 stability confirmation are pending
 
 **Analysis anchor:** `0b27a30ea4485a851bf36aa291e009b0c65713ab`
 
@@ -358,7 +360,7 @@ work before proceeding to additional broad migrations.
 
 ## 8. Current recovery evidence
 
-The current tree contains four relevant recovery mechanisms:
+The current tree contains five relevant recovery mechanisms:
 
 1. `js_apply_resolved_constructed_prototype()` avoids an identical canonical
    prototype publication that would create array companion metadata.
@@ -367,6 +369,10 @@ The current tree contains four relevant recovery mechanisms:
    before falling back to the semantic operation.
 4. `js_elements_set_existing_dense_int_fast()` performs a guarded existing
    dense-element store while preserving generic fallback.
+5. Named-property feedback-vector lowering is selected by
+   `LAMBDA_INLINE_CACHE` in release as well as profile configurations;
+   `LAMBDA_JS_EXEC_PROFILE` now controls only observability, not whether
+   `js_get_name_id_ic()` / `js_set_name_id_ic()` are emitted.
 
 The local `temp/result29_tuned_clean_release.json` run, captured from commit
 `bf8cb8b6633f853d0a971eed3ae5fdd160086656`, produced this same-row comparison:
@@ -398,6 +404,52 @@ This recovery strongly validates the primary diagnosis. It is incomplete:
 
 The tuned JSON is therefore a diagnostic artifact. It must not replace
 Result29 or be labeled Result30.
+
+### 8.1 P2.1 release named-IC recovery (2026-08-14)
+
+P3 profiling of `awfy/nbody` identified a release-only compiler gate rather
+than a new property-semantics defect. The runtime already has guarded named
+load/store IC implementations. However, `js_mir_expression_lowering.cpp` also
+required `JS_EXEC_PROFILE_ENABLED` before emitting them. Consequently,
+`LAMBDA_INLINE_CACHE=1` was present in a normal release build but named member
+operations still bypassed those ICs and entered the generic property kernel.
+
+The fix preserves the D3.4.4v2/D4.6.1v2 `NameId` authority and the D8.4.3
+fallback ABI: only the existing `LAMBDA_INLINE_CACHE` guard now controls IC
+emission. A cache miss still calls the same semantic operation; profile builds
+only add counters. This is not a new semantic property implementation.
+
+Diagnostic evidence (not an acceptance measurement):
+
+| Configuration | `awfy/nbody` result | Interpretation |
+|---|---:|---|
+| Profile ICs enabled | 2,960.769 ms | Existing feedback path is effective. |
+| Profile ICs disabled | 8,486.388 ms | Same profile binary; validates the IC contribution. |
+| Release before the lowering fix | 7.38 s | One-sample residual probe; not interleaved. |
+| Release after the lowering fix | 2,364.617 / 2,374.176 / 2,363.807 ms | Three correct runs; median 2,364.617 ms, about 3.1x faster than the pre-fix probe. |
+| Final tree after the live-DOM IC boundary | 3,180.387 / 3,200.743 / 3,019.025 ms | Three correct release runs; median 3,180.387 ms, still about 2.3x faster than the pre-fix probe. |
+
+The two release sample groups were not interleaved and the later group followed
+the full baseline runs, so their difference is environmental noise until P0
+captures the controlled A/B bundle. They establish that the final guarded tree
+still executes the optimized path, not a publishable benchmark delta.
+
+The profile recorded 9,648,206 named-load probes and 2,700,039 named-store
+probes for this workload. The focused JS optimization contract suite passed all
+19 tests after the change, including named IC warming and the Tune9 indexed
+semantic guards. Enabling release ICs initially exposed a stale-read regression
+in live DOM form collections: their named entries are derived from the current
+tree and must run the existing refresh hook. The IC receiver admission now
+rejects only arrays registered as live DOM collections, so they use the single
+semantic fallback while ordinary array companion properties remain cacheable.
+
+`make test-lambda-baseline` passed **3,718/3,718** on this tree, including all
+21 JS MIR-emission fixtures and all 347 JS file tests. Two pinned Test262
+baseline runs completed with zero pass-to-fail regressions across all 40,261
+baseline entries. Both runs killed the same seven tests from four worker batches,
+but every affected test passed in its isolated retry. The repeatable batch-only
+failure is not a masked runtime result, yet its no-retry stability acceptance
+condition remains open until the runner-level cause is separately resolved.
 
 ## 9. Tune9 performance architecture
 
@@ -499,6 +551,9 @@ fixture regression and no timeout.
 
 - Measure named IC hit/miss rates and eliminate repeated misses that can be
   guarded by shape/prototype epochs.
+- **Completed P2.1:** emit the existing guarded named load/store feedback slots
+  in normal release builds; the profile-only macro must not suppress them, and
+  exclude live DOM collections whose properties require a refresh hook.
 - Hoist constant `NameId` and module slot loads.
 - Add stable-callee direct call/construct feedback while preserving observable
   `Get`, receiver, bound function, `newTarget`, and prototype behavior under
@@ -618,9 +673,13 @@ difference.
 - [x] Current partial recovery measured and labeled diagnostic.
 - [ ] Controlled archived Result28/Result29/current interleaved A/B completed.
 - [ ] Indexed access recovery complete across all semantic boundaries.
+- [x] P2.1 release named load/store IC lowering is enabled and has a measured
+  `nbody` diagnostic recovery.
 - [ ] Named property, module, and callable residuals profiled and tuned.
-- [ ] Focused optimization gtests and fixtures complete.
-- [ ] Lambda and Test262 baseline gates pass on the final tree.
+- [x] Focused optimization gtests and MIR/DOM regression fixtures complete.
+- [x] Lambda baseline passes on the final tree (3,718/3,718).
+- [x] Test262 baseline has zero pass-to-fail regression (40,261 entries).
+- [ ] Test262 batch stability is confirmed with zero retry.
 - [ ] Full 59-row release benchmark completes with no timeout.
 - [ ] Tune9 acceptance targets pass and the next numbered result is published.
 
@@ -650,6 +709,13 @@ Transient diagnostic evidence currently under `temp/`:
 - `temp/result29_sieve.trace`
 - `temp/result29_primes.profile`
 - `temp/result29_tuned_clean_release.json`
+- `temp/tune9_residual_probe.json`
+- `temp/tune9_nbody_profile.tsv`
+- `temp/tune9_lambda_baseline.log`
+- `temp/tune9_test262_baseline.log`
+- `temp/tune9_lambda_baseline_final.log`
+- `temp/tune9_test262_baseline_final.log`
+- `temp/_t262_batch_kills.txt`
 
 The transient files support this analysis but are not a reproducible benchmark
 archive. P0 must replace them with a complete capture bundle before Tune9 is
