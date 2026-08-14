@@ -1,0 +1,8 @@
+{
+  "name": "Selection range wrapper remains valid after JS reachability changes",
+  "html": "test/ui/dom/selection_wrapper_lifetime_gc.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "1|true|true"}
+  ]
+}

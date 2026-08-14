@@ -31,6 +31,8 @@ extern "C" {
 #include "../../lambda/runtime/lambda-stack.h"
 }
 
+extern "C" void heap_finalize_gc_objects(struct gc_heap* gc);
+
 // Use LMD_TYPE_* enum values from lambda.h directly — no local aliases needed.
 
 // ============================================================================
@@ -714,6 +716,26 @@ TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsAtHeapTeardown) {
 
     EXPECT_EQ(external_destroy_calls, 1);
     EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
+}
+
+TEST_F(GCHeapTest, ExplicitFinalizationDisarmsTeardownCallbacks) {
+    external_destroy_calls = 0;
+    external_destroy_last_tag = 0;
+    gc->external_destroy = test_external_destroy;
+    void* obj = gc_heap_calloc(gc, sizeof(void*), LMD_TYPE_BINARY);
+    ASSERT_NE(obj, nullptr);
+    *(void**)obj = obj;
+
+    // explicit runtime finalization must leave heap teardown with no callback
+    // armed, because the same external payload has already been destroyed.
+    heap_finalize_gc_objects(gc);
+
+    EXPECT_EQ(external_destroy_calls, 1);
+    EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
+
+    gc_heap_destroy(gc);
+    gc = nullptr;
+    EXPECT_EQ(external_destroy_calls, 1);
 }
 
 // ============================================================================

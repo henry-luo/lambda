@@ -1,0 +1,8 @@
+{
+  "name": "Jube DOM bridge exposes document, fragment, text clone, and labels",
+  "html": "test/ui/dom/dom_bridge_surface.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "9|11|3|bridge-text|1|1|0"}
+  ]
+}

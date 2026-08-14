@@ -45,6 +45,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/time_util.h"
 #include "../lambda/js/js_event_loop.h"
+#include "../lambda/jube/jube_registry.h"
 #include "../lambda/network/network_resource_manager.h"
 
 #include <cstring>
@@ -2268,6 +2269,16 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     }
     js_dom_set_ui_context(runtime->dom_ui_context);
     js_dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
+
+    if (s_js_mir_cache && !s_retain_js_state) {
+        const JubeModuleDef* radiant = jube_find_static_module("radiant");
+        // The compile-only preamble runs before normal document binding, but
+        // its document member ordinals must see the same Jube registry as the
+        // later realm or the retained cache key changes after the first file.
+        if (radiant && !jube_activate_module(radiant)) {
+            log_error("execute_document_scripts: failed to activate radiant before preamble cache");
+        }
+    }
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.
