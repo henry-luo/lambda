@@ -277,6 +277,19 @@ void js_scope_pop(JsTranspiler* tp) {
     }
 }
 
+static NameEntry* js_scope_find_entry(JsScope* scope, String* name) {
+    if (!scope || !name) return NULL;
+    if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
+        if (entry->name->len == name->len &&
+            memcmp(entry->name->chars, name->chars, name->len) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     JsScope* scope = tp->current_scope;
     if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
@@ -295,20 +308,9 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
         js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
             JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
         NameEntry* result = NULL;
-        JsScope* scan_scope = scope;
-        while (scan_scope && !result) {
-            if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
-            NameEntry* entry = scan_scope->first;
-            while (entry) {
-                if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
-                if (entry->name->len == name->len &&
-                    memcmp(entry->name->chars, name->chars, name->len) == 0) {
-                    result = entry;
-                    break;
-                }
-                entry = entry->next;
-            }
-            scan_scope = scan_scope->parent;
+        for (JsScope* scan_scope = scope; scan_scope && !result;
+                scan_scope = scan_scope->parent) {
+            result = js_scope_find_entry(scan_scope, name);
         }
         probe.result = result;
         probe.found = result != NULL;
@@ -317,17 +319,8 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     }
 
     while (scope) {
-        if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
-        NameEntry* entry = scope->first;
-        while (entry) {
-            if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
-            if (entry->name->len == name->len &&
-                memcmp(entry->name->chars, name->chars, name->len) == 0) {
-                return entry;
-            }
-            entry = entry->next;
-        }
-
+        NameEntry* entry = js_scope_find_entry(scope, name);
+        if (entry) return entry;
         // For var declarations, skip block scopes and go to function scope
         scope = scope->parent;
     }
@@ -353,19 +346,13 @@ NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
     }
     if (!tp->current_scope) return NULL;
 
-    if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
-    NameEntry* entry = tp->current_scope->first;
-    while (entry) {
-        if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
-            if (entry->name->len == name->len &&
-                memcmp(entry->name->chars, name->chars, name->len) == 0) {
-                if (tp->scope_lookup_cache) {
-                    JsScopeLookupCacheEntry hit = {tp->current_scope, name, entry, true, true};
-                    hashmap_set(tp->scope_lookup_cache, &hit);
-                }
-                return entry;
+    NameEntry* entry = js_scope_find_entry(tp->current_scope, name);
+    if (entry) {
+        if (tp->scope_lookup_cache) {
+            JsScopeLookupCacheEntry hit = {tp->current_scope, name, entry, true, true};
+            hashmap_set(tp->scope_lookup_cache, &hit);
         }
-        entry = entry->next;
+        return entry;
     }
 
     if (tp->scope_lookup_cache && name) {

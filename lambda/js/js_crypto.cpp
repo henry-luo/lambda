@@ -1438,16 +1438,6 @@ static void crypto_untrack_context(void** contexts, int* count, void* ctx) {
     }
 }
 
-static void crypto_track_hmac_context(HmacCtx* ctx) {
-    crypto_track_context(crypto_native_state.hmac_contexts,
-        &crypto_native_state.hmac_context_count, ctx);
-}
-
-static void crypto_untrack_hmac_context(HmacCtx* ctx) {
-    crypto_untrack_context(crypto_native_state.hmac_contexts,
-        &crypto_native_state.hmac_context_count, ctx);
-}
-
 static void hmac_ctx_release(HmacCtx* ctx) {
     if (!ctx) return;
     if (ctx->key) mem_free(ctx->key);
@@ -1457,7 +1447,8 @@ static void hmac_ctx_release(HmacCtx* ctx) {
 
 static void hmac_ctx_free(HmacCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_hmac_context(ctx);
+    crypto_untrack_context(crypto_native_state.hmac_contexts,
+        &crypto_native_state.hmac_context_count, ctx);
     hmac_ctx_release(ctx);
 }
 
@@ -1473,10 +1464,6 @@ static void crypto_append_bytes(uint8_t** data, int* data_len, int* data_cap,
     }
     memcpy(*data + *data_len, buf, (size_t)len);
     *data_len += len;
-}
-
-static void hmac_ctx_append(HmacCtx* ctx, const uint8_t* buf, int len) {
-    if (ctx) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, buf, len);
 }
 
 static void crypto_link_instance_to_constructor(Item obj, const char* constructor_name) {
@@ -1500,7 +1487,7 @@ extern "C" Item js_hmac_update(Item data_item) {
     Item status = crypto_stream_input_bytes(data_item, make_js_undefined_crypto(),
         true, false, &bytes, &len, &owned);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) hmac_ctx_append(ctx, bytes, len);
+    if (bytes) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, bytes, len);
     if (owned) mem_free((void*)bytes);
     return self;
 }
@@ -1568,7 +1555,8 @@ extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
     }
 
     HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_hmac_context(ctx);
+    crypto_track_context(crypto_native_state.hmac_contexts,
+        &crypto_native_state.hmac_context_count, ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->key = key;
     ctx->key_len = key_len;
@@ -1604,16 +1592,6 @@ struct HashCtx {
 #define crypto_live_hash_contexts ((HashCtx**)crypto_native_state.hash_contexts)
 #define crypto_live_hash_context_count (crypto_native_state.hash_context_count)
 
-static void crypto_track_hash_context(HashCtx* ctx) {
-    crypto_track_context(crypto_native_state.hash_contexts,
-        &crypto_native_state.hash_context_count, ctx);
-}
-
-static void crypto_untrack_hash_context(HashCtx* ctx) {
-    crypto_untrack_context(crypto_native_state.hash_contexts,
-        &crypto_native_state.hash_context_count, ctx);
-}
-
 static void hash_ctx_release(HashCtx* ctx) {
     if (!ctx) return;
     if (ctx->data) mem_free(ctx->data);
@@ -1622,12 +1600,9 @@ static void hash_ctx_release(HashCtx* ctx) {
 
 static void hash_ctx_free(HashCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_hash_context(ctx);
+    crypto_untrack_context(crypto_native_state.hash_contexts,
+        &crypto_native_state.hash_context_count, ctx);
     hash_ctx_release(ctx);
-}
-
-static void hash_ctx_append(HashCtx* ctx, const uint8_t* buf, int len) {
-    if (ctx) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, buf, len);
 }
 
 JS_CRYPTO_THROW_CODE(crypto_throw_hash_finalized,
@@ -1649,7 +1624,7 @@ extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     Item status = crypto_stream_input_bytes(data_item, encoding_item,
         false, true, &bytes, &len, &owned);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) hash_ctx_append(ctx, bytes, len);
+    if (bytes) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, bytes, len);
     if (owned) mem_free((void*)bytes);
     return self;
 }
@@ -1754,7 +1729,8 @@ extern "C" Item js_hash_copy(Item options_item) {
             &output_len, &has_output_len));
 
     HashCtx* copy = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_hash_context(copy);
+    crypto_track_context(crypto_native_state.hash_contexts,
+        &crypto_native_state.hash_context_count, copy);
     memcpy(copy->alg, ctx->alg, strlen(ctx->alg) + 1);
     copy->output_len = has_output_len ? output_len : ctx->output_len;
     if (ctx->data_len > 0) {
@@ -1873,7 +1849,8 @@ extern "C" Item js_crypto_createHash(Item alg_item, Item options_item) {
     }
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_hash_context(ctx);
+    crypto_track_context(crypto_native_state.hash_contexts,
+        &crypto_native_state.hash_context_count, ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->output_len = output_len;
 
@@ -1896,29 +1873,6 @@ struct SignVerifyCtx {
 #define crypto_live_sign_verify_contexts ((SignVerifyCtx**)crypto_native_state.sign_verify_contexts)
 #define crypto_live_sign_verify_context_count (crypto_native_state.sign_verify_context_count)
 
-static void crypto_track_sign_verify_context(SignVerifyCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_sign_verify_context_count; i++) {
-        if (crypto_live_sign_verify_contexts[i] == ctx) return;
-    }
-    if (crypto_live_sign_verify_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
-        crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count++] = ctx;
-    }
-}
-
-static void crypto_untrack_sign_verify_context(SignVerifyCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_sign_verify_context_count; i++) {
-        if (crypto_live_sign_verify_contexts[i] == ctx) {
-            crypto_live_sign_verify_contexts[i] =
-                crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count - 1];
-            crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count - 1] = NULL;
-            crypto_live_sign_verify_context_count--;
-            return;
-        }
-    }
-}
-
 static void sign_verify_ctx_release(SignVerifyCtx* ctx) {
     if (!ctx) return;
     if (ctx->data) mem_free(ctx->data);
@@ -1927,21 +1881,9 @@ static void sign_verify_ctx_release(SignVerifyCtx* ctx) {
 
 static void sign_verify_ctx_free(SignVerifyCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_sign_verify_context(ctx);
+    crypto_untrack_context(crypto_native_state.sign_verify_contexts,
+        &crypto_native_state.sign_verify_context_count, ctx);
     sign_verify_ctx_release(ctx);
-}
-
-static void sign_verify_ctx_append(SignVerifyCtx* ctx, const uint8_t* buf, int len) {
-    if (!ctx || len <= 0) return;
-    int need = ctx->data_len + len;
-    if (need > ctx->data_cap) {
-        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-        while (cap < need) cap *= 2;
-        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-        ctx->data_cap = cap;
-    }
-    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
-    ctx->data_len += len;
 }
 
 JS_CRYPTO_THROW_CODE(crypto_throw_sign_verify_finalized,
@@ -2369,7 +2311,7 @@ extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
     Item status = crypto_stream_input_bytes(data_item, encoding_item,
         false, true, &bytes, &len, &owned);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) sign_verify_ctx_append(ctx, bytes, len);
+    if (bytes) crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap, bytes, len);
     if (owned) mem_free((void*)bytes);
     return self;
 }
@@ -2632,7 +2574,8 @@ static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
     }
 
     SignVerifyCtx* ctx = (SignVerifyCtx*)mem_calloc(1, sizeof(SignVerifyCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_sign_verify_context(ctx);
+    crypto_track_context(crypto_native_state.sign_verify_contexts,
+        &crypto_native_state.sign_verify_context_count, ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->verify_mode = verify_mode;
 
@@ -2671,11 +2614,13 @@ static Item js_crypto_callback_result_emit(Item env_item) {
     return make_js_undefined_crypto();
 }
 
-static bool crypto_one_shot_data_bytes(Item data_item, uint8_t** out, int* out_len) {
-    if (!out || !out_len) return false;
-    *out = NULL;
-    *out_len = 0;
-    return extract_bytes(data_item, out, out_len);
+static Item js_crypto_schedule_callback(Item callback, Item result) {
+    Item* env = js_alloc_env(2);
+    env[0] = callback;
+    env[1] = result;
+    Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
+    js_next_tick_enqueue(fn);
+    return make_js_undefined_crypto();
 }
 
 static bool crypto_alg_is_eddsa_default(Item alg_item) {
@@ -2688,7 +2633,7 @@ static Item js_crypto_sign_eddsa(Item data_item, Item key_item) {
 
     uint8_t* data = NULL;
     int data_len = 0;
-    if (!crypto_one_shot_data_bytes(data_item, &data, &data_len)) {
+    if (!extract_bytes(data_item, &data, &data_len)) {
         return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
     }
 
@@ -2717,7 +2662,7 @@ static Item js_crypto_verify_eddsa(Item data_item, Item key_item, Item signature
 
     uint8_t* data = NULL;
     int data_len = 0;
-    if (!crypto_one_shot_data_bytes(data_item, &data, &data_len)) {
+    if (!extract_bytes(data_item, &data, &data_len)) {
         return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
     }
 
@@ -2757,14 +2702,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
 
     if (crypto_alg_is_eddsa_default(alg_item)) {
         JS_ASSIGN_OR_RETURN(result, js_crypto_sign_eddsa(data_item, key_item));
-        if (has_callback) {
-            Item* env = js_alloc_env(2);
-            env[0] = callback_item;
-            env[1] = result;
-            Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-            js_next_tick_enqueue(fn);
-            return make_js_undefined_crypto();
-        }
+        if (has_callback) return js_crypto_schedule_callback(callback_item, result);
         return result;
     }
 
@@ -2779,12 +2717,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
     JS_ASSIGN_OR_RETURN(result, js_call_function(sign_fn, sign_obj, sign_args, 1));
 
     if (has_callback) {
-        Item* env = js_alloc_env(2);
-        env[0] = callback_item;
-        env[1] = result;
-        Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-        js_next_tick_enqueue(fn);
-        return make_js_undefined_crypto();
+        return js_crypto_schedule_callback(callback_item, result);
     }
     return result;
 }
@@ -2798,14 +2731,7 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
 
     if (crypto_alg_is_eddsa_default(alg_item)) {
         JS_ASSIGN_OR_RETURN(result, js_crypto_verify_eddsa(data_item, key_item, signature_item));
-        if (has_callback) {
-            Item* env = js_alloc_env(2);
-            env[0] = callback_item;
-            env[1] = result;
-            Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-            js_next_tick_enqueue(fn);
-            return make_js_undefined_crypto();
-        }
+        if (has_callback) return js_crypto_schedule_callback(callback_item, result);
         return result;
     }
 
@@ -2820,12 +2746,7 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
     JS_ASSIGN_OR_RETURN(result, js_call_function(verify_fn, verify_obj, verify_args, 2));
 
     if (has_callback) {
-        Item* env = js_alloc_env(2);
-        env[0] = callback_item;
-        env[1] = result;
-        Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-        js_next_tick_enqueue(fn);
-        return make_js_undefined_crypto();
+        return js_crypto_schedule_callback(callback_item, result);
     }
     return result;
 }
@@ -5290,6 +5211,54 @@ static bool crypto_openssl_export_pem(const uint8_t* key_bytes, int key_len,
     return ok;
 }
 
+static bool crypto_openssl_digest_sign_pkey(CryptoOpenSslDsaBackend* b, void* pkey,
+                                            const char* digest,
+                                            const uint8_t* data, int data_len,
+                                            uint8_t* signature, size_t signature_cap,
+                                            size_t* signature_len) {
+    const void* md = b->get_digestbyname(digest);
+    void* ctx = md ? b->md_ctx_new() : NULL;
+    bool ok = false;
+    if (ctx && b->digest_sign_init(ctx, NULL, md, NULL, pkey) == 1 &&
+            b->digest_sign_update(ctx, data ? data : crypto_empty_bytes,
+                data_len > 0 ? (size_t)data_len : 0) == 1) {
+        size_t need = 0;
+        if (b->digest_sign_final(ctx, NULL, &need) == 1 &&
+                need > 0 && need <= signature_cap &&
+                b->digest_sign_final(ctx, signature, &need) == 1) {
+            *signature_len = need;
+            ok = true;
+        }
+    }
+    if (ctx) b->md_ctx_free(ctx);
+    return ok;
+}
+
+static bool crypto_openssl_digest_verify_pkey(CryptoOpenSslDsaBackend* b, void* pkey,
+                                              const char* digest,
+                                              const uint8_t* data, int data_len,
+                                              const uint8_t* signature, int signature_len,
+                                              bool* verified) {
+    const void* md = b->get_digestbyname(digest);
+    void* ctx = md ? b->md_ctx_new() : NULL;
+    bool ok = false;
+    if (ctx && b->digest_verify_init(ctx, NULL, md, NULL, pkey) == 1 &&
+            b->digest_verify_update(ctx, data ? data : crypto_empty_bytes,
+                data_len > 0 ? (size_t)data_len : 0) == 1) {
+        int ret = b->digest_verify_final(ctx,
+            signature ? signature : crypto_empty_bytes,
+            signature_len > 0 ? (size_t)signature_len : 0);
+        if (ret == 1) {
+            *verified = true;
+            ok = true;
+        } else if (ret == 0) {
+            ok = true;
+        }
+    }
+    if (ctx) b->md_ctx_free(ctx);
+    return ok;
+}
+
 static bool crypto_openssl_dsa_sign_message(const char* digest,
                                             const uint8_t* key_bytes, int key_len,
                                             const uint8_t* data, int data_len,
@@ -5306,22 +5275,12 @@ static bool crypto_openssl_dsa_sign_message(const char* digest,
     CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
     void* pkey = crypto_openssl_dsa_parse_key(key_bytes, key_len, true, NULL);
     if (!pkey) return false;
-    const void* md = b->get_digestbyname(digest);
-    void* ctx = md ? b->md_ctx_new() : NULL;
-    bool ok = false;
-    if (ctx && b->digest_sign_init(ctx, NULL, md, NULL, pkey) == 1 &&
-            b->digest_sign_update(ctx, data ? data : crypto_empty_bytes,
-                data_len > 0 ? (size_t)data_len : 0) == 1) {
-        size_t need = 0;
-        if (b->digest_sign_final(ctx, NULL, &need) == 1 &&
-                need > 0 && need <= signature_cap &&
-                b->digest_sign_final(ctx, signature, &need) == 1) {
-            *signature_len = need;
-            *out_width = crypto_openssl_dsa_signature_width(pkey);
-            ok = *out_width > 0;
-        }
+    bool ok = crypto_openssl_digest_sign_pkey(b, pkey, digest, data, data_len,
+        signature, signature_cap, signature_len);
+    if (ok) {
+        *out_width = crypto_openssl_dsa_signature_width(pkey);
+        ok = *out_width > 0;
     }
-    if (ctx) b->md_ctx_free(ctx);
     b->pkey_free(pkey);
     return ok;
 }
@@ -5354,23 +5313,8 @@ static bool crypto_openssl_dsa_verify_message(const char* digest,
         verify_signature_len = der_len;
     }
 
-    const void* md = b->get_digestbyname(digest);
-    void* ctx = md ? b->md_ctx_new() : NULL;
-    bool ok = false;
-    if (ctx && b->digest_verify_init(ctx, NULL, md, NULL, pkey) == 1 &&
-            b->digest_verify_update(ctx, data ? data : crypto_empty_bytes,
-                data_len > 0 ? (size_t)data_len : 0) == 1) {
-        int ret = b->digest_verify_final(ctx,
-            verify_signature ? verify_signature : crypto_empty_bytes,
-            verify_signature_len > 0 ? (size_t)verify_signature_len : 0);
-        if (ret == 1) {
-            *verified = true;
-            ok = true;
-        } else if (ret == 0) {
-            ok = true;
-        }
-    }
-    if (ctx) b->md_ctx_free(ctx);
+    bool ok = crypto_openssl_digest_verify_pkey(b, pkey, digest, data, data_len,
+        verify_signature, verify_signature_len, verified);
     b->pkey_free(pkey);
     return ok;
 }
@@ -5391,23 +5335,8 @@ static bool crypto_openssl_rsa_sign_message(const char* digest,
     CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
     void* pkey = crypto_openssl_parse_evp_key(key_bytes, key_len, true, NULL);
     if (!pkey) return false;
-    const void* md = b->get_digestbyname(digest);
-    void* ctx = md ? b->md_ctx_new() : NULL;
-    bool ok = false;
-
-    if (ctx && b->digest_sign_init(ctx, NULL, md, NULL, pkey) == 1 &&
-            b->digest_sign_update(ctx, data ? data : crypto_empty_bytes,
-                data_len > 0 ? (size_t)data_len : 0) == 1) {
-        size_t need = 0;
-        if (b->digest_sign_final(ctx, NULL, &need) == 1 &&
-                need > 0 && need <= signature_cap &&
-                b->digest_sign_final(ctx, signature, &need) == 1) {
-            *signature_len = need;
-            ok = true;
-        }
-    }
-
-    if (ctx) b->md_ctx_free(ctx);
+    bool ok = crypto_openssl_digest_sign_pkey(b, pkey, digest, data, data_len,
+        signature, signature_cap, signature_len);
     b->pkey_free(pkey);
     return ok;
 }
@@ -5428,23 +5357,8 @@ static bool crypto_openssl_rsa_verify_message(const char* digest,
     CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
     void* pkey = crypto_openssl_parse_evp_key(key_bytes, key_len, false, NULL);
     if (!pkey) return false;
-    const void* md = b->get_digestbyname(digest);
-    void* ctx = md ? b->md_ctx_new() : NULL;
-    bool ok = false;
-
-    if (ctx && b->digest_verify_init(ctx, NULL, md, NULL, pkey) == 1 &&
-            b->digest_verify_update(ctx, data ? data : crypto_empty_bytes,
-                data_len > 0 ? (size_t)data_len : 0) == 1) {
-        int ret = b->digest_verify_final(ctx, signature, (size_t)signature_len);
-        if (ret == 1) {
-            *verified = true;
-            ok = true;
-        } else if (ret == 0) {
-            ok = true;
-        }
-    }
-
-    if (ctx) b->md_ctx_free(ctx);
+    bool ok = crypto_openssl_digest_verify_pkey(b, pkey, digest, data, data_len,
+        signature, signature_len, verified);
     b->pkey_free(pkey);
     return ok;
 }

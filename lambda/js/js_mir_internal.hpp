@@ -284,6 +284,7 @@ int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
     JsMirVarEntry* resolved_var);
 JsMirVarEntry* jm_arguments_param_var(JsMirTranspiler* mt, int param_index);
 bool jm_has_use_strict_directive(JsFunctionNode* fn);
+bool jm_function_decl_is_direct_binding(JsFunctionNode* fn, bool arrow_body_is_direct);
 void jm_pop_scope(JsMirTranspiler* mt);
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type = MIR_T_I64, TypeId type_id = LMD_TYPE_ANY);
@@ -639,6 +640,8 @@ bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture);
 bool jm_capture_is_lexical_meta_binding(const char* name);
 int jm_capture_env_slot(FnCapture* capture, int dense_slot);
 MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn);
+void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    MIR_reg_t key, MIR_reg_t value, bool private_brand);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);

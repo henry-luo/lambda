@@ -709,51 +709,37 @@ static bool dns_lookup_is_ip_literal(const DnsLookupOptions* options) {
     return false;
 }
 
+static bool dns_lookup_short_circuit_family(const DnsLookupOptions* options,
+        Item resolve, Item reject, int family) {
+    struct sockaddr_in addr4;
+    struct sockaddr_in6 addr6;
+    bool is_ip = family == 4
+        ? ((options->family == 0 || options->family == 4) &&
+           uv_ip4_addr(options->hostname, 0, &addr4) == 0)
+        : ((options->family == 0 || options->family == 6) &&
+           uv_ip6_addr(options->hostname, 0, &addr6) == 0);
+    if (!is_ip) return false;
+    Item address = make_string_item(options->hostname);
+    Item callback_family = (Item){.item = i2it(family)};
+    Item record = make_lookup_record(options->hostname, family);
+    Item callback_value = address;
+    Item promise_value = record;
+    if (options->all) {
+        Item arr = js_array_new(0);
+        js_array_push(arr, record);
+        callback_value = arr;
+        callback_family = make_js_undefined();
+        promise_value = arr;
+    }
+    dns_lookup_schedule(options->callback, resolve, reject,
+        ItemNull, callback_value, callback_family, promise_value);
+    return true;
+}
+
 static bool dns_lookup_short_circuit_ip(const DnsLookupOptions* options,
                                         Item resolve, Item reject) {
-    struct sockaddr_in addr4;
-    if ((options->family == 0 || options->family == 4) &&
-        uv_ip4_addr(options->hostname, 0, &addr4) == 0) {
-        Item address = make_string_item(options->hostname);
-        Item family = (Item){.item = i2it(4)};
-        Item record = make_lookup_record(options->hostname, 4);
-        Item callback_value = address;
-        Item callback_family = family;
-        Item promise_value = record;
-        if (options->all) {
-            Item arr = js_array_new(0);
-            js_array_push(arr, record);
-            callback_value = arr;
-            callback_family = make_js_undefined();
-            promise_value = arr;
-        }
-        dns_lookup_schedule(options->callback, resolve, reject,
-            ItemNull, callback_value, callback_family, promise_value);
-        return true;
-    }
-
-    struct sockaddr_in6 addr6;
-    if ((options->family == 0 || options->family == 6) &&
-        uv_ip6_addr(options->hostname, 0, &addr6) == 0) {
-        Item address = make_string_item(options->hostname);
-        Item family = (Item){.item = i2it(6)};
-        Item record = make_lookup_record(options->hostname, 6);
-        Item callback_value = address;
-        Item callback_family = family;
-        Item promise_value = record;
-        if (options->all) {
-            Item arr = js_array_new(0);
-            js_array_push(arr, record);
-            callback_value = arr;
-            callback_family = make_js_undefined();
-            promise_value = arr;
-        }
-        dns_lookup_schedule(options->callback, resolve, reject,
-            ItemNull, callback_value, callback_family, promise_value);
-        return true;
-    }
-
-    return false;
+    return dns_lookup_short_circuit_family(options, resolve, reject, 4) ||
+        dns_lookup_short_circuit_family(options, resolve, reject, 6);
 }
 
 static bool dns_lookup_start(const DnsLookupOptions* options, Item resolve, Item reject, bool use_hook) {

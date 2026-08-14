@@ -1464,6 +1464,8 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_exec_command, RADIANT_DOCUMENT_EXEC_COMMAND
     {n, js, NULL, NULL, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 #define DOC_METHOD(n, js, fn) \
     {n, js, NULL, NULL, NULL, NULL, fn, NULL, JUBE_MEMBER_NON_ENUMERABLE}
+#define DOC_METHOD_GUARDED(n, js, guard, fn) \
+    {n, js, NULL, guard, NULL, NULL, fn, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 
 static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD("document_element", "documentElement", radiant_doc_get_document_element),
@@ -1536,7 +1538,8 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),
     DOC_METHOD("create_tree_walker", "createTreeWalker", radiant_doc_call_create_tree_walker),
     DOC_METHOD("create_event", "createEvent", radiant_doc_call_create_event),
-    DOC_METHOD("exec_command", "execCommand", radiant_doc_call_exec_command),
+    DOC_METHOD_GUARDED("exec_command", "execCommand",
+        radiant_dom_document_legacy_command_enabled, radiant_doc_call_exec_command),
 };
 
 extern const JubeTypeBinding radiant_dom_type_bindings[];

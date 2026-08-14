@@ -120,6 +120,81 @@ static void jm_validate_destructured_params(JsMirTranspiler* mt,
     }
 }
 
+static void jm_collect_destructured_param_names(JsAstNode* params,
+        struct hashmap* names) {
+    for (JsAstNode* param = params; param; param = param->next) {
+        JsAstNode* pattern = param;
+        if (pattern->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+            pattern = ((JsAssignmentPatternNode*)pattern)->left;
+        if (pattern->node_type == JS_AST_NODE_REST_ELEMENT ||
+                pattern->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+            pattern = ((JsSpreadElementNode*)pattern)->argument;
+        if (pattern->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                pattern->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+            jm_collect_pattern_names(pattern, names);
+        }
+    }
+}
+
+static int jm_hashmap_entry_count(struct hashmap* map) {
+    int count = 0;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(map, &iter, &item)) count++;
+    return count;
+}
+
+static MIR_reg_t jm_initialize_resumable_env(JsMirTranspiler* mt,
+        JsFunctionNode* fn, JsFuncCollected* fc, int param_count,
+        bool has_captures, const char* closure_env_param_name,
+        int env_total_slots, int active_iterator_slot, int this_slot,
+        int args_slot, const char* capture_reg_name) {
+    MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, env_total_slots));
+    jm_register_owned_env(mt, env);
+    if (active_iterator_slot >= 0) {
+        MIR_reg_t null_iter = jm_emit_null(mt);
+        jm_emit_store_i64(mt, active_iterator_slot * (int)sizeof(uint64_t),
+            env, null_iter);
+    }
+
+    if (has_captures) {
+        MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name,
+            mt->em.func);
+        for (int ci = 0; ci < fc->capture_count; ci++) {
+            int src_slot = jm_capture_env_slot(&fc->captures[ci], ci);
+            MIR_reg_t cap_val = jm_new_reg(mt, capture_reg_name, MIR_T_I64);
+            jm_emit_load_i64(mt, cap_val, src_slot * (int)sizeof(uint64_t),
+                outer_env);
+            jm_emit_store_i64(mt, ci * (int)sizeof(uint64_t), env, cap_val);
+        }
+    }
+
+    for (int i = 0; i < param_count; i++) {
+        char backend_name[32];
+        jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
+        MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, mt->em.func);
+        int env_slot = fc->capture_count + i;
+        jm_emit_store_i64(mt, env_slot * (int)sizeof(uint64_t), env, preg);
+    }
+    jm_validate_destructured_params(mt, fn->params, param_count, mt->em.func);
+
+    if (this_slot >= 0) {
+        MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
+        jm_emit_store_i64(mt, this_slot * (int)sizeof(uint64_t), env, this_val);
+    }
+    if (args_slot >= 0 && fc->uses_arguments) {
+        bool args_aliased = !fc->has_non_simple_params &&
+                            !mt->is_module && !mt->is_global_strict &&
+                            !fc->is_strict && !jm_has_use_strict_directive(fn);
+        jm_call_void_1(mt, "js_set_arguments_info", MIR_T_I64,
+            MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
+        MIR_reg_t args_obj = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
+        jm_emit_store_i64(mt, args_slot * (int)sizeof(uint64_t), env, args_obj);
+    }
+    return env;
+}
+
 static MIR_reg_t jm_emit_keyed_scope_env_tdz(JsMirTranspiler* mt) {
     MIR_reg_t value = jm_new_reg(mt, "keyed_lex_tdz", MIR_T_I64);
     jm_emit_reg_op(mt, MIR_MOV, value, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
@@ -152,6 +227,80 @@ static JsMirVarEntry* jm_scope_env_entry_binding_at_function_entry(JsMirTranspil
         if (strcmp(scope_name, binding_key) == 0) return candidate;
     }
     return NULL;
+}
+
+static void jm_initialize_resumable_scope_env(JsMirTranspiler* mt,
+        JsFuncCollected* fc, const char* kind_name) {
+    if (!fc->has_scope_env || fc->scope_env_count <= 0) return;
+    int scope_env_alloc_count = fc->scope_env_count;
+    if (fc->reuse_parent_env && fc->reuse_env_slot_count > scope_env_alloc_count) {
+        scope_env_alloc_count = fc->reuse_env_slot_count;
+    }
+    int scope_env_slot = mt->gen_local_slot_count++;
+    mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, scope_env_alloc_count));
+    jm_register_owned_env(mt, mt->scope_env_reg);
+    mt->scope_env_slot_count = scope_env_alloc_count;
+    jm_emit_store_i64(mt, scope_env_slot * (int)sizeof(uint64_t),
+        mt->gen_env_reg, mt->scope_env_reg);
+
+    JsVarScopeEntry senv_entry;
+    memset(&senv_entry, 0, sizeof(senv_entry));
+    senv_entry.name = mir_em_persist_cstr(&mt->em, "_scope_env").str;
+    senv_entry.var.reg = mt->scope_env_reg;
+    senv_entry.var.from_env = true;
+    senv_entry.var.env_slot = scope_env_slot;
+    senv_entry.var.env_reg = mt->gen_env_reg;
+    senv_entry.var.typed_array_type = -1;
+    jm_install_fresh_var_entry(mt, mt->scope_depth, &senv_entry);
+
+    int populate_limit = fc->scope_env_normal_count > 0
+        ? fc->scope_env_normal_count : fc->scope_env_count;
+    for (int s = 0; s < populate_limit; s++) {
+        const char* sname = fc->scope_env_names[s];
+        const char* lookup_sname = sname;
+        const char* keyed_at = strchr(sname, '@');
+        if (keyed_at) {
+            size_t base_len = (size_t)(keyed_at - sname);
+            lookup_sname = jm_format_name("%.*s", (int)base_len, sname);
+        }
+        int target_slot = s;
+        if (fc->reuse_parent_env) {
+            for (int c = 0; c < fc->capture_count; c++) {
+                if (strcmp(sname, fc->captures[c].name) == 0 &&
+                        fc->captures[c].scope_env_slot >= 0) {
+                    target_slot = fc->captures[c].scope_env_slot;
+                    break;
+                }
+            }
+        }
+
+        JsMirVarEntry* svar = jm_scope_env_entry_binding_at_function_entry(
+            mt, sname, lookup_sname);
+        MIR_reg_t val;
+        if (keyed_at && !svar) {
+            val = jm_emit_keyed_scope_env_tdz(mt);
+        } else if (svar) {
+            val = svar->reg;
+            if (jm_is_native_type(svar->type_id))
+                val = jm_box_native(mt, svar->reg, svar->type_id);
+            svar->in_scope_env = true;
+            svar->scope_env_slot = target_slot;
+            svar->scope_env_reg = mt->scope_env_reg;
+        } else if (strcmp(sname, "_js_this") == 0) {
+            val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
+            jm_install_scope_env_binding(mt, "_js_this", val, target_slot);
+        } else if (strcmp(sname, "_js_new.target") == 0) {
+            val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
+            jm_install_scope_env_binding(mt, "_js_new.target", val, target_slot);
+        } else {
+            val = jm_emit_module_const_or_null(mt, sname);
+        }
+        jm_emit_store_i64(mt, target_slot * (int)sizeof(uint64_t),
+            mt->scope_env_reg, val);
+    }
+    log_debug("js-mir: %s '%s' allocated scope env with %d slots at gen_env[%d]",
+        kind_name, fc->name, scope_env_alloc_count, scope_env_slot);
 }
 
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
@@ -515,6 +664,119 @@ static JsFunctionNode* jm_function_find_direct_body_function_binding(JsFunctionN
         if (strcmp(name, vname) == 0) return decl;
     }
     return NULL;
+}
+
+static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
+        JsFunctionNode* fn, JsFuncCollected* fc) {
+    if (!fn || !fn->body || fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    bool effective_strict = mt->is_global_strict || mt->is_module ||
+        (fc && fc->is_strict) || jm_has_use_strict_directive(fn);
+    struct hashmap* annexb_lex_collisions = NULL;
+    if (!effective_strict) {
+        annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
+    }
+    jm_collect_body_locals(fn->body, body_locals, true);
+    size_t viter = 0; void* vitem;
+    while (hashmap_iter(body_locals, &viter, &vitem)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)vitem;
+        if (e->from_func_decl && effective_strict &&
+            !jm_function_has_direct_body_function_binding(fn, e->name)) {
+            log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
+            continue;
+        }
+        if (e->from_func_decl && annexb_lex_collisions &&
+            jm_name_set_has(annexb_lex_collisions, e->name)) {
+            log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
+            continue;
+        }
+        if (e->from_func_decl && fc && fc->uses_arguments &&
+            strcmp(e->name, "_js_arguments") == 0 &&
+            jm_function_has_formal_arguments_binding(fn)) {
+            log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
+            continue;
+        }
+        JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
+        bool shadows_capture = current_binding && current_binding->from_env;
+        // Function-body declarations shadow outer names, including arrow captures
+        // installed as from_env bindings.
+        if (!current_binding || shadows_capture) {
+            // Module vars in IIFE body functions are read through their live slots.
+            if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
+                JsModuleConstEntry mclookup;
+                mclookup.name = jm_persist_name(e->name);
+                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(
+                    mt->module_consts, &mclookup);
+                if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) continue;
+            }
+            MIR_reg_t vr = jm_new_reg(mt, e->name, MIR_T_I64);
+            jm_emit_reg_op(mt, MIR_MOV, vr,
+                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
+            jm_set_var(mt, e->name, vr);
+            JsMirVarEntry* hvar = jm_find_var(mt, e->name);
+            if (hvar) {
+                if (shadows_capture) jm_function_clear_shadowed_capture_binding(hvar);
+                hvar->from_hoist = true;
+                hvar->binding_start = e->binding_start;
+                hvar->binding_end = e->binding_end;
+            }
+        }
+    }
+    if (annexb_lex_collisions) hashmap_free(annexb_lex_collisions);
+    hashmap_free(body_locals);
+
+    struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_let_const_names(fn->body, let_consts);
+    size_t lciter = 0; void* lcitem;
+    while (hashmap_iter(let_consts, &lciter, &lcitem)) {
+        JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
+        if (lce->from_func_decl) continue;
+        JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
+        if (!ve) {
+            MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
+            jm_set_var(mt, lce->name, vr);
+            ve = jm_function_find_current_scope_var(mt, lce->name);
+        }
+        if (ve) {
+            jm_emit_reg_op(mt, MIR_MOV, ve->reg,
+                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
+            ve->is_let_const = true;
+            ve->is_const = (lce->var_kind == 2);
+            ve->tdz_active = true;
+            ve->binding_start = lce->binding_start;
+            ve->binding_end = lce->binding_end;
+        }
+    }
+    hashmap_free(let_consts);
+}
+
+static void jm_hoist_inner_function_declarations(JsMirTranspiler* mt,
+        JsFunctionNode* fn, bool write_scope_env) {
+    if (!fn->body || fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    JsBlockNode* block = (JsBlockNode*)fn->body;
+    for (JsAstNode* statement = block->statements; statement; statement = statement->next) {
+        if (statement->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        JsFunctionNode* inner_fn = (JsFunctionNode*)statement;
+        if (!inner_fn->name) continue;
+        JsFuncCollected* inner_fc = jm_find_collected_func(mt, inner_fn);
+        if (!inner_fc || !inner_fc->func_item) continue;
+
+        const char* var_name = jm_format_name("_js_%.*s",
+            (int)inner_fn->name->len, inner_fn->name->chars);
+        MIR_reg_t var_reg = jm_new_reg(mt, var_name, MIR_T_I64);
+        MIR_reg_t fn_item = jm_create_func_or_closure(mt, inner_fc);
+        jm_emit_mov(mt, var_reg, fn_item);
+        jm_set_var(mt, var_name, var_reg);
+        jm_function_clear_shadowed_capture_binding(
+            jm_function_find_current_scope_var(mt, var_name));
+        if (write_scope_env) jm_scope_env_mark_and_writeback(mt, var_name, var_reg);
+        // nested closures may resolve a hoisted declaration through the module slot.
+        jm_hoisted_func_modvar_write_through(mt, var_name, var_reg);
+    }
 }
 
 static bool jm_param_tree_has_assignment_pattern(JsAstNode* node) {
@@ -1046,132 +1308,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Hoist var declarations: register all var-declared names initialized
         // to null/undefined BEFORE function hoisting (mirrors JS var hoisting)
-        if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-            struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
-            bool effective_strict = mt->is_global_strict || mt->is_module ||
-                (fc && fc->is_strict) || jm_has_use_strict_directive(fn);
-            struct hashmap* annexb_lex_collisions = NULL;
-            if (!effective_strict) {
-                annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
-            }
-            jm_collect_body_locals(fn->body, body_locals, true);  // var_only: only hoist var declarations
-            size_t viter = 0; void* vitem;
-            while (hashmap_iter(body_locals, &viter, &vitem)) {
-                JsNameSetEntry* e = (JsNameSetEntry*)vitem;
-                if (e->from_func_decl && effective_strict &&
-                    !jm_function_has_direct_body_function_binding(fn, e->name)) {
-                    // Strict mode only suppresses nested block function hoists;
-                    // direct body declarations still create local bindings.
-                    log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
-                    continue;
-                }
-                if (e->from_func_decl && annexb_lex_collisions &&
-                    jm_name_set_has(annexb_lex_collisions, e->name)) {
-                    log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
-                    continue;
-                }
-                if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0 &&
-                    jm_function_has_formal_arguments_binding(fn)) {
-                    log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
-                    continue;
-                }
-                JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
-                bool shadows_capture = current_binding && current_binding->from_env;
-                // Function-body declarations shadow outer names, including
-                // arrow captures installed as from_env bindings.
-                if (!current_binding || shadows_capture) {
-                    // Skip hoisting vars that are module vars in IIFE body functions
-                    // — these are accessed via js_get/set_module_var, not local registers
-                    if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
-                        JsModuleConstEntry mclookup;
-                        mclookup.name = jm_persist_name(e->name);
-                        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                        if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) continue;
-                    }
-                    MIR_reg_t vr = jm_new_reg(mt, e->name, MIR_T_I64);
-                    jm_emit_reg_op(mt, MIR_MOV, vr, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
-                    jm_set_var(mt, e->name, vr);
-                    // v50: mark as hoisted so var_reused path can distinguish from parameters
-                    {
-                        JsMirVarEntry* hvar = jm_find_var(mt, e->name);
-                        if (hvar) {
-                            if (shadows_capture) {
-                                // A function-scoped declaration owns this binding; retaining
-                                // outer-capture metadata reloads the stale capture after writes.
-                                // Snapshot this before jm_set_var, which may resize the hashmap.
-                                jm_function_clear_shadowed_capture_binding(hvar);
-                            }
-                            hvar->from_hoist = true;
-                            // A child closure may need to distinguish this var
-                            // from a nested same-named lexical binding.
-                            hvar->binding_start = e->binding_start;
-                            hvar->binding_end = e->binding_end;
-                        }
-                    }
-                }
-            }
-            if (annexb_lex_collisions) hashmap_free(annexb_lex_collisions);
-            hashmap_free(body_locals);
+        jm_hoist_function_body_bindings(mt, fn, fc);
 
-            // v20 TDZ: Reinitialize let/const variables to TDZ sentinel
-            struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
-            jm_collect_let_const_names(fn->body, let_consts);
-            size_t lciter = 0; void* lcitem;
-            while (hashmap_iter(let_consts, &lciter, &lcitem)) {
-                JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                // direct function declarations use mutable var/function bindings;
-                // marking them lexical blocks Annex B runtime replacement.
-                if (lce->from_func_decl) continue;
-                JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
-                if (!ve) {
-                    // Create register for let/const (no longer hoisted by jm_collect_body_locals)
-                    MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
-                    jm_set_var(mt, lce->name, vr);
-                    ve = jm_function_find_current_scope_var(mt, lce->name);
-                }
-                if (ve) {
-                    jm_emit_reg_op(mt, MIR_MOV, ve->reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
-                    ve->is_let_const = true;
-                    ve->is_const = (lce->var_kind == 2);
-                    ve->tdz_active = true;
-                    ve->binding_start = lce->binding_start;
-                    ve->binding_end = lce->binding_end;
-                }
-            }
-            hashmap_free(let_consts);
-        }
-
-        // Hoist inner function declarations (same as boxed path)
-        if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-            JsBlockNode* hblk = (JsBlockNode*)fn->body;
-            JsAstNode* hs = hblk->statements;
-            while (hs) {
-                if (hs->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-                    JsFunctionNode* inner_fn = (JsFunctionNode*)hs;
-                    if (inner_fn->name) {
-                        JsFuncCollected* inner_fc = jm_find_collected_func(mt, inner_fn);
-                        if (inner_fc && inner_fc->func_item) {
-                            const char* hvname = jm_format_name("_js_%.*s", (int)inner_fn->name->len, inner_fn->name->chars);
-                            MIR_reg_t hvar = jm_new_reg(mt, hvname, MIR_T_I64);
-                            MIR_reg_t fn_item = jm_create_func_or_closure(mt, inner_fc);
-                            jm_emit_mov(mt, hvar, fn_item);
-                            jm_set_var(mt, hvname, hvar);
-                            jm_function_clear_shadowed_capture_binding(
-                                jm_function_find_current_scope_var(mt, hvname));
-                            // Bug 4: keep the module-var slot in sync for nested
-                            // closures that resolve this hoist via js_get_module_var.
-                            jm_hoisted_func_modvar_write_through(mt, hvname, hvar);
-                        }
-                    }
-                }
-                hs = hs->next;
-            }
-        }
+        // Hoist inner function declarations (same as boxed path).
+        jm_hoist_inner_function_declarations(mt, fn, false);
 
         // Transpile body (same as original, but params are native-typed)
         if (fn->body) {
@@ -1269,29 +1409,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Also collect destructured param variable names so they get env slots.
         // These variables are created during param destructuring in state 0 and
         // must survive across the implicit param-binding yield.
-        {
-            JsAstNode* dp = fn->params;
-            while (dp) {
-                JsAstNode* pat = dp;
-                if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
-                    pat = ((JsAssignmentPatternNode*)pat)->left;
-                if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
-                    pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
-                    pat = ((JsSpreadElementNode*)pat)->argument;
-                if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                    pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                    jm_collect_pattern_names(pat, gen_locals);
-                }
-                dp = dp->next;
-            }
-        }
+        jm_collect_destructured_param_names(fn->params, gen_locals);
 
         // Count distinct locals
-        int local_count = 0;
-        {
-            size_t iter = 0; void* item;
-            while (hashmap_iter(gen_locals, &iter, &item)) local_count++;
-        }
+        int local_count = jm_hashmap_entry_count(gen_locals);
 
         // Env layout: [captures... | params... | locals... | this | arguments | padding(32 for for-of internals)]
         int cap_offset = 0;
@@ -1433,20 +1554,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         {
             struct hashmap* dstr_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
-            JsAstNode* dp = fn->params;
-            while (dp) {
-                JsAstNode* pat = dp;
-                if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
-                    pat = ((JsAssignmentPatternNode*)pat)->left;
-                if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
-                    pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
-                    pat = ((JsSpreadElementNode*)pat)->argument;
-                if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                    pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                    jm_collect_pattern_names(pat, dstr_names);
-                }
-                dp = dp->next;
-            }
+            jm_collect_destructured_param_names(fn->params, dstr_names);
             int li = 0;
             size_t diter = 0; void* ditem;
             while (hashmap_iter(dstr_names, &diter, &ditem)) {
@@ -1655,126 +1763,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
-        // Allocate shared scope env for child closures inside this generator.
-        // Must be done inside the state machine (not the wrapper) so closures
-        // created after yields still have access to mutable captures.
-        if (fc->has_scope_env && fc->scope_env_count > 0) {
-            int scope_env_alloc_count = fc->scope_env_count;
-            if (fc->reuse_parent_env && fc->reuse_env_slot_count > scope_env_alloc_count) {
-                scope_env_alloc_count = fc->reuse_env_slot_count;
-            }
-            int scope_env_slot = mt->gen_local_slot_count++;
-            mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, scope_env_alloc_count));
-            jm_register_owned_env(mt, mt->scope_env_reg);
-            mt->scope_env_slot_count = scope_env_alloc_count;
-
-            // Store scope env pointer in gen_env so it persists across yields
-            jm_emit_store_i64(mt, scope_env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, mt->scope_env_reg);
-
-            // Register as a scoped variable so it gets saved/loaded across yields
-            JsVarScopeEntry senv_entry;
-            memset(&senv_entry, 0, sizeof(senv_entry));
-            senv_entry.name = mir_em_persist_cstr(&mt->em, "_scope_env").str;
-            senv_entry.var.reg = mt->scope_env_reg;
-            senv_entry.var.from_env = true;
-            senv_entry.var.env_slot = scope_env_slot;
-            senv_entry.var.env_reg = mt->gen_env_reg;
-            senv_entry.var.typed_array_type = -1;
-            jm_install_fresh_var_entry(mt, mt->scope_depth, &senv_entry);
-
-            // Populate scope env with current values and mark vars for write-back
-            // Only iterate normal slots — NFE extra slots are populated by self-patch code
-            int gen_populate_limit = fc->scope_env_normal_count > 0 ? fc->scope_env_normal_count : fc->scope_env_count;
-            for (int s = 0; s < gen_populate_limit; s++) {
-                const char* sname = fc->scope_env_names[s];
-                const char* lookup_sname = sname;
-                const char* keyed_at = strchr(sname, '@');
-                if (keyed_at) {
-                    size_t base_len = (size_t)(keyed_at - sname);
-                    const char* base_sname = jm_format_name("%.*s", (int)base_len, sname);
-                    lookup_sname = base_sname;
-                }
-                int target_slot = s;
-                if (fc->reuse_parent_env) {
-                    for (int c = 0; c < fc->capture_count; c++) {
-                        if (strcmp(sname, fc->captures[c].name) == 0 &&
-                            fc->captures[c].scope_env_slot >= 0) {
-                            target_slot = fc->captures[c].scope_env_slot;
-                            break;
-                        }
-                    }
-                }
-                // keyed duplicate lexical slots keep their base MIR binding name.
-                JsMirVarEntry* svar = jm_scope_env_entry_binding_at_function_entry(
-                    mt, sname, lookup_sname);
-                MIR_reg_t val;
-                if (keyed_at && !svar) {
-                    // The range key denotes a nested lexical that is not active
-                    // at function entry. Associating its cell with a same-named
-                    // parameter makes callback reload overwrite that parameter.
-                    val = jm_emit_keyed_scope_env_tdz(mt);
-                } else if (svar) {
-                    val = svar->reg;
-                    if (jm_is_native_type(svar->type_id))
-                        val = jm_box_native(mt, svar->reg, svar->type_id);
-                    svar->in_scope_env = true;
-                    svar->scope_env_slot = target_slot;
-                    svar->scope_env_reg = mt->scope_env_reg;
-                } else if (strcmp(sname, "_js_this") == 0) {
-                    val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-                    JsVarScopeEntry this_entry;
-                    memset(&this_entry, 0, sizeof(this_entry));
-                    this_entry.name = mir_em_persist_cstr(&mt->em, "_js_this").str;
-                    this_entry.var.reg = val;
-                    this_entry.var.mir_type = MIR_T_I64;
-                    this_entry.var.type_id = LMD_TYPE_ANY;
-                    this_entry.var.in_scope_env = true;
-                    this_entry.var.scope_env_slot = target_slot;
-                    this_entry.var.scope_env_reg = mt->scope_env_reg;
-                    this_entry.var.typed_array_type = -1;
-                    jm_install_fresh_var_entry(mt, mt->scope_depth, &this_entry);
-                } else if (strcmp(sname, "_js_new.target") == 0) {
-                    // Child arrows read new.target lexically from this shared
-                    // env; store the creation-context value before direct calls
-                    // get a chance to clear the runtime slot.
-                    val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
-                    JsVarScopeEntry nt_entry;
-                    memset(&nt_entry, 0, sizeof(nt_entry));
-                    nt_entry.name = mir_em_persist_cstr(&mt->em, "_js_new.target").str;
-                    nt_entry.var.reg = val;
-                    nt_entry.var.mir_type = MIR_T_I64;
-                    nt_entry.var.type_id = LMD_TYPE_ANY;
-                    nt_entry.var.in_scope_env = true;
-                    nt_entry.var.scope_env_slot = target_slot;
-                    nt_entry.var.scope_env_reg = mt->scope_env_reg;
-                    nt_entry.var.typed_array_type = -1;
-                    jm_install_fresh_var_entry(mt, mt->scope_depth, &nt_entry);
-                } else if (mt->module_consts) {
-                    JsModuleConstEntry mclookup;
-                    mclookup.name = jm_persist_name(sname);
-                    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_MODVAR) {
-                        val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-                    } else if (mc && mc->const_type == MCONST_FUNC) {
-                        int fi = (int)mc->int_val;
-                        if (fi >= 0 && fi < mt->func_count && mt->func_entries[fi].func_item) {
-                            val = jm_create_func_or_closure(mt, &mt->func_entries[fi]);
-                        } else {
-                            val = jm_emit_null(mt);
-                        }
-                    } else {
-                        val = jm_emit_null(mt);
-                    }
-                } else {
-                    val = jm_emit_null(mt);
-                }
-                jm_emit_store_i64(mt, target_slot * (int)sizeof(uint64_t), mt->scope_env_reg, val);
-            }
-            log_debug("js-mir: generator '%s' allocated scope env with %d slots at gen_env[%d]",
-                fc->name, scope_env_alloc_count, scope_env_slot);
-        }
+        jm_initialize_resumable_scope_env(mt, fc, "generator");
 
         // Transpile generator body
         if (fn->body) {
@@ -1865,11 +1854,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             if (fn->body) jm_collect_body_locals(fn->body, async_locals);  // async needs all locals for state machine
 
-            int local_count = 0;
-            {
-                size_t iter = 0; void* item;
-                while (hashmap_iter(async_locals, &iter, &item)) local_count++;
-            }
+            int local_count = jm_hashmap_entry_count(async_locals);
 
             // Env layout: [captures... | params... | locals... | this | arguments | padding(32 for for-of internals)]
             int cap_offset = 0;
@@ -2144,83 +2129,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
 
-            // Allocate shared scope env for child closures inside this async function.
-            if (fc->has_scope_env && fc->scope_env_count > 0) {
-                int scope_env_alloc_count = fc->scope_env_count;
-                if (fc->reuse_parent_env && fc->reuse_env_slot_count > scope_env_alloc_count) {
-                    scope_env_alloc_count = fc->reuse_env_slot_count;
-                }
-                int scope_env_slot = mt->gen_local_slot_count++;
-                mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, scope_env_alloc_count));
-                jm_register_owned_env(mt, mt->scope_env_reg);
-                mt->scope_env_slot_count = scope_env_alloc_count;
-
-                // Store scope env pointer in gen_env so it persists across awaits
-                jm_emit_store_i64(mt, scope_env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, mt->scope_env_reg);
-
-                // Register as a scoped variable so it gets saved/loaded across awaits
-                JsVarScopeEntry senv_entry;
-                memset(&senv_entry, 0, sizeof(senv_entry));
-                senv_entry.name = mir_em_persist_cstr(&mt->em, "_scope_env").str;
-                senv_entry.var.reg = mt->scope_env_reg;
-                senv_entry.var.from_env = true;
-                senv_entry.var.env_slot = scope_env_slot;
-                senv_entry.var.env_reg = mt->gen_env_reg;
-                senv_entry.var.typed_array_type = -1;
-                jm_install_fresh_var_entry(mt, mt->scope_depth, &senv_entry);
-
-                // Populate scope env with current values and mark vars for write-back
-                // Only iterate normal slots — NFE extra slots are populated by self-patch code
-                int async_populate_limit = fc->scope_env_normal_count > 0 ? fc->scope_env_normal_count : fc->scope_env_count;
-                for (int s = 0; s < async_populate_limit; s++) {
-                    const char* sname = fc->scope_env_names[s];
-                    const char* lookup_sname = sname;
-                    const char* keyed_at = strchr(sname, '@');
-                    if (keyed_at) {
-                        size_t base_len = (size_t)(keyed_at - sname);
-                        const char* base_sname = jm_format_name("%.*s", (int)base_len, sname);
-                        lookup_sname = base_sname;
-                    }
-                    int target_slot = s;
-                    if (fc->reuse_parent_env) {
-                        for (int c = 0; c < fc->capture_count; c++) {
-                            if (strcmp(sname, fc->captures[c].name) == 0 &&
-                                fc->captures[c].scope_env_slot >= 0) {
-                                target_slot = fc->captures[c].scope_env_slot;
-                                break;
-                            }
-                        }
-                    }
-                    // keyed duplicate lexical slots keep their base MIR binding name.
-                    JsMirVarEntry* svar = jm_scope_env_entry_binding_at_function_entry(
-                        mt, sname, lookup_sname);
-                    MIR_reg_t val;
-                    if (keyed_at && !svar) {
-                        val = jm_emit_keyed_scope_env_tdz(mt);
-                    } else if (svar) {
-                        val = svar->reg;
-                        if (jm_is_native_type(svar->type_id))
-                            val = jm_box_native(mt, svar->reg, svar->type_id);
-                        svar->in_scope_env = true;
-                        svar->scope_env_slot = target_slot;
-                        svar->scope_env_reg = mt->scope_env_reg;
-                    } else if (strcmp(sname, "_js_this") == 0) {
-                        val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-                        jm_install_scope_env_binding(mt, "_js_this", val, target_slot);
-                    } else if (strcmp(sname, "_js_new.target") == 0) {
-                        // Async child arrows still need lexical new.target after
-                        // the call frame advances, so persist it in the async scope env.
-                        val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
-                        jm_install_scope_env_binding(mt, "_js_new.target", val, target_slot);
-                    } else {
-                        val = jm_emit_module_const_or_null(mt, sname);
-                    }
-                    jm_emit_store_i64(mt, target_slot * (int)sizeof(uint64_t), mt->scope_env_reg, val);
-                }
-                log_debug("js-mir: async '%s' allocated scope env with %d slots at gen_env[%d]",
-                    fc->name, scope_env_alloc_count, scope_env_slot);
-            }
+            jm_initialize_resumable_scope_env(mt, fc, "async");
 
             // Push implicit try context for async exception handling
             if (JsTryContext* tc = jm_try_context_push(mt)) {
@@ -2617,67 +2526,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 gen_param = gen_param ? gen_param->next : NULL;
             }
         }
-        // Allocate env array for the generator's state machine
-        MIR_reg_t gen_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
-        jm_register_owned_env(mt, gen_env);
-        if (gen_active_iterator_slot >= 0) {
-            MIR_reg_t null_iter = jm_emit_null(mt);
-            jm_emit_store_i64(mt, gen_active_iterator_slot * (int)sizeof(uint64_t), gen_env, null_iter);
-        }
-
-        // Store captured variables into env[0..capture_count-1]
-        if (has_captures) {
-            MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name, func);
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                int src_slot = jm_capture_env_slot(&fc->captures[ci], ci);
-                MIR_reg_t cap_val = jm_new_reg(mt, "gcap", MIR_T_I64);
-                jm_emit_load_i64(mt, cap_val, src_slot * (int)sizeof(uint64_t), outer_env);
-                jm_emit_store_i64(mt, ci * (int)sizeof(uint64_t), gen_env, cap_val);
-            }
-        }
-
-        // Store parameters into env[capture_count..capture_count+param_count-1]
-        JsAstNode* gp_node = fn->params;
-        for (int i = 0; i < param_count; i++) {
-            char backend_name[32];
-            jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-            MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-            int env_slot = fc->capture_count + i;
-            jm_emit_store_i64(mt, env_slot * (int)sizeof(uint64_t), gen_env, preg);
-            gp_node = gp_node ? gp_node->next : NULL;
-        }
-
-        // validate destructured parameters before lazy generator execution.
-        jm_validate_destructured_params(mt, fn->params, param_count, func);
-
-        // Store 'this' into env[this_slot] so the state machine can access it.
-        // Must not use js_get_this here: a generator whose body never reads
-        // `this` has observes_this == false, so js_call_function skips
-        // install_this and js_current_this still holds the caller's binding.
-        // Inside a derived constructor before super() that binding is the TDZ
-        // sentinel, and js_get_this throws a ReferenceError for it — clobbering
-    // any returned ERROR lane and firing even when nothing reads `this`.
-        // js_get_lexical_this_binding stores the sentinel instead; the state
-        // machine's own reads go through js_resolve_lexical_this, which throws
-        // at actual use.
-        if (gen_this_slot >= 0) {
-            MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-            jm_emit_store_i64(mt, gen_this_slot * (int)sizeof(uint64_t), gen_env, this_val);
-        }
-
-        // Build 'arguments' object and store into env[args_slot] (js_pending_call_args still valid here)
-        if (gen_args_slot >= 0 && fc->uses_arguments) {
-            bool args_aliased = !fc->has_non_simple_params &&
-                                !mt->is_module &&
-                                !mt->is_global_strict &&
-                                !fc->is_strict &&
-                                !jm_has_use_strict_directive(fn);
-            jm_call_void_1(mt, "js_set_arguments_info",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
-            MIR_reg_t args_obj = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
-            jm_emit_store_i64(mt, gen_args_slot * (int)sizeof(uint64_t), gen_env, args_obj);
-        }
+        MIR_reg_t gen_env = jm_initialize_resumable_env(mt, fn, fc, param_count,
+            has_captures, closure_env_param_name, gen_env_total_slots,
+            gen_active_iterator_slot, gen_this_slot, gen_args_slot, "gcap");
 
         // Context travels with the resumable record, so later .next() calls
         // re-enter the state machine without consulting a runtime global.
@@ -2703,60 +2554,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     // --- Phase 6: Async wrapper (creates async context + promise instead of running body) ---
     if (fn->is_async && gen_sm_func_item) {
-        // Allocate env array for the async state machine
-        MIR_reg_t async_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
-        jm_register_owned_env(mt, async_env);
-        if (gen_active_iterator_slot >= 0) {
-            MIR_reg_t null_iter = jm_emit_null(mt);
-            jm_emit_store_i64(mt, gen_active_iterator_slot * (int)sizeof(uint64_t), async_env, null_iter);
-        }
-
-        // Store captured variables into env[0..capture_count-1]
-        if (has_captures) {
-            MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name, func);
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                int src_slot = jm_capture_env_slot(&fc->captures[ci], ci);
-                MIR_reg_t cap_val = jm_new_reg(mt, "acap", MIR_T_I64);
-                jm_emit_load_i64(mt, cap_val, src_slot * (int)sizeof(uint64_t), outer_env);
-                jm_emit_store_i64(mt, ci * (int)sizeof(uint64_t), async_env, cap_val);
-            }
-        }
-
-        // Store parameters into env[capture_count..capture_count+param_count-1]
-        JsAstNode* ap_node = fn->params;
-        for (int i = 0; i < param_count; i++) {
-            char backend_name[32];
-            jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-            MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-            int env_slot = fc->capture_count + i;
-            jm_emit_store_i64(mt, env_slot * (int)sizeof(uint64_t), async_env, preg);
-            ap_node = ap_node ? ap_node->next : NULL;
-        }
-
-        // async generators use the same eager parameter validation as generators.
-        if (fn->is_generator)
-            jm_validate_destructured_params(mt, fn->params, param_count, func);
-
-        // Store 'this' into env[this_slot] so the async state machine can access it.
-        // Same TDZ-sentinel rule as the generator env capture above.
-        if (gen_this_slot >= 0) {
-            MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-            jm_emit_store_i64(mt, gen_this_slot * (int)sizeof(uint64_t), async_env, this_val);
-        }
-
-        // Build 'arguments' object and store into env[args_slot] (js_pending_call_args still valid here)
-        if (gen_args_slot >= 0 && fc->uses_arguments) {
-            bool args_aliased = !fc->has_non_simple_params &&
-                                !mt->is_module &&
-                                !mt->is_global_strict &&
-                                !fc->is_strict &&
-                                !jm_has_use_strict_directive(fn);
-            jm_call_void_1(mt, "js_set_arguments_info",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
-            MIR_reg_t args_obj = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
-            jm_emit_store_i64(mt, gen_args_slot * (int)sizeof(uint64_t), async_env, args_obj);
-        }
+        MIR_reg_t async_env = jm_initialize_resumable_env(mt, fn, fc, param_count,
+            has_captures, closure_env_param_name, gen_env_total_slots,
+            gen_active_iterator_slot, gen_this_slot, gen_args_slot, "acap");
 
         // The async record retains this context for every later microtask resume.
         MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "asmfn", MIR_T_I64);
@@ -3033,103 +2833,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Hoist var declarations: register all var-declared names initialized
         // to null/undefined BEFORE function hoisting (mirrors JS var hoisting)
-        if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-            struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
-            bool effective_strict = mt->is_global_strict || mt->is_module ||
-                (fc && fc->is_strict) || jm_has_use_strict_directive(fn);
-            struct hashmap* annexb_lex_collisions = NULL;
-            if (!effective_strict) {
-                annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
-            }
-            jm_collect_body_locals(fn->body, body_locals, true);  // var_only: only hoist var declarations
-            size_t viter = 0; void* vitem;
-            while (hashmap_iter(body_locals, &viter, &vitem)) {
-                JsNameSetEntry* e = (JsNameSetEntry*)vitem;
-                if (e->from_func_decl && effective_strict &&
-                    !jm_function_has_direct_body_function_binding(fn, e->name)) {
-                    // Strict mode only suppresses nested block function hoists;
-                    // direct body declarations still create local bindings.
-                    log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
-                    continue;
-                }
-                if (e->from_func_decl && annexb_lex_collisions &&
-                    jm_name_set_has(annexb_lex_collisions, e->name)) {
-                    log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
-                    continue;
-                }
-                if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0 &&
-                    jm_function_has_formal_arguments_binding(fn)) {
-                    log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
-                    continue;
-                }
-                JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
-                bool shadows_capture = current_binding && current_binding->from_env;
-                // Function-body declarations shadow outer names, including
-                // arrow captures installed as from_env bindings.
-                if (!current_binding || shadows_capture) {
-                    // Skip hoisting vars that are module vars in IIFE body functions
-                    if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
-                        JsModuleConstEntry mclookup;
-                        mclookup.name = jm_persist_name(e->name);
-                        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                        if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) continue;
-                    }
-                    MIR_reg_t vr = jm_new_reg(mt, e->name, MIR_T_I64);
-                    jm_emit_reg_op(mt, MIR_MOV, vr, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
-                    jm_set_var(mt, e->name, vr);
-                    // v50: mark as hoisted so var_reused path can distinguish from parameters
-                    {
-                        JsMirVarEntry* hvar = jm_find_var(mt, e->name);
-                        if (hvar) {
-                            if (shadows_capture) {
-                                // A function-scoped declaration owns this binding; retaining
-                                // outer-capture metadata reloads the stale capture after writes.
-                                // Snapshot this before jm_set_var, which may resize the hashmap.
-                                jm_function_clear_shadowed_capture_binding(hvar);
-                            }
-                            hvar->from_hoist = true;
-                            // A child closure may need to distinguish this var
-                            // from a nested same-named lexical binding.
-                            hvar->binding_start = e->binding_start;
-                            hvar->binding_end = e->binding_end;
-                        }
-                    }
-                }
-            }
-            if (annexb_lex_collisions) hashmap_free(annexb_lex_collisions);
-            hashmap_free(body_locals);
-
-            // v20 TDZ: Reinitialize let/const variables to TDZ sentinel
-            struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
-            jm_collect_let_const_names(fn->body, let_consts);
-            size_t lciter = 0; void* lcitem;
-            while (hashmap_iter(let_consts, &lciter, &lcitem)) {
-                JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                // direct function declarations use mutable var/function bindings;
-                // marking them lexical blocks Annex B runtime replacement.
-                if (lce->from_func_decl) continue;
-                JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
-                if (!ve) {
-                    MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
-                    jm_set_var(mt, lce->name, vr);
-                    ve = jm_function_find_current_scope_var(mt, lce->name);
-                }
-                if (ve) {
-                    jm_emit_reg_op(mt, MIR_MOV, ve->reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
-                    ve->is_let_const = true;
-                    ve->is_const = (lce->var_kind == 2);
-                    ve->tdz_active = true;
-                    ve->binding_start = lce->binding_start;
-                    ve->binding_end = lce->binding_end;
-                }
-            }
-            hashmap_free(let_consts);
-        }
+        jm_hoist_function_body_bindings(mt, fn, fc);
 
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).
@@ -3308,39 +3012,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_slot_count = 0;
         }
 
-        // Hoist inner function declarations: create variable bindings so nested
-        // calls can resolve them (mirrors Phase 3 hoisting for top-level functions)
-        if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-            JsBlockNode* hblk = (JsBlockNode*)fn->body;
-            JsAstNode* hs = hblk->statements;
-            while (hs) {
-                if (hs->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-                    JsFunctionNode* inner_fn = (JsFunctionNode*)hs;
-                    if (inner_fn->name) {
-                        JsFuncCollected* inner_fc = jm_find_collected_func(mt, inner_fn);
-                        if (inner_fc && inner_fc->func_item) {
-                            const char* hvname = jm_format_name("_js_%.*s", (int)inner_fn->name->len, inner_fn->name->chars);
-                            MIR_reg_t hvar = jm_new_reg(mt, hvname, MIR_T_I64);
-                            MIR_reg_t fn_item = jm_create_func_or_closure(mt, inner_fc);
-                            jm_emit_mov(mt, hvar, fn_item);
-                            jm_set_var(mt, hvname, hvar);
-                            jm_function_clear_shadowed_capture_binding(
-                                jm_function_find_current_scope_var(mt, hvname));
-                            jm_scope_env_mark_and_writeback(mt, hvname, hvar);
-                            // Bug 4: an IIFE-scope inner function declaration is
-                            // resolved by nested closures via js_get_module_var(int_val)
-                            // — e.g. a class field-init arrow that captures it when the
-                            // class is inline-`new`'d in a nested function. This hoist
-                            // writes only the local reg + scope env, leaving the
-                            // module-var slot undefined, so the capture reads garbage
-                            // ("X is not a function"). Keep the module-var slot in sync.
-                            jm_hoisted_func_modvar_write_through(mt, hvname, hvar);
-                        }
-                    }
-                }
-                hs = hs->next;
-            }
-        }
+        // Hoist inner function declarations into the boxed scope environment.
+        jm_hoist_inner_function_declarations(mt, fn, true);
 
         // Phase 5: Set in_async flag for async function bodies
         bool saved_in_async = mt->in_async;

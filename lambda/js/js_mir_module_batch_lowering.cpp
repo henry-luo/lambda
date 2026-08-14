@@ -7038,6 +7038,18 @@ static bool jm_module_tree_contains_await(TSNode node) {
     }
 }
 
+static void jm_free_import_graph(JsImportGraphNode* nodes, int count) {
+    if (!nodes) return;
+    for (int i = 0; i < count; i++) {
+        mem_free(nodes[i].path);
+        mem_free(nodes[i].source);
+        mem_free(nodes[i].deps);
+        mem_free(nodes[i].module_property_specs);
+        if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
+    }
+    mem_free(nodes);
+}
+
 int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char* filename) {
     if (!filename) return 0;
 
@@ -7075,12 +7087,7 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
 
     int import_count = count - 1;
     if (import_count == 0) {
-        for (int i = 0; i < count; i++) {
-            mem_free(nodes[i].path);
-            mem_free(nodes[i].source);
-            mem_free(nodes[i].deps);
-        }
-        mem_free(nodes);
+        jm_free_import_graph(nodes, count);
         return 0;
     }
 
@@ -7143,28 +7150,14 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
     for (int i = 1; i < count; i++) {
         if (nodes[i].source && !nodes[i].compiled) {
             log_error("js-name-prelink: failed to compile '%s'", nodes[i].path);
-            for (int j = 0; j < count; j++) {
-                mem_free(nodes[j].path);
-                mem_free(nodes[j].source);
-                mem_free(nodes[j].deps);
-                mem_free(nodes[j].module_property_specs);
-                if (nodes[j].mir_ctx) MIR_finish(nodes[j].mir_ctx);
-            }
-            mem_free(nodes);
+            jm_free_import_graph(nodes, count);
             return -1;
         }
         if (nodes[i].compiled && !lambda_property_key_specs_prelink(
                 nodes[i].module_property_specs, nodes[i].module_property_count,
                 nodes[i].module_property_bytes_size)) {
             log_error("js-name-prelink: invalid property key image for '%s'", nodes[i].path);
-            for (int j = 0; j < count; j++) {
-                mem_free(nodes[j].path);
-                mem_free(nodes[j].source);
-                mem_free(nodes[j].deps);
-                mem_free(nodes[j].module_property_specs);
-                if (nodes[j].mir_ctx) MIR_finish(nodes[j].mir_ctx);
-            }
-            mem_free(nodes);
+            jm_free_import_graph(nodes, count);
             return -1;
         }
     }
@@ -7173,27 +7166,13 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
         // TLA evaluation still requires the recursive async-parent protocol.
         // Its key image is now static; jm_load_imports will execute it only
         // after the entry point activates the dynamic child.
-        for (int i = 0; i < count; i++) {
-            mem_free(nodes[i].path);
-            mem_free(nodes[i].source);
-            mem_free(nodes[i].deps);
-            mem_free(nodes[i].module_property_specs);
-            if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
-        }
-        mem_free(nodes);
+        jm_free_import_graph(nodes, count);
         return 0;
     }
 
     if (!js_activate_runtime_name_pool()) {
         log_error("js-name-prelink: failed to activate dynamic pool");
-        for (int i = 0; i < count; i++) {
-            mem_free(nodes[i].path);
-            mem_free(nodes[i].source);
-            mem_free(nodes[i].deps);
-            mem_free(nodes[i].module_property_specs);
-            if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
-        }
-        mem_free(nodes);
+        jm_free_import_graph(nodes, count);
         return -1;
     }
     // Module initializers can install globals. Realm setup is therefore after
@@ -7215,14 +7194,7 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
                 js_set_active_module_state_id(prev_module_state_id);
                 log_error("js-name-prelink: failed to link compiled module '%s'",
                     nodes[idx].path ? nodes[idx].path : "<module>");
-                for (int j = 0; j < count; j++) {
-                    mem_free(nodes[j].path);
-                    mem_free(nodes[j].source);
-                    mem_free(nodes[j].deps);
-                    mem_free(nodes[j].module_property_specs);
-                    if (nodes[j].mir_ctx) MIR_finish(nodes[j].mir_ctx);
-                }
-                mem_free(nodes);
+                jm_free_import_graph(nodes, count);
                 return -1;
             }
             jm_log_module_phase_progress(nodes[idx].path, "parallel-execute-begin");
@@ -7242,16 +7214,7 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
     log_info("js-parallel: pre-compiled and executed %d modules", precompiled);
 
     // cleanup graph
-    for (int i = 0; i < count; i++) {
-        mem_free(nodes[i].path);
-        mem_free(nodes[i].source);
-        mem_free(nodes[i].deps);
-        if (nodes[i].module_property_specs) {
-            mem_free(nodes[i].module_property_specs);
-        }
-        if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
-    }
-    mem_free(nodes);
+    jm_free_import_graph(nodes, count);
 
     return precompiled;
 }

@@ -387,6 +387,22 @@ extern "C" void js_function_set_prototype(Item fn_item, Item proto) {
     js_function_root_item_if_needed(jsfn, &jsfn->prototype);
 }
 
+static JsFunction* js_alloc_function_storage(bool gc_backed) {
+    return gc_backed ? js_alloc_gc_function_object()
+        : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+}
+
+static void js_function_init_common(JsFunction* fn, int param_count) {
+    js_function_init_native_module_scope(fn);
+    fn->type_id = LMD_TYPE_FUNC;
+    // D6.2.2v2: every callable wrapper uses the canonical layout marker;
+    // legacy arity/target decoding otherwise silently drops compiled args.
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->prototype = ItemNull;
+}
+
 static Item js_new_function_impl(void* func_ptr, int param_count,
         bool mir_context_abi) {
     Context* runtime = mir_context_abi ? (Context*)context : NULL;
@@ -412,24 +428,14 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     // carrying `with` state or cache-suppressed identity must own traced edges.
     RootFrame roots(1);
     Rooted<Item> fn_root(roots, ItemNull);
-    JsFunction* fn = (has_with_env || suppress_cache)
-        ? js_alloc_gc_function_object()
-        : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    JsFunction* fn = js_alloc_function_storage(has_with_env || suppress_cache);
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
-    js_function_init_native_module_scope(fn);
-    fn->type_id = LMD_TYPE_FUNC;
-    // D6.2.2v2: pool-backed and GC-backed callables share one canonical
-    // layout. Without the marker, cross-language arity/target queries decoded
-    // these compiled wrappers as legacy Function records and passed zero args.
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    js_function_init_common(fn, param_count);
     fn->func_ptr = func_ptr;
     fn->runtime_context = runtime;
-    fn->param_count = param_count;
-    fn->formal_length = -1; // -1 = use param_count for .length
     fn->env = NULL;
     fn->env_size = 0;
-    fn->prototype = ItemNull;
     fn->module_state_id = js_get_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
@@ -483,14 +489,10 @@ static Item js_new_native_function_impl(JsNativeTarget target,
 
     RootFrame roots(1);
     Rooted<Item> fn_root(roots, ItemNull);
-    JsFunction* fn = (has_with_env || suppress_cache)
-        ? js_alloc_gc_function_object()
-        : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    JsFunction* fn = js_alloc_function_storage(has_with_env || suppress_cache);
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
-    js_function_init_native_module_scope(fn);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    js_function_init_common(fn, policy == JS_NATIVE_CALL_REST ? -arity : arity);
     fn->native_target = target;
     fn->native_call = call_body;
     fn->native_construct = constructable
@@ -498,9 +500,6 @@ static Item js_new_native_function_impl(JsNativeTarget target,
         : NULL;
     fn->native_arity = (uint8_t)arity;
     fn->native_policy = (uint8_t)policy;
-    fn->param_count = policy == JS_NATIVE_CALL_REST ? -arity : arity;
-    fn->formal_length = -1;
-    fn->prototype = ItemNull;
     // D6.2.2v2: host-native callbacks execute in the caller's module scope; assigning
     // the publication scope here makes nested eval copy from an unrelated
     // state and fails Test262's $262.evalScript/agent callbacks.

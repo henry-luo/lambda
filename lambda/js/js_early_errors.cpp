@@ -608,6 +608,19 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node);
 static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node);
 static void walk_statements(EarlyErrorCtx* ctx, JsAstNode* stmts);
 
+static void walk_class_for_early_errors(EarlyErrorCtx* ctx, JsClassNode* cls) {
+    bool was_strict = ctx->in_strict;
+    int saved_private_count = ctx->private_name_count;
+    ctx->in_strict = true; // class bodies are always strict
+    collect_class_private_names(ctx, cls);
+    walk_expression(ctx, cls->superclass);
+    for (JsAstNode* m = cls->body; m; m = m->next) {
+        walk_statement(ctx, m);
+    }
+    ctx->private_name_count = saved_private_count;
+    ctx->in_strict = was_strict;
+}
+
 static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* fn) {
     bool was_gen = ctx->in_generator;
     bool was_async = ctx->in_async;
@@ -839,17 +852,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
 
         case JS_AST_NODE_CLASS_EXPRESSION:
         case JS_AST_NODE_CLASS_DECLARATION: {
-            JsClassNode* cls = (JsClassNode*)node;
-            bool was_strict = ctx->in_strict;
-            int saved_private_count = ctx->private_name_count;
-            ctx->in_strict = true; // class bodies are always strict
-            collect_class_private_names(ctx, cls);
-            walk_expression(ctx, cls->superclass);
-            for (JsAstNode* m = cls->body; m; m = m->next) {
-                walk_statement(ctx, m);
-            }
-            ctx->private_name_count = saved_private_count;
-            ctx->in_strict = was_strict;
+            walk_class_for_early_errors(ctx, (JsClassNode*)node);
             break;
         }
 
@@ -1081,17 +1084,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         }
 
         case JS_AST_NODE_CLASS_DECLARATION: {
-            JsClassNode* cls = (JsClassNode*)node;
-            bool was_strict = ctx->in_strict;
-            int saved_private_count = ctx->private_name_count;
-            ctx->in_strict = true; // class body is always strict
-            collect_class_private_names(ctx, cls);
-            walk_expression(ctx, cls->superclass);
-            for (JsAstNode* m = cls->body; m; m = m->next) {
-                walk_statement(ctx, m);
-            }
-            ctx->private_name_count = saved_private_count;
-            ctx->in_strict = was_strict;
+            walk_class_for_early_errors(ctx, (JsClassNode*)node);
             break;
         }
 
