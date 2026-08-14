@@ -280,10 +280,9 @@ static Item js_response_blob_text() {
 
 static Item make_blob_object(const char* bytes, int len, const char* type) {
     Item blob = js_new_object();
-    js_set_key_default(blob, make_string_item("_text"), make_string_item(bytes ? bytes : "", len));
-    js_set_key_default(blob, make_string_item("size"), (Item){.item = i2it(len)});
-    js_set_key_default(blob, make_string_item("type"),
-        make_string_item(type ? type : "application/octet-stream"));
+    js_set_key_cstr(blob, "_text", make_string_item(bytes ? bytes : "", len));
+    js_set_key_cstr(blob, "size", (Item){.item = i2it(len)});
+    js_set_key_cstr(blob, "type", make_string_item(type ? type : "application/octet-stream"));
     js_set_native_key(blob, make_string_item("text"), js_response_blob_text);
     return blob;
 }
@@ -572,7 +571,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         // permission fixture waits for the worker/drain timeout instead of catch().
         Item cause = js_permission_make_net_error("connect", url);
         Item err = js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch failed"));
-        js_set_key_default(err, make_string_item("cause"), cause);
+        js_set_key_cstr(err, "cause", cause);
         return js_promise_reject(err);
     }
 

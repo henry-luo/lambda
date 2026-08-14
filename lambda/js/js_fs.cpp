@@ -63,12 +63,12 @@ struct FsPathResult {
 static FsPathResult fs_path_to_cstr(Item value, const char* name, char* buf, int buf_size) {
     bool from_url = false;
     if (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_URL) {
-        Item protocol = js_get_key_default(value, (Item){.item = s2it(heap_create_name("protocol", 8))});
+        Item protocol = js_get_key_cstr(value, "protocol");
         if (get_type_id(protocol) != LMD_TYPE_STRING ||
             it2s(protocol)->len < 5 || memcmp(it2s(protocol)->chars, "file:", 5) != 0) {
             return {NULL, js_throw_type_error_code("ERR_INVALID_URL_SCHEME", "The URL must be of scheme file")};
         }
-        value = js_get_key_default(value, (Item){.item = s2it(heap_create_name("pathname", 8))});
+        value = js_get_key_cstr(value, "pathname");
         if (item_is_error(value)) return {NULL, value};
         from_url = true;
     }
@@ -148,7 +148,7 @@ static Item fs_validate_encoding_options(Item options_item) {
     if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return js_status_ok();
     if (type == LMD_TYPE_STRING) return fs_validate_encoding_item(options_item);
     if (type == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(encoding, js_get_key_default(options_item, (Item){.item = s2it(heap_create_name("encoding", 8))}));
+        JS_ASSIGN_OR_RETURN(encoding, js_get_key_cstr(options_item, "encoding"));
         return fs_validate_encoding_item(encoding);
     }
     return js_status_ok();
@@ -159,7 +159,7 @@ static bool fs_read_file_should_return_buffer(Item options_item) {
     if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
     if (type == LMD_TYPE_STRING) return fs_string_equals(it2s(options_item), "buffer");
     if (type == LMD_TYPE_MAP) {
-        Item encoding = js_get_key_default(options_item, (Item){.item = s2it(heap_create_name("encoding", 8))});
+        Item encoding = js_get_key_cstr(options_item, "encoding");
         return fs_read_file_should_return_buffer(encoding);
     }
     return true;
@@ -169,7 +169,7 @@ static Item fs_validate_watch_options(Item options_item) {
     JS_ASSIGN_OR_RETURN(encoding_result, fs_validate_encoding_options(options_item));
     if (get_type_id(options_item) != LMD_TYPE_MAP) return js_status_ok();
 
-    Item ignore = js_get_key_default(options_item, (Item){.item = s2it(heap_create_name("ignore", 6))});
+    Item ignore = js_get_key_cstr(options_item, "ignore");
     TypeId type = get_type_id(ignore);
     if (item_is_error(ignore)) return ignore;
     if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return js_status_ok();
@@ -344,15 +344,15 @@ extern "C" Item js_get_internal_fs_binding_namespace(void) {
     if (internal_fs_binding_namespace.item == 0) {
         internal_fs_binding_namespace = js_new_object();
         internal_fs_default_fstat = js_new_native_function(js_internal_fs_fstat);
-        js_set_key_default(internal_fs_binding_namespace, make_string_item("fstat"), internal_fs_default_fstat);
-        js_set_key_default(internal_fs_binding_namespace, make_string_item("default"), internal_fs_binding_namespace);
+        js_set_key_cstr(internal_fs_binding_namespace, "fstat", internal_fs_default_fstat);
+        js_set_key_cstr(internal_fs_binding_namespace, "default", internal_fs_binding_namespace);
     }
     return internal_fs_binding_namespace;
 }
 
 static void fs_maybe_call_internal_fstat_hook(int fd) {
     if (internal_fs_binding_namespace.item == 0) return;
-    Item fstat = js_get_key_default(internal_fs_binding_namespace, make_string_item("fstat"));
+    Item fstat = js_get_key_cstr(internal_fs_binding_namespace, "fstat");
     if (fstat.item == internal_fs_default_fstat.item) return;
     if (!js_is_callable(fstat)) return;
     Item fd_item = (Item){.item = i2it((int64_t)fd)};
@@ -464,11 +464,6 @@ extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item);
 extern "C" Item js_fs_closeSync(Item fd_item);
 
-static bool fs_is_nullish(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL;
-}
-
 static bool fs_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
@@ -482,7 +477,7 @@ static bool fs_is_options_object(Item value) {
 }
 
 static Item fs_read_position_to_int64(Item position_item, int64_t* out_position) {
-    if (fs_is_nullish(position_item)) {
+    if (js_is_nullish(position_item)) {
         *out_position = -1;
         return js_status_ok();
     }
@@ -508,18 +503,18 @@ static Item fs_read_parse_options(Item options_item, Item fallback_buffer,
     Item position = make_js_undefined();
 
     if (fs_is_options_object(options_item)) {
-        JS_ASSIGN_OR_RETURN(option_buffer, js_get_key_default(options_item, make_string_item("buffer")));
-        if (!fs_is_nullish(option_buffer)) buffer = option_buffer;
-        JS_ASSIGN_OR_RETURN_INTO(offset, js_get_key_default(options_item, make_string_item("offset")));
-        JS_ASSIGN_OR_RETURN_INTO(length, js_get_key_default(options_item, make_string_item("length")));
-        JS_ASSIGN_OR_RETURN_INTO(position, js_get_key_default(options_item, make_string_item("position")));
+        JS_ASSIGN_OR_RETURN(option_buffer, js_get_key_cstr(options_item, "buffer"));
+        if (!js_is_nullish(option_buffer)) buffer = option_buffer;
+        JS_ASSIGN_OR_RETURN_INTO(offset, js_get_key_cstr(options_item, "offset"));
+        JS_ASSIGN_OR_RETURN_INTO(length, js_get_key_cstr(options_item, "length"));
+        JS_ASSIGN_OR_RETURN_INTO(position, js_get_key_cstr(options_item, "position"));
     }
 
-    if (fs_is_nullish(buffer)) {
+    if (js_is_nullish(buffer)) {
         JS_ASSIGN_OR_RETURN_INTO(buffer, js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined()));
     }
-    if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
-    if (fs_is_nullish(length) && fs_get_typed_array(buffer)) {
+    if (js_is_nullish(offset)) offset = (Item){.item = i2it(0)};
+    if (js_is_nullish(length) && fs_get_typed_array(buffer)) {
         int byte_length = js_typed_array_byte_length(buffer);
         int64_t offset_value = 0;
         if (get_type_id(offset) == LMD_TYPE_INT) {
@@ -538,7 +533,7 @@ static Item fs_read_parse_options(Item options_item, Item fallback_buffer,
 
 #define JS_STATS_MODE_TEST(name, mode_kind) \
     extern "C" Item name() { \
-        Item mode_val = js_get_key_default(js_get_this(), make_string_item("__mode")); \
+        Item mode_val = js_get_key_cstr(js_get_this(), "__mode"); \
         int mode = (int)it2i(mode_val); \
         return (Item){.item = b2it((mode & S_IFMT) == mode_kind)}; \
     }
@@ -601,18 +596,18 @@ static Item make_stats_object(const uv_stat_t* st, bool bigint) {
     // result object must remain rooted until its property graph is complete.
     
     // Store mode for isFile/isDirectory/etc methods
-    js_set_key_default(obj_root.get(), make_string_item("__mode"), (Item){.item = i2it((int64_t)st->st_mode)});
+    js_set_key_cstr(obj_root.get(), "__mode", (Item){.item = i2it((int64_t)st->st_mode)});
     // stats fields have an explicit Node API face: numbers by default, BigInt only when requested.
-    js_set_key_default(obj_root.get(), make_string_item("mode"), fs_stats_uint64_value((uint64_t)st->st_mode, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("size"), fs_stats_int64_value((int64_t)st->st_size, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("uid"), fs_stats_uint64_value((uint64_t)st->st_uid, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("gid"), fs_stats_uint64_value((uint64_t)st->st_gid, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("nlink"), fs_stats_uint64_value((uint64_t)st->st_nlink, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("ino"), fs_stats_uint64_value((uint64_t)st->st_ino, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("dev"), fs_stats_uint64_value((uint64_t)st->st_dev, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("rdev"), fs_stats_uint64_value((uint64_t)st->st_rdev, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("blksize"), fs_stats_uint64_value((uint64_t)st->st_blksize, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("blocks"), fs_stats_int64_value((int64_t)st->st_blocks, bigint));
+    js_set_key_cstr(obj_root.get(), "mode", fs_stats_uint64_value((uint64_t)st->st_mode, bigint));
+    js_set_key_cstr(obj_root.get(), "size", fs_stats_int64_value((int64_t)st->st_size, bigint));
+    js_set_key_cstr(obj_root.get(), "uid", fs_stats_uint64_value((uint64_t)st->st_uid, bigint));
+    js_set_key_cstr(obj_root.get(), "gid", fs_stats_uint64_value((uint64_t)st->st_gid, bigint));
+    js_set_key_cstr(obj_root.get(), "nlink", fs_stats_uint64_value((uint64_t)st->st_nlink, bigint));
+    js_set_key_cstr(obj_root.get(), "ino", fs_stats_uint64_value((uint64_t)st->st_ino, bigint));
+    js_set_key_cstr(obj_root.get(), "dev", fs_stats_uint64_value((uint64_t)st->st_dev, bigint));
+    js_set_key_cstr(obj_root.get(), "rdev", fs_stats_uint64_value((uint64_t)st->st_rdev, bigint));
+    js_set_key_cstr(obj_root.get(), "blksize", fs_stats_uint64_value((uint64_t)st->st_blksize, bigint));
+    js_set_key_cstr(obj_root.get(), "blocks", fs_stats_int64_value((int64_t)st->st_blocks, bigint));
 
     // Time properties in milliseconds
     auto set_time = [&](const char* name, const uv_timespec_t& ts) {
@@ -635,7 +630,7 @@ static Item make_stats_object(const uv_stat_t* st, bool bigint) {
     set_date("birthtime", st->st_birthtim);
 
     // Set __proto__ so methods resolve via prototype chain lookup
-    js_set_key_default(obj_root.get(), make_string_item("__proto__"), get_stats_proto());
+    js_set_key_cstr(obj_root.get(), "__proto__", get_stats_proto());
     
     return obj_root.get();
 }
@@ -761,32 +756,32 @@ static Item js_fs_read_file_buffer(const char* path) {
 
 extern "C" Item js_fs_readstream_pipe(Item dest_item) {
     Item stream = js_get_this();
-    Item path_item = js_get_key_default(stream, make_string_item("__readstream_path__"));
+    Item path_item = js_get_key_cstr(stream, "__readstream_path__");
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
 
     JS_ASSIGN_OR_RETURN(chunk, js_fs_read_file_buffer(path));
 
-    Item write_fn = js_get_key_default(dest_item, make_string_item("write"));
+    Item write_fn = js_get_key_cstr(dest_item, "write");
     if (js_is_callable(write_fn)) {
         Item args[1] = {chunk};
         JS_ASSIGN_OR_RETURN(write_result, js_call_function(write_fn, dest_item, args, 1));
     }
 
-    Item end_fn = js_get_key_default(dest_item, make_string_item("end"));
+    Item end_fn = js_get_key_cstr(dest_item, "end");
     if (js_is_callable(end_fn)) {
         JS_ASSIGN_OR_RETURN(end_result, js_call_function(end_fn, dest_item, NULL, 0));
     }
 
-    js_set_key_default(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(true)});
+    js_set_key_cstr(stream, "__readstream_drained__", (Item){.item = b2it(true)});
     return dest_item;
 }
 
 static Item js_fs_readstream_close(Item callback_item) {
     Item stream = js_get_this();
     if (js_is_callable(callback_item)) {
-        js_set_key_default(stream, make_string_item("__destroy_callback__"), callback_item);
+        js_set_key_cstr(stream, "__destroy_callback__", callback_item);
     }
     return js_stream_destroy(stream, make_js_undefined());
 }
@@ -805,9 +800,9 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
 
     if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
-        Item auto_close = js_get_key_default(options_root.get(), make_string_item("autoClose"));
+        Item auto_close = js_get_key_cstr(options_root.get(), "autoClose");
         if (get_type_id(auto_close) == LMD_TYPE_BOOL && !it2b(auto_close)) {
-            js_set_key_default(options_root.get(), make_string_item("autoDestroy"), (Item){.item = b2it(false)});
+            js_set_key_cstr(options_root.get(), "autoDestroy", (Item){.item = b2it(false)});
         }
     }
 
@@ -815,8 +810,8 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     if (stream_root.get().item == 0) return ItemNull;
     // The factory publishes methods and buffered content after constructing the
     // Readable; keep it rooted because each property allocation may compact.
-    js_set_key_default(stream_root.get(), make_string_item("__readstream_path__"), path_root.get());
-    js_set_key_default(stream_root.get(), make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
+    js_set_key_cstr(stream_root.get(), "__readstream_path__", path_root.get());
+    js_set_key_cstr(stream_root.get(), "__readstream_drained__", (Item){.item = b2it(false)});
     js_set_native_key(stream_root.get(), make_string_item("close"), js_fs_readstream_close);
     // keep Readable.on() intact so late 'data' listeners switch buffered
     // fs streams into flowing mode; the fs-only drain path missed data-only consumers.
@@ -843,7 +838,7 @@ static Item js_fs_writestream_write_after_end_error(void);
 
 static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
     Item stream = js_get_this();
-    Item finished = js_get_key_default(stream, make_string_item("__writestream_finished__"));
+    Item finished = js_get_key_cstr(stream, "__writestream_finished__");
     if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
         if (js_is_callable(callback_item)) {
             Item err = js_fs_writestream_write_after_end_error();
@@ -856,13 +851,13 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
     int len = 0;
     if (!js_item_bytes(chunk_item, &data, &len)) return (Item){.item = b2it(false)};
 
-    Item fd_item = js_get_key_default(stream, make_string_item("fd"));
+    Item fd_item = js_get_key_cstr(stream, "fd");
     int fd = 0;
     bool close_after_write = false;
     if (get_type_id(fd_item) == LMD_TYPE_INT) {
         fd = (int)it2i(fd_item);
     } else {
-        Item path_item = js_get_key_default(stream, make_string_item("__writestream_path__"));
+        Item path_item = js_get_key_cstr(stream, "__writestream_path__");
         char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
         if (!path) return (Item){.item = b2it(false)};
@@ -878,7 +873,7 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
 
     if (len > 0) {
         int64_t position = -1;
-        Item position_item = js_get_key_default(stream, make_string_item("__writestream_position__"));
+        Item position_item = js_get_key_cstr(stream, "__writestream_position__");
         if (get_type_id(position_item) == LMD_TYPE_INT) {
             position = it2i(position_item);
         }
@@ -887,12 +882,11 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
         uv_fs_write(NULL, &write_req, fd, &buf, 1, position, NULL);
         uv_fs_req_cleanup(&write_req);
         if (position >= 0) {
-            js_set_key_default(stream, make_string_item("__writestream_position__"),
-                            (Item){.item = i2it(position + len)});
+            js_set_key_cstr(stream, "__writestream_position__", (Item){.item = i2it(position + len)});
         }
     }
     js_fs_writestream_call_write_hook(stream, fd_item);
-    Item bytes_written = js_get_key_default(stream, make_string_item("bytesWritten"));
+    Item bytes_written = js_get_key_cstr(stream, "bytesWritten");
     int64_t total = 0;
     if (get_type_id(bytes_written) == LMD_TYPE_INT) {
         total = it2i(bytes_written);
@@ -901,9 +895,9 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
     }
     total += len;
     // WriteStream.bytesWritten is a Node JS Number surface, independent of host counter width.
-    js_set_key_default(stream, make_string_item("bytesWritten"), js_make_number((double)total));
+    js_set_key_cstr(stream, "bytesWritten", js_make_number((double)total));
 
-    Item hwm_item = js_get_key_default(stream, make_string_item("__writestream_high_water_mark__"));
+    Item hwm_item = js_get_key_cstr(stream, "__writestream_high_water_mark__");
     int64_t high_water_mark = (get_type_id(hwm_item) == LMD_TYPE_INT) ? it2i(hwm_item) : 16384;
     bool needs_drain = high_water_mark > 0 && total >= high_water_mark;
     if (needs_drain) js_fs_writestream_schedule_drain(stream);
@@ -927,9 +921,9 @@ JS_FORWARD_STATIC_VOID( js_fs_writestream_emit_finish, (Item stream), js_fs_writ
 JS_FORWARD_STATIC_VOID( js_fs_writestream_emit_close, (Item stream), js_fs_writestream_emit_callback, (stream, "__writestream_close_cb__"))
 
 static Item js_fs_writestream_emit_open_tick(Item stream) {
-    js_set_key_default(stream, make_string_item("__writestream_opened__"), (Item){.item = b2it(true)});
-    Item cb = js_get_key_default(stream, make_string_item("__writestream_open_cb__"));
-    Item fd_item = js_get_key_default(stream, make_string_item("fd"));
+    js_set_key_cstr(stream, "__writestream_opened__", (Item){.item = b2it(true)});
+    Item cb = js_get_key_cstr(stream, "__writestream_open_cb__");
+    Item fd_item = js_get_key_cstr(stream, "fd");
     if (js_is_callable(cb)) {
         Item args[1] = {fd_item};
         js_call_function(cb, stream, args, 1);
@@ -946,8 +940,8 @@ static void js_fs_writestream_schedule_open(Item stream) {
 }
 
 static Item js_fs_writestream_emit_drain_tick(Item stream) {
-    js_set_key_default(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
-    Item cb = js_get_key_default(stream, make_string_item("__writestream_drain_cb__"));
+    js_set_key_cstr(stream, "__writestream_drain_pending__", (Item){.item = b2it(false)});
+    Item cb = js_get_key_cstr(stream, "__writestream_drain_cb__");
     if (js_is_callable(cb)) {
         js_call_function(cb, stream, NULL, 0);
         js_microtask_flush();
@@ -956,9 +950,9 @@ static Item js_fs_writestream_emit_drain_tick(Item stream) {
 }
 
 static void js_fs_writestream_schedule_drain(Item stream) {
-    Item pending = js_get_key_default(stream, make_string_item("__writestream_drain_pending__"));
+    Item pending = js_get_key_cstr(stream, "__writestream_drain_pending__");
     if (get_type_id(pending) == LMD_TYPE_BOOL && it2b(pending)) return;
-    js_set_key_default(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(true)});
+    js_set_key_cstr(stream, "__writestream_drain_pending__", (Item){.item = b2it(true)});
     Item bound_args[1] = {stream};
     Item tick = js_bind_function(js_new_native_function(js_fs_writestream_emit_drain_tick),
                                  make_js_undefined(), bound_args, 1);
@@ -967,7 +961,7 @@ static void js_fs_writestream_schedule_drain(Item stream) {
 
 static Item js_fs_writestream_write_after_end_error(void) {
     Item err = js_new_error(make_string_item("write after end"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ERR_STREAM_WRITE_AFTER_END"));
+    js_set_key_cstr(err, "code", make_string_item("ERR_STREAM_WRITE_AFTER_END"));
     return err;
 }
 
@@ -992,14 +986,14 @@ static Item js_fs_writestream_io_hook_cb(Item err_item, Item value_item, Item da
 }
 
 static Item js_fs_writestream_hooks(Item stream) {
-    Item hooks = js_get_key_default(stream, make_string_item("__writestream_fs_hooks__"));
+    Item hooks = js_get_key_cstr(stream, "__writestream_fs_hooks__");
     return get_type_id(hooks) == LMD_TYPE_MAP ? hooks : make_js_undefined();
 }
 
 static void js_fs_writestream_call_open_hook(Item stream, Item path_item, Item flags, Item mode) {
     Item hooks = js_fs_writestream_hooks(stream);
     if (get_type_id(hooks) != LMD_TYPE_MAP) return;
-    Item open_fn = js_get_key_default(hooks, make_string_item("open"));
+    Item open_fn = js_get_key_cstr(hooks, "open");
     if (!js_is_callable(open_fn)) return;
     Item cb = js_new_native_function(js_fs_writestream_open_hook_cb);
     Item args[4] = {path_item, flags, mode, cb};
@@ -1009,9 +1003,9 @@ static void js_fs_writestream_call_open_hook(Item stream, Item path_item, Item f
 static void js_fs_writestream_call_write_hook(Item stream, Item fd_item) {
     Item hooks = js_fs_writestream_hooks(stream);
     if (get_type_id(hooks) != LMD_TYPE_MAP || get_type_id(fd_item) != LMD_TYPE_INT) return;
-    Item writev_fn = js_get_key_default(hooks, make_string_item("writev"));
+    Item writev_fn = js_get_key_cstr(hooks, "writev");
     if (js_is_callable(writev_fn)) return;
-    Item write_fn = js_get_key_default(hooks, make_string_item("write"));
+    Item write_fn = js_get_key_cstr(hooks, "write");
     if (!js_is_callable(write_fn)) return;
     Item cb = js_new_native_function(js_fs_writestream_io_hook_cb);
     Item args[4] = {fd_item, make_string_item("", 0), (Item){.item = i2it(0)}, cb};
@@ -1021,9 +1015,9 @@ static void js_fs_writestream_call_write_hook(Item stream, Item fd_item) {
 static void js_fs_writestream_call_writev_hook(Item stream) {
     Item hooks = js_fs_writestream_hooks(stream);
     if (get_type_id(hooks) != LMD_TYPE_MAP) return;
-    Item writev_fn = js_get_key_default(hooks, make_string_item("writev"));
+    Item writev_fn = js_get_key_cstr(hooks, "writev");
     if (!js_is_callable(writev_fn)) return;
-    Item fd_item = js_get_key_default(stream, make_string_item("fd"));
+    Item fd_item = js_get_key_cstr(stream, "fd");
     if (get_type_id(fd_item) != LMD_TYPE_INT) return;
     Item cb = js_new_native_function(js_fs_writestream_io_hook_cb);
     Item args[3] = {fd_item, js_array_new(0), cb};
@@ -1031,16 +1025,16 @@ static void js_fs_writestream_call_writev_hook(Item stream) {
 }
 
 static void js_fs_writestream_close_if_needed(Item stream) {
-    Item fd_item = js_get_key_default(stream, make_string_item("fd"));
+    Item fd_item = js_get_key_cstr(stream, "fd");
     if (get_type_id(fd_item) != LMD_TYPE_INT) return;
 
-    Item auto_close = js_get_key_default(stream, make_string_item("__writestream_auto_close__"));
+    Item auto_close = js_get_key_cstr(stream, "__writestream_auto_close__");
     if (get_type_id(auto_close) == LMD_TYPE_BOOL && !it2b(auto_close)) return;
 
     Item hooks = js_fs_writestream_hooks(stream);
     Item close_fn = get_type_id(hooks) == LMD_TYPE_MAP ?
-        js_get_key_default(hooks, make_string_item("close")) :
-        js_get_key_default(fs_namespace, make_string_item("close"));
+        js_get_key_cstr(hooks, "close") :
+        js_get_key_cstr(fs_namespace, "close");
     if (js_is_callable(close_fn)) {
         Item noop = js_new_native_function(js_fs_writestream_close_noop);
         Item args[2] = {fd_item, noop};
@@ -1048,8 +1042,8 @@ static void js_fs_writestream_close_if_needed(Item stream) {
     } else {
         js_fs_closeSync(fd_item);
     }
-    js_set_key_default(stream, make_string_item("fd"), ItemNull);
-    js_set_key_default(stream, make_string_item("closed"), (Item){.item = b2it(true)});
+    js_set_key_cstr(stream, "fd", ItemNull);
+    js_set_key_cstr(stream, "closed", (Item){.item = b2it(true)});
     js_fs_writestream_emit_close(stream);
 }
 
@@ -1060,7 +1054,7 @@ static Item js_fs_writestream_end(Item chunk_item) {
         js_fs_writestream_write(chunk_item, make_js_undefined());
     }
     js_fs_writestream_call_writev_hook(stream);
-    js_set_key_default(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(true)});
+    js_set_key_cstr(stream, "__writestream_finished__", (Item){.item = b2it(true)});
     js_fs_writestream_emit_finish(stream);
     js_fs_writestream_close_if_needed(stream);
     return stream;
@@ -1073,26 +1067,26 @@ static Item js_fs_writestream_on(Item event_item, Item callback_item) {
     }
     String* event = it2s(event_item);
     if (event->len == 6 && memcmp(event->chars, "finish", 6) == 0) {
-        js_set_key_default(stream, make_string_item("__writestream_finish_cb__"), callback_item);
-        Item finished = js_get_key_default(stream, make_string_item("__writestream_finished__"));
+        js_set_key_cstr(stream, "__writestream_finish_cb__", callback_item);
+        Item finished = js_get_key_cstr(stream, "__writestream_finished__");
         if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
             js_fs_writestream_emit_finish(stream);
         }
     } else if (event->len == 4 && memcmp(event->chars, "open", 4) == 0) {
-        js_set_key_default(stream, make_string_item("__writestream_open_cb__"), callback_item);
-        Item opened = js_get_key_default(stream, make_string_item("__writestream_opened__"));
+        js_set_key_cstr(stream, "__writestream_open_cb__", callback_item);
+        Item opened = js_get_key_cstr(stream, "__writestream_opened__");
         if (get_type_id(opened) == LMD_TYPE_BOOL && it2b(opened)) {
-            Item fd_item = js_get_key_default(stream, make_string_item("fd"));
+            Item fd_item = js_get_key_cstr(stream, "fd");
             Item args[1] = {fd_item};
             js_call_function(callback_item, stream, args, 1);
         }
     } else if (event->len == 5 && memcmp(event->chars, "drain", 5) == 0) {
-        js_set_key_default(stream, make_string_item("__writestream_drain_cb__"), callback_item);
+        js_set_key_cstr(stream, "__writestream_drain_cb__", callback_item);
     } else if (event->len == 5 && memcmp(event->chars, "error", 5) == 0) {
-        js_set_key_default(stream, make_string_item("__writestream_error_cb__"), callback_item);
+        js_set_key_cstr(stream, "__writestream_error_cb__", callback_item);
     } else if (event->len == 5 && memcmp(event->chars, "close", 5) == 0) {
-        js_set_key_default(stream, make_string_item("__writestream_close_cb__"), callback_item);
-        Item closed = js_get_key_default(stream, make_string_item("closed"));
+        js_set_key_cstr(stream, "__writestream_close_cb__", callback_item);
+        Item closed = js_get_key_cstr(stream, "closed");
         if (get_type_id(closed) == LMD_TYPE_BOOL && it2b(closed)) {
             js_fs_writestream_emit_close(stream);
         }
@@ -1112,60 +1106,58 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
     stream_root.set(js_new_object());
     // A write stream receives many own properties before it escapes. Keep the
     // object rooted because property and function creation can compact the heap.
-    js_set_key_default(stream_root.get(), make_string_item("__writestream_path__"), path_root.get());
-    js_set_key_default(stream_root.get(), make_string_item("__writestream_finished__"), (Item){.item = b2it(false)});
-    js_set_key_default(stream_root.get(), make_string_item("__writestream_auto_close__"), (Item){.item = b2it(true)});
-    js_set_key_default(stream_root.get(), make_string_item("__writestream_opened__"), (Item){.item = b2it(false)});
-    js_set_key_default(stream_root.get(), make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
-    js_set_key_default(stream_root.get(), make_string_item("__writestream_high_water_mark__"), (Item){.item = i2it(16384)});
-    js_set_key_default(stream_root.get(), make_string_item("closed"), (Item){.item = b2it(false)});
-    js_set_key_default(stream_root.get(), make_string_item("bytesWritten"), js_make_number(0.0));
-    js_set_key_default(stream_root.get(), make_string_item("fd"), ItemNull);
+    js_set_key_cstr(stream_root.get(), "__writestream_path__", path_root.get());
+    js_set_key_cstr(stream_root.get(), "__writestream_finished__", (Item){.item = b2it(false)});
+    js_set_key_cstr(stream_root.get(), "__writestream_auto_close__", (Item){.item = b2it(true)});
+    js_set_key_cstr(stream_root.get(), "__writestream_opened__", (Item){.item = b2it(false)});
+    js_set_key_cstr(stream_root.get(), "__writestream_drain_pending__", (Item){.item = b2it(false)});
+    js_set_key_cstr(stream_root.get(), "__writestream_high_water_mark__", (Item){.item = i2it(16384)});
+    js_set_key_cstr(stream_root.get(), "closed", (Item){.item = b2it(false)});
+    js_set_key_cstr(stream_root.get(), "bytesWritten", js_make_number(0.0));
+    js_set_key_cstr(stream_root.get(), "fd", ItemNull);
 
     flags_root.set(make_string_item("w"));
     if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
-        Item flags_opt = js_get_key_default(options_root.get(), make_string_item("flags"));
+        Item flags_opt = js_get_key_cstr(options_root.get(), "flags");
         if (get_type_id(flags_opt) == LMD_TYPE_STRING || get_type_id(flags_opt) == LMD_TYPE_INT) {
             flags_root.set(flags_opt);
         }
-        Item mode_opt = js_get_key_default(options_root.get(), make_string_item("mode"));
-        if (!fs_is_nullish(mode_opt)) {
+        Item mode_opt = js_get_key_cstr(options_root.get(), "mode");
+        if (!js_is_nullish(mode_opt)) {
             uint32_t parsed_mode = 0;
             JS_RETURN_IF_ERROR(fs_validate_mode(mode_opt, &parsed_mode));
             mode_root.set((Item){.item = i2it((int64_t)parsed_mode)});
         }
-        Item auto_close = js_get_key_default(options_root.get(), make_string_item("autoClose"));
+        Item auto_close = js_get_key_cstr(options_root.get(), "autoClose");
         if (get_type_id(auto_close) == LMD_TYPE_BOOL) {
-            js_set_key_default(stream_root.get(), make_string_item("__writestream_auto_close__"), auto_close);
+            js_set_key_cstr(stream_root.get(), "__writestream_auto_close__", auto_close);
         }
-        Item hwm = js_get_key_default(options_root.get(), make_string_item("highWaterMark"));
-        if (!fs_is_nullish(hwm)) {
+        Item hwm = js_get_key_cstr(options_root.get(), "highWaterMark");
+        if (!js_is_nullish(hwm)) {
             int64_t parsed_hwm = 0;
             // JS numeric literals are float-backed Numbers; fs internals keep HWM as an integral counter.
             JS_RETURN_IF_ERROR(fs_validate_int_range(hwm, "options.highWaterMark", 0, 9223372036854775807LL, &parsed_hwm));
-            js_set_key_default(stream_root.get(), make_string_item("__writestream_high_water_mark__"),
-                            (Item){.item = i2it(parsed_hwm)});
+            js_set_key_cstr(stream_root.get(), "__writestream_high_water_mark__", (Item){.item = i2it(parsed_hwm)});
         }
-        Item hooks = js_get_key_default(options_root.get(), make_string_item("fs"));
+        Item hooks = js_get_key_cstr(options_root.get(), "fs");
         if (get_type_id(hooks) == LMD_TYPE_MAP) {
-            js_set_key_default(stream_root.get(), make_string_item("__writestream_fs_hooks__"), hooks);
+            js_set_key_cstr(stream_root.get(), "__writestream_fs_hooks__", hooks);
         }
-        Item fd_opt = js_get_key_default(options_root.get(), make_string_item("fd"));
-        if (!fs_is_nullish(fd_opt)) {
+        Item fd_opt = js_get_key_cstr(options_root.get(), "fd");
+        if (!js_is_nullish(fd_opt)) {
             int parsed_fd = 0;
             JS_RETURN_IF_ERROR(fs_validate_fd(fd_opt, &parsed_fd));
-            js_set_key_default(stream_root.get(), make_string_item("fd"), (Item){.item = i2it(parsed_fd)});
+            js_set_key_cstr(stream_root.get(), "fd", (Item){.item = i2it(parsed_fd)});
         }
-        Item start_opt = js_get_key_default(options_root.get(), make_string_item("start"));
-        if (!fs_is_nullish(start_opt)) {
+        Item start_opt = js_get_key_cstr(options_root.get(), "start");
+        if (!js_is_nullish(start_opt)) {
             int64_t parsed_start = 0;
             JS_RETURN_IF_ERROR(fs_validate_int_range(start_opt, "options.start", 0, 9223372036854775807LL, &parsed_start));
-            js_set_key_default(stream_root.get(), make_string_item("__writestream_position__"),
-                            (Item){.item = i2it(parsed_start)});
+            js_set_key_cstr(stream_root.get(), "__writestream_position__", (Item){.item = i2it(parsed_start)});
         }
     }
 
-    fd_root.set(js_get_key_default(stream_root.get(), make_string_item("fd")));
+    fd_root.set(js_get_key_cstr(stream_root.get(), "fd"));
     if (get_type_id(fd_root.get()) != LMD_TYPE_INT) {
         char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_root.get(), "path", path_buf, sizeof(path_buf));
@@ -1173,11 +1165,11 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
         if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
         fd_root.set(js_fs_openSync(path_root.get(), flags_root.get(), mode_root.get()));
         if (get_type_id(fd_root.get()) == LMD_TYPE_INT) {
-            js_set_key_default(stream_root.get(), make_string_item("fd"), fd_root.get());
+            js_set_key_cstr(stream_root.get(), "fd", fd_root.get());
         }
     }
     js_fs_writestream_call_open_hook(stream_root.get(), path_root.get(), flags_root.get(), mode_root.get());
-    if (get_type_id(js_get_key_default(stream_root.get(), make_string_item("fd"))) == LMD_TYPE_INT) {
+    if (get_type_id(js_get_key_cstr(stream_root.get(), "fd")) == LMD_TYPE_INT) {
         js_fs_writestream_schedule_open(stream_root.get());
     }
 
@@ -1280,10 +1272,10 @@ static void fs_parse_mkdir_options(Item options, int* mode, bool* recursive) {
     } else if (get_type_id(options) == LMD_TYPE_FLOAT) {
         *mode = (int)it2d(options);
     } else if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item mode_val = js_get_key_default(options, make_string_item("mode"));
+        Item mode_val = js_get_key_cstr(options, "mode");
         if (get_type_id(mode_val) == LMD_TYPE_INT) *mode = (int)it2i(mode_val);
         else if (get_type_id(mode_val) == LMD_TYPE_FLOAT) *mode = (int)it2d(mode_val);
-        Item rec_val = js_get_key_default(options, make_string_item("recursive"));
+        Item rec_val = js_get_key_cstr(options, "recursive");
         *recursive = js_is_truthy(rec_val);
     }
 }
@@ -1303,6 +1295,14 @@ static void fs_mkdir_recursive(const char* path, int mode) {
     }
 }
 
+static int fs_mkdir_do(const char* path, int mode, bool recursive) {
+    if (recursive) fs_mkdir_recursive(path, mode);
+    uv_fs_t req;
+    int result = uv_fs_mkdir(NULL, &req, path, mode, NULL);
+    uv_fs_req_cleanup(&req);
+    return result;
+}
+
 extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
@@ -1313,13 +1313,7 @@ extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
     bool recursive = false;
     fs_parse_mkdir_options(options, &mode, &recursive);
 
-    if (recursive) {
-        fs_mkdir_recursive(path, mode);
-    }
-
-    uv_fs_t req;
-    int r = uv_fs_mkdir(NULL, &req, path, mode, NULL);
-    uv_fs_req_cleanup(&req);
+    int r = fs_mkdir_do(path, mode, recursive);
 
     if (recursive) {
         // for recursive, return the first directory created (or undefined)
@@ -1355,19 +1349,12 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
     bool recursive = false;
     fs_parse_mkdir_options(options, &mode, &recursive);
 
-    if (recursive) {
-        fs_mkdir_recursive(path, mode);
-    }
-
-    uv_fs_t req;
-    int r = uv_fs_mkdir(NULL, &req, path, mode, NULL);
-    uv_fs_req_cleanup(&req);
+    int r = fs_mkdir_do(path, mode, recursive);
 
     if (js_is_callable(callback)) {
         if (r < 0 && !(recursive && r == UV_EEXIST)) {
             Item err = js_new_error(make_string_item(uv_strerror(r)));
-            js_set_key_default(err, make_string_item("code"),
-                make_string_item(r == UV_EEXIST ? "EEXIST" :
+            js_set_key_cstr(err, "code", make_string_item(r == UV_EEXIST ? "EEXIST" :
                                  r == UV_ENOENT ? "ENOENT" :
                                  r == UV_EACCES ? "EACCES" : "ERR_FS"));
             Item args[1] = {err};
@@ -1444,7 +1431,7 @@ JS_FORWARD_ITEM(js_fs_statSync, (Item path_item, Item options_item), js_fs_stat_
 
 static bool fs_options_bigint(Item options_item) {
     if (get_type_id(options_item) != LMD_TYPE_MAP) return false;
-    Item bigint = js_get_key_default(options_item, make_string_item("bigint"));
+    Item bigint = js_get_key_cstr(options_item, "bigint");
     return js_is_truthy(bigint);
 }
 
@@ -1460,14 +1447,14 @@ static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
     // statfs fields are created one at a time; root the result across each
     // key/value allocation so forced collection cannot publish a stale map.
     Rooted<Item> obj_root(roots, js_new_object());
-    js_set_key_default(obj_root.get(), make_string_item("type"), fs_statfs_number(type, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("bsize"), fs_statfs_number(bsize, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("frsize"), fs_statfs_number(frsize, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("blocks"), fs_statfs_number(blocks, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("bfree"), fs_statfs_number(bfree, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("bavail"), fs_statfs_number(bavail, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("files"), fs_statfs_number(files, bigint));
-    js_set_key_default(obj_root.get(), make_string_item("ffree"), fs_statfs_number(ffree, bigint));
+    js_set_key_cstr(obj_root.get(), "type", fs_statfs_number(type, bigint));
+    js_set_key_cstr(obj_root.get(), "bsize", fs_statfs_number(bsize, bigint));
+    js_set_key_cstr(obj_root.get(), "frsize", fs_statfs_number(frsize, bigint));
+    js_set_key_cstr(obj_root.get(), "blocks", fs_statfs_number(blocks, bigint));
+    js_set_key_cstr(obj_root.get(), "bfree", fs_statfs_number(bfree, bigint));
+    js_set_key_cstr(obj_root.get(), "bavail", fs_statfs_number(bavail, bigint));
+    js_set_key_cstr(obj_root.get(), "files", fs_statfs_number(files, bigint));
+    js_set_key_cstr(obj_root.get(), "ffree", fs_statfs_number(ffree, bigint));
     return obj_root.get();
 }
 
@@ -2156,9 +2143,9 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     Item read_offset = offset_item;
     Item read_length = length_item;
     Item read_position = position_item;
-    bool options_form = fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    bool options_form = js_is_nullish(length_item) && js_is_nullish(position_item);
     if (options_form) {
-        if (!fs_is_options_object(offset_item) && !fs_is_nullish(offset_item)) {
+        if (!fs_is_options_object(offset_item) && !js_is_nullish(offset_item)) {
             return js_throw_invalid_arg_type("options", "object", offset_item);
         }
         JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(offset_item, buffer_item, &read_buffer,
@@ -2224,10 +2211,10 @@ extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Ite
     Item read_length = length_item;
     Item read_position = position_item;
     bool second_arg_is_options = !fs_get_typed_array(buffer_item) &&
-                                 (fs_is_options_object(buffer_item) || fs_is_nullish(buffer_item));
+                                 (fs_is_options_object(buffer_item) || js_is_nullish(buffer_item));
     bool third_arg_is_options = fs_get_typed_array(buffer_item) &&
-                                (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
-                                fs_is_nullish(length_item) && fs_is_nullish(position_item);
+                                (fs_is_options_object(offset_item) || js_is_nullish(offset_item)) &&
+                                js_is_nullish(length_item) && js_is_nullish(position_item);
     if (second_arg_is_options) {
         JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
                                    &read_offset, &read_length, &read_position));
@@ -2245,16 +2232,16 @@ extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Ite
 
 static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item length_item, Item position_item) {
     Item self = js_get_this();
-    Item fd_item = js_get_key_default(self, make_string_item("__fd"));
+    Item fd_item = js_get_key_cstr(self, "__fd");
     Item read_buffer = buffer_item;
     Item read_offset = offset_item;
     Item read_length = length_item;
     Item read_position = position_item;
     bool first_arg_is_options = !fs_get_typed_array(buffer_item) &&
-                                (fs_is_options_object(buffer_item) || fs_is_nullish(buffer_item));
+                                (fs_is_options_object(buffer_item) || js_is_nullish(buffer_item));
     bool second_arg_is_options = fs_get_typed_array(buffer_item) &&
-                                 (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
-                                 fs_is_nullish(length_item) && fs_is_nullish(position_item);
+                                 (fs_is_options_object(offset_item) || js_is_nullish(offset_item)) &&
+                                 js_is_nullish(length_item) && js_is_nullish(position_item);
     if (first_arg_is_options) {
         Item parse_result = fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
                                    &read_offset, &read_length, &read_position);
@@ -2271,16 +2258,16 @@ static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item lengt
     }
 
     Item result = js_new_object();
-    js_set_key_default(result, make_string_item("bytesRead"), bytes_read);
-    js_set_key_default(result, make_string_item("buffer"), read_buffer);
+    js_set_key_cstr(result, "bytesRead", bytes_read);
+    js_set_key_cstr(result, "buffer", read_buffer);
     return js_promise_resolve(result);
 }
 
 static Item js_fs_filehandle_transferred_error(const char* syscall) {
     Item err = js_new_error_with_name(make_string_item("Error"),
         make_string_item("The FileHandle has been transferred"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("EBADF"));
-    js_set_key_default(err, make_string_item("syscall"), make_string_item(syscall ? syscall : "read"));
+    js_set_key_cstr(err, "code", make_string_item("EBADF"));
+    js_set_key_cstr(err, "syscall", make_string_item(syscall ? syscall : "read"));
     return err;
 }
 
@@ -2289,7 +2276,7 @@ static Item js_fs_filehandle_readFile(Item options_item) {
     if (item_is_error(validation)) return js_promise_reject(js_error_lane_payload(validation));
 
     Item self = js_get_this();
-    Item fd_item = js_get_key_default(self, make_string_item("__fd"));
+    Item fd_item = js_get_key_cstr(self, "__fd");
     if (get_type_id(fd_item) != LMD_TYPE_INT || it2i(fd_item) < 0) {
         return js_promise_reject(js_fs_filehandle_transferred_error("read"));
     }
@@ -2337,22 +2324,19 @@ static Item js_fs_filehandle_readFile(Item options_item) {
 
 static Item js_fs_filehandle_close(void) {
     Item self = js_get_this();
-    Item fd_item = js_get_key_default(self, make_string_item("__fd"));
+    Item fd_item = js_get_key_cstr(self, "__fd");
     if (get_type_id(fd_item) == LMD_TYPE_INT) {
         js_fs_closeSync(fd_item);
-        js_set_key_default(self, make_string_item("__fd"), make_js_undefined());
+        js_set_key_cstr(self, "__fd", make_js_undefined());
     }
     return js_promise_resolve(make_js_undefined());
 }
 
-template <typename Target>
-static Item js_fs_set_method(Item ns, const char* name, Target target,
-                             int adapter_arity);
 JS_FORWARD_STATIC_ITEM(js_fs_filehandle_illegal_constructor, (void), js_throw_type_error, ("FileHandle is not constructible"))
 
 static Item js_fs_filehandle_fd_getter(void) {
     Item self = js_get_this();
-    return js_get_key_default(self, make_string_item("__fd"));
+    return js_get_key_cstr(self, "__fd");
 }
 
 static Item fs_get_filehandle_prototype(void) {
@@ -2376,8 +2360,8 @@ static Item fs_get_filehandle_constructor(void) {
 
     Item proto = fs_get_filehandle_prototype();
     fs_filehandle_ctor = js_new_native_constructor(js_fs_filehandle_illegal_constructor);
-    js_set_key_default(fs_filehandle_ctor, make_string_item("prototype"), proto);
-    js_set_key_default(proto, make_string_item("constructor"), fs_filehandle_ctor);
+    js_set_key_cstr(fs_filehandle_ctor, "prototype", proto);
+    js_set_key_cstr(proto, "constructor", fs_filehandle_ctor);
     return fs_filehandle_ctor;
 }
 
@@ -2386,7 +2370,7 @@ static Item fs_create_filehandle(Item fd) {
     Rooted<Item> fd_root(roots, fd);
     Rooted<Item> handle_root(roots, js_new_object());
     js_set_prototype(handle_root.get(), fs_get_filehandle_prototype());
-    js_set_key_default(handle_root.get(), make_string_item("__fd"), fd_root.get());
+    js_set_key_cstr(handle_root.get(), "__fd", fd_root.get());
     return handle_root.get();
 }
 
@@ -2434,12 +2418,12 @@ static Item fs_write_parse_options(Item options_item, Item data_item,
     Item length = make_js_undefined();
     Item position = make_js_undefined();
     if (fs_is_options_object(options_item)) {
-        JS_ASSIGN_OR_RETURN_INTO(offset, js_get_key_default(options_item, make_string_item("offset")));
-        JS_ASSIGN_OR_RETURN_INTO(length, js_get_key_default(options_item, make_string_item("length")));
-        JS_ASSIGN_OR_RETURN_INTO(position, js_get_key_default(options_item, make_string_item("position")));
+        JS_ASSIGN_OR_RETURN_INTO(offset, js_get_key_cstr(options_item, "offset"));
+        JS_ASSIGN_OR_RETURN_INTO(length, js_get_key_cstr(options_item, "length"));
+        JS_ASSIGN_OR_RETURN_INTO(position, js_get_key_cstr(options_item, "position"));
     }
-    if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
-    if (fs_is_nullish(length)) {
+    if (js_is_nullish(offset)) offset = (Item){.item = i2it(0)};
+    if (js_is_nullish(length)) {
         int byte_length = js_typed_array_byte_length(data_item);
         int64_t offset_value = 0;
         if (get_type_id(offset) == LMD_TYPE_INT) {
@@ -2468,8 +2452,8 @@ extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
     Item write_position = position_item;
 
     if (fs_get_typed_array(data_item)) {
-        bool options_form = (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
-                            fs_is_nullish(length_item) && fs_is_nullish(position_item);
+        bool options_form = (fs_is_options_object(offset_item) || js_is_nullish(offset_item)) &&
+                            js_is_nullish(length_item) && js_is_nullish(position_item);
         if (options_form) {
             JS_RETURN_IF_ERROR(fs_write_parse_options(offset_item, data_item, &write_offset,
                                         &write_length, &write_position));
@@ -2478,7 +2462,7 @@ extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
         write_offset = (Item){.item = i2it(0)};
         write_length = make_js_undefined();
         write_position = offset_item;
-        if (fs_is_nullish(write_position) || js_is_callable(write_position)) {
+        if (js_is_nullish(write_position) || js_is_callable(write_position)) {
             write_position = make_js_undefined();
         }
         JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_item(length_item));
@@ -2617,12 +2601,12 @@ static Item make_fs_error(int uv_err, const char* path) {
     else if (uv_err == UV_ENOTDIR) code = "ENOTDIR";
     else if (uv_err == UV_EPERM) code = "EPERM";
     else if (uv_err == UV_EBADF) code = "EBADF";
-    js_set_key_default(err, make_string_item("code"), make_string_item(code));
+    js_set_key_cstr(err, "code", make_string_item(code));
     if (path) {
-        js_set_key_default(err, make_string_item("path"), make_string_item(path));
+        js_set_key_cstr(err, "path", make_string_item(path));
     }
-    js_set_key_default(err, make_string_item("errno"), (Item){.item = i2it(uv_err)});
-    js_set_key_default(err, make_string_item("syscall"), make_string_item("access"));
+    js_set_key_cstr(err, "errno", (Item){.item = i2it(uv_err)});
+    js_set_key_cstr(err, "syscall", make_string_item("access"));
     return err;
 }
 
@@ -2897,7 +2881,7 @@ static bool fs_options_has_signal(Item options, Item* signal_out) {
     if (signal_out) *signal_out = make_js_undefined();
     TypeId opt_type = get_type_id(options);
     if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_OBJECT) return false;
-    Item signal = js_get_key_default(options, make_string_item("signal"));
+    Item signal = js_get_key_cstr(options, "signal");
     if (get_type_id(signal) == LMD_TYPE_UNDEFINED || get_type_id(signal) == LMD_TYPE_NULL) return false;
     if (signal_out) *signal_out = signal;
     return true;
@@ -2906,25 +2890,25 @@ static bool fs_options_has_signal(Item options, Item* signal_out) {
 static bool fs_is_abort_signal(Item signal) {
     TypeId sig_type = get_type_id(signal);
     if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) return false;
-    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
-    Item add_event = js_get_key_default(signal, make_string_item("addEventListener"));
+    Item aborted = js_get_key_cstr(signal, "aborted");
+    Item add_event = js_get_key_cstr(signal, "addEventListener");
     return get_type_id(aborted) == LMD_TYPE_BOOL && js_is_callable(add_event);
 }
 
 static bool fs_signal_aborted(Item signal) {
-    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
+    Item aborted = js_get_key_cstr(signal, "aborted");
     return get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted);
 }
 
 static Item fs_make_abort_error(Item signal) {
     Item err = js_new_object_with_class(JS_CLASS_ABORT_ERROR);
-    js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ABORT_ERR"));
-    js_set_key_default(err, make_string_item("message"), make_string_item("The operation was aborted"));
+    js_set_key_cstr(err, "name", make_string_item("AbortError"));
+    js_set_key_cstr(err, "code", make_string_item("ABORT_ERR"));
+    js_set_key_cstr(err, "message", make_string_item("The operation was aborted"));
     if (get_type_id(signal) == LMD_TYPE_MAP || get_type_id(signal) == LMD_TYPE_OBJECT) {
-        Item reason = js_get_key_default(signal, make_string_item("reason"));
+        Item reason = js_get_key_cstr(signal, "reason");
         if (get_type_id(reason) != LMD_TYPE_UNDEFINED && get_type_id(reason) != LMD_TYPE_NULL) {
-            js_set_key_default(err, make_string_item("cause"), reason);
+            js_set_key_cstr(err, "cause", reason);
         }
     }
     return err;
@@ -2934,7 +2918,7 @@ static Item fs_make_invalid_signal_error(void) {
     Item err = js_new_error_with_name(
         make_string_item("TypeError"),
         make_string_item("The \"options.signal\" property must be an instance of AbortSignal."));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ERR_INVALID_ARG_TYPE"));
+    js_set_key_cstr(err, "code", make_string_item("ERR_INVALID_ARG_TYPE"));
     return err;
 }
 
@@ -2997,9 +2981,9 @@ extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
         }
 
         Item capability = js_promise_with_resolvers();
-        Item promise = js_get_key_default(capability, make_string_item("promise"));
-        Item resolve_fn = js_get_key_default(capability, make_string_item("resolve"));
-        Item reject_fn = js_get_key_default(capability, make_string_item("reject"));
+        Item promise = js_get_key_cstr(capability, "promise");
+        Item resolve_fn = js_get_key_cstr(capability, "resolve");
+        Item reject_fn = js_get_key_cstr(capability, "reject");
         Item* env = js_alloc_env(5);
         env[0] = path;
         env[1] = opts;
@@ -3336,7 +3320,7 @@ extern "C" Item js_get_internal_fs_utils_namespace(void) {
         js_internal_fs_validateOffsetLengthRead, 3);
     js_fs_set_method(ns_root.get(), "validateOffsetLengthWrite",
         js_internal_fs_validateOffsetLengthWrite, 3);
-    js_set_key_default(ns_root.get(), make_string_item("default"), ns_root.get());
+    js_set_key_cstr(ns_root.get(), "default", ns_root.get());
     return ns_root.get();
 }
 
@@ -3351,87 +3335,66 @@ extern "C" Item js_get_fs_namespace(void) {
     Rooted<Item> promises_root(roots, ItemNull);
     Rooted<Item> default_key_root(roots, ItemNull);
 
-    // synchronous methods
-    js_fs_set_method(fs_namespace, "readFileSync",    js_fs_readFileSync, 2);
-    js_fs_set_method(fs_namespace, "writeFileSync",   js_fs_writeFileSync, 3);
-    js_fs_set_method(fs_namespace, "existsSync",      js_fs_existsSync, 1);
-    js_fs_set_method(fs_namespace, "unlinkSync",      js_fs_unlinkSync, 1);
-    js_fs_set_method(fs_namespace, "mkdirSync",       js_fs_mkdirSync, 2);
-    js_fs_set_method(fs_namespace, "rmdirSync",       js_fs_rmdirSync, 1);
-    js_fs_set_method(fs_namespace, "renameSync",      js_fs_renameSync, 2);
-    js_fs_set_method(fs_namespace, "readdirSync",     js_fs_readdirSync, 2);
-    js_fs_set_method(fs_namespace, "statSync",        js_fs_statSync, 2);
-    js_fs_set_method(fs_namespace, "appendFileSync",  js_fs_appendFileSync, 3);
-    js_fs_set_method(fs_namespace, "createReadStream",js_fs_createReadStream, 2);
-    js_fs_set_method(fs_namespace, "createWriteStream",js_fs_createWriteStream, 2);
+#define JS_FS_INSTALL_METHOD(name, target, arity) \
+    js_fs_set_method(fs_namespace, name, target, arity);
+#define JS_FS_SYNC_METHODS(M) \
+    M("readFileSync", js_fs_readFileSync, 2) M("writeFileSync", js_fs_writeFileSync, 3) \
+    M("existsSync", js_fs_existsSync, 1) M("unlinkSync", js_fs_unlinkSync, 1) \
+    M("mkdirSync", js_fs_mkdirSync, 2) M("rmdirSync", js_fs_rmdirSync, 1) \
+    M("renameSync", js_fs_renameSync, 2) M("readdirSync", js_fs_readdirSync, 2) \
+    M("statSync", js_fs_statSync, 2) M("appendFileSync", js_fs_appendFileSync, 3) \
+    M("createReadStream", js_fs_createReadStream, 2) M("createWriteStream", js_fs_createWriteStream, 2)
+    JS_FS_SYNC_METHODS(JS_FS_INSTALL_METHOD)
     js_install_native_constructor(fs_namespace, "ReadStream",
         js_fs_createReadStream, 2);
     js_install_native_constructor(fs_namespace, "WriteStream",
         js_fs_createWriteStream, 2);
 
-    // asynchronous (callback) methods
-    js_fs_set_method(fs_namespace, "readFile",        js_fs_readFile, 3);
-    js_fs_set_method(fs_namespace, "writeFile",       js_fs_writeFile, 4);
-    js_fs_set_method(fs_namespace, "mkdir",           js_fs_mkdir_async, 3);
-    js_fs_set_method(fs_namespace, "access",          js_fs_access_async, 3);
-    js_fs_set_method(fs_namespace, "stat",            js_fs_stat_async, 3);
-    js_fs_set_method(fs_namespace, "statfs",          js_fs_statfs_async, 3);
-    js_fs_set_method(fs_namespace, "lstat",           js_fs_lstat_async, 3);
-    js_fs_set_method(fs_namespace, "open",            js_fs_open_async, 4);
-    js_fs_set_method(fs_namespace, "close",           js_fs_close_async, 2);
-    js_fs_set_method(fs_namespace, "chmod",           js_fs_chmod_async, 3);
-    js_fs_set_method(fs_namespace, "unlink",          js_fs_unlink_async, 2);
+#define JS_FS_ASYNC_METHODS(M) \
+    M("readFile", js_fs_readFile, 3) M("writeFile", js_fs_writeFile, 4) \
+    M("mkdir", js_fs_mkdir_async, 3) M("access", js_fs_access_async, 3) \
+    M("stat", js_fs_stat_async, 3) M("statfs", js_fs_statfs_async, 3) \
+    M("lstat", js_fs_lstat_async, 3) M("open", js_fs_open_async, 4) \
+    M("close", js_fs_close_async, 2) M("chmod", js_fs_chmod_async, 3) \
+    M("unlink", js_fs_unlink_async, 2)
+    JS_FS_ASYNC_METHODS(JS_FS_INSTALL_METHOD)
     Item exists_fn = js_fs_set_method(fs_namespace, "exists",          js_fs_exists_async, 2);
     js_fs_set_custom_promisify(exists_fn, js_fs_exists_promisified, 1);
-    js_fs_set_method(fs_namespace, "rename",          js_fs_rename_async, 3);
-    js_fs_set_method(fs_namespace, "readdir",         js_fs_readdir_async, 3);
-    js_fs_set_method(fs_namespace, "fstat",           js_fs_fstat_async, 3);
-    js_fs_set_method(fs_namespace, "rmdir",           js_fs_rmdir_async, 2);
-    js_fs_set_method(fs_namespace, "copyFile",        js_fs_copyFile_async, 4);
     Item realpath_fn = js_fs_set_method(fs_namespace, "realpath",        js_fs_realpath_async, 3);
-    js_set_key_default(realpath_fn, make_string_item("native"), realpath_fn);
-    js_fs_set_method(fs_namespace, "mkdtemp",         js_fs_mkdtemp_async, 3);
-    js_fs_set_method(fs_namespace, "readlink",        js_fs_readlink_async, 3);
-    js_fs_set_method(fs_namespace, "symlink",         js_fs_symlink_async, 4);
-    js_fs_set_method(fs_namespace, "truncate",        js_fs_truncate_async, 3);
-    js_fs_set_method(fs_namespace, "appendFile",      js_fs_appendFile_async, 4);
-    js_fs_set_method(fs_namespace, "fchmod",          js_fs_fchmod_async, 3);
-    js_fs_set_method(fs_namespace, "lchmod",          js_fs_lchmod_async, 3);
-    js_fs_set_method(fs_namespace, "fchown",          js_fs_fchown_async, 4);
-    js_fs_set_method(fs_namespace, "lchown",          js_fs_lchown_async, 4);
-    js_fs_set_method(fs_namespace, "chown",           js_fs_chown_async, 4);
-    js_fs_set_method(fs_namespace, "link",            js_fs_link_async, 3);
-    js_fs_set_method(fs_namespace, "watch",           js_fs_watch, 3);
-    js_fs_set_method(fs_namespace, "watchFile",       js_fs_watchFile, 3);
-    js_fs_set_method(fs_namespace, "unwatchFile",     js_fs_unwatchFile, 2);
-    js_fs_set_method(fs_namespace, "utimes",          js_fs_utimes_async, 4);
+    js_set_key_cstr(realpath_fn, "native", realpath_fn);
+#define JS_FS_ASYNC_TAIL_METHODS(M) \
+    M("rename", js_fs_rename_async, 3) M("readdir", js_fs_readdir_async, 3) \
+    M("fstat", js_fs_fstat_async, 3) M("rmdir", js_fs_rmdir_async, 2) \
+    M("copyFile", js_fs_copyFile_async, 4) M("mkdtemp", js_fs_mkdtemp_async, 3) \
+    M("readlink", js_fs_readlink_async, 3) M("symlink", js_fs_symlink_async, 4) \
+    M("truncate", js_fs_truncate_async, 3) M("appendFile", js_fs_appendFile_async, 4) \
+    M("fchmod", js_fs_fchmod_async, 3) M("lchmod", js_fs_lchmod_async, 3) \
+    M("fchown", js_fs_fchown_async, 4) M("lchown", js_fs_lchown_async, 4) \
+    M("chown", js_fs_chown_async, 4) M("link", js_fs_link_async, 3) \
+    M("watch", js_fs_watch, 3) M("watchFile", js_fs_watchFile, 3) \
+    M("unwatchFile", js_fs_unwatchFile, 2) M("utimes", js_fs_utimes_async, 4)
+    JS_FS_ASYNC_TAIL_METHODS(JS_FS_INSTALL_METHOD)
 
     // additional sync methods
-    js_fs_set_method(fs_namespace, "copyFileSync",    js_fs_copyFileSync, 2);
     Item realpath_sync_fn = js_fs_set_method(fs_namespace, "realpathSync",    js_fs_realpathSync, 2);
-    js_set_key_default(realpath_sync_fn, make_string_item("native"), realpath_sync_fn);
-    js_fs_set_method(fs_namespace, "statfsSync",      js_fs_statfsSync, 2);
-    js_fs_set_method(fs_namespace, "accessSync",      js_fs_accessSync, 2);
-    js_fs_set_method(fs_namespace, "rmSync",          js_fs_rmSync, 2);
-    js_fs_set_method(fs_namespace, "mkdtempSync",     js_fs_mkdtempSync, 2);
-    js_fs_set_method(fs_namespace, "chmodSync",       js_fs_chmodSync, 2);
-    js_fs_set_method(fs_namespace, "fchmodSync",      js_fs_fchmodSync, 2);
-    js_fs_set_method(fs_namespace, "lchmodSync",      js_fs_lchmodSync, 2);
-    js_fs_set_method(fs_namespace, "chownSync",       js_fs_chownSync, 3);
-    js_fs_set_method(fs_namespace, "lchownSync",      js_fs_lchownSync, 3);
-    js_fs_set_method(fs_namespace, "fchownSync",      js_fs_fchownSync, 3);
-    js_fs_set_method(fs_namespace, "symlinkSync",     js_fs_symlinkSync, 2);
-    js_fs_set_method(fs_namespace, "readlinkSync",    js_fs_readlinkSync, 2);
-    js_fs_set_method(fs_namespace, "lstatSync",       js_fs_lstatSync, 2);
-    js_fs_set_method(fs_namespace, "truncateSync",    js_fs_truncateSync, 2);
-    js_fs_set_method(fs_namespace, "utimesSync",      js_fs_utimesSync, 3);
-    js_fs_set_method(fs_namespace, "linkSync",        js_fs_linkSync, 2);
-    js_fs_set_method(fs_namespace, "opendirSync",     js_fs_opendirSync, 2);
-    js_fs_set_method(fs_namespace, "_toUnixTimestamp",js_fs_toUnixTimestamp, 1);
+    js_set_key_cstr(realpath_sync_fn, "native", realpath_sync_fn);
+#define JS_FS_EXTRA_SYNC_METHODS(M) \
+    M("copyFileSync", js_fs_copyFileSync, 2) M("statfsSync", js_fs_statfsSync, 2) \
+    M("accessSync", js_fs_accessSync, 2) M("rmSync", js_fs_rmSync, 2) \
+    M("mkdtempSync", js_fs_mkdtempSync, 2) M("chmodSync", js_fs_chmodSync, 2) \
+    M("fchmodSync", js_fs_fchmodSync, 2) M("lchmodSync", js_fs_lchmodSync, 2) \
+    M("chownSync", js_fs_chownSync, 3) M("lchownSync", js_fs_lchownSync, 3) \
+    M("fchownSync", js_fs_fchownSync, 3) M("symlinkSync", js_fs_symlinkSync, 2) \
+    M("readlinkSync", js_fs_readlinkSync, 2) M("lstatSync", js_fs_lstatSync, 2) \
+    M("truncateSync", js_fs_truncateSync, 2) M("utimesSync", js_fs_utimesSync, 3) \
+    M("linkSync", js_fs_linkSync, 2) M("opendirSync", js_fs_opendirSync, 2) \
+    M("_toUnixTimestamp", js_fs_toUnixTimestamp, 1)
+    JS_FS_EXTRA_SYNC_METHODS(JS_FS_INSTALL_METHOD)
 
     // file descriptor operations
-    js_fs_set_method(fs_namespace, "openSync",        js_fs_openSync, 3);
-    js_fs_set_method(fs_namespace, "closeSync",       js_fs_closeSync, 1);
+#define JS_FS_FD_METHODS(M) \
+    M("openSync", js_fs_openSync, 3) M("closeSync", js_fs_closeSync, 1)
+    JS_FS_FD_METHODS(JS_FS_INSTALL_METHOD)
     Item read_fn = js_fs_set_method(fs_namespace, "read",            js_fs_read, 6);
     js_fs_set_custom_promisify_args(read_fn, "bytesRead", "buffer");
     js_fs_set_method(fs_namespace, "readSync",        js_fs_readSync, 5);
@@ -3443,58 +3406,36 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "readvSync",       js_fs_readvSync, 3);
     Item writev_fn = js_fs_set_method(fs_namespace, "writev",          js_fs_writev, 4);
     js_fs_set_custom_promisify_args(writev_fn, "bytesWritten", "buffer");
-    js_fs_set_method(fs_namespace, "writevSync",      js_fs_writevSync, 3);
-    js_fs_set_method(fs_namespace, "fstatSync",       js_fs_fstatSync, 2);
+    js_fs_set_method(fs_namespace, "writevSync", js_fs_writevSync, 3);
+    js_fs_set_method(fs_namespace, "fstatSync", js_fs_fstatSync, 2);
 
     // fs.constants — null prototype per Node.js spec
     constants_root.set(js_object_create(ItemNull));
     Item constants = constants_root.get();
-    js_set_key_default(constants, make_string_item("F_OK"), (Item){.item = i2it(0)});
-    js_set_key_default(constants, make_string_item("R_OK"), (Item){.item = i2it(4)});
-    js_set_key_default(constants, make_string_item("W_OK"), (Item){.item = i2it(2)});
-    js_set_key_default(constants, make_string_item("X_OK"), (Item){.item = i2it(1)});
-    js_set_key_default(constants, make_string_item("O_RDONLY"),   (Item){.item = i2it(UV_FS_O_RDONLY)});
-    js_set_key_default(constants, make_string_item("O_WRONLY"),   (Item){.item = i2it(UV_FS_O_WRONLY)});
-    js_set_key_default(constants, make_string_item("O_RDWR"),     (Item){.item = i2it(UV_FS_O_RDWR)});
-    js_set_key_default(constants, make_string_item("O_CREAT"),    (Item){.item = i2it(UV_FS_O_CREAT)});
-    js_set_key_default(constants, make_string_item("O_TRUNC"),    (Item){.item = i2it(UV_FS_O_TRUNC)});
-    js_set_key_default(constants, make_string_item("O_APPEND"),   (Item){.item = i2it(UV_FS_O_APPEND)});
-    js_set_key_default(constants, make_string_item("O_EXCL"),     (Item){.item = i2it(UV_FS_O_EXCL)});
-    // POSIX file mode constants
-    js_set_key_default(constants, make_string_item("S_IFMT"),  (Item){.item = i2it(S_IFMT)});
-    js_set_key_default(constants, make_string_item("S_IFREG"), (Item){.item = i2it(S_IFREG)});
-    js_set_key_default(constants, make_string_item("S_IFDIR"), (Item){.item = i2it(S_IFDIR)});
-    js_set_key_default(constants, make_string_item("S_IFCHR"), (Item){.item = i2it(S_IFCHR)});
-    js_set_key_default(constants, make_string_item("S_IFBLK"), (Item){.item = i2it(S_IFBLK)});
-    js_set_key_default(constants, make_string_item("S_IFIFO"), (Item){.item = i2it(S_IFIFO)});
-    js_set_key_default(constants, make_string_item("S_IFLNK"), (Item){.item = i2it(S_IFLNK)});
-    js_set_key_default(constants, make_string_item("S_IFSOCK"), (Item){.item = i2it(S_IFSOCK)});
-    js_set_key_default(constants, make_string_item("S_IRUSR"), (Item){.item = i2it(S_IRUSR)});
-    js_set_key_default(constants, make_string_item("S_IWUSR"), (Item){.item = i2it(S_IWUSR)});
-    js_set_key_default(constants, make_string_item("S_IXUSR"), (Item){.item = i2it(S_IXUSR)});
-    js_set_key_default(constants, make_string_item("S_IRGRP"), (Item){.item = i2it(S_IRGRP)});
-    js_set_key_default(constants, make_string_item("S_IWGRP"), (Item){.item = i2it(S_IWGRP)});
-    js_set_key_default(constants, make_string_item("S_IXGRP"), (Item){.item = i2it(S_IXGRP)});
-    js_set_key_default(constants, make_string_item("S_IROTH"), (Item){.item = i2it(S_IROTH)});
-    js_set_key_default(constants, make_string_item("S_IWOTH"), (Item){.item = i2it(S_IWOTH)});
-    js_set_key_default(constants, make_string_item("S_IXOTH"), (Item){.item = i2it(S_IXOTH)});
-    // UV_DIRENT_ constants
-    js_set_key_default(constants, make_string_item("UV_DIRENT_UNKNOWN"), (Item){.item = i2it(UV_DIRENT_UNKNOWN)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_FILE"),    (Item){.item = i2it(UV_DIRENT_FILE)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_DIR"),     (Item){.item = i2it(UV_DIRENT_DIR)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_LINK"),    (Item){.item = i2it(UV_DIRENT_LINK)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_FIFO"),    (Item){.item = i2it(UV_DIRENT_FIFO)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_SOCKET"),  (Item){.item = i2it(UV_DIRENT_SOCKET)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_CHAR"),    (Item){.item = i2it(UV_DIRENT_CHAR)});
-    js_set_key_default(constants, make_string_item("UV_DIRENT_BLOCK"),   (Item){.item = i2it(UV_DIRENT_BLOCK)});
-    // UV_FS_SYMLINK constants
-    js_set_key_default(constants, make_string_item("UV_FS_SYMLINK_DIR"),      (Item){.item = i2it(UV_FS_SYMLINK_DIR)});
-    js_set_key_default(constants, make_string_item("UV_FS_SYMLINK_JUNCTION"), (Item){.item = i2it(UV_FS_SYMLINK_JUNCTION)});
-    // COPYFILE constants
-    js_set_key_default(constants, make_string_item("COPYFILE_EXCL"),         (Item){.item = i2it(UV_FS_COPYFILE_EXCL)});
-    js_set_key_default(constants, make_string_item("COPYFILE_FICLONE"),      (Item){.item = i2it(UV_FS_COPYFILE_FICLONE)});
-    js_set_key_default(constants, make_string_item("COPYFILE_FICLONE_FORCE"),(Item){.item = i2it(UV_FS_COPYFILE_FICLONE_FORCE)});
-    js_set_key_default(fs_namespace, make_string_item("constants"), constants);
+#define JS_FS_CONSTANTS(M) \
+    M("F_OK", 0) M("R_OK", 4) M("W_OK", 2) M("X_OK", 1) \
+    M("O_RDONLY", UV_FS_O_RDONLY) M("O_WRONLY", UV_FS_O_WRONLY) M("O_RDWR", UV_FS_O_RDWR) \
+    M("O_CREAT", UV_FS_O_CREAT) M("O_TRUNC", UV_FS_O_TRUNC) M("O_APPEND", UV_FS_O_APPEND) \
+    M("O_EXCL", UV_FS_O_EXCL) M("S_IFMT", S_IFMT) M("S_IFREG", S_IFREG) \
+    M("S_IFDIR", S_IFDIR) M("S_IFCHR", S_IFCHR) M("S_IFBLK", S_IFBLK) \
+    M("S_IFIFO", S_IFIFO) M("S_IFLNK", S_IFLNK) M("S_IFSOCK", S_IFSOCK) \
+    M("S_IRUSR", S_IRUSR) M("S_IWUSR", S_IWUSR) M("S_IXUSR", S_IXUSR) \
+    M("S_IRGRP", S_IRGRP) M("S_IWGRP", S_IWGRP) M("S_IXGRP", S_IXGRP) \
+    M("S_IROTH", S_IROTH) M("S_IWOTH", S_IWOTH) M("S_IXOTH", S_IXOTH) \
+    M("UV_DIRENT_UNKNOWN", UV_DIRENT_UNKNOWN) M("UV_DIRENT_FILE", UV_DIRENT_FILE) \
+    M("UV_DIRENT_DIR", UV_DIRENT_DIR) M("UV_DIRENT_LINK", UV_DIRENT_LINK) \
+    M("UV_DIRENT_FIFO", UV_DIRENT_FIFO) M("UV_DIRENT_SOCKET", UV_DIRENT_SOCKET) \
+    M("UV_DIRENT_CHAR", UV_DIRENT_CHAR) M("UV_DIRENT_BLOCK", UV_DIRENT_BLOCK) \
+    M("UV_FS_SYMLINK_DIR", UV_FS_SYMLINK_DIR) \
+    M("UV_FS_SYMLINK_JUNCTION", UV_FS_SYMLINK_JUNCTION) \
+    M("COPYFILE_EXCL", UV_FS_COPYFILE_EXCL) M("COPYFILE_FICLONE", UV_FS_COPYFILE_FICLONE) \
+    M("COPYFILE_FICLONE_FORCE", UV_FS_COPYFILE_FICLONE_FORCE)
+#define JS_FS_SET_CONSTANT(name, value) \
+    js_set_key_cstr(constants, name, (Item){.item = i2it(value)});
+    JS_FS_CONSTANTS(JS_FS_SET_CONSTANT)
+#undef JS_FS_SET_CONSTANT
+#undef JS_FS_CONSTANTS
+    js_set_key_cstr(fs_namespace, "constants", constants);
 
     // fs.promises — promise-based API
     {
@@ -3502,42 +3443,38 @@ extern "C" Item js_get_fs_namespace(void) {
         promises_root.set(js_new_object());
         Item promises = promises_root.get();
 
-        // fs.promises.readFile(path, options?) — returns Promise<Buffer|string>
-        // We wrap the sync version for simplicity
-        auto make_promise_wrapper_1 = [](Item (*sync_fn)(Item)) -> void* {
-            // Can't create closures in C, so we'll register each individually
-            return nullptr;
-        };
-        (void)make_promise_wrapper_1;
-
         // Create a set of promise-returning wrapper functions
         // Each calls the sync version and wraps result in a resolved promise
         // (or rejected promise on error)
-        js_fs_set_method(promises, "readFile",    js_fs_readFile_promise, 2);
-        js_fs_set_method(promises, "writeFile",   js_fs_writeFile_promise, 2);
-        js_fs_set_method(promises, "stat",        js_fs_stat_promise, 2);
-        js_fs_set_method(promises, "lstat",       js_fs_lstat_promise, 2);
-        js_fs_set_method(promises, "mkdir",       js_fs_mkdir_promise, 2);
-        js_fs_set_method(promises, "access",      js_fs_access_promise, 2);
-        js_fs_set_method(promises, "unlink",      js_fs_unlink_promise, 1);
-        js_fs_set_method(promises, "rm",          js_fs_unlink_promise, 1);
-        js_fs_set_method(promises, "rename",      js_fs_rename_promise, 2);
-        js_fs_set_method(promises, "readdir",     js_fs_readdir_promise, 1);
-        js_fs_set_method(promises, "open",        js_fs_open_promise, 3);
-        js_fs_set_method(promises, "chmod",       js_fs_chmod_promise, 2);
-        js_fs_set_method(promises, "chown",       js_fs_chown_promise, 3);
-        js_fs_set_method(promises, "lchown",      js_fs_lchown_promise, 3);
-        js_fs_set_method(promises, "realpath",    js_fs_realpath_promise, 1);
-        js_fs_set_method(promises, "copyFile",    js_fs_copyFile_promise, 2);
-        js_fs_set_method(promises, "mkdtemp",     js_fs_mkdtemp_promise, 1);
-        js_fs_set_method(promises, "truncate",    js_fs_truncate_promise, 2);
-        js_fs_set_method(promises, "symlink",     js_fs_symlink_promise, 2);
+#define JS_FS_PROMISE_METHODS(M) \
+        M("readFile", js_fs_readFile_promise, 2) M("writeFile", js_fs_writeFile_promise, 2) \
+        M("stat", js_fs_stat_promise, 2) M("lstat", js_fs_lstat_promise, 2) \
+        M("mkdir", js_fs_mkdir_promise, 2) M("access", js_fs_access_promise, 2) \
+        M("unlink", js_fs_unlink_promise, 1) M("rm", js_fs_unlink_promise, 1) \
+        M("rename", js_fs_rename_promise, 2) M("readdir", js_fs_readdir_promise, 1) \
+        M("open", js_fs_open_promise, 3) M("chmod", js_fs_chmod_promise, 2) \
+        M("chown", js_fs_chown_promise, 3) M("lchown", js_fs_lchown_promise, 3) \
+        M("realpath", js_fs_realpath_promise, 1) M("copyFile", js_fs_copyFile_promise, 2) \
+        M("mkdtemp", js_fs_mkdtemp_promise, 1) M("truncate", js_fs_truncate_promise, 2) \
+        M("symlink", js_fs_symlink_promise, 2)
+#define JS_FS_INSTALL_PROMISE_METHOD(name, target, arity) \
+        js_fs_set_method(promises, name, target, arity);
+        JS_FS_PROMISE_METHODS(JS_FS_INSTALL_PROMISE_METHOD)
+#undef JS_FS_INSTALL_PROMISE_METHOD
+#undef JS_FS_PROMISE_METHODS
 
         // fs.promises.constants === fs.constants
-        js_set_key_default(promises, make_string_item("constants"), constants);
+        js_set_key_cstr(promises, "constants", constants);
 
-        js_set_key_default(fs_namespace, make_string_item("promises"), promises);
+        js_set_key_cstr(fs_namespace, "promises", promises);
     }
+
+#undef JS_FS_FD_METHODS
+#undef JS_FS_EXTRA_SYNC_METHODS
+#undef JS_FS_ASYNC_TAIL_METHODS
+#undef JS_FS_ASYNC_METHODS
+#undef JS_FS_SYNC_METHODS
+#undef JS_FS_INSTALL_METHOD
 
     // set "default" export to the namespace itself (for `import fs from 'fs'`)
     default_key_root.set(make_string_item("default"));
@@ -3548,7 +3485,7 @@ extern "C" Item js_get_fs_namespace(void) {
 
 extern "C" Item js_get_fs_promises_namespace(void) {
     Item fs = js_get_fs_namespace();
-    return js_get_key_default(fs, make_string_item("promises"));
+    return js_get_key_cstr(fs, "promises");
 }
 
 extern "C" Item js_get_internal_fs_promises_namespace(void) {
@@ -3556,10 +3493,8 @@ extern "C" Item js_get_internal_fs_promises_namespace(void) {
     if (fs_internal_promises_namespace.item != 0) return fs_internal_promises_namespace;
 
     fs_internal_promises_namespace = js_new_object();
-    js_set_key_default(fs_internal_promises_namespace, make_string_item("FileHandle"),
-                    fs_get_filehandle_constructor());
-    js_set_key_default(fs_internal_promises_namespace, make_string_item("default"),
-                    fs_internal_promises_namespace);
+    js_set_key_cstr(fs_internal_promises_namespace, "FileHandle", fs_get_filehandle_constructor());
+    js_set_key_cstr(fs_internal_promises_namespace, "default", fs_internal_promises_namespace);
     return fs_internal_promises_namespace;
 }
 

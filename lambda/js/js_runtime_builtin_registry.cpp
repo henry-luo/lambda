@@ -327,35 +327,34 @@ Item js_intrinsic_binding_get(JsBuiltinOwner owner, const char* name, int len) {
     return js_create_builtin_function_from_spec(spec);
 }
 
-void js_install_builtin_method_specs(Item object, JsBuiltinOwner owner) {
+static void js_install_builtin_method_specs_to(Item object, JsBuiltinOwner owner,
+                                               bool function_target,
+                                               bool skip_existing) {
+    JsFunction* fn = NULL;
+    if (function_target) {
+        if (get_type_id(object) != LMD_TYPE_FUNC) return;
+        fn = (JsFunction*)object.function;
+    }
     for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
         const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
         if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_METHOD) continue;
         Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
-        Item fn = js_create_builtin_function_from_spec(spec);
-        js_set_key_default(object, key, fn);
+        if (function_target && skip_existing && fn->properties_map.item != 0 &&
+            get_type_id(fn->properties_map) == LMD_TYPE_MAP &&
+            map_get(fn->properties_map.map, key).item != ItemNull.item) {
+            continue;
+        }
+        Item method = js_create_builtin_function_from_spec(spec);
+        // Constructor statics use function-property initialization; ordinary
+        // prototypes use the object setter, but both must share the catalog walk.
+        if (function_target) js_func_init_property(object, key, method);
+        else js_set_key_default(object, key, method);
         js_mark_non_enumerable(object, key);
     }
 }
 
-static void js_install_builtin_method_specs_on_function(Item function_item,
-                                                        JsBuiltinOwner owner,
-                                                        bool skip_existing) {
-    if (get_type_id(function_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)function_item.function;
-    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
-        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
-        if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_METHOD) continue;
-        Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
-        if (skip_existing && fn->properties_map.item != 0 &&
-            get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            Item existing = map_get(fn->properties_map.map, key);
-            if (existing.item != ItemNull.item) continue;
-        }
-        Item method = js_create_builtin_function_from_spec(spec);
-        js_func_init_property(function_item, key, method);
-        js_mark_non_enumerable(function_item, key);
-    }
+void js_install_builtin_method_specs(Item object, JsBuiltinOwner owner) {
+    js_install_builtin_method_specs_to(object, owner, false, false);
 }
 
 void js_install_builtin_function_specs(Item object, JsBuiltinOwner owner) {
@@ -499,8 +498,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 
     // Install static methods from/of on %TypedArray% constructor (base_ctor)
     {
-        js_install_builtin_method_specs_on_function(
-            base_ctor, JS_BUILTIN_OWNER_TYPED_ARRAY_STATIC_METHOD, false);
+        js_install_builtin_method_specs_to(
+            base_ctor, JS_BUILTIN_OWNER_TYPED_ARRAY_STATIC_METHOD, true, false);
 
         // Install get [Symbol.species]() { return this; } on %TypedArray%
         // Phase 3 Stage A: route through unified js_install_native_accessor.
@@ -515,7 +514,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 // This makes them visible to hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames.
 extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor_name, int ctor_len) {
     JsBuiltinOwner owner = js_get_constructor_static_owner(ctor_name, ctor_len);
-    js_install_builtin_method_specs_on_function(ctor_item, owner, true);
+    js_install_builtin_method_specs_to(ctor_item, owner, true, true);
 
     // ES spec: install get [Symbol.species]() { return this; } on constructors
     // that support @@species (Array, RegExp, Promise, Map, Set, ArrayBuffer, TypedArray constructors)

@@ -115,7 +115,7 @@ static bool blob_part_has_shared_backing(Item part) {
     if (js_is_sharedarraybuffer(part)) return true;
     if (get_type_id(part) != LMD_TYPE_MAP) return false;
     if (js_is_typed_array(part) || js_is_dataview(part)) {
-        Item buffer = js_get_key_default(part, make_str("buffer"));
+        Item buffer = js_get_key_cstr(part, "buffer");
         if (js_is_sharedarraybuffer(buffer)) return true;
     }
     if (js_is_typed_array(part)) {
@@ -224,9 +224,9 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     Item obj = js_new_object_with_class(class_id);
     attach_known_prototype(obj, g_blob_proto);
     Item text_str = make_str_n(sb->str ? sb->str : "", sb->length);
-    js_set_key_default(obj, make_str("_text"), text_str);
-    js_set_key_default(obj, make_str("size"), (Item){.item = i2it((int64_t)sb->length)});
-    js_set_key_default(obj, make_str("type"), make_str(type_buf));
+    js_set_key_cstr(obj, "_text", text_str);
+    js_set_key_cstr(obj, "size", (Item){.item = i2it((int64_t)sb->length)});
+    js_set_key_cstr(obj, "type", make_str(type_buf));
     // bind prototype methods directly to instance (Lambda has no proto chain walk)
     js_clipboard_set_method(obj, "text", js_blob_text);
     js_clipboard_set_method(obj, "arrayBuffer", js_blob_array_buffer);
@@ -280,9 +280,9 @@ extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item) {
     js_array_push(parts, make_str_n(sb->str ? sb->str : "", sb->length));
     Item opts = js_new_object();
     if (get_type_id(type_item) == LMD_TYPE_STRING) {
-        js_set_key_default(opts, make_str("type"), type_item);
+        js_set_key_cstr(opts, "type", type_item);
     } else {
-        js_set_key_default(opts, make_str("type"), make_str(""));
+        js_set_key_cstr(opts, "type", make_str(""));
     }
     strbuf_free(sb);
     return js_blob_new(parts, opts);
@@ -301,13 +301,13 @@ extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
         String* s = it2s(name_item);
         if (s) nm = s->chars;
     }
-    js_set_key_default(obj, make_str("name"), make_str(nm));
+    js_set_key_cstr(obj, "name", make_str(nm));
     int64_t lm = 0;
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item v = js_get_key_default(options, make_str("lastModified"));
+        Item v = js_get_key_cstr(options, "lastModified");
         if (get_type_id(v) == LMD_TYPE_INT) lm = (int64_t)it2i(v);
     }
-    js_set_key_default(obj, make_str("lastModified"), (Item){.item = i2it(lm)});
+    js_set_key_cstr(obj, "lastModified", (Item){.item = i2it(lm)});
     return obj;
 }
 
@@ -356,9 +356,9 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
         js_set_key_default(reps, lower_k, js_get_key_default(items, k));
     }
 
-    js_set_key_default(obj, make_str("types"), types);
-    js_set_key_default(obj, make_str("_orig_types"), orig_types);
-    js_set_key_default(obj, make_str("_reps"), reps);
+    js_set_key_cstr(obj, "types", types);
+    js_set_key_cstr(obj, "_orig_types", orig_types);
+    js_set_key_cstr(obj, "_reps", reps);
     // bind prototype methods directly to instance (Lambda has no proto chain walk)
     js_clipboard_set_method(obj, "getType", js_clipboard_item_get_type);
 
@@ -369,20 +369,20 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
         if (p && (strcmp(p, "inline") == 0 || strcmp(p, "attachment") == 0 ||
                   strcmp(p, "unspecified") == 0)) presentation = p;
     }
-    js_set_key_default(obj, make_str("presentationStyle"), make_str(presentation));
+    js_set_key_cstr(obj, "presentationStyle", make_str(presentation));
     return obj;
 }
 
 extern "C" Item js_clipboard_item_get_type(Item type_item) {
     Item self = js_get_this();
-    Item gen = js_get_key_default(self, make_str("_clipboard_generation"));
+    Item gen = js_get_key_cstr(self, "_clipboard_generation");
     if (get_type_id(gen) == LMD_TYPE_INT && (int64_t)it2i(gen) != g_clipboard_generation) {
         JS_CLIPBOARD_REJECT("DataError", "clipboard item is stale");
     }
     if (get_type_id(type_item) != LMD_TYPE_STRING) {
         JS_CLIPBOARD_REJECT("TypeError", "ClipboardItem.getType: type must be a string");
     }
-    Item reps = js_get_key_default(self, make_str("_reps"));
+    Item reps = js_get_key_cstr(self, "_reps");
     if (get_type_id(reps) != LMD_TYPE_MAP) {
         JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
     }
@@ -405,7 +405,7 @@ extern "C" Item js_clipboard_item_get_type(Item type_item) {
         Item parts = js_array_new(0);
         js_array_push(parts, rep);
         Item opts = js_new_object();
-        js_set_key_default(opts, make_str("type"), make_str(buf));
+        js_set_key_cstr(opts, "type", make_str(buf));
         return js_promise_resolve(js_blob_new(parts, opts));
     }
     return js_promise_resolve(rep);
@@ -454,18 +454,18 @@ extern "C" Item js_clipboard_item_supports(Item type_item) {
 
 extern "C" Item js_clipboard_event_prevent_default(void) {
     Item self = js_get_this();
-    js_set_key_default(self, make_str("defaultPrevented"), (Item){.item = b2it(true)});
+    js_set_key_cstr(self, "defaultPrevented", (Item){.item = b2it(true)});
     return ItemNull;
 }
 extern "C" Item js_clipboard_event_stop_propagation(void) {
     Item self = js_get_this();
-    js_set_key_default(self, make_str("_stopped"), (Item){.item = b2it(true)});
+    js_set_key_cstr(self, "_stopped", (Item){.item = b2it(true)});
     return ItemNull;
 }
 extern "C" Item js_clipboard_event_stop_immediate_propagation(void) {
     Item self = js_get_this();
-    js_set_key_default(self, make_str("_stopped"), (Item){.item = b2it(true)});
-    js_set_key_default(self, make_str("_stoppedImmediate"), (Item){.item = b2it(true)});
+    js_set_key_cstr(self, "_stopped", (Item){.item = b2it(true)});
+    js_set_key_cstr(self, "_stoppedImmediate", (Item){.item = b2it(true)});
     return ItemNull;
 }
 JS_FORWARD_ITEM(js_clipboard_event_composed_path, (void), js_array_new, (0))
@@ -482,31 +482,31 @@ extern "C" Item js_clipboard_event_new(Item type_item, Item init_item) {
         String* s = it2s(type_item);
         if (s) type = s->chars;
     }
-    js_set_key_default(ev, make_str("type"), make_str(type));
-    js_set_key_default(ev, make_str("isTrusted"), (Item){.item = b2it(false)});
-    js_set_key_default(ev, make_str("bubbles"), (Item){.item = b2it(false)});
-    js_set_key_default(ev, make_str("cancelable"), (Item){.item = b2it(false)});
-    js_set_key_default(ev, make_str("composed"), (Item){.item = b2it(false)});
-    js_set_key_default(ev, make_str("defaultPrevented"), (Item){.item = b2it(false)});
+    js_set_key_cstr(ev, "type", make_str(type));
+    js_set_key_cstr(ev, "isTrusted", (Item){.item = b2it(false)});
+    js_set_key_cstr(ev, "bubbles", (Item){.item = b2it(false)});
+    js_set_key_cstr(ev, "cancelable", (Item){.item = b2it(false)});
+    js_set_key_cstr(ev, "composed", (Item){.item = b2it(false)});
+    js_set_key_cstr(ev, "defaultPrevented", (Item){.item = b2it(false)});
 
     if (get_type_id(init_item) == LMD_TYPE_MAP) {
-        Item b = js_get_key_default(init_item, make_str("bubbles"));
+        Item b = js_get_key_cstr(init_item, "bubbles");
         if (get_type_id(b) == LMD_TYPE_BOOL)
-            js_set_key_default(ev, make_str("bubbles"), b);
-        Item c = js_get_key_default(init_item, make_str("cancelable"));
+            js_set_key_cstr(ev, "bubbles", b);
+        Item c = js_get_key_cstr(init_item, "cancelable");
         if (get_type_id(c) == LMD_TYPE_BOOL)
-            js_set_key_default(ev, make_str("cancelable"), c);
-        Item cp = js_get_key_default(init_item, make_str("composed"));
+            js_set_key_cstr(ev, "cancelable", c);
+        Item cp = js_get_key_cstr(init_item, "composed");
         if (get_type_id(cp) == LMD_TYPE_BOOL)
-            js_set_key_default(ev, make_str("composed"), cp);
-        Item cd = js_get_key_default(init_item, make_str("clipboardData"));
+            js_set_key_cstr(ev, "composed", cp);
+        Item cd = js_get_key_cstr(init_item, "clipboardData");
         if (get_type_id(cd) == LMD_TYPE_MAP) {
-            js_set_key_default(ev, make_str("clipboardData"), cd);
+            js_set_key_cstr(ev, "clipboardData", cd);
         } else {
-            js_set_key_default(ev, make_str("clipboardData"), js_make_data_transfer_object());
+            js_set_key_cstr(ev, "clipboardData", js_make_data_transfer_object());
         }
     } else {
-        js_set_key_default(ev, make_str("clipboardData"), js_make_data_transfer_object());
+        js_set_key_cstr(ev, "clipboardData", js_make_data_transfer_object());
     }
 
     js_clipboard_set_method(ev, "preventDefault", js_clipboard_event_prevent_default);
@@ -574,7 +574,7 @@ static bool dt_index_arg(Item value, int* out_idx) {
 
 static bool dt_record_kind_is(Item r, const char* kind, size_t kind_len) {
     if (get_type_id(r) != LMD_TYPE_MAP) return false;
-    Item k = js_get_key_default(r, make_str("kind"));
+    Item k = js_get_key_cstr(r, "kind");
     if (get_type_id(k) != LMD_TYPE_STRING) return false;
     String* s = it2s(k);
     return s && (size_t)s->len == kind_len &&
@@ -583,7 +583,7 @@ static bool dt_record_kind_is(Item r, const char* kind, size_t kind_len) {
 
 static bool dt_record_string_type_is(Item record, const char* type, size_t type_len) {
     if (!dt_record_kind_is(record, "string", 6)) return false;
-    Item format = js_get_key_default(record, make_str("type"));
+    Item format = js_get_key_cstr(record, "type");
     if (get_type_id(format) != LMD_TYPE_STRING) return false;
     String* s = it2s(format);
     return s && (size_t)s->len == type_len &&
@@ -611,10 +611,10 @@ static bool dt_normalize_format(Item type_item, char* out, size_t out_cap) {
 // Recompute the public items/files/types arrays in place from _items.
 // Required to preserve caller-held references like `const fl = dt.files`.
 static void dt_recompute_views(Item dt) {
-    Item items = js_get_key_default(dt, make_str("items"));
-    Item files = js_get_key_default(dt, make_str("files"));
-    Item types = js_get_key_default(dt, make_str("types"));
-    Item rec   = js_get_key_default(dt, make_str("_items"));
+    Item items = js_get_key_cstr(dt, "items");
+    Item files = js_get_key_cstr(dt, "files");
+    Item types = js_get_key_cstr(dt, "types");
+    Item rec   = js_get_key_cstr(dt, "_items");
     if (get_type_id(items) != LMD_TYPE_ARRAY ||
         get_type_id(files) != LMD_TYPE_ARRAY ||
         get_type_id(types) != LMD_TYPE_ARRAY ||
@@ -628,14 +628,14 @@ static void dt_recompute_views(Item dt) {
     bool has_files = false;
     for (int64_t i = 0; i < n; i++) {
         Item r = js_elements_get_int(rec, i);
-        Item kind = js_get_key_default(r, make_str("kind"));
-        Item type = js_get_key_default(r, make_str("type"));
+        Item kind = js_get_key_cstr(r, "kind");
+        Item type = js_get_key_cstr(r, "type");
 
         // public DataTransferItem-like proxy: { kind, type }
         Item proxy = js_new_object();
-        js_set_key_default(proxy, make_str("kind"), kind);
-        js_set_key_default(proxy, make_str("type"), type);
-        js_set_key_default(proxy, make_str("_record"), r);
+        js_set_key_cstr(proxy, "kind", kind);
+        js_set_key_cstr(proxy, "type", type);
+        js_set_key_cstr(proxy, "_record", r);
         js_clipboard_set_method(proxy, "getAsFile", js_dt_item_get_as_file);
         js_clipboard_set_method(proxy, "getAsString", js_dt_item_get_as_string);
         js_array_push(items, proxy);
@@ -643,7 +643,7 @@ static void dt_recompute_views(Item dt) {
         bool is_file = dt_record_kind_is(r, "file", 4);
         if (is_file) {
             has_files = true;
-            Item f = js_get_key_default(r, make_str("file"));
+            Item f = js_get_key_cstr(r, "file");
             if (f.item != ITEM_NULL) js_array_push(files, f);
         } else if (get_type_id(type) == LMD_TYPE_STRING) {
             // dedupe types for string entries
@@ -669,19 +669,19 @@ static void dt_recompute_views(Item dt) {
 extern "C" Item js_dt_item_get_as_file(void) {
     Item item = js_get_this();
     if (get_type_id(item) != LMD_TYPE_MAP) return ItemNull;
-    Item record = js_get_key_default(item, make_str("_record"));
+    Item record = js_get_key_cstr(item, "_record");
     if (!dt_record_kind_is(record, "file", 4)) return ItemNull;
-    Item file = js_get_key_default(record, make_str("file"));
+    Item file = js_get_key_cstr(record, "file");
     return file.item == 0 ? ItemNull : file;
 }
 
 extern "C" Item js_dt_item_get_as_string(Item callback) {
     Item item = js_get_this();
     if (get_type_id(item) != LMD_TYPE_MAP) return make_js_undefined();
-    Item record = js_get_key_default(item, make_str("_record"));
+    Item record = js_get_key_cstr(item, "_record");
     if (!dt_record_kind_is(record, "string", 6)) return make_js_undefined();
     if (!js_is_callable(callback)) return make_js_undefined();
-    Item value = js_get_key_default(record, make_str("value"));
+    Item value = js_get_key_cstr(record, "value");
     if (get_type_id(value) != LMD_TYPE_STRING) value = make_str("");
     js_call_function(callback, make_js_undefined(), &value, 1);
     return make_js_undefined();
@@ -691,9 +691,9 @@ extern "C" Item js_dt_item_get_as_string(Item callback) {
 extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
     Item items = js_get_this();
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
-    Item dt = js_get_key_default(items, make_str("_owner"));
+    Item dt = js_get_key_cstr(items, "_owner");
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
 
     Item record = js_new_object();
@@ -701,11 +701,11 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
                        dt_is_class(data_arg, "Blob", 4);
 
     if (is_file_arg) {
-        Item ftype = js_get_key_default(data_arg, make_str("type"));
+        Item ftype = js_get_key_cstr(data_arg, "type");
         if (get_type_id(ftype) != LMD_TYPE_STRING) ftype = make_str("");
-        js_set_key_default(record, make_str("kind"), make_str("file"));
-        js_set_key_default(record, make_str("type"), ftype);
-        js_set_key_default(record, make_str("file"), data_arg);
+        js_set_key_cstr(record, "kind", make_str("file"));
+        js_set_key_cstr(record, "type", ftype);
+        js_set_key_cstr(record, "file", data_arg);
         js_array_push(rec_arr, record);
     } else if (get_type_id(data_arg) == LMD_TYPE_STRING) {
         if (get_type_id(type_arg) != LMD_TYPE_STRING) {
@@ -724,16 +724,16 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
                     "NotSupportedError: type already present");
             }
         }
-        js_set_key_default(record, make_str("kind"), make_str("string"));
-        js_set_key_default(record, make_str("type"), make_str(tbuf));
-        js_set_key_default(record, make_str("value"), data_arg);
+        js_set_key_cstr(record, "kind", make_str("string"));
+        js_set_key_cstr(record, "type", make_str(tbuf));
+        js_set_key_cstr(record, "value", data_arg);
         js_array_push(rec_arr, record);
     } else {
         return ItemNull;
     }
 
     dt_recompute_views(dt);
-    Item items_view = js_get_key_default(dt, make_str("items"));
+    Item items_view = js_get_key_cstr(dt, "items");
     int64_t ln = js_array_length(items_view);
     return (ln > 0) ? js_elements_get_int(items_view, ln - 1) : ItemNull;
 }
@@ -751,9 +751,9 @@ extern "C" Item js_dt_items_item(Item idx_arg) {
 extern "C" Item js_dt_items_remove(Item idx_arg) {
     Item items = js_get_this();
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
-    Item dt = js_get_key_default(items, make_str("_owner"));
+    Item dt = js_get_key_cstr(items, "_owner");
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
 
     int idx = -1;
@@ -770,9 +770,9 @@ extern "C" Item js_dt_items_remove(Item idx_arg) {
 extern "C" Item js_dt_items_clear(void) {
     Item items = js_get_this();
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
-    Item dt = js_get_key_default(items, make_str("_owner"));
+    Item dt = js_get_key_cstr(items, "_owner");
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) == LMD_TYPE_ARRAY) rec_arr.array->length = 0;
     dt_recompute_views(dt);
     return ItemNull;
@@ -795,7 +795,7 @@ extern "C" Item js_dt_set_data(Item type_item, Item data_item) {
     if (!dt_normalize_format(type_item, tbuf, sizeof(tbuf))) return ItemNull;
     Item value = data_item;
     if (get_type_id(value) != LMD_TYPE_STRING) value = make_str("");
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
 
     size_t tlen = strlen(tbuf);
@@ -803,15 +803,15 @@ extern "C" Item js_dt_set_data(Item type_item, Item data_item) {
     for (int64_t i = 0; i < n; i++) {
         Item r = js_elements_get_int(rec_arr, i);
         if (dt_record_string_type_is(r, tbuf, tlen)) {
-            js_set_key_default(r, make_str("value"), value);
+            js_set_key_cstr(r, "value", value);
             dt_recompute_views(dt);
             return ItemNull;
         }
     }
     Item record = js_new_object();
-    js_set_key_default(record, make_str("kind"), make_str("string"));
-    js_set_key_default(record, make_str("type"), make_str(tbuf));
-    js_set_key_default(record, make_str("value"), value);
+    js_set_key_cstr(record, "kind", make_str("string"));
+    js_set_key_cstr(record, "type", make_str(tbuf));
+    js_set_key_cstr(record, "value", value);
     js_array_push(rec_arr, record);
     dt_recompute_views(dt);
     return ItemNull;
@@ -822,14 +822,14 @@ extern "C" Item js_dt_get_data(Item type_item) {
     if (get_type_id(dt) != LMD_TYPE_MAP) return make_str("");
     char tbuf[256];
     if (!dt_normalize_format(type_item, tbuf, sizeof(tbuf))) return make_str("");
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return make_str("");
     size_t tlen = strlen(tbuf);
     int64_t n = js_array_length(rec_arr);
     for (int64_t i = 0; i < n; i++) {
         Item r = js_elements_get_int(rec_arr, i);
         if (dt_record_string_type_is(r, tbuf, tlen)) {
-            Item v = js_get_key_default(r, make_str("value"));
+            Item v = js_get_key_cstr(r, "value");
             return (get_type_id(v) == LMD_TYPE_STRING) ? v : make_str("");
         }
     }
@@ -841,7 +841,7 @@ extern "C" Item js_dt_get_data(Item type_item) {
 extern "C" Item js_dt_clear_data(Item format_item) {
     Item dt = js_get_this();
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
     Array* a = rec_arr.array;
 
@@ -860,7 +860,7 @@ extern "C" Item js_dt_clear_data(Item format_item) {
     int64_t out = 0;
     for (int64_t i = 0; i < n; i++) {
         Item r = a->items[i];
-        Item kind = js_get_key_default(r, make_str("kind"));
+        Item kind = js_get_key_cstr(r, "kind");
         bool is_string = false;
         if (get_type_id(kind) == LMD_TYPE_STRING) {
             String* ks = it2s(kind);
@@ -871,7 +871,7 @@ extern "C" Item js_dt_clear_data(Item format_item) {
         if (target_specific) {
             drop = false;
             if (is_string) {
-                Item etype = js_get_key_default(r, make_str("type"));
+                Item etype = js_get_key_cstr(r, "type");
                 if (get_type_id(etype) == LMD_TYPE_STRING) {
                     String* es = it2s(etype);
                     if (es && (size_t)es->len == tlen &&
@@ -898,9 +898,9 @@ static Item js_make_data_transfer_object(void) {
     Rooted<Item> types_root(roots, ItemNull);
     dt_root.set(js_new_object_with_class(JS_CLASS_DATA_TRANSFER));
     attach_known_prototype(dt_root.get(), g_data_transfer_proto);
-    js_set_key_default(dt_root.get(), make_str("dropEffect"), make_str("none"));
-    js_set_key_default(dt_root.get(), make_str("effectAllowed"), make_str("none"));
-    js_set_key_default(dt_root.get(), make_str("_items"), js_array_new(0));
+    js_set_key_cstr(dt_root.get(), "dropEffect", make_str("none"));
+    js_set_key_cstr(dt_root.get(), "effectAllowed", make_str("none"));
+    js_set_key_cstr(dt_root.get(), "_items", js_array_new(0));
 
     // Stable view arrays — mutated in place by dt_recompute_views.
     items_root.set(js_array_new(0));
@@ -911,15 +911,15 @@ static Item js_make_data_transfer_object(void) {
     if (get_type_id(g_file_list_proto) == LMD_TYPE_MAP) {
         js_set_prototype(files_root.get(), g_file_list_proto);
     }
-    js_set_key_default(items_root.get(), make_str("_owner"), dt_root.get());
-    js_set_key_default(files_root.get(), make_str("_owner"), dt_root.get());
+    js_set_key_cstr(items_root.get(), "_owner", dt_root.get());
+    js_set_key_cstr(files_root.get(), "_owner", dt_root.get());
     js_clipboard_set_method(items_root.get(), "add", js_dt_items_add);
     js_clipboard_set_method(items_root.get(), "item", js_dt_items_item);
     js_clipboard_set_method(items_root.get(), "remove", js_dt_items_remove);
     js_clipboard_set_method(items_root.get(), "clear", js_dt_items_clear);
-    js_set_key_default(dt_root.get(), make_str("items"), items_root.get());
-    js_set_key_default(dt_root.get(), make_str("files"), files_root.get());
-    js_set_key_default(dt_root.get(), make_str("types"), types_root.get());
+    js_set_key_cstr(dt_root.get(), "items", items_root.get());
+    js_set_key_cstr(dt_root.get(), "files", files_root.get());
+    js_set_key_cstr(dt_root.get(), "types", types_root.get());
 
     js_clipboard_set_method(dt_root.get(), "setData", js_dt_set_data);
     js_clipboard_set_method(dt_root.get(), "getData", js_dt_get_data);
@@ -939,20 +939,20 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html)
 {
     Item dt = js_make_data_transfer_object();
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return dt;
     if (text_plain && *text_plain) {
         Item record = js_new_object();
-        js_set_key_default(record, make_str("kind"),  make_str("string"));
-        js_set_key_default(record, make_str("type"),  make_str("text/plain"));
-        js_set_key_default(record, make_str("value"), make_str(text_plain));
+        js_set_key_cstr(record, "kind", make_str("string"));
+        js_set_key_cstr(record, "type", make_str("text/plain"));
+        js_set_key_cstr(record, "value", make_str(text_plain));
         js_array_push(rec_arr, record);
     }
     if (text_html && *text_html) {
         Item record = js_new_object();
-        js_set_key_default(record, make_str("kind"),  make_str("string"));
-        js_set_key_default(record, make_str("type"),  make_str("text/html"));
-        js_set_key_default(record, make_str("value"), make_str(text_html));
+        js_set_key_cstr(record, "kind", make_str("string"));
+        js_set_key_cstr(record, "type", make_str("text/html"));
+        js_set_key_cstr(record, "value", make_str(text_html));
         js_array_push(rec_arr, record);
     }
     dt_recompute_views(dt);
@@ -962,17 +962,17 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
 // Read a text/<mime> record's value out of a DataTransfer's _items array.
 // Returns NULL if absent. The returned pointer is owned by the JS string.
 static const char* dt_read_record(Item dt, const char* mime) {
-    Item rec_arr = js_get_key_default(dt, make_str("_items"));
+    Item rec_arr = js_get_key_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return NULL;
     int64_t n = js_array_length(rec_arr);
     for (int64_t i = 0; i < n; i++) {
         Item r = js_elements_get_int(rec_arr, i);
         if (get_type_id(r) != LMD_TYPE_MAP) continue;
-        Item type = js_get_key_default(r, make_str("type"));
+        Item type = js_get_key_cstr(r, "type");
         if (get_type_id(type) != LMD_TYPE_STRING) continue;
         String* ts = it2s(type);
         if (!ts || strcmp(ts->chars, mime) != 0) continue;
-        Item val = js_get_key_default(r, make_str("value"));
+        Item val = js_get_key_cstr(r, "value");
         if (get_type_id(val) != LMD_TYPE_STRING) return "";
         String* vs = it2s(val);
         return vs ? vs->chars : "";
@@ -1005,7 +1005,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
         dt = js_make_data_transfer_object();
     }
     Item ev = js_create_event(type, /*bubbles=*/1, /*cancelable=*/1);
-    js_set_key_default(ev, make_str("clipboardData"), dt);
+    js_set_key_cstr(ev, "clipboardData", dt);
     js_dom_dispatch_event(target_item, ev);
     bool prevented = js_event_is_default_prevented(ev);
     if (!is_paste) {
@@ -1131,8 +1131,8 @@ static bool item_is_blob_like(Item it) {
     JsClass cls = js_class_id(it);
     if (cls == JS_CLASS_BLOB || cls == JS_CLASS_FILE) return true;
     if (get_type_id(it) != LMD_TYPE_MAP) return false;
-    Item ty = js_get_key_default(it, make_str("type"));
-    Item tx = js_get_key_default(it, make_str("text"));
+    Item ty = js_get_key_cstr(it, "type");
+    Item tx = js_get_key_cstr(it, "text");
     return get_type_id(ty) == LMD_TYPE_STRING &&
            js_is_callable(tx);
 }
@@ -1242,7 +1242,7 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
     int64_t flat_idx = 0;
     for (int64_t i = 0; i < n_items; i++) {
         Item item = js_elements_get_int(items_array, i);
-        Item types = js_get_key_default(item, make_str("types"));
+        Item types = js_get_key_cstr(item, "types");
         if (get_type_id(types) != LMD_TYPE_ARRAY) continue;
         int64_t nk = js_array_length(types);
         Item rec = js_new_object();
@@ -1313,9 +1313,9 @@ extern "C" Item js_clipboard_write(Item items_array) {
         if (!item_is_clipboard_item(item)) {
             JS_CLIPBOARD_REJECT("TypeError", "write() entries must be ClipboardItem");
         }
-        Item orig_types = js_get_key_default(item, make_str("_orig_types"));
-        Item types_lower = js_get_key_default(item, make_str("types"));
-        Item reps = js_get_key_default(item, make_str("_reps"));
+        Item orig_types = js_get_key_cstr(item, "_orig_types");
+        Item types_lower = js_get_key_cstr(item, "types");
+        Item reps = js_get_key_cstr(item, "_reps");
         if (get_type_id(orig_types) != LMD_TYPE_ARRAY) continue;
         int64_t nk = js_array_length(orig_types);
         for (int64_t j = 0; j < nk; j++) {
@@ -1340,7 +1340,7 @@ extern "C" Item js_clipboard_write(Item items_array) {
                 Item lower_k = js_elements_get_int(types_lower, j);
                 Item rep = js_get_key_default(reps, lower_k);
                 if (item_is_blob_like(rep)) {
-                    Item bt = js_get_key_default(rep, make_str("type"));
+                    Item bt = js_get_key_cstr(rep, "type");
                     if (get_type_id(bt) == LMD_TYPE_STRING) {
                         String* bts = it2s(bt);
                         if (bts && bts->len > 0 &&
@@ -1368,8 +1368,8 @@ extern "C" Item js_clipboard_write(Item items_array) {
     Item flat = js_array_new(0);
     for (int64_t i = 0; i < n_items; i++) {
         Item item = js_elements_get_int(items_array, i);
-        Item types = js_get_key_default(item, make_str("types"));
-        Item reps = js_get_key_default(item, make_str("_reps"));
+        Item types = js_get_key_cstr(item, "types");
+        Item reps = js_get_key_cstr(item, "_reps");
         if (get_type_id(types) != LMD_TYPE_ARRAY) continue;
         int64_t nk = js_array_length(types);
         for (int64_t j = 0; j < nk; j++) {
@@ -1414,7 +1414,7 @@ extern "C" Item js_clipboard_read(Item opts) {
             }
         }
         if (has_unsanitized) {
-            Item u = js_get_key_default(opts, make_str("unsanitized"));
+            Item u = js_get_key_cstr(opts, "unsanitized");
             TypeId ut = get_type_id(u);
             if (ut == LMD_TYPE_ARRAY) {
                 if (js_array_length(u) > 0) {
@@ -1455,13 +1455,12 @@ extern "C" Item js_clipboard_read(Item opts) {
                 Item parts = js_array_new(0);
                 js_array_push(parts, v);
                 Item bopts = js_new_object();
-                js_set_key_default(bopts, make_str("type"), k);
+                js_set_key_cstr(bopts, "type", k);
                 Item blob = js_blob_new(parts, bopts);
                 js_set_key_default(wrapped, k, blob);
             }
             Item ci = js_clipboard_item_new(wrapped, ItemNull);
-            js_set_key_default(ci, make_str("_clipboard_generation"),
-                (Item){.item = i2it(g_clipboard_generation)});
+            js_set_key_cstr(ci, "_clipboard_generation", (Item){.item = i2it(g_clipboard_generation)});
             js_array_push(out, ci);
         }
     }
@@ -1490,10 +1489,10 @@ extern "C" Item js_permissions_query(Item desc) {
                 case CLIPBOARD_PERMISSION_DENIED:  state = "denied";  break;
                 default:                           state = "prompt";  break;
             }
-            js_set_key_default(status, make_str("name"), make_str(nm));
+            js_set_key_cstr(status, "name", make_str(nm));
         }
     }
-    js_set_key_default(status, make_str("state"), make_str(state));
+    js_set_key_cstr(status, "state", make_str(state));
     return js_promise_resolve(status);
 }
 
@@ -1662,6 +1661,10 @@ extern "C" Item js_lambda_clipboard_get_perm(Item name_item) {
 
 extern "C" void js_register_clipboard_globals(Item global_this) {
     if (!clipboard_ensure_roots()) return;
+#define JS_CLIPBOARD_BLOB_METHODS(M) \
+    M("text", js_blob_text) M("arrayBuffer", js_blob_array_buffer) M("slice", js_blob_slice)
+#define JS_CLIPBOARD_INSTALL_PROTO_METHOD(name, target) \
+    js_clipboard_set_method(proto_root.get(), name, target);
     // D5.3/D5.4.3: registration allocates while publishing each property, so
     // constructor/prototype locals must remain exact roots until publication.
     RootFrame global_roots(1);
@@ -1673,13 +1676,11 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> proto_root(roots, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("Blob"));
         proto_root.set(js_new_object());
-        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
-        js_clipboard_set_method(proto_root.get(), "text", js_blob_text);
-        js_clipboard_set_method(proto_root.get(), "arrayBuffer", js_blob_array_buffer);
-        js_clipboard_set_method(proto_root.get(), "slice", js_blob_slice);
-        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+        JS_CLIPBOARD_BLOB_METHODS(JS_CLIPBOARD_INSTALL_PROTO_METHOD)
+        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
         g_blob_proto = proto_root.get();
-        js_set_key_default(global_root.get(), make_str("Blob"), ctor_root.get());
+        js_set_key_cstr(global_root.get(), "Blob", ctor_root.get());
     }
 
     // ---- File -------------------------------------------------------------
@@ -1689,13 +1690,13 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> proto_root(roots, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("File"));
         proto_root.set(js_new_object());
-        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
         if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) {
             js_set_prototype(proto_root.get(), g_blob_proto);
         }
-        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
         g_file_proto = proto_root.get();
-        js_set_key_default(global_root.get(), make_str("File"), ctor_root.get());
+        js_set_key_cstr(global_root.get(), "File", ctor_root.get());
     }
 
     // ---- ClipboardItem ---------------------------------------------------
@@ -1706,12 +1707,12 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> proto_root(roots, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("ClipboardItem"));
         proto_root.set(js_new_object());
-        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
         js_clipboard_set_method(proto_root.get(), "getType", js_clipboard_item_get_type);
-        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
         js_clipboard_set_method(ctor_root.get(), "supports", js_clipboard_item_supports);
         g_clipboard_item_proto = proto_root.get();
-        js_set_key_default(global_root.get(), make_str("ClipboardItem"), ctor_root.get());
+        js_set_key_cstr(global_root.get(), "ClipboardItem", ctor_root.get());
     }
 
     // ---- FileList --------------------------------------------------------
@@ -1724,10 +1725,9 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> array_proto_root(roots, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("FileList"));
         proto_root.set(js_new_object());
-        js_set_key_default(proto_root.get(), make_str("constructor"),
-            ctor_root.get());
+        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
         method_root.set(js_new_native_function(js_dt_files_item));
-        js_set_key_default(proto_root.get(), make_str("item"), method_root.get());
+        js_set_key_cstr(proto_root.get(), "item", method_root.get());
         js_set_key_default(proto_root.get(), js_well_known_symbol_key(4),
             make_str("FileList"));
         array_proto_root.set(
@@ -1741,7 +1741,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         // the same precisely rooted prototype; otherwise a nursery relocation
         // splits instanceof identity from the public constructor property.
         g_file_list_proto = proto_root.get();
-        js_set_key_default(global_root.get(), make_str("FileList"), ctor_root.get());
+        js_set_key_cstr(global_root.get(), "FileList", ctor_root.get());
     }
 
     // ---- ClipboardEvent --------------------------------------------------
@@ -1752,10 +1752,10 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> proto_root(roots, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("ClipboardEvent"));
         proto_root.set(js_new_object());
-        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
-        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
         g_clipboard_event_proto = proto_root.get();
-        js_set_key_default(global_root.get(), make_str("ClipboardEvent"), ctor_root.get());
+        js_set_key_cstr(global_root.get(), "ClipboardEvent", ctor_root.get());
     }
 
     // ---- DataTransfer ----------------------------------------------------
@@ -1766,10 +1766,10 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> proto_root(roots, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("DataTransfer"));
         proto_root.set(js_new_object());
-        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
-        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
         g_data_transfer_proto = proto_root.get();
-        js_set_key_default(global_root.get(), make_str("DataTransfer"), ctor_root.get());
+        js_set_key_cstr(global_root.get(), "DataTransfer", ctor_root.get());
     }
 
     // ---- Clipboard (instanceof + prototype) -----------------------------
@@ -1784,15 +1784,13 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
             js_new_native_constructor(js_data_transfer_new)); // dummy ctor
         js_set_function_name(ctor_root.get(), make_str("Clipboard"));
         clipboard_proto_root.set(js_new_object());
-        js_set_key_default(clipboard_proto_root.get(), make_str("constructor"),
-            ctor_root.get());
+        js_set_key_cstr(clipboard_proto_root.get(), "constructor", ctor_root.get());
         js_clipboard_set_method(clipboard_proto_root.get(), "writeText", js_clipboard_write_text);
         js_clipboard_set_method(clipboard_proto_root.get(), "readText", js_clipboard_read_text);
         js_clipboard_set_method(clipboard_proto_root.get(), "write", js_clipboard_write);
         js_clipboard_set_method(clipboard_proto_root.get(), "read", js_clipboard_read);
-        js_set_key_default(ctor_root.get(), make_str("prototype"),
-            clipboard_proto_root.get());
-        js_set_key_default(global_root.get(), make_str("Clipboard"), ctor_root.get());
+        js_set_key_cstr(ctor_root.get(), "prototype", clipboard_proto_root.get());
+        js_set_key_cstr(global_root.get(), "Clipboard", ctor_root.get());
     }
 
     // ---- navigator -------------------------------------------------------
@@ -1821,39 +1819,34 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
             js_new_object_with_class(JS_CLASS_CLIPBOARD));
         Rooted<Item> permissions_root(roots, ItemNull);
         Rooted<Item> navigator_root(roots, ItemNull);
-        js_set_key_default(clipboard_root.get(), make_str("writeText"),
-            js_get_key_default(clipboard_proto_root.get(), make_str("writeText")));
-        js_set_key_default(clipboard_root.get(), make_str("readText"),
-            js_get_key_default(clipboard_proto_root.get(), make_str("readText")));
-        js_set_key_default(clipboard_root.get(), make_str("write"),
-            js_get_key_default(clipboard_proto_root.get(), make_str("write")));
-        js_set_key_default(clipboard_root.get(), make_str("read"),
-            js_get_key_default(clipboard_proto_root.get(), make_str("read")));
+        js_set_key_cstr(clipboard_root.get(), "writeText", js_get_key_cstr(clipboard_proto_root.get(), "writeText"));
+        js_set_key_cstr(clipboard_root.get(), "readText", js_get_key_cstr(clipboard_proto_root.get(), "readText"));
+        js_set_key_cstr(clipboard_root.get(), "write", js_get_key_cstr(clipboard_proto_root.get(), "write"));
+        js_set_key_cstr(clipboard_root.get(), "read", js_get_key_cstr(clipboard_proto_root.get(), "read"));
 
         permissions_root.set(js_new_object());
         js_clipboard_set_method(permissions_root.get(), "query", js_permissions_query);
 
         navigator_root.set(js_new_object());
-        js_set_key_default(navigator_root.get(), make_str("clipboard"), clipboard_root.get());
-        js_set_key_default(navigator_root.get(), make_str("permissions"), permissions_root.get());
-        js_set_key_default(navigator_root.get(), make_str("platform"), make_str("MacIntel"));
-        js_set_key_default(navigator_root.get(), make_str("userAgent"),
-            make_str("Lambda/Headless (Macintosh)"));
+        js_set_key_cstr(navigator_root.get(), "clipboard", clipboard_root.get());
+        js_set_key_cstr(navigator_root.get(), "permissions", permissions_root.get());
+        js_set_key_cstr(navigator_root.get(), "platform", make_str("MacIntel"));
+        js_set_key_cstr(navigator_root.get(), "userAgent", make_str("Lambda/Headless (Macintosh)"));
         // Browser capability probes call appName before inspecting SVG support;
         // leaving this legacy Navigator string absent makes ordinary method
         // access throw before the probe can select its rendering path.
-        js_set_key_default(navigator_root.get(), make_str("appName"), make_str("Netscape"));
+        js_set_key_cstr(navigator_root.get(), "appName", make_str("Netscape"));
         // Legacy UA-sniffing libraries still call string methods on
         // Navigator.appVersion; keep it present and consistent with this host.
-        js_set_key_default(navigator_root.get(), make_str("appVersion"),
-            make_str("5.0 (Macintosh) Lambda/Headless"));
-        js_set_key_default(navigator_root.get(), make_str("vendor"), make_str(""));
-        js_set_key_default(navigator_root.get(), make_str("language"), make_str("en-US"));
+        js_set_key_cstr(navigator_root.get(), "appVersion", make_str("5.0 (Macintosh) Lambda/Headless"));
+        js_set_key_cstr(navigator_root.get(), "vendor", make_str(""));
+        js_set_key_cstr(navigator_root.get(), "language", make_str("en-US"));
         // Radiant exposes PointerEvent input in both interactive and headless
         // hosts, so feature detection must advertise at least one touch-capable
         // pointer; otherwise libraries never register their pointer handlers.
-        js_set_key_default(navigator_root.get(), make_str("maxTouchPoints"),
-            (Item){.item = i2it(1)});
-        js_set_key_default(global_root.get(), make_str("navigator"), navigator_root.get());
+        js_set_key_cstr(navigator_root.get(), "maxTouchPoints", (Item){.item = i2it(1)});
+        js_set_key_cstr(global_root.get(), "navigator", navigator_root.get());
     }
+#undef JS_CLIPBOARD_INSTALL_PROTO_METHOD
+#undef JS_CLIPBOARD_BLOB_METHODS
 }

@@ -766,54 +766,9 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
     }
 
     void* field_ptr = (char*)target.map->data + entry->byte_offset;
-    switch (value_type) {
-    case LMD_TYPE_NULL:
+    if (value_type == LMD_TYPE_ERROR) {
         *(void**)field_ptr = NULL;
-        break;
-    case LMD_TYPE_UNDEFINED:
-        *(bool*)field_ptr = false;
-        break;
-    case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT:
-        // Raw shape writes must preserve the same lane that map reads decode.
-        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = value.get_int64();
-        break;
-    case LMD_TYPE_UINT64:
-        *(uint64_t*)field_ptr = value.get_uint64();
-        break;
-    case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = value.get_double();
-        break;
-    case LMD_TYPE_DTIME:
-        *(DateTime**)field_ptr = value.get_datetime_ptr();
-        break;
-    case LMD_TYPE_STRING:
-        *(String**)field_ptr = value.get_safe_string();
-        break;
-    case LMD_TYPE_SYMBOL:
-        *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
-    case LMD_TYPE_BINARY:
-        *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
-        *(Container**)field_ptr = value.container;
-        break;
-    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
-        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
-        break;
-    case LMD_TYPE_ERROR:
-        *(void**)field_ptr = NULL;
-        break;
-    default:
+    } else if (!js_store_typed_value(field_ptr, value_type, value)) {
         return false;
     }
 

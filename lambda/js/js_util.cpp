@@ -322,7 +322,7 @@ static bool js_util_inspect_option_bool(Item options, const char* name, bool fal
 
 static int js_util_inspect_option_depth(Item options) {
     if (get_type_id(options) != LMD_TYPE_MAP) return 2;
-    Item value = js_get_key_default(options, make_string_item("depth"));
+    Item value = js_get_key_cstr(options, "depth");
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL) return 64;
     if (type == LMD_TYPE_INT) {
@@ -360,10 +360,7 @@ static bool js_util_inspect_is_object_like(Item value) {
            type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
 }
 
-static bool js_util_inspect_is_undefined(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED;
-}
+#define js_util_inspect_is_undefined(value) (get_type_id(value) == LMD_TYPE_UNDEFINED)
 
 static bool js_util_inspect_string_equals(Item value, const char* text) {
     if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
@@ -374,7 +371,7 @@ static bool js_util_inspect_string_equals(Item value, const char* text) {
 
 static bool js_util_inspect_is_assertion_error(Item value) {
     if (!js_util_inspect_is_object_like(value)) return false;
-    Item code = js_get_key_default(value, make_string_item("code"));
+    Item code = js_get_key_cstr(value, "code");
     return js_util_inspect_string_equals(code, "ERR_ASSERTION");
 }
 
@@ -389,7 +386,7 @@ static bool js_util_inspect_seen_contains(Item seen, Item value) {
 static void js_util_inspect_seen_pop(Item seen) {
     int64_t len = js_array_length(seen);
     if (len <= 0) return;
-    js_set_key_default(seen, make_string_item("length"), (Item){.item = i2it(len - 1)});
+    js_set_key_cstr(seen, "length", (Item){.item = i2it(len - 1)});
 }
 
 static Item js_util_inspect_string(Item obj_item, JsInspectContext* ctx) {
@@ -608,10 +605,10 @@ static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Ite
 }
 
 static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx, int depth_left) {
-    Item message = js_get_key_default(obj_item, make_string_item("message"));
-    Item code = js_get_key_default(obj_item, make_string_item("code"));
-    Item diff = js_get_key_default(obj_item, make_string_item("diff"));
-    Item instance_error = js_get_key_default(obj_item, make_string_item("__assert_instance_error__"));
+    Item message = js_get_key_cstr(obj_item, "message");
+    Item code = js_get_key_cstr(obj_item, "code");
+    Item diff = js_get_key_cstr(obj_item, "diff");
+    Item instance_error = js_get_key_cstr(obj_item, "__assert_instance_error__");
     String* ms = get_type_id(message) == LMD_TYPE_STRING ? it2s(message) : NULL;
     String* cs = get_type_id(code) == LMD_TYPE_STRING ? it2s(code) : NULL;
     size_t assertion_string_limit =
@@ -632,11 +629,11 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
 
     bool first = true;
     js_util_inspect_append_named_value(sb, "generatedMessage",
-        js_get_key_default(obj_item, make_string_item("generatedMessage")),
+        js_get_key_cstr(obj_item, "generatedMessage"),
         ctx, depth_left, &first, false);
     js_util_inspect_append_named_value(sb, "code", code, ctx, depth_left, &first, false);
-    Item actual = js_get_key_default(obj_item, make_string_item("actual"));
-    Item expected = js_get_key_default(obj_item, make_string_item("expected"));
+    Item actual = js_get_key_cstr(obj_item, "actual");
+    Item expected = js_get_key_cstr(obj_item, "expected");
     bool multiline_expected = get_type_id(actual) == LMD_TYPE_ARRAY &&
         js_array_length(actual) > 50 && !js_util_inspect_is_undefined(expected);
     js_util_inspect_append_named_value(sb, "actual", actual,
@@ -657,7 +654,7 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
             ctx, depth_left, &first, true, assertion_string_limit);
     }
     js_util_inspect_append_named_value(sb, "operator",
-        js_get_key_default(obj_item, make_string_item("operator")),
+        js_get_key_cstr(obj_item, "operator"),
         ctx, depth_left, &first, false);
     js_util_inspect_append_named_value(sb, "diff", diff,
         ctx, depth_left, &first, false);
@@ -667,7 +664,7 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
 }
 
 static Item js_util_inspect_abort_signal(Item obj_item) {
-    Item aborted = js_get_key_default(obj_item, make_string_item("aborted"));
+    Item aborted = js_get_key_cstr(obj_item, "aborted");
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "AbortSignal { aborted: ");
     strbuf_append_str(sb, (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) ? "true" : "false");
@@ -676,7 +673,7 @@ static Item js_util_inspect_abort_signal(Item obj_item) {
 }
 
 static Item js_util_inspect_abort_controller(Item obj_item, JsInspectContext* ctx, int depth_left) {
-    Item signal = js_get_key_default(obj_item, make_string_item("signal"));
+    Item signal = js_get_key_cstr(obj_item, "signal");
     // util.inspect depth is consumed by the containing controller field, so a
     // depth-1 controller must render its signal as Node's typed placeholder.
     Item signal_text = depth_left <= 1 ? make_string_item("[AbortSignal]")
@@ -688,26 +685,6 @@ static Item js_util_inspect_abort_controller(Item obj_item, JsInspectContext* ct
     else strbuf_append_str(sb, "[AbortSignal]");
     strbuf_append_str(sb, " }");
     return js_util_inspect_make_string(sb);
-}
-
-static bool js_util_inspect_constructor_name(Item value, char* out, int out_size) {
-    if (out_size <= 0 || get_type_id(value) != LMD_TYPE_MAP) return false;
-    out[0] = '\0';
-    Item ctor = js_get_key_default(value, make_string_item("constructor"));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
-        Item proto = js_get_prototype_of(value);
-        if (get_type_id(proto) == LMD_TYPE_MAP) {
-            ctor = js_get_key_default(proto, make_string_item("constructor"));
-        }
-    }
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
-    Item name = js_get_key_default(ctor, make_string_item("name"));
-    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
-    if (!ns || ns->len == 0) return false;
-    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
-    memcpy(out, ns->chars, len);
-    out[len] = '\0';
-    return true;
 }
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_arguments_exotic, (Item value), (js_is_arguments_exotic_array(value)))
@@ -722,7 +699,7 @@ static bool js_util_is_arguments_deep_value(Item value) {
 static Item js_util_inspect_date(Item obj_item, JsInspectContext* ctx, int depth_left) {
     StrBuf* sb = strbuf_new();
     char ctor_name[64];
-    if (js_util_inspect_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
+    if (js_get_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
             strcmp(ctor_name, "Date") != 0) {
         strbuf_append_str(sb, ctor_name);
         strbuf_append_char(sb, ' ');
@@ -812,7 +789,7 @@ static Item js_util_inspect_regexp(Item obj_item, JsInspectContext* ctx, int dep
     String* rs = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
     StrBuf* sb = strbuf_new();
     char ctor_name[64];
-    if (js_util_inspect_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
+    if (js_get_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
             strcmp(ctor_name, "RegExp") != 0) {
         strbuf_append_str(sb, ctor_name);
         strbuf_append_char(sb, ' ');
@@ -1035,7 +1012,7 @@ static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int dept
     }
 
     if (tid == LMD_TYPE_FUNC) {
-        Item name = js_get_key_default(obj_item, make_string_item("name"));
+        Item name = js_get_key_cstr(obj_item, "name");
         String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
         StrBuf* sb = strbuf_new();
         if (ns && ns->len > 0) {
@@ -1195,17 +1172,16 @@ static bool js_util_is_promise_like(Item value) {
     if (js_class_id(value) == JS_CLASS_PROMISE) return true;
     TypeId type = get_type_id(value);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_FUNC) return false;
-    Item then_fn = js_get_key_default(value, make_string_item("then"));
+    Item then_fn = js_get_key_cstr(value, "then");
     if (item_is_error(then_fn)) return false;
     return js_is_callable(then_fn);
 }
 
 static void js_util_emit_promisify_promise_warning(void) {
     Item warning = js_new_object();
-    js_set_key_default(warning, make_string_item("name"), make_string_item("DeprecationWarning"));
-    js_set_key_default(warning, make_string_item("message"),
-        make_string_item("Calling promisify on a function that returns a Promise is likely a mistake."));
-    js_set_key_default(warning, make_string_item("code"), make_string_item("DEP0174"));
+    js_set_key_cstr(warning, "name", make_string_item("DeprecationWarning"));
+    js_set_key_cstr(warning, "message", make_string_item("Calling promisify on a function that returns a Promise is likely a mistake."));
+    js_set_key_cstr(warning, "code", make_string_item("DEP0174"));
     (void)js_process_emit(make_string_item("warning"), warning);
 }
 
@@ -1264,8 +1240,8 @@ extern "C" Item js_util_promisify(Item fn_item) {
 
 static Item js_util_callbackify_make_falsy_error(Item reason) {
     Item error = js_new_error(make_string_item("Promise was rejected with a falsy value"));
-    js_set_key_default(error, make_string_item("code"), make_string_item("ERR_FALSY_VALUE_REJECTION"));
-    js_set_key_default(error, make_string_item("reason"), reason);
+    js_set_key_cstr(error, "code", make_string_item("ERR_FALSY_VALUE_REJECTION"));
+    js_set_key_cstr(error, "reason", reason);
     return error;
 }
 
@@ -1356,7 +1332,7 @@ static Item js_util_invalid_arg_rejection(const char* name, const char* expected
     snprintf(msg, sizeof(msg),
              "The \"%s\" argument must be of type %s.", name, expected);
     Item error = js_new_error_with_name(make_string_item("TypeError"), make_string_item(msg));
-    js_set_key_default(error, make_string_item("code"), make_string_item("ERR_INVALID_ARG_TYPE"));
+    js_set_key_cstr(error, "code", make_string_item("ERR_INVALID_ARG_TYPE"));
     return js_promise_reject(error);
 }
 
@@ -1369,7 +1345,7 @@ static Item js_util_aborted_on_abort(Item env_item, Item event_item) {
     Item resolve = env[1];
     Item handler = env[2];
 
-    Item remove_fn = js_get_key_default(signal, make_string_item("removeEventListener"));
+    Item remove_fn = js_get_key_cstr(signal, "removeEventListener");
     if (js_is_callable(remove_fn)) {
         Item remove_args[2] = { make_string_item("abort"), handler };
         (void)js_call_function(remove_fn, signal, remove_args, 2);
@@ -1388,7 +1364,7 @@ static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
     if (!env) return make_js_undefined();
 
     Item signal = env[0];
-    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
+    Item aborted = js_get_key_cstr(signal, "aborted");
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
         Item resolve_args[1] = { make_js_undefined() };
         (void)js_call_function(resolve, make_js_undefined(), resolve_args, 1);
@@ -1402,7 +1378,7 @@ static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
     Item handler = js_new_native_closure(js_util_aborted_on_abort, 1, handler_env, 3);
     handler_env[2] = handler;
 
-    Item add_fn = js_get_key_default(signal, make_string_item("addEventListener"));
+    Item add_fn = js_get_key_cstr(signal, "addEventListener");
     if (js_is_callable(add_fn)) {
         Item add_args[2] = { make_string_item("abort"), handler };
         (void)js_call_function(add_fn, signal, add_args, 2);
@@ -1460,7 +1436,7 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
     // validate superCtor.prototype
-    Item super_proto = js_get_key_default(super_item, make_string_item("prototype"));
+    Item super_proto = js_get_key_cstr(super_item, "prototype");
     TypeId proto_tid = get_type_id(super_proto);
     if (proto_tid != LMD_TYPE_MAP && proto_tid != LMD_TYPE_ARRAY) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
@@ -1468,9 +1444,9 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
     }
     // Set ctor.prototype.__proto__ = superCtor.prototype
     // This preserves existing properties on ctor.prototype (like D.prototype.d set before inherits)
-    Item ctor_proto = js_get_key_default(ctor_item, make_string_item("prototype"));
-    js_set_key_default(ctor_proto, make_string_item("__proto__"), super_proto);
-    js_set_key_default(ctor_proto, make_string_item("constructor"), ctor_item);
+    Item ctor_proto = js_get_key_cstr(ctor_item, "prototype");
+    js_set_key_cstr(ctor_proto, "__proto__", super_proto);
+    js_set_key_cstr(ctor_proto, "constructor", ctor_item);
     // set ctor.super_ = superConstructor (non-enumerable, per Node.js spec)
     Item super_key = make_string_item("super_");
     js_set_key_default(ctor_item, super_key, super_item);
@@ -2179,7 +2155,7 @@ extern "C" Item js_util_types_isPromise(Item obj) {
     if (js_class_id(obj) == JS_CLASS_PROMISE) return (Item){.item = b2it(true)};
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     // also check for .then method (thenable duck-type)
-    Item then = js_get_key_default(obj, make_string_item("then"));
+    Item then = js_get_key_cstr(obj, "then");
     if (js_is_callable(then)) return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
 }
@@ -2226,7 +2202,7 @@ extern "C" Item js_util_types_isError(Item obj) {
         return (Item){.item = b2it(true)};
     }
     // check for .message + .stack
-    Item msg = js_get_key_default(obj, make_string_item("message"));
+    Item msg = js_get_key_cstr(obj, "message");
     if (get_type_id(msg) == LMD_TYPE_STRING) return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
 }
@@ -2301,7 +2277,7 @@ JS_UTIL_CLASS_TEST(js_util_types_isArgumentsObject, js_class_id(obj) == JS_CLASS
 
 extern "C" Item js_util_types_isModuleNamespaceObject(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
-    Item marker = js_get_key_default(obj, make_string_item("__vm_module_namespace__"));
+    Item marker = js_get_key_cstr(obj, "__vm_module_namespace__");
     return (Item){.item = b2it(get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker))};
 }
 
@@ -2323,7 +2299,7 @@ extern "C" Item js_util_getCallSites(Item frame_count_item) {
     if (frame_count > 200) frame_count = 200;
 
     Item global = js_get_global_this();
-    Item filename = js_get_key_default(global, make_string_item("__filename"));
+    Item filename = js_get_key_cstr(global, "__filename");
     Item argv = js_get_process_argv();
     if (get_type_id(argv) == LMD_TYPE_ARRAY && js_array_length(argv) > 1) {
         Item script = js_elements_get_int(argv, 1);
@@ -2361,11 +2337,11 @@ extern "C" Item js_util_getCallSites(Item frame_count_item) {
         Item frame = js_new_object();
         // util.getCallSites must not invoke Error.prepareStackTrace; it returns
         // frame records directly from the current script context.
-        js_set_key_default(frame, make_string_item("scriptName"), filename);
-        js_set_key_default(frame, make_string_item("functionName"), make_string_item(""));
-        js_set_key_default(frame, make_string_item("lineNumber"), (Item){.item = i2it(1)});
-        js_set_key_default(frame, make_string_item("column"), (Item){.item = i2it(1)});
-        js_set_key_default(frame, make_string_item("columnNumber"), (Item){.item = i2it(1)});
+        js_set_key_cstr(frame, "scriptName", filename);
+        js_set_key_cstr(frame, "functionName", make_string_item(""));
+        js_set_key_cstr(frame, "lineNumber", (Item){.item = i2it(1)});
+        js_set_key_cstr(frame, "column", (Item){.item = i2it(1)});
+        js_set_key_cstr(frame, "columnNumber", (Item){.item = i2it(1)});
         js_array_push(frames, frame);
     }
     return frames;
@@ -2616,6 +2592,48 @@ JS_FORWARD_STATIC_EXPRESSION(bool, util_ensure_roots, (void), (js_active_runtime
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_util_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
+typedef Item (*JsUtilTypeMethod)(Item);
+typedef struct JsUtilTypeMethodSpec {
+    const char* name;
+    JsUtilTypeMethod target;
+} JsUtilTypeMethodSpec;
+
+static const JsUtilTypeMethodSpec js_util_basic_type_methods[] = {
+    {"isDate", js_util_types_isDate}, {"isRegExp", js_util_types_isRegExp},
+    {"isArray", js_util_types_isArray}, {"isMap", js_util_types_isMap},
+    {"isSet", js_util_types_isSet}, {"isUint8Array", js_util_types_isUint8Array},
+    {"isPromise", js_util_types_isPromise}, {"isFunction", js_util_types_isFunction},
+    {"isString", js_util_types_isString}, {"isNumber", js_util_types_isNumber},
+    {"isBoolean", js_util_types_isBoolean}, {"isNull", js_util_types_isNull},
+    {"isUndefined", js_util_types_isUndefined},
+    {"isNullOrUndefined", js_util_types_isNullOrUndefined},
+    {"isObject", js_util_types_isObject}, {"isPrimitive", js_util_types_isPrimitive},
+    {"isBuffer", js_util_types_isBuffer}, {"isError", js_util_types_isError},
+    {NULL, NULL}
+};
+
+static const JsUtilTypeMethodSpec js_util_extended_type_methods[] = {
+    {"isTypedArray", js_util_types_isTypedArray}, {"isArrayBuffer", js_util_types_isArrayBuffer},
+    {"isSharedArrayBuffer", js_util_types_isSharedArrayBuffer},
+    {"isAnyArrayBuffer", js_util_types_isAnyArrayBuffer}, {"isDataView", js_util_types_isDataView},
+    {"isWeakMap", js_util_types_isWeakMap}, {"isWeakSet", js_util_types_isWeakSet},
+    {"isWeakRef", js_util_types_isWeakRef}, {"isUint16Array", js_util_types_isUint16Array},
+    {"isUint32Array", js_util_types_isUint32Array}, {"isInt8Array", js_util_types_isInt8Array},
+    {"isInt16Array", js_util_types_isInt16Array}, {"isInt32Array", js_util_types_isInt32Array},
+    {"isFloat16Array", js_util_types_isFloat16Array}, {"isFloat32Array", js_util_types_isFloat32Array},
+    {"isFloat64Array", js_util_types_isFloat64Array},
+    {"isUint8ClampedArray", js_util_types_isUint8ClampedArray},
+    {"isNumberObject", js_util_types_isNumberObject}, {"isStringObject", js_util_types_isStringObject},
+    {"isBooleanObject", js_util_types_isBooleanObject}, {"isSymbolObject", js_util_types_isSymbolObject},
+    {"isNativeError", js_util_types_isNativeError}, {"isBoxedPrimitive", js_util_types_isBoxedPrimitive},
+    {"isProxy", js_util_types_isProxy}, {"isExternal", js_util_types_isExternal},
+    {"isGeneratorFunction", js_util_types_isGeneratorFunction},
+    {"isGeneratorObject", js_util_types_isGeneratorObject},
+    {"isAsyncFunction", js_util_types_isAsyncFunction}, {"isMapIterator", js_util_types_isMapIterator},
+    {"isSetIterator", js_util_types_isSetIterator}, {"isArgumentsObject", js_util_types_isArgumentsObject},
+    {"isModuleNamespaceObject", js_util_types_isModuleNamespaceObject}, {NULL, NULL}
+};
+
 extern "C" Item js_get_util_namespace(void) {
     if (!util_ensure_roots()) return ItemError;
     // The console hook is valid for the process lifetime and has no Item
@@ -2643,20 +2661,20 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "inspect",             js_util_inspect, 2);
     // Set util.inspect.custom = Symbol.for('nodejs.util.inspect.custom')
     {
-        inspect_root.set(js_get_key_default(util_namespace, make_string_item("inspect")));
+        inspect_root.set(js_get_key_cstr(util_namespace, "inspect"));
         custom_symbol_root.set(js_symbol_for(make_string_item("nodejs.util.inspect.custom")));
-        js_set_key_default(inspect_root.get(), make_string_item("custom"), custom_symbol_root.get());
+        js_set_key_cstr(inspect_root.get(), "custom", custom_symbol_root.get());
         default_options_root.set(js_new_object());
         // util.inspect.defaultOptions is observable and must stay separate from
         // REPL-local writer options so enabling REPL colors does not leak global state.
-        js_set_key_default(default_options_root.get(), make_string_item("colors"), (Item){.item = b2it(false)});
-        js_set_key_default(inspect_root.get(), make_string_item("defaultOptions"), default_options_root.get());
+        js_set_key_cstr(default_options_root.get(), "colors", (Item){.item = b2it(false)});
+        js_set_key_cstr(inspect_root.get(), "defaultOptions", default_options_root.get());
     }
     js_util_set_method(util_namespace, "promisify",           js_util_promisify, 1);
     {
-        promisify_root.set(js_get_key_default(util_namespace, make_string_item("promisify")));
+        promisify_root.set(js_get_key_cstr(util_namespace, "promisify"));
         temporary_root.set(js_util_promisify_custom_symbol());
-        js_set_key_default(promisify_root.get(), make_string_item("custom"), temporary_root.get());
+        js_set_key_cstr(promisify_root.get(), "custom", temporary_root.get());
     }
     js_util_set_method(util_namespace, "callbackify",         js_util_callbackify, 1);
     js_util_set_method(util_namespace, "aborted",             js_util_aborted, 2);
@@ -2673,66 +2691,24 @@ extern "C" Item js_get_util_namespace(void) {
 
     // util.types sub-namespace
     types_root.set(js_new_object());
-    js_util_set_method(types_root.get(), "isDate",           js_util_types_isDate, 1);
-    js_util_set_method(types_root.get(), "isRegExp",         js_util_types_isRegExp, 1);
-    js_util_set_method(types_root.get(), "isArray",          js_util_types_isArray, 1);
-    js_util_set_method(types_root.get(), "isMap",            js_util_types_isMap, 1);
-    js_util_set_method(types_root.get(), "isSet",            js_util_types_isSet, 1);
-    js_util_set_method(types_root.get(), "isUint8Array",     js_util_types_isUint8Array, 1);
-    js_util_set_method(types_root.get(), "isPromise",        js_util_types_isPromise, 1);
-    js_util_set_method(types_root.get(), "isFunction",       js_util_types_isFunction, 1);
-    js_util_set_method(types_root.get(), "isString",         js_util_types_isString, 1);
-    js_util_set_method(types_root.get(), "isNumber",         js_util_types_isNumber, 1);
-    js_util_set_method(types_root.get(), "isBoolean",        js_util_types_isBoolean, 1);
-    js_util_set_method(types_root.get(), "isNull",           js_util_types_isNull, 1);
-    js_util_set_method(types_root.get(), "isUndefined",      js_util_types_isUndefined, 1);
-    js_util_set_method(types_root.get(), "isNullOrUndefined",js_util_types_isNullOrUndefined, 1);
-    js_util_set_method(types_root.get(), "isObject",         js_util_types_isObject, 1);
-    js_util_set_method(types_root.get(), "isPrimitive",      js_util_types_isPrimitive, 1);
-    js_util_set_method(types_root.get(), "isBuffer",         js_util_types_isBuffer, 1);
-    js_util_set_method(types_root.get(), "isError",          js_util_types_isError, 1);
+    for (const JsUtilTypeMethodSpec* spec = js_util_basic_type_methods;
+            spec->name; spec++) {
+        js_util_set_method(types_root.get(), spec->name, spec->target, 1);
+    }
     // additional types checks
     Item types = types_root.get();
-    js_util_set_method(types, "isTypedArray",     js_util_types_isTypedArray, 1);
-    js_util_set_method(types, "isArrayBuffer",    js_util_types_isArrayBuffer, 1);
-    js_util_set_method(types, "isSharedArrayBuffer", js_util_types_isSharedArrayBuffer, 1);
-    js_util_set_method(types, "isAnyArrayBuffer",    js_util_types_isAnyArrayBuffer, 1);
-    js_util_set_method(types, "isDataView",       js_util_types_isDataView, 1);
-    js_util_set_method(types, "isWeakMap",        js_util_types_isWeakMap, 1);
-    js_util_set_method(types, "isWeakSet",        js_util_types_isWeakSet, 1);
-    js_util_set_method(types, "isWeakRef",        js_util_types_isWeakRef, 1);
-    js_util_set_method(types, "isUint16Array",    js_util_types_isUint16Array, 1);
-    js_util_set_method(types, "isUint32Array",    js_util_types_isUint32Array, 1);
-    js_util_set_method(types, "isInt8Array",      js_util_types_isInt8Array, 1);
-    js_util_set_method(types, "isInt16Array",     js_util_types_isInt16Array, 1);
-    js_util_set_method(types, "isInt32Array",     js_util_types_isInt32Array, 1);
-    js_util_set_method(types, "isFloat16Array",   js_util_types_isFloat16Array, 1);
-    js_util_set_method(types, "isFloat32Array",   js_util_types_isFloat32Array, 1);
-    js_util_set_method(types, "isFloat64Array",   js_util_types_isFloat64Array, 1);
-    js_util_set_method(types, "isUint8ClampedArray", js_util_types_isUint8ClampedArray, 1);
-    js_util_set_method(types, "isNumberObject",   js_util_types_isNumberObject, 1);
-    js_util_set_method(types, "isStringObject",   js_util_types_isStringObject, 1);
-    js_util_set_method(types, "isBooleanObject",  js_util_types_isBooleanObject, 1);
-    js_util_set_method(types, "isSymbolObject",   js_util_types_isSymbolObject, 1);
-    js_util_set_method(types, "isNativeError",    js_util_types_isNativeError, 1);
-    js_util_set_method(types, "isBoxedPrimitive", js_util_types_isBoxedPrimitive, 1);
-    js_util_set_method(types, "isProxy",          js_util_types_isProxy, 1);
-    js_util_set_method(types, "isExternal",       js_util_types_isExternal, 1);
-    js_util_set_method(types, "isGeneratorFunction", js_util_types_isGeneratorFunction, 1);
-    js_util_set_method(types, "isGeneratorObject",   js_util_types_isGeneratorObject, 1);
-    js_util_set_method(types, "isAsyncFunction",     js_util_types_isAsyncFunction, 1);
-    js_util_set_method(types, "isMapIterator",       js_util_types_isMapIterator, 1);
-    js_util_set_method(types, "isSetIterator",       js_util_types_isSetIterator, 1);
-    js_util_set_method(types, "isArgumentsObject",   js_util_types_isArgumentsObject, 1);
-    js_util_set_method(types, "isModuleNamespaceObject", js_util_types_isModuleNamespaceObject, 1);
-    js_set_key_default(util_namespace, make_string_item("types"), types_root.get());
+    for (const JsUtilTypeMethodSpec* spec = js_util_extended_type_methods;
+            spec->name; spec++) {
+        js_util_set_method(types, spec->name, spec->target, 1);
+    }
+    js_set_key_cstr(util_namespace, "types", types_root.get());
     js_util_set_method(util_namespace, "getCallSites", js_util_getCallSites, 1);
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
     text_encoder_root.set(js_new_native_function(js_text_encoder_new));
     text_decoder_root.set(js_new_native_function(js_text_decoder_new));
-    js_set_key_default(util_namespace, make_string_item("TextEncoder"), text_encoder_root.get());
-    js_set_key_default(util_namespace, make_string_item("TextDecoder"), text_decoder_root.get());
+    js_set_key_cstr(util_namespace, "TextEncoder", text_encoder_root.get());
+    js_set_key_cstr(util_namespace, "TextDecoder", text_decoder_root.get());
 
     // default export
     default_key_root.set(make_string_item("default"));

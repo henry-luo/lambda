@@ -256,8 +256,8 @@ static Item js_create_document_fonts_object(void) {
     Item fonts = js_new_object();
     Item ready = js_new_object();
     Item then_fn = js_new_native_function(js_font_face_set_ready_then);
-    js_set_key_default(ready, js_string_key("then"), then_fn);
-    js_set_key_default(fonts, js_string_key("ready"), ready);
+    js_set_key_cstr(ready, "then", then_fn);
+    js_set_key_cstr(fonts, "ready", ready);
     return fonts;
 }
 
@@ -1369,8 +1369,7 @@ extern "C" void js_dom_after_default_checked_set(void* dom_elem, bool checked) {
     Item exp = expando_get_map((DomNode*)elem);
     bool dirty = false;
     if (exp.item != ITEM_NULL) {
-        Item v = js_get_key_default(exp,
-            (Item){.item = s2it(heap_create_name("__chkDirty"))});
+        Item v = js_get_key_cstr(exp, "__chkDirty");
         dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
     }
     // defaultChecked only syncs live checkedness before the user/API dirty flag.
@@ -1382,9 +1381,7 @@ extern "C" void js_dom_set_checked_dirty(void* dom_elem, bool checked) {
     _set_checkedness(elem, checked);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
-        js_set_key_default(exp,
-            (Item){.item = s2it(heap_create_name("__chkDirty"))},
-            (Item){.item = b2it(true)});
+        js_set_key_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
     }
 }
 JS_FORWARD_RETURN(const char*, js_dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
@@ -1733,10 +1730,10 @@ extern "C" Item js_dom_get_prototype_value(Item obj) {
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(ctor_name));
     if (get_type_id(ctor) != LMD_TYPE_FUNC && strcmp(ctor_name, "HTMLElement") == 0) {
-        ctor = js_get_key_default(global, js_string_key("Element"));
+        ctor = js_get_key_cstr(global, "Element");
     }
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto = js_get_key_default(ctor, js_string_key("prototype"));
+    Item proto = js_get_key_cstr(ctor, "prototype");
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
@@ -2145,7 +2142,7 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
                                               Item count_arg);
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home);
-static void _value_mark_dirty(DomElement* elem);
+static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item value);
 static void _select_refresh_options_collection(Item collection, DomElement* sel);
 static void _select_refresh_selected_options_collection(Item collection, DomElement* sel);
 
@@ -2186,7 +2183,7 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     Item ctor = js_get_key_default(js_get_global_this(),
         (Item){.item = s2it(heap_create_name(ctor_name))});
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        js_set_key_default(collection, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
+        js_set_key_cstr(collection, "constructor", ctor);
     }
 }
 
@@ -3072,11 +3069,11 @@ static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
 
     Item parsed = js_create_foreign_html_doc("");
     if (parsed.item == ITEM_NULL) return ItemNull;
-    Item body = js_get_key_default(parsed, js_string_key("body"));
+    Item body = js_get_key_cstr(parsed, "body");
     if (body.item == ITEM_NULL || is_js_undefined(body)) return parsed;
     // Reuse the element innerHTML path so detached parsed documents preserve
     // the same node ownership and wrapper identity invariants as live DOM.
-    js_set_key_default(body, js_string_key("innerHTML"), source_item);
+    js_set_key_cstr(body, "innerHTML", source_item);
     return parsed;
 }
 
@@ -3090,8 +3087,7 @@ static void js_dom_install_native_constructor_global(const char* ctor_name,
     Rooted<Item> method_root(roots, js_new_native_function(method_target));
     js_set_function_name(ctor_root.get(),
         (Item){.item = s2it(heap_create_name(ctor_name))});
-    js_set_key_default(proto_root.get(), js_string_key("constructor"),
-        ctor_root.get());
+    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_set_key_default(proto_root.get(), js_string_key(method_name),
         method_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
@@ -3169,13 +3165,13 @@ static void js_dom_install_window_frames_global(void) {
     int64_t length = js_array_length(frames);
     Item length_item = (Item){.item = i2it(length)};
     Item global = js_get_global_this();
-    js_set_key_default(global, js_string_key("frames"), frames);
-    js_set_key_default(global, js_string_key("length"), length_item);
+    js_set_key_cstr(global, "frames", frames);
+    js_set_key_cstr(global, "length", length_item);
 
-    Item window = js_get_key_default(global, js_string_key("window"));
+    Item window = js_get_key_cstr(global, "window");
     if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_default(window, js_string_key("frames"), frames);
-        js_set_key_default(window, js_string_key("length"), length_item);
+        js_set_key_cstr(window, "frames", frames);
+        js_set_key_cstr(window, "length", length_item);
     }
 }
 
@@ -3230,10 +3226,10 @@ static Item js_window_prompt(Item message_item, Item default_item) {
 static void js_dom_install_window_dialog_globals(void) {
     Item global = js_get_global_this();
     Item fn = js_new_native_function(js_window_prompt);
-    js_set_key_default(global, js_string_key("prompt"), fn);
-    Item window = js_get_key_default(global, js_string_key("window"));
+    js_set_key_cstr(global, "prompt", fn);
+    Item window = js_get_key_cstr(global, "window");
     if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_default(window, js_string_key("prompt"), fn);
+        js_set_key_cstr(window, "prompt", fn);
     }
 }
 
@@ -3657,10 +3653,8 @@ static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
             js_set_key_default(expando_root.get(), cache_key, wrapper_root.get());
         }
     }
-    js_set_key_default(wrapper_root.get(), (Item){.item = s2it(heap_create_name("length"))},
-        (Item){.item = i2it((int64_t)elem->class_count)});
-    js_set_key_default(wrapper_root.get(), (Item){.item = s2it(heap_create_name("value"))},
-        js_classlist_value_item(elem));
+    js_set_key_cstr(wrapper_root.get(), "length", (Item){.item = i2it((int64_t)elem->class_count)});
+    js_set_key_cstr(wrapper_root.get(), "value", js_classlist_value_item(elem));
     return wrapper_root.get();
 }
 
@@ -5778,17 +5772,17 @@ extern "C" Item js_dom_create_tree_walker_bridge(Item root_item, Item what_to_sh
     method_root.set(js_bind_function(
         js_new_native_function(js_dom_tree_walker_next_node_method),
         make_js_undefined(), bound_args, 1));
-    js_set_key_default(walker_root.get(), js_string_key("nextNode"), method_root.get());
+    js_set_key_cstr(walker_root.get(), "nextNode", method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
         js_new_native_function(js_dom_tree_walker_first_child_method),
         make_js_undefined(), bound_args, 1));
-    js_set_key_default(walker_root.get(), js_string_key("firstChild"), method_root.get());
+    js_set_key_cstr(walker_root.get(), "firstChild", method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
         js_new_native_function(js_dom_tree_walker_next_sibling_method),
         make_js_undefined(), bound_args, 1));
-    js_set_key_default(walker_root.get(), js_string_key("nextSibling"), method_root.get());
+    js_set_key_cstr(walker_root.get(), "nextSibling", method_root.get());
     return walker_root.get();
 }
 
@@ -6435,7 +6429,7 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
         return make_js_undefined();
     }
     mem_free(new_value);
-    _value_mark_dirty(elem);
+    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     form_control_set_selection(state, (View*)elem,
         final_start, final_end, final_direction);
@@ -6835,20 +6829,10 @@ static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item val
 }
 JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), js_dom_expando_flag_is, (sel, "__selDirty"))
 
-static void _select_mark_dirty(DomElement* sel) {
-    js_dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
-}
-
 // Text-control dirty value flag (input/textarea), tracked via expando so we
 // can distinguish "API has been called to set value" from "value reflects
 // defaultValue". Cleared by form reset.
 JS_FORWARD_STATIC_RETURN(bool, _value_is_dirty, (DomElement* elem), js_dom_expando_flag_is, (elem, "__valueDirty"))
-static void _value_mark_dirty(DomElement* elem) {
-    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
-}
-static void _value_clear_dirty(DomElement* elem) {
-    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
-}
 
 extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
@@ -6876,7 +6860,7 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
                     stripped[out] = '\0';
                     tc_set_value(elem, stripped, out);
                     mem_free(stripped);
-                    _value_mark_dirty(elem);
+                    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
                     return value;
                 }
             }
@@ -6884,7 +6868,7 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
     }
     // text-control value writes dirty live state without changing the default attribute.
     tc_set_value(elem, s, strlen(s));
-    _value_mark_dirty(elem);
+    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
     return value;
 }
 
@@ -6915,6 +6899,21 @@ static Item js_dom_text_control_set_selection_edge(void* dom_elem, Item value,
 JS_FORWARD_ITEM(js_dom_text_control_set_selection_start_bridge, (void* dom_elem, Item value), js_dom_text_control_set_selection_edge, (dom_elem, value, true))
 JS_FORWARD_ITEM(js_dom_text_control_set_selection_end_bridge, (void* dom_elem, Item value), js_dom_text_control_set_selection_edge, (dom_elem, value, false))
 
+static void js_dom_detach_all_children(DomElement* elem) {
+    if (!elem) return;
+    DomNode* child = elem->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_pre_remove(child);
+        child->parent = nullptr;
+        child->next_sibling = nullptr;
+        child->prev_sibling = nullptr;
+        child = next;
+    }
+    elem->first_child = nullptr;
+    elem->last_child = nullptr;
+}
+
 extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
@@ -6935,17 +6934,7 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Ite
     if (!s) s = "";
     if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
         bool dom_children_changed = elem->first_child != nullptr || *s;
-        DomNode* child = elem->first_child;
-        while (child) {
-            DomNode* next = child->next_sibling;
-            dom_pre_remove(child);
-            child->parent = nullptr;
-            child->next_sibling = nullptr;
-            child->prev_sibling = nullptr;
-            child = next;
-        }
-        elem->first_child = nullptr;
-        elem->last_child = nullptr;
+        js_dom_detach_all_children(elem);
         if (*s) {
             DomText* tn = DomText::create_copy(s, strlen(s), elem);
             if (tn) {
@@ -7003,7 +6992,7 @@ static void _select_set_selected_index(DomElement* sel, int idx) {
     _select_sync_native_selected_index(
         sel, idx >= 0 && idx < n ? idx : -1,
         (int)n); // INT_CAST_OK: option count
-    _select_mark_dirty(sel);
+    js_dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
 }
 
 static void _select_select_only_option(DomElement* sel, DomElement* selected_opt) {
@@ -7058,8 +7047,7 @@ static void _select_normalize_for_selected_options(DomElement* sel, Item options
 
 static void _select_refresh_selected_options_collection(Item collection, DomElement* sel) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !sel) return;
-    js_set_key_default(collection, (Item){.item = s2it(heap_create_name("length"))},
-                    (Item){.item = i2it(0)});
+    js_set_key_cstr(collection, "length", (Item){.item = i2it(0)});
 
     Item arr = js_array_new(0);
     _collect_options(sel->first_child, arr);
@@ -7107,13 +7095,11 @@ static void _select_refresh_options_collection(Item collection, DomElement* sel)
     _collect_options(sel->first_child, collection);
     int64_t n = js_array_length(collection);
     int sel_idx = _select_effective_selected_index(sel, collection);
-    js_set_key_default(collection, (Item){.item = s2it(heap_create_name("selectedIndex"))},
-                    (Item){.item = i2it(sel_idx)});
+    js_set_key_cstr(collection, "selectedIndex", (Item){.item = i2it(sel_idx)});
     if (js_array_has_props(collection.array)) {
         Map* props = js_array_props(collection.array);
         Item props_item = (Item){.map = props};
-        js_set_key_default(props_item, (Item){.item = s2it(heap_create_name("length"))},
-                        (Item){.item = i2it(n)});
+        js_set_key_cstr(props_item, "length", (Item){.item = i2it(n)});
         _array_companion_set_int_slot(collection, "length", 6, n);
     }
 }
@@ -7423,8 +7409,7 @@ extern "C" void js_dom_after_default_selected_set(void* dom_elem, bool selected)
     Item exp = expando_get_map((DomNode*)elem);
     bool dirty = false;
     if (exp.item != ITEM_NULL) {
-        Item v = js_get_key_default(exp,
-            (Item){.item = s2it(heap_create_name("__optDirty"))});
+        Item v = js_get_key_cstr(exp, "__optDirty");
         dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
     }
     if (dirty) return;
@@ -7466,7 +7451,7 @@ extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value
     if (!elem) return;
     const char* sv = value ? value : "";
     js_dom_select_apply_value(elem, sv, true);
-    _select_mark_dirty(elem);
+    js_dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
 }
 JS_FORWARD_VOID( js_dom_select_set_selected_index_bridge, (void* dom_elem, Item value), _select_set_selected_index, ((DomElement*)dom_elem, _select_index_from_item(value)))
 
@@ -7531,9 +7516,7 @@ static void js_dom_apply_option_selected(DomElement* elem, bool selected) {
     _set_selectedness(elem, selected);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
-        js_set_key_default(exp,
-            (Item){.item = s2it(heap_create_name("__optDirty"))},
-            (Item){.item = b2it(true)});
+        js_set_key_cstr(exp, "__optDirty", (Item){.item = b2it(true)});
     }
     // Explicit option.selected wins in non-multiple selects, then refreshes
     // cached selectedOptions exactly as the fallback setter did.
@@ -7647,9 +7630,7 @@ static void _reset_form_control(DomElement* elem) {
             // Clear dirty checkedness flag.
             Item exp = expando_get_map((DomNode*)elem);
             if (exp.item != ITEM_NULL) {
-                js_set_key_default(exp,
-                    (Item){.item = s2it(heap_create_name("__chkDirty"))},
-                    (Item){.item = ITEM_NULL});
+                js_set_key_cstr(exp, "__chkDirty", (Item){.item = ITEM_NULL});
             }
             return;
         }
@@ -7676,7 +7657,7 @@ static void _reset_form_control(DomElement* elem) {
             const char* dv = elem->get_attribute("value");
             if (!dv) dv = "";
             tc_set_value(elem, dv, strlen(dv));
-            _value_clear_dirty(elem);
+            js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
         }
         return;
     }
@@ -7688,7 +7669,7 @@ static void _reset_form_control(DomElement* elem) {
             collect_text_content((DomNode*)elem, sb);
             const char* s = sb->str ? sb->str : "";
             tc_set_value(elem, s, sb->length);
-            _value_clear_dirty(elem);
+            js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
             strbuf_free(sb);
         }
         return;
@@ -7707,9 +7688,7 @@ static void _reset_form_control(DomElement* elem) {
             // Clear per-option dirty selectedness flag.
             Item oexp = expando_get_map((DomNode*)opt);
             if (oexp.item != ITEM_NULL) {
-                js_set_key_default(oexp,
-                    (Item){.item = s2it(heap_create_name("__optDirty"))},
-                    (Item){.item = ITEM_NULL});
+                js_set_key_cstr(oexp, "__optDirty", (Item){.item = ITEM_NULL});
             }
         }
         // Clear the dirty flag so default-reset rules apply again.
@@ -8042,17 +8021,16 @@ static Item _build_validity_state(DomElement* elem) {
     }
 
     auto _b = [](bool v) -> Item { return (Item){.item = b2it(v)}; };
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("valueMissing"))},    _b(value_missing));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("typeMismatch"))},    _b(type_mismatch));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("patternMismatch"))}, _b(pattern_mismatch));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("tooLong"))},         _b(too_long));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("tooShort"))},        _b(too_short));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("rangeOverflow"))},   _b(range_overflow));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("rangeUnderflow"))},  _b(range_underflow));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("stepMismatch"))},    _b(step_mismatch));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("badInput"))},        _b(bad_input));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("customError"))},     _b(custom_error));
-    js_set_key_default(vs, (Item){.item = s2it(heap_create_name("valid"))},           _b(valid));
+#define JS_DOM_VALIDITY_FIELDS(M) \
+    M("valueMissing", value_missing) M("typeMismatch", type_mismatch) \
+    M("patternMismatch", pattern_mismatch) M("tooLong", too_long) \
+    M("tooShort", too_short) M("rangeOverflow", range_overflow) \
+    M("rangeUnderflow", range_underflow) M("stepMismatch", step_mismatch) \
+    M("badInput", bad_input) M("customError", custom_error) M("valid", valid)
+#define JS_DOM_SET_VALIDITY_FIELD(name, value) js_set_key_cstr(vs, name, _b(value));
+    JS_DOM_VALIDITY_FIELDS(JS_DOM_SET_VALIDITY_FIELD)
+#undef JS_DOM_SET_VALIDITY_FIELD
+#undef JS_DOM_VALIDITY_FIELDS
     return vs;
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_validity_item_is_valid, (Item flag), (((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL)))
@@ -8067,14 +8045,11 @@ static bool js_dom_is_constraint_control(DomElement* elem) {
 
 static void js_dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
     Item ev_obj = js_new_object();
-    js_set_key_default(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
-                    (Item){.item = s2it(heap_create_name("invalid"))});
+    js_set_key_cstr(ev_obj, "type", (Item){.item = s2it(heap_create_name("invalid"))});
     if (include_bubbles) {
-        js_set_key_default(ev_obj, (Item){.item = s2it(heap_create_name("bubbles"))},
-                        (Item){.item = ITEM_FALSE});
+        js_set_key_cstr(ev_obj, "bubbles", (Item){.item = ITEM_FALSE});
     }
-    js_set_key_default(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
-                    (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(ev_obj, "cancelable", (Item){.item = ITEM_TRUE});
     js_dom_dispatch_event(target_item, ev_obj);
 }
 
@@ -8084,7 +8059,7 @@ static void js_dom_check_form_control_descendants(DomNode* node, bool* all_valid
             DomElement* elem = node->as_element();
             if (js_dom_is_constraint_control(elem)) {
                 Item vs = _build_validity_state(elem);
-                Item vf = js_get_key_default(vs, (Item){.item = s2it(heap_create_name("valid"))});
+                Item vf = js_get_key_cstr(vs, "valid");
                 if (!js_dom_validity_item_is_valid(vf)) {
                     if (all_valid) *all_valid = false;
                     js_dom_dispatch_invalid_event(js_dom_wrap_element(elem), false);
@@ -8102,8 +8077,7 @@ extern "C" Item js_dom_form_reset_bridge(Item form_item) {
         return make_js_undefined();
     }
     Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
-    js_set_key_default(ev, (Item){.item = s2it(heap_create_name("isTrusted"))},
-                    (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(ev, "isTrusted", (Item){.item = ITEM_TRUE});
     Item dispatched = js_dom_dispatch_event(form_item, ev);
     if (dispatched.item == ITEM_FALSE) return make_js_undefined();
     _run_form_reset(elem);
@@ -8122,7 +8096,7 @@ static Item js_dom_check_or_report_validity(Item elem_item, bool report) {
 
     if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
     Item vs = _build_validity_state(elem);
-    Item valid_flag = js_get_key_default(vs, (Item){.item = s2it(heap_create_name("valid"))});
+    Item valid_flag = js_get_key_cstr(vs, "valid");
     bool is_valid = js_dom_validity_item_is_valid(valid_flag);
     if (!is_valid) {
         js_dom_dispatch_invalid_event(elem_item, !report);
@@ -8775,10 +8749,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             Item value_item = (Item){.item = s2it(heap_create_name(value ? value : ""))};
             // Attr exposes both legacy name/value and Node nodeName/nodeValue;
             // sanitizers iterate the latter aliases from element.attributes.
-            js_set_key_default(pair, js_string_key("nodeName"), name_item);
-            js_set_key_default(pair, js_string_key("nodeValue"), value_item);
-            js_set_key_default(pair, js_string_key("name"), name_item);
-            js_set_key_default(pair, js_string_key("value"), value_item);
+            js_set_key_cstr(pair, "nodeName", name_item);
+            js_set_key_cstr(pair, "nodeValue", value_item);
+            js_set_key_cstr(pair, "name", name_item);
+            js_set_key_cstr(pair, "value", value_item);
             js_array_push(arr_item, pair);
         }
         return arr_item;
@@ -9959,17 +9933,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (strcmp(prop, "innerText") == 0) {
         const char* text_str = fn_to_cstr(value);
         if (text_str) {
-            DomNode* child = elem->first_child;
-            while (child) {
-                DomNode* next = child->next_sibling;
-                dom_pre_remove(child);
-                child->parent = nullptr;
-                child->next_sibling = nullptr;
-                child->prev_sibling = nullptr;
-                child = next;
-            }
-            elem->first_child = nullptr;
-            elem->last_child = nullptr;
+            js_dom_detach_all_children(elem);
 
             const char* segment = text_str;
             const char* p = text_str;
@@ -10062,9 +10026,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         // attribute changes do not override the value.
         Item exp = expando_get_or_create_map((DomNode*)elem);
         if (exp.item != ITEM_NULL) {
-            js_set_key_default(exp,
-                (Item){.item = s2it(heap_create_name("__chkDirty"))},
-                (Item){.item = b2it(true)});
+            js_set_key_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
         }
         return value;
     }
@@ -10079,8 +10041,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         Item exp = expando_get_map((DomNode*)elem);
         bool dirty = false;
         if (exp.item != ITEM_NULL) {
-            Item v = js_get_key_default(exp,
-                (Item){.item = s2it(heap_create_name("__chkDirty"))});
+            Item v = js_get_key_cstr(exp, "__chkDirty");
             dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
         }
         if (!dirty) _set_checkedness(elem, t);
@@ -10095,7 +10056,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             const char* sv = fn_to_cstr(value);
             if (!sv) sv = "";
             js_dom_select_apply_value(elem, sv, false);
-            _select_mark_dirty(elem);
+            js_dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
             return value;
         }
         if (strcmp(prop, "selectedIndex") == 0) {
@@ -10123,8 +10084,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             Item exp = expando_get_map((DomNode*)elem);
             bool dirty = false;
             if (exp.item != ITEM_NULL) {
-                Item v = js_get_key_default(exp,
-                    (Item){.item = s2it(heap_create_name("__optDirty"))});
+                Item v = js_get_key_cstr(exp, "__optDirty");
                 dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
             }
             if (!dirty) {
@@ -10553,12 +10513,12 @@ static float js_dom_svg_number(Item value, float fallback) {
 
 static RdtMatrix js_dom_svg_matrix_from_item(Item item) {
     RdtMatrix matrix = rdt_matrix_identity();
-    matrix.e11 = js_dom_svg_number(js_get_key_default(item, js_string_key("a")), 1.0f);
-    matrix.e21 = js_dom_svg_number(js_get_key_default(item, js_string_key("b")), 0.0f);
-    matrix.e12 = js_dom_svg_number(js_get_key_default(item, js_string_key("c")), 0.0f);
-    matrix.e22 = js_dom_svg_number(js_get_key_default(item, js_string_key("d")), 1.0f);
-    matrix.e13 = js_dom_svg_number(js_get_key_default(item, js_string_key("e")), 0.0f);
-    matrix.e23 = js_dom_svg_number(js_get_key_default(item, js_string_key("f")), 0.0f);
+    matrix.e11 = js_dom_svg_number(js_get_key_cstr(item, "a"), 1.0f);
+    matrix.e21 = js_dom_svg_number(js_get_key_cstr(item, "b"), 0.0f);
+    matrix.e12 = js_dom_svg_number(js_get_key_cstr(item, "c"), 0.0f);
+    matrix.e22 = js_dom_svg_number(js_get_key_cstr(item, "d"), 1.0f);
+    matrix.e13 = js_dom_svg_number(js_get_key_cstr(item, "e"), 0.0f);
+    matrix.e23 = js_dom_svg_number(js_get_key_cstr(item, "f"), 0.0f);
     return matrix;
 }
 
@@ -10643,37 +10603,30 @@ static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
     js_dom_set_number_property(result, "d", matrix.e22);
     js_dom_set_number_property(result, "e", matrix.e13);
     js_dom_set_number_property(result, "f", matrix.e23);
-    js_set_key_default(result, js_string_key("multiply"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "multiply", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_MULTIPLY, 1));
-    js_set_key_default(result, js_string_key("inverse"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "inverse", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_INVERSE, 0));
-    js_set_key_default(result, js_string_key("translate"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "translate", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_TRANSLATE, 2));
-    js_set_key_default(result, js_string_key("scale"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "scale", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_SCALE, 1));
-    js_set_key_default(result, js_string_key("rotate"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "rotate", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_ROTATE, 1));
-    js_set_key_default(result, js_string_key("flipX"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "flipX", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_X, 0));
-    js_set_key_default(result, js_string_key("flipY"),
-        js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "flipY", js_new_native_payload_function(js_dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_Y, 0));
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(interface_name));
-    Item proto = js_get_key_default(ctor, js_string_key("prototype"));
+    Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
     return result;
 }
 JS_FORWARD_STATIC_ITEM(js_dom_svg_create_matrix, (void), js_dom_svg_make_matrix, (rdt_matrix_identity()))
 
 static DomElement* js_dom_svg_owner_from_value(Item value) {
-    Item owner = js_get_key_default(value, js_string_key("__lambda_svg_owner"));
+    Item owner = js_get_key_cstr(value, "__lambda_svg_owner");
     return (DomElement*)js_dom_unwrap_element(owner);
 }
 
@@ -10691,8 +10644,7 @@ static void js_dom_svg_set_transform_attribute(DomElement* elem, RdtMatrix matri
 
 static Item js_dom_svg_transform_set_matrix(Item matrix_item) {
     Item transform = js_get_this();
-    js_set_key_default(transform, js_string_key("matrix"),
-                    js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix_item)));
+    js_set_key_cstr(transform, "matrix", js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix_item)));
     return ItemNull;
 }
 
@@ -10724,16 +10676,15 @@ static Item js_dom_svg_transform_set_rotate(Item angle, Item cx, Item cy) {
 
 static Item js_dom_svg_make_transform(Item matrix) {
     Item transform = js_new_object();
-    js_set_key_default(transform, js_string_key("matrix"),
-                    js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix)));
-    js_set_key_default(transform, js_string_key("type"), (Item){.item = i2it(1)});
+    js_set_key_cstr(transform, "matrix", js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix)));
+    js_set_key_cstr(transform, "type", (Item){.item = i2it(1)});
     js_set_native_key(transform, js_string_key("setMatrix"), js_dom_svg_transform_set_matrix);
     js_set_native_key(transform, js_string_key("setTranslate"), js_dom_svg_transform_set_translate);
     js_set_native_key(transform, js_string_key("setScale"), js_dom_svg_transform_set_scale);
     js_set_native_key(transform, js_string_key("setRotate"), js_dom_svg_transform_set_rotate);
     Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key("SVGTransform"));
-    Item proto = js_get_key_default(ctor, js_string_key("prototype"));
+    Item ctor = js_get_key_cstr(global, "SVGTransform");
+    Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(transform, proto);
     return transform;
 }
@@ -10757,7 +10708,7 @@ static Item js_dom_svg_transform_list_clear(void) {
 
 static Item js_dom_svg_transform_list_append(Item transform) {
     DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
-    Item matrix = js_get_key_default(transform, js_string_key("matrix"));
+    Item matrix = js_get_key_cstr(transform, "matrix");
     if (elem && matrix.item != ITEM_NULL && !is_js_undefined(matrix)) {
         js_dom_svg_set_transform_attribute(elem, js_dom_svg_matrix_from_item(matrix));
     }
@@ -10783,7 +10734,7 @@ static Item js_dom_svg_transform_list_initialize(Item transform) {
 
 static Item js_dom_svg_get_transform_list(DomElement* elem) {
     Item list = js_new_object();
-    js_set_key_default(list, js_string_key("__lambda_svg_owner"), js_dom_wrap_element(elem));
+    js_set_key_cstr(list, "__lambda_svg_owner", js_dom_wrap_element(elem));
     js_install_native_accessor(list, js_string_key("numberOfItems"),
         js_new_native_function(js_dom_svg_transform_list_count_get), ItemNull,
         JSPD_NON_ENUMERABLE);
@@ -10793,8 +10744,8 @@ static Item js_dom_svg_get_transform_list(DomElement* elem) {
     js_set_native_key(list, js_string_key("consolidate"), js_dom_svg_transform_list_consolidate);
     js_set_native_key(list, js_string_key("getItem"), js_dom_svg_transform_list_get_item);
     Item animated = js_new_object();
-    js_set_key_default(animated, js_string_key("baseVal"), list);
-    js_set_key_default(animated, js_string_key("animVal"), list);
+    js_set_key_cstr(animated, "baseVal", list);
+    js_set_key_cstr(animated, "animVal", list);
     return animated;
 }
 
@@ -10815,7 +10766,7 @@ static Item js_dom_svg_class_name_set_base_val(Item value) {
 
 static Item js_dom_svg_get_animated_class_name(DomElement* elem) {
     Item animated = js_new_object();
-    js_set_key_default(animated, js_string_key("__lambda_svg_owner"), js_dom_wrap_element(elem));
+    js_set_key_cstr(animated, "__lambda_svg_owner", js_dom_wrap_element(elem));
     js_install_native_accessor(animated, js_string_key("baseVal"),
         js_new_native_function(js_dom_svg_class_name_get_base_val),
         js_new_native_function(js_dom_svg_class_name_set_base_val),
@@ -10830,8 +10781,8 @@ static Item js_dom_svg_make_point(float x, float y, const char* interface_name);
 
 static Item js_dom_svg_point_matrix_transform(Item matrix_item) {
     Item point_item = js_get_this();
-    float x = js_dom_svg_number(js_get_key_default(point_item, js_string_key("x")), 0.0f);
-    float y = js_dom_svg_number(js_get_key_default(point_item, js_string_key("y")), 0.0f);
+    float x = js_dom_svg_number(js_get_key_cstr(point_item, "x"), 0.0f);
+    float y = js_dom_svg_number(js_get_key_cstr(point_item, "y"), 0.0f);
     RdtMatrix matrix = js_dom_svg_matrix_from_item(matrix_item);
     float transformed_x = 0.0f;
     float transformed_y = 0.0f;
@@ -10848,7 +10799,7 @@ static Item js_dom_svg_make_point(float x, float y, const char* interface_name) 
     js_set_native_key(result, js_string_key("matrixTransform"), js_dom_svg_point_matrix_transform);
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(interface_name));
-    Item proto = js_get_key_default(ctor, js_string_key("prototype"));
+    Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
     return result;
 }
@@ -12571,23 +12522,15 @@ static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item y_arg);
 
 static float js_dom_item_to_float(Item value) {
-    Item numeric = js_to_number(value);
-    TypeId type = get_type_id(numeric);
-    if (type == LMD_TYPE_FLOAT) return (float)it2d(numeric);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        return (float)it2i(numeric);
-    }
-    return 0.0f;
+    return js_dom_svg_number(value, 0.0f);
 }
 JS_FORWARD_STATIC_ITEM(js_dom_float_item, (float value), js_make_number, ((double)value))
 
 static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
     Item out = js_new_object();
-    js_set_key_default(out, js_string_key("node"),
-        js_dom_wrap_element(boundary.node));
-    js_set_key_default(out, js_string_key("offset"),
-        (Item){.item = i2it((int64_t)boundary.offset)});
+    js_set_key_cstr(out, "node", js_dom_wrap_element(boundary.node));
+    js_set_key_cstr(out, "offset", (Item){.item = i2it((int64_t)boundary.offset)});
     return out;
 }
 
@@ -12599,19 +12542,15 @@ static Item js_dom_make_boundary_object(DomBoundary boundary) {
     DomBoundary all_end;
     if (dom_selection_user_select_all_range_for_node(boundary.node,
             &all_start, &all_end)) {
-        js_set_key_default(out, js_string_key("selectAllStart"),
-            js_dom_make_plain_boundary_object(all_start));
-        js_set_key_default(out, js_string_key("selectAllEnd"),
-            js_dom_make_plain_boundary_object(all_end));
+        js_set_key_cstr(out, "selectAllStart", js_dom_make_plain_boundary_object(all_start));
+        js_set_key_cstr(out, "selectAllEnd", js_dom_make_plain_boundary_object(all_end));
     }
     DomBoundary triple_start;
     DomBoundary triple_end;
     if (dom_selection_triple_click_range_for_node(boundary.node,
             &triple_start, &triple_end)) {
-        js_set_key_default(out, js_string_key("tripleClickStart"),
-            js_dom_make_plain_boundary_object(triple_start));
-        js_set_key_default(out, js_string_key("tripleClickEnd"),
-            js_dom_make_plain_boundary_object(triple_end));
+        js_set_key_cstr(out, "tripleClickStart", js_dom_make_plain_boundary_object(triple_start));
+        js_set_key_cstr(out, "tripleClickEnd", js_dom_make_plain_boundary_object(triple_end));
     }
     return out;
 }
@@ -12755,11 +12694,9 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
         value_len, hit.offset);
 
     Item out = js_new_object();
-    js_set_key_default(out, js_string_key("node"), js_dom_wrap_element(elem));
-    js_set_key_default(out, js_string_key("offset"),
-        (Item){.item = i2it((int64_t)offset_u16)});
-    js_set_key_default(out, js_string_key("byteOffset"),
-        (Item){.item = i2it((int64_t)hit.offset)});
+    js_set_key_cstr(out, "node", js_dom_wrap_element(elem));
+    js_set_key_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
+    js_set_key_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
     return out;
 }
 JS_FORWARD_ITEM(js_dom_text_control_caret_bounds_bridge, (void* elem), js_dom_text_control_caret_bounds, ((DomElement*)elem))
@@ -12847,8 +12784,8 @@ extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
     float x = 0.0f;
     float y = 0.0f;
     if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-        Item left = js_get_key_default(args[0], js_string_key("left"));
-        Item top = js_get_key_default(args[0], js_string_key("top"));
+        Item left = js_get_key_cstr(args[0], "left");
+        Item top = js_get_key_cstr(args[0], "top");
         x = js_dom_item_to_float(left);
         y = js_dom_item_to_float(top);
     } else {
@@ -13987,12 +13924,10 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         const char* mode = "open";
         bool delegates_focus = false;
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            Item mode_item = js_get_key_default(args[0],
-                (Item){.item = s2it(heap_create_name("mode"))});
+            Item mode_item = js_get_key_cstr(args[0], "mode");
             const char* mode_text = fn_to_cstr(mode_item);
             if (mode_text && mode_text[0]) mode = mode_text;
-            Item delegates_item = js_get_key_default(args[0],
-                (Item){.item = s2it(heap_create_name("delegatesFocus"))});
+            Item delegates_item = js_get_key_cstr(args[0], "delegatesFocus");
             delegates_focus = js_is_truthy(delegates_item);
         }
 
@@ -14004,21 +13939,15 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         elem->set_shadow_root_element(frag);
         Item root = js_dom_wrap_element(frag);
 
-        js_set_key_default(root, (Item){.item = s2it(heap_create_name("host"))}, elem_item);
-        js_set_key_default(root, (Item){.item = s2it(heap_create_name("mode"))},
-            (Item){.item = s2it(heap_create_name(mode))});
-        js_set_key_default(root, (Item){.item = s2it(heap_create_name("delegatesFocus"))},
-            (Item){.item = b2it(delegates_focus)});
+        js_set_key_cstr(root, "host", elem_item);
+        js_set_key_cstr(root, "mode", (Item){.item = s2it(heap_create_name(mode))});
+        js_set_key_cstr(root, "delegatesFocus", (Item){.item = b2it(delegates_focus)});
 
         Item exp_map = expando_get_or_create_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
             Item visible_root = (strcasecmp(mode, "closed") == 0) ? ItemNull : root;
-            js_set_key_default(exp_map,
-                (Item){.item = s2it(heap_create_name("shadowRoot"))},
-                visible_root);
-            js_set_key_default(exp_map,
-                (Item){.item = s2it(heap_create_name("__shadowRootInternal"))},
-                root);
+            js_set_key_cstr(exp_map, "shadowRoot", visible_root);
+            js_set_key_cstr(exp_map, "__shadowRootInternal", root);
         }
         return root;
     }
@@ -14876,8 +14805,7 @@ extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
     }
     // Property lookup may collect while an async handler owns the only
     // references to this dataset view; keep the receiver and operands precise.
-    owner_root.set(js_get_key_default(dataset_root.get(),
-        js_string_key("__lambda_dataset_element")));
+    owner_root.set(js_get_key_cstr(dataset_root.get(), "__lambda_dataset_element"));
     if (!js_dom_unwrap_element(owner_root.get())) return false;
     js_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
     return true;
@@ -15196,8 +15124,7 @@ static void _install_iface(Item global, const char* name) {
         js_get_key_default(global_root.get(), key_root.get()));
     Rooted<Item> proto_root(roots, ItemNull);
     if (js_is_callable(ctor_root.get())) {
-        proto_root.set(js_get_key_default(ctor_root.get(),
-            js_string_key("prototype")));
+        proto_root.set(js_get_key_cstr(ctor_root.get(), "prototype"));
         _set_iface_to_string_tag(proto_root.get(), name);
         return;
     }
@@ -15210,9 +15137,7 @@ static void _install_iface(Item global, const char* name) {
     js_set_function_name(ctor_root.get(), key_root.get());
     proto_root.set(js_new_object());
     _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_default(proto_root.get(),
-        (Item){.item = s2it(heap_create_name("constructor"))},
-        ctor_root.get());
+    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
     js_set_key_default(global_root.get(), key_root.get(), ctor_root.get());
@@ -15224,41 +15149,40 @@ static Item _document_fragment_ctor(void) {
     return js_dom_create_document_fragment(_js_current_document);
 }
 
-static void js_dom_install_global_constructor(Item global, const char* name,
-        JsNativeP0 target, bool set_string_tag) {
+template <typename Target>
+static void js_dom_install_value_constructor(Item global, const char* name,
+        Target target, bool set_string_tag) {
     RootFrame roots(3);
     Rooted<Item> global_root(roots, global);
-    Rooted<Item> ctor_root(roots,
-        js_new_distinct_native_constructor(target));
+    Rooted<Item> ctor_root(roots, js_new_distinct_native_constructor(target));
     Rooted<Item> proto_root(roots, js_new_object());
     Item name_key = js_string_key(name);
     js_set_function_name(ctor_root.get(), name_key);
     if (set_string_tag) _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_default(proto_root.get(), js_string_key("constructor"),
-        ctor_root.get());
+    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
     js_set_key_default(global_root.get(), name_key, ctor_root.get());
 }
-JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), js_dom_install_global_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
+JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), js_dom_install_value_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
 
 static Item _iface_proto(Item global, const char* name) {
     Item ctor = js_get_key_default(global, (Item){.item = s2it(heap_create_name(name))});
     if (!js_is_callable(ctor)) return ItemNull;
-    Item proto = js_get_key_default(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
+    Item proto = js_get_key_cstr(ctor, "prototype");
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
 static void _install_nodelist_for_each(Item global) {
     Item node_list_proto = _iface_proto(global, "NodeList");
-    Item array_ctor = js_get_key_default(global, js_string_key("Array"));
-    Item array_proto = js_get_key_default(array_ctor, js_string_key("prototype"));
-    Item array_for_each = js_get_key_default(array_proto, js_string_key("forEach"));
+    Item array_ctor = js_get_key_cstr(global, "Array");
+    Item array_proto = js_get_key_cstr(array_ctor, "prototype");
+    Item array_for_each = js_get_key_cstr(array_proto, "forEach");
     if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
         js_is_callable(array_for_each)) {
         // Query APIs return Arrays, but libraries feature-detect the WebIDL
         // NodeList prototype before choosing their iteration path.
-        js_set_key_default(node_list_proto, js_string_key("forEach"), array_for_each);
+        js_set_key_cstr(node_list_proto, "forEach", array_for_each);
     }
 }
 
@@ -15268,23 +15192,6 @@ static void _link_iface_proto(Item global, const char* name, const char* base_na
     if (get_type_id(proto) == LMD_TYPE_MAP && get_type_id(base_proto) == LMD_TYPE_MAP) {
         js_set_prototype(proto, base_proto);
     }
-}
-
-template <typename Target>
-static void js_dom_install_svg_value_constructor(Item global,
-        const char* name, Target target) {
-    RootFrame roots(3);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> ctor_root(roots,
-        js_new_distinct_native_constructor(target));
-    Rooted<Item> proto_root(roots, js_new_object());
-    js_set_function_name(ctor_root.get(), js_string_key(name));
-    _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_default(proto_root.get(), js_string_key("constructor"),
-        ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), js_string_key(name), ctor_root.get());
 }
 
 static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
@@ -15334,22 +15241,21 @@ static void _xpath_collect_descendants(DomNode* node, Item expression, Item matc
 
 static Item _xpath_result_iterate_next(void) {
     Item self = js_get_this();
-    Item items = js_get_key_default(self, js_string_key("__lambda_xpath_items"));
-    Item index_item = js_get_key_default(self, js_string_key("__lambda_xpath_index"));
+    Item items = js_get_key_cstr(self, "__lambda_xpath_items");
+    Item index_item = js_get_key_cstr(self, "__lambda_xpath_index");
     int64_t index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : 0;
     if (get_type_id(items) != LMD_TYPE_ARRAY || index >= js_array_length(items)) {
         return ItemNull;
     }
     Item match = js_elements_get_int(items, index);
-    js_set_key_default(self, js_string_key("__lambda_xpath_index"),
-                    (Item){.item = i2it(index + 1)});
+    js_set_key_cstr(self, "__lambda_xpath_index", (Item){.item = i2it(index + 1)});
     return match;
 }
 
 static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
                                        Item /*existing_result*/) {
     Item self = js_get_this();
-    Item expression = js_get_key_default(self, js_string_key("__lambda_xpath_source"));
+    Item expression = js_get_key_cstr(self, "__lambda_xpath_source");
     DomElement* root = (DomElement*)js_dom_unwrap_element(context_node);
     Item matches = js_array_new(0);
     if (root && root->first_child) {
@@ -15359,22 +15265,20 @@ static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
     }
 
     Item result = js_new_object();
-    js_set_key_default(result, js_string_key("__lambda_xpath_items"), matches);
-    js_set_key_default(result, js_string_key("__lambda_xpath_index"),
-                    (Item){.item = i2it(0)});
+    js_set_key_cstr(result, "__lambda_xpath_items", matches);
+    js_set_key_cstr(result, "__lambda_xpath_index", (Item){.item = i2it(0)});
     Item iterate_next = js_new_distinct_native_function(_xpath_result_iterate_next);
     js_set_function_name(iterate_next, js_string_key("iterateNext"));
-    js_set_key_default(result, js_string_key("iterateNext"), iterate_next);
+    js_set_key_cstr(result, "iterateNext", iterate_next);
     return result;
 }
 
 static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*/) {
     Item compiled = js_new_object();
-    js_set_key_default(compiled, js_string_key("__lambda_xpath_source"),
-                    js_to_string(expression));
+    js_set_key_cstr(compiled, "__lambda_xpath_source", js_to_string(expression));
     Item evaluate = js_new_distinct_native_function(_xpath_expression_evaluate);
     js_set_function_name(evaluate, js_string_key("evaluate"));
-    js_set_key_default(compiled, js_string_key("evaluate"), evaluate);
+    js_set_key_cstr(compiled, "evaluate", evaluate);
     return compiled;
 }
 
@@ -15383,15 +15287,15 @@ static Item _xpath_evaluator_ctor(void) {
     Item create_expression = js_new_distinct_native_function(
         _xpath_evaluator_create_expression);
     js_set_function_name(create_expression, js_string_key("createExpression"));
-    js_set_key_default(evaluator, js_string_key("createExpression"), create_expression);
+    js_set_key_cstr(evaluator, "createExpression", create_expression);
 
     Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key("XPathEvaluator"));
-    Item proto = js_get_key_default(ctor, js_string_key("prototype"));
+    Item ctor = js_get_key_cstr(global, "XPathEvaluator");
+    Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(evaluator, proto);
     return evaluator;
 }
-JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), js_dom_install_global_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
+JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), js_dom_install_value_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
 
 static void _install_node_iface(Item global) {
     RootFrame roots(3);
@@ -15402,25 +15306,22 @@ static void _install_node_iface(Item global) {
     js_set_function_name(ctor_root.get(),
         (Item){.item = s2it(heap_create_name("Node"))});
     _set_iface_to_string_tag(proto_root.get(), "Node");
-    js_set_key_default(proto_root.get(),
-        (Item){.item = s2it(heap_create_name("constructor"))},
-        ctor_root.get());
+    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
-    _set_ctor_int_constant(ctor_root.get(), "ELEMENT_NODE", 1);
-    _set_ctor_int_constant(ctor_root.get(), "ATTRIBUTE_NODE", 2);
-    _set_ctor_int_constant(ctor_root.get(), "TEXT_NODE", 3);
-    _set_ctor_int_constant(ctor_root.get(), "CDATA_SECTION_NODE", 4);
-    _set_ctor_int_constant(ctor_root.get(), "ENTITY_REFERENCE_NODE", 5);
-    _set_ctor_int_constant(ctor_root.get(), "ENTITY_NODE", 6);
-    _set_ctor_int_constant(ctor_root.get(), "PROCESSING_INSTRUCTION_NODE", 7);
-    _set_ctor_int_constant(ctor_root.get(), "COMMENT_NODE", 8);
-    _set_ctor_int_constant(ctor_root.get(), "DOCUMENT_NODE", 9);
-    _set_ctor_int_constant(ctor_root.get(), "DOCUMENT_TYPE_NODE", 10);
-    _set_ctor_int_constant(ctor_root.get(), "DOCUMENT_FRAGMENT_NODE", 11);
-    _set_ctor_int_constant(ctor_root.get(), "NOTATION_NODE", 12);
-    js_set_key_default(global_root.get(),
-        (Item){.item = s2it(heap_create_name("Node"))}, ctor_root.get());
+    static const struct { const char* name; int value; } node_constants[] = {
+        {"ELEMENT_NODE", 1}, {"ATTRIBUTE_NODE", 2}, {"TEXT_NODE", 3},
+        {"CDATA_SECTION_NODE", 4}, {"ENTITY_REFERENCE_NODE", 5},
+        {"ENTITY_NODE", 6}, {"PROCESSING_INSTRUCTION_NODE", 7},
+        {"COMMENT_NODE", 8}, {"DOCUMENT_NODE", 9},
+        {"DOCUMENT_TYPE_NODE", 10}, {"DOCUMENT_FRAGMENT_NODE", 11},
+        {"NOTATION_NODE", 12},
+    };
+    for (size_t i = 0; i < sizeof(node_constants) / sizeof(node_constants[0]); i++) {
+        _set_ctor_int_constant(ctor_root.get(), node_constants[i].name,
+            node_constants[i].value);
+    }
+    js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
 }
 
 static JsWebAnimationHost* js_web_animation_host(Item value) {
@@ -15429,8 +15330,7 @@ static JsWebAnimationHost* js_web_animation_host(Item value) {
         return (JsWebAnimationHost*)value.vmap->host_data;
     }
     if (get_type_id(value) == LMD_TYPE_MAP) {
-        Item holder = js_get_key_default(value,
-            js_string_key("__lambda_web_animation_host"));
+        Item holder = js_get_key_cstr(value, "__lambda_web_animation_host");
         if (get_type_id(holder) == LMD_TYPE_VMAP && holder.vmap &&
             holder.vmap->host_type == (const void*)&js_web_animation_vmap_marker) {
             return (JsWebAnimationHost*)holder.vmap->host_data;
@@ -15440,13 +15340,7 @@ static JsWebAnimationHost* js_web_animation_host(Item value) {
 }
 
 static float js_web_animation_number(Item value, float fallback) {
-    Item numeric = js_to_number(value);
-    TypeId type = get_type_id(numeric);
-    if (type == LMD_TYPE_FLOAT) return (float)it2d(numeric);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
-        return (float)it2i(numeric);
-    }
-    return fallback;
+    return js_dom_svg_number(value, fallback);
 }
 
 static CssAnimComposite js_web_animation_composite(Item value) {
@@ -15484,7 +15378,7 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
         if (get_type_id(frame) != LMD_TYPE_MAP &&
             get_type_id(frame) != LMD_TYPE_VMAP) continue;
 
-        Item offset = js_get_key_default(frame, js_string_key("offset"));
+        Item offset = js_get_key_cstr(frame, "offset");
         if (!is_js_undefined(offset) && offset.item != ITEM_NULL) {
             float parsed_offset = js_web_animation_number(offset, stop->offset);
             if (isfinite(parsed_offset)) stop->offset = parsed_offset;
@@ -15510,8 +15404,7 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
             CssAnimatedProp parsed;
             if (!css_animation_parse_property_value(property, value, &parsed,
                                                     pool)) continue;
-            parsed.composite = js_web_animation_composite(js_get_key_default(
-                frame, js_string_key("composite")));
+            parsed.composite = js_web_animation_composite(js_get_key_cstr(frame, "composite"));
             stop->properties = (CssAnimatedProp*)pool_calloc(
                 pool, sizeof(CssAnimatedProp));
             if (!stop->properties) return nullptr;
@@ -15564,11 +15457,11 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
     timing.type = TIMING_LINEAR;
     if (get_type_id(options_item) == LMD_TYPE_MAP ||
         get_type_id(options_item) == LMD_TYPE_VMAP) {
-        Item duration = js_get_key_default(options_item, js_string_key("duration"));
+        Item duration = js_get_key_cstr(options_item, "duration");
         if (!is_js_undefined(duration) && duration.item != ITEM_NULL) {
             duration_ms = js_web_animation_number(duration, 0.0f);
         }
-        Item easing = js_get_key_default(options_item, js_string_key("easing"));
+        Item easing = js_get_key_cstr(options_item, "easing");
         const char* easing_text = fn_to_cstr(easing);
         if (easing_text) {
             css_animation_parse_timing_function_text(easing_text, &timing);
@@ -15591,8 +15484,7 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
     // A plain object keeps pause() on the normal JS method path; the private
     // native holder supplies the DOM-owned state to currentTime accessors.
     Item animation = js_new_object();
-    js_set_key_default(animation, js_string_key("__lambda_web_animation_host"),
-                    holder);
+    js_set_key_cstr(animation, "__lambda_web_animation_host", holder);
     js_set_native_key(animation, js_string_key("pause"), js_web_animation_pause);
     js_install_native_accessor(animation, js_string_key("currentTime"),
         js_new_native_function(js_web_animation_current_time_get),
@@ -15615,34 +15507,26 @@ extern "C" void js_dom_install_collection_globals(void) {
     _install_node_iface(global);
     // Document wrappers are module-owned, but bare WebIDL constructor lookup
     // must still succeed before libraries inspect static Document features.
-    _install_iface(global, "Document");
-    _link_iface_proto(global, "Document", "Node");
-    _install_iface(global, "HTMLDocument");
-    _link_iface_proto(global, "HTMLDocument", "Document");
-    _install_iface(global, "Element");
-    _link_iface_proto(global, "Element", "Node");
-    _install_iface(global, "HTMLElement");
-    _link_iface_proto(global, "HTMLElement", "Element");
-    _install_iface(global, "SVGElement");
-    _link_iface_proto(global, "SVGElement", "Element");
-    _install_iface(global, "SVGGraphicsElement");
-    _link_iface_proto(global, "SVGGraphicsElement", "SVGElement");
-    _install_iface(global, "SVGSVGElement");
-    _link_iface_proto(global, "SVGSVGElement", "SVGGraphicsElement");
-    _install_iface(global, "SVGPathElement");
-    _link_iface_proto(global, "SVGPathElement", "SVGGraphicsElement");
-    _install_iface(global, "SVGTextContentElement");
-    _link_iface_proto(global, "SVGTextContentElement", "SVGGraphicsElement");
+    static const char* iface_links[][2] = {
+        {"Document", "Node"}, {"HTMLDocument", "Document"},
+        {"Element", "Node"}, {"HTMLElement", "Element"},
+        {"SVGElement", "Element"}, {"SVGGraphicsElement", "SVGElement"},
+        {"SVGSVGElement", "SVGGraphicsElement"},
+        {"SVGPathElement", "SVGGraphicsElement"},
+        {"SVGTextContentElement", "SVGGraphicsElement"},
+    };
+    for (size_t i = 0; i < sizeof(iface_links) / sizeof(iface_links[0]); i++) {
+        _install_iface(global, iface_links[i][0]);
+        _link_iface_proto(global, iface_links[i][0], iface_links[i][1]);
+    }
     // JointJS Vectorizer gates its SVG implementation on window.SVGAngle;
     // without this legacy WebIDL interface it installs a non-SVG fallback.
-    _install_iface(global, "SVGAngle");
-    _install_iface(global, "SVGMatrix");
-    _install_iface(global, "SVGTransform");
-    _install_iface(global, "SVGPoint");
-    js_dom_install_svg_value_constructor(global, "DOMMatrix",
-        js_dom_matrix_constructor);
-    js_dom_install_svg_value_constructor(global, "DOMPoint",
-        js_dom_point_constructor);
+    static const char* svg_ifaces[] = {"SVGAngle", "SVGMatrix", "SVGTransform", "SVGPoint"};
+    for (size_t i = 0; i < sizeof(svg_ifaces) / sizeof(svg_ifaces[0]); i++) {
+        _install_iface(global, svg_ifaces[i]);
+    }
+    js_dom_install_value_constructor(global, "DOMMatrix", js_dom_matrix_constructor, true);
+    js_dom_install_value_constructor(global, "DOMPoint", js_dom_point_constructor, true);
     int html_interface_count = (int)(sizeof(s_js_dom_html_interfaces) /
         sizeof(s_js_dom_html_interfaces[0]));
     for (int i = 0; i < html_interface_count; i++) {
@@ -15668,21 +15552,20 @@ extern "C" void js_dom_install_collection_globals(void) {
         // Bootstrap needs these WebIDL prototype aliases before any instance
         // exists. Each carries its direct operation payload; populating every
         // Jube prototype here would mutate the sealed NameId module table.
-        js_set_key_default(element_proto_root.get(), js_string_key("querySelector"),
-            method_root.get());
+        js_set_key_cstr(element_proto_root.get(), "querySelector", method_root.get());
         method_root.set(js_new_native_payload_function(
             js_dom_element_prototype_operation_body,
             (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
-        js_set_key_default(element_proto_root.get(), js_string_key("querySelectorAll"),
-            method_root.get());
+        js_set_key_cstr(element_proto_root.get(), "querySelectorAll", method_root.get());
         js_set_native_key(element_proto_root.get(), js_string_key("animate"), js_dom_element_animate);
     }
-    _install_iface(global, "Range");
-    _install_iface(global, "Selection");
-    _install_iface(global, "HTMLCollection");
-    _install_iface(global, "HTMLFormControlsCollection");
-    _install_iface(global, "HTMLOptionsCollection");
-    _install_iface(global, "NodeList");
+    static const char* collection_ifaces[] = {
+        "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
+        "HTMLOptionsCollection", "NodeList",
+    };
+    for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
+        _install_iface(global, collection_ifaces[i]);
+    }
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_xpath_evaluator(global);
@@ -15734,9 +15617,9 @@ extern "C" void js_dom_install_option_constructor(void) {
     Item ctor = js_new_native_constructor(_option_ctor);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Option"))});
     Item proto = js_new_object();
-    js_set_key_default(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
-    js_set_key_default(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
-    js_set_key_default(global, (Item){.item = s2it(heap_create_name("Option"))}, ctor);
+    js_set_key_cstr(proto, "constructor", ctor);
+    js_set_key_cstr(ctor, "prototype", proto);
+    js_set_key_cstr(global, "Option", ctor);
     log_debug("js_dom_install_option_constructor: installed Option");
 }
 JS_FORWARD_VOID( js_dom_collections_release_context, (void), reset_live_dom_collections, ())

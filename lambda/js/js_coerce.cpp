@@ -36,12 +36,6 @@ static inline bool is_object_value(Item value) {
            t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT;
 }
 
-// Per ES §7.1.1 step 4.b: a valid ToPrimitive return is *not* an object.
-// We treat the four object TypeIds above as objects for this check.
-static inline bool result_is_object(Item result) {
-    return is_object_value(result);
-}
-
 static inline bool js_coerce_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
@@ -93,7 +87,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         Item hint_item = (Item){.item = s2it(heap_create_name(hint_str))};
         Item args[1] = { hint_item };
         JS_ASSIGN_OR_RETURN(result, js_call_function(to_prim, value, args, 1));
-        if (result_is_object(result)) {
+        if (is_object_value(result)) {
             return js_throw_type_error("Cannot convert object to primitive value");
         }
         return result;
@@ -134,7 +128,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         JS_ASSIGN_OR_RETURN(fn, js_get_key_default(value, method_keys[i]));
         if (fn.item == ItemNull.item || !js_is_callable(fn)) continue;
         JS_ASSIGN_OR_RETURN(result, js_call_function(fn, value, NULL, 0));
-        if (!result_is_object(result)) {
+        if (!is_object_value(result)) {
             return result;
         }
     }

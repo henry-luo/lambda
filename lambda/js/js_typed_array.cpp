@@ -1090,8 +1090,8 @@ static void js_atomics_set_waiter_status(JsAtomicsWaiter* waiter, JsAtomicsWaite
 
 static Item js_atomics_wait_async_result(bool async, Item value) {
     Item result = js_new_object();
-    js_set_key_default(result, (Item){.item = s2it(heap_create_name("async"))}, (Item){.item = b2it(async)});
-    js_set_key_default(result, (Item){.item = s2it(heap_create_name("value"))}, value);
+    js_set_key_cstr(result, "async", (Item){.item = b2it(async)});
+    js_set_key_cstr(result, "value", value);
     return result;
 }
 
@@ -1551,8 +1551,7 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
         (Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))}));
     Rooted<Item> proto_root(roots, ItemNull);
     if (get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) return;
-    proto_root.set(js_get_key_default(ctor_root.get(),
-        (Item){.item = s2it(heap_create_name("prototype"))}));
+    proto_root.set(js_get_key_cstr(ctor_root.get(), "prototype"));
     if (get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
         js_set_prototype(buffer_root.get(), proto_root.get());
     }
@@ -2819,58 +2818,41 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
         memset((int8_t*)data + start, (int8_t)js_typed_array_to_int_n(num_val, 8, true), count);
         return ta_item;
     }
+#define JS_TYPED_ARRAY_FILL_LOOP(c_type, expression) \
+    { \
+        c_type fill_value = (expression); \
+        c_type* fill_ptr = (c_type*)data + start; \
+        for (int i = 0; i < count; i++) fill_ptr[i] = fill_value; \
+        break; \
+    }
     case JS_TYPED_INT16: {
-        int16_t v = (int16_t)js_typed_array_to_int_n(num_val, 16, true);
-        int16_t* p = (int16_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(int16_t, js_typed_array_to_int_n(num_val, 16, true));
     }
     case JS_TYPED_UINT16: {
-        uint16_t v = (uint16_t)js_typed_array_to_int_n(num_val, 16, false);
-        uint16_t* p = (uint16_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(uint16_t, js_typed_array_to_int_n(num_val, 16, false));
     }
     case JS_TYPED_INT32: {
-        int32_t v = (int32_t)js_typed_array_to_int_n(num_val, 32, true);
-        int32_t* p = (int32_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(int32_t, js_typed_array_to_int_n(num_val, 32, true));
     }
     case JS_TYPED_UINT32: {
-        uint32_t v = (uint32_t)js_typed_array_to_int_n(num_val, 32, false);
-        uint32_t* p = (uint32_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(uint32_t, js_typed_array_to_int_n(num_val, 32, false));
     }
     case JS_TYPED_FLOAT16: {
-        uint16_t v = js_float64_to_float16_bits(num_val);
-        uint16_t* p = (uint16_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(uint16_t, js_float64_to_float16_bits(num_val));
     }
     case JS_TYPED_FLOAT32: {
-        float v = (float)num_val;
-        float* p = (float*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(float, (float)num_val);
     }
     case JS_TYPED_FLOAT64: {
-        double v = num_val;
-        double* p = (double*)data + start;
-        for (int i = 0; i < count; i++) p[i] = v;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(double, num_val);
     }
     case JS_TYPED_BIGINT64: {
-        int64_t* p = (int64_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = bigint_i64;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(int64_t, bigint_i64);
     }
     case JS_TYPED_BIGUINT64: {
-        uint64_t* p = (uint64_t*)data + start;
-        for (int i = 0; i < count; i++) p[i] = bigint_u64;
-        return ta_item;
+        JS_TYPED_ARRAY_FILL_LOOP(uint64_t, bigint_u64);
     }
+#undef JS_TYPED_ARRAY_FILL_LOOP
     default:
         break;
     }
@@ -2888,7 +2870,6 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (!dst || js_typed_array_is_out_of_bounds(dst)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
     }
-    if (!dst) return (Item){.item = ITEM_JS_UNDEFINED};
     int target_len = js_typed_array_current_length(dst);
     if (offset < 0) return js_throw_range_error("offset is out of bounds");
 
@@ -2899,7 +2880,6 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
             js_typed_array_is_out_of_bounds(dst)) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
         }
-        if (!src) return (Item){.item = ITEM_JS_UNDEFINED};
         int src_len = js_typed_array_current_length(src);
         if (ta_set_stats_enabled) {
             g_js_ta_set_stats.typed_array_source_calls++;

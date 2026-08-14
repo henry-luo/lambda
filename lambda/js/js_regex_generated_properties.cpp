@@ -5,7 +5,7 @@ static bool js_regex_match_property_name(const char* name, int len, const char* 
     return (int)strlen(target) == len && strncmp(name, target, len) == 0;
 }
 
-static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
+bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
     int lo = 0;
     int hi = count - 1;
     while (lo <= hi) {

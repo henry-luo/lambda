@@ -879,10 +879,6 @@ static bool js_source_has_identifier(const char* source, size_t length,
     return false;
 }
 
-static bool js_source_has_soft_yield_identifier(const char* source, size_t length) {
-    return js_source_has_identifier(source, length, js_source_soft_yield_identifier_at);
-}
-
 static bool js_source_soft_await_identifier_at(const char* source, size_t length, size_t pos) {
     if (!js_source_assignment_keyword_at(source, length, pos, "await", 5)) {
         if (pos + 5 > length || memcmp(source + pos, "await", 5) != 0) return false;
@@ -916,7 +912,8 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
     bool has_nul = false;
     bool has_assignment_keyword = js_source_has_assignment_keyword(source, length);
     bool has_soft_await_identifier = js_source_has_soft_await_identifier(source, length);
-    bool has_soft_yield_identifier = js_source_has_soft_yield_identifier(source, length);
+    bool has_soft_yield_identifier = js_source_has_identifier(
+        source, length, js_source_soft_yield_identifier_at);
     bool has_invalid_tagged_template_escape = js_source_has_invalid_tagged_template_escape(source, length);
     for (size_t i = 0; i + 3 < length; i++) {
         if (source[i] == '<' && source[i + 1] == '!' && source[i + 2] == '-' && source[i + 3] == '-') {

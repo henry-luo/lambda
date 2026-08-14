@@ -93,15 +93,13 @@ static Item js_history_drain_events(void) {
 
     if (task->dispatch_popstate) {
         Item event = js_create_event("popstate", false, false);
-        js_set_key_default(event, make_string_item("state"), task->state);
+        js_set_key_cstr(event, "state", task->state);
         js_dom_dispatch_event(window, event);
     }
     if (task->dispatch_hashchange) {
         Item event = js_create_event("hashchange", false, false);
-        js_set_key_default(event, make_string_item("oldURL"),
-                        js_history_string(task->old_url));
-        js_set_key_default(event, make_string_item("newURL"),
-                        js_history_string(task->new_url));
+        js_set_key_cstr(event, "oldURL", js_history_string(task->old_url));
+        js_set_key_cstr(event, "newURL", js_history_string(task->new_url));
         js_dom_dispatch_event(window, event);
     }
     js_history_task_destroy(task);
@@ -150,12 +148,10 @@ static void js_history_refresh_object(void) {
     DomDocument* document = js_history_document();
     if (!document) return;
     Item global = js_get_global_this();
-    Item history = js_get_key_default(global, make_string_item("history"));
+    Item history = js_get_key_cstr(global, "history");
     if (get_type_id(history) != LMD_TYPE_MAP) return;
-    js_set_key_default(history, make_string_item("length"),
-                    (Item){.item = i2it(radiant_history_length(document))});
-    js_set_key_default(history, make_string_item("state"),
-                    radiant_history_state(document));
+    js_set_key_cstr(history, "length", (Item){.item = i2it(radiant_history_length(document))});
+    js_set_key_cstr(history, "state", radiant_history_state(document));
 }
 
 static const char* js_history_optional_url(Item value) {
@@ -214,17 +210,19 @@ extern "C" void js_history_install_globals(void) {
 
     Item global = js_get_global_this();
     Item document_proxy = js_get_document_object_value();
-    js_set_key_default(global, make_string_item("location"), document_proxy);
+    js_set_key_cstr(global, "location", document_proxy);
 
     Item history = js_new_object();
-    js_set_native_key(history, make_string_item("pushState"), js_history_push);
-    js_set_native_key(history, make_string_item("replaceState"), js_history_replace);
-    js_set_native_key(history, make_string_item("back"), js_history_back);
-    js_set_native_key(history, make_string_item("forward"), js_history_forward);
-    js_set_native_key(history, make_string_item("go"), js_history_go);
-    js_set_key_default(history, make_string_item("scrollRestoration"),
-                    make_string_item(radiant_history_scroll_restoration(document)));
-    js_set_key_default(global, make_string_item("history"), history);
+#define JS_HISTORY_METHODS(M) \
+    M("pushState", js_history_push) M("replaceState", js_history_replace) \
+    M("back", js_history_back) M("forward", js_history_forward) M("go", js_history_go)
+#define JS_HISTORY_INSTALL_METHOD(name, target) \
+    js_set_native_key(history, make_string_item(name), target);
+    JS_HISTORY_METHODS(JS_HISTORY_INSTALL_METHOD)
+#undef JS_HISTORY_INSTALL_METHOD
+#undef JS_HISTORY_METHODS
+    js_set_key_cstr(history, "scrollRestoration", make_string_item(radiant_history_scroll_restoration(document)));
+    js_set_key_cstr(global, "history", history);
     js_set_native_key(global, make_string_item("focus"), js_history_window_noop);
     js_set_native_key(global, make_string_item("blur"), js_history_window_noop);
     js_history_refresh_object();

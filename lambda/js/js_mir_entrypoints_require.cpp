@@ -56,7 +56,7 @@ static Item js_require_module_not_found(const char* specifier) {
     char message[640];
     snprintf(message, sizeof(message), "Cannot find module '%s'", name);
     Item error = js_new_error_with_name(make_string_item("Error"), make_string_item(message));
-    js_set_key_default(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
+    js_set_key_cstr(error, "code", make_string_item("MODULE_NOT_FOUND"));
     // the returned error must stay attached to the call result; there is no
     // pending side channel for require callers to recover.
     return js_throw_value(error);
@@ -421,6 +421,45 @@ static Item js_mir_compile_failure_cleanup(MIR_context_t ctx,
     return (Item){.item = ITEM_ERROR};
 }
 
+static bool js_mir_prepare_eval_context(Runtime* runtime,
+        bool initialize_thread, EvalContext** out_context,
+        bool* out_reusing_context) {
+    if (!out_context || !out_reusing_context) return false;
+    EvalContext* js_context = NULL;
+    bool reusing_context = context && context->heap;
+    if (reusing_context) {
+        js_context = context;
+        if (!context->type_list) {
+            context->type_list = runtime && runtime->type_list
+                ? runtime->type_list
+                : arraylist_new(64);
+        }
+    } else {
+        js_context = runtime_get_eval_context(runtime);
+        if (!js_context) return false;
+        bool thread_ready = initialize_thread
+            ? eval_context_thread_initialize(js_context)
+            : eval_context_thread_matches(js_context);
+        if (!thread_ready) return false;
+        heap_init();
+        context->pool = context->heap->pool;
+        context->name_pool = name_pool_create_runtime_static(context->pool);
+        context->type_list = arraylist_new(64);
+        // Runtime and the active context must publish the same fresh owners so
+        // compile-error cleanup can release the heap exactly once.
+        if (runtime) {
+            runtime->heap = context->heap;
+            runtime->name_pool = context->name_pool;
+            runtime->type_list = (ArrayList*)context->type_list;
+        }
+    }
+    context->runtime = runtime;
+    if (!js_runtime_state_thread_initialize(context)) return false;
+    *out_context = js_context;
+    *out_reusing_context = reusing_context;
+    return true;
+}
+
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
                              const char* filename, uint64_t* result_home) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -430,36 +469,9 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // to another owner after this call.
     EvalContext* js_context = NULL;
     bool reusing_context = false;
-
-    if (context && context->heap) {
-        js_context = context;
-        reusing_context = true;
-        if (!context->type_list) {
-            context->type_list = runtime && runtime->type_list
-                ? runtime->type_list
-                : arraylist_new(64);
-        }
-    } else {
-        js_context = runtime_get_eval_context(runtime);
-        if (!js_context) return (Item){.item = ITEM_ERROR};
-        if (!eval_context_thread_initialize(js_context)) {
-            return (Item){.item = ITEM_ERROR};
-        }
-        heap_init();
-        context->pool = context->heap->pool;
-        // Keep the fresh static root open while this initial closure is
-        // compiled; generated names are sealed only immediately before the
-        // first JS execution (D5.4.3, RN-NamePool).
-        context->name_pool = name_pool_create_runtime_static(context->pool);
-        context->type_list = arraylist_new(64);
-        // The canonical context owns this fresh heap; publish the same owner
-        // immediately so runtime_cleanup releases it even if compilation fails.
-        runtime->heap = context->heap;
-        runtime->name_pool = context->name_pool;
-        runtime->type_list = (ArrayList*)context->type_list;
+    if (!js_mir_prepare_eval_context(runtime, true, &js_context, &reusing_context)) {
+        return (Item){.item = ITEM_ERROR};
     }
-    context->runtime = runtime;
-    if (!js_runtime_state_thread_initialize(context)) return ItemError;
 
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
@@ -863,39 +875,14 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // deferred callbacks share one lifetime owner.
     EvalContext* js_context = NULL;
     bool reusing_context = false;
-
-    if (context->heap) {
-        js_context = context;
-        reusing_context = true;
-        if (!context->type_list) {
-            context->type_list = runtime && runtime->type_list
-                ? runtime->type_list
-                : arraylist_new(64);
-        }
-    } else {
-        js_context = runtime_get_eval_context(runtime);
-        if (!js_context || !eval_context_thread_matches(js_context)) {
-            jm_clear_active_js_transpile(tp, NULL, NULL);
-            js_transpiler_destroy(tp);
-            jm_clear_active_js_transpile(NULL, NULL, owned_source);
-            mem_free(owned_source);
-            log_error("js-mir: Runtime context differs from eval-thread owner");
-            return ItemError;
-        }
-        heap_init();
-        context->pool = context->heap->pool;
-        // The initial script/import closure owns the static collection point.
-        // Dynamic allocation starts only after MIR lowering has completed and
-        // the root is sealed (D5.4.3, D5.4.4).
-        context->name_pool = name_pool_create_runtime_static(context->pool);
-        context->type_list = arraylist_new(64);
-        // Keep Runtime and its canonical context on the same fresh heap.
-        runtime->heap = context->heap;
-        runtime->name_pool = context->name_pool;
-        runtime->type_list = (ArrayList*)context->type_list;
+    if (!js_mir_prepare_eval_context(runtime, false, &js_context, &reusing_context)) {
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
+        mem_free(owned_source);
+        log_error("js-mir: Runtime context differs from eval-thread owner");
+        return ItemError;
     }
-    context->runtime = runtime;
-    if (!js_runtime_state_thread_initialize(context)) return ItemError;
     if (runtime->dom_ui_context) {
         // The stack worker binds a distinct execution realm. Carry the host's
         // borrowed UI session into that realm before any DOM wrapper or task is
@@ -1989,17 +1976,9 @@ static Item js_cjs_key(const char* name, int len) {
     return (Item){.item = s2it(heap_create_name(name, len))};
 }
 
-static Item js_cjs_key(const char* name) {
-    return js_cjs_key(name, (int)strlen(name));
-}
-
 #define js_cjs_module_stack_state (js_runtime_state.cjs.module_stack)
 #define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
 #define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
-
-static bool js_cjs_register_roots(void) {
-    return js_root_range_ensure_registered(&js_cjs_module_stack_state.roots);
-}
 
 extern "C" void js_cjs_metadata_reset(void) {
     js_item_stack_clear(&js_cjs_module_stack_state);
@@ -2034,7 +2013,7 @@ static void js_cjs_store_module(Item filename, Item module) {
 }
 
 static Item js_cjs_exports(Item module) {
-    Item exports_key = js_cjs_key("exports");
+    Item exports_key = js_cjs_key("exports", (int)strlen("exports"));
     Item exports = js_get_key_default(module, exports_key);
     if (get_type_id(exports) == LMD_TYPE_NULL || get_type_id(exports) == LMD_TYPE_UNDEFINED) {
         exports = js_new_object();
@@ -2044,7 +2023,7 @@ static Item js_cjs_exports(Item module) {
 }
 
 static Item js_cjs_children(Item module) {
-    Item children_key = js_cjs_key("children");
+    Item children_key = js_cjs_key("children", (int)strlen("children"));
     Item children = js_get_key_default(module, children_key);
     if (get_type_id(children) != LMD_TYPE_ARRAY) {
         children = js_array_new(0);
@@ -2056,21 +2035,23 @@ static Item js_cjs_children(Item module) {
 static void js_cjs_update_cached_default(Item filename, Item module) {
     Item ns = js_module_get(filename);
     if (get_type_id(ns) != LMD_TYPE_MAP && get_type_id(ns) != LMD_TYPE_OBJECT) return;
-    js_set_key_default(ns, js_cjs_key("default"), js_cjs_exports(module));
+    js_set_key_default(ns, js_cjs_key("default", (int)strlen("default")), js_cjs_exports(module));
 }
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
-    if (!js_cjs_register_roots()) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
     if (get_type_id(module) != LMD_TYPE_MAP && get_type_id(module) != LMD_TYPE_OBJECT) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    js_set_key_default(module, js_cjs_key("id"), filename);
-    js_set_key_default(module, js_cjs_key("filename"), filename);
-    js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(module, js_cjs_key("id", (int)strlen("id")), filename);
+    js_set_key_default(module, js_cjs_key("filename", (int)strlen("filename")), filename);
+    js_set_key_default(module, js_cjs_key("loaded", (int)strlen("loaded")), (Item){.item = ITEM_FALSE});
     js_cjs_exports(module);
     js_cjs_children(module);
     Item parent = js_cjs_current_module();
-    js_set_key_default(module, js_cjs_key("parent"), parent);
+    js_set_key_default(module, js_cjs_key("parent", (int)strlen("parent")), parent);
     if (get_type_id(filename) == LMD_TYPE_STRING) {
         js_cjs_store_module(filename, module);
         js_cjs_update_cached_default(filename, module);
@@ -2085,7 +2066,7 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
 
 extern "C" Item js_cjs_complete(Item module) {
     if (get_type_id(module) == LMD_TYPE_MAP || get_type_id(module) == LMD_TYPE_OBJECT) {
-        js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(module, js_cjs_key("loaded", (int)strlen("loaded")), (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -2112,12 +2093,12 @@ extern "C" Item js_cjs_leave(Item module) {
 
 static Item js_cjs_create_module_metadata(Item child_filename, Item exports) {
     Item module = js_new_object();
-    js_set_key_default(module, js_cjs_key("id"), child_filename);
-    js_set_key_default(module, js_cjs_key("filename"), child_filename);
-    js_set_key_default(module, js_cjs_key("exports"), exports);
-    js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(module, js_cjs_key("children"), js_array_new(0));
-    js_set_key_default(module, js_cjs_key("parent"), ItemNull);
+    js_set_key_default(module, js_cjs_key("id", (int)strlen("id")), child_filename);
+    js_set_key_default(module, js_cjs_key("filename", (int)strlen("filename")), child_filename);
+    js_set_key_default(module, js_cjs_key("exports", (int)strlen("exports")), exports);
+    js_set_key_default(module, js_cjs_key("loaded", (int)strlen("loaded")), (Item){.item = ITEM_TRUE});
+    js_set_key_default(module, js_cjs_key("children", (int)strlen("children")), js_array_new(0));
+    js_set_key_default(module, js_cjs_key("parent", (int)strlen("parent")), ItemNull);
     js_cjs_store_module(child_filename, module);
     return module;
 }
