@@ -99,20 +99,9 @@ static void js_install_lazy_host_globals(Item global) {
     }
 }
 
-typedef int (*JsHostPropertyHook)(Item receiver, Item key, Item* out);
-
-static bool js_host_object_property_dispatch(Item object, Item key, Item* out,
-        JsHostPropertyHook jube_hook, JsHostPropertyHook host_hook) {
-    // DOM3: declared-interface types dispatch through compiled member records.
-    if (jube_hook(object, key, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    return type && type->host_ops && host_hook && host_hook(object, key, out);
-}
-
 bool js_host_object_has_property(Item object, Item key, Item* out) {
-    const JubeTypeDef* type = js_host_object_type(object);
-    return js_host_object_property_dispatch(object, key, out, jube_member_has,
-        type && type->host_ops ? type->host_ops->has_property : NULL);
+    if (jube_member_has(object, key, out)) return true;
+    return false;
 }
 
 static void js_install_jube_global_namespaces(Item global) {
@@ -181,22 +170,18 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
 }
 
 bool js_host_object_delete_property(Item object, Item key, Item* out) {
-    const JubeTypeDef* type = js_host_object_type(object);
-    return js_host_object_property_dispatch(object, key, out, jube_member_delete,
-        type && type->host_ops ? type->host_ops->delete_property : NULL);
+    if (jube_member_delete(object, key, out)) return true;
+    return false;
 }
 
 bool js_host_object_own_property_names(Item object, Item* out) {
     if (jube_member_own_keys(object, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    return type && type->host_ops && type->host_ops->own_property_keys &&
-        type->host_ops->own_property_keys(object, out);
+    return false;
 }
 
 bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
-    const JubeTypeDef* type = js_host_object_type(object);
-    return js_host_object_property_dispatch(object, key, out, jube_member_descriptor,
-        type && type->host_ops ? type->host_ops->get_own_property_descriptor : NULL);
+    if (jube_member_descriptor(object, key, out)) return true;
+    return false;
 }
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16

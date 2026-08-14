@@ -619,9 +619,21 @@ typedef enum JitAbiRep {
     JIT_ABI_POINTER
 } JitAbiRep;
 
+// MAY_ALLOCATE must stay value 0: an unaudited row, or any zero-initialized
+// JitCallEffects, then decodes as the CONSERVATIVE answer. The reverse order
+// would make silence mean "preserves", which a consumer would read as
+// permission to elide work the callee actually needs. Corrected 2026-08-14 to
+// match the shipping enum in `lambda/runtime/sys_func_registry.h`; the
+// ordering is load-bearing, not cosmetic.
+//
+// PRESERVES means the call leaves `Context.side_number_top` where it found it
+// — the postcondition a caller needs to answer "did this call leave anything
+// above my pre-call top?". It admits both "never allocates" and "allocates and
+// restores"; a callee doing the latter must not return an Item pointing into
+// the region it released.
 typedef enum JitNumberStackEffect {
-    JIT_NUMBER_STACK_PRESERVES,
-    JIT_NUMBER_STACK_MAY_ALLOCATE
+    JIT_NUMBER_STACK_MAY_ALLOCATE = 0,
+    JIT_NUMBER_STACK_PRESERVES
 } JitNumberStackEffect;
 
 typedef struct JitAbiValue {

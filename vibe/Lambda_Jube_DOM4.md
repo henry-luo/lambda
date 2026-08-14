@@ -1,10 +1,17 @@
-# Lambda Jube DOM — Stage 4 (DOM4): Compile-Time Member Ordinals — Proposal
+# Lambda Jube DOM — Stage 4 (DOM4): Compile-Time Member Ordinals
 
-> **Status**: PROPOSAL (2026-08-13). Not started.
+> **Status**: IMPLEMENTED (2026-08-14). DOM4 exit gates pass.
+> **LOC gate**: `./utils/count_loc.sh` totals 1,317,921 lines at the frozen baseline
+> (`temp/dom4_loc_baseline.txt`) and 1,316,750 at exit (`temp/dom4_loc_exit.txt`):
+> 1,171 source lines removed in the same scope, exceeding the 1,000-line D4k gate.
+> **Validation**: 36/36 DOM fixtures, 350/350 full JS GTests with the ordinal path,
+> 350/350 with `LAMBDA_JS_NO_JUBE_ORDINAL=1`, and the all-member ordinal parity GTest
+> pass. `make build`, `make build-test`, `make test-lambda-baseline`, `make release`,
+> and the node-fs/node-net/node-zlib module builds are green.
 > **Parent design**: [Lambda_Jube_DOM3.md](./Lambda_Jube_DOM3.md) — table-driven property
 > dispatch (`JubeMemberRecord` tables, Lambda-type-syntax interface declarations, binding
 > tables). DOM3 phases 0–5 are implemented and green; `dom_node` has 142 declared members
-> routed through record dispatch with `host_ops = NULL`.
+> routed through record dispatch and record-owned hooks.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2).
 > **Spec anchors**: **D7.4.4** (single host-object protocol — this doc's charter ruling,
@@ -239,9 +246,10 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   exits with the type-level fallback dispatch mechanism gone, not merely unused:
   declared interfaces + record-owned hooks (`named_get`/`named_set`/`object_*`,
   `indexed_get`, `JubeTypeDef.destroy`) become the **only** host-object protocol.
-  Inventory (2026-08-13) says this is cheap: `legacy_ops` already has zero users
-  (all 13 binding rows NULL) and `host_ops` has two instances — one dead for property
-  traffic (range/selection), one live (`velmt`). Exit criteria:
+  The pre-DOM4 inventory (2026-08-13) established that the sweep was bounded:
+  `legacy_ops` had zero users (all 13 binding rows NULL) and `host_ops` had two
+  instances — one dead for property traffic (range/selection), one live (`velmt`).
+  Exit criteria:
   1. Zero `host_ops`/`legacy_ops` instances in the tree (velmt migrated; range/selection
      stripped after the `invalidate` caller check).
   2. All consumer code deleted, not stubbed: the ~12 `jube_legacy_ops()` fall-through
@@ -286,9 +294,9 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   **named-member** protocol and apply identically to all three carriers (D7.4.4); the
   carrier decides which **structural** faces exist virtually. **Scope (user ruling
   2026-08-13): direction only in DOM4.** The Lambda runtime is likely not ready for the
-  new carriers; varray and velmt are future Jube work (their own stage). **DOM4 settles
-  vmap first** — ordinals, subtypes, host_ops retirement, and the fast path all land on
-  the existing VMap carrier; nothing in DOM4 depends on the new carriers existing.
+  new carriers; varray and velmt are future Jube work (their own stage). **DOM4 settled
+  vmap first** — ordinals, subtypes, protocol retirement, and the fast path all landed
+  on the existing VMap carrier; nothing in DOM4 depends on the new carriers existing.
   Collections stay materialized Arrays for now (the refresh-sweep cost is accepted,
   known, and quarantined behind D4l as the future fix); DOM-node carrier move = OQ9.
 
@@ -420,65 +428,42 @@ Gates per phase follow the DOM3 pattern: `make build`, focused DOM GTests, full 
 plus the DOM3 Phase-5 wrap-sweep benchmark (query_ms / walk_ms) and jq_find_repro as the
 perf/behavior canaries.
 
-- **P0 — Registry groundwork** (no JS changes). Type slots + O(1) `jube_record_for_type`
+- **P0 — Registry groundwork** ✅ Type slots + O(1) `jube_record_for_type`
   (D4c, benefits the slow path immediately); compile-time query API (3.1); result-type
   retention on records; by-ordinal runtime entries (3.2) with the shared dispatch kernel.
-  New gate: a **parity harness** GTest that, for every declared type, sweeps every member
+  The **parity harness** GTest, for every declared type, sweeps every member
   ordinal and diffs `*_by_ordinal` against the by-name path (get/set/call, husk receivers
   and mismatched kind × member pairs included).
-- **P0.5 — Family split** (D4h/D4i; independent of the compiler work and de-risks it).
+- **P0.5 — Family split** ✅ (D4h/D4i).
   Interface-inheritance flattening with prefix layout + registration assert (H4);
   wrap-time tag→type selection; migrate guard clusters into subtypes
   (character_data / svg first — pure applicability, no behavior forks — then the form
   controls), fold 1–2-row clusters into handler-internal branches; delete
   `guard`/`next_same_name` from the dispatch kernel; brand-compare sweep (H4b);
   convert `_is_tag` strcasecmp to `tag_name_id()` integer compares (§6).
-  Gates: full DOM3 gate set with **deliberate, reviewed golden updates** for prototype
+  The full DOM3 gate set passes with **deliberate, reviewed golden updates** for prototype
   identity (per-subtype prototypes are an intended behavior change toward browser
   semantics), plus H4c mismatched-pair parity.
-- **P0.6 — host_ops/legacy_ops retirement** (carries D4k, which subsumes D4j's shim
-  goal; can run parallel to P1). Inventory 2026-08-13: `legacy_ops` has **zero users** —
-  all 13 binding rows in the tree are NULL (radiant ×10, node_fs ×2, hostobj_demo) — and
-  `host_ops` has exactly two instances: `radiant_dom_node_host_ops` (stamped on
-  range/selection, dead for all property traffic since records + prototype_seed answer
-  first; only the `invalidate` slot needs a caller check — no `ops->invalidate` call
-  site found) and `radiant_velmt_host_ops` (fully live: velmt has no binding row at
-  all). Steps:
-  1. Delete the ~12 dead `jube_legacy_ops()` fall-through checks in jube_interface.cpp —
-     no migration needed, they guard nothing today (field removal = optional ABI bump).
-  2. Migrate `velmt` to a declared interface + binding table (node_fs file_handle/stats
-     rows are the OWNING_NATIVE template: records + `JubeTypeDef.destroy`, host_ops
-     NULL).
-  3. Verify/rehome `radiant_dom_host_invalidate` (husk protocol), then strip the dead
-     pointer from range/selection.
-  4. One sweep deletes the whole dead mechanism per D4k exit criteria: `string_key_item`
-     + the host route in vmap.cpp, the js-side host_ops fallback branches (js_globals.cpp
-     has/delete/own_keys, js_runtime.cpp prototype fallback, JS_EXOTIC hook resolution),
-     then remove `JubeHostObjectOps` + the `host_ops`/`legacy_ops` fields from jube.h
-     with the JUBE_ABI_VERSION bump and update stale fallback-protocol comments/docs
-     (jube.h, hostobj_demo, JS_13).
-  Distinction to preserve: `named_get`/`named_set`/`object_*` **record-owned hooks** on
-  the binding (dom_node, document, style/CSSOM open-name surfaces) are the sanctioned
-  D4f surface and stay — retirement targets the type-level `host_ops` fallback and
-  `legacy_ops` only. Gates: grep-zero `string_key_item`, hostobj/velmt-touching suites,
-  full DOM3 gate set.
-- **P1 — Get fast path, seeded types only.** Lattice with `document`/`window` seeds; emit
+  **P0.6 — host_ops/legacy_ops retirement ✅** (D4k). The type-level fallback protocol,
+  `JubeHostObjectOps`, `host_ops`, `legacy_ops`, and `string_key_item` were removed;
+  the ABI is version 4. Record-owned `named_get`/`named_set`/`object_*` hooks remain the
+  sanctioned D4f surface. The host invalidation/husk path is preserved through declared
+  binding records.
+- **P1 — Get fast path ✅** Seeded `document`/`window` types emit
   guarded by-ordinal gets at non-computed named sites; kill switch + profile counters.
   Gate: goldens unchanged with the flag on and off; counter report shows nonzero hits on
   dom-heavy suites.
-- **P2 — Signature propagation + direct method calls.** `jube_member_result_type_at` flow
+- **P2 — Signature propagation + direct method calls ✅** `jube_member_result_type_at` flow
   (D4e) so `getElementById` / `createRange` / navigation chains type through;
   `jube_member_call_by_ordinal` for immediate calls (D4d) with error-lane parity tests
   (H5): a raising member (e.g. `compareBoundaryPoints` on a detached range) must produce
   the identical thrown error via both paths.
-- **P3 — Stores + guard-heavy rows.** `set_by_ordinal` including readonly-swallow and
+- **P3 — Stores + guard-heavy rows ✅** `set_by_ordinal` including readonly-swallow and
   reflected-attribute + live-state hooks; the select/input/option/textcontrol `value`
   guard family as the acceptance case.
-- **P4 — Cache digest + adjacent scans.** Registry digest into the MIR L1 (and planned
-  L3) cache key (H1 — must land before default-on if the cache is enabled anywhere the
-  fast path is). Convert the DOM wrapper identity cache's linear chunk scan to a
-  pointer-keyed hashmap while in the area — it is the other per-access linear scan DOM3
-  left behind (JS_13 §2 known issue).
+- **P4 — Cache digest + adjacent scans ✅** Registry digest is in the MIR L1 cache key
+  (H1), and the DOM wrapper identity cache uses a pointer-keyed index rather than a
+  per-access linear scan.
 - **(Future, not DOM4) varray carrier + collection conversion** (D4l direction). When
   the runtime is ready: introduce `VArray` (vtable + host brand); convert DOM
   collections (childNodes/children, getElementsBy*/HTMLCollection, select.options,

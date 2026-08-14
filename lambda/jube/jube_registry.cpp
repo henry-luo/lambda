@@ -4561,38 +4561,6 @@ bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user) 
     return true;
 }
 
-// release strips log_info arguments, so keep diagnostic-only helpers out of NDEBUG builds.
-#if !defined(NDEBUG)
-static int jube_host_ops_count(const JubeHostObjectOps* ops) {
-    if (!ops) return 0;
-    int count = 0;
-    if (ops->get_property) count++;
-    if (ops->set_property) count++;
-    if (ops->has_property) count++;
-    if (ops->delete_property) count++;
-    if (ops->get_own_property_descriptor) count++;
-    if (ops->own_property_keys) count++;
-    if (ops->prototype) count++;
-    if (ops->invalidate) count++;
-    if (ops->destroy) count++;
-    return count;
-}
-
-static void jube_log_module_type_ops(const JubeModuleDef* module) {
-    if (!module || !module->types || module->type_count <= 0) return;
-    for (int i = 0; i < module->type_count; i++) {
-        const JubeTypeDef* type = &module->types[i];
-        if (!type || !(type->flags & (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_OWNING_NATIVE))) {
-            continue;
-        }
-        log_info("JUBE_REG: type %s.%s host_ops=%d/9",
-                 module->name ? module->name : "(module)",
-                 type->name ? type->name : "(type)",
-                 jube_host_ops_count(type->host_ops));
-    }
-}
-#endif
-
 static void jube_install_module_globals(const JubeModuleDef* module, void* session) {
     if (!module || !session || !jube_host_node_session_is_live(session) ||
             !jube_host_api.node || !jube_host_api.node->roots || !jube_host_api.value ||
@@ -4833,9 +4801,6 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
     jube_runtime_session_lock_release();
     log_info("JUBE_REG: activated module '%s' version '%s'", module->name,
              module->version ? module->version : "(none)");
-#if !defined(NDEBUG)
-    jube_log_module_type_ops(module);
-#endif
     return jube_attach_module_to_active_runtime(entry);
 }
 

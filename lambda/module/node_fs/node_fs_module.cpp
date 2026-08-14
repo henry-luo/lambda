@@ -80,8 +80,8 @@ static Item node_fs_writev_sync(Item descriptor_item, Item buffers_item, Item po
 static Item node_fs_write_sync_export(Item descriptor_item, Item data_item, Item offset_item,
                                       Item length_item, Item position_item);
 static const JubeTypeDef node_fs_types[] = {
-    {"file_handle", JUBE_TYPE_OWNING_NATIVE, NULL, NULL, node_fs_filehandle_destroy},
-    {"stats", JUBE_TYPE_OWNING_NATIVE, NULL, NULL, node_fs_stats_destroy},
+    {"file_handle", JUBE_TYPE_OWNING_NATIVE, NULL, node_fs_filehandle_destroy},
+    {"stats", JUBE_TYPE_OWNING_NATIVE, NULL, node_fs_stats_destroy},
 };
 
 static NodeFsRequest* node_fs_pending = NULL;
@@ -2087,47 +2087,47 @@ static Item node_fs_close_sync_export(Item descriptor_item) {
 }
 
 static const JubeMemberBind node_fs_filehandle_members[] = {
-    {"fd", NULL, NULL, NULL, node_fs_filehandle_fd_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"close", NULL, NULL, NULL, NULL, NULL, node_fs_filehandle_close_call, NULL, JUBE_MEMBER_NONE},
-    {"read", NULL, NULL, NULL, NULL, NULL, node_fs_filehandle_read_call, NULL, JUBE_MEMBER_NONE},
-    {"read_file", "readFile", NULL, NULL, NULL, NULL, node_fs_filehandle_read_file_call, NULL,
+    {"fd", NULL, node_fs_filehandle_fd_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"close", NULL, NULL, NULL, node_fs_filehandle_close_call, NULL, JUBE_MEMBER_NONE},
+    {"read", NULL, NULL, NULL, node_fs_filehandle_read_call, NULL, JUBE_MEMBER_NONE},
+    {"read_file", "readFile", NULL, NULL, node_fs_filehandle_read_file_call, NULL,
      JUBE_MEMBER_NONE},
 };
 
 static const JubeMemberBind node_fs_stats_members[] = {
-    {"mode", NULL, NULL, NULL, node_fs_stats_mode_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"size", NULL, NULL, NULL, node_fs_stats_size_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"uid", NULL, NULL, NULL, node_fs_stats_uid_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"gid", NULL, NULL, NULL, node_fs_stats_gid_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"nlink", NULL, NULL, NULL, node_fs_stats_nlink_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"ino", NULL, NULL, NULL, node_fs_stats_ino_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"dev", NULL, NULL, NULL, node_fs_stats_dev_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"rdev", NULL, NULL, NULL, node_fs_stats_rdev_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"blksize", NULL, NULL, NULL, node_fs_stats_blksize_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"blocks", NULL, NULL, NULL, node_fs_stats_blocks_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"mtime_ms", "mtimeMs", NULL, NULL, node_fs_stats_mtime_ms_get, NULL, NULL, NULL,
+    {"mode", NULL, node_fs_stats_mode_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"size", NULL, node_fs_stats_size_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"uid", NULL, node_fs_stats_uid_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"gid", NULL, node_fs_stats_gid_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"nlink", NULL, node_fs_stats_nlink_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"ino", NULL, node_fs_stats_ino_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"dev", NULL, node_fs_stats_dev_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"rdev", NULL, node_fs_stats_rdev_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"blksize", NULL, node_fs_stats_blksize_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"blocks", NULL, node_fs_stats_blocks_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"mtime_ms", "mtimeMs", node_fs_stats_mtime_ms_get, NULL, NULL, NULL,
      JUBE_MEMBER_NONE},
-    {"atime_ms", "atimeMs", NULL, NULL, node_fs_stats_atime_ms_get, NULL, NULL, NULL,
+    {"atime_ms", "atimeMs", node_fs_stats_atime_ms_get, NULL, NULL, NULL,
      JUBE_MEMBER_NONE},
-    {"ctime_ms", "ctimeMs", NULL, NULL, node_fs_stats_ctime_ms_get, NULL, NULL, NULL,
+    {"ctime_ms", "ctimeMs", node_fs_stats_ctime_ms_get, NULL, NULL, NULL,
      JUBE_MEMBER_NONE},
-    {"birthtime_ms", "birthtimeMs", NULL, NULL, node_fs_stats_birthtime_ms_get, NULL, NULL, NULL,
+    {"birthtime_ms", "birthtimeMs", node_fs_stats_birthtime_ms_get, NULL, NULL, NULL,
      JUBE_MEMBER_NONE},
-    {"atime", NULL, NULL, NULL, node_fs_stats_atime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"mtime", NULL, NULL, NULL, node_fs_stats_mtime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"ctime", NULL, NULL, NULL, node_fs_stats_ctime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"birthtime", NULL, NULL, NULL, node_fs_stats_birthtime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
-    {"is_file", "isFile", NULL, NULL, NULL, NULL, node_fs_stats_is_file, NULL, JUBE_MEMBER_NONE},
-    {"is_directory", "isDirectory", NULL, NULL, NULL, NULL, node_fs_stats_is_directory, NULL,
+    {"atime", NULL, node_fs_stats_atime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"mtime", NULL, node_fs_stats_mtime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"ctime", NULL, node_fs_stats_ctime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"birthtime", NULL, node_fs_stats_birthtime_get, NULL, NULL, NULL, JUBE_MEMBER_NONE},
+    {"is_file", "isFile", NULL, NULL, node_fs_stats_is_file, NULL, JUBE_MEMBER_NONE},
+    {"is_directory", "isDirectory", NULL, NULL, node_fs_stats_is_directory, NULL,
      JUBE_MEMBER_NONE},
-    {"is_symbolic_link", "isSymbolicLink", NULL, NULL, NULL, NULL, node_fs_stats_is_symbolic_link, NULL,
+    {"is_symbolic_link", "isSymbolicLink", NULL, NULL, node_fs_stats_is_symbolic_link, NULL,
      JUBE_MEMBER_NONE},
-    {"is_block_device", "isBlockDevice", NULL, NULL, NULL, NULL, node_fs_stats_is_block_device, NULL,
+    {"is_block_device", "isBlockDevice", NULL, NULL, node_fs_stats_is_block_device, NULL,
      JUBE_MEMBER_NONE},
-    {"is_character_device", "isCharacterDevice", NULL, NULL, NULL, NULL, node_fs_stats_is_character_device, NULL,
+    {"is_character_device", "isCharacterDevice", NULL, NULL, node_fs_stats_is_character_device, NULL,
      JUBE_MEMBER_NONE},
-    {"is_fifo", "isFIFO", NULL, NULL, NULL, NULL, node_fs_stats_is_fifo, NULL, JUBE_MEMBER_NONE},
-    {"is_socket", "isSocket", NULL, NULL, NULL, NULL, node_fs_stats_is_socket, NULL, JUBE_MEMBER_NONE},
+    {"is_fifo", "isFIFO", NULL, NULL, node_fs_stats_is_fifo, NULL, JUBE_MEMBER_NONE},
+    {"is_socket", "isSocket", NULL, NULL, node_fs_stats_is_socket, NULL, JUBE_MEMBER_NONE},
 };
 
 static const char node_fs_interface[] =
@@ -2168,10 +2168,10 @@ static const char node_fs_interface[] =
 static const JubeTypeBinding node_fs_type_bindings[] = {
     {"file_handle", &node_fs_types[0], node_fs_filehandle_members,
      (int32_t)(sizeof(node_fs_filehandle_members) / sizeof(node_fs_filehandle_members[0])),
-     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
     {"stats", &node_fs_types[1], node_fs_stats_members,
      (int32_t)(sizeof(node_fs_stats_members) / sizeof(node_fs_stats_members[0])),
-     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
 };
 
 static int node_fs_open_flags(Item flags_item, int* out_flags, bool* out_read, bool* out_write) {

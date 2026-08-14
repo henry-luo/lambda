@@ -182,6 +182,20 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
             case C_RET_ITEM:
             case C_RET_RETITEM:
                 metadata->ret_class = JIT_VALUE_BOXED_ITEM;
+                // RV14a, type-driven: `C_RET_ITEM` says only "a boxed Item
+                // comes back", which made every sys func pay the wide-scalar
+                // adopt. The row already carries the DECLARED Lambda return
+                // type, and a declaration that cannot be a wide scalar
+                // (`null`, `bool`, `string`, a container, ...) proves the
+                // result needs no rehoming. `print` is declared `null` and
+                // returns `ItemNull` unconditionally, yet was 78 of the 101
+                // remaining helper adopts across AWFY. Wide declarations
+                // (int64/uint64/float) fall through and keep their adopt, so
+                // this narrows by proof rather than by an audit promise.
+                if (info->return_type && !lambda_type_id_may_be_wide_scalar(
+                        info->return_type->type_id)) {
+                    metadata->flags |= JIT_IMPORT_RESULT_SCALAR_STABLE;
+                }
                 break;
             case C_RET_STRING:
             case C_RET_SYMBOL:
@@ -260,6 +274,18 @@ MIR_context_t jit_init(unsigned int optimize_level) {
         // Note: MIR inlines CALL instructions for functions under 50 instructions at levels > 0
         log_info("MIR JIT optimization level: %u", optimize_level);
         MIR_gen_set_optimize_level(ctx, optimize_level);
+        // Dump gen-internal MIR stages (post-simplify, per pass) when asked.
+        // The finalized-MIR artifact shows PRE-simplify code only; simplify's
+        // make_one_ret / value-numbering rewrites are invisible there, which
+        // is exactly what hid the shape-4 ret collapse. Level 4 = full detail.
+        const char* gen_dbg = getenv("LAMBDA_MIR_GEN_DEBUG");
+        if (gen_dbg) {
+            FILE* f = fopen("temp/mir_gen_debug.txt", "w");
+            if (f) {
+                MIR_gen_set_debug_file(ctx, f);
+                MIR_gen_set_debug_level(ctx, atoi(gen_dbg));
+            }
+        }
     }
     return ctx;
 }

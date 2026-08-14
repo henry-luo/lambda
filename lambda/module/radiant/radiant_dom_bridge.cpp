@@ -10,6 +10,7 @@
 #include "../../input/css/dom_lifecycle.hpp"
 #include "../../input/css/css_tokenizer.hpp"
 #include "../../input/css/selector_matcher.hpp"
+#include "../../core/well_known_markup_names.h"
 #include "../../js/js_class.h"
 #include "../../js/js_dom.h"
 #include "../../../radiant/view.hpp"
@@ -30,7 +31,14 @@
 #include <string.h>
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
+RADIANT_C_API const void* radiant_dom_html_element_host_type(void);
 RADIANT_C_API const void* radiant_dom_document_host_type(void);
+RADIANT_C_API const void* radiant_dom_character_data_host_type(void);
+RADIANT_C_API const void* radiant_dom_svg_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_input_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_select_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_textarea_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_option_element_host_type(void);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
@@ -237,7 +245,48 @@ static void radiant_dom_cache_check_owner(const char* op) {
 
 static bool radiant_dom_is_node_host_type(const void* host_type) {
     return host_type == (const void*)&s_radiant_dom_vmap_type_marker ||
-        host_type == radiant_dom_node_host_type();
+        host_type == radiant_dom_node_host_type() ||
+        host_type == radiant_dom_html_element_host_type() ||
+        host_type == radiant_dom_character_data_host_type() ||
+        host_type == radiant_dom_svg_element_host_type() ||
+        host_type == radiant_dom_input_element_host_type() ||
+        host_type == radiant_dom_select_element_host_type() ||
+        host_type == radiant_dom_textarea_element_host_type() ||
+        host_type == radiant_dom_option_element_host_type();
+}
+
+static const void* radiant_dom_host_type_for_node(DomNode* node) {
+    if (!node) return radiant_dom_node_host_type();
+    if (node->is_text() || node->is_comment()) {
+        return radiant_dom_character_data_host_type();
+    }
+    if (!node->is_element()) return radiant_dom_node_host_type();
+
+    DomElement* elem = node->as_element();
+    if (!elem) return radiant_dom_html_element_host_type();
+    for (DomNode* current = node; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* ancestor = current->as_element();
+        if (!ancestor) continue;
+        const char* namespace_uri = ancestor->get_attribute("__lambda_ns_uri");
+        if ((namespace_uri && strcmp(namespace_uri,
+                "http://www.w3.org/2000/svg") == 0) ||
+                ancestor->tag_name_id() == MARKUP_NAME_SVG) {
+            return radiant_dom_svg_element_host_type();
+        }
+    }
+    switch (elem->tag_name_id()) {
+    case MARKUP_NAME_INPUT:
+        return radiant_dom_input_element_host_type();
+    case MARKUP_NAME_SELECT:
+        return radiant_dom_select_element_host_type();
+    case MARKUP_NAME_TEXTAREA:
+        return radiant_dom_textarea_element_host_type();
+    case MARKUP_NAME_OPTION:
+        return radiant_dom_option_element_host_type();
+    default:
+        return radiant_dom_html_element_host_type();
+    }
 }
 
 static HashMap* radiant_dom_wrapper_index() {
@@ -304,11 +353,9 @@ static bool radiant_dom_is_internal_attr(const char* name) {
 }
 
 static bool radiant_dom_is_attr_name_projection(const char* name) {
-    if (!name) return false;
-    // Lambda exposes declarative data/ARIA attributes by dashed name, but an
-    // arbitrary hyphenated JavaScript key is an expando (htmx stores objects
-    // under `htmx-internal-data` and must not be coerced into an attribute).
-    return strncmp(name, "data-", 5) == 0 || strncmp(name, "aria-", 5) == 0;
+    // Lambda's dashed data/ARIA fields are DOM attributes, not JS expandos.
+    return name && (strncmp(name, "data-", 5) == 0 ||
+                    strncmp(name, "aria-", 5) == 0);
 }
 
 static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
@@ -321,15 +368,6 @@ static bool radiant_dom_node_is_dom_element(DomNode* node) {
     // Document/fragment shells share DomElement storage internally but are
     // not Elements in the DOM type hierarchy.
     return elem && elem->tag_name && elem->tag_name[0] != '#';
-}
-
-static const char* radiant_dom_item_to_html_bool_string(Item value) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
-        const char* text = js_dom_to_attribute_cstr(value);
-        return text ? text : "";
-    }
-    return js_is_truthy(value) ? "true" : "false";
 }
 
 static int64_t radiant_dom_reflected_int_value(DomElement* elem, const char* attr_name,
@@ -641,92 +679,46 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
     return arr_item;
 }
 
-static bool radiant_dom_is_listed_form_control(DomElement* elem) {
-    if (!elem || !elem->tag_name) return false;
-    if (radiant_dom_is_tag(elem, "input")) {
-        const char* type = elem->get_attribute("type");
-        return !type || strcasecmp(type, "image") != 0;
-    }
-    return radiant_dom_is_tag(elem, "button") ||
-           radiant_dom_is_tag(elem, "select") ||
-           radiant_dom_is_tag(elem, "textarea") ||
-           radiant_dom_is_tag(elem, "fieldset") ||
-           radiant_dom_is_tag(elem, "object") ||
-           radiant_dom_is_tag(elem, "output");
-}
-
-static void radiant_dom_collect_form_controls(DomNode* node, Array* arr) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (radiant_dom_is_listed_form_control(elem)) {
-                array_push(arr, radiant_dom_node_item((DomNode*)elem));
-            }
-            radiant_dom_collect_form_controls(elem->first_child, arr);
-        }
-        node = node->next_sibling;
-    }
-}
-
-static Item radiant_dom_form_controls_item(DomElement* form) {
-    Item controls = radiant_dom_array_item();
-    if (form) {
-        radiant_dom_collect_form_controls(form->first_child, controls.array);
-    }
-    return controls;
-}
-
-static const char* radiant_dom_form_control_name_or_id(DomElement* elem) {
-    const char* name = elem->get_attribute("name");
-    if (name && name[0] != '\0') return name;
-    return elem && elem->id && elem->id[0] != '\0' ? elem->id : nullptr;
-}
-
-static bool radiant_dom_is_form_named_getter_reserved(const char* prop) {
-    static const char* reserved[] = {
-        "elements", "length", "action", "method", "enctype", "encoding",
-        "acceptCharset", "target", "noValidate", "autocomplete", "name",
-        "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
-        nullptr
-    };
-    for (int i = 0; reserved[i]; i++) {
-        if (strcmp(prop, reserved[i]) == 0) return true;
+static bool radiant_dom_label_contains_control(DomElement* label,
+                                               DomElement* control) {
+    if (!label || !control) return false;
+    for (DomNode* child = label->first_child; child; child = child->next_sibling) {
+        if (child == (DomNode*)control) return true;
+        if (child->is_element() && radiant_dom_label_contains_control(
+                child->as_element(), control)) return true;
     }
     return false;
 }
 
-static void radiant_dom_collect_form_named(DomNode* node, const char* key, Array* arr) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (radiant_dom_is_listed_form_control(elem)) {
-                const char* control_key = radiant_dom_form_control_name_or_id(elem);
-                if (control_key && strcmp(control_key, key) == 0) {
-                    array_push(arr, radiant_dom_node_item((DomNode*)elem));
-                }
-            }
-            radiant_dom_collect_form_named(elem->first_child, key, arr);
+static void radiant_dom_collect_labels(DomElement* root, DomElement* control,
+                                       Item result) {
+    if (!root || !control) return;
+    if (radiant_dom_is_tag(root, "label")) {
+        const char* label_for = root->get_attribute("for");
+        const char* control_id = control->get_attribute("id");
+        bool explicitly_for = label_for && label_for[0] && control_id &&
+            control_id[0] && strcmp(label_for, control_id) == 0;
+        bool wrapping = (!label_for || !label_for[0]) &&
+            radiant_dom_label_contains_control(root, control);
+        if (explicitly_for || wrapping) {
+            radiant_host_api->value->array_push(result,
+                radiant_dom_node_item((DomNode*)root));
         }
-        node = node->next_sibling;
+    }
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            radiant_dom_collect_labels(child->as_element(), control, result);
+        }
     }
 }
 
-static bool radiant_dom_form_named_getter(DomElement* form, const char* prop, Item* out) {
-    if (!radiant_dom_is_tag(form, "form") || !prop || prop[0] == '\0' ||
-        !out || radiant_dom_is_form_named_getter_reserved(prop)) {
-        return false;
-    }
-    Item matches = radiant_dom_array_item();
-    radiant_dom_collect_form_named(form->first_child, prop, matches.array);
-    if (matches.array->length == 1) {
-        *out = matches.array->items[0];
-        return true;
-    }
-    if (matches.array->length > 1) {
-        *out = matches;
-        return true;
-    }
-    return false;
+static Item radiant_dom_labels_item(DomElement* control) {
+    Item result = radiant_dom_array_item();
+    if (!control || !control->doc || !control->doc->root) return result;
+    // A missing labels property sends libraries into a less-compatible manual
+    // ancestor path; expose the actual label association from the DOM tree.
+    radiant_dom_collect_labels(control->doc->root, control, result);
+    return result;
 }
 
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
@@ -818,156 +810,6 @@ static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
         child = child->next_sibling;
     }
     return nullptr;
-}
-
-typedef struct RadiantAriaElementReflection {
-    const char* idl_name;
-    const char* attr_name;
-    const char* cache_name;
-    bool multiple;
-} RadiantAriaElementReflection;
-
-static const RadiantAriaElementReflection RADIANT_ARIA_ELEMENT_REFLECTIONS[] = {
-    {"ariaActiveDescendantElement", "aria-activedescendant",
-     "__lambda_aria_active_descendant_element", false},
-    {"ariaDescribedByElements", "aria-describedby",
-     "__lambda_aria_described_by_elements", true},
-};
-
-static const RadiantAriaElementReflection* radiant_dom_aria_element_reflection(
-        const char* name, bool attribute_name) {
-    if (!name) return nullptr;
-    size_t count = sizeof(RADIANT_ARIA_ELEMENT_REFLECTIONS) /
-        sizeof(RADIANT_ARIA_ELEMENT_REFLECTIONS[0]);
-    for (size_t i = 0; i < count; i++) {
-        const RadiantAriaElementReflection* reflection =
-            &RADIANT_ARIA_ELEMENT_REFLECTIONS[i];
-        const char* candidate = attribute_name
-            ? reflection->attr_name : reflection->idl_name;
-        if (strcmp(name, candidate) == 0) return reflection;
-    }
-    return nullptr;
-}
-
-static DomElement* radiant_dom_element_tree_root(DomElement* elem) {
-    DomNode* root = (DomNode*)elem;
-    while (root && root->parent) root = root->parent;
-    return root && root->is_element() ? root->as_element() : nullptr;
-}
-
-static Item radiant_dom_aria_resolve_idrefs(DomElement* elem, const char* value,
-                                            bool multiple) {
-    Item result = multiple ? radiant_dom_array_item() : ItemNull;
-    DomElement* root = radiant_dom_element_tree_root(elem);
-    if (!root || !value) return result;
-
-    const char* cursor = value;
-    while (*cursor) {
-        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
-        const char* start = cursor;
-        while (*cursor && !isspace((unsigned char)*cursor)) cursor++;
-        size_t len = (size_t)(cursor - start);
-        if (len == 0) continue;
-        char* id = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
-        if (!id) return result;
-        memcpy(id, start, len);
-        id[len] = '\0';
-        DomElement* target = radiant_dom_find_by_id(root, id);
-        mem_free(id);
-        if (target) {
-            Item target_item = radiant_dom_node_item((DomNode*)target);
-            if (!multiple) return target_item;
-            array_push(result.array, target_item);
-        }
-        if (!multiple) return ItemNull;
-    }
-    return result;
-}
-
-static Item radiant_dom_aria_cached_reference(Item receiver,
-        const RadiantAriaElementReflection* reflection) {
-    Item cache_key = radiant_dom_string_item(reflection->cache_name);
-    Item cached = js_dom_get_property_impl(receiver, cache_key);
-    if (cached.item == ITEM_JS_UNDEFINED || cached.item == ITEM_NULL) {
-        return reflection->multiple ? radiant_dom_array_item() : ItemNull;
-    }
-    return cached;
-}
-
-static void radiant_dom_aria_cache_reference(Item receiver,
-        const RadiantAriaElementReflection* reflection, Item value) {
-    js_dom_set_property_impl(receiver,
-        radiant_dom_string_item(reflection->cache_name), value);
-}
-
-static void radiant_dom_aria_invalidate_attribute_cache(Item receiver,
-                                                         const char* attr_name) {
-    const RadiantAriaElementReflection* reflection =
-        radiant_dom_aria_element_reflection(attr_name, true);
-    if (!reflection) return;
-    // Content-attribute writes replace an explicit associated-element value;
-    // leaving the hidden reference alive would make an empty authored IDREF
-    // indistinguishable from an IDL-set association.
-    radiant_dom_aria_cache_reference(receiver, reflection,
-                                     radiant_dom_undefined_item());
-}
-
-static bool radiant_dom_get_aria_element_reflection(Item receiver,
-        DomElement* elem, const char* prop, Item* out) {
-    const RadiantAriaElementReflection* reflection =
-        radiant_dom_aria_element_reflection(prop, false);
-    if (!reflection || !elem || !out) return false;
-    const char* idrefs = elem->get_attribute(reflection->attr_name);
-    if (!idrefs) {
-        *out = ItemNull;
-    } else if (idrefs[0] == '\0') {
-        *out = radiant_dom_aria_cached_reference(receiver, reflection);
-    } else {
-        // Resolve from this element's tree root so IDREFs remain meaningful
-        // while a complete subtree is disconnected from its document.
-        *out = radiant_dom_aria_resolve_idrefs(elem, idrefs, reflection->multiple);
-    }
-    return true;
-}
-
-static bool radiant_dom_set_aria_element_reflection(Item receiver,
-        DomElement* elem, const char* prop, Item value, Item* out) {
-    const RadiantAriaElementReflection* reflection =
-        radiant_dom_aria_element_reflection(prop, false);
-    if (!reflection || !elem || !out) return false;
-
-    TypeId value_type = get_type_id(value);
-    bool clear = value.item == ITEM_NULL || value.item == ITEM_JS_UNDEFINED;
-    Item cached = ItemNull;
-    if (!clear && reflection->multiple) {
-        if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
-        cached = radiant_dom_array_item();
-        for (int i = 0; i < value.array->length; i++) {
-            DomNode* target = (DomNode*)radiant_dom_unwrap_node(value.array->items[i]);
-            if (!target || !target->is_element()) return false;
-            array_push(cached.array, radiant_dom_node_item(target));
-        }
-    } else if (!clear) {
-        DomNode* target = (DomNode*)radiant_dom_unwrap_node(value);
-        if (!target || !target->is_element()) return false;
-        cached = radiant_dom_node_item(target);
-    }
-
-    const char* old_value = elem->get_attribute(reflection->attr_name);
-    if (clear) {
-        elem->remove_attribute(reflection->attr_name);
-        radiant_dom_aria_cache_reference(receiver, reflection,
-                                         radiant_dom_undefined_item());
-    } else {
-        // The empty content attribute is the specified marker for an explicit
-        // element association; the actual node identity stays in the wrapper.
-        elem->set_attribute(reflection->attr_name, "");
-        radiant_dom_aria_cache_reference(receiver, reflection, cached);
-    }
-    js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
-        (void*)elem->parent, reflection->attr_name, old_value);
-    *out = value;
-    return true;
 }
 
 static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_text, Pool* pool) {
@@ -1168,15 +1010,10 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
         form_control_release_prop(live_node->as_element());
     }
     Item wrapper = (Item){.item = entry->item};
-    // Document teardown frees arena-owned DOM nodes; retained wrappers must
-    // keep their JS identity but lose the native payload via the registered host op.
+    // document teardown frees arena-owned DOM nodes; retained wrappers must
+    // keep their JS identity but lose the native payload through the husk protocol.
     if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap && wrapper.vmap->host_type) {
-        const JubeTypeDef* type = jube_find_type_by_host_type(wrapper.vmap->host_type);
-        if (type && type->host_ops && type->host_ops->invalidate) {
-            type->host_ops->invalidate(wrapper);
-        } else {
-            radiant_dom_host_invalidate(wrapper);
-        }
+        radiant_dom_host_invalidate(wrapper);
     }
     radiant_host_api->gc->unregister_weak(&entry->item);
     if (live_node) {
@@ -1241,7 +1078,7 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
 
     Item wrapper = radiant_host_api->value->vmap_new();
     if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-        wrapper.vmap->host_type = radiant_dom_node_host_type();
+        wrapper.vmap->host_type = radiant_dom_host_type_for_node(node);
         wrapper.vmap->host_data = dom_elem;
         // Cache identity before initialization because inline handlers and
         // native DOM state attach expandos to this same wrapper recursively.
@@ -1278,46 +1115,45 @@ RADIANT_C_API bool radiant_dom_is_node(Item item) {
     return false;
 }
 
-static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, Item* out) {
-    if (!text_node || !prop || !out) return false;
+static bool radiant_dom_get_character_data_property(DomNode* node,
+        const char* content, int64_t length, int64_t node_type,
+        const char* node_name, const char* prop, Item* out) {
+    if (!node || !prop || !out) return false;
     if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
         strcmp(prop, "textContent") == 0) {
-        *out = radiant_dom_string_item(text_node->text);
+        *out = radiant_dom_string_item(content);
         return true;
     }
     if (strcmp(prop, "length") == 0) {
-        *out = radiant_dom_int_item(radiant_dom_utf16_length(text_node->text));
+        *out = radiant_dom_int_item(length);
         return true;
     }
     if (strcmp(prop, "nodeType") == 0) {
-        *out = radiant_dom_int_item(3);
+        *out = radiant_dom_int_item(node_type);
         return true;
     }
     if (strcmp(prop, "nodeName") == 0) {
-        *out = radiant_dom_string_item("#text");
+        *out = radiant_dom_string_item(node_name);
         return true;
     }
-    if (strcmp(prop, "parentNode") == 0) {
-        DomNode* parent = text_node->parent;
-        *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
-        return true;
-    }
-    if (strcmp(prop, "parentElement") == 0) {
-        DomNode* parent = text_node->parent;
-        *out = radiant_dom_node_is_dom_element(parent)
+    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+        DomNode* parent = node->parent;
+        bool element_only = strcmp(prop, "parentElement") == 0;
+        *out = (!element_only && parent && parent->is_element()) ||
+               (element_only && radiant_dom_node_is_dom_element(parent))
             ? radiant_dom_node_item(parent) : ItemNull;
         return true;
     }
     if (strcmp(prop, "isConnected") == 0) {
-        *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)text_node) ? 1 : 0)};
+        *out = (Item){.item = b2it(radiant_dom_node_is_connected(node) ? 1 : 0)};
         return true;
     }
     if (strcmp(prop, "nextSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)text_node));
+        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling(node));
         return true;
     }
     if (strcmp(prop, "previousSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)text_node));
+        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling(node));
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
@@ -1329,68 +1165,9 @@ static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, 
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        DomNode* parent = text_node->parent;
+        DomNode* parent = node->parent;
         DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
-        *out = doc ? radiant_dom_document_item(doc) : js_dom_owner_document_for_node((void*)text_node);
-        return true;
-    }
-    return false;
-}
-
-static bool radiant_dom_get_comment_property(DomComment* comment_node, const char* prop, Item* out) {
-    if (!comment_node || !prop || !out) return false;
-    if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
-        strcmp(prop, "textContent") == 0) {
-        *out = radiant_dom_string_item(comment_node->content);
-        return true;
-    }
-    if (strcmp(prop, "nodeType") == 0) {
-        *out = radiant_dom_int_item((int64_t)comment_node->node_type);
-        return true;
-    }
-    if (strcmp(prop, "nodeName") == 0) {
-        *out = radiant_dom_string_item("#comment");
-        return true;
-    }
-    if (strcmp(prop, "length") == 0) {
-        *out = radiant_dom_int_item((int64_t)comment_node->length);
-        return true;
-    }
-    if (strcmp(prop, "parentNode") == 0) {
-        DomNode* parent = comment_node->parent;
-        *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
-        return true;
-    }
-    if (strcmp(prop, "parentElement") == 0) {
-        DomNode* parent = comment_node->parent;
-        *out = radiant_dom_node_is_dom_element(parent)
-            ? radiant_dom_node_item(parent) : ItemNull;
-        return true;
-    }
-    if (strcmp(prop, "isConnected") == 0) {
-        *out = (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)comment_node) ? 1 : 0)};
-        return true;
-    }
-    if (strcmp(prop, "nextSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)comment_node));
-        return true;
-    }
-    if (strcmp(prop, "previousSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)comment_node));
-        return true;
-    }
-    if (strcmp(prop, "childNodes") == 0) {
-        *out = radiant_dom_array_item();
-        return true;
-    }
-    if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
-        *out = ItemNull;
-        return true;
-    }
-    if (strcmp(prop, "ownerDocument") == 0) {
-        DomNode* parent = comment_node->parent;
-        DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
-        *out = doc ? radiant_dom_document_item(doc) : js_dom_owner_document_for_node((void*)comment_node);
+        *out = doc ? radiant_dom_document_item(doc) : js_dom_owner_document_for_node((void*)node);
         return true;
     }
     return false;
@@ -1486,451 +1263,234 @@ RADIANT_MEMBER_GET(radiant_dom_member_child_nodes,
 // Generated cluster: the bool/int/string/hint reflection predicate chains and
 // their get/set arms collapse into guarded record rows. Live-state booleans
 // keep their centralized invariant hooks.
-RADIANT_C_API int radiant_dom_guard_dis(Item receiver) {
+static bool radiant_dom_member_tag_set(Item receiver, const char* tags) {
     DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "input") ||
-        radiant_dom_is_tag(elem, "button") ||
-        radiant_dom_is_tag(elem, "select") ||
-        radiant_dom_is_tag(elem, "textarea") ||
-        radiant_dom_is_tag(elem, "fieldset") ||
-        radiant_dom_is_tag(elem, "option") ||
-        radiant_dom_is_tag(elem, "optgroup"));
+    if (!elem || !elem->tag_name || !tags) return false;
+    const char* tag = tags;
+    while (*tag) {
+        while (*tag == ' ') tag++;
+        const char* end = tag;
+        while (*end && *end != ' ') end++;
+        if (end != tag && strlen(elem->tag_name) == (size_t)(end - tag) &&
+            strncasecmp(elem->tag_name, tag, (size_t)(end - tag)) == 0) return true;
+        tag = end;
+    }
+    return false;
 }
-RADIANT_C_API int radiant_dom_guard_ist(Item receiver) {
+
+#define RADIANT_DOM_TAG_SET_GUARD(name, tags) \
+    RADIANT_C_API int name(Item receiver) { return radiant_dom_member_tag_set(receiver, tags); }
+
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_dis,
+    "input button select textarea fieldset option optgroup")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_ist, "input select textarea")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_it, "input textarea")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_ib, "input button")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_fist, "form input select textarea")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_form, "form")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_details, "details")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_img, "img")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_srct,
+    "img script iframe embed source track audio video input")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_hreft, "a area link base")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_anchor, "a area")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_namet,
+    "input button select textarea form fieldset output object")
+RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_lblout, "label output")
+
+#undef RADIANT_DOM_TAG_SET_GUARD
+static int radiant_dom_reflected_bool_get(Item receiver, Item* out,
+                                          const char* attribute) {
     DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "input") ||
-        radiant_dom_is_tag(elem, "select") ||
-        radiant_dom_is_tag(elem, "textarea"));
-}
-RADIANT_C_API int radiant_dom_guard_it(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "input") ||
-        radiant_dom_is_tag(elem, "textarea"));
-}
-RADIANT_C_API int radiant_dom_guard_ib(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "input") ||
-        radiant_dom_is_tag(elem, "button"));
-}
-RADIANT_C_API int radiant_dom_guard_fist(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "form") ||
-        radiant_dom_is_tag(elem, "input") ||
-        radiant_dom_is_tag(elem, "select") ||
-        radiant_dom_is_tag(elem, "textarea"));
-}
-RADIANT_C_API int radiant_dom_guard_input(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "input"));
-}
-RADIANT_C_API int radiant_dom_guard_select(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "select"));
-}
-RADIANT_C_API int radiant_dom_guard_textarea(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "textarea"));
-}
-RADIANT_C_API int radiant_dom_guard_form(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "form"));
-}
-RADIANT_C_API int radiant_dom_guard_details(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "details"));
-}
-RADIANT_C_API int radiant_dom_guard_option(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "option"));
-}
-RADIANT_C_API int radiant_dom_guard_img(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "img"));
-}
-RADIANT_C_API int radiant_dom_guard_srct(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "img") ||
-        radiant_dom_is_tag(elem, "script") ||
-        radiant_dom_is_tag(elem, "iframe") ||
-        radiant_dom_is_tag(elem, "embed") ||
-        radiant_dom_is_tag(elem, "source") ||
-        radiant_dom_is_tag(elem, "track") ||
-        radiant_dom_is_tag(elem, "audio") ||
-        radiant_dom_is_tag(elem, "video") ||
-        radiant_dom_is_tag(elem, "input"));
-}
-RADIANT_C_API int radiant_dom_guard_hreft(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "a") ||
-        radiant_dom_is_tag(elem, "area") ||
-        radiant_dom_is_tag(elem, "link") ||
-        radiant_dom_is_tag(elem, "base"));
-}
-RADIANT_C_API int radiant_dom_guard_anchor(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area"));
-}
-RADIANT_C_API int radiant_dom_guard_namet(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "input") ||
-        radiant_dom_is_tag(elem, "button") ||
-        radiant_dom_is_tag(elem, "select") ||
-        radiant_dom_is_tag(elem, "textarea") ||
-        radiant_dom_is_tag(elem, "form") ||
-        radiant_dom_is_tag(elem, "fieldset") ||
-        radiant_dom_is_tag(elem, "output") ||
-        radiant_dom_is_tag(elem, "object"));
-}
-RADIANT_C_API int radiant_dom_guard_lblout(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && (radiant_dom_is_tag(elem, "label") ||
-        radiant_dom_is_tag(elem, "output"));
-}
-RADIANT_C_API int radiant_dom_m4b_disabled_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("disabled") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute(attribute) ? 1 : 0)};
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_disabled_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+static int radiant_dom_reflected_bool_set(Item receiver, Item value, Item* out,
+                                          const char* attribute, bool notify) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) {
+    if (js_is_truthy(value)) elem->set_attribute(attribute, "");
+    else elem->remove_attribute(attribute);
+    if (notify) {
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    }
+    *out = value;
+    return 1;
+}
+
+#define RADIANT_REFLECT_BOOL(prefix, attribute) \
+    RADIANT_C_API int prefix##_get(Item receiver, Item* out) { \
+        return radiant_dom_reflected_bool_get(receiver, out, attribute); \
+    } \
+    RADIANT_C_API int prefix##_set(Item receiver, Item value, Item* out) { \
+        return radiant_dom_reflected_bool_set(receiver, value, out, attribute, true); \
+    }
+
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_required, "required")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_multiple, "multiple")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_read_only, "readonly")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_readonly, "readonly")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_no_validate, "novalidate")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_form_no_validate, "formnovalidate")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_open, "open")
+RADIANT_REFLECT_BOOL(radiant_dom_m4b_autofocus, "autofocus")
+
+#undef RADIANT_REFLECT_BOOL
+
+RADIANT_C_API int radiant_dom_m4b_disabled_get(Item receiver, Item* out) {
+    return radiant_dom_reflected_bool_get(receiver, out, "disabled");
+}
+
+RADIANT_C_API int radiant_dom_m4b_disabled_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    if (js_is_truthy(value)) {
         elem->set_attribute("disabled", "");
         js_dom_after_disabled_attribute_set((void*)elem);
     } else {
         elem->remove_attribute("disabled");
     }
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_required_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("required") ? 1 : 0)};
-    return 1;
+
+RADIANT_C_API int radiant_dom_m4b_multiple2_get(Item receiver, Item* out) {
+    return radiant_dom_reflected_bool_get(receiver, out, "multiple");
 }
-RADIANT_C_API int radiant_dom_m4b_required_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_multiple2_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("required", "");
-    else elem->remove_attribute("required");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_multiple_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("multiple") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_multiple_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("multiple", "");
-    else elem->remove_attribute("multiple");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_multiple2_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("multiple") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_multiple2_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    bool truthy = js_is_truthy(v);
+    bool truthy = js_is_truthy(value);
     if (truthy) elem->set_attribute("multiple", "");
     else elem->remove_attribute("multiple");
-    // live checked/selected invariants remain centralized in js_dom.cpp
     if (!truthy) js_dom_after_select_multiple_removed((void*)elem);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_read_only_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("readonly") ? 1 : 0)};
-    return 1;
+
+RADIANT_C_API int radiant_dom_m4b_default_checked_get(Item receiver, Item* out) {
+    return radiant_dom_reflected_bool_get(receiver, out, "checked");
 }
-RADIANT_C_API int radiant_dom_m4b_read_only_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_default_checked_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("readonly", "");
-    else elem->remove_attribute("readonly");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_readonly_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("readonly") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_readonly_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("readonly", "");
-    else elem->remove_attribute("readonly");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_no_validate_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("novalidate") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_no_validate_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("novalidate", "");
-    else elem->remove_attribute("novalidate");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_form_no_validate_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("formnovalidate") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_form_no_validate_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("formnovalidate", "");
-    else elem->remove_attribute("formnovalidate");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_open_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("open") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_open_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("open", "");
-    else elem->remove_attribute("open");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_default_checked_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("checked") ? 1 : 0)};
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_default_checked_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    bool truthy = js_is_truthy(v);
+    bool truthy = js_is_truthy(value);
     if (truthy) elem->set_attribute("checked", "");
     else elem->remove_attribute("checked");
-    // live checked/selected invariants remain centralized in js_dom.cpp
     js_dom_after_default_checked_set((void*)elem, truthy);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_default_selected_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("selected") ? 1 : 0)};
-    return 1;
+
+RADIANT_C_API int radiant_dom_m4b_default_selected_get(Item receiver, Item* out) {
+    return radiant_dom_reflected_bool_get(receiver, out, "selected");
 }
-RADIANT_C_API int radiant_dom_m4b_default_selected_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_default_selected_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    bool truthy = js_is_truthy(v);
+    bool truthy = js_is_truthy(value);
     if (truthy) elem->set_attribute("selected", "");
     else elem->remove_attribute("selected");
-    // live checked/selected invariants remain centralized in js_dom.cpp
     js_dom_after_default_selected_set((void*)elem, truthy);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_autofocus_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+static int radiant_dom_reflected_int_get(Item receiver, Item* out,
+                                         const char* attribute, long fallback) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(elem->has_attribute("autofocus") ? 1 : 0)};
+    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, attribute, fallback));
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_autofocus_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+static int radiant_dom_reflected_int_set(Item receiver, Item value, Item* out,
+                                         const char* attribute, long fallback) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) elem->set_attribute("autofocus", "");
-    else elem->remove_attribute("autofocus");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_max_length_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "maxlength", -1));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_max_length_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, -1);
     char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("maxlength", buf);
+    snprintf(buf, sizeof(buf), "%ld",
+        radiant_dom_item_to_reflected_int(value, fallback));
+    elem->set_attribute(attribute, buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_min_length_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+#define RADIANT_REFLECT_INT(prefix, attribute, fallback) \
+    RADIANT_C_API int prefix##_get(Item receiver, Item* out) { \
+        return radiant_dom_reflected_int_get(receiver, out, attribute, fallback); \
+    } \
+    RADIANT_C_API int prefix##_set(Item receiver, Item value, Item* out) { \
+        return radiant_dom_reflected_int_set(receiver, value, out, attribute, fallback); \
+    }
+
+RADIANT_REFLECT_INT(radiant_dom_m4b_max_length, "maxlength", -1)
+RADIANT_REFLECT_INT(radiant_dom_m4b_min_length, "minlength", 0)
+RADIANT_REFLECT_INT(radiant_dom_m4b_size, "size", 20)
+RADIANT_REFLECT_INT(radiant_dom_m4b_size2, "size", 0)
+RADIANT_REFLECT_INT(radiant_dom_m4b_width, "width", 0)
+RADIANT_REFLECT_INT(radiant_dom_m4b_height, "height", 0)
+RADIANT_REFLECT_INT(radiant_dom_m4b_rows, "rows", 2)
+RADIANT_REFLECT_INT(radiant_dom_m4b_cols, "cols", 20)
+
+#undef RADIANT_REFLECT_INT
+
+static int radiant_dom_reflected_string_get(Item receiver, Item* out,
+                                            const char* attribute, const char* fallback) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "minlength", 0));
+    const char* value = elem->get_attribute(attribute);
+    *out = radiant_dom_string_item(value ? value : fallback);
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_min_length_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+static int radiant_dom_reflected_string_set(Item receiver, Item value, Item* out,
+                                            const char* attribute) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 0);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("minlength", buf);
+    const char* text = js_dom_to_attribute_cstr(value);
+    elem->set_attribute(attribute, text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_size_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "size", 20));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_size_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 20);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("size", buf);
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_size2_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "size", 0));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_size2_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 0);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("size", buf);
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_width_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "width", 0));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_width_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 0);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("width", buf);
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_height_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "height", 0));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_height_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 0);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("height", buf);
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_rows_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "rows", 2));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_rows_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 2);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("rows", buf);
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_cols_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    *out = radiant_dom_int_item(radiant_dom_reflected_int_value(elem, "cols", 20));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_cols_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    long reflected = radiant_dom_item_to_reflected_int(v, 20);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", reflected);
-    elem->set_attribute("cols", buf);
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_src_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("src");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_src_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("src", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_href_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+#define RADIANT_REFLECT_STRING(prefix, attribute, fallback) \
+    RADIANT_C_API int prefix##_get(Item receiver, Item* out) { \
+        return radiant_dom_reflected_string_get(receiver, out, attribute, fallback); \
+    } \
+    RADIANT_C_API int prefix##_set(Item receiver, Item value, Item* out) { \
+        return radiant_dom_reflected_string_set(receiver, value, out, attribute); \
+    }
+
+RADIANT_REFLECT_STRING(radiant_dom_m4b_src, "src", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_alt, "alt", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_name, "name", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_placeholder, "placeholder", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_autocomplete, "autocomplete", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_pattern, "pattern", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_min, "min", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_max, "max", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_step, "step", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_accept, "accept", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_html_for, "for", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_target, "target", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_accept_charset, "accept-charset", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_form_target, "formtarget", "")
+RADIANT_REFLECT_STRING(radiant_dom_m4b_wrap, "wrap", "soft")
+
+#undef RADIANT_REFLECT_STRING
+
+RADIANT_C_API int radiant_dom_m4b_href_get(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
     const char* value = elem->get_attribute("href");
     if (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area")) {
@@ -1944,14 +1504,9 @@ RADIANT_C_API int radiant_dom_m4b_href_get(Item r, Item* out) {
     }
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_href_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("href", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
+
+RADIANT_C_API int radiant_dom_m4b_href_set(Item receiver, Item value, Item* out) {
+    return radiant_dom_reflected_string_set(receiver, value, out, "href");
 }
 
 typedef const char* (*RadiantUrlGetter)(const Url* url);
@@ -1993,264 +1548,39 @@ RADIANT_C_API int radiant_dom_anchor_hash_get(Item receiver, Item* out) {
 }
 
 #undef RADIANT_ANCHOR_COMPONENT_GETTER
-RADIANT_C_API int radiant_dom_m4b_alt_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_input_mode_get(Item receiver, Item* out) {
+    static const char* const keywords[] = {
+        "none", "text", "decimal", "numeric", "tel", "search", "email", "url", nullptr
+    };
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("alt");
-    *out = radiant_dom_string_item(value ? value : "");
+    *out = radiant_dom_string_item(
+        radiant_dom_canonical_token_attr(elem, "inputmode", keywords));
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_alt_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_input_mode_set(Item receiver, Item value, Item* out) {
+    return radiant_dom_reflected_string_set(receiver, value, out, "inputmode");
+}
+
+RADIANT_C_API int radiant_dom_m4b_enter_key_hint_get(Item receiver, Item* out) {
+    static const char* const keywords[] = {
+        "enter", "done", "go", "next", "previous", "search", "send", nullptr
+    };
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("alt", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+    *out = radiant_dom_string_item(
+        radiant_dom_canonical_token_attr(elem, "enterkeyhint", keywords));
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_name_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("name");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
+
+RADIANT_C_API int radiant_dom_m4b_enter_key_hint_set(Item receiver, Item value, Item* out) {
+    return radiant_dom_reflected_string_set(receiver, value, out, "enterkeyhint");
 }
-RADIANT_C_API int radiant_dom_m4b_name_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("name", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_placeholder_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("placeholder");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_placeholder_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("placeholder", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_autocomplete_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("autocomplete");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_autocomplete_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("autocomplete", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_pattern_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("pattern");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_pattern_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("pattern", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_min_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("min");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_min_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("min", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_max_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("max");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_max_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("max", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_step_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("step");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_step_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("step", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_accept_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("accept");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_accept_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("accept", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_html_for_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("for");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_html_for_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("for", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_target_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("target");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_target_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("target", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_accept_charset_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("accept-charset");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_accept_charset_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("accept-charset", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_form_target_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("formtarget");
-    *out = radiant_dom_string_item(value ? value : "");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_form_target_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("formtarget", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_wrap_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("wrap");
-    *out = radiant_dom_string_item(value ? value : "soft");
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_wrap_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("wrap", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_input_mode_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    static const char* const keywords[] = { "none", "text", "decimal", "numeric", "tel", "search", "email", "url", nullptr };
-    *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "inputmode", keywords));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_input_mode_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("inputmode", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_enter_key_hint_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    static const char* const keywords[] = { "enter", "done", "go", "next", "previous", "search", "send", nullptr };
-    *out = radiant_dom_string_item(radiant_dom_canonical_token_attr(elem, "enterkeyhint", keywords));
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_enter_key_hint_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = js_dom_to_attribute_cstr(v);
-    elem->set_attribute("enterkeyhint", text ? text : "");
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4b_content_editable_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_content_editable_get(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
     if (!elem->has_attribute("contenteditable")) {
         *out = radiant_dom_string_item("inherit");
@@ -2261,14 +1591,15 @@ RADIANT_C_API int radiant_dom_m4b_content_editable_get(Item r, Item* out) {
     *out = radiant_dom_string_item(normalized ? normalized : "inherit");
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
     const char* text = nullptr;
-    if (get_type_id(v) == LMD_TYPE_BOOL) {
-        text = it2b(v) ? "true" : "false";
+    if (get_type_id(value) == LMD_TYPE_BOOL) {
+        text = it2b(value) ? "true" : "false";
     } else {
-        text = fn_to_cstr(v);
+        text = fn_to_cstr(value);
     }
     if (!text) text = "";
     if (*text == '\0') {
@@ -2286,16 +1617,16 @@ RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out
         }
     }
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4b_is_content_editable_get(Item r, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4b_is_content_editable_get(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
     *out = (Item){.item = b2it(radiant_dom_is_content_editable(elem) ? 1 : 0)};
     return 1;
 }
-
 
 // ---- DOM3 Phase 4c: live form-control members ----
 RADIANT_C_API int radiant_dom_guard_tc(Item receiver) {
@@ -2303,10 +1634,6 @@ RADIANT_C_API int radiant_dom_guard_tc(Item receiver) {
     return elem && tc_is_text_control(elem);
 }
 
-RADIANT_C_API int radiant_dom_guard_input_nontc(Item receiver) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    return elem && radiant_dom_is_tag(elem, "input") && !tc_is_text_control(elem);
-}
 RADIANT_C_API int radiant_dom_guard_input_typed_value(Item receiver) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !radiant_dom_is_tag(elem, "input")) return 0;
@@ -2554,206 +1881,155 @@ RADIANT_C_API int radiant_dom_input_step_down(Item r, Item* args, int argc, Item
     Item minus_one = radiant_host_api->script->make_number(-1.0);
     return radiant_dom_input_step_up(r, &minus_one, 1, out);
 }
-RADIANT_C_API int radiant_dom_m4c_get_checked(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("checked"))});
+static int radiant_dom_m4c_get_property(Item receiver, Item* out,
+                                          const char* property) {
+    if (!out) return 0;
+    *out = js_dom_get_property_impl(receiver,
+        (Item){.item = s2it(heap_create_name(property))});
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4c_checked_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    js_dom_set_checked_dirty((void*)elem, js_is_truthy(v));
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_value(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("value"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_value_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(v);
-    js_dom_select_set_value_bridge((void*)elem, text ? text : "");
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_value2_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    (void)elem;
-    *out = js_dom_text_control_set_value_bridge((void*)elem, v);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_value3_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(v);
-    elem->set_attribute("value", text ? text : "");
-    if (elem->form) {
-        elem->form->value = elem->get_attribute("value");
+
+#define RADIANT_M4C_GET(name, property) \
+    RADIANT_C_API int name(Item receiver, Item* out) { \
+        return radiant_dom_m4c_get_property(receiver, out, property); \
     }
-    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = v;
+
+RADIANT_M4C_GET(radiant_dom_m4c_get_checked, "checked")
+RADIANT_M4C_GET(radiant_dom_m4c_get_value, "value")
+RADIANT_M4C_GET(radiant_dom_m4c_get_selectedIndex, "selectedIndex")
+RADIANT_M4C_GET(radiant_dom_m4c_get_length, "length")
+RADIANT_M4C_GET(radiant_dom_m4c_get_selected, "selected")
+RADIANT_M4C_GET(radiant_dom_m4c_get_text, "text")
+RADIANT_M4C_GET(radiant_dom_m4c_get_selectionStart, "selectionStart")
+RADIANT_M4C_GET(radiant_dom_m4c_get_selectionEnd, "selectionEnd")
+RADIANT_M4C_GET(radiant_dom_m4c_get_selectionDirection, "selectionDirection")
+RADIANT_M4C_GET(radiant_dom_m4c_get_defaultValue, "defaultValue")
+RADIANT_M4C_GET(radiant_dom_m4c_get_options, "options")
+RADIANT_M4C_GET(radiant_dom_m4c_get_selectedOptions, "selectedOptions")
+RADIANT_M4C_GET(radiant_dom_m4c_get_type, "type")
+RADIANT_M4C_GET(radiant_dom_m4c_get_index, "index")
+RADIANT_M4C_GET(radiant_dom_m4c_get_label, "label")
+RADIANT_M4C_GET(radiant_dom_m4c_get_form, "form")
+
+#undef RADIANT_M4C_GET
+
+typedef Item (*RadiantDomItemSetter)(void* element, Item value);
+
+static int radiant_dom_m4c_set_bridge(Item receiver, Item value, Item* out,
+                                      RadiantDomItemSetter setter) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out || !setter) return 0;
+    *out = setter((void*)elem, value);
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4c_value4_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+#define RADIANT_M4C_SET(name, setter) \
+    RADIANT_C_API int name(Item receiver, Item value, Item* out) { \
+        return radiant_dom_m4c_set_bridge(receiver, value, out, setter); \
+    }
+
+RADIANT_C_API int radiant_dom_m4c_checked_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(v);
+    js_dom_set_checked_dirty((void*)elem, js_is_truthy(value));
+    *out = value;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_m4c_value_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(value);
+    js_dom_select_set_value_bridge((void*)elem, text ? text : "");
+    *out = value;
+    return 1;
+}
+
+RADIANT_M4C_SET(radiant_dom_m4c_value2_set, js_dom_text_control_set_value_bridge)
+
+static int radiant_dom_m4c_attribute_set(Item receiver, Item value, Item* out,
+                                         bool update_form, bool notify) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(value);
     elem->set_attribute("value", text ? text : "");
-    *out = v;
+    if (update_form && elem->form) elem->form->value = elem->get_attribute("value");
+    if (notify) {
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+    }
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4c_get_selectedIndex(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectedIndex"))});
+
+RADIANT_C_API int radiant_dom_m4c_value3_set(Item receiver, Item value, Item* out) {
+    return radiant_dom_m4c_attribute_set(receiver, value, out, true, true);
+}
+
+RADIANT_C_API int radiant_dom_m4c_value4_set(Item receiver, Item value, Item* out) {
+    return radiant_dom_m4c_attribute_set(receiver, value, out, false, false);
+}
+
+typedef void (*RadiantDomVoidSetter)(void* element, Item value);
+
+static int radiant_dom_m4c_set_void(Item receiver, Item value, Item* out,
+                                    RadiantDomVoidSetter setter) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out || !setter) return 0;
+    setter((void*)elem, value);
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4c_selected_index_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+#define RADIANT_M4C_VOID_SET(name, setter) \
+    RADIANT_C_API int name(Item receiver, Item value, Item* out) { \
+        return radiant_dom_m4c_set_void(receiver, value, out, setter); \
+    }
+
+RADIANT_M4C_VOID_SET(radiant_dom_m4c_selected_index_set, js_dom_select_set_selected_index_bridge)
+RADIANT_M4C_VOID_SET(radiant_dom_m4c_length_set, js_dom_select_set_length_bridge)
+
+RADIANT_C_API int radiant_dom_m4c_selected_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    js_dom_select_set_selected_index_bridge((void*)elem, v);
-    *out = v;
+    js_dom_set_option_selected_dirty((void*)elem, js_is_truthy(value));
+    *out = value;
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4c_get_length(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("length"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_length_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
+
+RADIANT_C_API int radiant_dom_m4c_text_set(Item receiver, Item value, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    js_dom_select_set_length_bridge((void*)elem, v);
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_selected(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selected"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_selected_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    js_dom_set_option_selected_dirty((void*)elem, js_is_truthy(v));
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_text(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("text"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_text_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(v);
+    const char* text = fn_to_cstr(value);
     js_dom_set_option_text_bridge((void*)elem, text ? text : "");
-    *out = v;
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_selectionStart(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectionStart"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_selection_start_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    (void)elem;
-    *out = js_dom_text_control_set_selection_start_bridge((void*)elem, v);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_selectionEnd(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectionEnd"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_selection_end_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    (void)elem;
-    *out = js_dom_text_control_set_selection_end_bridge((void*)elem, v);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_selectionDirection(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectionDirection"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_selection_direction_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    (void)elem;
-    *out = js_dom_text_control_set_selection_direction_bridge((void*)elem, v);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_defaultValue(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("defaultValue"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_default_value_set(Item r, Item v, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(r);
-    if (!elem || !out) return 0;
-    (void)elem;
-    *out = js_dom_text_control_set_default_value_bridge((void*)elem, v);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_options(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("options"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_selectedOptions(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("selectedOptions"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_type(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("type"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_index(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("index"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_label(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("label"))});
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4c_get_form(Item r, Item* out) {
-    *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("form"))});
+    *out = value;
     return 1;
 }
 
+RADIANT_M4C_SET(radiant_dom_m4c_selection_start_set,
+                js_dom_text_control_set_selection_start_bridge)
+RADIANT_M4C_SET(radiant_dom_m4c_selection_end_set,
+                js_dom_text_control_set_selection_end_bridge)
+RADIANT_M4C_SET(radiant_dom_m4c_selection_direction_set,
+                js_dom_text_control_set_selection_direction_bridge)
+RADIANT_M4C_SET(radiant_dom_m4c_default_value_set,
+                js_dom_text_control_set_default_value_bridge)
 
-// ---- DOM3 Phase 4d: direct method capabilities ----
-// Each record target fixes its executable operation at publication; observable
-// property names never select the method body after Get (D6.2.2v2).
-RADIANT_C_API int radiant_dom_guard_node(Item receiver) {
-    return radiant_dom_unwrap_node(receiver) != nullptr;
-}
-
-RADIANT_C_API int radiant_dom_guard_text(Item receiver) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    return node && node->is_text();
-}
-RADIANT_C_API int radiant_dom_guard_character_data(Item receiver) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    return node && (node->is_text() || node->is_comment());
-}
-
-RADIANT_C_API int radiant_dom_guard_svg(Item receiver) {
-    if (!radiant_dom_member_is_element(receiver)) return 0;
-    Item namespace_value = js_dom_get_property_impl(receiver,
-        (Item){.item = s2it(heap_create_name("namespaceURI"))});
-    const char* namespace_uri = fn_to_cstr(namespace_value);
-    return namespace_uri &&
-        strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0;
-}
-
+#undef RADIANT_M4C_SET
+#undef RADIANT_M4C_VOID_SET
 static int radiant_dom_member_character_data_property(Item receiver,
                                                       const char* prop,
                                                       Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !prop || !out) return 0;
     if (node->is_text()) {
-        return radiant_dom_get_text_property(node->as_text(), prop, out) ? 1 : 0;
+        DomText* text = node->as_text();
+        return radiant_dom_get_character_data_property(node, text->text,
+            radiant_dom_utf16_length(text->text), 3, "#text", prop, out) ? 1 : 0;
     }
     if (node->is_comment()) {
-        return radiant_dom_get_comment_property(node->as_comment(), prop, out) ? 1 : 0;
+        DomComment* comment = node->as_comment();
+        return radiant_dom_get_character_data_property(node, comment->content,
+            comment->length, comment->node_type, "#comment", prop, out) ? 1 : 0;
     }
     return 0;
 }
@@ -2787,9 +2063,11 @@ RADIANT_C_API int radiant_dom_member_node_type_any(Item receiver, Item* out) {
     if (!node || !out) return 0;
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        // DocumentFragment uses the shared container storage internally, but
-        // its projected DOM discriminator must remain nodeType 11.
+        // Document and DocumentFragment share element storage internally, but
+        // ancestor walks must stop at their DOM node types instead of treating
+        // the shell as another Element.
         *out = radiant_dom_int_item(
+            radiant_dom_is_tag(elem, "#document") ? 9 :
             radiant_dom_is_tag(elem, "#document-fragment") ? 11 :
             (int64_t)elem->node_type);
         return 1;
@@ -2965,737 +2243,11 @@ RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_screen_ctm, JUBE_DOM_GET_SCREE
 
 #undef RADIANT_DOM_OPERATION_BINDING
 
-static bool radiant_dom_get_element_property(Item receiver, DomElement* elem,
-                                             const char* prop, Item* out) {
-    if (!elem || !prop || !out) return false;
-    if (radiant_dom_get_aria_element_reflection(receiver, elem, prop, out)) {
-        return true;
-    }
-    if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
-        *out = js_dom_live_form_elements_bridge((void*)elem);
-        return true;
-    }
-    if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
-        Item controls = radiant_dom_form_controls_item(elem);
-        *out = radiant_dom_int_item(controls.array ? controls.array->length : 0);
-        return true;
-    }
-    if (strcmp(prop, "length") == 0) {
-        *out = radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem));
-        return true;
-    }
-    if (radiant_dom_form_named_getter(elem, prop, out)) {
-        return true;
-    }
-    if (strcmp(prop, "dataset") == 0) {
-        // Dataset must stay connected to its owner; a snapshot would make
-        // `element.dataset.name = value` invisible to DOM attribute reads.
-        *out = js_dom_dataset_property(receiver);
-        return true;
-    }
-    return false;
-}
-
-static bool radiant_dom_get_basic_property(Item elem_item, Item prop_name, Item* out) {
-    if (!out) return false;
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
-    if (!node) return false;
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop) return false;
-
-    if (strcmp(prop, "__sym_4") == 0) {
-        // Host DOM wrappers do not store ordinary prototype slots themselves;
-        // project the WebIDL @@toStringTag from their resolved interface ctor.
-        Item proto = js_dom_get_prototype_value(elem_item);
-        Item ctor = radiant_host_api->value->property_get(
-            proto, (Item){.item = s2it(heap_create_name("constructor"))});
-        Item name = radiant_host_api->value->property_get(
-            ctor, (Item){.item = s2it(heap_create_name("name"))});
-        if (get_type_id(name) == LMD_TYPE_STRING) {
-            *out = name;
-            return true;
-        }
-    }
-
-    if (node->is_text()) {
-        return radiant_dom_get_text_property(node->as_text(), prop, out);
-    }
-    if (node->is_comment()) {
-        return radiant_dom_get_comment_property(node->as_comment(), prop, out);
-    }
-    if (node->is_element()) {
-        return radiant_dom_get_element_property(elem_item, node->as_element(), prop, out);
-    }
-    return false;
-}
-
-static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item value, Item* out) {
-    if (!out) return false;
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop) return false;
-
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
-    if (!node) return false;
-
-    if (node->is_text() &&
-        (strcmp(prop, "data") == 0 ||
-         strcmp(prop, "nodeValue") == 0 ||
-         strcmp(prop, "textContent") == 0)) {
-        *out = js_dom_set_text_data_property((void*)node->as_text(), value);
-        return true;
-    }
-
-    if (!node->is_element()) return false;
-
-    DomElement* elem = node->as_element();
-    if (radiant_dom_set_aria_element_reflection(elem_item, elem, prop, value, out)) {
-        return true;
-    }
-    if (radiant_dom_is_attr_name_projection(prop) && !radiant_dom_is_internal_attr(prop)) {
-        const char* text = js_dom_to_attribute_cstr(value);
-        // Dashed Lambda projection writes used to be routed by VMap's DOM-only
-        // setAttribute shortcut; after Phase 5 removes that shortcut, the DOM
-        // named setter must own attr-name writes before JS property fallback.
-        radiant_dom_aria_invalidate_attribute_cache(elem_item, prop);
-        elem->set_attribute(prop, text ? text : "");
-        js_dom_after_set_attribute((void*)elem, prop, text ? text : "");
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "id") == 0) {
-        const char* id_str = fn_to_cstr(value);
-        if (id_str && elem->set_attribute("id", id_str)) {
-            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        }
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "className") == 0) {
-        const char* class_str = fn_to_cstr(value);
-        if (class_str && elem->set_attribute("class", class_str)) {
-            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        }
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "srcdoc") == 0 && radiant_dom_is_tag(elem, "iframe")) {
-        const char* text = fn_to_cstr(value);
-        elem->set_attribute("srcdoc", text ? text : "");
-        js_dom_after_srcdoc_set((void*)elem);
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "autocapitalize") == 0) {
-        const char* text = js_dom_to_attribute_cstr(value);
-        elem->set_attribute("autocapitalize", text ? text : "");
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "autocorrect") == 0) {
-        elem->set_attribute("autocorrect", js_is_truthy(value) ? "on" : "off");
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "spellcheck") == 0) {
-        elem->set_attribute("spellcheck", radiant_dom_item_to_html_bool_string(value));
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    if (strcmp(prop, "writingSuggestions") == 0) {
-        elem->set_attribute("writingsuggestions", radiant_dom_item_to_html_bool_string(value));
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-        *out = value;
-        return true;
-    }
-    return false;
-}
-
-static Item radiant_dom_attribute_names_item(DomElement* elem) {
-    Item arr_item = radiant_dom_array_item();
-    Array* arr = arr_item.array;
-
-    int attr_count = 0;
-    const char** attr_names = elem->attribute_names(&attr_count);
-    for (int i = 0; attr_names && i < attr_count; i++) {
-        if (radiant_dom_is_internal_attr(attr_names[i])) continue;
-        array_push(arr, radiant_dom_string_item(attr_names[i]));
-    }
-    return arr_item;
-}
-
-static bool radiant_dom_element_operation_basic(Item elem_item, JubeDomElementOperation operation, Item* args, int argc, Item* out) {
-    if (!out) return false;
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
-    if (!node) return false;
-
-    if (node->is_element()) {
-        DomElement* method_elem = node->as_element();
-        if (radiant_dom_is_tag(method_elem, "select") &&
-            (operation == JUBE_DOM_NAMED_ITEM ||
-             operation == JUBE_DOM_ADD ||
-             operation == JUBE_DOM_REMOVE)) {
-            // HTMLSelectElement overrides ChildNode.remove(); dispatch this
-            // before generic node removal so select.remove(index) and
-            // select.remove() keep the legacy option-list semantics.
-            *out = js_dom_element_operation_impl(elem_item, operation, args, argc);
-            return true;
-        }
-    }
-
-    if (operation == JUBE_DOM_CONTAINS) {
-        DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
-        *out = (Item){.item = b2it(radiant_dom_node_contains(node, other) ? 1 : 0)};
-        return true;
-    }
-
-    if (operation == JUBE_DOM_COMPARE_DOCUMENT_POSITION) {
-        DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
-        *out = radiant_dom_int_item(radiant_dom_compare_document_position(node, other));
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_ROOT_NODE) {
-        // Shadow DOM is deferred, so composed and non-composed roots coincide.
-        *out = radiant_dom_node_root_item(node);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_REMOVE) {
-        *out = js_dom_remove_bridge((void*)node);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_REPLACE_WITH) {
-        *out = js_dom_replace_with_bridge((void*)node, args, argc);
-        return true;
-    }
-
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (operation == JUBE_DOM_CLONE_NODE) {
-            DomNode* ancestor = text->parent;
-            DomDocument* doc = nullptr;
-            while (ancestor && !ancestor->is_element()) ancestor = ancestor->parent;
-            if (ancestor) doc = ancestor->as_element()->doc;
-            // jQuery clones label text before wrapping it; returning null here
-            // makes its clone cleanup query a non-node instead of a Text clone.
-            DomText* clone = doc ? DomText::create_detached_copy(doc,
-                text->text ? text->text : "", text->length) : nullptr;
-            *out = radiant_dom_node_item((DomNode*)clone);
-            return true;
-        }
-        if (operation == JUBE_DOM_REPLACE_DATA) {
-            *out = js_dom_text_replace_data_bridge((void*)text,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-                argc >= 2 ? args[1] : radiant_dom_undefined_item(),
-                argc >= 3 ? args[2] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_INSERT_DATA) {
-            *out = js_dom_text_insert_data_bridge((void*)text,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-                argc >= 2 ? args[1] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_APPEND_DATA) {
-            *out = js_dom_text_append_data_bridge((void*)text,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_DELETE_DATA) {
-            *out = js_dom_text_delete_data_bridge((void*)text,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-                argc >= 2 ? args[1] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_SUBSTRING_DATA) {
-            *out = js_dom_text_substring_data_bridge((void*)text,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-                argc >= 2 ? args[1] : radiant_dom_undefined_item());
-            return true;
-        }
-    }
-
-    // EventTarget is inherited by every Node, including CharacterData. Keep
-    // these capabilities before the Element-only boundary (D6.2.2v2).
-    if (operation == JUBE_DOM_ADD_EVENT_LISTENER) {
-        *out = argc >= 2
-            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1],
-                argc >= 3 ? args[2] : ItemNull)
-            : radiant_dom_undefined_item();
-        return true;
-    }
-    if (operation == JUBE_DOM_REMOVE_EVENT_LISTENER) {
-        *out = argc >= 2
-            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1],
-                argc >= 3 ? args[2] : ItemNull)
-            : radiant_dom_undefined_item();
-        return true;
-    }
-    if (operation == JUBE_DOM_DISPATCH_EVENT) {
-        *out = argc >= 1
-            ? js_dom_dispatch_event_bridge(elem_item, args[0])
-            : (Item){.item = b2it(0)};
-        return true;
-    }
-
-    if (!node->is_element()) return false;
-    DomElement* elem = node->as_element();
-
-    if (operation == JUBE_DOM_GET_ATTRIBUTE) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* attr_name = fn_to_cstr(args[0]);
-        if (!attr_name || radiant_dom_is_internal_attr(attr_name)) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* val = elem->get_attribute(attr_name);
-        if (val) {
-            *out = radiant_dom_string_item(val);
-            return true;
-        }
-        *out = elem->has_attribute(attr_name) ? radiant_dom_string_item("") : ItemNull;
-        return true;
-    }
-
-    if (operation == JUBE_DOM_HAS_ATTRIBUTE) {
-        if (argc < 1) {
-            *out = (Item){.item = b2it(0)};
-            return true;
-        }
-        const char* attr_name = fn_to_cstr(args[0]);
-        bool has = attr_name && !radiant_dom_is_internal_attr(attr_name) &&
-            elem->has_attribute(attr_name);
-        *out = (Item){.item = b2it(has ? 1 : 0)};
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_ATTRIBUTE_NAMES) {
-        *out = radiant_dom_attribute_names_item(elem);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_live_element_get_elements_by_tag_name_bridge((void*)elem, args[0]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_live_element_get_elements_by_class_name_bridge((void*)elem, args[0]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_QUERY_SELECTOR) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !elem->doc) {
-            *out = ItemNull;
-            return true;
-        }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
-        if (!selector_group) {
-            *out = ItemNull;
-            return true;
-        }
-        // selector parsing and matching stay on the document pool so returned
-        // wrappers are the only GC-managed values created by this read-only path.
-        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
-        // jQuery scopes relative .find() selectors through :scope; bind it to
-        // this receiver before matching its descendants.
-        selector_matcher_set_scope_element(matcher, elem);
-        // Element selector queries walk descendants and must not match the
-        // context element itself (Document queries pass true below).
-        DomElement* found = radiant_dom_selector_group_find_first(
-            matcher, selector_group, elem, false);
-        *out = radiant_dom_node_item((DomNode*)found);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_QUERY_SELECTOR_ALL) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !elem->doc) {
-            *out = ItemNull;
-            return true;
-        }
-        Item arr_item = radiant_dom_array_item();
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
-        if (!selector_group) {
-            *out = arr_item;
-            return true;
-        }
-        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
-        // Preserve the Element query root so :scope selectors match correctly.
-        selector_matcher_set_scope_element(matcher, elem);
-        ArrayList* results = arraylist_new(16);
-        if (!results) {
-            *out = arr_item;
-            return true;
-        }
-        radiant_dom_selector_group_collect_all(
-            matcher, selector_group, elem, results, false);
-        for (int i = 0; i < results->length; i++) {
-            array_push(arr_item.array, radiant_dom_node_item((DomNode*)results->data[i]));
-        }
-        arraylist_free(results);
-        *out = arr_item;
-        return true;
-    }
-
-    if (operation == JUBE_DOM_MATCHES) {
-        if (argc < 1) {
-            *out = (Item){.item = b2it(0)};
-            return true;
-        }
-        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !elem->doc) {
-            *out = (Item){.item = b2it(0)};
-            return true;
-        }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
-        if (!selector_group) {
-            *out = (Item){.item = b2it(0)};
-            return true;
-        }
-        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
-        MatchResult result;
-        bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
-        *out = (Item){.item = b2it(matched ? 1 : 0)};
-        return true;
-    }
-
-    if (operation == JUBE_DOM_CLOSEST) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !elem->doc) {
-            *out = ItemNull;
-            return true;
-        }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
-        if (!selector_group) {
-            *out = ItemNull;
-            return true;
-        }
-        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
-        MatchResult result;
-        DomElement* current = elem;
-        while (current) {
-            if (selector_matcher_matches_group(matcher, selector_group, current, &result)) {
-                *out = radiant_dom_node_item((DomNode*)current);
-                return true;
-            }
-            DomNode* parent = current->parent;
-            current = (parent && parent->is_element()) ? parent->as_element() : nullptr;
-        }
-        *out = ItemNull;
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_ELEMENT_BY_ID) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* id = fn_to_cstr(args[0]);
-        if (!id) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = radiant_dom_node_item((DomNode*)radiant_dom_find_by_id(elem, id));
-        return true;
-    }
-
-    if (operation == JUBE_DOM_APPEND_CHILD) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_append_child_bridge((void*)elem, args[0]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_REMOVE_CHILD) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_remove_child_bridge((void*)elem, args[0]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_INSERT_BEFORE) {
-        if (argc < 2) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_insert_before_bridge((void*)elem, args[0], args[1]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_NORMALIZE) {
-        *out = js_dom_normalize_bridge((void*)elem);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_CLONE_NODE) {
-        *out = js_dom_clone_node_bridge((void*)elem,
-            argc >= 1 ? args[0] : radiant_dom_undefined_item(), argc >= 1);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_REPLACE_CHILD) {
-        if (argc < 2) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_replace_child_bridge((void*)elem, args[0], args[1]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_INSERT_ADJACENT_ELEMENT) {
-        if (argc < 2) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_INSERT_ADJACENT_HTML) {
-        if (argc < 2) {
-            *out = ItemNull;
-            return true;
-        }
-        *out = js_dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_APPEND) {
-        *out = js_dom_append_variadic_bridge((void*)elem, args, argc);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_PREPEND) {
-        *out = js_dom_prepend_variadic_bridge((void*)elem, args, argc);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_BOUNDING_CLIENT_RECT) {
-        radiant_dom_has_committed_geometry_snapshot(elem->doc);
-        *out = js_dom_get_bounding_client_rect_bridge((void*)elem);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_GET_CLIENT_RECTS) {
-        radiant_dom_has_committed_geometry_snapshot(elem->doc);
-        *out = js_dom_get_client_rects_bridge((void*)elem);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_SCROLL_INTO_VIEW) {
-        radiant_dom_has_committed_geometry_snapshot(elem->doc);
-        *out = js_dom_scroll_into_view_bridge((void*)elem);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_SCROLL ||
-        operation == JUBE_DOM_SCROLL_TO ||
-        operation == JUBE_DOM_SCROLL_BY) {
-        *out = js_dom_scroll_operation_bridge(elem_item, operation, args, argc);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS) {
-        *out = js_dom_text_control_caret_bounds_bridge((void*)elem);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT) {
-        *out = js_dom_text_control_boundary_from_point_bridge((void*)elem,
-            argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-            argc >= 2 ? args[1] : radiant_dom_undefined_item());
-        return true;
-    }
-
-    if (operation == JUBE_DOM_BOUNDARY_FROM_POINT) {
-        *out = js_dom_boundary_from_point_bridge((void*)elem,
-            argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-            argc >= 2 ? args[1] : radiant_dom_undefined_item(),
-            argc >= 3 ? args[2] : radiant_dom_undefined_item());
-        return true;
-    }
-
-    if (operation == JUBE_DOM_FOCUS || operation == JUBE_DOM_BLUR) {
-        *out = js_dom_focus_method_bridge((void*)elem, operation == JUBE_DOM_FOCUS);
-        return true;
-    }
-
-    if (operation == JUBE_DOM_CLICK) {
-        *out = js_dom_click_method_bridge(elem_item);
-        return true;
-    }
-
-    if (radiant_dom_is_tag(elem, "form")) {
-        if (operation == JUBE_DOM_SUBMIT) {
-            *out = js_dom_form_submit_bridge(elem_item);
-            return true;
-        }
-        if (operation == JUBE_DOM_REQUEST_SUBMIT) {
-            *out = js_dom_form_request_submit_bridge(elem_item,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_RESET) {
-            *out = js_dom_form_reset_bridge(elem_item);
-            return true;
-        }
-        if (operation == JUBE_DOM_CHECK_VALIDITY) {
-            *out = js_dom_check_validity_bridge(elem_item);
-            return true;
-        }
-        if (operation == JUBE_DOM_REPORT_VALIDITY) {
-            *out = js_dom_report_validity_bridge(elem_item);
-            return true;
-        }
-    }
-
-    if (tc_is_text_control(elem)) {
-        if (operation == JUBE_DOM_SET_SELECTION_RANGE) {
-            // preserve the legacy DOM fallback no-op when required offsets are absent.
-            if (argc < 2) {
-                *out = radiant_dom_undefined_item();
-                return true;
-            }
-            *out = js_dom_text_control_set_selection_range_bridge((void*)elem,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-                argc >= 2 ? args[1] : radiant_dom_undefined_item(),
-                argc >= 3 ? args[2] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_SET_RANGE_TEXT) {
-            *out = js_dom_text_control_set_range_text_bridge((void*)elem,
-                argc >= 1 ? args[0] : radiant_dom_undefined_item(),
-                argc >= 2 ? args[1] : radiant_dom_undefined_item(),
-                argc >= 3 ? args[2] : radiant_dom_undefined_item(),
-                argc >= 4 ? args[3] : radiant_dom_undefined_item());
-            return true;
-        }
-        if (operation == JUBE_DOM_SELECT) {
-            *out = js_dom_text_control_select_bridge((void*)elem);
-            return true;
-        }
-    }
-
-    if (operation == JUBE_DOM_SET_ATTRIBUTE) {
-        if (argc < 2) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* attr_name = fn_to_cstr(args[0]);
-        const char* attr_val = js_dom_to_attribute_cstr(args[1]);
-        if (!attr_name || !attr_val || radiant_dom_is_internal_attr(attr_name)) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* old_value = elem->get_attribute(attr_name);
-        radiant_dom_aria_invalidate_attribute_cache(elem_item, attr_name);
-        elem->set_attribute(attr_name, attr_val);
-        js_dom_after_set_attribute((void*)elem, attr_name, attr_val);
-        js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
-            (void*)elem->parent, attr_name, old_value);
-        *out = ItemNull;
-        return true;
-    }
-
-    if (operation == JUBE_DOM_REMOVE_ATTRIBUTE) {
-        if (argc < 1) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* attr_name = fn_to_cstr(args[0]);
-        if (!attr_name) {
-            *out = ItemNull;
-            return true;
-        }
-        const char* old_value = elem->get_attribute(attr_name);
-        radiant_dom_aria_invalidate_attribute_cache(elem_item, attr_name);
-        elem->remove_attribute(attr_name);
-        js_dom_after_remove_attribute((void*)elem, attr_name);
-        js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
-            (void*)elem->parent, attr_name, old_value);
-        *out = ItemNull;
-        return true;
-    }
-
-    if (operation == JUBE_DOM_TOGGLE_ATTRIBUTE) {
-        if (argc < 1) {
-            *out = (Item){.item = b2it(0)};
-            return true;
-        }
-        const char* attr_name = fn_to_cstr(args[0]);
-        if (!attr_name) {
-            *out = (Item){.item = b2it(0)};
-            return true;
-        }
-        bool has = elem->has_attribute(attr_name);
-        const char* old_value = elem->get_attribute(attr_name);
-        bool should_have = (argc >= 2) ? js_is_truthy(args[1]) : !has;
-        if (should_have && !has) {
-            elem->set_attribute(attr_name, "");
-        } else if (!should_have && has) {
-            elem->remove_attribute(attr_name);
-            js_dom_after_toggle_attribute_remove((void*)elem, attr_name);
-        }
-        if (should_have != has) {
-            js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
-                (void*)elem->parent, attr_name, old_value);
-        }
-        *out = (Item){.item = b2it(should_have ? 1 : 0)};
-        return true;
-    }
-
-    if (operation == JUBE_DOM_HAS_CHILD_NODES) {
-        *out = (Item){.item = b2it(radiant_dom_first_script_visible_child(elem) ? 1 : 0)};
-        return true;
-    }
-
-    return false;
-}
-
 static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
-    if (!doc || !doc->root || s_radiant_dom_geometry_layout_active) {
-        return;
-    }
+    if (!doc || !doc->root || s_radiant_dom_geometry_layout_active) return;
     UiContext* uicon = (UiContext*)doc->js.host_ui_context;
     if (!uicon) return;
-
-    // CSSOM View geometry reads must include the current cascade and loaded
-    // document fonts; otherwise the first snapshot poisons later measurements.
+    // geometry reads must reconcile pending DOM mutations before the first snapshot.
     s_radiant_dom_geometry_layout_active = true;
     DomDocument* saved_document = uicon->document;
     uicon->document = doc;
@@ -3703,8 +2255,6 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
     if (!doc->js.host_driven_loop && doc->js.mutation_count > 0) {
         radiant_reconcile_js_dom_mutations(uicon, doc);
     } else if (!doc->view_tree || !doc->view_tree->root) {
-        // The initial snapshot also establishes anonymous table fixup boxes
-        // before a later DOM edit observes their geometry.
         layout_html_doc(uicon, doc, false);
     }
     uicon->document = saved_document;
@@ -3712,12 +2262,20 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
 }
 
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
-    Item result = ItemNull;
-    if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
-        return result;
-    }
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     const char* prop = fn_to_cstr(prop_name);
+    if (node && node->is_element() && prop && strcmp(prop, "labels") == 0) {
+        DomElement* elem = node->as_element();
+        if (radiant_dom_is_tag(elem, "input") ||
+            radiant_dom_is_tag(elem, "select") ||
+            radiant_dom_is_tag(elem, "textarea") ||
+            radiant_dom_is_tag(elem, "button") ||
+            radiant_dom_is_tag(elem, "output") ||
+            radiant_dom_is_tag(elem, "meter") ||
+            radiant_dom_is_tag(elem, "progress")) {
+            return radiant_dom_labels_item(elem);
+        }
+    }
     if (node && node->is_element() && prop &&
         (strcmp(prop, "offsetWidth") == 0 || strcmp(prop, "offsetHeight") == 0 ||
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
@@ -3730,19 +2288,58 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
 }
 
 RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value) {
-    Item result = ItemNull;
-    if (radiant_dom_set_basic_property(elem_item, prop_name, value, &result)) {
-        return result;
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
+    const char* prop = fn_to_cstr(prop_name);
+    if (node && node->is_element() && prop &&
+            radiant_dom_is_attr_name_projection(prop) &&
+            !radiant_dom_is_internal_attr(prop)) {
+        const char* text = js_dom_to_attribute_cstr(value);
+        node->as_element()->set_attribute(prop, text ? text : "");
+        js_dom_after_set_attribute((void*)node, prop, text ? text : "");
+        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE,
+            (void*)node, (void*)node->parent);
+        return value;
     }
     return js_dom_set_property_impl(elem_item, prop_name, value);
 }
 
 RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
-                                                 JubeDomElementOperation operation,
-                                                 Item* args, int argc) {
-    Item result = ItemNull;
-    if (radiant_dom_element_operation_basic(elem_item, operation, args, argc, &result)) {
-        return result;
+                                                  JubeDomElementOperation operation,
+                                                  Item* args, int argc) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
+    if (!node) return ItemNull;
+    if (operation == JUBE_DOM_CLONE_NODE && !node->is_element()) {
+        // Text nodes are valid Node receivers; the element-only clone bridge
+        // passed them a null DomElement and made jQuery clone cleanup crash.
+        DomNode* clone = dom_node_clone(node, argc > 0 && js_is_truthy(args[0]));
+        return radiant_dom_node_item(clone);
+    }
+    if (operation == JUBE_DOM_CONTAINS) {
+        DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
+        return (Item){.item = b2it(radiant_dom_node_contains(node, other) ? 1 : 0)};
+    }
+    if (operation == JUBE_DOM_COMPARE_DOCUMENT_POSITION) {
+        DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
+        return radiant_dom_int_item(radiant_dom_compare_document_position(node, other));
+    }
+    if (operation == JUBE_DOM_GET_ROOT_NODE) {
+        // Shadow DOM is deferred, so composed and non-composed roots coincide.
+        return radiant_dom_node_root_item(node);
+    }
+    if (node->is_element() && radiant_dom_is_tag(node->as_element(), "select") &&
+        (operation == JUBE_DOM_NAMED_ITEM || operation == JUBE_DOM_ADD ||
+         operation == JUBE_DOM_REMOVE)) {
+        // HTMLSelectElement overrides ChildNode.remove(); preserve the option
+        // list overload before the generic node-removal bridge.
+        return js_dom_element_operation_impl(elem_item, operation, args, argc);
+    }
+    if (operation == JUBE_DOM_REMOVE) {
+        // Node.remove() must use the backed-tree path so renderer and DOM
+        // sibling state are retired together and observers receive a detail.
+        return js_dom_remove_bridge((void*)node);
+    }
+    if (operation == JUBE_DOM_REPLACE_WITH) {
+        return js_dom_replace_with_bridge((void*)node, args, argc);
     }
     return js_dom_element_operation_impl(elem_item, operation, args, argc);
 }
@@ -3773,7 +2370,9 @@ static bool radiant_dom_projected_own_value(Item object, Item key, Item* out) {
     // own-keys projection and descriptors keep covering them after their
     // legacy chain arms are deleted
     if (jube_member_projected_get(object, key, out)) return true;
-    return radiant_dom_get_basic_property(object, key, out);
+    // Generic DOM reads also expose expandos; treating that fallback as a
+    // projected value would make an expando undeletable and non-configurable.
+    return false;
 }
 
 static bool radiant_dom_has_expando(Item object, Item key) {
@@ -4074,226 +2673,30 @@ RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out) {
     return 1;
 }
 
-static DomElement* radiant_dom_document_child_by_tag(DomDocument* doc, const char* tag) {
-    if (!doc || !doc->root || !tag) return nullptr;
-    DomNode* child = doc->root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* elem = child->as_element();
-            if (elem->tag_name && strcasecmp(elem->tag_name, tag) == 0) {
-                return elem;
-            }
-        }
-        child = child->next_sibling;
+static Item radiant_dom_create_element_item(DomDocument* doc, const char* tag,
+                                             const char* namespace_uri) {
+    if (!doc || !doc->input || !tag) return ItemNull;
+    MarkBuilder builder(doc->input);
+    Item elem_item = builder.element(tag).final();
+    DomElement* elem = dom_element_create(doc, tag, elem_item.element);
+    if (elem && namespace_uri && namespace_uri[0]) {
+        elem->set_attribute("__lambda_ns_uri", namespace_uri);
     }
-    return nullptr;
+    return radiant_dom_node_item((DomNode*)elem);
 }
 
-static void radiant_dom_collect_text_content(DomNode* node, StrBuf* sb) {
-    if (!node || !sb || radiant_dom_is_generated_pseudo_node(node)) return;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (text->text && text->length > 0) {
-            strbuf_append_str_n(sb, text->text, text->length);
-        }
-        return;
-    }
-    if (node->is_element()) {
-        DomNode* child = radiant_dom_first_script_visible_child(node->as_element());
-        while (child) {
-            radiant_dom_collect_text_content(child, sb);
-            child = radiant_dom_next_script_visible_sibling(child);
-        }
-    }
-}
-
-static Item radiant_dom_document_title_item(DomDocument* doc) {
-    DomElement* head = radiant_dom_document_child_by_tag(doc, "head");
-    DomNode* child = head ? head->first_child : nullptr;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* elem = child->as_element();
-            if (elem->tag_name && strcasecmp(elem->tag_name, "title") == 0) {
-                StrBuf* sb = strbuf_new_cap(64);
-                if (!sb) return radiant_dom_string_item("");
-                radiant_dom_collect_text_content((DomNode*)elem, sb);
-                Item result = radiant_dom_string_item(sb->str ? sb->str : "");
-                strbuf_free(sb);
-                return result;
-            }
-        }
-        child = child->next_sibling;
-    }
-    return radiant_dom_string_item("");
-}
-
-static const char* radiant_dom_url_component(DomDocument* doc, const char* prop) {
-    if (!doc || !doc->url || !prop) return "";
-    if (strcmp(prop, "URL") == 0 || strcmp(prop, "href") == 0) {
-        const char* value = url_get_href(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "protocol") == 0) {
-        const char* value = url_get_protocol(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "hostname") == 0) {
-        const char* value = url_get_hostname(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "port") == 0) {
-        const char* value = url_get_port(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "pathname") == 0) {
-        const char* value = url_get_pathname(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "search") == 0) {
-        const char* value = url_get_search(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "hash") == 0) {
-        const char* value = url_get_hash(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "host") == 0) {
-        const char* value = url_get_host(doc->url);
-        return value ? value : "";
-    }
-    if (strcmp(prop, "origin") == 0) {
-        const char* value = url_get_origin(doc->url);
-        return value ? value : "";
-    }
-    return "";
-}
-
-static Item radiant_dom_document_child_nodes_item(DomDocument* doc) {
-    void* stub_v = js_dom_get_or_create_doc_node((void*)doc);
-    if (!stub_v) return ItemNull;
-    DomElement* stub = (DomElement*)stub_v;
-    Item arr_item = radiant_dom_array_item();
-    DomNode* child = stub->first_child;
-    while (child) {
-        array_push(arr_item.array, radiant_dom_node_item(child));
-        child = child->next_sibling;
-    }
-    return arr_item;
-}
-
-static Item radiant_dom_document_doctype_item(DomDocument* doc) {
-    void* stub_v = js_dom_get_or_create_doc_node((void*)doc);
-    if (!stub_v) return ItemNull;
-    DomElement* stub = (DomElement*)stub_v;
-    DomNode* first = stub->first_child;
-    return (first && first->is_comment()) ? radiant_dom_node_item(first) : ItemNull;
-}
-
-RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out) {
-    const char* prop = fn_to_cstr(prop_name);
-    if (!prop || !out) return 0;
-
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
-    if (!doc) {
-        *out = ItemNull;
-        return 1;
-    }
-
-    if (strcmp(prop, "documentElement") == 0) {
-        *out = doc->root ? radiant_dom_node_item((DomNode*)doc->root) : ItemNull;
-        return 1;
-    }
-    if (strcmp(prop, "body") == 0) {
-        DomElement* body = radiant_dom_document_child_by_tag(doc, "body");
-        *out = body ? radiant_dom_node_item((DomNode*)body) : ItemNull;
-        return 1;
-    }
-    if (strcmp(prop, "head") == 0) {
-        DomElement* head = radiant_dom_document_child_by_tag(doc, "head");
-        *out = head ? radiant_dom_node_item((DomNode*)head) : ItemNull;
-        return 1;
-    }
-    if (strcmp(prop, "title") == 0) {
-        *out = radiant_dom_document_title_item(doc);
-        return 1;
-    }
-    if (strcmp(prop, "URL") == 0 || strcmp(prop, "href") == 0 ||
-        strcmp(prop, "protocol") == 0 || strcmp(prop, "hostname") == 0 ||
-        strcmp(prop, "port") == 0 || strcmp(prop, "pathname") == 0 ||
-        strcmp(prop, "search") == 0 || strcmp(prop, "hash") == 0 ||
-        strcmp(prop, "host") == 0 || strcmp(prop, "origin") == 0) {
-        *out = radiant_dom_string_item(radiant_dom_url_component(doc, prop));
-        return 1;
-    }
-    if (strcmp(prop, "location") == 0 || strcmp(prop, "document") == 0) {
-        *out = js_dom_document_proxy_for_doc_bridge((void*)doc);
-        return 1;
-    }
-    if (strcmp(prop, "readyState") == 0) {
-        *out = radiant_dom_string_item(doc->js.ready_state ? doc->js.ready_state : "complete");
-        return 1;
-    }
-    if (strcmp(prop, "fonts") == 0) {
-        *out = js_dom_document_fonts_bridge();
-        return 1;
-    }
-    if (strcmp(prop, "compatMode") == 0) {
-        *out = radiant_dom_string_item("CSS1Compat");
-        return 1;
-    }
-    if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
-        *out = radiant_dom_string_item("UTF-8");
-        return 1;
-    }
-    if (strcmp(prop, "contentType") == 0) {
-        *out = radiant_dom_string_item("text/html");
-        return 1;
-    }
-    if (strcmp(prop, "nodeType") == 0) {
-        *out = radiant_dom_int_item(9);
-        return 1;
-    }
-    if (strcmp(prop, "nodeName") == 0) {
-        *out = radiant_dom_string_item("#document");
-        return 1;
-    }
-    if (strcmp(prop, "ownerDocument") == 0) {
-        *out = ItemNull;
-        return 1;
-    }
-    if (strcmp(prop, "childNodes") == 0) {
-        *out = radiant_dom_document_child_nodes_item(doc);
-        return 1;
-    }
-    if (strcmp(prop, "doctype") == 0) {
-        *out = radiant_dom_document_doctype_item(doc);
-        return 1;
-    }
-    if (strcmp(prop, "styleSheets") == 0) {
-        *out = js_dom_document_stylesheets_bridge();
-        return 1;
-    }
-    if (strcmp(prop, "defaultView") == 0) {
-        *out = js_dom_document_default_view_bridge((void*)doc);
-        return 1;
-    }
-    if (strcmp(prop, "implementation") == 0) {
-        *out = js_dom_document_implementation_bridge();
-        return 1;
-    }
-    if (strcmp(prop, "designMode") == 0) {
-        *out = js_dom_document_design_mode_bridge();
-        return 1;
-    }
-    if (strcmp(prop, "activeElement") == 0) {
-        *out = js_dom_document_active_element_bridge((void*)doc);
-        return 1;
-    }
-    if (strcmp(prop, "forms") == 0) {
-        *out = js_dom_live_document_forms_bridge((void*)doc);
-        return 1;
-    }
-    return 0;
+static Item radiant_dom_create_mark_element_item(DomDocument* doc, const char* backing_tag,
+                                                  const char* node_tag, const char* text,
+                                                  bool comment, bool add_text) {
+    if (!doc || !doc->input) return ItemNull;
+    MarkBuilder builder(doc->input);
+    Item backing = add_text
+        ? builder.element(backing_tag).text(text ? text : "").final()
+        : builder.element(backing_tag).final();
+    DomNode* node = comment
+        ? (DomNode*)dom_comment_create_detached(backing.element, doc)
+        : (DomNode*)dom_element_create(doc, node_tag, backing.element);
+    return radiant_dom_node_item(node);
 }
 
 static int radiant_dom_document_operation_active(RadiantDocumentOperation operation,
@@ -4500,83 +2903,34 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_ELEMENT) {
-        if (argc < 1 || !doc || !doc->input) {
-            *out = ItemNull;
-            return 1;
-        }
-        const char* tag = fn_to_cstr(args[0]);
-        if (!tag) {
-            *out = ItemNull;
-            return 1;
-        }
-        MarkBuilder builder(doc->input);
-        Item elem_item = builder.element(tag).final();
-        DomElement* elem = dom_element_create(doc, tag, elem_item.element);
-        *out = radiant_dom_node_item((DomNode*)elem);
+        *out = argc >= 1 ? radiant_dom_create_element_item(
+            doc, fn_to_cstr(args[0]), nullptr) : ItemNull;
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_ELEMENT_NS) {
-        if (argc < 2 || !doc || !doc->input) {
-            *out = ItemNull;
-            return 1;
-        }
-        const char* ns = fn_to_cstr(args[0]);
-        const char* tag = fn_to_cstr(args[1]);
-        if (!tag) {
-            *out = ItemNull;
-            return 1;
-        }
-        MarkBuilder builder(doc->input);
-        Item elem_item = builder.element(tag).final();
-        DomElement* elem = dom_element_create(doc, tag, elem_item.element);
-        if (elem && ns && ns[0] != '\0') {
-            // namespace reflection is stored as an internal attribute, hidden from scripts.
-            elem->set_attribute("__lambda_ns_uri", ns);
-        }
-        *out = radiant_dom_node_item((DomNode*)elem);
+        *out = argc >= 2 ? radiant_dom_create_element_item(
+            doc, fn_to_cstr(args[1]), fn_to_cstr(args[0])) : ItemNull;
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_TEXT_NODE) {
-        if (argc < 1 || !doc) {
-            *out = ItemNull;
-            return 1;
-        }
-        const char* text = fn_to_cstr(args[0]);
-        if (!text) {
-            *out = ItemNull;
-            return 1;
-        }
-        DomText* text_node = DomText::create_detached_copy(
-            doc, text, strlen(text));
+        const char* text = argc >= 1 ? fn_to_cstr(args[0]) : nullptr;
+        DomText* text_node = (doc && text)
+            ? DomText::create_detached_copy(doc, text, strlen(text)) : nullptr;
         *out = radiant_dom_node_item((DomNode*)text_node);
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_DOCUMENT_FRAGMENT) {
-        if (!doc || !doc->input) {
-            *out = ItemNull;
-            return 1;
-        }
-        MarkBuilder builder(doc->input);
-        Item frag_item = builder.element("#document-fragment").final();
-        DomElement* frag = dom_element_create(doc, "#document-fragment", frag_item.element);
-        *out = radiant_dom_node_item((DomNode*)frag);
+        *out = radiant_dom_create_mark_element_item(doc, "#document-fragment",
+            "#document-fragment", nullptr, false, false);
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_COMMENT) {
-        if (!doc || !doc->input) {
-            *out = ItemNull;
-            return 1;
-        }
         const char* text = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (!text) text = "";
-        MarkBuilder builder(doc->input);
-        Item comment_item = builder.element("!--").text(text).final();
-        DomComment* comment = dom_comment_create_detached(comment_item.element, doc);
-        *out = radiant_dom_node_item((DomNode*)comment);
+        *out = radiant_dom_create_mark_element_item(doc, "!--", "!--", text, true, true);
         return 1;
     }
 
@@ -4587,12 +2941,8 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         }
         const char* target = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         const char* data = (argc >= 2) ? fn_to_cstr(args[1]) : "";
-        if (!target) target = "";
-        if (!data) data = "";
-        MarkBuilder builder(doc->input);
-        Item pi_item = builder.element("?").text(data).final();
-        DomElement* pi = dom_element_create(doc, target, pi_item.element);
-        *out = radiant_dom_node_item((DomNode*)pi);
+        *out = radiant_dom_create_mark_element_item(doc, "?", target ? target : "",
+            data, false, true);
         return 1;
     }
 

@@ -15,6 +15,7 @@
 #include "../../lib/memtrack.h"
 
 struct JsClassEntry;
+struct JubeTypeDef;
 
 // Imported MIR calls share Core Lambda's user-operand ceiling. Keeping this
 // storage below LAMBDA_MAX_FUNCTION_ARGS silently rejected valid 9..16-arg
@@ -40,6 +41,9 @@ struct VarEntry {
     int async_slot;
     MIR_type_t mir_type;
     TypeId type_id;
+    // DOM4 flow fact: a declared Jube carrier type proven for this binding.
+    // It is compiler metadata only; generated MIR carries slot/ordinal ints.
+    const JubeTypeDef* jube_type;
     TypeId elem_type;
     // elem_type came from a declared annotation rather than from local fill()
     // narrowing, so the representation is only guaranteed at function entry.
@@ -385,6 +389,8 @@ struct MirFunctionPlan {
     // v3 (RV1/RV10): the shape this body returns in. Callee-side emission reads
     // it; it must agree with the descriptor published in FnReturnAnalysis.
     FnReturnShape return_shape;
+    // Where this body's lane 2 travels (RV10a/RV12).
+    FnCompanionTransport companion;
     int fixed_number_scratch_slots;
     bool accepts_caller_scalar_home;
     const char* debug_name;
@@ -754,6 +760,11 @@ static inline int em_gc_new_home(MirEmitter* em) {
 // machine return type. Both Lambda and LambdaJS use this enum so Item encoding
 // changes cannot make their return epilogues drift apart.
 static inline MirScalarReturnMode em_scalar_return_mode_for_type(TypeId type_id) {
+    // The NONE decision lives in lambda_type_id_may_be_wide_scalar() so the
+    // C-side sys-func metadata fallback shares exactly this answer.
+    if (!lambda_type_id_may_be_wide_scalar(type_id)) {
+        return MIR_SCALAR_RETURN_NONE;
+    }
     switch (type_id) {
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
@@ -762,10 +773,8 @@ static inline MirScalarReturnMode em_scalar_return_mode_for_type(TypeId type_id)
         return MIR_SCALAR_RETURN_INT64;
     case LMD_TYPE_UINT64:
         return MIR_SCALAR_RETURN_UINT64;
-    case LMD_TYPE_ANY:
-        return MIR_SCALAR_RETURN_DYNAMIC;
     default:
-        return MIR_SCALAR_RETURN_NONE;
+        return MIR_SCALAR_RETURN_DYNAMIC;  // ANY
     }
 }
 
@@ -818,25 +827,96 @@ static inline FnReturnShape em_return_shape(bool native_return, bool can_raise,
 //
 // Windows x86-64 hard-errors on nres > 1 (`mir-x86_64.c`), so RV12 lowers lane
 // 2 to a context slot there; that lowering lands in P3.
-static inline bool em_returns_result_pair(FnReturnShape shape,
-        uint8_t scalar_home_lane_mask) {
-#if LAMBDA_RETURN_V3 && !defined(_WIN32)
-    return fn_return_shape_is_pair(shape) && scalar_home_lane_mask == 0;
+// Lane 2 is a second MIR result iff the transport says so. This must be
+// transport-based, not mask-based: a slot-transport entry also has a zero home
+// mask, and reading that as "register pair" makes the epilogue emit a
+// two-operand `ret` from an nres=1 function.
+static inline bool em_returns_result_pair(FnCompanionTransport companion) {
+    return companion == FN_COMPANION_RESULT_REG;
+}
+
+static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
+    return variant && em_returns_result_pair(variant->result.companion);
+}
+
+// RV12: this entry hands lane 2 back through `Context::mir_companion_slot`
+// rather than a second MIR result, because it is reachable from C. On Windows
+// every shape-2 entry takes this path, since MIR rejects nres > 1 there.
+static inline bool em_returns_companion_slot(FnCompanionTransport companion) {
+#if LAMBDA_RETURN_V3
+    return companion == FN_COMPANION_CONTEXT_SLOT;
 #else
-    (void)shape; (void)scalar_home_lane_mask;
+    (void)companion;
     return false;
 #endif
 }
 
-static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
-    return variant && em_returns_result_pair(variant->result.shape,
-        variant->result.scalar_home_lane_mask);
+static inline bool em_variant_returns_slot(const FnVariantAnalysis* variant) {
+    return variant && em_returns_companion_slot(variant->result.companion);
+}
+
+// The transport an entry uses, derived once from its shape and reachability.
+// `c_reachable` is true for the public `_b` wrappers (boxed-call trampolines,
+// `fn->invoke`) and for anything else a C prototype can call.
+static inline FnCompanionTransport em_companion_transport(FnReturnShape shape,
+        bool c_reachable, uint8_t scalar_home_lane_mask) {
+    if (!fn_return_shape_is_pair(shape)) return FN_COMPANION_NONE;
+#if LAMBDA_RETURN_V3
+#if 0  // DIAGNOSTIC: shape 4 un-parked for root-cause work
+    // Shape 4 (P2) is PARKED on the v1 context-lane transport. The callee-side
+    // pair emission is written and verifiably correct in the dump — the body
+    // declares two results and returns `ret <value>, <error>` — but the value
+    // lane does not reach the caller at runtime for an `int64^` signature,
+    // while `int^` and `float^` both work and the error lane is read correctly
+    // in every case. Until that is understood, promising a companion the
+    // caller cannot observe would be worse than the extra context round trip.
+    // See the impl log for the diagnostics already run.
+    if (shape == RETURN_SHAPE_NATIVE_ERROR) {
+        return scalar_home_lane_mask ? FN_COMPANION_HOME : FN_COMPANION_NONE;
+    }
+#endif
+    #if defined(_WIN32)
+        (void)c_reachable; (void)scalar_home_lane_mask;
+        return FN_COMPANION_CONTEXT_SLOT;   // MIR rejects nres > 1 here
+    #else
+        (void)scalar_home_lane_mask;
+        return c_reachable ? FN_COMPANION_CONTEXT_SLOT : FN_COMPANION_RESULT_REG;
+    #endif
+#else
+    (void)c_reachable;
+    return scalar_home_lane_mask ? FN_COMPANION_HOME : FN_COMPANION_NONE;
+#endif
+}
+
+// RV10's single-source-of-truth defence, enforced rather than documented.
+//
+// A call site derives its result count from the callee's descriptor; the
+// callee derived its `nres` from the same descriptor when the function was
+// created. If those two ever disagree the call reads the wrong number of
+// result registers — the v27 havlak wrong-answer class, which is silent at
+// the MIR level. When the target is a defined function in this module its
+// real signature is available, so cross-check it instead of trusting that
+// both derivations stayed in step. Forward/import/export items have no body
+// yet and are skipped: their contract is checked when the definition lands.
+static inline void em_assert_callee_result_count(MIR_context_t ctx,
+        const char* call_name, MIR_item_t target, bool expect_pair) {
+    if (!ctx || !target || target->item_type != MIR_func_item) return;
+    MIR_func_t func = MIR_get_item_func(ctx, target);
+    if (!func) return;
+    uint32_t want = expect_pair ? 2u : 1u;
+    if (func->nres != want) {
+        log_error("mir: return-convention mismatch calling %s — call site "
+            "expects %u result(s), callee declares %u. The descriptor and the "
+            "emitted signature disagree (RV10).",
+            call_name ? call_name : "<anon>", (unsigned)want,
+            (unsigned)func->nres);
+        abort();
+    }
 }
 
 // Physical MIR result count for an entry.
-static inline int em_return_nres(FnReturnShape shape,
-        uint8_t scalar_home_lane_mask) {
-    return em_returns_result_pair(shape, scalar_home_lane_mask) ? 2 : 1;
+static inline int em_return_nres(FnCompanionTransport companion) {
+    return em_returns_result_pair(companion) ? 2 : 1;
 }
 
 static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
@@ -1242,11 +1322,9 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
     em_emit_label(em, l_done);
-    if (em->after_call_result) {
-        // The resolved carrier is what survives an await, exactly like an
-        // ordinary call result.
-        em->after_call_result(em->call_owner, result, MIR_T_I64);
-    }
+    // Publication is the CALLER's job (em_publish_call_result): the resolved
+    // carrier must be announced to the spill tracker and the root machinery
+    // exactly once, and only after this patch.
     return result;
 }
 static inline int em_add_const(MirEmitter* em, void* ptr) {
@@ -3194,6 +3272,27 @@ static inline void em_before_resolved_call(MirEmitter* em,
     }
 }
 
+// Hand a call's result to the async spill tracker and the root machinery.
+//
+// Split out of em_after_resolved_call because a shape-2 call must NOT publish
+// its raw result: lane 1 may be a pending Item, and both consumers write it to
+// memory — the spill tracker across a suspension, the root machinery into a GC
+// slot. That breaks RV4.1 ("a pending Item never lives in memory") and hands
+// the collector a word whose tag (0x1E) is outside the traceable TypeId range.
+// Pair call sites publish the RESOLVED register instead, after the patch.
+static inline void em_publish_call_result(MirEmitter* em,
+        const JitCallMetadata* metadata, MIR_reg_t result,
+        MIR_type_t ret_type) {
+    if (!em || !metadata || !result) return;
+    if (em->after_call_result) {
+        em->after_call_result(em->call_owner, result, ret_type);
+    }
+    if (em->root_call_value && mir_gc_value_needs_root(
+            metadata->normal_result.value.value_class, ret_type)) {
+        em->root_call_value(em->call_owner, result);
+    }
+}
+
 static inline void em_after_resolved_call(MirEmitter* em,
         const char* call_name, const JitCallMetadata* metadata,
         MIR_insn_t call, MIR_reg_t result, MIR_type_t ret_type) {
@@ -3211,13 +3310,7 @@ static inline void em_after_resolved_call(MirEmitter* em,
         em->note_call_exception(em->call_owner, metadata->effects.exception);
     }
     if (!result) return;
-    if (em->after_call_result) {
-        em->after_call_result(em->call_owner, result, ret_type);
-    }
-    if (em->root_call_value && mir_gc_value_needs_root(
-            metadata->normal_result.value.value_class, ret_type)) {
-        em->root_call_value(em->call_owner, result);
-    }
+    em_publish_call_result(em, metadata, result, ret_type);
 }
 
 static inline void em_enforce_argument_ownership(MirEmitter* em,
@@ -3334,11 +3427,26 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
     em_enforce_argument_ownership(em, &resolved.call, nargs, arg_ops);
     MirScalarReturnMode scalar_mode = em_scalar_return_mode_for_class(
         resolved.call.normal_result.scalar_class);
+    // RV14a: the whole snapshot / home / classify / restore sequence below
+    // exists for one hazard — the callee left a wide payload above our
+    // pre-call watermark, and the restore is about to reclaim it. A callee
+    // whose audit declares it leaves the watermark where it found it cannot
+    // have done that: the region is empty on return, and anything the result
+    // points at that IS on the number stack was allocated before the call,
+    // i.e. below the snapshot the restore would target. So the sequence is
+    // provably dead and the audit already told us.
+    //
+    // Note the skip drops the restore as well as the adopt, which is what
+    // makes an untruthful row degrade safely: an allocation nobody reclaims
+    // simply lives to the frame epilogue, so the returned Item stays valid
+    // and the cost is space, not a dangling pointer.
+    bool callee_preserves_watermark =
+        resolved.call.effects.number_stack == JIT_NUMBER_STACK_PRESERVES;
     MIR_reg_t source_base = 0;
     MIR_reg_t scalar_home = 0;
     int scalar_home_id = 0;
-    if (scalar_mode != MIR_SCALAR_RETURN_NONE && em->frame.active &&
-            em->frame.number_base) {
+    if (scalar_mode != MIR_SCALAR_RETURN_NONE && !callee_preserves_watermark &&
+            em->frame.active && em->frame.number_base) {
         scalar_home_id = em_scalar_home_new(em);
         scalar_home = em_materialize_frame_ref(em,
             em_scalar_home_ref(em, scalar_home_id));
@@ -3554,6 +3662,8 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     // RV5/RV10: the callee's descriptor — not any local fact here — decides
     // whether a second result lane comes back.
     bool callee_returns_pair = em_variant_returns_pair(variant);
+    em_assert_callee_result_count(em->ctx, call_name, target,
+        callee_returns_pair);
     char proto_name[192];
     snprintf(proto_name, sizeof(proto_name), "%s_dp%d", call_name,
         em->label_counter++);
@@ -3587,16 +3697,53 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
             result, nargs, physical_ops);
     }
     mir_append_emit_insn(em->ctx, em->func_item, call);
-    em_after_resolved_call(em, call_name, &metadata, call, result, result_type);
+    // A shape-2 result is withheld from publication here (result operand 0):
+    // it may be pending, and publishing writes it to memory. The call-site and
+    // exception bookkeeping still runs. Both transports need this.
+    // Shape 2 and the slot transport must withhold publication until the
+    // pending Item is resolved (RV4.1). Shape 4 must NOT: its value lane is a
+    // native scalar that is never pending, and deferring it moves the
+    // publication after `after_may_gc_call`, which is where the root
+    // machinery reloads live values — a native lane published there is both
+    // late and wrongly rooted.
+    bool callee_returns_error_pair = callee_returns_pair && variant &&
+        variant->result.shape == RETURN_SHAPE_NATIVE_ERROR;
+    bool callee_defers_publication =
+        (callee_returns_pair && !callee_returns_error_pair) ||
+        em_variant_returns_slot(variant);
+    em_after_resolved_call(em, call_name, &metadata, call,
+        callee_defers_publication ? 0 : result, result_type);
     if (em->after_may_gc_call && metadata.effects.gc != JIT_EFFECT_NO_GC) {
         em->after_may_gc_call(em->call_owner);
     }
-    if (callee_returns_pair) {
+    if (callee_returns_error_pair) {
+        // Shape 4 (RV9): lane 2 is an ERROR ITEM, not a wide payload — a
+        // pointer Item that needs no resolution. Hand it to the caller as the
+        // error lane; the value lane was published normally above.
+        call_result.error = em_value(companion, MIR_T_I64, LMD_TYPE_ERROR,
+            VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
+    } else if (callee_returns_pair) {
         // RV4.2 single-live: lane 2 dies at the next call, so resolve before
         // anything else can clobber it. This eager form is correct by
         // construction; RV6's lazy `maybe_pending` propagation (resolve only at
         // escape sites) is a strict refinement on top of it, not a prerequisite.
+        //
+        // Nothing between the call and this patch may spill or root the raw
+        // result — see em_publish_call_result. The pair itself is GC-safe while
+        // it lives in registers (RV5: lane 1 is tag bits, lane 2 raw non-pointer
+        // bits), so an intervening safepoint has nothing to trace.
         result = em_resolve_pending_pair(em, result, companion);
+        em_publish_call_result(em, &metadata, result, result_type);
+    } else if (em_variant_returns_slot(variant)) {
+        // RV12 slot transport: identical protocol, lane 2 read from the
+        // context cell instead of a second result register. Loaded eagerly
+        // because the slot dies at the next call (RV4.2), and resolved before
+        // publication for the same reason the register form is — a pending
+        // Item must never be spilled or rooted.
+        MIR_reg_t slot = em_load_frame_top(em, em->frame.runtime,
+            offsetof(Context, mir_companion_slot), "companion_slot");
+        result = em_resolve_pending_pair(em, result, slot);
+        em_publish_call_result(em, &metadata, result, result_type);
     }
     call_result.normal = em_value(result, result_type, normal.semantic_type,
         normal.abi_rep, metadata.normal_result.value.value_class);

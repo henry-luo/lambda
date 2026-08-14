@@ -38,6 +38,8 @@
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 extern Item js_make_number(double d);
+extern "C" Item js_dom_form_submit_bridge(Item form_item);
+extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../../lib/arena.h"
 #include "../../lib/str.h"
 #include "../../lib/url.h"
@@ -117,10 +119,10 @@ extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
 extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
+extern "C" void js_dom_after_srcdoc_set(void* dom_elem);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
-extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 
@@ -2513,12 +2515,7 @@ extern "C" Item js_get_document_object_value() {
 }
 
 // Dispatch property access on the document proxy object.
-// Routes to js_document_get_property which handles body, documentElement, etc.
 extern "C" Item js_document_proxy_get_property(Item prop_name) {
-    Item module_result = ItemNull;
-    if (radiant_dom_document_get_property(prop_name, &module_result)) {
-        return module_result;
-    }
     return js_document_get_property(prop_name);
 }
 
@@ -8332,15 +8329,8 @@ static const char* _form_control_name_or_id(DomElement* e) {
     return nullptr;
 }
 
-extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name);
 extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
-
-extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
-    // Jube POC: keep the JS ABI stable while routing DOM policy through the
-    // radiant module boundary before changing wrapper representation.
-    return radiant_dom_get_property(elem_item, prop_name);
-}
 
 static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
 
@@ -9708,14 +9698,6 @@ static bool js_inline_style_cssom_property_exposed(const char* css_prop) {
     return true;
 }
 
-extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
-
-extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) {
-    // Jube POC: DOM resources and branded DOM VMaps both route through the
-    // module-owned dispatch surface.
-    return radiant_dom_set_property(elem_item, prop_name, value);
-}
-
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     if (!node) {
@@ -9824,7 +9806,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (strcmp(prop, "srcdoc") == 0 && _is_tag(elem, "iframe")) {
         const char* srcdoc = fn_to_cstr(value);
         elem->set_attribute("srcdoc", srcdoc ? srcdoc : "");
-        _schedule_iframe_load(elem);
+        // srcdoc can be assigned after the browsing context was lazily cached;
+        // rehydrate that existing blank document before dispatching its load.
+        js_dom_after_srcdoc_set((void*)elem);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
@@ -12795,15 +12779,15 @@ extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
     if (x != x) x = 0.0f;
     if (y != y) y = 0.0f;
     if (operation == JUBE_DOM_SCROLL_BY) {
-        x += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollLeft")));
-        y += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollTop")));
+        x += js_dom_item_to_float(js_dom_get_property_impl(elem_item, js_string_key("scrollLeft")));
+        y += js_dom_item_to_float(js_dom_get_property_impl(elem_item, js_string_key("scrollTop")));
     }
     if (x < 0.0f) x = 0.0f;
     if (y < 0.0f) y = 0.0f;
     // scroll(), scrollTo(), and scrollBy() share the element scroll setters
     // so pending viewport/element scroll state stays in one place.
-    js_dom_set_property(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));
-    js_dom_set_property(elem_item, js_string_key("scrollTop"), js_dom_float_item(y));
+    js_dom_set_property_impl(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));
+    js_dom_set_property_impl(elem_item, js_string_key("scrollTop"), js_dom_float_item(y));
     return make_js_undefined();
 }
 
@@ -14466,6 +14450,16 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // ----------------------------------------------------------------
     if (operation == JUBE_DOM_RESET && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
         return js_dom_form_reset_bridge(elem_item);
+    }
+
+    if (operation == JUBE_DOM_SUBMIT && elem->tag_name &&
+        strcasecmp(elem->tag_name, "form") == 0) {
+        return js_dom_form_submit_bridge(elem_item);
+    }
+    if (operation == JUBE_DOM_REQUEST_SUBMIT && elem->tag_name &&
+        strcasecmp(elem->tag_name, "form") == 0) {
+        return js_dom_form_request_submit_bridge(elem_item,
+            argc >= 1 ? args[0] : make_js_undefined());
     }
 
     // checkValidity(): fire invalid event if not valid, return bool

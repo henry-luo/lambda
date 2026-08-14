@@ -1,5 +1,6 @@
 #include "js_transpiler.hpp"
 #include "js_mir_context.hpp"
+#include "../jube/jube_interface.h"
 
 #include "../../lib/hashmap.h"
 #include "../../lib/mem.h"
@@ -29,10 +30,14 @@ static uint64_t js_mir_cache_mix(uint64_t hash, uint64_t value) {
 }
 
 static uint64_t js_mir_cache_preamble_abi_hash(const JsPreambleState* preamble) {
-    if (!preamble) return 0;
-
+    // DOM4 ordinal sites bake registry-local slots and declaration ordinals;
+    // a changed interface must therefore invalidate an otherwise identical
+    // JavaScript source cache entry.
     uint64_t hash = js_mir_cache_mix(0xcbf29ce484222325ULL,
-                                     (uint64_t)preamble->module_var_count);
+                                     jube_interface_registry_digest());
+    if (!preamble) return hash;
+
+    hash = js_mir_cache_mix(hash, (uint64_t)preamble->module_var_count);
     // The cached MIR contains module-name-table indices. Include the retained
     // spelling table in the cache key so a relink cannot reuse an old index
     // layout after the NameId transport changes.

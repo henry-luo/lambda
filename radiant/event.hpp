@@ -616,6 +616,9 @@ typedef struct DomRange {
     // Host-binding back-pointer (e.g. JS wrapper Item). Owned and managed
     // by the binding layer; the core leaves this slot alone.
     void*  host_wrapper;
+    // exact GC root for the cached wrapper; the raw back-pointer alone can
+    // outlive an unreachable VMap and be reused for an unrelated JS value.
+    uint64_t host_wrapper_root;
 } DomRange;
 
 // Lifecycle ------------------------------------------------------------------
@@ -736,6 +739,9 @@ typedef struct DomSelection {
     // Host-binding back-pointer (e.g. JS wrapper Item). Managed by the
     // binding layer.
     void*         host_wrapper;
+    // exact GC root for the cached wrapper; the raw back-pointer alone can
+    // outlive an unreachable VMap and be reused for an unrelated JS value.
+    uint64_t      host_wrapper_root;
 } DomSelection;
 
 DomSelection* dom_selection_create(DocState* state);

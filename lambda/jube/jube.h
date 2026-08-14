@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 3
+#define JUBE_ABI_VERSION 4
 #define JUBE_ABI_VERSION_LEGACY 1
 #define JUBE_HOST_API_VERSION 1
 #define JUBE_HOST_LANG_API_VERSION 1
@@ -27,7 +27,6 @@ typedef struct JubeTypeDef JubeTypeDef;
 typedef struct JubeFuncDef JubeFuncDef;
 typedef struct JubeNamespaceDef JubeNamespaceDef;
 typedef struct JubeModuleDef JubeModuleDef;
-typedef struct JubeHostObjectOps JubeHostObjectOps;
 typedef struct JubeHostGcAPI JubeHostGcAPI;
 typedef struct JubeRootFrame JubeRootFrame;
 typedef struct JubeHostRootAPI JubeHostRootAPI;
@@ -372,28 +371,10 @@ typedef enum JubeDomElementOperation {
     JUBE_DOM_BEFORE,
 } JubeDomElementOperation;
 
-struct JubeHostObjectOps {
-    int (*get_property)(Item receiver, Item key, Item* out);
-    int (*set_property)(Item receiver, Item key, Item value, Item* out);
-    // D6.2.2v2 retired receiver/name host calls. Preserve this ABI slot until
-    // the next Jube major version; modules must initialize it to NULL.
-    void* reserved_callable_slot;
-    int (*has_property)(Item receiver, Item key, Item* out);
-    int (*delete_property)(Item receiver, Item key, Item* out);
-    int (*get_own_property_descriptor)(Item receiver, Item key, Item* out);
-    int (*own_property_keys)(Item receiver, Item* out);
-    Item (*prototype)(Item receiver);
-    void (*invalidate)(Item receiver);
-    void (*destroy)(void* native);
-};
-
 struct JubeTypeDef {
     const char* name;
     uint32_t flags;
     const void* vmap_ops;
-    const JubeHostObjectOps* host_ops;
-    // Deprecated for host objects; use host_ops->destroy so the lifecycle
-    // surface stays with the rest of the native object protocol.
     void (*destroy)(void* native);
 };
 
@@ -464,8 +445,6 @@ typedef struct JubeMemberBind {
     const char* name;         // snake_case; must match a declared interface member
     const char* js_name;      // optional camelCase override for irregular names
                               //   (innerHTML, namespaceURI, ...); NULL = derived
-    const char* applies_to;   // optional lowercase tag-list guard ("input select")
-    int (*guard)(Item receiver);                     // optional extra predicate
     int (*get)(Item receiver, Item* out);
     int (*set)(Item receiver, Item value, Item* out);            // absent = readonly
     int (*call)(Item receiver, Item* args, int argc, Item* out); // methods
@@ -493,8 +472,7 @@ typedef struct JubeTypeBinding {
     // named getter; NULL = named names are not part of `has`
     int (*named_has)(Item receiver, Item key, Item* out);
     // object-operation hooks for large WebIDL surfaces whose descriptor,
-    // own-key, delete, and prototype semantics are receiver-specific. These
-    // are record-owned hooks, not legacy host_ops fallbacks.
+    // own-key, delete, and prototype semantics are receiver-specific.
     // ABI-preserving hole for the retired receiver/name object-call hook.
     void* reserved_callable_slot;
     int (*object_has)(Item receiver, Item key, Item* out);
@@ -502,13 +480,6 @@ typedef struct JubeTypeBinding {
     int (*object_descriptor)(Item receiver, Item key, Item* out);
     int (*object_own_keys)(Item receiver, Item* out);
     int (*object_prototype)(Item receiver, Item* out);
-    // TRANSITIONAL (Phase 4 migration): when set, record misses delegate to
-    // this legacy host-ops table instead of the generic expando/prototype
-    // paths, so a large type (dom_node) converts cluster-by-cluster while
-    // unconverted names, side-table expandos, per-kind prototypes, and
-    // own-key semantics keep their existing behavior. Removed when the type
-    // finishes converting.
-    const JubeHostObjectOps* legacy_ops;
 } JubeTypeBinding;
 
 typedef void (*JubeGcWeakClearFn)(uint64_t* slot, void* context);

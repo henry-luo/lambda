@@ -192,10 +192,7 @@ static void gc_finalize_vmap_host_payload(VMap* vm) {
     if (!vm || !vm->host_type || !vm->host_data) return;
     const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
     if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE)) return;
-    // DOM3 declared-interface types carry no host_ops; their finalizer lives on
-    // the typedef itself, so fall back to JubeTypeDef.destroy.
-    void (*destroy)(void*) = (type->host_ops && type->host_ops->destroy)
-        ? type->host_ops->destroy : type->destroy;
+    void (*destroy)(void*) = type->destroy;
     if (!destroy) return;
     void* native = vm->host_data;
     // owning host VMAPs store native payload beside the backing map, so GC must
@@ -1063,6 +1060,21 @@ extern "C" Item lambda_item_resolve_pending(Item pending, uint64_t payload) {
     }
 }
 
+// RV12: the C-side half of the slot transport. A boxed Lambda entry that
+// returned a pending Item left its payload in `Context::mir_companion_slot`;
+// read it there and resolve. Safe to call on any Item — a resolved one passes
+// straight through, so callers need no test of their own.
+extern "C" Item lambda_item_resolve_pending_slot(Item value) {
+    if (!lambda_item_is_pending(value.item)) return value;
+    if (!context) {
+        // No owning context means no slot to read; a pending Item here would
+        // decode as a bogus TypeId, so fail loudly rather than silently.
+        lambda_item_debug_trap();
+        return ItemError;
+    }
+    return lambda_item_resolve_pending(value, context->mir_companion_slot);
+}
+
 Item box_int64_value(int64_t lval) {
     if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("int64 number-home boxing called with invalid context");
@@ -1127,6 +1139,10 @@ Item push_d_safe(double val) {
 extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
     if (!gc) return;
     gc_finalize_all_objects(gc);
+    // teardown has already released every callback-owned payload; disabling
+    // both hooks here protects callers that destroy this heap directly.
+    gc->js_native_destroy = NULL;
+    gc->external_destroy = NULL;
 }
 
 void heap_destroy() {
@@ -1140,7 +1156,6 @@ void heap_destroy() {
             heap_finalize_gc_objects(context->heap->gc);
             // The full finalizer has already released every live native Map
             // payload with one shared duplicate-owner set.
-            context->heap->gc->js_native_destroy = NULL;
             gc_heap_destroy(context->heap->gc);
         }
         lambda_region_destroy_caches(context->heap);
@@ -1206,6 +1221,12 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         }
         void *obj = (void*)(current + 1);
         uint16_t tag = current->type_tag;
+
+        // heap finalization bypasses gc_heap_destroy's callback pass, so release
+        // live external payloads here before the helper disarms teardown hooks.
+        if (gc->external_destroy) {
+            gc->external_destroy(obj, tag);
+        }
 
         if (tag == LMD_TYPE_VMAP) {
             VMap *vm = (VMap*)obj;

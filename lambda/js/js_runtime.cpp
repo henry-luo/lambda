@@ -43,12 +43,27 @@ static Item js_make_iter_result(Item value, bool done);
 
 // Native publishers retain one overload per ABI arity because this header is
 // also consumed by MIR-facing C-compatible declarations.
+template <typename KeyFactory, typename FunctionFactory>
+static void js_publish_native_function(Item object, KeyFactory key_factory,
+        FunctionFactory function_factory) {
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key_factory());
+    // function construction and the property store can both collect before
+    // their callers publish the values, so root the complete publication set.
+    Rooted<Item> function_root(roots, function_factory());
+    js_set_key_default(object_root.get(), key_root.get(), function_root.get());
+}
 #define JS_DEFINE_NATIVE_PUBLISHERS(arity) \
     void js_set_native_method(Item object, const char* name, JsNativeP##arity target) { \
-        js_set_key_default(object, make_string_item(name), js_new_native_function(target)); \
+        js_publish_native_function(object, [name]() { return make_string_item(name); }, [target]() { \
+            return js_new_native_function(target); \
+        }); \
     } \
     void js_set_native_key(Item object, Item key, JsNativeP##arity target) { \
-        js_set_key_default(object, key, js_new_native_function(target)); \
+        js_publish_native_function(object, [key]() { return key; }, [target]() { \
+            return js_new_native_function(target); \
+        }); \
     }
 
 JS_DEFINE_NATIVE_PUBLISHERS(0)
@@ -65,16 +80,39 @@ JS_DEFINE_NATIVE_PUBLISHERS(8)
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_runtime_set_native_method, (Item object, const char* name, Target target), js_set_native_method, (object, name, target))
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_span_method, (Item object, const char* name,         JsNativeSpan target), js_set_key_default, (object, make_string_item(name), js_new_native_span_function(target)))
+
+static void js_set_native_span_method(Item object, const char* name,
+        JsNativeSpan target) {
+    js_publish_native_function(object, [name]() { return make_string_item(name); }, [target]() {
+        return js_new_native_span_function(target);
+    });
+}
+
+JS_FORWARD_STATIC_VOID( js_runtime_set_native_span_method, (Item object, const char* name,         JsNativeSpan target), js_set_native_span_method, (object, name, target))
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_runtime_set_native_key, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
 
 template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_rest_key, (Item object, Item key, Target target), js_set_key_default, (object, key, js_new_native_rest_function(target)))
+static void js_set_native_rest_key_rooted(Item object, Item key, Target target) {
+    js_publish_native_function(object, [key]() { return key; }, [target]() {
+        return js_new_native_rest_function(target);
+    });
+}
 
 template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_constructor_key, (Item object, Item key, Target target), js_set_key_default, (object, key, js_new_native_constructor(target)))
+JS_FORWARD_STATIC_VOID( js_runtime_set_native_rest_key, (Item object, Item key, Target target), js_set_native_rest_key_rooted, (object, key, target))
+
+template <typename Target>
+static void js_set_native_constructor_key_rooted(Item object, Item key,
+        Target target) {
+    js_publish_native_function(object, [key]() { return key; }, [target]() {
+        return js_new_native_constructor(target);
+    });
+}
+
+template <typename Target>
+JS_FORWARD_STATIC_VOID( js_runtime_set_native_constructor_key, (Item object, Item key, Target target), js_set_native_constructor_key_rooted, (object, key, target))
 
 extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING || !buf || buf_size <= 0) return NULL;
@@ -189,18 +227,13 @@ const JubeTypeDef* js_host_object_type(Item object) {
 }
 
 bool js_host_object_get_property(Item object, Item key, Item* out) {
-    // DOM3: declared-interface types dispatch through compiled member records
     if (jube_member_get(object, key, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    return type && type->host_ops && type->host_ops->get_property &&
-        type->host_ops->get_property(object, key, out);
+    return false;
 }
 
 bool js_host_object_set_property(Item object, Item key, Item value, Item* out) {
     if (jube_member_set(object, key, value, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    return type && type->host_ops && type->host_ops->set_property &&
-        type->host_ops->set_property(object, key, value, out);
+    return false;
 }
 
 static inline void js_note_event_handler_property_set(Item object,
@@ -221,10 +254,7 @@ static inline void js_note_event_handler_property_set(Item object, Item key,
 
 bool js_host_object_prototype(Item object, Item* out) {
     if (jube_member_prototype(object, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
-    *out = type->host_ops->prototype(object);
-    return true;
+    return false;
 }
 
 extern "C" Item js_using_dispose(Item resource) {
@@ -4639,6 +4669,24 @@ static bool js_intrinsic_name_in(const char* name, int len,
     return false;
 }
 
+extern "C" int js_is_window_event_global_property(Item object, Item key);
+extern "C" Item js_get_window_event_global_value(void);
+extern "C" int radiant_dom_window_get_property(Item object, Item key, Item* out);
+
+static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
+    if (js_is_window_event_global_property(object, key)) {
+        if (out) *out = js_get_window_event_global_value();
+        return true;
+    }
+
+    Item window_value = ItemNull;
+    if (radiant_dom_window_get_property(object, key, &window_value)) {
+        if (out) *out = window_value;
+        return true;
+    }
+    return false;
+}
+
 static bool js_intrinsic_uses_catalog_prototype(const char* name, int len) {
     static const char* names[] = {
         "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "FinalizationRegistry",
@@ -4743,21 +4791,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
         key = js_symbol_to_key(key);
         key_root.set(key);
     }
-    {
-        extern int js_is_window_event_global_property(Item object, Item key);
-        extern Item js_get_window_event_global_value(void);
-        if (js_is_window_event_global_property(object, key)) {
-            return js_get_window_event_global_value();
-        }
-    }
-    {
-        extern int radiant_dom_window_get_property(Item object, Item key, Item* out);
-        Item window_value = ItemNull;
-        // Browser globals are live host state; stored preamble placeholders
-        // only make the names resolvable and must never shadow current metrics.
-        if (radiant_dom_window_get_property(object, key, &window_value)) {
-            return window_value;
-        }
+    Item host_value = ItemNull;
+    // Browser globals are live host state; stored preamble placeholders only
+    // make the names resolvable and must never shadow current metrics.
+    if (js_get_host_dynamic_property(object, key, &host_value)) {
+        return host_value;
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
@@ -7830,6 +7868,69 @@ static Item js_super_lookup_base(Item receiver) {
     return proto;
 }
 
+static bool js_jube_ordinal_disabled(void) {
+    static int disabled = -1;
+    if (disabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_NO_JUBE_ORDINAL");
+        disabled = flag && flag[0] && strcmp(flag, "0") != 0 ? 1 : 0;
+    }
+    return disabled != 0;
+}
+
+// DOM4's MIR entry keeps the ABI Item-shaped while moving the ordinal guard
+// and exact generic fallback into one runtime boundary. This preserves the
+// ordinary property semantics when a flow fact is stale or the kill switch is
+// enabled, including expandos, prototypes, and nullish errors.
+extern "C" Item js_jube_member_get_by_ordinal(Item receiver, int64_t slot,
+                                               int64_t ordinal, Item key) {
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Item out = ItemNull;
+    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+            jube_member_get_by_ordinal(receiver_root.get(), (int)slot,
+                (uint32_t)ordinal, &out)) {
+        return out;
+    }
+    return js_get_reference(receiver_root.get(), key_root.get());
+}
+
+extern "C" Item js_jube_member_set_by_ordinal(Item receiver, int64_t slot,
+                                               int64_t ordinal, Item key,
+                                               Item value, int64_t strict) {
+    RootFrame roots(4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    Item out = ItemNull;
+    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+            jube_member_set_by_ordinal(receiver_root.get(), (int)slot,
+                (uint32_t)ordinal, value_root.get(), &out)) {
+        return js_assignment_set_result(value_root.get(), key_root.get(), out,
+            strict, receiver_root.get());
+    }
+    return js_set_key_policy(receiver_root.get(), key_root.get(),
+        value_root.get(), strict);
+}
+
+extern "C" Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
+                                                int64_t ordinal, Item key,
+                                                Item* args, int64_t argc) {
+    RootFrame roots(4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Item out = ItemNull;
+    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+            jube_member_call_by_ordinal(receiver_root.get(), (int)slot,
+                (uint32_t)ordinal, args, argc > 0 ? (int)argc : 0, &out)) {
+        return out;
+    }
+    Rooted<Item> fn_root(roots, js_get_reference(receiver_root.get(), key_root.get()));
+    if (item_is_error(fn_root.get())) return fn_root.get();
+    return js_call_function(fn_root.get(), receiver_root.get(), args,
+        argc > 0 ? (int)argc : 0);
+}
+
 // super.x property read: look up property on [[GetPrototypeOf]](receiver),
 // but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
 extern "C" Item js_super_property_get(Item receiver, Item key) {
@@ -8190,6 +8291,13 @@ static Item js_get_name_id_ic_impl(Item object, NameId name_id,
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
     if (!key || key->len > 2147483647u) {
         return js_get_name_id_ic_slow(object, name_id);
+    }
+    Item host_value = ItemNull;
+    // Live window properties cannot be cached from the preamble's placeholder
+    // map because resize and scroll mutate their host-backed values in place.
+    if (js_get_host_dynamic_property(object,
+            (Item){.item = s2it(key)}, &host_value)) {
+        return host_value;
     }
     const char* name = key->chars;
     int name_len = (int)key->len;

@@ -1094,6 +1094,11 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         mt->assign_target_vname = NULL;
                         jm_emit_mov(mt, reg, val);
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
+                        // D4e: retain only a declared Jube result proof; any
+                        // later unknown assignment clears it in assignment lowering.
+                        JsMirVarEntry* jube_var = jm_find_var(mt, vname);
+                        if (jube_var) jube_var->jube_type =
+                            jm_infer_jube_type(mt, d->init);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
                             JsMirVarEntry* cv = jm_find_var(mt, vname);
                             if (cv) {

@@ -227,30 +227,6 @@ Item js_document_get_property(Item prop_name);
 // =============================================================================
 
 /**
- * Get a DOM element property.
- * Supported: tagName, id, className, textContent, children, parentElement,
- *   parentNode, firstChild, lastChild, firstElementChild, lastElementChild,
- *   nextSibling, previousSibling, nextElementSibling, previousElementSibling,
- *   childNodes, childElementCount, nodeType, offsetWidth, offsetHeight,
- *   clientWidth, clientHeight, data (text nodes)
- * Falls back to getAttribute for unrecognized properties.
- * @param elem       Wrapped DOM element Item
- * @param prop_name  String Item with property name
- * @return Property value as Item
- */
-Item js_dom_get_property(Item elem, Item prop_name);
-
-/**
- * Set a DOM element property.
- * Supported: className, id, textContent, data (text nodes)
- * @param elem       Wrapped DOM element Item
- * @param prop_name  String Item with property name
- * @param value      Value to set
- * @return The value that was set, or ITEM_NULL on failure
- */
-Item js_dom_set_property(Item elem, Item prop_name, Item value);
-
-/**
  * Install a compiled event handler function into the DOM element's IDL
  * handler slot, e.g. "onclick". This is used for initial HTML attributes
  * after they are compiled by the document script runner.

@@ -6,6 +6,7 @@
 #include "js_runtime_state.hpp"
 #include "../runtime/heap_api.h"
 #include "../runtime/mir_policy.hpp"
+#include "../jube/jube_interface.h"
 
 extern "C" void *import_resolver(const char *name);
 extern __thread EvalContext* context;
@@ -107,6 +108,10 @@ typedef struct JsMirReference {
     uint32_t named_key_index;
     NameId named_key_id;
     uint32_t named_ic_index;
+    int jube_slot;
+    uint32_t jube_ordinal;
+    uint8_t jube_kind;
+    bool jube_can_raise;
 } JsMirReference;
 
 typedef struct JsMirLexicalThisRebind {
@@ -232,6 +237,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);
 MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t value);
 MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* ref);
+const JubeTypeDef* jm_infer_jube_type(JsMirTranspiler* mt, JsAstNode* node);
 bool jm_is_private_name(String* name);
 String* jm_class_private_name(JsMirTranspiler* mt, JsClassEntry* ce, String* name);
 bool jm_class_or_ancestor_has_private_members(JsClassEntry* ce);
