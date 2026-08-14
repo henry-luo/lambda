@@ -1603,8 +1603,13 @@ extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
     return make_js_undefined();
 }
 
-// fs.realpathSync(path) → string
-extern "C" Item js_fs_realpathSync(Item path_item, Item options_item) {
+enum FsPathStringOperation {
+    FS_PATH_REALPATH,
+    FS_PATH_READLINK
+};
+
+static Item fs_read_path_string_sync(Item path_item, Item options_item,
+        FsPathStringOperation operation) {
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_item));
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
@@ -1612,15 +1617,24 @@ extern "C" Item js_fs_realpathSync(Item path_item, Item options_item) {
     if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
 
     uv_fs_t req;
-    int r = uv_fs_realpath(NULL, &req, path, NULL);
+    int r = operation == FS_PATH_REALPATH
+        ? uv_fs_realpath(NULL, &req, path, NULL)
+        : uv_fs_readlink(NULL, &req, path, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&req);
-        log_error("fs: realpathSync: '%s': %s", path, uv_strerror(r));
+        log_error("fs: %sSync: '%s': %s",
+            operation == FS_PATH_REALPATH ? "realpath" : "readlink",
+            path, uv_strerror(r));
         return ItemNull;
     }
     Item result = make_string_item((const char*)req.ptr);
     uv_fs_req_cleanup(&req);
     return result;
+}
+
+// fs.realpathSync(path) → string
+extern "C" Item js_fs_realpathSync(Item path_item, Item options_item) {
+    return fs_read_path_string_sync(path_item, options_item, FS_PATH_REALPATH);
 }
 
 // fs.accessSync(path[, mode]) — throws if access check fails
@@ -1755,7 +1769,8 @@ extern "C" Item js_fs_lchmodSync(Item path_item, Item mode_item) {
 #endif
 }
 
-extern "C" Item js_fs_chownSync(Item path_item, Item uid_item, Item gid_item) {
+static Item fs_chown_path_sync(Item path_item, Item uid_item, Item gid_item,
+        bool no_follow) {
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1764,25 +1779,20 @@ extern "C" Item js_fs_chownSync(Item path_item, Item uid_item, Item gid_item) {
     JS_RETURN_IF_ERROR(fs_validate_uid_gid(uid_item, "uid", &uid));
     JS_RETURN_IF_ERROR(fs_validate_uid_gid(gid_item, "gid", &gid));
     uv_fs_t req;
-    int r = uv_fs_chown(NULL, &req, path, uid, gid, NULL);
+    int r = no_follow
+        ? uv_fs_lchown(NULL, &req, path, uid, gid, NULL)
+        : uv_fs_chown(NULL, &req, path, uid, gid, NULL);
     uv_fs_req_cleanup(&req);
-    if (r < 0) return js_throw_system_error(r, "chown", path);
+    if (r < 0) return js_throw_system_error(r, no_follow ? "lchown" : "chown", path);
     return make_js_undefined();
 }
 
+extern "C" Item js_fs_chownSync(Item path_item, Item uid_item, Item gid_item) {
+    return fs_chown_path_sync(path_item, uid_item, gid_item, false);
+}
+
 extern "C" Item js_fs_lchownSync(Item path_item, Item uid_item, Item gid_item) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
-    int uid = 0, gid = 0;
-    JS_RETURN_IF_ERROR(fs_validate_uid_gid(uid_item, "uid", &uid));
-    JS_RETURN_IF_ERROR(fs_validate_uid_gid(gid_item, "gid", &gid));
-    uv_fs_t req;
-    int r = uv_fs_lchown(NULL, &req, path, uid, gid, NULL);
-    uv_fs_req_cleanup(&req);
-    if (r < 0) return js_throw_system_error(r, "lchown", path);
-    return make_js_undefined();
+    return fs_chown_path_sync(path_item, uid_item, gid_item, true);
 }
 
 extern "C" Item js_fs_fchownSync(Item fd_item, Item uid_item, Item gid_item) {
@@ -1838,22 +1848,7 @@ extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
 
 // fs.readlinkSync(path) → string
 extern "C" Item js_fs_readlinkSync(Item path_item, Item options_item) {
-    JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_item));
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
-
-    uv_fs_t req;
-    int r = uv_fs_readlink(NULL, &req, path, NULL);
-    if (r < 0) {
-        uv_fs_req_cleanup(&req);
-        log_error("fs: readlinkSync: '%s': %s", path, uv_strerror(r));
-        return ItemNull;
-    }
-    Item result = make_string_item((const char*)req.ptr);
-    uv_fs_req_cleanup(&req);
-    return result;
+    return fs_read_path_string_sync(path_item, options_item, FS_PATH_READLINK);
 }
 
 // fs.lstatSync(path[, options]) — like statSync but doesn't follow symlinks
@@ -2301,26 +2296,33 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     return js_make_number((double)nread);
 }
 
-extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
-    if (js_is_callable(position_item)) {
-        callback = position_item;
-        position_item = make_js_undefined();
-    } else if (js_is_callable(length_item)) {
-        callback = length_item;
-        length_item = make_js_undefined();
-        position_item = make_js_undefined();
-    } else if (js_is_callable(offset_item)) {
-        callback = offset_item;
-        offset_item = make_js_undefined();
-        length_item = make_js_undefined();
-        position_item = make_js_undefined();
-    } else if (js_is_callable(buffer_item)) {
-        callback = buffer_item;
-        buffer_item = make_js_undefined();
-        offset_item = make_js_undefined();
-        length_item = make_js_undefined();
-        position_item = make_js_undefined();
+static Item fs_extract_io_callback(Item callback, Item* buffer, Item* offset,
+        Item* length, Item* position, bool allow_buffer) {
+    if (js_is_callable(*position)) {
+        callback = *position;
+        *position = make_js_undefined();
+    } else if (js_is_callable(*length)) {
+        callback = *length;
+        *length = make_js_undefined();
+        *position = make_js_undefined();
+    } else if (js_is_callable(*offset)) {
+        callback = *offset;
+        *offset = make_js_undefined();
+        *length = make_js_undefined();
+        *position = make_js_undefined();
+    } else if (allow_buffer && js_is_callable(*buffer)) {
+        callback = *buffer;
+        *buffer = make_js_undefined();
+        *offset = make_js_undefined();
+        *length = make_js_undefined();
+        *position = make_js_undefined();
     }
+    return callback;
+}
+
+extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
+    callback = fs_extract_io_callback(callback, &buffer_item, &offset_item,
+        &length_item, &position_item, true);
     if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
@@ -2567,20 +2569,8 @@ static Item fs_write_parse_options(Item options_item, Item data_item,
 
 extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
                             Item length_item, Item position_item, Item callback_item) {
-    Item callback = callback_item;
-    if (js_is_callable(position_item)) {
-        callback = position_item;
-        position_item = make_js_undefined();
-    } else if (js_is_callable(length_item)) {
-        callback = length_item;
-        length_item = make_js_undefined();
-        position_item = make_js_undefined();
-    } else if (js_is_callable(offset_item)) {
-        callback = offset_item;
-        offset_item = make_js_undefined();
-        length_item = make_js_undefined();
-        position_item = make_js_undefined();
-    }
+    Item callback = fs_extract_io_callback(callback_item, &data_item, &offset_item,
+        &length_item, &position_item, false);
     if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }

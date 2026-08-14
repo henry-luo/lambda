@@ -1395,26 +1395,35 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
     return make_js_undefined();
 }
 
-static Item js_stream_write_callback_once(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item self = env[0];
+static bool js_stream_claim_once_callback(Item* env) {
+    if (!env) return false;
     if (js_item_is_true(env[2])) {
         Item multi = js_stream_make_error_with_code("ERR_MULTIPLE_CALLBACK",
             "Callback called multiple times");
-        js_stream_schedule_error(self, multi);
-        return make_js_undefined();
+        js_stream_schedule_error(env[0], multi);
+        return false;
     }
     env[2] = js_bool_item(true);
-    return js_stream_after_write(self, env[1], err);
+    return true;
+}
+
+static Item* js_stream_alloc_once_callback_env(Item self, Item payload) {
+    Item* env = js_alloc_env(3);
+    env[0] = self;
+    env[1] = payload;
+    env[2] = js_bool_item(false);
+    return env;
+}
+
+static Item js_stream_write_callback_once(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!js_stream_claim_once_callback(env)) return make_js_undefined();
+    return js_stream_after_write(env[0], env[1], err);
 }
 
 static Item js_stream_make_write_callback(Item self, Item callback) {
     js_stream_adjust_writable_pendingcb(self, 1);
-    Item* env = js_alloc_env(3);
-    env[0] = self;
-    env[1] = callback;
-    env[2] = js_bool_item(false);
+    Item* env = js_stream_alloc_once_callback_env(self, callback);
     return js_new_native_closure(js_stream_write_callback_once, 1, env, 3);
 }
 
@@ -1431,24 +1440,13 @@ static Item js_stream_after_transform_write(Item self, Item callback, Item err, 
 
 static Item js_stream_transform_write_callback_once(Item env_item, Item err, Item data) {
     Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item self = env[0];
-    if (js_item_is_true(env[2])) {
-        Item multi = js_stream_make_error_with_code("ERR_MULTIPLE_CALLBACK",
-            "Callback called multiple times");
-        js_stream_schedule_error(self, multi);
-        return make_js_undefined();
-    }
-    env[2] = js_bool_item(true);
-    return js_stream_after_transform_write(self, env[1], err, data);
+    if (!js_stream_claim_once_callback(env)) return make_js_undefined();
+    return js_stream_after_transform_write(env[0], env[1], err, data);
 }
 
 static Item js_stream_make_transform_write_callback(Item self, Item callback) {
     js_stream_adjust_writable_pendingcb(self, 1);
-    Item* env = js_alloc_env(3);
-    env[0] = self;
-    env[1] = callback;
-    env[2] = js_bool_item(false);
+    Item* env = js_stream_alloc_once_callback_env(self, callback);
     return js_new_native_closure(js_stream_transform_write_callback_once, 2, env, 3);
 }
 
@@ -1486,24 +1484,13 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
 
 static Item js_stream_writev_callback_once(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item self = env[0];
-    if (js_item_is_true(env[2])) {
-        Item multi = js_stream_make_error_with_code("ERR_MULTIPLE_CALLBACK",
-            "Callback called multiple times");
-        js_stream_schedule_error(self, multi);
-        return make_js_undefined();
-    }
-    env[2] = js_bool_item(true);
-    return js_stream_after_writev(self, env[1], err);
+    if (!js_stream_claim_once_callback(env)) return make_js_undefined();
+    return js_stream_after_writev(env[0], env[1], err);
 }
 
 static Item js_stream_make_writev_callback(Item self, Item pending) {
     js_stream_adjust_writable_pendingcb(self, 1);
-    Item* env = js_alloc_env(3);
-    env[0] = self;
-    env[1] = pending;
-    env[2] = js_bool_item(false);
+    Item* env = js_stream_alloc_once_callback_env(self, pending);
     return js_new_native_closure(js_stream_writev_callback_once, 1, env, 3);
 }
 
@@ -6697,23 +6684,12 @@ static Item js_stream_finish_after_final(Item self, Item callback, Item err) {
 
 static Item js_stream_final_callback_once(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-    Item self = env[0];
-    if (js_item_is_true(env[2])) {
-        Item multi = js_stream_make_error_with_code("ERR_MULTIPLE_CALLBACK",
-            "Callback called multiple times");
-        js_stream_schedule_error(self, multi);
-        return make_js_undefined();
-    }
-    env[2] = js_bool_item(true);
-    return js_stream_finish_after_final(self, env[1], err);
+    if (!js_stream_claim_once_callback(env)) return make_js_undefined();
+    return js_stream_finish_after_final(env[0], env[1], err);
 }
 
 static Item js_stream_make_final_callback(Item self, Item callback) {
-    Item* env = js_alloc_env(3);
-    env[0] = self;
-    env[1] = callback;
-    env[2] = js_bool_item(false);
+    Item* env = js_stream_alloc_once_callback_env(self, callback);
     return js_new_native_closure(js_stream_final_callback_once, 1, env, 3);
 }
 

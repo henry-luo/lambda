@@ -49,6 +49,50 @@ static inline bool js_number_like_type(TypeId type) {
            type == LMD_TYPE_FLOAT64 || type == LMD_TYPE_NUM_SIZED;
 }
 
+char* js_skip_ecma_whitespace(char* start, char* end) {
+    while (start < end) {
+        unsigned char c = (unsigned char)*start;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+                c == '\f' || c == '\v') {
+            start++;
+            continue;
+        }
+        if (c == 0xC2 && start + 1 < end &&
+                (unsigned char)start[1] == 0xA0) {
+            start += 2;
+            continue;
+        }
+        if (start + 2 < end) {
+            unsigned char b1 = (unsigned char)start[1];
+            unsigned char b2 = (unsigned char)start[2];
+            if (c == 0xE2 && b1 == 0x80 &&
+                    ((b2 >= 0x80 && b2 <= 0x8A) || b2 == 0xA8 ||
+                     b2 == 0xA9 || b2 == 0xAF)) {
+                start += 3;
+                continue;
+            }
+            if (c == 0xE2 && b1 == 0x81 && b2 == 0x9F) {
+                start += 3;
+                continue;
+            }
+            if (c == 0xE1 && b1 == 0x9A && b2 == 0x80) {
+                start += 3;
+                continue;
+            }
+            if (c == 0xE3 && b1 == 0x80 && b2 == 0x80) {
+                start += 3;
+                continue;
+            }
+            if (c == 0xEF && b1 == 0xBB && b2 == 0xBF) {
+                start += 3;
+                continue;
+            }
+        }
+        break;
+    }
+    return start;
+}
+
 static double js_sized_number_to_double(Item value) {
     switch (value.get_num_type()) {
     case NUM_INT8:    return (double)item_to_i8(value.item);
@@ -140,28 +184,9 @@ extern "C" Item js_to_number(Item value) {
         }
         // v20: Trim whitespace before parsing (ES spec: WhiteSpace + LineTerminator)
         // Includes full Unicode StrWhiteSpaceChar set
-        const char* start = str->chars;
+        const char* start = js_skip_ecma_whitespace(
+            str->chars, str->chars + str->len);
         const char* end = str->chars + str->len;
-        // Trim leading whitespace
-        while (start < end) {
-            unsigned char c = (unsigned char)*start;
-            // ASCII whitespace
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') { start++; continue; }
-            // 2-byte: U+00A0 (NBSP)
-            if (c == 0xC2 && start + 1 < end && (unsigned char)start[1] == 0xA0) { start += 2; continue; }
-            // 3-byte sequences
-            if (c == 0xE1 && start + 2 < end && (unsigned char)start[1] == 0x9A && (unsigned char)start[2] == 0x80) { start += 3; continue; } // U+1680
-            if (c == 0xE2 && start + 2 < end) {
-                unsigned char b1 = (unsigned char)start[1], b2 = (unsigned char)start[2];
-                if (b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) { start += 3; continue; } // U+2000-U+200A
-                if (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) { start += 3; continue; } // U+2028, U+2029
-                if (b1 == 0x80 && b2 == 0xAF) { start += 3; continue; } // U+202F
-                if (b1 == 0x81 && b2 == 0x9F) { start += 3; continue; } // U+205F
-            }
-            if (c == 0xE3 && start + 2 < end && (unsigned char)start[1] == 0x80 && (unsigned char)start[2] == 0x80) { start += 3; continue; } // U+3000
-            if (c == 0xEF && start + 2 < end && (unsigned char)start[1] == 0xBB && (unsigned char)start[2] == 0xBF) { start += 3; continue; } // U+FEFF
-            break;
-        }
         // Trim trailing whitespace
         while (end > start) {
             unsigned char c = (unsigned char)*(end - 1);
@@ -1377,6 +1402,37 @@ JS_DEFINE_NUMERIC_BINARY(power, POWER)
 // Comparison Operators
 // =============================================================================
 
+static Item js_equal_bigint_number(Item bigint, Item number) {
+    double value = js_get_number(number);
+    if (isnan(value) || value == INFINITY || value == -INFINITY) {
+        return (Item){.item = b2it(false)};
+    }
+    return (Item){.item = b2it(bigint_cmp_double(bigint, value) == 0)};
+}
+
+static Item js_equal_bigint_string(Item bigint, Item string) {
+    String* s = it2s(string);
+    if (!s) return (Item){.item = b2it(false)};
+    Item converted = bigint_from_string(s->chars, s->len);
+    if (converted.item == ItemError.item) return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(bigint_cmp(bigint, converted) == 0)};
+}
+
+static Item js_equal_bigint_bool(Item bigint, Item boolean) {
+    Item converted = bigint_from_int64(it2b(boolean) ? 1 : 0);
+    return (Item){.item = b2it(bigint_cmp(bigint, converted) == 0)};
+}
+
+static bool js_equal_can_coerce_object(Item value, TypeId other_type) {
+    (void)other_type;
+    return get_type_id(value) == LMD_TYPE_MAP || js_is_js_array(value);
+}
+
+static Item js_equal_coerce_object(Item object, Item other, bool object_left) {
+    JS_ASSIGN_OR_RETURN(primitive, js_op_to_primitive(object, 0));
+    return object_left ? js_equal(primitive, other) : js_equal(other, primitive);
+}
+
 extern "C" Item js_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1412,34 +1468,24 @@ extern "C" Item js_equal(Item left, Item right) {
     bool left_bigint = js_is_bigint(left);
     bool right_bigint = js_is_bigint(right);
     if (left_bigint && js_number_like_type(right_type)) {
-        double r = js_get_number(right);
-        if (isnan(r) || r == INFINITY || r == -INFINITY) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(bigint_cmp_double(left, r) == 0)};
+        return js_equal_bigint_number(left, right);
     }
     if (js_number_like_type(left_type) && right_bigint) {
-        double l = js_get_number(left);
-        if (isnan(l) || l == INFINITY || l == -INFINITY) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(bigint_cmp_double(right, l) == 0)};
+        return js_equal_bigint_number(right, left);
     }
     // BigInt == String: convert string to BigInt and compare
     if (left_bigint && right_type == LMD_TYPE_STRING) {
-        String* s = it2s(right);
-        Item rbi = bigint_from_string(s->chars, s->len);
-        if (rbi.item == ItemError.item) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(bigint_cmp(left, rbi) == 0)};
+        return js_equal_bigint_string(left, right);
     }
     if (left_type == LMD_TYPE_STRING && right_bigint) {
-        String* s = it2s(left);
-        Item lbi = bigint_from_string(s->chars, s->len);
-        if (lbi.item == ItemError.item) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(bigint_cmp(lbi, right) == 0)};
+        return js_equal_bigint_string(right, left);
     }
     // BigInt == Boolean: convert boolean to BigInt
     if (left_bigint && right_type == LMD_TYPE_BOOL) {
-        return (Item){.item = b2it(bigint_cmp(left, bigint_from_int64(it2b(right) ? 1 : 0)) == 0)};
+        return js_equal_bigint_bool(left, right);
     }
     if (left_type == LMD_TYPE_BOOL && right_bigint) {
-        return (Item){.item = b2it(bigint_cmp(bigint_from_int64(it2b(left) ? 1 : 0), right) == 0)};
+        return js_equal_bigint_bool(right, left);
     }
 
     // String to number
@@ -1461,28 +1507,15 @@ extern "C" Item js_equal(Item left, Item right) {
     // Object ToPrimitive: if one side is object/map, convert via ToPrimitive then recurse
     // ES §7.2.13 Abstract Equality steps 10-11: x is Object & y is primitive (or vice versa)
     // → ToPrimitive(object, "default") then re-compare. Hint default for ==.
-    if (left_type == LMD_TYPE_MAP && (js_number_like_type(right_type) || right_type == LMD_TYPE_STRING || js_is_bigint(right) || js_is_symbol(right))) {
-        JS_ASSIGN_OR_RETURN(prim, js_op_to_primitive(left, 0));
-        return js_equal(prim, right);
+    if (js_equal_can_coerce_object(left, right_type) &&
+            (js_is_bigint(right) || js_is_symbol(right) ||
+             js_number_like_type(right_type) || right_type == LMD_TYPE_STRING)) {
+        return js_equal_coerce_object(left, right, true);
     }
-    if (right_type == LMD_TYPE_MAP && (js_number_like_type(left_type) || left_type == LMD_TYPE_STRING || js_is_bigint(left) || js_is_symbol(left))) {
-        JS_ASSIGN_OR_RETURN(prim, js_op_to_primitive(right, 0));
-        return js_equal(left, prim);
-    }
-
-    // Array ToPrimitive: arrays are objects; only coerce for object-vs-primitive
-    // abstract equality cases, not for null/undefined comparisons.
-    if (js_is_js_array(left) &&
-        (js_number_like_type(right_type) || right_type == LMD_TYPE_STRING ||
-         js_is_bigint(right) || js_is_symbol(right))) {
-        JS_ASSIGN_OR_RETURN(prim, js_op_to_primitive(left, 0));
-        return js_equal(prim, right);
-    }
-    if (js_is_js_array(right) &&
-        (js_number_like_type(left_type) || left_type == LMD_TYPE_STRING ||
-         js_is_bigint(left) || js_is_symbol(left))) {
-        JS_ASSIGN_OR_RETURN(prim, js_op_to_primitive(right, 0));
-        return js_equal(left, prim);
+    if (js_equal_can_coerce_object(right, left_type) &&
+            (js_is_bigint(left) || js_is_symbol(left) ||
+             js_number_like_type(left_type) || left_type == LMD_TYPE_STRING)) {
+        return js_equal_coerce_object(right, left, false);
     }
 
     return (Item){.item = b2it(false)};
@@ -1645,6 +1678,26 @@ static int js_compare_strings_utf16(String* left, String* right) {
     }
 }
 
+static Item js_relational_bigint_number(Item bigint, Item number,
+        bool bigint_left) {
+    double value = js_get_number(number);
+    if (isnan(value)) return (Item){.item = ITEM_JS_UNDEFINED};
+    bool less = bigint_left ? bigint_cmp_double(bigint, value) < 0 :
+        bigint_cmp_double(bigint, value) > 0;
+    return (Item){.item = b2it(less)};
+}
+
+static Item js_relational_bigint_string(Item bigint, Item string,
+        bool bigint_left) {
+    String* s = it2s(string);
+    if (!s) return (Item){.item = ITEM_JS_UNDEFINED};
+    Item converted = bigint_from_string(s->chars, s->len);
+    if (converted.item == ItemError.item) return (Item){.item = ITEM_JS_UNDEFINED};
+    bool less = bigint_left ? bigint_cmp(bigint, converted) < 0 :
+        bigint_cmp(converted, bigint) < 0;
+    return (Item){.item = b2it(less)};
+}
+
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1708,29 +1761,17 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     }
     // BigInt vs Number
     if (left_bi && js_number_like_type(right_type)) {
-        double r = js_get_number(right);
-        if (isnan(r)) return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(bigint_cmp_double(left, r) < 0)};
+        return js_relational_bigint_number(left, right, true);
     }
     if (js_number_like_type(left_type) && right_bi) {
-        double l = js_get_number(left);
-        if (isnan(l)) return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(bigint_cmp_double(right, l) > 0)};
+        return js_relational_bigint_number(right, left, false);
     }
     // BigInt vs String — ES spec: StringToBigInt with hex/octal/binary support
     if (left_bi && right_type == LMD_TYPE_STRING) {
-        String* s = it2s(right);
-        if (!s) return (Item){.item = ITEM_JS_UNDEFINED};
-        Item rbi = bigint_from_string(s->chars, s->len);
-        if (rbi.item == ItemError.item) return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(bigint_cmp(left, rbi) < 0)};
+        return js_relational_bigint_string(left, right, true);
     }
     if (left_type == LMD_TYPE_STRING && right_bi) {
-        String* s = it2s(left);
-        if (!s) return (Item){.item = ITEM_JS_UNDEFINED};
-        Item lbi = bigint_from_string(s->chars, s->len);
-        if (lbi.item == ItemError.item) return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(bigint_cmp(lbi, right) < 0)};
+        return js_relational_bigint_string(right, left, false);
     }
     double l = js_get_number(left);
     double r = js_get_number(right);

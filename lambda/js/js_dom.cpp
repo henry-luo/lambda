@@ -7691,10 +7691,8 @@ extern "C" void js_dom_after_select_multiple_removed(void* dom_elem) {
     _select_ask_for_reset((DomElement*)dom_elem);
 }
 
-extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return;
-    const char* sv = value ? value : "";
+static int js_dom_select_apply_value(DomElement* elem, const char* value,
+        bool sync_native_index) {
     Item arr = js_array_new(0);
     _collect_options(elem->first_child, arr);
     int64_t n = js_array_length(arr);
@@ -7702,19 +7700,28 @@ extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value
     for (int64_t i = 0; i < n; i++) {
         DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
-        char* v = _option_value(opt);
-        bool match = v && strcmp(v, sv) == 0;
-        mem_free(v);
+        char* option_value = _option_value(opt);
+        bool match = option_value && strcmp(option_value, value) == 0;
+        mem_free(option_value);
         if (match) { found = (int)i; break; } // INT_CAST_OK: option index
     }
-    // select.value writes selectedness for every option and dirties the select.
     for (int64_t i = 0; i < n; i++) {
         DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
     }
-    _select_sync_native_selected_index(elem, found,
-                                       (int)n); // INT_CAST_OK: option count
+    if (sync_native_index) {
+        _select_sync_native_selected_index(elem, found,
+            (int)n); // INT_CAST_OK: option count
+    }
+    return found;
+}
+
+extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    const char* sv = value ? value : "";
+    js_dom_select_apply_value(elem, sv, true);
     _select_mark_dirty(elem);
 }
 
@@ -8699,6 +8706,88 @@ static Item js_dom_collect_child_nodes(DomElement* elem, bool elements_only) {
     return (Item){.array = arr};
 }
 
+static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
+        Item prop_name, const char* prop, const char* content,
+        int64_t length, int64_t node_type, const char* node_name,
+        bool is_text, Item* result) {
+    if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
+            strcmp(prop, "textContent") == 0) {
+        *result = (Item){.item = s2it(heap_create_name(content ? content : ""))};
+        return true;
+    }
+    if (strcmp(prop, "length") == 0) {
+        *result = (Item){.item = i2it(length)};
+        return true;
+    }
+    if (strcmp(prop, "nodeType") == 0) {
+        *result = (Item){.item = i2it(node_type)};
+        return true;
+    }
+    if (strcmp(prop, "nodeName") == 0) {
+        *result = (Item){.item = s2it(heap_create_name(node_name))};
+        return true;
+    }
+    if (strcmp(prop, "parentNode") == 0) {
+        *result = js_dom_parent_node_or_null(node);
+        return true;
+    }
+    if (strcmp(prop, "parentElement") == 0) {
+        *result = js_dom_parent_element_or_null(node);
+        return true;
+    }
+    if (strcmp(prop, "isConnected") == 0) {
+        *result = (Item){.item = b2it(js_dom_node_is_connected(node))};
+        return true;
+    }
+    if (strcmp(prop, "nextSibling") == 0) {
+        DomNode* sibling = js_dom_next_script_visible_sibling(node);
+        *result = sibling ? js_dom_wrap_element((void*)sibling) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "previousSibling") == 0) {
+        DomNode* sibling = js_dom_prev_script_visible_sibling(node);
+        *result = sibling ? js_dom_wrap_element((void*)sibling) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "childNodes") == 0) {
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        *result = (Item){.array = arr};
+        return true;
+    }
+    if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
+        *result = ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "ownerDocument") == 0) {
+        *result = js_dom_owner_document_from_node(node->parent);
+        return true;
+    }
+    if (is_text) {
+        JsTextDataOperation operation;
+        int arity;
+        if (strcmp(prop, "replaceData") == 0) {
+            operation = JS_TEXT_DATA_REPLACE; arity = 3;
+        } else if (strcmp(prop, "insertData") == 0) {
+            operation = JS_TEXT_DATA_INSERT; arity = 2;
+        } else if (strcmp(prop, "appendData") == 0) {
+            operation = JS_TEXT_DATA_APPEND; arity = 1;
+        } else if (strcmp(prop, "deleteData") == 0) {
+            operation = JS_TEXT_DATA_DELETE; arity = 2;
+        } else if (strcmp(prop, "substringData") == 0) {
+            operation = JS_TEXT_DATA_SUBSTRING; arity = 2;
+        } else {
+            operation = JS_TEXT_DATA_APPEND; arity = 0;
+        }
+        if (arity > 0) {
+            *result = js_bind_function(js_new_native_payload_function(
+                js_text_data_body, operation, arity), elem_item, NULL, 0);
+            return true;
+        }
+    }
+    return expando_get_property(node, prop_name, result);
+}
+
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
 
@@ -8745,127 +8834,22 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
 
-    // Text node properties
     if (node->is_text()) {
         DomText* text_node = node->as_text();
-        if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 || strcmp(prop, "textContent") == 0) {
-            return text_node->text ? (Item){.item = s2it(heap_create_name(text_node->text))}
-                                   : (Item){.item = s2it(heap_create_name(""))};
-        }
-        if (strcmp(prop, "length") == 0) {
-            return (Item){.item = i2it((int64_t)dom_text_utf16_length(text_node))};
-        }
-        if (strcmp(prop, "nodeType") == 0) {
-            return (Item){.item = i2it(3)}; // TEXT_NODE
-        }
-        if (strcmp(prop, "nodeName") == 0) {
-            return (Item){.item = s2it(heap_create_name("#text"))};
-        }
-        if (strcmp(prop, "parentNode") == 0) {
-            return js_dom_parent_node_or_null((DomNode*)text_node);
-        }
-        if (strcmp(prop, "parentElement") == 0) {
-            return js_dom_parent_element_or_null((DomNode*)text_node);
-        }
-        if (strcmp(prop, "isConnected") == 0) {
-            return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)text_node) ? 1 : 0)};
-        }
-        if (strcmp(prop, "nextSibling") == 0) {
-            DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)text_node);
-            if (!sib) return ItemNull;
-            return js_dom_wrap_element((void*)sib);
-        }
-        if (strcmp(prop, "previousSibling") == 0) {
-            DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)text_node);
-            if (!sib) return ItemNull;
-            return js_dom_wrap_element((void*)sib);
-        }
-        // childNodes — text nodes have no children; return an empty NodeList
-        // (per WHATWG DOM Node.childNodes is non-null on every node).
-        if (strcmp(prop, "childNodes") == 0) {
-            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-            arr->type_id = LMD_TYPE_ARRAY;
-            return (Item){.array = arr};
-        }
-        if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
-            return ItemNull;
-        }
-        if (strcmp(prop, "ownerDocument") == 0) {
-            return js_dom_owner_document_from_node(text_node->parent);
-        }
-        if (strcmp(prop, "replaceData") == 0) {
-            return js_bind_function(js_new_native_payload_function(
-                js_text_data_body, JS_TEXT_DATA_REPLACE, 3),
-                elem_item, NULL, 0);
-        }
-        if (strcmp(prop, "insertData") == 0) {
-            return js_bind_function(js_new_native_payload_function(
-                js_text_data_body, JS_TEXT_DATA_INSERT, 2),
-                elem_item, NULL, 0);
-        }
-        if (strcmp(prop, "appendData") == 0) {
-            return js_bind_function(js_new_native_payload_function(
-                js_text_data_body, JS_TEXT_DATA_APPEND, 1),
-                elem_item, NULL, 0);
-        }
-        if (strcmp(prop, "deleteData") == 0) {
-            return js_bind_function(js_new_native_payload_function(
-                js_text_data_body, JS_TEXT_DATA_DELETE, 2),
-                elem_item, NULL, 0);
-        }
-        if (strcmp(prop, "substringData") == 0) {
-            return js_bind_function(js_new_native_payload_function(
-                js_text_data_body, JS_TEXT_DATA_SUBSTRING, 2),
-                elem_item, NULL, 0);
-        }
-        Item expando_value = ItemNull;
-        if (expando_get_property(node, prop_name, &expando_value)) return expando_value;
+        Item result = ItemNull;
+        if (js_dom_get_textlike_property(node, elem_item, prop_name, prop,
+                text_node->text, dom_text_utf16_length(text_node), 3,
+                "#text", true, &result)) return result;
         log_debug("js_dom_get_property: unknown text node property '%s'", prop);
         return make_js_undefined();
     }
 
-    // Comment node properties
     if (node->is_comment()) {
         DomComment* comment_node = node->as_comment();
-        if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 || strcmp(prop, "textContent") == 0) {
-            return comment_node->content ? (Item){.item = s2it(heap_create_name(comment_node->content))}
-                                         : (Item){.item = s2it(heap_create_name(""))};
-        }
-        if (strcmp(prop, "nodeType") == 0) {
-            // Reflect the underlying DomNodeType so the synthesized DOCTYPE
-            // (created with node_type = DOM_NODE_DOCTYPE = 10) is visible to
-            // DOM-spec node tests; plain comments still report COMMENT_NODE (8).
-            return (Item){.item = i2it((int64_t)comment_node->node_type)};
-        }
-        if (strcmp(prop, "nodeName") == 0) {
-            return (Item){.item = s2it(heap_create_name("#comment"))};
-        }
-        if (strcmp(prop, "length") == 0) {
-            return (Item){.item = i2it((int64_t)comment_node->length)};
-        }
-        if (strcmp(prop, "parentNode") == 0) {
-            return js_dom_parent_node_or_null((DomNode*)comment_node);
-        }
-        if (strcmp(prop, "parentElement") == 0) {
-            return js_dom_parent_element_or_null((DomNode*)comment_node);
-        }
-        if (strcmp(prop, "isConnected") == 0) {
-            return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)comment_node) ? 1 : 0)};
-        }
-        // childNodes — comment nodes have no children; return empty NodeList
-        if (strcmp(prop, "childNodes") == 0) {
-            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-            arr->type_id = LMD_TYPE_ARRAY;
-            return (Item){.array = arr};
-        }
-        if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
-            return ItemNull;
-        }
-        if (strcmp(prop, "ownerDocument") == 0) {
-            return js_dom_owner_document_from_node(comment_node->parent);
-        }
-        Item expando_value = ItemNull;
-        if (expando_get_property(node, prop_name, &expando_value)) return expando_value;
+        Item result = ItemNull;
+        if (js_dom_get_textlike_property(node, elem_item, prop_name, prop,
+                comment_node->content, comment_node->length,
+                comment_node->node_type, "#comment", false, &result)) return result;
         log_debug("js_dom_get_property: unknown comment node property '%s'", prop);
         return make_js_undefined();
     }
@@ -10396,24 +10380,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (strcmp(prop, "value") == 0) {
             const char* sv = fn_to_cstr(value);
             if (!sv) sv = "";
-            Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            int64_t n = js_array_length(arr);
-            int found = -1;
-            for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
-                if (!opt) continue;
-                char* v = _option_value(opt);
-                bool match = v && strcmp(v, sv) == 0;
-                mem_free(v);
-                if (match) { found = (int)i; break; } // INT_CAST_OK: option index
-            }
-            // Per spec, set selectedness of all options accordingly.
-            for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
-                if (!opt) continue;
-                _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
-            }
+            js_dom_select_apply_value(elem, sv, false);
             _select_mark_dirty(elem);
             return value;
         }

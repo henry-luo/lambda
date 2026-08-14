@@ -413,6 +413,9 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
         "AsyncLocalStorage instances");
     js_root_range_set_storage(&state->event_loop_queue_roots,
         state->event_loop.queue_storage, 2, "JS async queue storage");
+    js_root_range_set_storage(&state->event_loop_raf_roots,
+        state->event_loop.raf_callback, JS_EVENT_RAF_CAPACITY,
+        "JS animation frame callbacks");
 }
 
 bool js_root_range_register_reset(JsRootRange* range, void* owner,

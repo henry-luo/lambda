@@ -4084,6 +4084,23 @@ static bool js_assert_partial_error_match(Item actual, Item expected, int depth_
     return true;
 }
 
+static bool js_assert_partial_enumerable_properties(Item actual, Item expected,
+        int depth_left, JsAssertPartialContext* ctx, bool skip_search_params) {
+    Item keys = js_assert_enumerable_own_keys(expected);
+    int64_t key_len = js_array_length(keys);
+    Item search_params_key = assert_make_string("searchParams");
+    for (int64_t i = 0; i < key_len; i++) {
+        Item key = js_elements_get_int(keys, i);
+        if (skip_search_params && js_assert_same_property_key(key, search_params_key)) continue;
+        if (!js_assert_has_enumerable_own_key(actual, key)) return false;
+        if (!js_assert_partial_deep_match_impl(
+                js_get_key_default(actual, key),
+                js_get_key_default(expected, key),
+                depth_left - 1, ctx)) return false;
+    }
+    return true;
+}
+
 static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
     if (!js_assert_is_real_regexp(actual) || !js_assert_is_real_regexp(expected)) return false;
     // Borrowed RegExp prototypes/tags lack native RegExp slots; partial
@@ -4096,21 +4113,8 @@ static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth
             js_get_key_default(expected, assert_make_string("flags")))) {
         return false;
     }
-    Item keys = js_assert_enumerable_own_keys(expected);
-    int64_t key_len = js_array_length(keys);
-    Item search_params_key = assert_make_string("searchParams");
-    for (int64_t i = 0; i < key_len; i++) {
-        Item key = js_elements_get_int(keys, i);
-        if (js_assert_same_property_key(key, search_params_key)) continue;
-        if (!js_assert_has_enumerable_own_key(actual, key)) return false;
-        if (!js_assert_partial_deep_match_impl(
-                js_get_key_default(actual, key),
-                js_get_key_default(expected, key),
-                depth_left - 1, ctx)) {
-            return false;
-        }
-    }
-    return true;
+    return js_assert_partial_enumerable_properties(actual, expected,
+        depth_left, ctx, true);
 }
 
 static bool js_assert_is_any_arraybuffer(Item value) {
@@ -4195,45 +4199,36 @@ static bool js_assert_partial_url_match(Item actual, Item expected, int depth_le
     if (!js_assert_deep_strict_equal_bool(actual_href, expected_href)) return false;
     // User-defined enumerable URL properties are ordinary object surface; href-only
     // partial matching lets URLs with different custom fields compare equal.
-    Item keys = js_assert_enumerable_own_keys(expected);
-    int64_t key_len = js_array_length(keys);
-    Item search_params_key = assert_make_string("searchParams");
-    for (int64_t i = 0; i < key_len; i++) {
-        Item key = js_elements_get_int(keys, i);
-        if (js_assert_same_property_key(key, search_params_key)) {
-            // URLSearchParams is materialized as a per-instance wrapper; href
-            // above is the canonical URL/search state being protected.
-            continue;
-        }
-        if (!js_assert_has_enumerable_own_key(actual, key)) return false;
-        if (!js_assert_partial_deep_match_impl(
-                js_get_key_default(actual, key),
-                js_get_key_default(expected, key),
-                depth_left - 1, ctx)) {
-            return false;
-        }
-    }
-    return true;
+    // URLSearchParams is materialized as a per-instance wrapper; href above is
+    // the canonical URL/search state being protected.
+    return js_assert_partial_enumerable_properties(actual, expected,
+        depth_left, ctx, true);
 }
 
-static bool js_assert_partial_key_value_subset(Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
-    int64_t expected_count = js_array_length(expected_keys);
-    int64_t actual_count = js_array_length(actual_keys);
+typedef bool (*JsAssertSubsetMatcher)(Item actual, Item expected,
+    Item actual_entries, Item expected_entries,
+    int64_t actual_index, int64_t expected_index, int depth_left,
+    JsAssertPartialContext* ctx, bool exact_only);
+
+static bool js_assert_unordered_subset(Item actual, Item expected,
+        Item actual_entries, Item expected_entries,
+        int depth_left, JsAssertPartialContext* ctx,
+        JsAssertSubsetMatcher matcher, bool exact_first) {
+    int64_t expected_count = js_array_length(expected_entries);
+    int64_t actual_count = js_array_length(actual_entries);
     if (actual_count < expected_count) return false;
     if (expected_count == 0) return true;
 
     bool* used = (bool*)calloc((size_t)actual_count, sizeof(bool));
     if (!used) return false;
-
     for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_key = js_elements_get_int(expected_keys, i);
-        Item expected_value = js_get_key_default(expected, expected_key);
         bool found = false;
-        for (int64_t j = 0; j < actual_count; j++) {
-            if (used[j]) continue;
-            Item actual_key = js_elements_get_int(actual_keys, j);
-            Item actual_value = js_get_key_default(actual, actual_key);
-            if (js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
+        int pass_count = exact_first ? 2 : 1;
+        for (int pass = 0; pass < pass_count && !found; pass++) {
+            bool exact_only = exact_first && pass == 0;
+            for (int64_t j = 0; j < actual_count; j++) {
+                if (used[j] || !matcher(actual, expected, actual_entries,
+                        expected_entries, j, i, depth_left, ctx, exact_only)) continue;
                 used[j] = true;
                 found = true;
                 break;
@@ -4244,33 +4239,38 @@ static bool js_assert_partial_key_value_subset(Item actual, Item expected, Item 
             return false;
         }
     }
-
     free(used);
     return true;
 }
 
+static bool js_assert_partial_key_subset_match(Item actual, Item expected,
+        Item actual_keys, Item expected_keys,
+        int64_t actual_index, int64_t expected_index, int depth_left,
+        JsAssertPartialContext* ctx, bool exact_only) {
+    (void)exact_only;
+    Item expected_key = js_elements_get_int(expected_keys, expected_index);
+    Item actual_key = js_elements_get_int(actual_keys, actual_index);
+    return js_assert_partial_deep_match_impl(
+        js_get_key_default(actual, actual_key),
+        js_get_key_default(expected, expected_key), depth_left - 1, ctx);
+}
+
+static bool js_assert_partial_named_key_subset_match(Item actual, Item expected,
+        Item actual_keys, Item expected_keys, int64_t actual_index,
+        int64_t expected_index, int depth_left, JsAssertPartialContext* ctx,
+        bool exact_only) {
+    (void)exact_only;
+    Item actual_key = js_elements_get_int(actual_keys, actual_index);
+    Item expected_key = js_elements_get_int(expected_keys, expected_index);
+    if (!js_assert_same_property_key(actual_key, expected_key)) return false;
+    return js_assert_partial_deep_match_impl(
+        js_get_key_default(actual, actual_key),
+        js_get_key_default(expected, expected_key), depth_left - 1, ctx);
+}
+
 static bool js_assert_partial_named_key_subset(Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
-    int64_t expected_count = js_array_length(expected_keys);
-    int64_t actual_count = js_array_length(actual_keys);
-    for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_key = js_elements_get_int(expected_keys, i);
-        Item expected_value = js_get_key_default(expected, expected_key);
-        bool found = false;
-        for (int64_t j = 0; j < actual_count; j++) {
-            Item actual_key = js_elements_get_int(actual_keys, j);
-            if (!js_assert_same_property_key(actual_key, expected_key)) continue;
-            if (!js_assert_partial_deep_match_impl(
-                    js_get_key_default(actual, actual_key),
-                    expected_value,
-                    depth_left - 1, ctx)) {
-                return false;
-            }
-            found = true;
-            break;
-        }
-        if (!found) return false;
-    }
-    return true;
+    return js_assert_unordered_subset(actual, expected, actual_keys, expected_keys,
+        depth_left, ctx, js_assert_partial_named_key_subset_match, false);
 }
 
 static bool js_assert_partial_array_like_key_match(Item actual, Item expected,
@@ -4281,8 +4281,9 @@ static bool js_assert_partial_array_like_key_match(Item actual, Item expected,
     // dropped enumerable symbol-key mismatches entirely.
     Item actual_index_keys = js_assert_filter_keys(actual_keys, true);
     Item expected_index_keys = js_assert_filter_keys(expected_keys, true);
-    if (!js_assert_partial_key_value_subset(actual, expected,
-            actual_index_keys, expected_index_keys, depth_left, ctx)) {
+    if (!js_assert_unordered_subset(actual, expected, actual_index_keys,
+            expected_index_keys, depth_left, ctx,
+            js_assert_partial_key_subset_match, false)) {
         return false;
     }
     Item actual_named_keys = js_assert_filter_keys(actual_keys, false);
@@ -4322,89 +4323,50 @@ static bool js_assert_partial_typed_array_match(Item actual, Item expected, int 
     return js_assert_partial_array_like_key_match(actual, expected, actual_keys, expected_keys, depth_left, ctx);
 }
 
-static bool js_assert_partial_set_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_set_subset_match(Item actual, Item expected,
+        Item actual_values, Item expected_values, int64_t actual_index,
+        int64_t expected_index, int depth_left, JsAssertPartialContext* ctx,
+        bool exact_only) {
+    (void)actual;
+    (void)expected;
+    Item actual_value = js_elements_get_int(actual_values, actual_index);
+    Item expected_value = js_elements_get_int(expected_values, expected_index);
+    if (exact_only) return actual_value.item == expected_value.item;
+    return js_assert_partial_deep_match_impl(actual_value, expected_value,
+        depth_left - 1, ctx);
+}
 
+static bool js_assert_partial_map_subset_match(Item actual, Item expected,
+        Item actual_entries, Item expected_entries, int64_t actual_index,
+        int64_t expected_index, int depth_left, JsAssertPartialContext* ctx,
+        bool exact_only) {
+    (void)actual;
+    (void)expected;
+    (void)exact_only;
+    Item actual_pair = js_elements_get_int(actual_entries, actual_index);
+    Item expected_pair = js_elements_get_int(expected_entries, expected_index);
+    Item actual_key = js_elements_get_int(actual_pair, 0);
+    Item expected_key = js_elements_get_int(expected_pair, 0);
+    return js_assert_deep_strict_equal_bool(actual_key, expected_key) &&
+        js_assert_partial_deep_match_impl(
+            js_elements_get_int(actual_pair, 1),
+            js_elements_get_int(expected_pair, 1), depth_left - 1, ctx);
+}
+
+static bool js_assert_partial_set_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
     Item actual_values = js_iterable_to_array(actual);
     Item expected_values = js_iterable_to_array(expected);
-    int64_t actual_count = js_array_length(actual_values);
-    int64_t expected_count = js_array_length(expected_values);
-    if (actual_count < expected_count) return false;
-    if (expected_count == 0) return true;
-
-    bool* used = (bool*)calloc((size_t)actual_count, sizeof(bool));
-    if (!used) return false;
-
-    for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_value = js_elements_get_int(expected_values, i);
-        bool found = false;
-        for (int64_t j = 0; j < actual_count; j++) {
-            if (used[j]) continue;
-            Item actual_value = js_elements_get_int(actual_values, j);
-            if (actual_value.item == expected_value.item) {
-                // Unordered Set subset matching must consume exact references
-                // before broad structural matches such as {} versus [].
-                used[j] = true;
-                found = true;
-                break;
-            }
-        }
-        if (found) continue;
-        for (int64_t j = 0; j < actual_count; j++) {
-            if (used[j]) continue;
-            Item actual_value = js_elements_get_int(actual_values, j);
-            if (js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
-                used[j] = true;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            free(used);
-            return false;
-        }
-    }
-
-    free(used);
-    return true;
+    // Set matching consumes exact references before structural matches so {} and
+    // [] cannot steal a later exact candidate from the unordered subset.
+    return js_assert_unordered_subset(actual, expected, actual_values,
+        expected_values, depth_left, ctx, js_assert_partial_set_subset_match, true);
 }
 
 static bool js_assert_partial_map_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
-
     Item actual_entries = js_iterable_to_array(actual);
     Item expected_entries = js_iterable_to_array(expected);
-    int64_t actual_count = js_array_length(actual_entries);
-    int64_t expected_count = js_array_length(expected_entries);
-    if (actual_count < expected_count) return false;
-    if (expected_count == 0) return true;
-
-    bool* used = (bool*)calloc((size_t)actual_count, sizeof(bool));
-    if (!used) return false;
-
-    for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_pair = js_elements_get_int(expected_entries, i);
-        Item expected_key = js_elements_get_int(expected_pair, 0);
-        Item expected_value = js_elements_get_int(expected_pair, 1);
-        bool found = false;
-        for (int64_t j = 0; j < actual_count; j++) {
-            if (used[j]) continue;
-            Item actual_pair = js_elements_get_int(actual_entries, j);
-            Item actual_key = js_elements_get_int(actual_pair, 0);
-            Item actual_value = js_elements_get_int(actual_pair, 1);
-            if (js_assert_deep_strict_equal_bool(actual_key, expected_key) &&
-                js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
-                used[j] = true;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            free(used);
-            return false;
-        }
-    }
-
-    free(used);
-    return true;
+    return js_assert_unordered_subset(actual, expected, actual_entries,
+        expected_entries, depth_left, ctx, js_assert_partial_map_subset_match, false);
 }
 
 static bool js_assert_partial_collection_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
@@ -4576,29 +4538,8 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
             result = false;
             goto done;
         }
-        Item keys = js_assert_enumerable_own_keys(expected);
-        int64_t key_len = js_array_length(keys);
-        Item url_search_params_key = assert_make_string("searchParams");
-        for (int64_t i = 0; i < key_len; i++) {
-            Item key = js_elements_get_int(keys, i);
-            if (js_assert_same_property_key(key, url_search_params_key)) {
-                // URLSearchParams is a built-in per-instance wrapper; generic
-                // partial matching must not compare wrapper identity for URLs.
-                continue;
-            }
-            if (!js_assert_has_enumerable_own_key(actual, key)) {
-                result = false;
-                goto done;
-            }
-            if (!js_assert_partial_deep_match_impl(
-                    js_get_key_default(actual, key),
-                    js_get_key_default(expected, key),
-                    depth_left - 1, ctx)) {
-                result = false;
-                goto done;
-            }
-        }
-        result = true;
+        result = js_assert_partial_enumerable_properties(actual, expected,
+            depth_left, ctx, true);
         goto done;
     }
 
@@ -5026,28 +4967,41 @@ static bool js_assert_normalize_async_input(Item* promise) {
     return true;
 }
 
+typedef enum JsAssertAsyncInputStatus {
+    JS_ASSERT_ASYNC_READY,
+    JS_ASSERT_ASYNC_THROWN,
+    JS_ASSERT_ASYNC_INVALID_RETURN,
+    JS_ASSERT_ASYNC_INVALID_ARGUMENT,
+} JsAssertAsyncInputStatus;
+
+static JsAssertAsyncInputStatus js_assert_prepare_async_input(Item input,
+        Item* promise) {
+    bool callable = js_is_callable(input);
+    *promise = callable ? js_call_function(input, make_js_undefined(), NULL, 0) : input;
+    if (callable && item_is_error(*promise)) return JS_ASSERT_ASYNC_THROWN;
+    if (!js_assert_normalize_async_input(promise)) {
+        return callable ? JS_ASSERT_ASYNC_INVALID_RETURN :
+            JS_ASSERT_ASYNC_INVALID_ARGUMENT;
+    }
+    return JS_ASSERT_ASYNC_READY;
+}
+
 // assert.rejects(asyncFnOrPromise[, error[, message]])
 extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, Item message) {
 
     Item promise;
-    if (js_is_callable(asyncFnOrPromise)) {
-        promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
-        if (item_is_error(promise)) {
-            Item thrown = js_error_lane_payload(promise);
-            bool matched = validate_rejection(thrown, error_expected, message);
-            if (!matched) {
-                return js_assert_reject_with_error(thrown);
-            }
-            return js_promise_resolve(make_js_undefined());
-        }
-        if (!js_assert_normalize_async_input(&promise)) {
-            return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
-        }
-    } else {
-        promise = asyncFnOrPromise;
-        if (!js_assert_normalize_async_input(&promise)) {
-            return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
-        }
+    JsAssertAsyncInputStatus status = js_assert_prepare_async_input(asyncFnOrPromise, &promise);
+    if (status == JS_ASSERT_ASYNC_THROWN) {
+        Item thrown = js_error_lane_payload(promise);
+        bool matched = validate_rejection(thrown, error_expected, message);
+        if (!matched) return js_assert_reject_with_error(thrown);
+        return js_promise_resolve(make_js_undefined());
+    }
+    if (status == JS_ASSERT_ASYNC_INVALID_RETURN) {
+        return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
+    }
+    if (status == JS_ASSERT_ASYNC_INVALID_ARGUMENT) {
+        return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
     }
 
     Item* reject_env = js_alloc_env(2);
@@ -5078,17 +5032,13 @@ static Item js_assert_doesNotReject_on_rejected(Item env_item, Item reason) {
 extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expected, Item message) {
 
     Item promise;
-    if (js_is_callable(asyncFnOrPromise)) {
-        promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
-        if (item_is_error(promise)) return js_assert_reject_with_error(promise);
-        if (!js_assert_normalize_async_input(&promise)) {
-            return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
-        }
-    } else {
-        promise = asyncFnOrPromise;
-        if (!js_assert_normalize_async_input(&promise)) {
-            return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
-        }
+    JsAssertAsyncInputStatus status = js_assert_prepare_async_input(asyncFnOrPromise, &promise);
+    if (status == JS_ASSERT_ASYNC_THROWN) return js_assert_reject_with_error(promise);
+    if (status == JS_ASSERT_ASYNC_INVALID_RETURN) {
+        return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
+    }
+    if (status == JS_ASSERT_ASYNC_INVALID_ARGUMENT) {
+        return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
     }
 
     Item* reject_env = js_alloc_env(2);

@@ -48,6 +48,8 @@
 #ifndef JS_RUNTIME_INTERNAL_HPP_DECLS
 #define JS_RUNTIME_INTERNAL_HPP_DECLS
 
+char* js_skip_ecma_whitespace(char* start, char* end);
+
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 extern "C" JsFunction* js_alloc_gc_function_object(void);
 void js_function_finalize_capabilities(JsFunction* fn);

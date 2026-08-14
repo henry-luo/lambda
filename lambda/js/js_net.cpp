@@ -1403,40 +1403,31 @@ static void socket_close_handle_cb(uv_handle_t* handle) {
     }
 }
 
+static bool socket_prepare_close(JsSocket* sock) {
+    if (!sock || socket_delegate_close_to_tls(sock, make_undefined_item()) ||
+        uv_is_closing((uv_handle_t*)&sock->tcp)) return false;
+    sock->reading = false;
+    sock->destroyed = true;
+    socket_clear_auto_attempt_timer(sock);
+    socket_clear_timeout(sock);
+    socket_remove_abort_listener(sock);
+    socket_hide_handle(sock);
+    socket_update_writable(sock, false);
+    js_set_key_default(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    socket_update_state_properties(sock);
+    return true;
+}
+
 static void socket_close_now(JsSocket* sock) {
-    if (!sock) return;
-    if (socket_delegate_close_to_tls(sock, make_undefined_item())) return;
-    if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
-        sock->reading = false;
-        sock->destroyed = true;
-        socket_clear_auto_attempt_timer(sock);
-        socket_clear_timeout(sock);
-        socket_remove_abort_listener(sock);
-        socket_hide_handle(sock);
-        socket_update_writable(sock, false);
-        js_set_key_default(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
-        socket_update_state_properties(sock);
-        uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
-    }
+    if (!socket_prepare_close(sock)) return;
+    uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
 }
 
 static void socket_close_reset_now(JsSocket* sock) {
-    if (!sock) return;
-    if (socket_delegate_close_to_tls(sock, make_undefined_item())) return;
-    if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
-        sock->reading = false;
-        sock->destroyed = true;
-        socket_clear_auto_attempt_timer(sock);
-        socket_clear_timeout(sock);
-        socket_remove_abort_listener(sock);
-        socket_hide_handle(sock);
-        socket_update_writable(sock, false);
-        js_set_key_default(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
-        socket_update_state_properties(sock);
-        int r = uv_tcp_close_reset(&sock->tcp, socket_close_handle_cb);
-        if (r != 0 && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
-            uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
-        }
+    if (!socket_prepare_close(sock)) return;
+    int r = uv_tcp_close_reset(&sock->tcp, socket_close_handle_cb);
+    if (r != 0 && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
+        uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
     }
 }
 
@@ -3651,6 +3642,26 @@ static void net_resolve_cb(uv_getaddrinfo_t* req, int status, struct addrinfo* r
     mem_free(nr);
 }
 
+static NetResolveReq* socket_alloc_resolve_req(JsSocket* sock,
+        const NetConnectOptions* options, bool auto_select_family,
+        int auto_select_family_attempt_timeout) {
+    NetResolveReq* nr = (NetResolveReq*)mem_calloc(1, sizeof(NetResolveReq),
+        MEM_CAT_JS_RUNTIME);
+    nr->sock = sock;
+    nr->port = options->port;
+    nr->family = options->family;
+    memcpy(nr->host, options->host, sizeof(nr->host));
+    nr->has_local_address = options->has_local_address;
+    nr->has_local_port = options->has_local_port;
+    nr->local_port = options->local_port;
+    memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
+    nr->auto_select_family = auto_select_family;
+    nr->auto_select_family_attempt_timeout = auto_select_family_attempt_timeout;
+    nr->block_list = options->block_list;
+    nr->has_block_list = options->has_block_list;
+    return nr;
+}
+
 static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options) {
     if (!sock || sock->destroyed) return 0;
     socket_expose_handle(sock);
@@ -3664,20 +3675,9 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
         uv_loop_t* loop = lambda_uv_loop();
         if (!loop) return UV_EINVAL;
 
-        NetResolveReq* nr = (NetResolveReq*)mem_calloc(1, sizeof(NetResolveReq), MEM_CAT_JS_RUNTIME);
-        nr->sock = sock;
-        nr->port = options->port;
-        nr->family = options->family;
-        memcpy(nr->host, options->host, sizeof(nr->host));
-        nr->has_local_address = options->has_local_address;
-        nr->has_local_port = options->has_local_port;
-        nr->local_port = options->local_port;
-        memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
-        nr->auto_select_family = auto_select_family;
-        nr->auto_select_family_attempt_timeout = auto_select_family_attempt_timeout;
+        NetResolveReq* nr = socket_alloc_resolve_req(sock, options,
+            auto_select_family, auto_select_family_attempt_timeout);
         nr->lookup = options->lookup;
-        nr->block_list = options->block_list;
-        nr->has_block_list = options->has_block_list;
 
         sock->connect_pending = true;
         sock->auto_select_family = auto_select_family;
@@ -3732,19 +3732,8 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return UV_EINVAL;
 
-    NetResolveReq* nr = (NetResolveReq*)mem_calloc(1, sizeof(NetResolveReq), MEM_CAT_JS_RUNTIME);
-    nr->sock = sock;
-    nr->port = options->port;
-    nr->family = options->family;
-    memcpy(nr->host, options->host, sizeof(nr->host));
-    nr->has_local_address = options->has_local_address;
-    nr->has_local_port = options->has_local_port;
-    nr->local_port = options->local_port;
-    memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
-    nr->auto_select_family = auto_select_family;
-    nr->auto_select_family_attempt_timeout = auto_select_family_attempt_timeout;
-    nr->block_list = options->block_list;
-    nr->has_block_list = options->has_block_list;
+    NetResolveReq* nr = socket_alloc_resolve_req(sock, options,
+        auto_select_family, auto_select_family_attempt_timeout);
     snprintf(nr->service, sizeof(nr->service), "%d", options->port);
     nr->req.data = nr;
 

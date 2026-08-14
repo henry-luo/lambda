@@ -597,6 +597,15 @@ static bool dt_record_kind_is(Item r, const char* kind, size_t kind_len) {
         strncmp(s->chars, kind, kind_len) == 0;
 }
 
+static bool dt_record_string_type_is(Item record, const char* type, size_t type_len) {
+    if (!dt_record_kind_is(record, "string", 6)) return false;
+    Item format = js_get_key_default(record, make_str("type"));
+    if (get_type_id(format) != LMD_TYPE_STRING) return false;
+    String* s = it2s(format);
+    return s && (size_t)s->len == type_len &&
+        strncmp(s->chars, type, type_len) == 0;
+}
+
 // Lowercase and copy in-place. Returns false if input does not fit.
 static bool dt_normalize_format(Item type_item, char* out, size_t out_cap) {
     if (get_type_id(type_item) != LMD_TYPE_STRING) return false;
@@ -728,19 +737,9 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
         int64_t n = js_array_length(rec_arr);
         for (int64_t i = 0; i < n; i++) {
             Item r = js_elements_get_int(rec_arr, i);
-            Item kind = js_get_key_default(r, make_str("kind"));
-            Item etype = js_get_key_default(r, make_str("type"));
-            if (get_type_id(kind) == LMD_TYPE_STRING &&
-                get_type_id(etype) == LMD_TYPE_STRING) {
-                String* ks = it2s(kind);
-                String* es = it2s(etype);
-                if (ks && es && ks->len == 6 &&
-                    strncmp(ks->chars, "string", 6) == 0 &&
-                    (size_t)es->len == tlen &&
-                    strncmp(es->chars, tbuf, tlen) == 0) {
-                    return js_throw_type_error(
-                        "NotSupportedError: type already present");
-                }
+            if (dt_record_string_type_is(r, tbuf, tlen)) {
+                return js_throw_type_error(
+                    "NotSupportedError: type already present");
             }
         }
         js_set_key_default(record, make_str("kind"), make_str("string"));
@@ -821,20 +820,10 @@ extern "C" Item js_dt_set_data(Item type_item, Item data_item) {
     int64_t n = js_array_length(rec_arr);
     for (int64_t i = 0; i < n; i++) {
         Item r = js_elements_get_int(rec_arr, i);
-        Item kind = js_get_key_default(r, make_str("kind"));
-        Item etype = js_get_key_default(r, make_str("type"));
-        if (get_type_id(kind) == LMD_TYPE_STRING &&
-            get_type_id(etype) == LMD_TYPE_STRING) {
-            String* ks = it2s(kind);
-            String* es = it2s(etype);
-            if (ks && es && ks->len == 6 &&
-                strncmp(ks->chars, "string", 6) == 0 &&
-                (size_t)es->len == tlen &&
-                strncmp(es->chars, tbuf, tlen) == 0) {
-                js_set_key_default(r, make_str("value"), value);
-                dt_recompute_views(dt);
-                return ItemNull;
-            }
+        if (dt_record_string_type_is(r, tbuf, tlen)) {
+            js_set_key_default(r, make_str("value"), value);
+            dt_recompute_views(dt);
+            return ItemNull;
         }
     }
     Item record = js_new_object();
@@ -857,19 +846,9 @@ extern "C" Item js_dt_get_data(Item type_item) {
     int64_t n = js_array_length(rec_arr);
     for (int64_t i = 0; i < n; i++) {
         Item r = js_elements_get_int(rec_arr, i);
-        Item kind = js_get_key_default(r, make_str("kind"));
-        Item etype = js_get_key_default(r, make_str("type"));
-        if (get_type_id(kind) == LMD_TYPE_STRING &&
-            get_type_id(etype) == LMD_TYPE_STRING) {
-            String* ks = it2s(kind);
-            String* es = it2s(etype);
-            if (ks && es && ks->len == 6 &&
-                strncmp(ks->chars, "string", 6) == 0 &&
-                (size_t)es->len == tlen &&
-                strncmp(es->chars, tbuf, tlen) == 0) {
-                Item v = js_get_key_default(r, make_str("value"));
-                return (get_type_id(v) == LMD_TYPE_STRING) ? v : make_str("");
-            }
+        if (dt_record_string_type_is(r, tbuf, tlen)) {
+            Item v = js_get_key_default(r, make_str("value"));
+            return (get_type_id(v) == LMD_TYPE_STRING) ? v : make_str("");
         }
     }
     return make_str("");

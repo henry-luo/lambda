@@ -193,7 +193,12 @@ static bool raf_push(Item cb, int64_t id) {
         log_error("event_loop: animation frame queue overflow (%d)", RAF_CAPACITY);
         return false;
     }
-    raf_callback_ring[raf_tail] = cb;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, cb);
+    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_raf_roots)) {
+        return false;
+    }
+    raf_callback_ring[raf_tail] = callback_root.get();
     raf_id_ring[raf_tail] = id;
     raf_tail = (raf_tail + 1) % RAF_CAPACITY;
     raf_count++;
@@ -261,10 +266,12 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     int pending = raf_count;
     int called = 0;
     if (pending <= 0) return 0;
-
     // The frame clock supplies absolute monotonic time; DOMHighResTimeStamp is
     // relative to the same document origin as performance.now().
-    Item timestamp = js_make_number(js_performance_monotonic_to_relative(timestamp_ms));
+    RootFrame roots(2);
+    Rooted<Item> timestamp_root(roots,
+        js_make_number(js_performance_monotonic_to_relative(timestamp_ms)));
+    Rooted<Item> callback_root(roots, ItemNull);
     // rAF callbacks and performance.now() share one document frame clock.
     // Headless draining advances synthetic frames faster than wall time, so
     // exposing wall time here prevented animation libraries from completing.
@@ -272,10 +279,11 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
 
     for (int i = 0; i < pending; i++) {
         int64_t id = -1;
-        Item cb = raf_pop(&id);
+        callback_root.set(raf_pop(&id));
         (void)id;
-        if (js_is_callable(cb)) {
-            js_call_function(cb, ItemNull, &timestamp, 1);
+        if (js_is_callable(callback_root.get())) {
+            Item timestamp = timestamp_root.get();
+            js_call_function(callback_root.get(), ItemNull, &timestamp, 1);
             called++;
         }
     }
@@ -910,18 +918,48 @@ extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_ste
     return progress;
 }
 
+static uv_loop_t* js_timer_get_loop(const char* name) {
+    uv_loop_t *loop = lambda_uv_loop();
+    if (!loop) {
+        log_error("event_loop: uv loop not initialized for %s", name);
+    }
+    return loop;
+}
+
+static void js_timer_copy_extra_args(JsTimerHandle* th, Item args_array,
+        bool has_args) {
+    if (!has_args || get_type_id(args_array) != LMD_TYPE_ARRAY) return;
+    Array* arr = args_array.array;
+    int count = (int)arr->length;
+    if (count > 8) count = 8;
+    for (int i = 0; i < count; i++) th->extra_args[i] = arr->items[i];
+    th->extra_count = count;
+}
+
+static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
+        JsClass timer_class, uint64_t delay, uint64_t repeat,
+        const char* capture_name, int capture_name_len) {
+    timer_capture_runtime(th, capture_name, capture_name_len);
+    uv_timer_init(loop, &th->timer);
+    timer_start(loop, th, delay, repeat);
+    Item timer_obj = make_timer_object(th->id, timer_class);
+    th->object = timer_obj;
+    timer_register_gc_roots(th);
+    if (timer_handle_count < MAX_TIMER_HANDLES) {
+        timer_handles[timer_handle_count++] = th;
+    }
+    return timer_obj;
+}
+
 static Item js_schedule_timer(Item callback, Item delay, Item args_array,
                               bool has_args, bool is_interval) {
     if (!js_is_callable(callback)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
-    uv_loop_t *loop = lambda_uv_loop();
-    if (!loop) {
-        log_error("event_loop: uv loop not initialized for %s",
-                  is_interval ? "setInterval" : "setTimeout");
-        return ItemNull;
-    }
+    uv_loop_t *loop = js_timer_get_loop(
+        is_interval ? "setInterval" : "setTimeout");
+    if (!loop) return ItemNull;
 
     uint64_t ms = normalize_timer_delay(delay);
     if (is_interval && ms < 1) ms = 1;
@@ -934,26 +972,9 @@ static Item js_schedule_timer(Item callback, Item delay, Item args_array,
     th->is_interval = is_interval;
     th->extra_count = 0;
     th->timer.data = th;
-    if (has_args && get_type_id(args_array) == LMD_TYPE_ARRAY) {
-        Array* arr = args_array.array;
-        int count = (int)arr->length;
-        if (count > 8) count = 8;
-        for (int i = 0; i < count; i++) {
-            th->extra_args[i] = arr->items[i];
-        }
-        th->extra_count = count;
-    }
-    timer_capture_runtime(th, "Timeout", 7);
-
-    uv_timer_init(loop, &th->timer);
-    timer_start(loop, th, ms, is_interval ? ms : 0);
-    Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
-    th->object = timer_obj;
-    timer_register_gc_roots(th);
-    if (timer_handle_count < MAX_TIMER_HANDLES) {
-        timer_handles[timer_handle_count++] = th;
-    }
-    return timer_obj;
+    js_timer_copy_extra_args(th, args_array, has_args);
+    return js_timer_finish_create(loop, th, JS_CLASS_TIMEOUT, ms,
+        is_interval ? ms : 0, "Timeout", 7);
 }
 
 extern "C" Item js_setTimeout(Item callback, Item delay) {
@@ -969,11 +990,8 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
-    uv_loop_t *loop = lambda_uv_loop();
-    if (!loop) {
-        log_error("event_loop: uv loop not initialized for setImmediate");
-        return ItemNull;
-    }
+    uv_loop_t *loop = js_timer_get_loop("setImmediate");
+    if (!loop) return ItemNull;
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
@@ -983,31 +1001,10 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
     th->is_interval = false;
     th->extra_count = 0;
     th->timer.data = th;
-
-    if (has_args && get_type_id(args_array) == LMD_TYPE_ARRAY) {
-        Array* arr = args_array.array;
-        int count = (int)arr->length;
-        if (count > 8) count = 8;
-        for (int i = 0; i < count; i++) {
-            th->extra_args[i] = arr->items[i];
-        }
-        th->extra_count = count;
-    }
-
-    timer_capture_runtime(th, "Immediate", 9);
-
-    uv_timer_init(loop, &th->timer);
-    // Immediates queued while draining the current check phase belong to the next turn.
-    timer_start(loop, th, 1, 0);
-    Item timer_obj = make_timer_object(th->id, JS_CLASS_IMMEDIATE);
-    th->object = timer_obj;
-    timer_register_gc_roots(th);
-
-    if (timer_handle_count < MAX_TIMER_HANDLES) {
-        timer_handles[timer_handle_count++] = th;
-    }
-
-    return timer_obj;
+    js_timer_copy_extra_args(th, args_array, has_args);
+    // immediates queued while draining the current check phase belong to the next turn.
+    return js_timer_finish_create(loop, th, JS_CLASS_IMMEDIATE, 1, 0,
+        "Immediate", 9);
 }
 
 extern "C" Item js_setImmediate_timer(Item callback) {
@@ -1426,6 +1423,7 @@ extern "C" void js_event_loop_init(void) {
     runtime_async_deque_clear(&next_tick_deque);
     runtime_async_deque_clear(&microtask_deque);
     (void)js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots);
+    (void)js_root_range_ensure_registered(&js_runtime_state.event_loop_raf_roots);
     memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
     raf_head = 0;
     raf_tail = 0;

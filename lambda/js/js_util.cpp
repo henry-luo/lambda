@@ -1827,6 +1827,42 @@ static bool js_util_compare_enumerable_properties(Item a, Item b, JsDeepEqualCon
     return true;
 }
 
+static bool js_util_compare_unordered_collection(Item a, Item b,
+        JsDeepEqualContext* ctx, bool strict, bool is_map) {
+    Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
+    Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
+    if (it2i(size_a) != it2i(size_b)) return false;
+    Item items_a = js_iterable_to_array(a);
+    Item items_b = js_iterable_to_array(b);
+    int64_t len_a = js_array_length(items_a);
+    int64_t len_b = js_array_length(items_b);
+    bool matched[1024];
+    for (int64_t i = 0; i < len_b && i < 1024; i++) matched[i] = false;
+    for (int64_t i = 0; i < len_a; i++) {
+        Item left = js_elements_get_int(items_a, i);
+        Item left_key = is_map ? js_elements_get_int(left, 0) : left;
+        Item left_value = is_map ? js_elements_get_int(left, 1) : ItemNull;
+        bool found = false;
+        for (int64_t j = 0; j < len_b; j++) {
+            if (j < 1024 && matched[j]) continue;
+            Item right = js_elements_get_int(items_b, j);
+            Item right_key = is_map ? js_elements_get_int(right, 0) : right;
+            Item key_result = js_util_isDeepEqual_impl(left_key, right_key, ctx, strict);
+            if (!js_is_truthy(key_result)) continue;
+            if (is_map) {
+                Item value_result = js_util_isDeepEqual_impl(left_value,
+                    js_elements_get_int(right, 1), ctx, strict);
+                if (!js_is_truthy(value_result)) continue;
+            }
+            if (j < 1024) matched[j] = true;
+            found = true;
+            break;
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
 static bool js_util_date_time_equal(Item a, Item b) {
     if (js_class_id(a) != JS_CLASS_DATE || js_class_id(b) != JS_CLASS_DATE) return false;
     Item at = js_date_method(a, 0);
@@ -2145,82 +2181,16 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         bool a_set = js_is_set_instance(a), b_set = js_is_set_instance(b);
         bool a_map = js_is_map_instance(a), b_map = js_is_map_instance(b);
         if (a_set && b_set) {
-            // Set: compare by size, then check each element
-            Item size_a = js_collection_method(a, 9, ItemNull, ItemNull); // 9=size
-            Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
-            if (it2i(size_a) != it2i(size_b)) {
-                js_util_deep_equal_leave(ctx);
-                return (Item){.item = b2it(false)};
-            }
-            Item arr_a = js_iterable_to_array(a);
-            Item arr_b = js_iterable_to_array(b);
-            int64_t la = js_array_length(arr_a);
-            int64_t lb = js_array_length(arr_b);
-            bool matched[1024];
-            for (int64_t i = 0; i < lb && i < 1024; i++) matched[i] = false;
-            for (int64_t i = 0; i < la; i++) {
-                Item elem = js_elements_get_int(arr_a, i);
-                bool found = false;
-                for (int64_t j = 0; j < lb; j++) {
-                    if (j < 1024 && matched[j]) continue;
-                    Item eb = js_elements_get_int(arr_b, j);
-                    Item r = js_util_isDeepEqual_impl(elem, eb, ctx, strict);
-                    if (js_is_truthy(r)) {
-                        if (j < 1024) matched[j] = true;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    js_util_deep_equal_leave(ctx);
-                    return (Item){.item = b2it(false)};
-                }
-            }
-            bool props_equal = js_util_compare_enumerable_properties(a, b, ctx, strict);
+            bool equal = js_util_compare_unordered_collection(a, b, ctx, strict, false) &&
+                js_util_compare_enumerable_properties(a, b, ctx, strict);
             js_util_deep_equal_leave(ctx);
-            return (Item){.item = b2it(props_equal)};
+            return (Item){.item = b2it(equal)};
         }
         if (a_map && b_map) {
-            // Map: compare by size, then compare key-value pairs
-            Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
-            Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
-            if (it2i(size_a) != it2i(size_b)) {
-                js_util_deep_equal_leave(ctx);
-                return (Item){.item = b2it(false)};
-            }
-            Item entries_a = js_iterable_to_array(a);
-            Item entries_b = js_iterable_to_array(b);
-            int64_t la = js_array_length(entries_a);
-            int64_t lb = js_array_length(entries_b);
-            bool matched[1024];
-            for (int64_t i = 0; i < lb && i < 1024; i++) matched[i] = false;
-            for (int64_t i = 0; i < la; i++) {
-                Item pair = js_elements_get_int(entries_a, i);
-                Item ka = js_elements_get_int(pair, 0);
-                Item va = js_elements_get_int(pair, 1);
-                bool found = false;
-                for (int64_t j = 0; j < lb; j++) {
-                    if (j < 1024 && matched[j]) continue;
-                    Item other = js_elements_get_int(entries_b, j);
-                    Item kb = js_elements_get_int(other, 0);
-                    Item vb = js_elements_get_int(other, 1);
-                    Item kr = js_util_isDeepEqual_impl(ka, kb, ctx, strict);
-                    if (!js_is_truthy(kr)) continue;
-                    Item vr = js_util_isDeepEqual_impl(va, vb, ctx, strict);
-                    if (js_is_truthy(vr)) {
-                        if (j < 1024) matched[j] = true;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    js_util_deep_equal_leave(ctx);
-                    return (Item){.item = b2it(false)};
-                }
-            }
-            bool props_equal = js_util_compare_enumerable_properties(a, b, ctx, strict);
+            bool equal = js_util_compare_unordered_collection(a, b, ctx, strict, true) &&
+                js_util_compare_enumerable_properties(a, b, ctx, strict);
             js_util_deep_equal_leave(ctx);
-            return (Item){.item = b2it(props_equal)};
+            return (Item){.item = b2it(equal)};
         }
         if ((a_set && !b_set) || (!a_set && b_set) || (a_map && !b_map) || (!a_map && b_map)) {
             js_util_deep_equal_leave(ctx);

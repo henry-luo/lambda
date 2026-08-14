@@ -497,38 +497,13 @@ static bool jm_declarator_is_const(JsVariableDeclaratorNode* dn) {
     return kt && strcmp(kt, "const") == 0;
 }
 
-static bool jm_function_decl_entry_is_direct_binding(JsFunctionNode* fn) {
-    if (!fn) return false;
-    TSNode fn_node = fn->node;
-    if (ts_node_is_null(fn_node)) return false;
-    TSNode parent = ts_node_parent(fn_node);
-    if (ts_node_is_null(parent)) return false;
-    const char* parent_type = ts_node_type(parent);
-    if (parent_type && strcmp(parent_type, "program") == 0) return true;
-    if (!parent_type || strcmp(parent_type, "statement_block") != 0) return false;
-    TSNode grandparent = ts_node_parent(parent);
-    if (ts_node_is_null(grandparent)) return false;
-    const char* grandparent_type = ts_node_type(grandparent);
-    if (!grandparent_type) return false;
-    bool function_body_parent = strcmp(grandparent_type, "function_declaration") == 0 ||
-        strcmp(grandparent_type, "function_expression") == 0 ||
-        strcmp(grandparent_type, "generator_function_declaration") == 0 ||
-        strcmp(grandparent_type, "generator_function") == 0 ||
-        strcmp(grandparent_type, "arrow_function") == 0;
-    if (!function_body_parent) return false;
-    TSNode body = ts_node_child_by_field_name(grandparent, "body", 4);
-    return !ts_node_is_null(body) &&
-        ts_node_start_byte(body) == ts_node_start_byte(parent) &&
-        ts_node_end_byte(body) == ts_node_end_byte(parent);
-}
-
 static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* mt, const char* vname) {
     if (!mt || !vname) return NULL;
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         JsFunctionNode* fn = fc->node;
         if (!fn || !fn->name || fn->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-        if (!jm_function_decl_entry_is_direct_binding(fn)) continue;
+        if (!jm_function_decl_is_direct_binding(fn, false)) continue;
         const char* fname = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
         if (strcmp(fname, vname) == 0) return fc;
     }
@@ -6615,7 +6590,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
             if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
                 JsFunctionNode* fn = (JsFunctionNode*)entry->node;
-                if (jm_function_decl_entry_is_direct_binding(fn)) {
+                if (jm_function_decl_is_direct_binding(fn, false)) {
                     resolved_fn = fn;
                 }
             } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
@@ -7682,6 +7657,21 @@ MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg
         MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 }
 // Member expression
+static MIR_reg_t jm_transpile_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
+    if (mem->computed) return jm_transpile_box_item(mt, mem->property);
+    if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+        String* key_name = jm_resolve_private_name(mt,
+            (JsAstNode*)mem->property, prop->name);
+        if (jm_is_private_name(key_name)) {
+            return jm_emit_private_key_for_access(mt,
+                (JsAstNode*)mem->property, key_name);
+        }
+        return jm_box_property_name_literal(mt, key_name->chars, key_name->len);
+    }
+    return jm_transpile_box_item(mt, mem->property);
+}
+
 static MIR_reg_t jm_emit_optional_member_access(JsMirTranspiler* mt,
                                                 JsMemberNode* mem,
                                                 MIR_reg_t obj,
@@ -7705,20 +7695,7 @@ static MIR_reg_t jm_emit_optional_member_access(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_access);
-    MIR_reg_t key;
-    if (mem->computed) {
-        key = jm_transpile_box_item(mt, mem->property);
-    } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-        String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
-        if (jm_is_private_name(key_name)) {
-            key = jm_emit_private_key_for_access(mt, (JsAstNode*)mem->property, key_name);
-        } else {
-            key = jm_box_property_name_literal(mt, key_name->chars, key_name->len);
-        }
-    } else {
-        key = jm_transpile_box_item(mt, mem->property);
-    }
+    MIR_reg_t key = jm_transpile_member_key(mt, mem);
     if (mem_obj_spill >= 0) jm_gen_spill_load(mt, obj, mem_obj_spill);
     MIR_reg_t val = jm_call_2(mt, "js_get_reference", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -7947,20 +7924,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         }
     }
 
-    MIR_reg_t key;
-    if (mem->computed) {
-        key = jm_transpile_box_item(mt, mem->property);
-    } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-        String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
-        if (jm_is_private_name(key_name)) {
-            key = jm_emit_private_key_for_access(mt, (JsAstNode*)mem->property, key_name);
-        } else {
-            key = jm_box_property_name_literal(mt, key_name->chars, key_name->len);
-        }
-    } else {
-        key = jm_transpile_box_item(mt, mem->property);
-    }
+    MIR_reg_t key = jm_transpile_member_key(mt, mem);
 
     if (mem_obj_spill >= 0) {
         jm_gen_spill_load(mt, obj, mem_obj_spill);
@@ -8909,6 +8873,32 @@ static bool jm_force_copied_env_for_field_initializer(JsMirTranspiler* mt,
     return false;
 }
 
+static bool jm_should_use_shared_scope_env(JsMirTranspiler* mt,
+        JsFuncCollected* fc, bool immediate_call, bool* force_copy_out) {
+    bool force_copy = jm_force_copied_env_for_field_initializer(mt, fc);
+    if (force_copy_out) *force_copy_out = force_copy;
+    bool use_scope_env = (!force_copy && !fc->closure_env_has_parent_link &&
+        mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+    if (use_scope_env) {
+        // a named function expression can combine a private self slot with
+        // ordinary captures; rejecting the shared env snapshots outer values
+        // before the parent scope initializes them (D5.3, D5.4.3).
+        use_scope_env = jm_shared_scope_env_captures_valid(mt, fc, false);
+    }
+    if (use_scope_env &&
+            (!mt->allow_loop_let_scope_env_for_immediate_call ||
+             fc->closure_env_has_parent_link)) {
+        for (int ci = 0; ci < fc->capture_count; ci++) {
+            JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+            if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
+                use_scope_env = false;
+                break;
+            }
+        }
+    }
+    return use_scope_env;
+}
+
 static void jm_capture_arrow_lexical_home_class(JsMirTranspiler* mt,
                                                  MIR_reg_t fn_reg,
                                                  JsFunctionNode* fn) {
@@ -8963,24 +8953,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Share scope env so var-scoped closures can persist mutations to outer
         // variables.  But in loops, if any captured variable is let/const, we must
         // NOT share — let/const need per-iteration binding semantics.
-        bool force_copied_field_env = jm_force_copied_env_for_field_initializer(mt, fc);
-        bool use_scope_env = (!force_copied_field_env && !fc->closure_env_has_parent_link &&
-            mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
-        if (use_scope_env) use_scope_env = jm_shared_scope_env_captures_valid(mt, fc, true);
-        if (use_scope_env &&
-                (!mt->allow_loop_let_scope_env_for_immediate_call ||
-                 fc->closure_env_has_parent_link)) {
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
-                if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
-                    // A mixed loop closure needs a private env even when invoked
-                    // immediately: its parent-link tail is absent from the shared
-                    // scope env, so sharing makes transitive loads read past it.
-                    use_scope_env = false;
-                    break;
-                }
-            }
-        }
+        bool use_scope_env = jm_should_use_shared_scope_env(mt, fc, false, NULL);
         if (use_scope_env) {
             fn_reg = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
@@ -9151,23 +9124,9 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
     MIR_reg_t fn_reg;
     if (fc->capture_count > 0) {
         jm_prepare_closure_captures(mt, fc, true);
-        bool force_copied_field_env = jm_force_copied_env_for_field_initializer(mt, fc);
-        bool use_scope_env = (!force_copied_field_env && !fc->closure_env_has_parent_link &&
-            mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
-        if (use_scope_env) use_scope_env = jm_shared_scope_env_captures_valid(mt, fc, false);
-        if (use_scope_env &&
-                (!mt->allow_loop_let_scope_env_for_immediate_call ||
-                 fc->closure_env_has_parent_link)) {
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
-                if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
-                    // Immediate invocation does not make a mixed parent-link
-                    // layout compatible with the smaller shared scope env.
-                    use_scope_env = false;
-                    break;
-                }
-            }
-        }
+        bool force_copied_field_env = false;
+        bool use_scope_env = jm_should_use_shared_scope_env(mt, fc, true,
+            &force_copied_field_env);
         if (use_scope_env) {
             jm_track_last_closure_env(mt, mt->scope_env_reg, fc, true);
 
@@ -9633,9 +9592,31 @@ static MIR_reg_t jm_emit_class_static_field_value(JsMirTranspiler* mt,
     return value;
 }
 
-static void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
-                                          MIR_reg_t key, MIR_reg_t value,
-                                          bool private_brand) {
+static void jm_emit_class_static_named_field(JsMirTranspiler* mt,
+        MIR_reg_t cls_obj, JsStaticFieldEntry* sf, MIR_reg_t value) {
+    if (!sf || !sf->name) return;
+    MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
+    jm_call_void_2(mt, "js_set_function_name_if_anonymous",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
+    MIR_reg_t key = jm_is_private_name(sf->name)
+        ? jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len)
+        : jm_box_property_name_literal(mt, sf->name->chars, sf->name->len);
+    if (jm_is_private_name(sf->name)) {
+        key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    }
+    jm_call_1(mt, "js_check_class_static_field_key", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit_class_static_property(mt, cls_obj, key, value,
+        jm_is_private_name(sf->name));
+}
+
+void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+                                   MIR_reg_t key, MIR_reg_t value,
+                                   bool private_brand) {
     jm_call_3(mt, "js_create_data_property", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
@@ -10199,23 +10180,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                     // Also store as own property on class for hasOwnProperty/in/getOwnPropertyDescriptor
                     if (sf->name) {
-                        MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
-                        jm_call_void_2(mt, "js_set_function_name_if_anonymous",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
-                        MIR_reg_t key = jm_is_private_name(sf->name)
-                            ? jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len)
-                            : jm_box_property_name_literal(mt, sf->name->chars, sf->name->len);
-                        if (jm_is_private_name(sf->name)) {
-                            key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                        }
-                        jm_call_1(mt, "js_check_class_static_field_key", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                        jm_emit_error_lane_propagate_check(mt);
-                        jm_emit_class_static_property(mt, cls_obj, key, val,
-                            jm_is_private_name(sf->name));
+                        jm_emit_class_static_named_field(mt, cls_obj, sf, val);
                     }
                 } else if (sf->key_expr && !sf->name) {
                     MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
@@ -10231,23 +10196,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     jm_emit_class_static_property(mt, cls_obj, key, val, false);
                 } else if (sf->name) {
                     MIR_reg_t val = jm_emit_class_static_field_value(mt, sf);
-                    MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
-                    jm_call_void_2(mt, "js_set_function_name_if_anonymous",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name));
-                    MIR_reg_t key = jm_is_private_name(sf->name)
-                        ? jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len)
-                        : jm_box_property_name_literal(mt, sf->name->chars, sf->name->len);
-                    if (jm_is_private_name(sf->name)) {
-                        key = jm_call_2(mt, "js_private_key_for_class", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                    }
-                    jm_call_1(mt, "js_check_class_static_field_key", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                    jm_emit_error_lane_propagate_check(mt);
-                    jm_emit_class_static_property(mt, cls_obj, key, val,
-                        jm_is_private_name(sf->name));
+                    jm_emit_class_static_named_field(mt, cls_obj, sf, val);
                 }
             }
             // Emit static blocks for class expressions

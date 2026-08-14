@@ -117,16 +117,16 @@ static bool jm_node_has_direct_eval_call(JsAstNode* node) {
 // Phase 4: Native call resolution
 // ============================================================================
 
-// Phase 3.5: find the collected entry for a direct call without checking native eligibility.
-// Used to propagate return types from any known function, even non-native ones.
-JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call) {
+static JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
+        JsCallNode* call) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-    // The scope table is authoritative after Annex B rewrites; the AST entry
-    // can still point at a suppressed declaration from the pre-rewrite pass.
+    // resolve the post-Annex-B scope entry before the AST fallback so both
+    // native eligibility and return-type propagation use the same callee.
     NameEntry* entry = js_scope_lookup(mt->tp, id->name);
     if (!entry) entry = id->entry;
     if (!entry || !entry->node) return NULL;
+
     JsFunctionNode* fn = NULL;
     JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
     if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
@@ -138,6 +138,13 @@ JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode
             fn = (JsFunctionNode*)decl->init;
         }
     }
+    return fn;
+}
+
+// Phase 3.5: find the collected entry for a direct call without checking native eligibility.
+// Used to propagate return types from any known function, even non-native ones.
+JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call) {
+    JsFunctionNode* fn = jm_resolve_direct_call_function(mt, call);
     if (!fn) return NULL;
     return jm_find_collected_func(mt, fn);
 }
@@ -151,28 +158,7 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
         return NULL;
     }
 
-    if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
-    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-
-    // Resolve to a function declaration or expression
-    // Native-call resolution must observe the post-Annex-B scope table before
-    // consulting the AST fallback, otherwise a stale declaration can recurse
-    // through the wrong MIR body and crash the batch worker.
-    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
-    if (!entry) entry = id->entry;
-    if (!entry || !entry->node) return NULL;
-
-    JsFunctionNode* fn = NULL;
-    JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
-    if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
-        fn = (JsFunctionNode*)entry->node;
-    } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
-        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)entry->node;
-        if (decl->init && (decl->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION
-            || decl->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
-            fn = (JsFunctionNode*)decl->init;
-        }
-    }
+    JsFunctionNode* fn = jm_resolve_direct_call_function(mt, call);
     if (!fn) return NULL;
     if (fn->is_async) return NULL;
 

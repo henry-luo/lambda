@@ -40,6 +40,17 @@ extern "C" void js_async_hooks_drain_destroy_queue(void);
 extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
 
+static Item js_mir_finalize_result(Item result, bool reusing_context,
+        uint64_t* result_home) {
+    if (reusing_context || get_type_id(result) != LMD_TYPE_FLOAT) return result;
+    double value = it2d(result);
+    if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
+        return (Item){.item = i2it((int64_t)value)};
+    }
+    // A fresh compile context cannot own an out-of-band scalar after restore.
+    return lambda_item_adopt_scalar_home(result, result_home);
+}
+
 static Item js_require_module_not_found(const char* specifier) {
     const char* name = specifier ? specifier : "";
     char message[640];
@@ -391,6 +402,25 @@ static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
     }
 }
 
+static Item js_mir_compile_failure_cleanup(MIR_context_t ctx,
+        JsMirTranspiler* mt, JsTranspiler* tp, char* owned_source,
+        Runtime* runtime, EvalContext* js_context, bool reusing_context) {
+    // MIR failures must release the active transpiler before its context and source;
+    // one cleanup order prevents stale owners on every compile-error lane.
+    if (mt) {
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+    }
+    g_active_mir_ctx = NULL;
+    if (ctx) MIR_finish(ctx);
+    jm_clear_active_js_transpile(tp, NULL, NULL);
+    js_transpiler_destroy(tp);
+    jm_clear_active_js_transpile(NULL, NULL, owned_source);
+    mem_free(owned_source);
+    js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
+    return (Item){.item = ITEM_ERROR};
+}
+
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
                              const char* filename, uint64_t* result_home) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -524,23 +554,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     log_debug("js-mir-ast: execution returned (type=%d)", get_type_id(result));
 
     // handle result
-    Item final_result;
-    TypeId type_id = get_type_id(result);
-
-    if (reusing_context) {
-        final_result = result;
-    } else {
-        if (type_id == LMD_TYPE_FLOAT) {
-            double value = it2d(result);
-            if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
-                final_result = (Item){.item = i2it((int64_t)value)};
-            } else {
-                final_result = lambda_item_adopt_scalar_home(result, result_home);
-            }
-        } else {
-            final_result = result;
-        }
-    }
+    Item final_result = js_mir_finalize_result(result, reusing_context, result_home);
 
     ArrayList* result_type_list = (ArrayList*)context->type_list;
     // The freshly created context is already Runtime-owned; no adoption or
@@ -913,12 +927,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_failure_cleanup(NULL, NULL, tp, owned_source,
+            runtime, js_context, reusing_context);
     }
     g_active_mir_ctx = ctx;  // track for batch timeout recovery
 
@@ -930,14 +940,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Set up the compact MIR transpiler; source-sized collection storage is allocated after parsing.
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
     if (!mt) {
-        g_active_mir_ctx = NULL;
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_failure_cleanup(ctx, NULL, tp, owned_source,
+            runtime, js_context, reusing_context);
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
     mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
@@ -963,16 +967,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     if (!transpile_ok) {
         log_error("js-mir: collection/allocation failed for '%s'",
             filename ? filename : "<string>");
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        g_active_mir_ctx = NULL;
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+            runtime, js_context, reusing_context);
     }
 
     // Complete static discovery before any realm or module initializer can
@@ -980,16 +976,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // property-key image; imported modules contribute theirs in precompile.
     if (!js_prelink_compiled_name_table(mt)) {
         log_error("js-mir: failed to prelink main property-name table");
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        g_active_mir_ctx = NULL;
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+            runtime, js_context, reusing_context);
     }
 
     if (!g_jm_preamble_compile_only) {
@@ -999,30 +987,14 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             "import ") || js_source_contains_ascii(js_source, js_source_len, "import{");
         if (has_static_imports && jm_precompile_js_imports(runtime, js_source, filename) < 0) {
             log_error("js-mir: failed to precompile import closure");
-            jm_clear_active_js_transpile(NULL, mt, NULL);
-            jm_destroy_mir_transpiler(mt);
-            g_active_mir_ctx = NULL;
-            MIR_finish(ctx);
-            jm_clear_active_js_transpile(tp, NULL, NULL);
-            js_transpiler_destroy(tp);
-            jm_clear_active_js_transpile(NULL, NULL, owned_source);
-            mem_free(owned_source);
-            js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-            return (Item){.item = ITEM_ERROR};
+            return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+                runtime, js_context, reusing_context);
         }
 #endif
         if (!js_activate_runtime_name_pool()) {
             log_error("js-mir: failed to activate dynamic NamePool");
-            jm_clear_active_js_transpile(NULL, mt, NULL);
-            jm_destroy_mir_transpiler(mt);
-            g_active_mir_ctx = NULL;
-            MIR_finish(ctx);
-            jm_clear_active_js_transpile(tp, NULL, NULL);
-            js_transpiler_destroy(tp);
-            jm_clear_active_js_transpile(NULL, NULL, owned_source);
-            mem_free(owned_source);
-            js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-            return (Item){.item = ITEM_ERROR};
+            return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+                runtime, js_context, reusing_context);
         }
         // Realm construction is runtime work: it must occur only after static
         // discovery seals the root and installs the dynamic child.
@@ -1050,16 +1022,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Pre-link validation: abort gracefully if NULL labels found
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: NULL labels detected, aborting link for '%s'", filename ? filename : "<string>");
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        g_active_mir_ctx = NULL;
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+            runtime, js_context, reusing_context);
     }
 
     // Link and generate
@@ -1172,16 +1136,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         context->debug_info = previous_debug_info;
         context->current_file = previous_current_file;
         if (js_debug_info) free_debug_info_table(js_debug_info);
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        g_active_mir_ctx = NULL;
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+            runtime, js_context, reusing_context);
     }
     if (g_jm_preamble_out) {
         // The reusable preamble must retain both its entry thunk and ownership;
@@ -1385,25 +1341,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
 
     // Handle result (same logic as js_transpiler_compile)
-    Item final_result;
-    TypeId type_id = get_type_id(result);
-
-    if (reusing_context) {
-        final_result = result;
-    } else {
-        if (type_id == LMD_TYPE_FLOAT) {
-            double value = it2d(result);
-            if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
-                final_result = (Item){.item = i2it((int64_t)value)};
-            } else {
-                // The JS context is about to be restored, so its number frame
-                // cannot own an out-of-band scalar result after this boundary.
-                final_result = lambda_item_adopt_scalar_home(result, result_home);
-            }
-        } else {
-            final_result = result;
-        }
-    }
+    Item final_result = js_mir_finalize_result(result, reusing_context, result_home);
 
     // Convert JS HashMap objects to VMap for proper printing (before context restore)
     // (no longer needed — JS objects are now Lambda Maps)

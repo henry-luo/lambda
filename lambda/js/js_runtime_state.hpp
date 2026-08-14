@@ -1066,6 +1066,7 @@ struct JsRuntimeState {
     // Each context owns both range descriptors and the registry that resets
     // them. A heap replacement in one runtime must never touch another.
     JsRootRange event_loop_queue_roots = {};
+    JsRootRange event_loop_raf_roots = {};
     JsRootRange* root_range_registry[JS_ROOT_RANGE_REGISTRY_MAX] = {};
     int root_range_registry_count = 0;
 };

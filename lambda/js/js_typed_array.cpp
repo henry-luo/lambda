@@ -700,7 +700,8 @@ static bool js_typed_array_try_arraynum_convert_bigint(JsTypedArray* dst, JsType
     return array_num_copy_equal_size_bytes(dst->view, offset, src->view, 0, src_len);
 }
 
-extern "C" bool js_typed_array_raw_copy_same_type(Item dst_item, Item src_item) {
+static bool js_typed_array_raw_copy_same_type_impl(Item dst_item, Item src_item,
+        bool reversed) {
     if (!js_is_typed_array(dst_item) || !js_is_typed_array(src_item)) return false;
     JsTypedArray* dst = js_get_typed_array_ptr(dst_item.map);
     JsTypedArray* src = js_get_typed_array_ptr(src_item.map);
@@ -716,9 +717,14 @@ extern "C" bool js_typed_array_raw_copy_same_type(Item dst_item, Item src_item) 
     if (!src_data || !dst_data) return false;
     if (js_typed_array_arraynum_range_matches(src, src_data, 0, len) &&
         js_typed_array_arraynum_range_matches(dst, dst_data, 0, len)) {
+        if (reversed) return array_num_copy_reversed_bytes(dst->view, src->view);
         return array_num_copy_same_type_bytes(dst->view, 0, src->view, 0, len);
     }
     return false;
+}
+
+extern "C" bool js_typed_array_raw_copy_same_type(Item dst_item, Item src_item) {
+    return js_typed_array_raw_copy_same_type_impl(dst_item, src_item, false);
 }
 
 extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
@@ -737,24 +743,7 @@ extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
 }
 
 extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
-    if (!js_is_typed_array(dst_item) || !js_is_typed_array(src_item)) return false;
-    JsTypedArray* dst = js_get_typed_array_ptr(dst_item.map);
-    JsTypedArray* src = js_get_typed_array_ptr(src_item.map);
-    if (!dst || !src || dst->element_type != src->element_type) return false;
-    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
-    int len = js_typed_array_current_length(src);
-    if (len != js_typed_array_current_length(dst)) return false;
-    if (len <= 0) return true;
-    js_typed_array_refresh_arraynum_view(src);
-    js_typed_array_refresh_arraynum_view(dst);
-    char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_prepare_write(dst);
-    if (!src_data || !dst_data) return false;
-    if (js_typed_array_arraynum_range_matches(src, src_data, 0, len) &&
-        js_typed_array_arraynum_range_matches(dst, dst_data, 0, len)) {
-        return array_num_copy_reversed_bytes(dst->view, src->view);
-    }
-    return false;
+    return js_typed_array_raw_copy_same_type_impl(dst_item, src_item, true);
 }
 
 extern "C" bool js_typed_array_raw_copy_within(Item ta_item, int target, int start, int count) {
@@ -1904,6 +1893,71 @@ static bool js_arraybuffer_slice_index(Item value, int len, int* out_index) {
     return true;
 }
 
+static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buffer,
+        int begin, int new_len, bool shared) {
+    const char* type_name = shared ? "SharedArrayBuffer" : "ArrayBuffer";
+    Item result_item = ItemNull;
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+    JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(source, ctor_key));
+
+    bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
+    if (!use_default_ctor) {
+        TypeId ctor_type = get_type_id(ctor);
+        if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
+                ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
+            char message[96];
+            snprintf(message, sizeof(message),
+                "%s species constructor must be an object", type_name);
+            return js_throw_type_error(message);
+        }
+        Item species_key = js_well_known_symbol_key(6);
+        JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
+        TypeId species_type = get_type_id(species);
+        if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
+            use_default_ctor = true;
+        } else {
+            if (!shared && !js_has_construct_capability(species)) {
+                return js_throw_type_error("ArrayBuffer species is not a constructor");
+            }
+            Item len_arg = (Item){.item = i2it(new_len)};
+            JS_ASSIGN_OR_RETURN_INTO(result_item, js_construct_value(species,
+                &len_arg, 1, species, NULL, false));
+        }
+    }
+    if (use_default_ctor) {
+        result_item = shared
+            ? js_sharedarraybuffer_construct((Item){.item = i2it(new_len)})
+            : js_arraybuffer_construct((Item){.item = i2it(new_len)});
+    }
+    if (item_is_error(result_item)) return result_item;
+    bool correct_type = shared ? js_is_sharedarraybuffer(result_item)
+        : js_is_arraybuffer(result_item) && !js_is_sharedarraybuffer(result_item);
+    if (!correct_type) {
+        char message[128];
+        snprintf(message, sizeof(message),
+            "%s species constructor did not return a %s", type_name, type_name);
+        return js_throw_type_error(message);
+    }
+    if (result_item.item == source.item) {
+        char message[128];
+        snprintf(message, sizeof(message),
+            "%s species constructor returned the same buffer", type_name);
+        return js_throw_type_error(message);
+    }
+    JsArrayBuffer* result_buffer = js_get_arraybuffer_ptr(result_item.map);
+    if (!result_buffer || js_arraybuffer_length(result_buffer) < new_len) {
+        char message[128];
+        snprintf(message, sizeof(message),
+            "%s species constructor returned a buffer that is too small", type_name);
+        return js_throw_type_error(message);
+    }
+    if (new_len > 0) {
+        memcpy(js_arraybuffer_prepare_write(result_buffer),
+            js_arraybuffer_data_const(source_buffer) + begin, (size_t)new_len);
+    }
+    return result_item;
+}
+
 extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc) {
     if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
     if (js_is_sharedarraybuffer(val)) {
@@ -1927,53 +1981,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
     if (end < begin) end = begin;
     int new_len = end - begin;
 
-    Item result_item = ItemNull;
-    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-    JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(val, ctor_key));
-
-    bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
-    if (!use_default_ctor) {
-        TypeId ctor_type = get_type_id(ctor);
-        if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
-            ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
-            return js_throw_type_error("ArrayBuffer species constructor must be an object");
-        }
-        Item species_key = js_well_known_symbol_key(6);
-        JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
-        TypeId species_type = get_type_id(species);
-        if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
-            use_default_ctor = true;
-        } else {
-            if (!js_has_construct_capability(species)) {
-                // ArrayBuffer species uses the finalized [[Construct]] entry;
-                // carrier TypeId cannot distinguish a class map from a Proxy
-                // or an ordinary object (D6.2.2v2).
-                return js_throw_type_error("ArrayBuffer species is not a constructor");
-            }
-            Item len_arg = (Item){.item = i2it(new_len)};
-            JS_ASSIGN_OR_RETURN_INTO(result_item, js_construct_value(species,
-                &len_arg, 1, species, NULL, false));
-        }
-    }
-    if (use_default_ctor) {
-        result_item = js_arraybuffer_construct((Item){.item = i2it(new_len)});
-    }
-    if (item_is_error(result_item)) return result_item;
-    if (!js_is_arraybuffer(result_item) || js_is_sharedarraybuffer(result_item)) {
-        return js_throw_type_error("ArrayBuffer species constructor did not return an ArrayBuffer");
-    }
-    if (result_item.item == val.item) {
-        return js_throw_type_error("ArrayBuffer species constructor returned the same buffer");
-    }
-    JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
-    if (!rab || js_arraybuffer_length(rab) < new_len) {
-        return js_throw_type_error("ArrayBuffer species constructor returned a buffer that is too small");
-    }
-    if (new_len > 0) {
-        memcpy(js_arraybuffer_prepare_write(rab), js_arraybuffer_data_const(ab) + begin,
-            (size_t)new_len);
-    }
-    return result_item;
+    return js_arraybuffer_slice_species(val, ab, begin, new_len, false);
 }
 
 // Item-returning wrapper for MIR JIT calls (MIR expects Item return type)
@@ -2093,47 +2101,7 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
         if (end < begin) end = begin;
         int new_len = end - begin;
 
-        Item result_item = ItemNull;
-        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(sab, ctor_key));
-
-        bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
-        if (!use_default_ctor) {
-            TypeId ctor_type = get_type_id(ctor);
-            if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
-                ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
-                return js_throw_type_error("SharedArrayBuffer species constructor must be an object");
-            }
-            Item species_key = js_well_known_symbol_key(6);
-            JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
-            TypeId species_type = get_type_id(species);
-            if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
-                use_default_ctor = true;
-            } else {
-                Item len_arg = (Item){.item = i2it(new_len)};
-                JS_ASSIGN_OR_RETURN_INTO(result_item, js_construct_value(species,
-                    &len_arg, 1, species, NULL, false));
-            }
-        }
-        if (use_default_ctor) {
-            result_item = js_sharedarraybuffer_construct((Item){.item = i2it(new_len)});
-        }
-        if (item_is_error(result_item)) return result_item;
-        if (!js_is_sharedarraybuffer(result_item)) {
-            return js_throw_type_error("SharedArrayBuffer species constructor did not return a SharedArrayBuffer");
-        }
-        if (result_item.item == sab.item) {
-            return js_throw_type_error("SharedArrayBuffer species constructor returned the same buffer");
-        }
-        JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
-        if (!rab || js_arraybuffer_length(rab) < new_len) {
-            return js_throw_type_error("SharedArrayBuffer species constructor returned a buffer that is too small");
-        }
-        if (rab && new_len > 0) {
-            memcpy(js_arraybuffer_prepare_write(rab), js_arraybuffer_data_const(ab) + begin,
-                (size_t)new_len);
-        }
-        return result_item;
+        return js_arraybuffer_slice_species(sab, ab, begin, new_len, true);
     }
 
     if (operation == JS_SHARED_ARRAY_BUFFER_GROW) {
