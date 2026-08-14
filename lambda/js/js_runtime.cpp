@@ -8302,6 +8302,9 @@ static inline Map* js_named_ic_receiver_map(Item object, const char* name, int n
             js_named_ic_array_name_allowed(name, name_len)) {
         Array* arr = object.array;
         if (!js_array_has_props(arr)) return NULL;
+        // Live DOM collection names are derived from the current tree; an IC
+        // hit would bypass its refresh hook and expose removed or renamed nodes.
+        if (js_dom_collection_has_live_property_state(object)) return NULL;
         if (out_receiver_kind) *out_receiver_kind = JS_NAMED_IC_RECEIVER_ARRAY_PROPS;
         return js_array_props(arr);
     }

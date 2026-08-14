@@ -49,7 +49,32 @@ typedef enum FnEntryKind {
 typedef enum FnErrorLane {
     FN_ERROR_LANE_NONE = 0,
     FN_ERROR_LANE_CONTEXT_ITEM,
+    // Return-value convention v3 (RV9): the error travels as the second MIR
+    // result of a shape-4 native return, `ItemNull` meaning "no error".
+    FN_ERROR_LANE_PAIR,
 } FnErrorLane;
+// Return-value convention v3 (RV1, `vibe/Lambda_Design_Compiling_Return_Value.md`,
+// formal spec D5.2.1v2 / D8.4.2v2). The shape is a pure function of the
+// declared signature (RV2) — never inferred per call site, never read back from
+// MIR state — and it is the ONE descriptor every emitter, wrapper, `fn->invoke`
+// entry, interpreter bridge and cached module reads (RV10).
+typedef enum FnReturnShape {
+    RETURN_SHAPE_ITEM = 0,      // [item]            boxed, provably wide-free
+    RETURN_SHAPE_ITEM_SCALAR,   // [item, scalar]    boxed, may be pending
+    RETURN_SHAPE_NATIVE,        // [native]          typed, infallible (TE-17)
+    RETURN_SHAPE_NATIVE_ERROR,  // [native, error]   typed `^E`
+} FnReturnShape;
+
+// Shape 2 is the UNIVERSAL shape: every dynamic call site may assume it, so a
+// shape-1 callee still speaks it (writing a dummy lane 2).
+static inline bool fn_return_shape_is_pair(FnReturnShape shape) {
+    return shape == RETURN_SHAPE_ITEM_SCALAR || shape == RETURN_SHAPE_NATIVE_ERROR;
+}
+// Only shape 2 can produce a pending Item on lane 1; shape 4's lane 2 is an
+// error Item, not a wide payload.
+static inline bool fn_return_shape_may_be_pending(FnReturnShape shape) {
+    return shape == RETURN_SHAPE_ITEM_SCALAR;
+}
 enum {
     FN_RETURN_HOME_NORMAL = 1u << 0,
     FN_RETURN_HOME_ERROR = 1u << 1,

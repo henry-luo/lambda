@@ -139,6 +139,9 @@ typedef struct JitCallMetadata {
     uint16_t source_arg_count;
     int16_t scalar_return_home_arg_index;
     uint8_t scalar_home_lane_mask;
+    // v3 (RV10): mirrored from the callee's FnReturnAnalysis so a call site
+    // never recomputes the shape from its own local facts.
+    FnReturnShape return_shape;
     uint32_t flags;
 } JitCallMetadata;
 

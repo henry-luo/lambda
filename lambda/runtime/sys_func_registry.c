@@ -1288,6 +1288,14 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    // v3 pending resolution: allocates in the caller's number extent, so it is
+    // NOT number-stack preserving, but its result is a stable scalar home.
+    {"lambda_item_resolve_pending", FPTR(lambda_item_resolve_pending),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_restore_number_frame_top", FPTR(lambda_restore_number_frame_top),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
@@ -3287,7 +3295,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #endif
         "is_truthy",
         "lambda_mir_double_bits", "lambda_mir_bits_double",
-        "lambda_item_adopt_scalar_home", "lambda_restore_number_frame_top",
+        "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
+        "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store",
         "lambda_module_name_id_at",
         "js_active_module_name_id", "js_active_module_name_item",

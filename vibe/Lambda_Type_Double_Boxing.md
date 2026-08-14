@@ -461,3 +461,38 @@ Land the guardrails before the representation switch:
 7. enable V3 only after equality, hashing, GC, ASan, and release benchmarks pass.
 
 The acceptance bar for the raw-pointer scheme is strict: all container Items remain bit-identical to their native pointers, all known-type accessors remain mask-free identity conversions, and the only new work paid by generic container type discovery is the leading inline-double discriminator. If an implementation requires tagging or masking every container pointer, it has violated the V3 design rather than implemented it.
+
+---
+
+# Part 8 — KIV: Re-mapping the `100` octant back to inline doubles
+
+**Status: EXPLORED 2026-08-14, KIV — recommendation is to keep the octant reserved.** Prompted by the return-value convention work (`Lambda_Design_Compiling_Return_Value.md`), which parked its pending-Item tag in the `000` octant (0x1E) precisely so this question could stay open. Recorded here so the trade is decided once, on paper, instead of re-derived.
+
+## 8.1 What the octant actually holds
+
+Top three bits of a double = sign + exponent bits 62–61. `100` = sign 1, biased exponent < 0x200 — i.e. **negative doubles with magnitude below 2⁻⁵¹¹ ≈ 1.5·10⁻¹⁵⁴**: `-0.0` (the word `0x8000000000000000`), negative subnormals, and tiny negative normals. Real workloads produce exactly one of these with any frequency: **minus zero**. The rest is underflow territory. So "is `100` a common range for doubles?" — no; it is the negative half of the same out-of-band sliver §2.5 already documents (`e < 0x200`), whose positive half collides with tag space and can never be inlined.
+
+## 8.2 Pros
+
+- **The key merit: `ITEM_FLOAT_N0` retires.** With the octant mapped, `-0.0` is ordinary inline raw bits — the N0 packed immediate and every site that packs or checks it disappears:
+  - encode's zero guard shrinks from a float compare plus `signbit` split (`if (d == 0.0) return P0 | signbit(d)`) to a single integer test for the all-zero word (`if (bits == 0) return P0` — only `+0.0` still needs packing, §2.5's impossibility argument applies to it alone);
+  - `it2d`'s cold arm handles one packed value instead of two;
+  - every emitted classify sequence drops its N0 compare — the 2026-08-14 MIR census measured the scalar-home adopt cluster at 20 instructions per site, two of which are the P0/N0 compares; one of those two retires (P0 remains);
+  - §3.5's minus-zero discipline halves.
+- **All negative doubles become inline without exception** (sign = 1 covers octants `100`–`111` completely), and negative subnormals ride free.
+- **The double discriminator gets cheaper.** With `100` occupied by doubles, "not a double" = "top three bits all zero" — a single unsigned compare (`item < 0x2000…0000`) replaces the two-instruction `AND`+test on `ITEM_DBL_MASK`, on one of the hottest dispatch edges in the runtime.
+
+## 8.3 Cons
+
+- **It permanently spends the last encoding headroom.** The `000` tag space is now full — TypeIds through 0x1B, COUNT/HEAP_START at 0x1C–0x1D, the pending tag claiming 0x1E, `ITEM_SENTINEL_TAG` at 0x1F. The `100` octant's 32 high-byte values are the *only* remaining room for future TypeIds, guest-runtime sentinels, or representation experiments. Once live double values occupy it, reclaiming it is a full representation migration — strictly harder than everything this document already calls sharp-edged.
+- **The asymmetry means no machinery is deleted.** Positive tinies (`000`-octant collisions) still cannot inline, so the boxed-tiny fallback path — the number-stack residue, the wide-float arm of the return convention — survives in full. The re-map halves the *traffic* through a path that real workloads already never take; it does not remove the path.
+- **The migration surface is every `ITEM_DBL_MASK` site**: the C runtime, both JIT emitters, the MT7 MIR-budget goldens, and the representation tests of §7.4 — all for the marginal gains above.
+- **Hash/SameValueZero normalization trades shapes**: today −0 → +0 is "clear bit 0 of N0"; with N0 inline it becomes "map raw `0x8000…0000` to P0". Comparable cost, but it is churn in equality-adjacent code, exactly where §3.1 says raw-bit divergence hurts most.
+
+## 8.4 The middle path — harvest the cheap test without the re-map
+
+The single-compare discriminator does **not** require giving doubles the octant. Nothing legal occupies `100` today, so `item >= 0x2000…0000` is already a valid is-double test *provided the octant stays empty* — enforceable with one static assert plus a debug classifier assert. Caveat recorded honestly: adopting the compare soft-commits the octant to "doubles or nothing", since any future non-double occupant would be misclassified by every such site. Unlike the re-map, though, the commitment is reversible (revert the test) until the day the octant is actually populated.
+
+## 8.5 Recommendation
+
+**Keep `100` reserved (KIV).** The re-map's concrete benefit reduces to one retired packed sentinel and a ~1-instruction dispatch saving, because the positive-tiny fallback survives either way; the cost is irreversibly exhausting the final headroom in the Item encoding immediately after `000` filled up. If profiles ever show the `DBL_MASK` test itself on a critical edge, take §8.4's middle path first. Reopen the full re-map only if the octant is still unclaimed when a measured need for inline negative tinies appears — which no current workload predicts.

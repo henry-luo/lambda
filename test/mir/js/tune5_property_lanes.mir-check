@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D4.6.1v2/D4.6.2v2: direct MIR property reads and writes enter the final public Get and Set lane shells.",
+  "description": "D4.6.1v2/D4.6.2v2: eligible direct MIR property reads and writes enter the final named-IC lane shells, whose misses dispatch to the public Get and Set semantics.",
   "checks": [
     {
       "in_func": "_js_lane_#_body",
       "expect_seq": [
-        { "pattern": "call\tjs_set_p_r6_n1_a5, js_set" },
-        { "pattern": "call\tjs_get_p_r6_n1_a4, js_get" }
+        { "pattern": "call\tjs_set_name_id_ic_p_r6_n1_a5, js_set_name_id_ic" },
+        { "pattern": "call\tjs_get_name_id_ic_p_r6_n1_a3, js_get_name_id_ic" }
       ],
       "forbid": [
         "js_property_access",

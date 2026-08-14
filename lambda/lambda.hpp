@@ -131,6 +131,12 @@ typedef struct Item {
         // reports it. (v4 needed one: its rotation encoding put ints in the
         // `100` octant, outside the tag space entirely.)
         if (this->_type_id) {
+            // RV4.1 tripwire: this is the choke point every accessor, formatter,
+            // comparator and hash funnels through, so a pending return lane that
+            // escaped its resolution point dies here rather than decoding as a
+            // bogus TypeId. Debug builds only; in release the out-of-range tag
+            // still trips per-tag table bounds.
+            assert_item_not_pending(this->item);
             return this->_type_id;
         }
         // container types store TypeId at address pointed to by item

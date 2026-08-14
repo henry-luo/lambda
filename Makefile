@@ -74,6 +74,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \
+	test_js_test262_gtest \
 	test_compiler_pass_gtest \
 	test_js_bt_regex_gtest \
 	test_js_coerce_gtest \
@@ -530,7 +531,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
-	    ensure-test262-gtest test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
+	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
@@ -610,6 +611,7 @@ help:
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
+	@echo "  test-js262-prelim - Run the bounded Test262 runner preflight"
 	@echo "  test-js-opt   - Run JS optimization contract tests with the profile child"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
@@ -1624,6 +1626,12 @@ ensure-test262-gtest:
 	else \
 		echo "Using existing test/test_js_test262_gtest.exe"; \
 	fi
+
+# Fast runner-level Test262 gate. Rebuild the focused executable so source
+# changes are never hidden by the existence-only ensure target above.
+test-js262-prelim: ensure-test262-gtest
+	@$(MAKE) -C build/premake config=debug_native test_js_test262_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@./test/test_js_test262_gtest.exe --prelim
 
 # D8.4.3 standing gate: a raw scalar or void helper must not silently regain
 # an in-band error-lane contract that the emitter cannot transport.

@@ -52,6 +52,12 @@ void js_dom_set_host_driven_loop(bool enabled);
 bool js_dom_is_host_driven_loop(void);
 
 /**
+ * Return whether an Array is a DOM-owned live collection whose property reads
+ * can refresh named or indexed values from the current document tree.
+ */
+bool js_dom_collection_has_live_property_state(Item collection);
+
+/**
  * Return whether the document has a committed geometry snapshot.
  * This predicate never performs style resolution or layout.
  */

@@ -2124,6 +2124,16 @@ static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection)
         s_live_lookup_collection_count, collection);
 }
 
+extern "C" bool js_dom_collection_has_live_property_state(Item collection) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY) return false;
+    if (!js_dom_collection_runtime_state_get()) return false;
+    int collection_kind = 0;
+    if (_live_child_collection_owner(collection, &collection_kind)) return true;
+    if (_live_form_collection_entry(collection)) return true;
+    if (_live_lookup_collection_entry(collection)) return true;
+    return _select_options_owner(collection, &collection_kind) != nullptr;
+}
+
 static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg);
 static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
@@ -4537,6 +4547,9 @@ extern "C" Item js_dom_dataset_property(Item elem_item) {
     // Dataset construction allocates keys and shapes; root the unfinished view
     // and owner so a collection cannot leave an asynchronously retained wrapper stale.
     js_define_own_key_storage(dataset_root.get(), key_root.get(), elem_root.get());
+    // keep the dataset owner marker private; copying it makes ordinary objects
+    // route later writes back to the source element instead of storing fields.
+    js_mark_non_enumerable(dataset_root.get(), key_root.get());
     int attr_count = 0;
     const char** names = elem->attribute_names(&attr_count);
     for (int i = 0; i < attr_count; i++) {
