@@ -421,6 +421,27 @@
               "safepoints": 2176
             }
           ]
+        },
+        "darwin-debug-v3": {
+          "module_insns": 14587,
+          "functions": {
+            "js_main": {
+              "insns": 5686
+            },
+            "Tune6ExactCollection_m128_128": {
+              "insns": 10
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 12,
+              "root_stores": 806,
+              "scalar_homes": 15,
+              "number_scratch": 0,
+              "safepoints": 2111
+            }
+          ]
         }
       }
     }

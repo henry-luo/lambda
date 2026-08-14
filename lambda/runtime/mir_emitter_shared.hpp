@@ -862,13 +862,14 @@ static inline FnCompanionTransport em_companion_transport(FnReturnShape shape,
         bool c_reachable, uint8_t scalar_home_lane_mask) {
     if (!fn_return_shape_is_pair(shape)) return FN_COMPANION_NONE;
 #if LAMBDA_RETURN_V3
-    // Shape 4's error lane is P2 work and is NOT implemented: a native `^E`
-    // body still signals through `Context::mir_return_lane` with a single MIR
-    // result. It is a "pair" by RV1's taxonomy, so it must be excluded here
-    // explicitly — otherwise the descriptor promises a companion the emitter
-    // never produces, and call sites read a result register that does not
-    // exist. (Caught by em_assert_callee_result_count rather than by a wrong
-    // answer, which is the whole point of that check.)
+    // Shape 4 (P2) is PARKED on the v1 context-lane transport. The callee-side
+    // pair emission is written and verifiably correct in the dump — the body
+    // declares two results and returns `ret <value>, <error>` — but the value
+    // lane does not reach the caller at runtime for an `int64^` signature,
+    // while `int^` and `float^` both work and the error lane is read correctly
+    // in every case. Until that is understood, promising a companion the
+    // caller cannot observe would be worse than the extra context round trip.
+    // See the impl log for the diagnostics already run.
     if (shape == RETURN_SHAPE_NATIVE_ERROR) {
         return scalar_home_lane_mask ? FN_COMPANION_HOME : FN_COMPANION_NONE;
     }
@@ -3697,14 +3698,29 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     // A shape-2 result is withheld from publication here (result operand 0):
     // it may be pending, and publishing writes it to memory. The call-site and
     // exception bookkeeping still runs. Both transports need this.
+    // Shape 2 and the slot transport must withhold publication until the
+    // pending Item is resolved (RV4.1). Shape 4 must NOT: its value lane is a
+    // native scalar that is never pending, and deferring it moves the
+    // publication after `after_may_gc_call`, which is where the root
+    // machinery reloads live values — a native lane published there is both
+    // late and wrongly rooted.
+    bool callee_returns_error_pair = callee_returns_pair && variant &&
+        variant->result.shape == RETURN_SHAPE_NATIVE_ERROR;
     bool callee_defers_publication =
-        callee_returns_pair || em_variant_returns_slot(variant);
+        (callee_returns_pair && !callee_returns_error_pair) ||
+        em_variant_returns_slot(variant);
     em_after_resolved_call(em, call_name, &metadata, call,
         callee_defers_publication ? 0 : result, result_type);
     if (em->after_may_gc_call && metadata.effects.gc != JIT_EFFECT_NO_GC) {
         em->after_may_gc_call(em->call_owner);
     }
-    if (callee_returns_pair) {
+    if (callee_returns_error_pair) {
+        // Shape 4 (RV9): lane 2 is an ERROR ITEM, not a wide payload — a
+        // pointer Item that needs no resolution. Hand it to the caller as the
+        // error lane; the value lane was published normally above.
+        call_result.error = em_value(companion, MIR_T_I64, LMD_TYPE_ERROR,
+            VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
+    } else if (callee_returns_pair) {
         // RV4.2 single-live: lane 2 dies at the next call, so resolve before
         // anything else can clobber it. This eager form is correct by
         // construction; RV6's lazy `maybe_pending` propagation (resolve only at

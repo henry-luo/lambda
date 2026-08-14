@@ -548,6 +548,95 @@ the caller now resolves instead of donating; `lambda_cow_nested_store` +1), and
 `closure_scalar_rehome` gained a v3 check group asserting the wrapper has no
 home and reaches `ret` through the pending classify.
 
+### 2026-08-15 — P2 attempted; shape 4 PARKED with a reproducible defect
+
+Shape 4 as a register pair is written end to end — `em_companion_transport`
+un-parked for `NATIVE_ERROR`, `mir_body_returns_pair` extended to
+`RETURN_LANE_ERROR`, a pair epilogue and overflow exit, `em_call_direct`
+handing lane 2 back as `call_result.error`, and both the direct caller and the
+`_b` wrapper reading a register instead of `Context::mir_return_lane`. RV9's
+`ItemNull` encoding is implemented for the pair (the v1 context lane keeps its
+`0`/`BT` form; both are one instruction, so the two encodings coexist per
+transport rather than being unified for its own sake).
+
+**It does not work, and the failure is sharp: `int^` and `float^` return
+correctly, `int64^` does not.** For an `int64^` signature the caller's value
+lane comes back as `ITEM_NULL` bits. Diagnostics run, in order:
+
+| diagnostic | result | conclusion |
+|---|---|---|
+| dump the callee | `func i64, i64, …` / `ret %r17, %r6`, %r6 = ItemNull on success | callee emission is correct |
+| dump both protos | `proto i64, i64, p:a, i64:a` | nres agrees at every call site |
+| `ret first, first` | caller takes the error branch | **lane 2 is read correctly** |
+| `ret first, ITEM_NULL` (const) | value still `ITEM_NULL` | lane 1 is not observed |
+| `ret 777, ITEM_NULL` (both const) | value still `ITEM_NULL` | lane 1 is not observed *even as a constant* |
+| `ret 111, 222` | error branch taken | lane 2 correct again |
+| flag-off control | correct value | regression is P2's, not pre-existing |
+
+So the caller observes lane 2 faithfully and never observes lane 1 — while
+the identical two-result mechanism works for shape 2 and for `int^`/`float^`
+shape 4. That points at something specific to the `int64` value lane rather
+than to the pair mechanism.
+
+One ordering defect was found and fixed along the way and is worth keeping
+regardless: P2 initially deferred shape 4's result publication (as shape 2
+must, for RV4.1), which moved it after `after_may_gc_call` — where the root
+machinery reloads live values. Shape 4's value lane is a native scalar that is
+never pending, so it must publish at the original point; `callee_defers_publication`
+now excludes it. This did not fix the `int64^` defect, so it was not the cause.
+
+**Shape 4 is therefore parked back on the v1 context-lane transport** (a
+single `em_companion_transport` exclusion), which restores v3 to its
+post-P3 state. The pair code is left in place, dormant and commented, since it
+is correct as far as the dump shows and the remaining question is narrow.
+Next step for whoever resumes: instrument the generated code around an
+`int64^` call to see what the first result register actually receives, and
+compare the register allocation against the working `int^` case — the
+difference must be in how an `int64` value lane is classified
+(`lambda_value_rep(LMD_TYPE_INT64)`), not in the two-result convention.
+
+### 2026-08-15 — js_tune6 emission growth: NOT ours (incoming merge)
+
+*(Resolved after the note below was written; kept because the reasoning is
+the useful part.)* The growth is from an **in-progress merge of 11 commits
+from `origin/master`** that landed in the working tree mid-session, touching
+`js_mir_analysis.cpp`, `js_mir_expression_lowering.cpp`,
+`js_mir_function_class_lowering.cpp`, `js_mir_statement_lowering.cpp`,
+`js_runtime*.cpp` and more. That is exactly why it is flag-independent,
+deterministic, and unattributable to any P2 edit — it is not a P2 edit. The
+same merge explains the baseline count moving 3719 → 3720 (a Test262 runner
+preflight test appeared).
+
+Two consequences worth recording. First, the instinct that saved this from
+becoming a wrong conclusion was refusing to lift a 0%-slack budget for growth
+nobody had explained — had it been raised, the merge's emission change would
+have been silently absorbed into a Return_Value commit. Second, **the gates
+run after the merge appeared were measuring a partially-merged tree**, so the
+final P2/P3 numbers in this log should be re-taken once the merge is
+resolved. The pre-merge gates (through P3, commit `c565f1e7d`) stand.
+
+The remaining budget action belongs to whoever finishes the merge: re-run the
+ratchet and re-baseline `js_tune6_exact_collection` as part of *that* commit,
+where the JS emission change is visible in review.
+
+### (original note, superseded above) unattributed js_tune6 emission growth
+
+`js_tune6_exact_collection` grew **+176 module instructions** (14,411 →
+14,587), with `scalar_homes` 6 → 15, `root_stores` 806 → 773, `safepoints`
+2,111 → 2,102. Deterministic across runs and **identical in both flag
+states**, so it is not a v3 effect. It was green at the P3 gate, so it
+appeared during the P2 edits — but every P2 edit is either `#if
+LAMBDA_RETURN_V3`-guarded or gated on a `companion` value that is
+`HOME`/`NONE` at flag-off, and the one unguarded change
+(`mir_error_lane_no_error_op`) is behaviourally identical to the constant it
+replaced. The `+176 ≈ 9 × 20` reading that suggested nine new adopt clusters
+is wrong: the whole dump contains exactly **one** adopt.
+
+**The budget was deliberately NOT lifted.** MT7 is a 0%-slack ratchet whose
+stated contract is that growth is reviewed and justified in the same commit;
+raising it for growth nobody has explained would convert the one mechanism
+that noticed into noise. Recorded here as the open item instead.
+
 **P2.7.1 — Per-binding slots for wide-capable mutable locals (RV16).**
 - No per-source-binding scalar storage exists today. `MirScalarHomeBinding`
   (`mir_emitter_shared.hpp:459`) maps a MIR *register* to a colored home —
@@ -708,7 +797,11 @@ rather than the deletion removing it.
 - [~] P1.7 gate: baseline green both ways + emission fixtures cover both
       conventions; STILL OPEN — census re-run, MT7 re-ratchet, AWFY stdout
       diff, release timing/R26 canaries, RVO8/RVO9 measurements
-- [ ] P2 native lanes + error lane; can_raise un-deopt; RV9 assert
+- [~] **P2 native lanes + error lane** — pair emission written end to end and
+      RV9's `ItemNull` encoding implemented, but **PARKED**: `int64^` value
+      lanes do not reach the caller while `int^`/`float^` do. Diagnostic table
+      and next step in the 2026-08-15 log. A publication-ordering defect found
+      on the way IS fixed and kept.
 - [ ] P2.5 LambdaJS migration (node/js262 gates)
 - [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
       2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).

@@ -1326,6 +1326,20 @@ enum FunctionReturnLaneKind {
     RETURN_LANE_ERROR = 2,
 };
 
+// The "no error" value on a shape-4 error lane.
+//
+// RV9 rules this `ItemNull` for the v3 pair: a `T^E` function returning a
+// legitimate `null` flows it on lane 1 (the value lane), so lane 2 `ItemNull`
+// can only ever mean "no error". The v1 context-lane transport predates that
+// ruling and encodes it as 0 (`ITEM_UNDEFINED`), with callers testing `BT`
+// (non-zero) rather than comparing; both are one instruction, so the two
+// encodings coexist per transport rather than being unified for its own sake.
+static inline MIR_op_t mir_error_lane_no_error_op(MirTranspiler* mt) {
+    return em_returns_result_pair(mt->em.frame.plan.companion)
+        ? MIR_new_uint_op(mt->ctx, ITEM_NULL)
+        : MIR_new_int_op(mt->ctx, 0);
+}
+
 // v3 (RV1 shape 2): does this boxed body hand its wide payload back on a second
 // MIR result instead of a caller-donated home? The forward-declared contract
 // and the emitted body MUST answer identically — a contract promising the v2
@@ -1333,10 +1347,19 @@ enum FunctionReturnLaneKind {
 // convention-mismatch bug class — so both derive it from this one predicate.
 static inline bool mir_body_returns_pair(int return_lane_kind,
         MirScalarReturnMode scalar_mode) {
-    return return_lane_kind == RETURN_LANE_SCALAR &&
-        scalar_mode != MIR_SCALAR_RETURN_NONE &&
-        em_returns_result_pair(em_companion_transport(
+    // Shape 2: a boxed body whose value may be wide.
+    if (return_lane_kind == RETURN_LANE_SCALAR &&
+            scalar_mode != MIR_SCALAR_RETURN_NONE) {
+        return em_returns_result_pair(em_companion_transport(
             RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false, 0));
+    }
+    // Shape 4 (P2/RV9): a native `^E` body returns `[native, error]`, its error
+    // Item on lane 2 instead of `Context::mir_return_lane`.
+    if (return_lane_kind == RETURN_LANE_ERROR) {
+        return em_returns_result_pair(em_companion_transport(
+            RETURN_SHAPE_NATIVE_ERROR, /*c_reachable=*/false, 0));
+    }
+    return false;
 }
 
 static void begin_function_epilogue(MirTranspiler* mt, MIR_type_t return_type,
@@ -1383,7 +1406,7 @@ static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
     if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg),
-            MIR_new_int_op(mt->ctx, 0)));
+            mir_error_lane_no_error_op(mt)));
     }
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
@@ -1486,6 +1509,32 @@ static void finish_function_epilogue(MirTranspiler* mt) {
             mt->em.frame.number_base, mt->em.frame.incoming_scalar_home);
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_reg_op(mt->ctx, rehomed)));
+    } else if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR &&
+            em_returns_result_pair(mt->em.frame.plan.companion)) {
+        // v3 shape 4 (RV9): `[native, error]`. Lane 2 is a full error Item —
+        // a pointer Item, never a wide scalar, so it needs no pending pair and
+        // no adoption. `ItemNull` means "no error"; a `T^E` returning a
+        // legitimate null flows it on lane 1, so the encoding is unambiguous.
+        //
+        // This retires the `Context::mir_return_lane` round trip on register
+        // platforms: the caller's check becomes one compare against a constant
+        // instead of a load from the context.
+        MIR_reg_t first = new_reg(mt, "return_first_final",
+            mt->em.frame.return_type);
+        MIR_insn_code_t first_load = mt->em.frame.return_type == MIR_T_D
+            ? MIR_DMOV : MIR_MOV;
+        MIR_type_t first_type = mt->em.frame.return_type == MIR_T_D
+            ? MIR_T_D : MIR_T_I64;
+        // Debug frame restoration poisons reclaimed homes, so reload the
+        // native success lane before restoring its scratch extent.
+        emit_insn(mt, MIR_new_insn(mt->ctx, first_load,
+            MIR_new_reg_op(mt->ctx, first),
+            MIR_new_mem_op(mt->ctx, first_type, 0, error_scratch, 0, 1)));
+        em_store_frame_top(&mt->em, mt->em.frame.runtime,
+            offsetof(Context, side_number_top), mt->em.frame.number_base);
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2,
+            MIR_new_reg_op(mt->ctx, first),
+            MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg)));
     } else if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
         MIR_reg_t adopted_error = em_adopt_scalar_item_value(&mt->em,
             MIR_SCALAR_RETURN_DYNAMIC, mt->em.frame.error_return_reg,
@@ -1530,12 +1579,19 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
         MIR_op_t first = mt->em.frame.return_type == MIR_T_D
             ? MIR_new_double_op(mt->ctx, 0.0)
             : MIR_new_uint_op(mt->ctx, ITEM_ERROR);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                offsetof(Context, mir_return_lane),
-                mt->em.frame.runtime, 0, 1),
-            MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, first));
+        if (em_returns_result_pair(mt->em.frame.plan.companion)) {
+            // v3 shape 4: the overflow exit reports through lane 2 like any
+            // other failure, so there is no context store on this path either.
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2, first,
+                MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
+        } else {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    offsetof(Context, mir_return_lane),
+                    mt->em.frame.runtime, 0, 1),
+                MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, first));
+        }
     } else if (mt->em.frame.return_type == MIR_T_D) {
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_double_op(mt->ctx, 0.0)));
@@ -16291,6 +16347,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
 
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = 0;
+            // v3 shape 4: a direct call to a native `^E` body returns its error
+            // Item as a second MIR result, so the caller reads a register
+            // instead of `Context::mir_return_lane`.
+            MIR_reg_t direct_error_reg = 0;
             if (local_func) {
                 // A forward entry can temporarily lack its refined return
                 // contract, but its generated body always has Context first.
@@ -16309,6 +16369,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     local_func, local_entry ? local_entry->variant : NULL, ai, call_types,
                     call_ops, &options);
                 result = direct.normal.reg;
+                direct_error_reg = direct.error.reg;
                 scalar_home_id = direct.normal.scalar_home_id
                     ? direct.normal.scalar_home_id
                     : direct.error.scalar_home_id;
@@ -16343,10 +16404,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, 3 + ai, ops));
             }
             MIR_reg_t second_result = 0;
+            // v3 shape 4 hands the error back in a register; v1 leaves it in
+            // the context lane for the caller to load.
+            bool error_lane_in_register = call_error_lane && direct_error_reg;
             if (call_error_lane) {
-                second_result = new_reg(mt, "call_error", MIR_T_I64);
+                second_result = error_lane_in_register ? direct_error_reg
+                    : new_reg(mt, "call_error", MIR_T_I64);
             }
-            if (second_result) {
+            if (second_result && !error_lane_in_register) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, second_result),
                     MIR_new_mem_op(mt->ctx, MIR_T_I64,
@@ -16359,9 +16424,19 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_reg_t merged = new_reg(mt, "call_value_or_error", MIR_T_I64);
                 MIR_label_t use_error = new_label(mt);
                 MIR_label_t merged_done = new_label(mt);
+                // RV9: the register lane spells "no error" as `ItemNull`, so the
+                // check is one compare against a constant; the context lane
+                // predates that ruling and spells it 0, testing non-zero.
+                if (error_lane_in_register) {
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                        MIR_new_label_op(mt->ctx, use_error),
+                        MIR_new_reg_op(mt->ctx, second_result),
+                        MIR_new_uint_op(mt->ctx, ITEM_NULL)));
+                } else {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
                     MIR_new_label_op(mt->ctx, use_error),
                     MIR_new_reg_op(mt->ctx, second_result)));
+                }
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, merged),
                     MIR_new_reg_op(mt->ctx, boxed_native)));
@@ -21703,10 +21778,15 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     int scalar_home_id = direct.normal.scalar_home_id
         ? direct.normal.scalar_home_id : direct.error.scalar_home_id;
     MIR_reg_t second_result = 0;
+    // v3 shape 4: the raw body hands its error back in a second result
+    // register, so the wrapper reads that instead of the context lane.
+    bool wrapper_error_in_register = raw_lane_kind == RETURN_LANE_ERROR &&
+        direct.error.reg != 0;
     if (raw_lane_kind == RETURN_LANE_ERROR) {
-        second_result = new_reg(mt, "werr", MIR_T_I64);
+        second_result = wrapper_error_in_register ? direct.error.reg
+            : new_reg(mt, "werr", MIR_T_I64);
     }
-    if (second_result) {
+    if (second_result && !wrapper_error_in_register) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, second_result),
             MIR_new_mem_op(mt->ctx, MIR_T_I64,
@@ -21721,9 +21801,18 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             MIR_reg_t selected = new_reg(mt, "wrapper_lane", MIR_T_I64);
             MIR_label_t error = new_label(mt);
             MIR_label_t selected_done = new_label(mt);
+            // RV9: the register lane spells "no error" as ItemNull; the context
+            // lane spells it 0.
+            if (wrapper_error_in_register) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, error),
+                    MIR_new_reg_op(mt->ctx, second_result),
+                    MIR_new_uint_op(mt->ctx, ITEM_NULL)));
+            } else {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
                 MIR_new_label_op(mt->ctx, error),
                 MIR_new_reg_op(mt->ctx, second_result)));
+            }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, selected),
                 MIR_new_reg_op(mt->ctx, boxed_result)));
