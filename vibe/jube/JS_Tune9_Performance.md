@@ -2,9 +2,10 @@
 
 **Date:** 2026-08-14
 
-**Status:** ANALYSIS COMPLETE; P1 and P2.1 recovery slices are implemented
-with zero verified semantic regressions; canonical post-tuning benchmark and
-zero-retry Test262 stability confirmation are pending
+**Status:** ANALYSIS COMPLETE; P1, P2.1, and P2.2 recovery slices are
+implemented with zero verified semantic regressions. Canonical post-tuning
+benchmark work remains pending; Test262 batch stability is confirmed with zero
+retry.
 
 **Analysis anchor:** `0b27a30ea4485a851bf36aa291e009b0c65713ab`
 
@@ -448,8 +449,40 @@ semantic fallback while ordinary array companion properties remain cacheable.
 baseline runs completed with zero pass-to-fail regressions across all 40,261
 baseline entries. Both runs killed the same seven tests from four worker batches,
 but every affected test passed in its isolated retry. The repeatable batch-only
-failure is not a masked runtime result, yet its no-retry stability acceptance
-condition remains open until the runner-level cause is separately resolved.
+failure was not a masked runtime result; the runner-level cause and its final
+zero-retry verification are recorded in P2.2 below.
+
+### 8.2 P2.2 Test262 intrinsic-function batch reset (2026-08-14)
+
+The seven repeatable batch-only recoveries were a hot-realm isolation defect,
+not a worker timeout or retry-policy failure. The reset snapshot restored each
+constructor and prototype Map, but a method value such as
+`String.prototype.split` is a separate function object with its own
+`properties_map`. A valid preceding Test262 source deletes the configurable
+`split.length` property. The prototype still pointed to the same function after
+reset, while that function's descriptor map remained mutated, so the following
+metadata test inherited the deletion. The same missing boundary affected
+`Array.prototype.forEach` metadata and other intrinsic method functions.
+
+`js_globals.cpp` now captures every function (including accessor getter/setter
+functions) reachable from the intrinsic constructor/prototype snapshot maps.
+It preserves and restores each function's own prototype and property maps,
+roots each pristine shadow across GC, and treats those maps as snapshot-backed
+when a descriptor mutation needs a private TypeMap. This extends the existing
+D6.2.2v2/D6.2.4 callable-object and precise-rooting boundaries without
+special-casing the recovered test names or changing Test262 runner
+classification.
+
+Focused `js-test-batch` probes first deleted then verified restoration of
+`String.prototype.split.length`, `Array.prototype.forEach.length`, and
+`Array.prototype.forEach.name`; all second sources passed after the reset. The
+authoritative release gate, with `ref/test262` pinned at
+`673e9bacbe28590f501e2dcd817aadcc31899191`, then reported:
+
+| Gate | Result |
+|---|---|
+| `make test-lambda-baseline` | 3,718 / 3,718 passed |
+| `make test262-baseline` | 40,261 / 40,261 fully passed; 0 non-fully-passing; 0 failed; 0 retry; 0 regressions; 211.0 s |
 
 ## 9. Tune9 performance architecture
 
@@ -679,7 +712,7 @@ difference.
 - [x] Focused optimization gtests and MIR/DOM regression fixtures complete.
 - [x] Lambda baseline passes on the final tree (3,718/3,718).
 - [x] Test262 baseline has zero pass-to-fail regression (40,261 entries).
-- [ ] Test262 batch stability is confirmed with zero retry.
+- [x] Test262 batch stability is confirmed with zero retry (P2.2).
 - [ ] Full 59-row release benchmark completes with no timeout.
 - [ ] Tune9 acceptance targets pass and the next numbered result is published.
 
@@ -716,6 +749,10 @@ Transient diagnostic evidence currently under `temp/`:
 - `temp/tune9_lambda_baseline_final.log`
 - `temp/tune9_test262_baseline_final.log`
 - `temp/_t262_batch_kills.txt`
+- `temp/tune9_function_metadata_reset_after.log`
+- `temp/tune9_intrinsic_method_reset_after.log`
+- `temp/tune9_batch_reset_lambda_baseline.log`
+- `temp/tune9_batch_reset_test262_baseline.log`
 
 The transient files support this analysis but are not a reproducible benchmark
 archive. P0 must replace them with a complete capture bundle before Tune9 is

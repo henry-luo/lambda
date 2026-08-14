@@ -65,6 +65,7 @@ extern "C" Item js_get_buffer_namespace(void);
 extern "C" Item js_get_crypto_namespace(void);
 extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
                                                        Item value);
+extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
 
@@ -16343,9 +16344,21 @@ struct GlobalBuiltinFunctionSnapshot {
     bool        valid;
 };
 
+struct IntrinsicFunctionSnapshot {
+    JsFunction* function;
+    Item        prototype;        // Item value (preserved)
+    Item        properties_map;   // Item value (preserved)
+    MapSnapshot proto_map;        // contents snapshot of function.prototype
+    MapSnapshot props_map;        // contents snapshot of function properties
+    bool        valid;
+};
+
 struct JsPrototypeSnapshotState {
     CtorSnapshot ctor_snapshots[JS_CTOR_MAX] = {};
     GlobalBuiltinFunctionSnapshot global_builtin_fn_snapshots[JS_BUILTIN_GLOBAL_MAX] = {};
+    IntrinsicFunctionSnapshot* intrinsic_function_snapshots = NULL;
+    int intrinsic_function_snapshot_count = 0;
+    int intrinsic_function_snapshot_capacity = 0;
     MapSnapshot typed_array_base_proto_snap = {};
     Item typed_array_base_snap = {};
     Item typed_array_base_proto_item_snap = {};
@@ -16353,6 +16366,7 @@ struct JsPrototypeSnapshotState {
     MapSnapshot typed_array_per_type_proto_map_snap[JS_TYPED_ARRAY_TYPE_COUNT] = {};
     bool valid = false;
     uint64_t roots_epoch = 0;
+    uint64_t intrinsic_function_roots_epoch = 0;
 };
 
 static JsPrototypeSnapshotState* js_proto_snapshot_state() {
@@ -16373,6 +16387,7 @@ static JsPrototypeSnapshotState* js_proto_snapshot_state() {
 
 #define js_ctor_snapshots (js_proto_snapshot_state()->ctor_snapshots)
 #define js_global_builtin_fn_snapshots (js_proto_snapshot_state()->global_builtin_fn_snapshots)
+#define js_intrinsic_function_snapshots (js_proto_snapshot_state()->intrinsic_function_snapshots)
 #define js_typed_array_base_proto_snap (js_proto_snapshot_state()->typed_array_base_proto_snap)
 #define js_typed_array_base_snap (js_proto_snapshot_state()->typed_array_base_snap)
 #define js_typed_array_base_proto_item_snap (js_proto_snapshot_state()->typed_array_base_proto_item_snap)
@@ -16403,15 +16418,34 @@ static void js_proto_snapshot_visit_root_slots(JsPrototypeSnapshotState* state,
     }
 }
 
+static void js_proto_snapshot_visit_intrinsic_function_root_slots(
+        JsPrototypeSnapshotState* state, JsSnapshotRootSlotOp op) {
+    if (!state || !op) return;
+    for (int i = 0; i < state->intrinsic_function_snapshot_capacity; i++) {
+        IntrinsicFunctionSnapshot* snap =
+            &state->intrinsic_function_snapshots[i];
+        op(&snap->prototype.item);
+        op(&snap->properties_map.item);
+        op(&snap->proto_map.pristine.item);
+        op(&snap->props_map.pristine.item);
+    }
+}
+
 static void js_proto_snapshot_ensure_roots() {
     JsPrototypeSnapshotState* state = js_proto_snapshot_state();
     if (!state || !context || !context->heap || !context->heap->gc) return;
     uint64_t epoch = js_get_heap_epoch();
-    if (state->roots_epoch == epoch) return;
-    js_proto_snapshot_visit_root_slots(state, heap_register_gc_root);
-    heap_register_gc_root_range((uint64_t*)state->typed_array_per_type_proto_snap,
-        JS_TYPED_ARRAY_TYPE_COUNT);
-    state->roots_epoch = epoch;
+    if (state->roots_epoch != epoch) {
+        js_proto_snapshot_visit_root_slots(state, heap_register_gc_root);
+        heap_register_gc_root_range((uint64_t*)state->typed_array_per_type_proto_snap,
+            JS_TYPED_ARRAY_TYPE_COUNT);
+        state->roots_epoch = epoch;
+    }
+    if (state->intrinsic_function_roots_epoch != epoch) {
+        js_proto_snapshot_visit_intrinsic_function_root_slots(state,
+            heap_register_gc_root);
+        state->intrinsic_function_roots_epoch = epoch;
+    }
 }
 
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* runtime_state) {
@@ -16423,6 +16457,15 @@ extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* ru
         js_proto_snapshot_visit_root_slots(state, heap_unregister_gc_root);
         heap_unregister_gc_root_range(
             (uint64_t*)state->typed_array_per_type_proto_snap);
+    }
+    if (state->intrinsic_function_roots_epoch != 0 && context && context->heap &&
+            context->heap->gc &&
+            state->intrinsic_function_roots_epoch == js_get_heap_epoch()) {
+        js_proto_snapshot_visit_intrinsic_function_root_slots(state,
+            heap_unregister_gc_root);
+    }
+    if (state->intrinsic_function_snapshots) {
+        mem_free(state->intrinsic_function_snapshots);
     }
     mem_free(state);
     runtime_state->prototype_snapshot_state = NULL;
@@ -16539,6 +16582,159 @@ static void js_proto_restore_map(const MapSnapshot* snap) {
     }
 }
 
+typedef void (*JsSnapshotMapVisitor)(MapSnapshot* snap, void* data);
+
+static void js_proto_snapshot_visit_intrinsic_source_maps(
+        JsPrototypeSnapshotState* state, JsSnapshotMapVisitor visit, void* data) {
+    if (!state || !visit) return;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        visit(&state->ctor_snapshots[i].proto_map, data);
+        visit(&state->ctor_snapshots[i].props_map, data);
+    }
+    for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
+        visit(&state->global_builtin_fn_snapshots[i].props_map, data);
+    }
+    visit(&state->typed_array_base_proto_snap, data);
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        visit(&state->typed_array_per_type_proto_map_snap[i], data);
+    }
+}
+
+static void js_proto_snapshot_count_function_slots(MapSnapshot* snap,
+        void* data) {
+    if (!snap || !snap->m || !snap->m->type || !data) return;
+    TypeMap* type = (TypeMap*)snap->m->type;
+    int* count = (int*)data;
+    if (type->length <= 0) return;
+    // Every data slot can contribute one function and every accessor slot can
+    // contribute a getter plus a setter, so this is an exact safe upper bound.
+    *count += (int)(type->length * 2);
+}
+
+static void js_proto_snapshot_clear_intrinsic_function_snapshots(
+        JsPrototypeSnapshotState* state) {
+    if (!state) return;
+    for (int i = 0; i < state->intrinsic_function_snapshot_capacity; i++) {
+        IntrinsicFunctionSnapshot* snap =
+            &state->intrinsic_function_snapshots[i];
+        snap->function = NULL;
+        snap->prototype = (Item){0};
+        snap->properties_map = (Item){0};
+        snap->valid = false;
+        js_proto_snapshot_clear_map(&snap->proto_map);
+        js_proto_snapshot_clear_map(&snap->props_map);
+    }
+    state->intrinsic_function_snapshot_count = 0;
+}
+
+static bool js_proto_snapshot_reserve_intrinsic_functions(
+        JsPrototypeSnapshotState* state, int capacity) {
+    if (!state || capacity <= state->intrinsic_function_snapshot_capacity) {
+        return true;
+    }
+    IntrinsicFunctionSnapshot* snapshots =
+        (IntrinsicFunctionSnapshot*)mem_calloc((size_t)capacity,
+            sizeof(IntrinsicFunctionSnapshot), MEM_CAT_JS_RUNTIME);
+    if (!snapshots) {
+        log_error("prototype-snapshot: failed to reserve intrinsic function snapshots");
+        return false;
+    }
+    if (state->intrinsic_function_roots_epoch != 0 && context && context->heap &&
+            context->heap->gc &&
+            state->intrinsic_function_roots_epoch == js_get_heap_epoch()) {
+        js_proto_snapshot_visit_intrinsic_function_root_slots(state,
+            heap_unregister_gc_root);
+    }
+    if (state->intrinsic_function_snapshots) {
+        mem_free(state->intrinsic_function_snapshots);
+    }
+    state->intrinsic_function_snapshots = snapshots;
+    state->intrinsic_function_snapshot_capacity = capacity;
+    state->intrinsic_function_snapshot_count = 0;
+    state->intrinsic_function_roots_epoch = 0;
+    return true;
+}
+
+static void js_proto_snapshot_add_intrinsic_function(
+        JsPrototypeSnapshotState* state, Item function_item) {
+    if (!state || get_type_id(function_item) != LMD_TYPE_FUNC) return;
+    for (int i = 0; i < state->intrinsic_function_snapshot_count; i++) {
+        if (state->intrinsic_function_snapshots[i].function ==
+                (JsFunction*)function_item.function) {
+            return;
+        }
+    }
+    if (state->intrinsic_function_snapshot_count >=
+            state->intrinsic_function_snapshot_capacity) {
+        log_error("prototype-snapshot: intrinsic function snapshot capacity exhausted");
+        return;
+    }
+
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots, function_item);
+    IntrinsicFunctionSnapshot* snap =
+        &state->intrinsic_function_snapshots[
+            state->intrinsic_function_snapshot_count++];
+    JsFunction* function = (JsFunction*)function_root.get().function;
+    if (!function) {
+        state->intrinsic_function_snapshot_count--;
+        return;
+    }
+    snap->prototype = function->prototype;
+    snap->properties_map = function->properties_map;
+    snap->valid = true;
+    if (get_type_id(function->prototype) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&snap->proto_map, function->prototype.map);
+    } else if (get_type_id(function->prototype) == LMD_TYPE_FUNC) {
+        JsFunction* prototype_function =
+            (JsFunction*)function->prototype.function;
+        if (prototype_function &&
+                get_type_id(prototype_function->properties_map) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&snap->proto_map,
+                prototype_function->properties_map.map);
+        }
+    }
+    if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&snap->props_map, function->properties_map.map);
+    }
+    // Built-in method functions remain reachable through a pristine prototype
+    // map. Their own descriptor maps must also reset, or a prior test's
+    // `delete method.length` leaks into the next hot-batch realm (D6.2.2v2).
+    snap->function = (JsFunction*)function_root.get().function;
+}
+
+static void js_proto_snapshot_collect_intrinsic_functions(MapSnapshot* snap,
+        void* data) {
+    JsPrototypeSnapshotState* state = (JsPrototypeSnapshotState*)data;
+    if (!state || !snap || !snap->m || !snap->m->type || !snap->m->data) return;
+    TypeMap* type = (TypeMap*)snap->m->type;
+    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+        if (jspd_is_deleted(entry)) continue;
+        Item value = _map_read_field(entry, snap->m->data);
+        if (jspd_is_accessor(entry)) {
+            JsAccessorPair* pair = js_item_to_accessor_pair(value);
+            if (!pair) continue;
+            js_proto_snapshot_add_intrinsic_function(state, pair->getter);
+            js_proto_snapshot_add_intrinsic_function(state, pair->setter);
+        } else {
+            js_proto_snapshot_add_intrinsic_function(state, value);
+        }
+    }
+}
+
+static void js_proto_snapshot_take_intrinsic_function_maps(
+        JsPrototypeSnapshotState* state) {
+    int capacity = 0;
+    js_proto_snapshot_visit_intrinsic_source_maps(state,
+        js_proto_snapshot_count_function_slots, &capacity);
+    if (!js_proto_snapshot_reserve_intrinsic_functions(state, capacity)) return;
+    // The dynamic snapshot slots are native storage, so publish them as exact
+    // roots before their pristine Map allocations can trigger collection.
+    js_proto_snapshot_ensure_roots();
+    js_proto_snapshot_visit_intrinsic_source_maps(state,
+        js_proto_snapshot_collect_intrinsic_functions, state);
+}
+
 static bool js_proto_snapshot_map_requires_typemap_detach(const MapSnapshot* snap,
         Map* map) {
     return snap && map && snap->m == map && snap->type == map->type;
@@ -16567,6 +16763,15 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
             return true;
         }
     }
+    for (int i = 0; i < state->intrinsic_function_snapshot_count; i++) {
+        const IntrinsicFunctionSnapshot* snap =
+            &state->intrinsic_function_snapshots[i];
+        if (snap->valid &&
+                (js_proto_snapshot_map_requires_typemap_detach(&snap->proto_map, map) ||
+                 js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map))) {
+            return true;
+        }
+    }
     if (js_proto_snapshot_map_requires_typemap_detach(
             &state->typed_array_base_proto_snap, map)) {
         return true;
@@ -16583,6 +16788,8 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
 static void js_proto_snapshot_take_locked() {
     js_proto_snapshot_ensure_roots();
     js_proto_snapshot_valid = true;
+    js_proto_snapshot_clear_intrinsic_function_snapshots(
+        js_proto_snapshot_state());
     for (int i = 0; i < JS_CTOR_MAX; i++) {
         CtorSnapshot* s = &js_ctor_snapshots[i];
         s->valid = false;
@@ -16647,6 +16854,7 @@ static void js_proto_snapshot_take_locked() {
             js_proto_snapshot_map(&js_typed_array_per_type_proto_map_snap[i], p.map);
         }
     }
+    js_proto_snapshot_take_intrinsic_function_maps(js_proto_snapshot_state());
 }
 
 static void js_proto_snapshot_restore_locked() {
@@ -16666,6 +16874,15 @@ static void js_proto_snapshot_restore_locked() {
         // maps must therefore be restored too: a test-local delete of
         // encodeURI.length otherwise poisons the next test (D6.2.2v2).
         s->function->properties_map = s->properties_map;
+        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+    }
+    JsPrototypeSnapshotState* state = js_proto_snapshot_state();
+    for (int i = 0; state && i < state->intrinsic_function_snapshot_count; i++) {
+        IntrinsicFunctionSnapshot* s = &state->intrinsic_function_snapshots[i];
+        if (!s->valid || !s->function) continue;
+        s->function->prototype = s->prototype;
+        s->function->properties_map = s->properties_map;
+        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
         if (s->props_map.m) js_proto_restore_map(&s->props_map);
     }
     js_typed_array_base = js_typed_array_base_snap;
@@ -16720,6 +16937,8 @@ extern "C" void js_proto_snapshot_invalidate() {
         js_proto_snapshot_clear_map(
             &js_global_builtin_fn_snapshots[i].props_map);
     }
+    js_proto_snapshot_clear_intrinsic_function_snapshots(
+        js_proto_snapshot_state());
     js_typed_array_base_snap = (Item){0};
     js_typed_array_base_proto_item_snap = (Item){0};
     js_proto_snapshot_clear_map(&js_typed_array_base_proto_snap);
