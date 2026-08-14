@@ -100,6 +100,19 @@ static Item node_os_root_value(const uint64_t* slot) {
     return (Item){.item = slot ? *slot : 0};
 }
 
+static Item node_os_set_constant(Item object, const char* name,
+        const char* value, uint64_t* key_root, uint64_t* value_root) {
+    Item key = make_string_item(name);
+    *key_root = key.item;
+    // The value allocation can collect before property_set starts; keep the
+    // already-created key in the host root frame across that boundary (D5.3.3).
+    Item value_item = make_string_item(value);
+    *value_root = value_item.item;
+    js_set_key_default(object, node_os_root_value(key_root),
+        node_os_root_value(value_root));
+    return node_os_root_value(key_root);
+}
+
 static Item node_os_set_item_property(Item object, const char* name, Item value) {
     JubeRootFrame frame = {};
     if (!node_os_roots_begin(&frame, 3)) return object;
@@ -809,12 +822,15 @@ Item node_os_namespace(void) {
     os_namespace = js_new_object();
 
     JubeRootFrame roots = {};
-    if (!node_os_roots_begin(&roots, 4)) return os_namespace;
+    if (!node_os_roots_begin(&roots, 6)) return os_namespace;
     uint64_t* constants_root = node_os_host->node->roots->root_frame_take_slot(&roots);
     uint64_t* signals_root = node_os_host->node->roots->root_frame_take_slot(&roots);
     uint64_t* errno_root = node_os_host->node->roots->root_frame_take_slot(&roots);
     uint64_t* priority_root = node_os_host->node->roots->root_frame_take_slot(&roots);
-    if (!constants_root || !signals_root || !errno_root || !priority_root) {
+    uint64_t* constant_key_root = node_os_host->node->roots->root_frame_take_slot(&roots);
+    uint64_t* constant_value_root = node_os_host->node->roots->root_frame_take_slot(&roots);
+    if (!constants_root || !signals_root || !errno_root || !priority_root ||
+            !constant_key_root || !constant_value_root) {
         node_os_host->node->roots->root_frame_end(&roots);
         return os_namespace;
     }
@@ -842,13 +858,17 @@ Item node_os_namespace(void) {
 
     // constants
 #ifdef _WIN32
-    js_set_key_default(os_namespace, make_string_item("EOL"), make_string_item("\r\n"));
-    js_set_key_default(os_namespace, make_string_item("devNull"), make_string_item("\\\\.\\NUL"));
+    node_os_set_constant(os_namespace, "EOL", "\r\n",
+        constant_key_root, constant_value_root);
+    node_os_set_constant(os_namespace, "devNull", "\\\\.\\NUL",
+        constant_key_root, constant_value_root);
 #else
-    js_set_key_default(os_namespace, make_string_item("EOL"), make_string_item("\n"));
-    js_set_key_default(os_namespace, make_string_item("devNull"), make_string_item("/dev/null"));
+    node_os_set_constant(os_namespace, "EOL", "\n",
+        constant_key_root, constant_value_root);
+    node_os_set_constant(os_namespace, "devNull", "/dev/null",
+        constant_key_root, constant_value_root);
 #endif
-    js_mark_non_writable(os_namespace, make_string_item("EOL"));
+    js_mark_non_writable(os_namespace, node_os_root_value(constant_key_root));
 
     // os.constants with signals and errno subobjects
     Item constants = js_new_object();

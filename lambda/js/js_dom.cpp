@@ -4685,6 +4685,9 @@ extern "C" Item js_dom_dataset_property(Item elem_item) {
     // Dataset construction allocates keys and shapes; root the unfinished view
     // and owner so a collection cannot leave an asynchronously retained wrapper stale.
     js_define_own_key_storage(dataset_root.get(), key_root.get(), elem_root.get());
+    // keep the dataset owner marker private; copying it makes ordinary objects
+    // route later writes back to the source element instead of storing fields.
+    js_mark_non_enumerable(dataset_root.get(), key_root.get());
     int attr_count = 0;
     const char** names = elem->attribute_names(&attr_count);
     for (int i = 0; i < attr_count; i++) {

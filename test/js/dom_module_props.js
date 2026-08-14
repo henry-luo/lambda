@@ -141,7 +141,7 @@ console.log(docTextB.parentNode === null);
 document.adoptNode(docTextA);
 console.log(docTextA.parentNode === null);
 console.log(document.elementFromPoint(0, 0) !== null);
-// Legacy command APIs must remain absent so editors do not select an inert path.
+// execCommand is editor-only; this document has no contenteditable host.
 console.log(typeof document.execCommand === "undefined");
 console.log(typeof document.queryCommandSupported === "undefined");
 console.log(typeof document.queryCommandEnabled === "undefined");
