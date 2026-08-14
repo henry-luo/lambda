@@ -1032,6 +1032,34 @@ extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     }
 }
 
+// Return-value convention v3 (RV5): the caller-side patch. A shape-2 call whose
+// lane 1 came back PENDING resolves it here, on the rare path only. The payload
+// is boxed into the CALLING frame's number extent (SF6) — the callee has
+// already torn its own extent down, which is exactly why the payload travelled
+// in a register instead of a pointer.
+extern "C" Item lambda_item_resolve_pending(Item pending, uint64_t payload) {
+    AutoAssertNoGC no_gc;
+    if (!lambda_item_is_pending(pending.item)) return pending;
+    switch (lambda_item_pending_kind(pending.item)) {
+    case PENDING_KIND_INT64:
+        return box_int64_value((int64_t)payload);
+    case PENDING_KIND_UINT64:
+        return box_uint64_value(payload);
+    case PENDING_KIND_FLOAT: {
+        double value;
+        memcpy(&value, &payload, sizeof(value));
+        // Same policy as any other double birth: inline when the encoding
+        // allows, number-stack home otherwise (Double_Boxing §2.5).
+        return flt2it(value);
+    }
+    default:
+        // Kind 3 is reserved (RV8 rules DTIME in band); reaching it means an
+        // emitter built a malformed pair.
+        lambda_item_debug_trap();
+        return ItemError;
+    }
+}
+
 Item box_int64_value(int64_t lval) {
     if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("int64 number-home boxing called with invalid context");

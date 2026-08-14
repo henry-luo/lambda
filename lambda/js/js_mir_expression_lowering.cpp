@@ -1404,9 +1404,11 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
         }
         if (!ref->is_private && ref->named_key_index != UINT32_MAX) {
             MIR_reg_t lane = jm_emit_reference_name_id(mt, ref);
-            // consume the site reserved by reference construction; bypassing
-            // it sent warmed named accesses back through the generic helper.
-            if (ref->named_ic_index != UINT32_MAX && JS_EXEC_PROFILE_ENABLED) {
+            // The profile define instruments ICs; it must not decide whether a
+            // release MIR body emits them. Otherwise hot named reads silently
+            // fall back to the semantic kernel outside profile builds.
+#if LAMBDA_INLINE_CACHE
+            if (ref->named_ic_index != UINT32_MAX) {
                 MIR_reg_t ic = jm_active_module_ic_at_index(mt,
                     ref->named_ic_index);
                 if (ic) {
@@ -1416,6 +1418,7 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
                         MIR_T_P, MIR_new_reg_op(mt->ctx, ic));
                 }
             }
+#endif
             return jm_call_4(mt, "js_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
@@ -1494,10 +1497,10 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 ? jm_emit_reference_name_id(mt, ref)
                 : jm_call_1(mt, "js_property_lane_for_canonical_key",
                     MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            // stores share the reference-owned IC slot as loads do; otherwise
-            // store warming remains invisible to the contract trace.
-            if (!ref->is_private && ref->named_ic_index != UINT32_MAX &&
-                    JS_EXEC_PROFILE_ENABLED) {
+            // Keep the release store path symmetric with loads: profile-only
+            // instrumentation cannot suppress a valid IC specialization.
+#if LAMBDA_INLINE_CACHE
+            if (!ref->is_private && ref->named_ic_index != UINT32_MAX) {
                 MIR_reg_t ic = jm_active_module_ic_at_index(mt,
                     ref->named_ic_index);
                 if (ic) {
@@ -1510,6 +1513,7 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                     break;
                 }
             }
+#endif
             result = jm_call_5(mt, "js_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
@@ -8058,9 +8062,9 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     key_name->chars, key_name->len);
                 MIR_reg_t val = 0;
 #if LAMBDA_INLINE_CACHE
-                // direct member reads do not pass through Reference lowering,
-                // so they must consume their own module IC site here.
-                if (jm_load_ic_enabled() && JS_EXEC_PROFILE_ENABLED) {
+                // Direct member reads bypass Reference lowering, so they need
+                // their own release IC site; profiling only records the path.
+                if (jm_load_ic_enabled()) {
                     uint32_t ic_index = jm_module_ic_index(mt);
                     MIR_reg_t ic = ic_index != UINT32_MAX
                         ? jm_active_module_ic_at_index(mt, ic_index) : 0;

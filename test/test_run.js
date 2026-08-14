@@ -280,7 +280,7 @@ function discoverTests(config) {
         for (const t of (suite.tests || [])) {
             if (t.disabled) continue;
             const src = t.source || '';
-            let baseName = path.basename(src).replace(/\.(c|cpp)$/, '');
+            let baseName = t.runner_name || path.basename(src).replace(/\.(c|cpp)$/, '');
 
             // Prefer GTest version for known Criterion tests
             const preferGtest = [
@@ -302,7 +302,8 @@ function discoverTests(config) {
             // On Windows, only run gtest tests
             if (IS_WINDOWS && !baseName.includes('gtest')) continue;
 
-            const exePath = path.join(ROOT_DIR, 'test', `${baseName}.exe`);
+            const executable = t.binary || `${baseName}.exe`;
+            const exePath = path.join(ROOT_DIR, 'test', executable);
             const srcPath = path.join(ROOT_DIR, src.startsWith('test/') ? src : `test/${src}`);
 
             if (fs.existsSync(exePath) || fs.existsSync(srcPath)) {
@@ -315,6 +316,7 @@ function discoverTests(config) {
                     displayName: t.name || baseName,
                     icon: t.icon || '🧪',
                     isGtest: baseName.endsWith('_gtest') || libs.includes('gtest') || libs.includes('gtest_main'),
+                    runnerArgs: t.runner_args || [],
                     // Some GTest binaries launch their own worker processes; respect
                     // config-level serialization so nested async subprocesses are not
                     // starved by the outer suite scheduler.
@@ -442,7 +444,7 @@ function normalizeGtestCaseTimes(jsonFile) {
 
 function testArtifactLabel(testInfo) {
     if (testInfo.runner === 'node') return testInfo.script;
-    return `${testInfo.baseName}.exe`;
+    return path.basename(testInfo.exePath);
 }
 
 function appendArgValue(args, name, value) {
@@ -524,7 +526,7 @@ function runTest(testInfo) {
             spawnArgs = testArgs;
         } else if (testInfo.isGtest) {
             const jsonPath = IS_WINDOWS ? jsonFile.replace(/\//g, '\\') : jsonFile;
-            testArgs = [`--gtest_output=json:${jsonPath}`];
+            testArgs = [`--gtest_output=json:${jsonPath}`, ...(testInfo.runnerArgs || [])];
             if (['test_js_gtest', 'test_wpt_html_parser_gtest', 'test_markdown_gtest'].includes(baseName) &&
                 targetCategory === 'baseline') {
                 testArgs.push('--baseline');

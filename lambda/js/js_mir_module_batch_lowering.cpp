@@ -5765,6 +5765,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             scalar_class, scalar_class != SCALAR_RETURN_NONE};
         public_entry->result.scalar_home_lane_mask =
             scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
+        // v3 descriptor (RV13): LJS keeps emitting v2 until P2.5, but the shape
+        // must be truthful now — a zeroed field would claim "provably wide-free"
+        // for entries that can return a wide scalar.
+        public_entry->result.shape = em_return_shape(false, false,
+            em_scalar_return_mode_for_class(scalar_class));
         int env_param_count = fc->capture_count > 0 ? 1 : 0;
         int physical_param_count = fc->param_count + env_param_count;
         public_entry->param_count = physical_param_count + 1;
@@ -5791,6 +5796,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             scalar_class, scalar_class != SCALAR_RETURN_NONE};
         body->result.scalar_home_lane_mask =
             scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
+        body->result.shape = public_entry->result.shape;
         body->param_count = physical_param_count;
         if (physical_param_count > 0) {
             body->params = (FnParamAnalysis*)pool_calloc(

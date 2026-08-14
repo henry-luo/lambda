@@ -2507,6 +2507,9 @@ static int jube_host_mir_function_frame_scalar_return_home_set(void* compiler_cu
     frame->incoming_scalar_home = (MIR_reg_t)home_register;
     frame->plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
     frame->plan.accepts_caller_scalar_home = true;
+    // v3 descriptor: a guest body that accepts a caller home is exactly one
+    // that may return a wide scalar, i.e. the universal pair shape.
+    frame->plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
     return 0;
 }
 

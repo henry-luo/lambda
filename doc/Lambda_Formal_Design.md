@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.20.0 (2026-08-14)
+**Spec version:** 1.20.1 (2026-08-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -289,12 +289,15 @@ language-visible counterparts are the semantics spec's SI ledger.
   at the shared allocation choke point in every build. *A class of
   lifetime bugs becomes unrepresentable.* (A GC object may *contain*
   scalar payload words; it just never *is* a scalar cell.) [SG1, SG4]
-- **D2.7.2** Public entry wrappers use **caller-donated scalar homes** (a
-  trailing home out-param; transitive forwarding — an Item pointing at a
-  donated home returns only to that home's owner; NULL home aborts, *no
-  silent fallback*). Rejected: callee donation (unbounded in dynamic-call
-  loops), context-global slots, C-local forwarding. The ownerless-slot GC
-  fallback is counted and **explicitly transitional**.* [SG2, Stack_API §15.5]
+- **D2.7.2v2*** Public entry wrappers speak the **companion-lane pair**
+  (D5.2.1v2); the trailing home out-param is retired. Rejections stand:
+  callee donation (unbounded in dynamic-call loops), context-global
+  *homes*, C-local forwarding — the Windows companion *transport* (a
+  transient `EvalContext` slot, dead at every call boundary, never the
+  pointee of any Item) is not a home and inherits none of the rejected
+  failure modes; ruled 2026-08-14 as the Windows lowering (RVO1/RVO2
+  closed — one protocol on every platform). The ownerless-slot GC
+  fallback is counted and **explicitly transitional**. [SG2, RV10–RV12]
 
 ### D2.8 The error-free lane invariant
 
@@ -667,12 +670,18 @@ that carries them.
 
 ### D5.2 Scalar homes
 
-- **D5.2.1** Function scalar returns use **caller-donated canonical
-  homes**: the caller passes a liveness-colored home address as a hidden
-  final ABI operand; the callee copies the payload, retags, and restores
-  its complete number extent. Space is bounded by **peak simultaneous
-  liveness, not call count**. (Supersedes SF14 two-lane returns and
-  callee-frame donation.) [Stack_API §8.7]
+- **D5.2.1v2*** Function wide-scalar returns use the **companion-lane
+  convention**: a may-be-wide boxed return is the pair `[item, scalar]` —
+  lane 2 a raw 64-bit payload (never a pointer), live iff lane 1 is a
+  **pending Item** (reserved tag `0x1E`, kind in the payload). A pending
+  Item never lives in memory and at most one is live at a time; the
+  caller resolves at first consume (free — the existing tag dispatch),
+  patches on escape (one branch), or forwards on tail return (free).
+  Typed returns use native lanes with `^E` on a second error-Item lane.
+  Classification happens at the wide value's *birth site*, statically —
+  never at boundaries. (Reinstates SF14-v1 two-lane returns; supersedes
+  v1's caller-donated canonical homes — retired-ABI record in Appendix
+  A.) [RV1–RV9, Return_Value §2–§5]
 - **D5.2.2** Scalar homes are raw payload words, never GC roots, colored
   in a separate slot space from root slots; fully-unobserved lanes use a
   discard home; tail calls forward the incoming home. Destination-owned
@@ -1079,9 +1088,10 @@ loosely across the corpus — context disambiguates, and we live with it.
   LambdaJS keeps its ICs (guard-based cache cells beside immutable MIR,
   never patched instructions). Generated code stays immutable — an
   architectural asset the cache tiers rely on. [LC1]
-- **D8.4.2** Core direct calls pass individual ABI operands (`Context*`,
-  args, optional trailing scalar home); `Item* + argc` is the JS dynamic
-  boundary only. [LC call-ABI]
+- **D8.4.2v2*** Core direct calls pass individual ABI operands (`Context*`,
+  args); returns are shaped per the companion-lane convention (D5.2.1v2)
+  — the trailing scalar-home operand is retired. `Item* + argc` is the JS
+  dynamic boundary only. [LC call-ABI, RV1, RV10]
 - **D8.4.3** **Fallible JS/Jube helpers use the merged Item error ABI.** A
   helper that can raise returns an ERROR-tagged `Item` and never relies on a
   pending flag or a separate poll result; MIR lowering tests the returned
@@ -1160,7 +1170,7 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
-| D2.7.2 | Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
+| D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
 | D2.8.2–D2.8.3 | TE-17 lane gating is designed, not built: the admission predicates exist (`lambda_type_accepts_error`, `lambda_type_lane_storage_desc`) but no lane-entry decision consults them, and the `may_defect` fixed point they need does not exist (D6.1.3) — so the current polarity is "trusted clean", the wrong direction. Known violation V1: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true (the lane is lost, not poisoned) but makes the S7.7.2 dominance guarantee false today. |
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
@@ -1177,6 +1187,7 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
+| D5.2.1v2 | Decided 2026-08-14, implementation pending (Return_Value P0–P4); until P4 the **retired v1 trailing-scalar-home ABI** remains the shipping mechanism. Record of the retired design: every function carried a hidden trailing home address (a liveness-colored number-stack slot, `_scalar_home`); the callee classified its boxed result inline — a 20-instruction adopt cluster per site (`em_adopt_scalar_item_value`) — and copied wide payloads into the donated home; unobserved lanes used a discard home and tail calls forwarded the incoming home (the D5.2.2 discard/forward clauses lapse with the ABI at P4; D5.2.2's destination-owned scalar storage is unaffected). Retirement evidence (2026-08-14 MIR census): the ritual was 9–39% of emitted MIR across AWFY (~11–16 executed instructions per boxed return), paid signature-blind while wide scalars almost never occurred. |
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
@@ -1189,6 +1200,7 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
+| D8.4.2v2 | Decided 2026-08-14 with D5.2.1v2; the trailing scalar-home operand remains in the shipping call ABI until Return_Value P4. |
 | D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
@@ -1324,6 +1336,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D4.6 | NI1–NI16, W1–W6 | `Lambda_Design_Name_Identity.md` |
 | D4.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |
 | D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
+| D5.2, D2.7.2, D8.4.2 | RV1–RV13, RVO1–RVO9 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling.md` |
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |

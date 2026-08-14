@@ -2229,6 +2229,11 @@ class PremakeGenerator:
                     test_name = test.get('name', test.get('source', 'unknown'))
                     vlog(f"Skipping test: {test_name}")
                     continue
+                # Runner-only entries reuse a compiled executable with a focused
+                # argument set, so they must not emit a duplicate Premake project.
+                if test.get('runner_only', False):
+                    vlog(f"Skipping runner-only test entry: {test.get('name', 'unknown')}")
+                    continue
 
                 source = test.get('source', '')
                 binary_name = test.get('binary', '').replace('.exe', '')

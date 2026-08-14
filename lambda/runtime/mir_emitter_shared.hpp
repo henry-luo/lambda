@@ -204,6 +204,11 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
     entry->call.scalar_return_home_arg_index = -1;
     entry->call.scalar_home_lane_mask =
         entry->call.normal_result.may_use_scalar_return_home ? 1u : 0u;
+    // C helpers never speak the pair protocol (RV12/SF6): they establish no
+    // watermark frame, so `push_l` inside a helper homes its payload in the
+    // CALLING JIT frame's extent and the helper returns an ordinary resolved
+    // Item. The pair protocol is JIT-to-JIT only.
+    entry->call.return_shape = RETURN_SHAPE_ITEM;
     for (int i = 0; i < nargs && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
         JitValueClass arg_class = jit_import_arg_class(&entry->audit, i);
         entry->abi_args[i].value.abi_rep = em_abi_rep(
@@ -381,6 +386,9 @@ struct MirFunctionPlan {
     MirEntryMode entry_mode;
     MirScalarReturnMode scalar_return_mode;
     uint8_t scalar_home_lane_mask;
+    // v3 (RV1/RV10): the shape this body returns in. Callee-side emission reads
+    // it; it must agree with the descriptor published in FnReturnAnalysis.
+    FnReturnShape return_shape;
     int fixed_number_scratch_slots;
     bool accepts_caller_scalar_home;
     const char* debug_name;
@@ -403,6 +411,11 @@ struct MirFrameState {
     bool item_return;
     bool number_active;
     bool number_frame_required;
+    // v3: set when this frame emits a pending resolution. The patch helper
+    // boxes into THIS frame's number extent (SF6), so the epilogue must restore
+    // the watermark even though the frame owns no scalar homes — otherwise a
+    // resolve inside a loop grows the number stack without bound.
+    bool number_extent_dirty;
     MirScalarReturnMode scalar_return_mode;
     MIR_type_t return_type;
     MIR_reg_t runtime;
@@ -782,6 +795,54 @@ static inline ScalarReturnClass em_scalar_return_class_for_type(
     }
 }
 
+// RV1/RV2/RV10 — the ONLY place a return shape is computed. Every emitter,
+// wrapper and dispatch site reads the resulting descriptor instead of
+// re-deriving the answer from its own local facts; that divergence is exactly
+// the v27 havlak wrong-answer bug class (boxed result fed to a raw native
+// entry). `boxed_scalar_mode` is the same signature-derived fact the v2 home
+// protocol already gates on, so v3 shape selection is no weaker than v2's.
+static inline FnReturnShape em_return_shape(bool native_return, bool can_raise,
+        MirScalarReturnMode boxed_scalar_mode) {
+    if (native_return) {
+        return can_raise ? RETURN_SHAPE_NATIVE_ERROR : RETURN_SHAPE_NATIVE;
+    }
+    return boxed_scalar_mode != MIR_SCALAR_RETURN_NONE
+        ? RETURN_SHAPE_ITEM_SCALAR : RETURN_SHAPE_ITEM;
+}
+
+// Is this entry's lane 2 physically a second MIR result?
+//
+// Two transports can carry a shape-2 return, and the existing descriptor fields
+// already tell them apart: a non-zero `scalar_home_lane_mask` means the v2
+// trailing caller-donated home, zero means the v3 register pair. Entries that
+// must stay callable from C (the public `_b` wrappers reached through the
+// boxed-call trampolines and `fn->invoke`) therefore keep the home transport
+// while internal bodies move to pairs, with no mixed-convention ambiguity —
+// the call site reads the callee's descriptor, never its own locals (RV10).
+//
+// Windows x86-64 hard-errors on nres > 1 (`mir-x86_64.c`), so RV12 lowers lane
+// 2 to a context slot there; that lowering lands in P3.
+static inline bool em_returns_result_pair(FnReturnShape shape,
+        uint8_t scalar_home_lane_mask) {
+#if LAMBDA_RETURN_V3 && !defined(_WIN32)
+    return fn_return_shape_is_pair(shape) && scalar_home_lane_mask == 0;
+#else
+    (void)shape; (void)scalar_home_lane_mask;
+    return false;
+#endif
+}
+
+static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
+    return variant && em_returns_result_pair(variant->result.shape,
+        variant->result.scalar_home_lane_mask);
+}
+
+// Physical MIR result count for an entry.
+static inline int em_return_nres(FnReturnShape shape,
+        uint8_t scalar_home_lane_mask) {
+    return em_returns_result_pair(shape, scalar_home_lane_mask) ? 2 : 1;
+}
+
 static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
         TypeId semantic_type, ValueRep rep, JitValueClass value_class) {
     MirValue value = {};
@@ -1070,6 +1131,126 @@ static inline MIR_reg_t em_adopt_scalar_item(MirEmitter* em,
                                              MIR_reg_t target_home) {
     MIR_reg_t result = em_adopt_scalar_item_value(em, mode, item, target_home);
     em_store_frame_top(em, runtime, number_top_offset, source_base);
+    return result;
+}
+
+// Return-value convention v3 (RV3/RV7): turn a boxed Item into the shape-2 pair
+// `[item, companion]`. A wide scalar (int64 / uint64 / frame-backed double)
+// becomes a PENDING Item on lane 1 with its raw payload on lane 2; everything
+// else passes through with a dummy lane 2.
+//
+// This replaces `em_adopt_scalar_item_value`'s 20-instruction classify-and-
+// rehome cluster. The fast path is 3 instructions plus two moves, because the
+// four wide tags are contiguous (static-asserted in lambda.h): one subtract and
+// one unsigned compare reject every packed int, bool, null, string, container
+// and inline double at once. There is no home store, no helper call, and no
+// trailing ABI parameter — the payload rides a register back to the caller,
+// which resolves it only if the value escapes (RV5).
+//
+// MUST be emitted BEFORE the number-extent watermark is restored: the payload
+// is read out of that extent.
+static inline void em_build_pending_pair(MirEmitter* em, MIR_reg_t item,
+                                         MIR_reg_t* out_item,
+                                         MIR_reg_t* out_companion) {
+    MIR_reg_t result = em_new_reg(em, "pend_item", MIR_T_I64);
+    MIR_reg_t companion = em_new_reg(em, "pend_comp", MIR_T_I64);
+    // Fall-through is the resolved case, so the common return costs only the
+    // three-instruction reject below.
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, companion), MIR_new_int_op(em->ctx, 0)));
+
+    MIR_label_t l_done = em_new_label(em);
+    MIR_label_t l_float = em_new_label(em);
+    MIR_reg_t tag = em_new_reg(em, "pend_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+        MIR_new_reg_op(em->ctx, tag), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, 56)));
+    // `off` is the tag's offset into the contiguous wide run and, for the two
+    // integer tags, IS the pending kind.
+    MIR_reg_t off = em_new_reg(em, "pend_off", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_SUB,
+        MIR_new_reg_op(em->ctx, off), MIR_new_reg_op(em->ctx, tag),
+        MIR_new_int_op(em->ctx, (int64_t)LMD_TYPE_INT64)));
+    // Unsigned compare: a tag below the run wraps to a huge value, so one
+    // branch rejects both sides of the range.
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGT,
+        MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, off),
+        MIR_new_int_op(em->ctx, 3)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGT,
+        MIR_new_label_op(em->ctx, l_float), MIR_new_reg_op(em->ctx, off),
+        MIR_new_int_op(em->ctx, 1)));
+
+    // Wide integer: payload address is the low 56 bits, kind is the tag offset.
+    MIR_reg_t iptr = em_new_reg(em, "pend_iptr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, iptr), MIR_new_reg_op(em->ctx, item),
+        MIR_new_uint_op(em->ctx, ITEM_INT_PAYLOAD_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, companion),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, iptr, 0, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, off),
+        MIR_new_uint_op(em->ctx, ITEM_PENDING)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, l_done)));
+
+    // Float tags. No inline-double test is needed: every tag in the wide run
+    // has the double discriminator bits clear (static-asserted). Payload
+    // pointers 0 and 1 are the packed +0/-0 encodings, which stay in band.
+    em_emit_label(em, l_float);
+    MIR_reg_t fptr = em_new_reg(em, "pend_fptr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, fptr), MIR_new_reg_op(em->ctx, item),
+        MIR_new_uint_op(em->ctx, ITEM_INT_PAYLOAD_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBLE,
+        MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, fptr),
+        MIR_new_int_op(em->ctx, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, companion),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, fptr, 0, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result),
+        MIR_new_uint_op(em->ctx, ITEM_PENDING_FLOAT)));
+
+    em_emit_label(em, l_done);
+    if (out_item) *out_item = result;
+    if (out_companion) *out_companion = companion;
+}
+
+// The caller-side mirror (RV5): resolve a maybe-pending call result into an
+// ordinary Item. The 2-instruction test costs nothing on the resolved path;
+// the rare pending arm calls the runtime to allocate destination-owned storage.
+static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
+                                                MIR_reg_t companion) {
+    // The patch allocates in this frame's number extent, so the epilogue must
+    // restore the watermark even with no scalar homes present.
+    em->frame.number_extent_dirty = true;
+    MIR_reg_t result = em_new_reg(em, "resolved", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
+    MIR_label_t l_done = em_new_label(em);
+    MIR_reg_t high = em_new_reg(em, "res_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, high), MIR_new_reg_op(em->ctx, item),
+        MIR_new_uint_op(em->ctx, ITEM_HIGH_BYTE_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+        MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, high),
+        MIR_new_uint_op(em->ctx, ITEM_PENDING)));
+    MIR_type_t types[2] = {MIR_T_I64, MIR_T_I64};
+    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
+        MIR_new_reg_op(em->ctx, companion)};
+    MIR_reg_t boxed = em_call_with_args(em, "lambda_item_resolve_pending",
+        MIR_T_I64, 2, types, args, true);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
+    em_emit_label(em, l_done);
+    if (em->after_call_result) {
+        // The resolved carrier is what survives an await, exactly like an
+        // ordinary call result.
+        em->after_call_result(em->call_owner, result, MIR_T_I64);
+    }
     return result;
 }
 static inline int em_add_const(MirEmitter* em, void* ptr) {
@@ -3369,21 +3550,57 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     metadata.scalar_return_home_arg_index = (int16_t)scalar_home_arg_index;
     metadata.scalar_home_lane_mask = variant
         ? variant->result.scalar_home_lane_mask : 0;
+    // RV10: read the callee's shape, never derive one here. An unknown callee
+    // is assumed to speak the universal pair shape (§6).
+    metadata.return_shape = variant ? variant->result.shape
+        : RETURN_SHAPE_ITEM_SCALAR;
     em_enforce_argument_ownership(em, &metadata, nargs, physical_ops);
+    // RV5/RV10: the callee's descriptor — not any local fact here — decides
+    // whether a second result lane comes back.
+    bool callee_returns_pair = em_variant_returns_pair(variant);
     char proto_name[192];
     snprintf(proto_name, sizeof(proto_name), "%s_dp%d", call_name,
         em->label_counter++);
-    MIR_item_t proto = MIR_new_proto_arr(em->ctx, proto_name, 1,
-        &result_type, nargs, args);
+    MIR_type_t result_types[2] = {result_type, MIR_T_I64};
+    MIR_item_t proto = MIR_new_proto_arr(em->ctx, proto_name,
+        callee_returns_pair ? 2 : 1, result_types, nargs, args);
     em_before_resolved_call(em, call_name, &metadata, nargs,
         physical_types, physical_ops);
     MIR_reg_t result = em_new_reg(em, "direct_result", result_type);
-    MIR_insn_t call = mir_new_call_with_args(em->ctx, proto, target,
-        result, nargs, physical_ops);
+    MIR_insn_t call;
+    MIR_reg_t companion = 0;
+    if (callee_returns_pair) {
+        companion = em_new_reg(em, "direct_companion", MIR_T_I64);
+        int op_count = 4 + nargs;
+        MIR_op_t* ops = (MIR_op_t*)mem_alloc(
+            (size_t)op_count * sizeof(MIR_op_t), MEM_CAT_TEMP);
+        if (!ops) {
+            log_error("mir-direct-call: pair operand allocation failed for %s",
+                call_name);
+            abort();
+        }
+        ops[0] = MIR_new_ref_op(em->ctx, proto);
+        ops[1] = MIR_new_ref_op(em->ctx, target);
+        ops[2] = MIR_new_reg_op(em->ctx, result);
+        ops[3] = MIR_new_reg_op(em->ctx, companion);
+        for (int i = 0; i < nargs; i++) ops[4 + i] = physical_ops[i];
+        call = MIR_new_insn_arr(em->ctx, MIR_CALL, (size_t)op_count, ops);
+        mem_free(ops);
+    } else {
+        call = mir_new_call_with_args(em->ctx, proto, target,
+            result, nargs, physical_ops);
+    }
     mir_append_emit_insn(em->ctx, em->func_item, call);
     em_after_resolved_call(em, call_name, &metadata, call, result, result_type);
     if (em->after_may_gc_call && metadata.effects.gc != JIT_EFFECT_NO_GC) {
         em->after_may_gc_call(em->call_owner);
+    }
+    if (callee_returns_pair) {
+        // RV4.2 single-live: lane 2 dies at the next call, so resolve before
+        // anything else can clobber it. This eager form is correct by
+        // construction; RV6's lazy `maybe_pending` propagation (resolve only at
+        // escape sites) is a strict refinement on top of it, not a prerequisite.
+        result = em_resolve_pending_pair(em, result, companion);
     }
     call_result.normal = em_value(result, result_type, normal.semantic_type,
         normal.abi_rep, metadata.normal_result.value.value_class);

@@ -1461,12 +1461,29 @@ static bool g_mir_interp = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
 static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
 static bool g_verbose = false;       // --verbose: dump per-batch-timing + memory-growth detail (else summary-only)
+static bool g_prelim = false;        // --prelim: bounded runner-contract smoke test
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
 static std::string g_diagnose_list_file = DIAGNOSE_LIST_FILE;
 static bool g_run_async = false;     // --run-async: permit allowlisted async-flagged tests
 static std::string g_async_list_file; // --async-list=<path>: newline-separated async test allowlist
 static std::unordered_set<std::string> g_async_allowlist;
 static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
+
+static void configure_test262_source_paths() {
+    g_use_stripped = false;
+    if (g_no_stripped) return;
+
+    struct stat st;
+    std::string stripped_test_dir = std::string(TEST262_SOURCE_DIR) + "/test";
+    if (stat(stripped_test_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return;
+
+    g_use_stripped = true;
+    // The stripped harness is an older, behaviorally different copy.  The
+    // production runner must pair stripped test bodies with the canonical harness.
+    fprintf(stderr, "[test262] Using comment-stripped test files from %s "
+            "(harness from %s)\n",
+            TEST262_SOURCE_DIR, g_harness_dir.c_str());
+}
 
 static long slow_threshold_for_test(const std::string& test_name) {
     return g_slow_tests.count(test_name) ? SLOW_TEST_THRESHOLD_US : SLOW_THRESHOLD_US;
@@ -3951,6 +3968,145 @@ static int REPORT_ALL_TESTS() {
     return RUN_ALL_TESTS();
 }
 
+struct Test262PrelimFixture {
+    const char* test_name;
+    const char* relative_path;
+    const char* required_include;
+    bool is_async;
+    bool is_module;
+};
+
+static bool run_test262_prelim(std::string& failure) {
+    static const Test262PrelimFixture fixtures[] = {
+        {
+            "built_ins_String_prototype_split_checking_if_deleting_the_string_prototype_split_length_property_fails_js",
+            "built-ins/String/prototype/split/checking-if-deleting-the-string-prototype-split-length-property-fails.js",
+            nullptr, false, false,
+        },
+        {
+            "built_ins_String_prototype_split_checking_if_enumerating_the_string_prototype_split_length_property_fails_js",
+            "built-ins/String/prototype/split/checking-if-enumerating-the-string-prototype-split-length-property-fails.js",
+            nullptr, false, false,
+        },
+        {
+            "built_ins_Array_prototype_forEach_length_js",
+            "built-ins/Array/prototype/forEach/length.js",
+            "propertyHelper.js", false, false,
+        },
+        {
+            "built_ins_Promise_allSettled_resolves_empty_array_js",
+            "built-ins/Promise/allSettled/resolves-empty-array.js",
+            "promiseHelper.js", true, false,
+        },
+        {
+            "language_expressions_class_elements_class_name_static_initializer_default_export_js",
+            "language/expressions/class/elements/class-name-static-initializer-default-export.js",
+            nullptr, false, true,
+        },
+    };
+
+    auto started = std::chrono::steady_clock::now();
+    configure_test262_source_paths();
+    if (!verify_ref_test262_commit_matches_baseline(BASELINE_FILE)) {
+        failure = "ref/test262 does not match the committed baseline";
+        return false;
+    }
+    if (!load_metadata_cache(METADATA_CACHE_FILE)) {
+        failure = "Test262 metadata cache is unavailable";
+        return false;
+    }
+    if (!load_special_preamble_list(SPECIAL_PREAMBLE_FILE)) {
+        failure = "Test262 special-preamble map is unavailable";
+        return false;
+    }
+
+    std::vector<Test262Param> tests;
+    std::vector<Test262Prepared> prepared;
+    std::vector<size_t> indices;
+    tests.reserve(sizeof(fixtures) / sizeof(fixtures[0]));
+    prepared.reserve(sizeof(fixtures) / sizeof(fixtures[0]));
+    indices.reserve(sizeof(fixtures) / sizeof(fixtures[0]));
+    for (const Test262PrelimFixture& fixture : fixtures) {
+        Test262Param test;
+        test.test_name = fixture.test_name;
+        test.test_path = std::string(TEST262_ROOT) + "/test/" + fixture.relative_path;
+        test.category = "prelim";
+        test.subcategory = "runner";
+        if (sanitize_test262_manifest_name(test.test_path) != test.test_name) {
+            failure = std::string("fixture name does not match runner sanitization: ") + test.test_name;
+            return false;
+        }
+        tests.push_back(std::move(test));
+    }
+
+    size_t saved_jobs = g_t262_jobs;
+    size_t saved_chunk_size = g_t262_batch_chunk_size;
+    size_t saved_async_chunk_size = g_t262_async_chunk_size;
+    bool saved_run_async = g_run_async;
+    std::unordered_set<std::string> saved_async_allowlist = g_async_allowlist;
+    g_t262_jobs = 1;
+    g_t262_batch_chunk_size = 8;
+    g_t262_async_chunk_size = 8;
+    g_run_async = true;
+    g_async_allowlist.insert("built_ins_Promise_allSettled_resolves_empty_array_js");
+    prepare_all_tests(tests, prepared, indices);
+    if (g_harness_sta.empty() || g_harness_assert.empty() ||
+        prepared.size() != sizeof(fixtures) / sizeof(fixtures[0]) ||
+        indices.size() != sizeof(fixtures) / sizeof(fixtures[0])) {
+        failure = "Test262 runner preparation did not admit every preflight fixture";
+        return false;
+    }
+    for (size_t i = 0; i < prepared.size(); i++) {
+        Test262Prepared& p = prepared[i];
+        const Test262PrelimFixture& fixture = fixtures[i];
+        if (p.skip_result != T262_PASS || p.is_async != fixture.is_async ||
+            p.is_module != fixture.is_module || p.is_raw) {
+            failure = std::string("fixture metadata or admission changed unexpectedly: ") + p.test_name;
+            return false;
+        }
+        if (fixture.required_include) {
+            bool found_include = std::find(p.includes.begin(), p.includes.end(),
+                                           fixture.required_include) != p.includes.end();
+            if (!found_include || get_harness_file(fixture.required_include).empty()) {
+                failure = std::string("fixture harness include is unavailable: ") + fixture.required_include;
+                return false;
+            }
+        }
+        // Keep the state-mutating fixtures in a JS-harness batch: native mode
+        // bypasses the reusable-global reset contract this preflight protects.
+        p.native_harness = false;
+    }
+    auto results = execute_t262_batch(prepared, indices, g_t262_batch_chunk_size);
+    g_t262_jobs = saved_jobs;
+    g_t262_batch_chunk_size = saved_chunk_size;
+    g_t262_async_chunk_size = saved_async_chunk_size;
+    g_run_async = saved_run_async;
+    g_async_allowlist = std::move(saved_async_allowlist);
+
+    for (const Test262Prepared& p : prepared) {
+        Test262RunResult result = evaluate_batch_result(p, results);
+        if (result.result != T262_PASS) {
+            failure = std::string("runner contract failed for ") + p.test_name;
+            if (!result.message.empty()) failure += ": " + result.message;
+            return false;
+        }
+    }
+
+    double elapsed_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+    if (elapsed_seconds >= 10.0) {
+        failure = "runner preflight exceeded its 10-second budget: " +
+            std::to_string(elapsed_seconds) + "s";
+        return false;
+    }
+    return true;
+}
+
+TEST(Test262Prelim, RunnerContracts) {
+    std::string failure;
+    ASSERT_TRUE(run_test262_prelim(failure)) << failure;
+}
+
 TEST_P(Test262Suite, Run) {
     const Test262Param& param = GetParam();
 
@@ -4250,6 +4406,7 @@ static void print_test262_help(const char* program) {
     printf("  %s [js262 options] [gtest options]\n", program);
     printf("\n");
     printf("Common js262 options:\n");
+    printf("  --prelim                  Run the bounded Test262 runner preflight (<10s).\n");
     printf("  --batch-only              Run the js262 batch runner path.\n");
     printf("  --verbose                 Dump per-batch timing (top 20/top 5) and top-20 memory growth.\n");
     printf("  --baseline-only           Run only tests listed in the baseline file.\n");
@@ -4353,6 +4510,9 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--batch-only") == 0) {
             g_batch_only = true;
         }
+        if (strcmp(argv[i], "--prelim") == 0) {
+            g_prelim = true;
+        }
         if (strcmp(argv[i], "--verbose") == 0) {
             g_verbose = true;
         }
@@ -4435,6 +4595,11 @@ int main(int argc, char** argv) {
         g_t262_async_chunk_size = g_t262_batch_chunk_size;
     }
 
+    if (g_prelim) {
+        ::testing::GTEST_FLAG(filter) = "Test262Prelim.RunnerContracts";
+        return REPORT_ALL_TESTS();
+    }
+
     if (g_diagnose_mode) {
         g_batch_only = true;
         if (g_batch_file.empty()) {
@@ -4443,23 +4608,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[test262] Diagnose mode enabled: list=%s\n", g_batch_file.c_str());
     }
 
-    // Auto-detect stripped test files directory (test/js262 -> ../lambda-test/js262)
-    if (!g_no_stripped) {
-        struct stat st;
-        std::string stripped_test_dir = std::string(TEST262_SOURCE_DIR) + "/test";
-        if (stat(stripped_test_dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-            g_use_stripped = true;
-            // NOTE: do NOT switch g_harness_dir to the stripped harness directory.
-            // The files in test/js262/harness/ are not just comment-stripped — they
-            // are an older, materially divergent version (e.g. propertyHelper.js
-            // is missing verifyCallableProperty and has different writable/
-            // configurable check semantics) that causes spurious regressions.
-            // Always load harness files from the canonical ref/test262/harness.
-            fprintf(stderr, "[test262] Using comment-stripped test files from %s "
-                    "(harness from %s)\n",
-                    TEST262_SOURCE_DIR, g_harness_dir.c_str());
-        }
-    }
+    // Auto-detect stripped test files directory (test/js262 -> ../lambda-test/js262).
+    configure_test262_source_paths();
 
     // Load baseline file for regression checking
     {
