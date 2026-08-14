@@ -978,7 +978,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   guests never construct contexts or touch global runtime pointers (the
   G1 gate). The JS merged Item error lane (D8.4.3) is not reused as another
   guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3]
-- **D7.4.4*** **Declared interfaces + record-owned hooks are the ONLY
+- **D7.4.4** **Declared interfaces + record-owned hooks are the ONLY
   host-object protocol — one way to be a host object, no fallback tier.**
   A host type's surface is its Lambda-type-syntax interface declaration
   compiled to member records, plus the record-owned open-name/indexed
@@ -1227,7 +1227,7 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
-| D7.4.4 | Retirement not started (DOM4 P0.6): `legacy_ops` already has zero users; `host_ops` has two instances — range/selection (dead for property traffic, `invalidate` caller check pending) and `velmt` (live; migration template = node_fs OWNING_NATIVE rows). The vmap `string_key_item` key re-materialization shim dies in the same sweep. |
+| D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol and the ABI is version 4. |
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (js_dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |

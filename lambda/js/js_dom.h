@@ -52,6 +52,12 @@ void js_dom_set_host_driven_loop(bool enabled);
 bool js_dom_is_host_driven_loop(void);
 
 /**
+ * Return whether an Array is a DOM-owned live collection whose property reads
+ * can refresh named or indexed values from the current document tree.
+ */
+bool js_dom_collection_has_live_property_state(Item collection);
+
+/**
  * Return whether the document has a committed geometry snapshot.
  * This predicate never performs style resolution or layout.
  */
@@ -219,30 +225,6 @@ Item js_document_get_property(Item prop_name);
 // =============================================================================
 // Element Property Access (DOM-aware)
 // =============================================================================
-
-/**
- * Get a DOM element property.
- * Supported: tagName, id, className, textContent, children, parentElement,
- *   parentNode, firstChild, lastChild, firstElementChild, lastElementChild,
- *   nextSibling, previousSibling, nextElementSibling, previousElementSibling,
- *   childNodes, childElementCount, nodeType, offsetWidth, offsetHeight,
- *   clientWidth, clientHeight, data (text nodes)
- * Falls back to getAttribute for unrecognized properties.
- * @param elem       Wrapped DOM element Item
- * @param prop_name  String Item with property name
- * @return Property value as Item
- */
-Item js_dom_get_property(Item elem, Item prop_name);
-
-/**
- * Set a DOM element property.
- * Supported: className, id, textContent, data (text nodes)
- * @param elem       Wrapped DOM element Item
- * @param prop_name  String Item with property name
- * @param value      Value to set
- * @return The value that was set, or ITEM_NULL on failure
- */
-Item js_dom_set_property(Item elem, Item prop_name, Item value);
 
 /**
  * Install a compiled event handler function into the DOM element's IDL

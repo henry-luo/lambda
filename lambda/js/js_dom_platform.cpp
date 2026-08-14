@@ -177,14 +177,8 @@ static Item storage_object(JsStorageState* storage) {
     js_object_define_property(object, js_make_string("length"), descriptor);
     return object;
 }
-
-extern "C" Item js_storage_local_object(void) {
-    return storage_object(&js_dom_local_storage);
-}
-
-extern "C" Item js_storage_session_object(void) {
-    return storage_object(&js_dom_session_storage);
-}
+JS_FORWARD_ITEM(js_storage_local_object, (void), storage_object, (&js_dom_local_storage))
+JS_FORWARD_ITEM(js_storage_session_object, (void), storage_object, (&js_dom_session_storage))
 
 static void reset_storage(JsStorageState* storage) {
     for (int i = 0; i < storage->count; i++) {
@@ -214,23 +208,22 @@ static Item js_media_query_matches(void) {
     return (Item){.item = b2it(matches)};
 }
 
-static Item js_media_query_add_listener(Item callback) {
+static Item js_media_query_set_listener(Item callback, bool add) {
     JsMediaQueryState* state = media_query_from_this();
     if (state) {
-        js_dom_add_event_listener(state->object, js_make_string("change"),
-            callback, (Item){.item = ITEM_FALSE});
+        Item type = js_make_string("change");
+        if (add) {
+            js_dom_add_event_listener(state->object, type, callback,
+                (Item){.item = ITEM_FALSE});
+        } else {
+            js_dom_remove_event_listener(state->object, type, callback,
+                (Item){.item = ITEM_FALSE});
+        }
     }
     return make_js_undefined();
 }
-
-static Item js_media_query_remove_listener(Item callback) {
-    JsMediaQueryState* state = media_query_from_this();
-    if (state) {
-        js_dom_remove_event_listener(state->object, js_make_string("change"),
-            callback, (Item){.item = ITEM_FALSE});
-    }
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_media_query_add_listener, (Item callback), js_media_query_set_listener, (callback, true))
+JS_FORWARD_STATIC_ITEM(js_media_query_remove_listener, (Item callback), js_media_query_set_listener, (callback, false))
 
 extern "C" Item js_match_media(Item query_item) {
     if (js_dom_media_query_count >= JS_MEDIA_QUERY_CAP) {

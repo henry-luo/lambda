@@ -48,10 +48,7 @@ static void js_assert_append_multiline_value(StrBuf* sb, Item value, int indent,
                                              char sign, bool trailing_comma,
                                              int depth_left);
 static Item js_assert_enumerable_own_keys(Item object);
-
-static Item js_assert_noop(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_assert_noop, (void), make_js_undefined, ())
 
 static Item assert_make_string(const char* str) {
     if (!str) return ItemNull;
@@ -63,6 +60,9 @@ static Item assert_make_string_n(const char* str, size_t len) {
     String* s = heap_create_name(str ? str : "", len);
     return (Item){.item = s2it(s)};
 }
+
+template <typename Target>
+JS_FORWARD_STATIC_VOID( js_assert_set_native, (Item object, const char* name, Target target), js_set_native_key, (object, assert_make_string(name), target))
 
 extern "C" uint64_t js_get_heap_epoch(void);
 
@@ -112,10 +112,7 @@ static Item js_assert_diff_key(void) {
     (void)js_assert_options_key();
     return assert_diff_key;
 }
-
-static bool js_assert_item_is_date(Item value) {
-    return get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_DATE;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_item_is_date, (Item value), (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_DATE))
 
 static bool js_assert_string_equals(Item value, const char* text) {
     if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
@@ -233,10 +230,7 @@ static bool js_assert_current_has_instance_diff(void) {
     Item this_val = js_get_this();
     return js_assert_is_registered_instance(this_val);
 }
-
-static Item js_assert_instance_error_key(void) {
-    return assert_make_string("__assert_instance_error__");
-}
+JS_FORWARD_STATIC_ITEM(js_assert_instance_error_key, (void), assert_make_string, ("__assert_instance_error__"))
 
 static void js_assert_mark_instance_error(Item error) {
     if (!js_assert_current_has_instance_diff()) return;
@@ -302,11 +296,7 @@ static bool js_assert_skip_prototype_typed_array_equal(Item actual, Item expecte
     }
     return true;
 }
-
-static Item js_assert_throw_missing_actual_expected(void) {
-    return js_throw_type_error_code(JS_ERR_MISSING_ARGS,
-        "The \"actual\" and \"expected\" arguments must be specified");
-}
+JS_FORWARD_STATIC_ITEM(js_assert_throw_missing_actual_expected, (void), js_throw_type_error_code, (JS_ERR_MISSING_ARGS, "The \"actual\" and \"expected\" arguments must be specified"))
 
 static void js_internal_errors_append_item(StrBuf* sb, Item value) {
     TypeId type = get_type_id(value);
@@ -351,14 +341,8 @@ extern "C" Item js_internal_errors_ERR_OUT_OF_RANGE_ctor(Item name, Item range, 
     strbuf_free(sb);
     return js_internal_errors_make_range_error(message);
 }
-
-extern "C" Item js_internal_errors_identity(Item value) {
-    return value;
-}
-
-extern "C" Item js_internal_errors_true(void) {
-    return (Item){.item = ITEM_TRUE};
-}
+JS_FORWARD_EXPRESSION(Item, js_internal_errors_identity, (Item value), (value))
+JS_FORWARD_EXPRESSION(Item, js_internal_errors_true, (void), ((Item){.item = ITEM_TRUE}))
 
 template <typename Target>
 static void js_internal_errors_set_code(Item codes, const char* name,
@@ -385,12 +369,9 @@ extern "C" Item js_get_internal_errors_namespace(void) {
         js_internal_errors_ERR_OUT_OF_RANGE_ctor);
     js_set_key_default(internal_errors_namespace, assert_make_string("codes"), codes);
 
-    js_set_key_default(internal_errors_namespace, assert_make_string("hideStackFrames"),
-        js_new_native_function(js_internal_errors_identity));
-    js_set_key_default(internal_errors_namespace, assert_make_string("hideInternalStackFrames"),
-        js_new_native_function(js_internal_errors_identity));
-    js_set_key_default(internal_errors_namespace, assert_make_string("isErrorStackTraceLimitWritable"),
-        js_new_native_function(js_internal_errors_true));
+    js_assert_set_native(internal_errors_namespace, "hideStackFrames", js_internal_errors_identity);
+    js_assert_set_native(internal_errors_namespace, "hideInternalStackFrames", js_internal_errors_identity);
+    js_assert_set_native(internal_errors_namespace, "isErrorStackTraceLimitWritable", js_internal_errors_true);
     js_set_key_default(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
     return internal_errors_namespace;
 }
@@ -486,12 +467,9 @@ extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
 
     internal_assert_myers_diff_namespace = js_new_object();
     heap_register_gc_root(&internal_assert_myers_diff_namespace.item);
-    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"),
-        js_new_native_function(js_internal_assert_myersDiff));
-    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"),
-        js_new_native_function(js_internal_assert_printMyersDiff));
-    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"),
-        js_new_native_function(js_internal_assert_printSimpleMyersDiff));
+    js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"), js_internal_assert_myersDiff);
+    js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"), js_internal_assert_printMyersDiff);
+    js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"), js_internal_assert_printSimpleMyersDiff);
     js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("default"),
         internal_assert_myers_diff_namespace);
     return internal_assert_myers_diff_namespace;
@@ -543,19 +521,13 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
     js_assert_attach_assertion_error_prototype(error);
     return error;
 }
-
-static Item make_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
-    return make_assertion_error_full_item(assert_make_string(message), actual, expected, op_str, generated);
-}
+JS_FORWARD_STATIC_ITEM(make_assertion_error_full, (const char* message, Item actual, Item expected, const char* op_str, bool generated = true), make_assertion_error_full_item, (assert_make_string(message), actual, expected, op_str, generated))
 
 static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
     Item error = make_assertion_error_full(message, actual, expected, op_str, generated);
     return js_throw_value(error);
 }
-
-static Item throw_assertion_error(const char* message) {
-    return throw_assertion_error_full(message, make_js_undefined(), make_js_undefined(), NULL);
-}
+JS_FORWARD_STATIC_ITEM(throw_assertion_error, (const char* message), throw_assertion_error_full, (message, make_js_undefined(), make_js_undefined(), NULL))
 
 static Item throw_assertion_error_full_item(Item message, Item actual, Item expected,
                                             const char* op_str, bool generated = true) {
@@ -579,10 +551,7 @@ static bool assert_is_truthy(Item val) {
     }
     return true; // objects, arrays, functions are truthy
 }
-
-static bool js_assert_is_nan_number(Item value) {
-    return get_type_id(value) == LMD_TYPE_FLOAT && isnan(it2d(value));
-}
+JS_FORWARD_STATIC_RETURN(bool, js_assert_is_nan_number, (Item value), get_type_id, (value) == LMD_TYPE_FLOAT && isnan(it2d(value)))
 
 static bool js_assert_is_object_like_value(Item value) {
     TypeId type = get_type_id(value);
@@ -615,10 +584,7 @@ static bool js_assert_string_has_newline(Item value) {
     }
     return false;
 }
-
-static bool js_assert_is_symbol_value(Item value) {
-    return get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_is_symbol_value, (Item value), (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE))
 
 static Item js_assert_throw_invalid_message_arg(Item message) {
     StrBuf* sb = strbuf_new();
@@ -873,10 +839,7 @@ static void js_assert_append_long_multiline_string(StrBuf* sb, String* s,
         segment_count++;
     }
 }
-
-static bool js_assert_should_expand_multiline_string(String* s) {
-    return js_assert_count_newlines(s) >= 10;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_should_expand_multiline_string, (String* s), (js_assert_count_newlines(s) >= 10))
 
 static bool js_assert_append_expanded_string_literal(StrBuf* sb, Item value,
                                                      const char* first_prefix,
@@ -1203,12 +1166,7 @@ static bool js_assert_is_arguments_value(Item value) {
     String* s = it2s(tag);
     return s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0;
 }
-
-static bool js_assert_is_plain_diff_object(Item value) {
-    return get_type_id(value) == LMD_TYPE_MAP &&
-           (js_class_id(value) == JS_CLASS_NONE || js_class_id(value) == JS_CLASS_OBJECT ||
-            js_class_id(value) == JS_CLASS_ARGUMENTS);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_assert_is_plain_diff_object, (Item value), get_type_id, (value) == LMD_TYPE_MAP && (js_class_id(value) == JS_CLASS_NONE || js_class_id(value) == JS_CLASS_OBJECT || js_class_id(value) == JS_CLASS_ARGUMENTS))
 
 static void js_assert_append_line_prefix(StrBuf* sb, int indent, char sign) {
     if (sign) {
@@ -2524,10 +2482,7 @@ static bool js_assert_message_is_auto(Item message) {
     return type == LMD_TYPE_UNDEFINED || message.item == ITEM_JS_UNDEFINED ||
            type == LMD_TYPE_NULL || message.item == ItemNull.item;
 }
-
-static bool js_assert_source_space(char ch) {
-    return ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_source_space, (char ch), (ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f'))
 
 static Item js_assert_ok_source_message(void) {
     const char* source = js_pending_call_source;
@@ -3350,11 +3305,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
     // a user message they remain generated AssertionErrors in Node.
     return js_assert_throw_throws_assertion(msg, thrown, expected, true);
 }
-
-static Item js_assert_throw_empty_expected_object(void) {
-    return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
-        "The argument 'error' may not be an empty object. Received {}");
-}
+JS_FORWARD_STATIC_ITEM(js_assert_throw_empty_expected_object, (void), js_throw_type_error_code, (JS_ERR_INVALID_ARG_VALUE, "The argument 'error' may not be an empty object. Received {}"))
 
 extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item message) {
     if (!js_is_callable(fn)) {
@@ -3803,33 +3754,22 @@ static Item js_assert_match_invalid_string(Item string_val, Item regexp, const c
     return throw_assertion_error_full_item(msg, string_val, regexp, op, true);
 }
 
-extern "C" Item js_assert_match(Item string_val, Item regexp, Item message) {
+static Item js_assert_match_impl(Item string_val, Item regexp, Item message,
+        bool negate, const char* operation) {
     if (get_type_id(regexp) != LMD_TYPE_MAP || js_class_id(regexp) != JS_CLASS_REGEXP) {
         return js_assert_throw_invalid_assert_arg_type("regexp", "an instance of RegExp", regexp);
     }
     if (get_type_id(string_val) != LMD_TYPE_STRING) {
-        return js_assert_match_invalid_string(string_val, regexp, "match");
+        return js_assert_match_invalid_string(string_val, regexp, operation);
     }
     Item result = js_regex_test(regexp, string_val);
-    if (!it2b(result)) {
-        return js_assert_match_message_or_default(message, string_val, regexp, "match");
+    if (it2b(result) == negate) {
+        return js_assert_match_message_or_default(message, string_val, regexp, operation);
     }
     return make_js_undefined();
 }
-
-extern "C" Item js_assert_doesNotMatch(Item string_val, Item regexp, Item message) {
-    if (get_type_id(regexp) != LMD_TYPE_MAP || js_class_id(regexp) != JS_CLASS_REGEXP) {
-        return js_assert_throw_invalid_assert_arg_type("regexp", "an instance of RegExp", regexp);
-    }
-    if (get_type_id(string_val) != LMD_TYPE_STRING) {
-        return js_assert_match_invalid_string(string_val, regexp, "doesNotMatch");
-    }
-    Item result = js_regex_test(regexp, string_val);
-    if (it2b(result)) {
-        return js_assert_match_message_or_default(message, string_val, regexp, "doesNotMatch");
-    }
-    return make_js_undefined();
-}
+JS_FORWARD_ITEM(js_assert_match, (Item string_val, Item regexp, Item message), js_assert_match_impl, (string_val, regexp, message, false, "match"))
+JS_FORWARD_ITEM(js_assert_doesNotMatch, (Item string_val, Item regexp, Item message), js_assert_match_impl, (string_val, regexp, message, true, "doesNotMatch"))
 
 static bool js_assert_is_partial_object_like(Item value) {
     TypeId type = get_type_id(value);
@@ -3891,22 +3831,12 @@ static bool js_assert_deep_strict_equal_bool(Item actual, Item expected) {
 
 static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx);
 static bool js_assert_partial_deep_match(Item actual, Item expected, int depth_left);
-
-static bool js_assert_is_symbol_key(Item key) {
-    return js_key_is_symbol_c(key) != 0;
-}
-
-static bool js_assert_key_string_equals(Item left, Item right) {
-    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) return false;
-    String* ls = it2s(left);
-    String* rs = it2s(right);
-    return ls && rs && ls->len == rs->len && memcmp(ls->chars, rs->chars, ls->len) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_is_symbol_key, (Item key), (js_key_is_symbol_c(key) != 0))
 
 static bool js_assert_same_property_key(Item left, Item right) {
     if (left.item == right.item) return true;
     if (js_assert_is_symbol_key(left) || js_assert_is_symbol_key(right)) return false;
-    return js_assert_key_string_equals(left, right);
+    return it2b(js_strict_equal(left, right));
 }
 
 static bool js_assert_key_is_array_index(Item key) {
@@ -4037,10 +3967,7 @@ static bool js_assert_is_regexp_like(Item value) {
     return js_assert_has_constructor_prototype(value, "RegExp") ||
            js_assert_tag_equals(value, "RegExp");
 }
-
-static bool js_assert_is_dataview_like(Item value) {
-    return js_is_dataview(value) || js_assert_tag_equals(value, "DataView");
-}
+JS_FORWARD_STATIC_RETURN(bool, js_assert_is_dataview_like, (Item value), js_is_dataview, (value) || js_assert_tag_equals(value, "DataView"))
 
 static bool js_assert_is_error_like_value(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
@@ -4116,12 +4043,7 @@ static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth
     return js_assert_partial_enumerable_properties(actual, expected,
         depth_left, ctx, true);
 }
-
-static bool js_assert_is_any_arraybuffer(Item value) {
-    return js_is_arraybuffer(value) || js_is_sharedarraybuffer(value) ||
-           js_assert_tag_equals(value, "ArrayBuffer") ||
-           js_assert_tag_equals(value, "SharedArrayBuffer");
-}
+JS_FORWARD_STATIC_RETURN(bool, js_assert_is_any_arraybuffer, (Item value), js_is_arraybuffer, (value) || js_is_sharedarraybuffer(value) || js_assert_tag_equals(value, "ArrayBuffer") || js_assert_tag_equals(value, "SharedArrayBuffer"))
 
 static int js_assert_dataview_current_length(JsDataView* dv) {
     if (!dv || !dv->buffer) return -1;
@@ -4267,11 +4189,7 @@ static bool js_assert_partial_named_key_subset_match(Item actual, Item expected,
         js_get_key_default(actual, actual_key),
         js_get_key_default(expected, expected_key), depth_left - 1, ctx);
 }
-
-static bool js_assert_partial_named_key_subset(Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
-    return js_assert_unordered_subset(actual, expected, actual_keys, expected_keys,
-        depth_left, ctx, js_assert_partial_named_key_subset_match, false);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_assert_partial_named_key_subset, (Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx), js_assert_unordered_subset, (actual, expected, actual_keys, expected_keys, depth_left, ctx, js_assert_partial_named_key_subset_match, false))
 
 static bool js_assert_partial_array_like_key_match(Item actual, Item expected,
         Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
@@ -4667,10 +4585,7 @@ static Item make_type_error_with_code(const char* code, const char* message) {
     js_set_key_default(error, assert_make_string("code"), assert_make_string(code));
     return error;
 }
-
-static bool js_assert_is_native_promise(Item value) {
-    return get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_PROMISE;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_is_native_promise, (Item value), (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_PROMISE))
 
 static bool js_assert_is_valid_thenable(Item value) {
     TypeId type = get_type_id(value);
@@ -4776,14 +4691,8 @@ static Item js_assert_make_invalid_return_error(Item actual) {
         received);
     return make_type_error_with_code(JS_ERR_INVALID_RETURN_VALUE, msg);
 }
-
-static Item js_assert_reject_with_error(Item error) {
-    return js_promise_reject(error);
-}
-
-static bool js_assert_is_async_assertion_input(Item value) {
-    return js_assert_is_native_promise(value) || js_assert_is_valid_thenable(value);
-}
+JS_FORWARD_STATIC_ITEM(js_assert_reject_with_error, (Item error), js_promise_reject, (error))
+JS_FORWARD_STATIC_RETURN(bool, js_assert_is_async_assertion_input, (Item value), js_assert_is_native_promise, (value) || js_assert_is_valid_thenable(value))
 
 static Item js_assert_missing_rejection_error(Item error_expected) {
     const char* suffix = "";
@@ -5070,10 +4979,7 @@ static Item assert_set_fresh_method(Item ns, const char* name, Target target,
     js_set_key_default(ns, key, fn);
     return fn;
 }
-
-static void assert_set_method_item(Item ns, const char* name, Item fn) {
-    js_set_key_default(ns, assert_make_string(name), fn);
-}
+JS_FORWARD_STATIC_VOID( assert_set_method_item, (Item ns, const char* name, Item fn), js_set_key_default, (ns, assert_make_string(name), fn))
 
 static Item js_assert_constructor_default_message(Item actual, Item expected, Item op_item) {
     if (js_assert_string_equals(op_item, "strictEqual")) {
@@ -5433,16 +5339,13 @@ static Item js_mock_fn_impl(Item original_fn) {
     // create .mock property pointing to the live calls array
     Item mock_prop = js_new_object();
     js_set_key_default(mock_prop, assert_make_string("calls"), g_mock_slots[slot].calls);
-    js_set_key_default(mock_prop, assert_make_string("callCount"),
-                    js_new_native_function(js_mock_call_count_impl));
+    js_assert_set_native(mock_prop, "callCount", js_mock_call_count_impl);
     js_set_key_default(mock_prop, assert_make_string("_slot"), (Item){.item = i2it(slot)});
 
     // mock.restore() — no-op for fn mocks
-    js_set_key_default(mock_prop, assert_make_string("restore"),
-                    js_new_native_function(js_mock_reset_impl));
+    js_assert_set_native(mock_prop, "restore", js_mock_reset_impl);
     // mock.resetCalls()
-    js_set_key_default(mock_prop, assert_make_string("resetCalls"),
-                    js_new_native_function(js_mock_reset_impl));
+    js_assert_set_native(mock_prop, "resetCalls", js_mock_reset_impl);
 
     js_set_key_default(wrapper, assert_make_string("mock"), mock_prop);
     return wrapper;
@@ -5468,14 +5371,8 @@ static Item js_mock_method_impl(Item object, Item method_name, Item implementati
     js_set_key_default(object, method_name, wrapper);
     return wrapper;
 }
-
-static Item js_mock_reset_impl(void) {
-    return make_js_undefined();
-}
-
-static Item js_mock_restore_all_impl(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_mock_reset_impl, (void), make_js_undefined, ())
+JS_FORWARD_STATIC_ITEM(js_mock_restore_all_impl, (void), make_js_undefined, ())
 
 static Item js_mock_call_count_impl(void) {
     Item self = js_get_this();
@@ -5511,68 +5408,44 @@ static Item js_mock_timers_tick_impl(Item delay) {
 }
 
 // mock.getter(object, property) — stub
-static Item js_mock_getter_impl(Item object, Item property) {
-    return js_mock_method_impl(object, property, make_js_undefined());
-}
+JS_FORWARD_STATIC_ITEM(js_mock_getter_impl, (Item object, Item property), js_mock_method_impl, (object, property, make_js_undefined()))
 
 // mock.setter(object, property) — stub
-static Item js_mock_setter_impl(Item object, Item property) {
-    return js_mock_method_impl(object, property, make_js_undefined());
-}
+JS_FORWARD_STATIC_ITEM(js_mock_setter_impl, (Item object, Item property), js_mock_method_impl, (object, property, make_js_undefined()))
 
 // Create a mock context object with fn/method/getter/setter/reset/restoreAll
 static Item js_mock_create_context(void) {
     Item mock_obj = js_new_object();
-    js_set_key_default(mock_obj, assert_make_string("fn"),
-                    js_new_native_function(js_mock_fn_impl));
-    js_set_key_default(mock_obj, assert_make_string("method"),
-                    js_new_native_function(js_mock_method_impl));
-    js_set_key_default(mock_obj, assert_make_string("getter"),
-                    js_new_native_function(js_mock_getter_impl));
-    js_set_key_default(mock_obj, assert_make_string("setter"),
-                    js_new_native_function(js_mock_setter_impl));
-    js_set_key_default(mock_obj, assert_make_string("reset"),
-                    js_new_native_function(js_mock_reset_impl));
-    js_set_key_default(mock_obj, assert_make_string("restoreAll"),
-                    js_new_native_function(js_mock_restore_all_impl));
+    js_assert_set_native(mock_obj, "fn", js_mock_fn_impl);
+    js_assert_set_native(mock_obj, "method", js_mock_method_impl);
+    js_assert_set_native(mock_obj, "getter", js_mock_getter_impl);
+    js_assert_set_native(mock_obj, "setter", js_mock_setter_impl);
+    js_assert_set_native(mock_obj, "reset", js_mock_reset_impl);
+    js_assert_set_native(mock_obj, "restoreAll", js_mock_restore_all_impl);
     // timers sub-object
     Item timers_obj = js_new_object();
-    js_set_key_default(timers_obj, assert_make_string("enable"),
-                    js_new_native_function(js_mock_timers_enable_impl));
-    js_set_key_default(timers_obj, assert_make_string("reset"),
-                    js_new_native_function(js_mock_timers_reset_impl));
-    js_set_key_default(timers_obj, assert_make_string("tick"),
-                    js_new_native_function(js_mock_timers_tick_impl));
+    js_assert_set_native(timers_obj, "enable", js_mock_timers_enable_impl);
+    js_assert_set_native(timers_obj, "reset", js_mock_timers_reset_impl);
+    js_assert_set_native(timers_obj, "tick", js_mock_timers_tick_impl);
     js_set_key_default(mock_obj, assert_make_string("timers"), timers_obj);
     return mock_obj;
 }
 
 // t.skip() — no-op skip
-static Item js_test_context_skip(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_test_context_skip, (void), make_js_undefined, ())
 
 // t.todo() — no-op
-static Item js_test_context_todo(void) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_test_context_todo, (void), make_js_undefined, ())
 
 // t.diagnostic(msg) — no-op
-static Item js_test_context_diagnostic(Item msg) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_test_context_diagnostic, (Item msg), make_js_undefined, ())
 
 // t.plan(count) — no-op
-static Item js_test_context_plan(Item count) {
-    return make_js_undefined();
-}
+JS_FORWARD_STATIC_ITEM(js_test_context_plan, (Item count), make_js_undefined, ())
 
 // t.test(name, fn) — sub-test, delegate to js_node_test_run
 extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn);
-
-static Item js_test_context_subtest(Item name, Item options_or_fn, Item fn) {
-    return js_node_test_run(name, options_or_fn, fn);
-}
+JS_FORWARD_STATIC_ITEM(js_test_context_subtest, (Item name, Item options_or_fn, Item fn), js_node_test_run, (name, options_or_fn, fn))
 
 static void node_test_ensure_hook_stores(void) {
     if (g_node_before_each_store.item == 0) {
@@ -5624,10 +5497,7 @@ static void node_test_register_roots(void) {
     heap_register_gc_root(&g_node_test_event_queue.item);
     g_node_test_roots_epoch = epoch;
 }
-
-static bool node_test_event_queue_active(void) {
-    return get_type_id(g_node_test_event_queue) == LMD_TYPE_ARRAY;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, node_test_event_queue_active, (void), (get_type_id(g_node_test_event_queue) == LMD_TYPE_ARRAY))
 
 static void node_test_emit_event(const char* type, Item name, int64_t test_id, Item error) {
     if (!node_test_event_queue_active()) return;
@@ -5643,10 +5513,7 @@ static void node_test_emit_event(const char* type, Item name, int64_t test_id, I
     js_set_key_default(event, assert_make_string("data"), data);
     js_array_push(g_node_test_event_queue, event);
 }
-
-static Item node_test_event_stream_identity(void) {
-    return js_get_this();
-}
+JS_FORWARD_STATIC_ITEM(node_test_event_stream_identity, (void), js_get_this, ())
 
 static Item node_test_event_stream_next(void) {
 
@@ -5672,8 +5539,7 @@ static Item node_test_make_event_stream(Item events) {
     Item stream = js_new_object();
     js_set_key_default(stream, assert_make_string("__events__"), events);
     js_set_key_default(stream, assert_make_string("__index__"), (Item){.item = i2it(0)});
-    js_set_key_default(stream, assert_make_string("next"),
-                    js_new_native_function(node_test_event_stream_next));
+    js_set_native_key(stream, assert_make_string("next"), node_test_event_stream_next);
     Item identity = js_new_native_function(node_test_event_stream_identity);
     Item async_key = js_well_known_symbol_key(5);
     Item iter_key = js_well_known_symbol_key(1);
@@ -5758,25 +5624,18 @@ static Item js_build_test_context(void) {
     extern Item js_get_assert_namespace(void);
     Item t_assert = js_assert_create_instance(make_js_undefined());
     // add snapshot and fileSnapshot as no-op stubs for test runner context
-    js_set_key_default(t_assert, assert_make_string("snapshot"),
-                    js_new_native_function(js_test_context_skip));
-    js_set_key_default(t_assert, assert_make_string("fileSnapshot"),
-                    js_new_native_function(js_test_context_skip));
+    js_assert_set_native(t_assert, "snapshot", js_test_context_skip);
+    js_assert_set_native(t_assert, "fileSnapshot", js_test_context_skip);
     js_set_key_default(t, assert_make_string("assert"), t_assert);
 
     // t.skip(), t.todo(), t.diagnostic(), t.plan()
-    js_set_key_default(t, assert_make_string("skip"),
-                    js_new_native_function(js_test_context_skip));
-    js_set_key_default(t, assert_make_string("todo"),
-                    js_new_native_function(js_test_context_todo));
-    js_set_key_default(t, assert_make_string("diagnostic"),
-                    js_new_native_function(js_test_context_diagnostic));
-    js_set_key_default(t, assert_make_string("plan"),
-                    js_new_native_function(js_test_context_plan));
+    js_assert_set_native(t, "skip", js_test_context_skip);
+    js_assert_set_native(t, "todo", js_test_context_todo);
+    js_assert_set_native(t, "diagnostic", js_test_context_diagnostic);
+    js_assert_set_native(t, "plan", js_test_context_plan);
 
     // t.test — sub-tests
-    js_set_key_default(t, assert_make_string("test"),
-                    js_new_native_function(js_test_context_subtest));
+    js_assert_set_native(t, "test", js_test_context_subtest);
 
     // t.name — filled in later
     js_set_key_default(t, assert_make_string("name"), make_js_undefined());
@@ -6037,12 +5896,10 @@ extern "C" Item js_get_node_test_namespace(void) {
     js_set_key_default(node_test_namespace, assert_make_string("MockTracker"), mock_obj);
 
     // run — in-process file runner that returns a test event iterable
-    js_set_key_default(node_test_namespace, assert_make_string("run"),
-                    js_new_native_function(js_node_test_run_files));
+    js_set_native_key(node_test_namespace, assert_make_string("run"), js_node_test_run_files);
 
     // getTestContext — stub
-    js_set_key_default(node_test_namespace, assert_make_string("getTestContext"),
-                    js_new_native_function(js_mock_reset_impl));
+    js_set_native_key(node_test_namespace, assert_make_string("getTestContext"), js_mock_reset_impl);
 
     return node_test_namespace;
 }

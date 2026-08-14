@@ -45,10 +45,7 @@ static void js_cssom_notify_stylesheet_mutation(void) {
 // =============================================================================
 // Unicode-Range Parsing & Canonical Serialization
 // =============================================================================
-
-static bool is_hex_digit(char c) {
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_hex_digit, (char c), ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
 
 static uint32_t hex_val(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -305,41 +302,21 @@ static TypeMap js_rule_decl_marker = {};
 // Type Checking
 // =============================================================================
 
-extern "C" bool js_is_stylesheet(Item item) {
+static bool js_cssom_is_host(Item item, const void* legacy_marker,
+                             const void* vmap_marker,
+                             const void* (*host_type)(void)) {
     if (get_type_id(item) == LMD_TYPE_VMAP) {
         return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_stylesheet_vmap_marker ||
-             item.vmap->host_type == radiant_dom_stylesheet_host_type()) &&
+            (item.vmap->host_type == vmap_marker ||
+             item.vmap->host_type == host_type()) &&
             item.vmap->host_data != nullptr;
     }
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->type == (void*)&js_stylesheet_marker;
+    return item.map->type == legacy_marker;
 }
-
-extern "C" bool js_is_css_rule(Item item) {
-    if (get_type_id(item) == LMD_TYPE_VMAP) {
-        return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_css_rule_vmap_marker ||
-             item.vmap->host_type == radiant_dom_css_rule_host_type()) &&
-            item.vmap->host_data != nullptr;
-    }
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->type == (void*)&js_css_rule_marker;
-}
-
-extern "C" bool js_is_rule_style_decl(Item item) {
-    if (get_type_id(item) == LMD_TYPE_VMAP) {
-        return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_rule_decl_vmap_marker ||
-             item.vmap->host_type == radiant_dom_rule_style_decl_host_type()) &&
-            item.vmap->host_data != nullptr;
-    }
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m->type == (void*)&js_rule_decl_marker;
-}
+JS_FORWARD_RETURN(bool, js_is_stylesheet, (Item item), js_cssom_is_host, (item, &js_stylesheet_marker, &js_stylesheet_vmap_marker, radiant_dom_stylesheet_host_type))
+JS_FORWARD_RETURN(bool, js_is_css_rule, (Item item), js_cssom_is_host, (item, &js_css_rule_marker, &js_css_rule_vmap_marker, radiant_dom_css_rule_host_type))
+JS_FORWARD_RETURN(bool, js_is_rule_style_decl, (Item item), js_cssom_is_host, (item, &js_rule_decl_marker, &js_rule_decl_vmap_marker, radiant_dom_rule_style_decl_host_type))
 
 // =============================================================================
 // Helper: camelCase to CSS hyphenated property name
@@ -380,10 +357,14 @@ extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
     return wrapper;
 }
 
+static void* js_cssom_unwrap_host(Item item, bool (*is_host)(Item)) {
+    if (!is_host(item)) return nullptr;
+    if (get_type_id(item) == LMD_TYPE_VMAP) return item.vmap->host_data;
+    return item.map->data;
+}
+
 static CssStylesheet* unwrap_stylesheet(Item item) {
-    if (!js_is_stylesheet(item)) return nullptr;
-    if (get_type_id(item) == LMD_TYPE_VMAP) return (CssStylesheet*)item.vmap->host_data;
-    return (CssStylesheet*)item.map->data;
+    return (CssStylesheet*)js_cssom_unwrap_host(item, js_is_stylesheet);
 }
 
 // =============================================================================
@@ -527,9 +508,7 @@ extern "C" Item js_cssom_wrap_rule(void* rule, void* pool) {
 }
 
 static CssRule* unwrap_rule(Item item) {
-    if (!js_is_css_rule(item)) return nullptr;
-    if (get_type_id(item) == LMD_TYPE_VMAP) return (CssRule*)item.vmap->host_data;
-    return (CssRule*)item.map->data;
+    return (CssRule*)js_cssom_unwrap_host(item, js_is_css_rule);
 }
 
 // =============================================================================
@@ -550,9 +529,7 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
 }
 
 static CssRule* unwrap_rule_decl(Item item) {
-    if (!js_is_rule_style_decl(item)) return nullptr;
-    if (get_type_id(item) == LMD_TYPE_VMAP) return (CssRule*)item.vmap->host_data;
-    return (CssRule*)item.map->data;
+    return (CssRule*)js_cssom_unwrap_host(item, js_is_rule_style_decl);
 }
 
 static Pool* unwrap_rule_decl_pool(Item item) {
@@ -684,10 +661,7 @@ extern "C" Item js_cssom_stylesheet_get_disabled(Item sheet_item) {
     if (!sheet) return ItemNull;
     return sheet->disabled ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
 }
-
-extern "C" Item js_cssom_stylesheet_get_type(Item sheet_item) {
-    return unwrap_stylesheet(sheet_item) ? make_string_item("text/css") : ItemNull;
-}
+JS_FORWARD_EXPRESSION(Item, js_cssom_stylesheet_get_type, (Item sheet_item), (unwrap_stylesheet(sheet_item) ? make_string_item("text/css") : ItemNull))
 
 extern "C" Item js_cssom_stylesheet_get_href(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
@@ -1382,10 +1356,7 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-
-extern "C" bool js_is_css_namespace(Item item) {
-    return js_object_has_class(item, JS_CLASS_CSS_NAMESPACE);
-}
+JS_FORWARD_RETURN(bool, js_is_css_namespace, (Item item), js_object_has_class, (item, JS_CLASS_CSS_NAMESPACE))
 
 /**
  * CSS.supports(property, value) — two-argument form.
@@ -1492,10 +1463,7 @@ static Item js_css_supports(Item* args, int argc) {
     if (free_pool) mem_pool_destroy(pool);
     return (Item){.item = b2it(result)};
 }
-
-extern "C" Item js_css_supports_operation(Item* args, int argc) {
-    return js_css_supports(args, argc);
-}
+JS_FORWARD_ITEM(js_css_supports_operation, (Item* args, int argc), js_css_supports, (args, argc))
 
 extern "C" Item js_css_escape_operation(Item* args, int argc) {
     // CSS.escape(ident) — serialize a CSS identifier. The intrinsic target

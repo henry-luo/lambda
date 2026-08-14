@@ -88,7 +88,6 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out);
 RADIANT_C_API int radiant_dom_document_legacy_command_enabled(Item object);
 
-RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out);
 RADIANT_C_API int radiant_dom_document_operation(Item object,
                                                  RadiantDocumentOperation operation,
                                                  Item* args, int argc, Item* out);
@@ -98,6 +97,7 @@ RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item);
 RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* out);
 RADIANT_C_API bool radiant_dom_has_committed_geometry_snapshot(DomDocument* doc);
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
+RADIANT_C_API const void* radiant_dom_html_element_host_type(void);
 RADIANT_C_API const void* radiant_dom_range_host_type(void);
 RADIANT_C_API const void* radiant_dom_selection_host_type(void);
 RADIANT_C_API const void* radiant_dom_inline_style_host_type(void);
@@ -107,6 +107,12 @@ RADIANT_C_API const void* radiant_dom_css_rule_host_type(void);
 RADIANT_C_API const void* radiant_dom_rule_style_decl_host_type(void);
 RADIANT_C_API const void* radiant_dom_document_host_type(void);
 RADIANT_C_API const void* radiant_dom_foreign_document_host_type(void);
+RADIANT_C_API const void* radiant_dom_character_data_host_type(void);
+RADIANT_C_API const void* radiant_dom_svg_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_input_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_select_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_textarea_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_option_element_host_type(void);
 
 RADIANT_C_API Item fn_radiant_load(Item path_item);
 RADIANT_C_API Item fn_radiant_root(Item doc_item);

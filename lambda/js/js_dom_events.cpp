@@ -469,10 +469,7 @@ static bool js_dom_event_runtime_state_ensure() {
 // sentinel pointers for non-element targets
 static const int _window_sentinel = 0;
 static const int _document_sentinel = 0;
-
-static Item event_listener_root_item(uint64_t* root) {
-    return root ? (Item){.item = *root} : ItemNull;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, event_listener_root_item, (uint64_t* root), (root ? (Item){.item = *root} : ItemNull))
 
 static void event_listener_release_roots(EventListener* listener) {
     if (!listener) return;
@@ -1133,35 +1130,32 @@ extern "C" Item js_event_prevent_default() {
     return make_js_undefined();
 }
 
-extern "C" Item js_event_stop_propagation() {
+static Item js_event_stop(bool immediate) {
     Item ev = js_get_this();
     if (get_type_id(ev) == LMD_TYPE_MAP) {
         event_set_bool(ev, "__stop_prop", true);
+        if (immediate) event_set_bool(ev, "__stop_imm", true);
     }
     _stop_propagation = true;
+    if (immediate) _stop_immediate = true;
     return make_js_undefined();
 }
-
-extern "C" Item js_event_stop_immediate_propagation() {
-    Item ev = js_get_this();
-    if (get_type_id(ev) == LMD_TYPE_MAP) {
-        event_set_bool(ev, "__stop_prop", true);
-        event_set_bool(ev, "__stop_imm", true);
-    }
-    _stop_propagation = true;
-    _stop_immediate = true;
-    return make_js_undefined();
-}
+JS_FORWARD_ITEM(js_event_stop_propagation, (), js_event_stop, (false))
+JS_FORWARD_ITEM(js_event_stop_immediate_propagation, (), js_event_stop, (true))
 
 // Legacy aliases / setters
 
 // returnValue accessor: getter returns !canceled; setter (when cancelable
 // and not in passive listener) sets defaultPrevented if value is false.
-extern "C" Item js_event_returnvalue_get(void) {
+static Item js_event_flag_value(const char* key, bool default_value) {
     Item ev = js_get_this();
-    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    bool dp = event_flag_get(ev, "__default_prevented");
-    return (Item){.item = b2it(!dp)};
+    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(default_value)};
+    return (Item){.item = b2it(event_flag_get(ev, key))};
+}
+
+extern "C" Item js_event_returnvalue_get(void) {
+    Item value = js_event_flag_value("__default_prevented", false);
+    return (Item){.item = b2it(!it2b(value))};
 }
 
 extern "C" Item js_event_returnvalue_set(Item value) {
@@ -1179,12 +1173,7 @@ extern "C" Item js_event_returnvalue_set(Item value) {
 
 // cancelBubble accessor: getter returns stop-propagation flag; setter sets
 // stop-propagation flag when value is truthy (false is a no-op).
-extern "C" Item js_event_cancelbubble_get(void) {
-    Item ev = js_get_this();
-    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    bool sp = event_flag_get(ev, "__stop_prop");
-    return (Item){.item = b2it(sp)};
-}
+JS_FORWARD_ITEM(js_event_cancelbubble_get, (void), js_event_flag_value, ("__stop_prop", false))
 
 extern "C" Item js_event_cancelbubble_set(Item value) {
     Item ev = js_get_this();
@@ -1197,12 +1186,7 @@ extern "C" Item js_event_cancelbubble_set(Item value) {
 }
 
 // defaultPrevented getter: reflects the canceled flag.
-extern "C" Item js_event_defaultprevented_get(void) {
-    Item ev = js_get_this();
-    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    bool dp = event_flag_get(ev, "__default_prevented");
-    return (Item){.item = b2it(dp)};
-}
+JS_FORWARD_ITEM(js_event_defaultprevented_get, (void), js_event_flag_value, ("__default_prevented", false))
 
 // composedPath() — returns a fresh copy of the frozen in-flight dispatch path.
 extern "C" Item js_event_composed_path() {
@@ -1218,6 +1202,27 @@ extern "C" Item js_event_composed_path() {
         js_array_push(out, path.array->items[i]);
     }
     return out;
+}
+
+static void js_event_install_accessor(Item event, const char* name,
+        JsNativeP0 getter, JsNativeP1 setter) {
+    RootFrame roots(3);
+    Rooted<Item> descriptor_root(roots, js_new_object());
+    Rooted<Item> getter_root(roots, js_new_native_function(getter));
+    Rooted<Item> setter_root(roots, setter
+        ? js_new_native_function(setter) : ItemNull);
+    js_set_key_default(descriptor_root.get(), make_string_item("get"),
+        getter_root.get());
+    if (setter) {
+        js_set_key_default(descriptor_root.get(), make_string_item("set"),
+            setter_root.get());
+    }
+    js_set_key_default(descriptor_root.get(), make_string_item("configurable"),
+        (Item){.item = ITEM_TRUE});
+    js_set_key_default(descriptor_root.get(), make_string_item("enumerable"),
+        (Item){.item = ITEM_TRUE});
+    js_object_define_property(event, make_string_item(name),
+        descriptor_root.get());
 }
 
 // initEvent(type, bubbles, cancelable) — legacy. No-op while dispatching.
@@ -1311,9 +1316,8 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 
 static Item js_create_event_init_with_class(const char* type, bool bubbles,
         bool cancelable, bool composed, JsClass class_id) {
-    RootFrame roots(2);
+    RootFrame roots(1);
     Rooted<Item> event_root(roots, js_new_object_with_class(class_id));
-    Rooted<Item> descriptor_root(roots, ItemNull);
     // Event construction performs many allocating property writes; keep the
     // partially initialized receiver precise until it is returned to JS.
     Item event = event_root.get();
@@ -1363,45 +1367,13 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     js_set_key_default(event, cp_key, js_new_native_function(js_event_composed_path));
     js_set_key_default(event, ie_key, js_new_native_function(js_event_init_event));
 
-    // Install accessor properties for legacy spec'd setters/getters
-    // (returnValue, cancelBubble, defaultPrevented). These override the
-    // plain data properties set above.
-    {
-        Item get_key = (Item){.item = s2it(heap_create_name("get"))};
-        Item set_key = (Item){.item = s2it(heap_create_name("set"))};
-        Item conf_key = (Item){.item = s2it(heap_create_name("configurable"))};
-        Item enum_key = (Item){.item = s2it(heap_create_name("enumerable"))};
-        Item true_v  = (Item){.item = b2it(true)};
-
-        // returnValue: get + set
-        descriptor_root.set(js_new_object());
-        Item rv_desc = descriptor_root.get();
-        js_set_key_default(rv_desc, get_key, js_new_native_function(js_event_returnvalue_get));
-        js_set_key_default(rv_desc, set_key, js_new_native_function(js_event_returnvalue_set));
-        js_set_key_default(rv_desc, conf_key, true_v);
-        js_set_key_default(rv_desc, enum_key, true_v);
-        js_object_define_property(event,
-            (Item){.item = s2it(heap_create_name("returnValue"))}, rv_desc);
-
-        // cancelBubble: get + set
-        descriptor_root.set(js_new_object());
-        Item cb_desc = descriptor_root.get();
-        js_set_key_default(cb_desc, get_key, js_new_native_function(js_event_cancelbubble_get));
-        js_set_key_default(cb_desc, set_key, js_new_native_function(js_event_cancelbubble_set));
-        js_set_key_default(cb_desc, conf_key, true_v);
-        js_set_key_default(cb_desc, enum_key, true_v);
-        js_object_define_property(event,
-            (Item){.item = s2it(heap_create_name("cancelBubble"))}, cb_desc);
-
-        // defaultPrevented: get only
-        descriptor_root.set(js_new_object());
-        Item dp_desc = descriptor_root.get();
-        js_set_key_default(dp_desc, get_key, js_new_native_function(js_event_defaultprevented_get));
-        js_set_key_default(dp_desc, conf_key, true_v);
-        js_set_key_default(dp_desc, enum_key, true_v);
-        js_object_define_property(event,
-            (Item){.item = s2it(heap_create_name("defaultPrevented"))}, dp_desc);
-    }
+    // Install accessor properties for legacy spec'd setters/getters.
+    js_event_install_accessor(event, "returnValue",
+        js_event_returnvalue_get, js_event_returnvalue_set);
+    js_event_install_accessor(event, "cancelBubble",
+        js_event_cancelbubble_get, js_event_cancelbubble_set);
+    js_event_install_accessor(event, "defaultPrevented",
+        js_event_defaultprevented_get, nullptr);
 
     event_apply_new_target_prototype(event);
 
@@ -1612,9 +1584,11 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
     return ev;
 }
 
-extern "C" Item js_ctor_ui_event_fn(Item type_arg, Item init_arg) {
-    return build_ui_event(fn_to_cstr(type_arg), init_arg, "UIEvent");
-}
+#define JS_DOM_UI_EVENT_CTOR(name, class_name) \
+    extern "C" Item name(Item type_arg, Item init_arg) { \
+        return build_ui_event(fn_to_cstr(type_arg), init_arg, class_name); \
+    }
+JS_DOM_UI_EVENT_CTOR(js_ctor_ui_event_fn, "UIEvent")
 
 extern "C" Item js_ctor_focus_event_fn(Item type_arg, Item init_arg) {
     JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "FocusEvent"));
@@ -1646,9 +1620,12 @@ static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
     return ev;
 }
 
-extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
-    return js_ctor_mouse_event_with_class(type_arg, init_arg, "MouseEvent");
-}
+#define JS_DOM_MOUSE_EVENT_CTOR(name, class_name) \
+    extern "C" Item name(Item type_arg, Item init_arg) { \
+        return js_ctor_mouse_event_with_class(type_arg, init_arg, class_name); \
+    }
+JS_DOM_MOUSE_EVENT_CTOR(js_ctor_mouse_event_fn, "MouseEvent")
+#undef JS_DOM_MOUSE_EVENT_CTOR
 
 extern "C" Item js_ctor_wheel_event_fn(Item type_arg, Item init_arg) {
     JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_with_class(type_arg, init_arg, "WheelEvent"));
@@ -1751,10 +1728,7 @@ static bool js_input_event_is_static_range(Item range) {
     if (get_type_id(range) != LMD_TYPE_MAP) return false;
     return js_class_id(range) == JS_CLASS_STATIC_RANGE;
 }
-
-static Item js_input_event_throw_dom_exception(const char* name, const char* message) {
-    return js_throw_named_error_text(name ? name : "InvalidStateError", message ? message : "");
-}
+JS_FORWARD_STATIC_ITEM(js_input_event_throw_dom_exception, (const char* name, const char* message), js_throw_named_error_text, (name ? name : "InvalidStateError", message ? message : ""))
 
 static Item js_input_event_live_target_ranges(Item target_ranges) {
     Item ranges = js_array_new(0);
@@ -1840,15 +1814,16 @@ static Item js_ctor_timing_event(Item type_arg, Item init_arg, JsClass class_id,
     return ev;
 }
 
-extern "C" Item js_ctor_transition_event_fn(Item type_arg, Item init_arg) {
-    return js_ctor_timing_event(type_arg, init_arg, JS_CLASS_TRANSITION_EVENT,
-        "propertyName");
-}
-
-extern "C" Item js_ctor_animation_event_fn(Item type_arg, Item init_arg) {
-    return js_ctor_timing_event(type_arg, init_arg, JS_CLASS_ANIMATION_EVENT,
-        "animationName");
-}
+#define JS_DOM_TIMING_EVENT_CTOR(name, class_id, property_name) \
+    extern "C" Item name(Item type_arg, Item init_arg) { \
+        return js_ctor_timing_event(type_arg, init_arg, class_id, property_name); \
+    }
+JS_DOM_TIMING_EVENT_CTOR(js_ctor_transition_event_fn,
+    JS_CLASS_TRANSITION_EVENT, "propertyName")
+JS_DOM_TIMING_EVENT_CTOR(js_ctor_animation_event_fn,
+    JS_CLASS_ANIMATION_EVENT, "animationName")
+#undef JS_DOM_TIMING_EVENT_CTOR
+#undef JS_DOM_UI_EVENT_CTOR
 
 // Build a synthetic click MouseEvent (composed=true, bubbles=true, cancelable=true)
 // for `HTMLElement.prototype.click()`. Per spec, all coordinate / button fields
@@ -1904,10 +1879,7 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     event_set_bool(ev, "isTrusted", true);
     return ev;
 }
-
-extern "C" void js_event_set_timestamp(Item event, double timestamp_ms) {
-    event_set_double(event, "timeStamp", timestamp_ms);
-}
+JS_FORWARD_VOID( js_event_set_timestamp, (Item event, double timestamp_ms), event_set_double, (event, "timeStamp", timestamp_ms))
 
 extern "C" Item js_create_native_pointer_event(const char* type,
     int client_x, int client_y,
@@ -2110,10 +2082,8 @@ extern "C" Item js_create_native_wheel_event(const char* type,
     return ev;
 }
 
-extern "C" bool js_event_is_default_prevented(Item event) {
-    if (get_type_id(event) != LMD_TYPE_MAP) return false;
-    return event_flag_get(event, "__default_prevented");
-}
+JS_FORWARD_EXPRESSION(bool, js_event_is_default_prevented, (Item event),
+    get_type_id(event) == LMD_TYPE_MAP && event_flag_get(event, "__default_prevented"))
 
 // ============================================================================
 // Legacy IE-style `window.event` plumbing for the Radiant inline-handler

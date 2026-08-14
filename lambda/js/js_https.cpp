@@ -37,11 +37,7 @@ extern "C" Item js_http_agent_destroy(void);
 
 #define https_agent_prototype (js_runtime_state.https.agent_prototype)
 #define https_namespace (js_runtime_state.https.namespace_object)
-
-static bool https_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.https.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, https_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.https.roots)))
 
 static bool is_missing_value(Item value) {
     TypeId type = get_type_id(value);
@@ -534,8 +530,7 @@ extern "C" Item js_https_Agent(Item options) {
     if (get_type_id(https_agent_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(agent, https_agent_prototype);
     }
-    js_set_key_default(agent, make_string_item("getName"),
-                    js_new_native_function(js_https_agent_getName));
+    js_set_native_key(agent, make_string_item("getName"), js_https_agent_getName);
     js_set_key_default(agent, make_string_item("createConnection"),
                     js_new_native_rest_function(js_https_agent_createConnection));
     return agent;
@@ -613,8 +608,7 @@ extern "C" Item js_https_createServer(Item options, Item handler) {
         } else if (js_is_callable(handler)) {
             js_set_key_default(server, make_string_item("__https_request_listener__"), handler);
         }
-        js_set_key_default(server, make_string_item("listeners"),
-                        js_new_native_function(js_https_server_listeners));
+        js_set_native_key(server, make_string_item("listeners"), js_https_server_listeners);
         https_server_apply_alpn_options(server, options);
     }
     return server;
@@ -651,14 +645,11 @@ extern "C" Item js_get_https_namespace(void) {
 
     https_namespace = js_new_object();
 
-    js_set_key_default(https_namespace, make_string_item("createServer"),
-                    js_new_native_function(js_https_createServer));
+    js_set_native_key(https_namespace, make_string_item("createServer"), js_https_createServer);
     js_set_key_default(https_namespace, make_string_item("Server"),
                     js_new_native_constructor(js_https_createServer)); // alias
-    js_set_key_default(https_namespace, make_string_item("request"),
-                    js_new_native_function(js_https_request));
-    js_set_key_default(https_namespace, make_string_item("get"),
-                    js_new_native_function(js_https_get));
+    js_set_native_key(https_namespace, make_string_item("request"), js_https_request);
+    js_set_native_key(https_namespace, make_string_item("get"), js_https_get);
 
     // Agent — share HTTP agent storage, but use HTTPS constructor/prototype and
     // TLS-specific cache key formatting.
@@ -666,10 +657,8 @@ extern "C" Item js_get_https_namespace(void) {
     https_agent_prototype = js_new_object_with_class(JS_CLASS_AGENT);
     js_set_key_default(https_agent_prototype, make_string_item("constructor"), agent_ctor);
     js_mark_non_enumerable(https_agent_prototype, make_string_item("constructor"));
-    js_set_key_default(https_agent_prototype, make_string_item("getName"),
-                    js_new_native_function(js_https_agent_getName));
-    js_set_key_default(https_agent_prototype, make_string_item("destroy"),
-                    js_new_native_function(js_http_agent_destroy));
+    js_set_native_key(https_agent_prototype, make_string_item("getName"), js_https_agent_getName);
+    js_set_native_key(https_agent_prototype, make_string_item("destroy"), js_http_agent_destroy);
     js_set_key_default(https_agent_prototype, make_string_item("createConnection"),
                     js_new_native_rest_function(js_https_agent_createConnection));
     js_function_set_prototype(agent_ctor, https_agent_prototype);

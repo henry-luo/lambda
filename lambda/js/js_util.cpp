@@ -710,17 +710,7 @@ static bool js_util_inspect_constructor_name(Item value, char* out, int out_size
     return true;
 }
 
-static bool js_util_is_arguments_exotic(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
-            value.array->is_content != 1 || !js_array_has_props(value.array)) {
-        return false;
-    }
-    Map* props = js_array_props(value.array);
-    Item tag = js_get_key_default((Item){.map = props}, js_well_known_symbol_key(4));
-    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
-    String* s = it2s(tag);
-    return s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_arguments_exotic, (Item value), (js_is_arguments_exotic_array(value)))
 
 static bool js_util_is_arguments_deep_value(Item value) {
     TypeId type = get_type_id(value);
@@ -1086,25 +1076,16 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
 // util.types — type checking namespace
 // =============================================================================
 
-extern "C" Item js_util_types_isDate(Item value) {
-    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_DATE)};
-}
-
-extern "C" Item js_util_types_isRegExp(Item value) {
-    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_REGEXP)};
-}
-
-extern "C" Item js_util_types_isArray(Item value) {
-    return (Item){.item = b2it(get_type_id(value) == LMD_TYPE_ARRAY)};
-}
-
-extern "C" Item js_util_types_isMap(Item value) {
-    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_MAP)};
-}
-
-extern "C" Item js_util_types_isSet(Item value) {
-    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_SET)};
-}
+#define JS_UTIL_TYPE_TEST(name, expression) \
+    extern "C" Item name(Item value) { \
+        return (Item){.item = b2it(expression)}; \
+    }
+JS_UTIL_TYPE_TEST(js_util_types_isDate, js_class_id(value) == JS_CLASS_DATE)
+JS_UTIL_TYPE_TEST(js_util_types_isRegExp, js_class_id(value) == JS_CLASS_REGEXP)
+JS_UTIL_TYPE_TEST(js_util_types_isArray, get_type_id(value) == LMD_TYPE_ARRAY)
+JS_UTIL_TYPE_TEST(js_util_types_isMap, js_class_id(value) == JS_CLASS_MAP)
+JS_UTIL_TYPE_TEST(js_util_types_isSet, js_class_id(value) == JS_CLASS_SET)
+#undef JS_UTIL_TYPE_TEST
 
 // =============================================================================
 // util.promisify(original) — callback-last API to Promise wrapper
@@ -1206,14 +1187,9 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     executor_root.set(js_new_native_closure(js_util_promisify_executor, 2, exec_env, 4));
     return js_promise_create(executor_root.get());
 }
-
-extern "C" Item js_util_promisify_custom_symbol(void) {
-    return js_symbol_for(make_string_item("nodejs.util.promisify.custom"));
-}
-
-extern "C" Item js_util_custom_promisify_args_symbol(void) {
-    return js_symbol_for(make_string_item("nodejs.util.promisify.customArgs"));
-}
+JS_FORWARD_STATIC_ITEM(js_util_promisify_symbol, (const char* name), js_symbol_for, (make_string_item(name)))
+JS_FORWARD_ITEM(js_util_promisify_custom_symbol, (void), js_util_promisify_symbol, ("nodejs.util.promisify.custom"))
+JS_FORWARD_ITEM(js_util_custom_promisify_args_symbol, (void), js_util_promisify_symbol, ("nodejs.util.promisify.customArgs"))
 
 static bool js_util_is_promise_like(Item value) {
     if (js_class_id(value) == JS_CLASS_PROMISE) return true;
@@ -1367,10 +1343,7 @@ extern "C" Item js_util_callbackify(Item fn) {
 // =============================================================================
 // util.aborted(signal, resource)
 // =============================================================================
-
-static bool js_util_is_abort_signal(Item signal) {
-    return js_class_id(signal) == JS_CLASS_ABORT_SIGNAL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_abort_signal, (Item signal), (js_class_id(signal) == JS_CLASS_ABORT_SIGNAL))
 
 static bool js_util_is_resource_object(Item resource) {
     TypeId type = get_type_id(resource);
@@ -1610,12 +1583,7 @@ typedef struct JsDeepEqualContext {
     JsDeepEqualPair stack[4096];
     int depth;
 } JsDeepEqualContext;
-
-static bool js_util_deep_equal_is_object_like_type(TypeId type) {
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-           type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT ||
-           type == LMD_TYPE_VMAP;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
 
 static int js_util_deep_equal_enter(JsDeepEqualContext* ctx, Item a, Item b) {
     if (!ctx) return 1;
@@ -1655,10 +1623,7 @@ static bool js_util_has_own_key(Item object, const char* key, int len) {
         (Item){.item = s2it(heap_create_name(key, len))});
     return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
 }
-
-static Item js_util_deep_dispatch_value(Item value) {
-    return js_is_proxy(value) ? js_proxy_get_target(value) : value;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_util_deep_dispatch_value, (Item value), (js_is_proxy(value) ? js_proxy_get_target(value) : value))
 
 static TypeId js_util_deep_dispatch_type(Item value) {
     return get_type_id(js_util_deep_dispatch_value(value));
@@ -1710,12 +1675,7 @@ static bool js_util_is_regexp_like_value(Item value) {
     return js_util_has_constructor_prototype(value, "RegExp", 6) ||
            js_util_string_equals(js_get_key_default(value, js_well_known_symbol_key(4)), "RegExp");
 }
-
-static bool js_util_is_url_like_value(Item value) {
-    return get_type_id(value) == LMD_TYPE_MAP &&
-           (js_util_deep_dispatch_class(value) == JS_CLASS_URL ||
-            js_util_has_constructor_prototype(value, "URL", 3));
-}
+JS_FORWARD_STATIC_RETURN(bool, js_util_is_url_like_value, (Item value), get_type_id, (value) == LMD_TYPE_MAP && (js_util_deep_dispatch_class(value) == JS_CLASS_URL || js_util_has_constructor_prototype(value, "URL", 3)))
 
 static bool js_util_is_error_like_value(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
@@ -1731,10 +1691,7 @@ static bool js_util_descriptor_is_enumerable(Item desc) {
     Item enumerable = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &found);
     return found && js_is_truthy(enumerable);
 }
-
-static bool js_util_key_is_symbol(Item key) {
-    return get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_key_is_symbol, (Item key), (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE))
 
 static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
     // Typed-array indexed storage is already compared by raw bytes; materializing
@@ -1786,17 +1743,10 @@ static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
     return result;
 }
 
-static bool js_util_string_key_equal(Item a, Item b) {
-    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
-    String* as = it2s(a);
-    String* bs = it2s(b);
-    return as && bs && as->len == bs->len && memcmp(as->chars, bs->chars, as->len) == 0;
-}
-
 static bool js_util_same_property_key(Item a, Item b) {
     if (a.item == b.item) return true;
     if (js_util_key_is_symbol(a) || js_util_key_is_symbol(b)) return false;
-    return js_util_string_key_equal(a, b);
+    return it2b(js_strict_equal(a, b));
 }
 
 static Item js_util_find_matching_key(Item keys, Item key) {
@@ -2207,17 +2157,13 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
     return (Item){.item = b2it(false)};
 }
 
-extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
+static Item js_util_is_deep_equal_mode(Item a, Item b, bool strict) {
     JsDeepEqualContext ctx;
     memset(&ctx, 0, sizeof(ctx));
-    return js_util_isDeepEqual_impl(a, b, &ctx, true);
+    return js_util_isDeepEqual_impl(a, b, &ctx, strict);
 }
-
-extern "C" Item js_util_isDeepEqual(Item a, Item b) {
-    JsDeepEqualContext ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    return js_util_isDeepEqual_impl(a, b, &ctx, false);
-}
+JS_FORWARD_ITEM(js_util_isDeepStrictEqual, (Item a, Item b), js_util_is_deep_equal_mode, (a, b, true))
+JS_FORWARD_ITEM(js_util_isDeepEqual, (Item a, Item b), js_util_is_deep_equal_mode, (a, b, false))
 
 // additional util.types.* functions
 extern "C" Item js_util_types_isUint8Array(Item obj) {
@@ -2238,51 +2184,40 @@ extern "C" Item js_util_types_isPromise(Item obj) {
     return (Item){.item = b2it(false)};
 }
 
-extern "C" Item js_util_types_isFunction(Item obj) {
-    return (Item){.item = b2it(js_is_callable(obj))};
-}
-
-extern "C" Item js_util_types_isString(Item obj) {
-    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_STRING)};
-}
-
 extern "C" Item js_util_types_isNumber(Item obj) {
     TypeId t = get_type_id(obj);
     return (Item){.item = b2it(t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT)};
 }
 
-extern "C" Item js_util_types_isBoolean(Item obj) {
-    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_BOOL)};
-}
+#define JS_UTIL_TYPE_TEST_OBJ(name, expression) \
+    extern "C" Item name(Item obj) { \
+        return (Item){.item = b2it(expression)}; \
+    }
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isFunction, js_is_callable(obj))
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isString, get_type_id(obj) == LMD_TYPE_STRING)
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isBoolean, get_type_id(obj) == LMD_TYPE_BOOL)
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isNull, get_type_id(obj) == LMD_TYPE_NULL)
+#undef JS_UTIL_TYPE_TEST_OBJ
 
-extern "C" Item js_util_types_isNull(Item obj) {
-    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_NULL)};
-}
 
-extern "C" Item js_util_types_isUndefined(Item obj) {
-    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_UNDEFINED)};
-}
+#define JS_UTIL_TYPE_TEST_OBJ(name, expression) \
+    extern "C" Item name(Item obj) { \
+        return (Item){.item = b2it(expression)}; \
+    }
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isUndefined, get_type_id(obj) == LMD_TYPE_UNDEFINED)
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isNullOrUndefined,
+    get_type_id(obj) == LMD_TYPE_NULL || get_type_id(obj) == LMD_TYPE_UNDEFINED)
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isObject,
+    get_type_id(obj) == LMD_TYPE_MAP || get_type_id(obj) == LMD_TYPE_ARRAY ||
+    get_type_id(obj) == LMD_TYPE_FUNC)
+JS_UTIL_TYPE_TEST_OBJ(js_util_types_isPrimitive,
+    get_type_id(obj) == LMD_TYPE_NULL || get_type_id(obj) == LMD_TYPE_UNDEFINED ||
+    get_type_id(obj) == LMD_TYPE_BOOL || get_type_id(obj) == LMD_TYPE_INT ||
+    get_type_id(obj) == LMD_TYPE_FLOAT || get_type_id(obj) == LMD_TYPE_STRING)
 
-extern "C" Item js_util_types_isNullOrUndefined(Item obj) {
-    TypeId t = get_type_id(obj);
-    return (Item){.item = b2it(t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED)};
-}
-
-extern "C" Item js_util_types_isObject(Item obj) {
-    TypeId t = get_type_id(obj);
-    return (Item){.item = b2it(t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC)};
-}
-
-extern "C" Item js_util_types_isPrimitive(Item obj) {
-    TypeId t = get_type_id(obj);
-    return (Item){.item = b2it(t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED ||
-                                t == LMD_TYPE_BOOL || t == LMD_TYPE_INT ||
-                                t == LMD_TYPE_FLOAT || t == LMD_TYPE_STRING)};
-}
-
-extern "C" Item js_util_types_isBuffer(Item obj) {
-    return js_buffer_isBuffer(obj);
-}
+#define JS_UTIL_TYPE_FORWARD(name, target) \
+    extern "C" Item name(Item obj) { return target(obj); }
+JS_UTIL_TYPE_FORWARD(js_util_types_isBuffer, js_buffer_isBuffer)
 
 extern "C" Item js_util_types_isError(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
@@ -2298,37 +2233,19 @@ extern "C" Item js_util_types_isError(Item obj) {
 
 // ─── additional util.types.* functions ───────────────────────────────────────
 
-extern "C" Item js_util_types_isTypedArray(Item obj) {
-    return (Item){.item = b2it(js_is_typed_array(obj))};
-}
-
-extern "C" Item js_util_types_isArrayBuffer(Item obj) {
-    return (Item){.item = b2it(js_is_arraybuffer(obj))};
-}
-
-extern "C" Item js_util_types_isSharedArrayBuffer(Item obj) {
-    return (Item){.item = b2it(js_is_sharedarraybuffer(obj))};
-}
-
-extern "C" Item js_util_types_isAnyArrayBuffer(Item obj) {
-    return (Item){.item = b2it(js_is_arraybuffer(obj) || js_is_sharedarraybuffer(obj))};
-}
-
-extern "C" Item js_util_types_isDataView(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_DATA_VIEW)};
-}
-
-extern "C" Item js_util_types_isWeakMap(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_WEAK_MAP)};
-}
-
-extern "C" Item js_util_types_isWeakSet(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_WEAK_SET)};
-}
-
-extern "C" Item js_util_types_isWeakRef(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_WEAK_REF)};
-}
+#define JS_UTIL_TYPE_TEST(name, expression) \
+    extern "C" Item name(Item obj) { \
+        return (Item){.item = b2it(expression)}; \
+    }
+JS_UTIL_TYPE_TEST(js_util_types_isTypedArray, js_is_typed_array(obj))
+JS_UTIL_TYPE_TEST(js_util_types_isArrayBuffer, js_is_arraybuffer(obj))
+JS_UTIL_TYPE_TEST(js_util_types_isSharedArrayBuffer, js_is_sharedarraybuffer(obj))
+JS_UTIL_TYPE_TEST(js_util_types_isAnyArrayBuffer,
+    js_is_arraybuffer(obj) || js_is_sharedarraybuffer(obj))
+JS_UTIL_TYPE_TEST(js_util_types_isDataView, js_class_id(obj) == JS_CLASS_DATA_VIEW)
+JS_UTIL_TYPE_TEST(js_util_types_isWeakMap, js_class_id(obj) == JS_CLASS_WEAK_MAP)
+JS_UTIL_TYPE_TEST(js_util_types_isWeakSet, js_class_id(obj) == JS_CLASS_WEAK_SET)
+JS_UTIL_TYPE_TEST(js_util_types_isWeakRef, js_class_id(obj) == JS_CLASS_WEAK_REF)
 
 static bool is_typed_array_type(Item obj, JsTypedArrayType target_type) {
     if (!js_is_typed_array(obj)) return false;
@@ -2337,116 +2254,61 @@ static bool is_typed_array_type(Item obj, JsTypedArrayType target_type) {
     return ta && ta->element_type == target_type;
 }
 
-extern "C" Item js_util_types_isUint16Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_UINT16))};
-}
+#define JS_UTIL_TYPED_ARRAY_TEST(name, type) \
+    JS_UTIL_TYPE_TEST(name, is_typed_array_type(obj, type))
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isUint16Array, JS_TYPED_UINT16)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isUint32Array, JS_TYPED_UINT32)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isInt8Array, JS_TYPED_INT8)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isInt16Array, JS_TYPED_INT16)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isInt32Array, JS_TYPED_INT32)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isFloat32Array, JS_TYPED_FLOAT32)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isFloat16Array, JS_TYPED_FLOAT16)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isFloat64Array, JS_TYPED_FLOAT64)
+JS_UTIL_TYPED_ARRAY_TEST(js_util_types_isUint8ClampedArray, JS_TYPED_UINT8_CLAMPED)
+#undef JS_UTIL_TYPED_ARRAY_TEST
+JS_UTIL_TYPE_TEST(js_util_types_isNumberObject, js_class_id(obj) == JS_CLASS_NUMBER)
+JS_UTIL_TYPE_TEST(js_util_types_isStringObject, js_class_id(obj) == JS_CLASS_STRING)
+JS_UTIL_TYPE_TEST(js_util_types_isBooleanObject, js_class_id(obj) == JS_CLASS_BOOLEAN)
+JS_UTIL_TYPE_TEST(js_util_types_isSymbolObject, js_class_id(obj) == JS_CLASS_SYMBOL)
+JS_UTIL_TYPE_FORWARD(js_util_types_isNativeError, js_util_types_isError)
 
-extern "C" Item js_util_types_isUint32Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_UINT32))};
-}
+#define JS_UTIL_CLASS_TEST(name, expression) \
+    JS_UTIL_TYPE_TEST(name, expression)
+JS_UTIL_CLASS_TEST(js_util_types_isBoxedPrimitive,
+    js_class_id(obj) == JS_CLASS_NUMBER || js_class_id(obj) == JS_CLASS_STRING ||
+    js_class_id(obj) == JS_CLASS_BOOLEAN || js_class_id(obj) == JS_CLASS_SYMBOL ||
+    js_class_id(obj) == JS_CLASS_BIGINT)
+// these Node predicates have no native representation in this runtime
+JS_UTIL_TYPE_TEST(js_util_types_isProxy, ((void)(obj), false))
+JS_UTIL_TYPE_TEST(js_util_types_isExternal, ((void)(obj), false))
 
-extern "C" Item js_util_types_isInt8Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_INT8))};
-}
-
-extern "C" Item js_util_types_isInt16Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_INT16))};
-}
-
-extern "C" Item js_util_types_isInt32Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_INT32))};
-}
-
-extern "C" Item js_util_types_isFloat32Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_FLOAT32))};
-}
-
-extern "C" Item js_util_types_isFloat16Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_FLOAT16))};
-}
-
-extern "C" Item js_util_types_isFloat64Array(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_FLOAT64))};
-}
-
-extern "C" Item js_util_types_isUint8ClampedArray(Item obj) {
-    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_UINT8_CLAMPED))};
-}
-
-extern "C" Item js_util_types_isNumberObject(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_NUMBER)};
-}
-
-extern "C" Item js_util_types_isStringObject(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_STRING)};
-}
-
-extern "C" Item js_util_types_isBooleanObject(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_BOOLEAN)};
-}
-
-extern "C" Item js_util_types_isSymbolObject(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_SYMBOL)};
-}
-
-extern "C" Item js_util_types_isNativeError(Item obj) {
-    return js_util_types_isError(obj);
-}
-
-extern "C" Item js_util_types_isBoxedPrimitive(Item obj) {
-    JsClass cls = js_class_id(obj);
-    bool boxed = (cls == JS_CLASS_NUMBER || cls == JS_CLASS_STRING ||
-                  cls == JS_CLASS_BOOLEAN || cls == JS_CLASS_SYMBOL ||
-                  cls == JS_CLASS_BIGINT);
-    return (Item){.item = b2it(boxed)};
-}
-
-extern "C" Item js_util_types_isProxy(Item obj) {
-    // can't detect Proxy from the outside — always return false
-    (void)obj;
-    return (Item){.item = b2it(false)};
-}
-
-extern "C" Item js_util_types_isExternal(Item obj) {
-    // not supported — always return false
-    (void)obj;
-    return (Item){.item = b2it(false)};
-}
-
-extern "C" Item js_util_types_isGeneratorFunction(Item obj) {
+static Item js_util_types_function_flag(Item obj, uint32_t flag,
+        bool exclude_generator) {
     if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
     JsFunction* fn = (JsFunction*)obj.function;
-    return (Item){.item = b2it(fn && (fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR))};
+    bool set = fn && (fn->flags & flag);
+    if (exclude_generator) set = set && !(fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR);
+    return (Item){.item = b2it(set)};
 }
+JS_FORWARD_ITEM(js_util_types_isGeneratorFunction, (Item obj), js_util_types_function_flag, (obj, JS_UTIL_FUNC_FLAG_GENERATOR, false))
 
-extern "C" Item js_util_types_isGeneratorObject(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_GENERATOR)};
-}
+JS_UTIL_CLASS_TEST(js_util_types_isGeneratorObject, js_class_id(obj) == JS_CLASS_GENERATOR)
+JS_FORWARD_ITEM(js_util_types_isAsyncFunction, (Item obj), js_util_types_function_flag, (obj, JS_UTIL_FUNC_FLAG_ASYNC, true))
 
-extern "C" Item js_util_types_isAsyncFunction(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
-    JsFunction* fn = (JsFunction*)obj.function;
-    return (Item){.item = b2it(fn && (fn->flags & JS_UTIL_FUNC_FLAG_ASYNC) &&
-        !(fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR))};
-}
-
-extern "C" Item js_util_types_isMapIterator(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_MAP_ITERATOR)};
-}
-
-extern "C" Item js_util_types_isSetIterator(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_SET_ITERATOR)};
-}
-
-extern "C" Item js_util_types_isArgumentsObject(Item obj) {
-    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_ARGUMENTS)};
-}
+JS_UTIL_CLASS_TEST(js_util_types_isMapIterator, js_class_id(obj) == JS_CLASS_MAP_ITERATOR)
+JS_UTIL_CLASS_TEST(js_util_types_isSetIterator, js_class_id(obj) == JS_CLASS_SET_ITERATOR)
+JS_UTIL_CLASS_TEST(js_util_types_isArgumentsObject, js_class_id(obj) == JS_CLASS_ARGUMENTS)
 
 extern "C" Item js_util_types_isModuleNamespaceObject(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
     Item marker = js_get_key_default(obj, make_string_item("__vm_module_namespace__"));
     return (Item){.item = b2it(get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker))};
 }
+
+#undef JS_UTIL_CLASS_TEST
+#undef JS_UTIL_TYPE_TEST_OBJ
+#undef JS_UTIL_TYPE_TEST
+#undef JS_UTIL_TYPE_FORWARD
 
 extern "C" Item js_util_getCallSites(Item frame_count_item) {
     int64_t frame_count = 10;
@@ -2749,17 +2611,10 @@ static Item js_util_extend(Item target, Item source) {
 // =============================================================================
 
 #define util_namespace (js_runtime_state.util.namespace_object)
-
-static bool util_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.util.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, util_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.util.roots)))
 
 template <typename Target>
-static void js_util_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
-    js_install_native_method(ns, name, target, adapter_arity);
-}
+JS_FORWARD_STATIC_VOID( js_util_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 extern "C" Item js_get_util_namespace(void) {
     if (!util_ensure_roots()) return ItemError;

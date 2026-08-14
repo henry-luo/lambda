@@ -814,10 +814,7 @@ extern "C" Item js_buffer_isBuffer(Item obj) {
         return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
 }
-
-static Item js_buffer_has_instance(Item value) {
-    return js_buffer_isBuffer(value);
-}
+JS_FORWARD_STATIC_ITEM(js_buffer_has_instance, (Item value), js_buffer_isBuffer, (value))
 
 // ─── Buffer.isUtf8(input) ──────────────────────────────────────────────────
 static Item js_buffer_isUtf8(Item input) {
@@ -976,16 +973,7 @@ static bool normalize_encoding(Item enc_item, char* out, int out_size) {
     out[len] = '\0';
     return true;
 }
-
-static bool is_known_encoding(const char* enc) {
-    return strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0 ||
-           strcmp(enc, "hex") == 0 ||
-           strcmp(enc, "base64") == 0 || strcmp(enc, "base64url") == 0 ||
-           strcmp(enc, "ascii") == 0 || strcmp(enc, "latin1") == 0 ||
-           strcmp(enc, "binary") == 0 ||
-           strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 ||
-           strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_known_encoding, (const char* enc), (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0 || strcmp(enc, "hex") == 0 || strcmp(enc, "base64") == 0 || strcmp(enc, "base64url") == 0 || strcmp(enc, "ascii") == 0 || strcmp(enc, "latin1") == 0 || strcmp(enc, "binary") == 0 || strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 || strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0))
 
 extern "C" Item js_buffer_byteLength(Item str_item, Item enc_item) {
     if (get_type_id(str_item) == LMD_TYPE_STRING) {
@@ -1561,10 +1549,7 @@ static int encode_string_bytes(const char* str, int str_len, const char* enc,
 }
 
 // ─── buf.indexOf(value[, byteOffset[, encoding]]) ──────────────────────────
-static bool is_ucs2_enc(const char* enc) {
-    return strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 ||
-           strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, is_ucs2_enc, (const char* enc), (strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 || strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0))
 
 static Item buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
         size_t enc_size, uint8_t* enc_buf, int enc_buf_size,
@@ -1698,10 +1683,7 @@ static Item js_buffer_search(Item buf, Item value, Item offset_item, Item enc_it
         is_ucs2_enc(enc));
     return (Item){.item = i2it(found)};
 }
-
-extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item enc_item) {
-    return js_buffer_search(buf, value, offset_item, enc_item, false);
-}
+JS_FORWARD_ITEM(js_buffer_indexOf, (Item buf, Item value, Item offset_item, Item enc_item), js_buffer_search, (buf, value, offset_item, enc_item, false))
 
 // ─── buf.slice(start?, end?) — returns a new Buffer ─────────────────────────
 extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item) {
@@ -1747,9 +1729,7 @@ extern "C" Item js_buffer_allocUnsafe(Item size_item) {
 }
 
 // ─── buf.subarray(start?, end?) — alias for slice ───────────────────────────
-extern "C" Item js_buffer_subarray(Item buf, Item start_item, Item end_item) {
-    return js_buffer_slice(buf, start_item, end_item);
-}
+JS_FORWARD_ITEM(js_buffer_subarray, (Item buf, Item start_item, Item end_item), js_buffer_slice, (buf, start_item, end_item))
 
 // ─── buf.includes(value[, byteOffset[, encoding]]) ─────────────────────────
 extern "C" Item js_buffer_includes(Item buf, Item value, Item offset_item, Item enc_item) {
@@ -1758,9 +1738,7 @@ extern "C" Item js_buffer_includes(Item buf, Item value, Item offset_item, Item 
 }
 
 // ─── buf.lastIndexOf(value[, byteOffset[, encoding]]) ──────────────────────
-extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, Item enc_item) {
-    return js_buffer_search(buf, value, offset_item, enc_item, true);
-}
+JS_FORWARD_ITEM(js_buffer_lastIndexOf, (Item buf, Item value, Item offset_item, Item enc_item), js_buffer_search, (buf, value, offset_item, enc_item, true))
 
 // ─── Offset validation helper for read/write methods ────────────────────────
 // Returns the validated offset (>= 0), or -1 if an error was thrown.
@@ -2028,25 +2006,15 @@ extern "C" Item js_buffer_swap64(Item buf) { return js_buffer_swap_words(buf, 8)
 
 #define buffer_namespace (js_runtime_state.buffer.namespace_object)
 #define buffer_prototype (js_runtime_state.buffer.prototype)
-
-static bool buffer_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.buffer.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, buffer_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.buffer.roots)))
 
 template <typename Target>
-static void buf_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
-    js_install_native_method(ns, name, target, adapter_arity);
-}
+JS_FORWARD_STATIC_VOID( buf_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 static Item buffer_iterator_key(const char* name, int len) {
     return (Item){.item = s2it(heap_create_name(name, len))};
 }
-
-extern "C" Item js_buffer_iterator_identity(void) {
-    return js_get_current_this();
-}
+JS_FORWARD_ITEM(js_buffer_iterator_identity, (void), js_get_current_this, ())
 
 extern "C" Item js_buffer_iterator_next(void) {
     Item iter = js_get_current_this();
@@ -2118,8 +2086,8 @@ static Item js_buffer_iterator_new(Item target, int kind) {
     js_set_key_default(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(0)});
     js_set_key_default(iter, buffer_iterator_key("__kind__", 8), (Item){.item = i2it(kind)});
     js_set_key_default(iter, buffer_iterator_key("__done__", 8), (Item){.item = b2it(false)});
-    js_set_key_default(iter, make_string_item("next"), js_new_native_function(js_buffer_iterator_next));
-    js_set_key_default(iter, js_well_known_symbol_key(1), js_new_native_function(js_buffer_iterator_identity));
+    js_set_native_key(iter, make_string_item("next"), js_buffer_iterator_next);
+    js_set_native_key(iter, js_well_known_symbol_key(1), js_buffer_iterator_identity);
     return iter;
 }
 
@@ -2241,10 +2209,7 @@ JS_BUFFER_WRITE_BIGINT(writeBigUInt64BE, false, true) JS_BUFFER_WRITE_BIGINT(wri
 #undef JS_BUFFER_WRITE_BIGINT
 
 // ─── Static Buffer.compare(buf1, buf2) ─────────────────────────────────────
-
-extern "C" Item js_buffer_compare_static(Item a, Item b) {
-    return js_buffer_compare(a, b);
-}
+JS_FORWARD_ITEM(js_buffer_compare_static, (Item a, Item b), js_buffer_compare, (a, b))
 
 // ─── Buffer.allocUnsafeSlow(size) ───────────────────────────────────────────
 
@@ -2308,15 +2273,12 @@ extern "C" Item js_buf_inst_compare(Item other) {
     }
     return js_buffer_compare(THIS, other);
 }
-extern "C" Item js_buf_inst_keys() {
-    return js_buffer_iterator_new(THIS, 0);
-}
-extern "C" Item js_buf_inst_values() {
-    return js_buffer_iterator_new(THIS, 1);
-}
-extern "C" Item js_buf_inst_entries() {
-    return js_buffer_iterator_new(THIS, 2);
-}
+#define JS_BUF_INST_ITERATOR(name, kind) \
+extern "C" Item name() { return js_buffer_iterator_new(THIS, kind); }
+JS_BUF_INST_ITERATOR(js_buf_inst_keys, 0)
+JS_BUF_INST_ITERATOR(js_buf_inst_values, 1)
+JS_BUF_INST_ITERATOR(js_buf_inst_entries, 2)
+#undef JS_BUF_INST_ITERATOR
 
 // These adapters only bind the receiver; keeping their ABI-shaped names lets
 // the prototype table pass the same native callback without another dispatch.

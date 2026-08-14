@@ -6,8 +6,8 @@
 // declaration with the real Lambda grammar (Tree-sitter), cross-checks it
 // against the bindings, and compiles per-type member records plus a
 // content-hashed name index dual-keyed on snake_case and camelCase. The
-// generic host-object paths consult these records before a type's host_ops,
-// so a fully declared type needs no hand-written dispatch at all.
+// generic host-object paths consult these records, so a fully declared type
+// needs no hand-written dispatch at all.
 
 #include "jube_interface.h"
 #include "jube_registry.h"
@@ -49,27 +49,36 @@ struct JubeMemberRecord {
     bool enumerable;              // fields only; aliases/constants/methods opt out
     bool can_raise;
     int arity;                    // methods: declared parameter count
+    const JubeTypeDef* result_type; // resolved field/method result type, if declared
     int64_t const_int;            // CONST int payload
     char* const_str;              // CONST string payload (owned copy, or NULL)
     bool const_is_str;
     Item method_fn;               // cached function object (lazy, GC-rooted)
     bool method_fn_rooted;
-    JubeMemberRecord* next_same_name;  // guard chain, declaration order
 };
 
 typedef struct JubeTypeRecord {
     const JubeTypeDef* type;      // brand: vmap->host_type of instances
     const JubeTypeBinding* binding;
+    struct JubeTypeRecord* base_record;
+    int type_slot;                // process-stable registry slot
+    int family_root_slot;         // base slot shared by derived records
     JubeMemberRecord* members;    // stable array, declaration order
     int member_count;
-    HashMap* index;               // content-hashed name -> record chain head
+    HashMap* index;               // content-hashed name -> one member record
     Item prototype;               // lazy per-type prototype object (GC-rooted)
     bool prototype_rooted;
 } JubeTypeRecord;
 
+typedef struct JubeTypeIndexEntry {
+    const void* type;
+    JubeTypeRecord* record;
+} JubeTypeIndexEntry;
+
 #define JUBE_TYPE_RECORD_CAPACITY 64
 static JubeTypeRecord* s_type_records[JUBE_TYPE_RECORD_CAPACITY];
 static int s_type_record_count = 0;
+static HashMap* s_type_index = NULL;
 
 typedef struct JubeMemberIndexEntry {
     const char* chars;
@@ -88,6 +97,19 @@ static int jube_member_index_compare(const void* a, const void* b, void* udata) 
     const JubeMemberIndexEntry* eb = (const JubeMemberIndexEntry*)b;
     if (ea->len != eb->len) return 1;
     return memcmp(ea->chars, eb->chars, ea->len);
+}
+
+static uint64_t jube_type_index_hash(const void* item, uint64_t seed0,
+                                     uint64_t seed1) {
+    const JubeTypeIndexEntry* entry = (const JubeTypeIndexEntry*)item;
+    return hashmap_sip(&entry->type, sizeof(entry->type), seed0, seed1);
+}
+
+static int jube_type_index_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const JubeTypeIndexEntry* ea = (const JubeTypeIndexEntry*)a;
+    const JubeTypeIndexEntry* eb = (const JubeTypeIndexEntry*)b;
+    return ea->type == eb->type ? 0 : 1;
 }
 
 // ============================================================================
@@ -143,15 +165,11 @@ static char* jube_derive_camel(const char* snake) {
 }
 
 static JubeTypeRecord* jube_record_for_type(const void* host_type) {
-    if (!host_type) return NULL;
-    for (int i = 0; i < s_type_record_count; i++) {
-        if ((const void*)s_type_records[i]->type == host_type) return s_type_records[i];
-    }
-    return NULL;
-}
-
-static const JubeHostObjectOps* jube_legacy_ops(JubeTypeRecord* trec) {
-    return trec->binding ? trec->binding->legacy_ops : NULL;
+    if (!host_type || !s_type_index) return NULL;
+    JubeTypeIndexEntry probe = {host_type, NULL};
+    const JubeTypeIndexEntry* found =
+        (const JubeTypeIndexEntry*)hashmap_get(s_type_index, &probe);
+    return found ? found->record : NULL;
 }
 
 static JubeTypeRecord* jube_record_for(Item receiver) {
@@ -168,9 +186,9 @@ void* jube_host_identity(Item item) {
     return item.vmap->host_data;
 }
 
-// resolve a key against the type's index; guard chains evaluate in
-// declaration order (first matching guard wins)
+// resolve a key against the type's compiled ordinal index.
 static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver, Item key) {
+    (void)receiver;
     const char* chars = NULL;
     uint32_t len = 0;
     if (!trec->index || !jube_item_key_chars(key, &chars, &len)) return NULL;
@@ -178,11 +196,7 @@ static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver
     const JubeMemberIndexEntry* found =
         (const JubeMemberIndexEntry*)hashmap_get(trec->index, &probe);
     if (!found) return NULL;
-    for (JubeMemberRecord* rec = found->rec; rec; rec = rec->next_same_name) {
-        if (rec->bind && rec->bind->guard && !rec->bind->guard(receiver)) continue;
-        return rec;
-    }
-    return NULL;
+    return found->rec;
 }
 
 // ============================================================================
@@ -354,6 +368,158 @@ bool jube_type_has_interface(const JubeTypeDef* type) {
     return jube_record_for_type((const void*)type) != NULL;
 }
 
+static JubeTypeRecord* jube_record_for_query(const JubeTypeDef* type, int ordinal) {
+    JubeTypeRecord* trec = jube_record_for_type((const void*)type);
+    if (!trec || ordinal < 0 || ordinal >= trec->member_count) return NULL;
+    return trec;
+}
+
+static uint64_t jube_digest_mix(uint64_t hash, uint64_t value) {
+    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    return hash;
+}
+
+static uint64_t jube_digest_text(uint64_t hash, const char* text) {
+    size_t len = text ? strlen(text) : 0;
+    hash = jube_digest_mix(hash, (uint64_t)len);
+    if (len > 0) hash = jube_digest_mix(hash, hashmap_xxhash3(text, len, 0, 0));
+    return hash;
+}
+
+extern "C" uint64_t jube_interface_registry_digest(void) {
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    hash = jube_digest_mix(hash, (uint64_t)JUBE_ABI_VERSION);
+    hash = jube_digest_mix(hash, (uint64_t)s_type_record_count);
+    for (int i = 0; i < s_type_record_count; i++) {
+        JubeTypeRecord* trec = s_type_records[i];
+        if (!trec) continue;
+        hash = jube_digest_text(hash, trec->type ? trec->type->name : NULL);
+        hash = jube_digest_mix(hash, (uint64_t)trec->family_root_slot);
+        hash = jube_digest_mix(hash, (uint64_t)trec->member_count);
+        for (int ordinal = 0; ordinal < trec->member_count; ordinal++) {
+            JubeMemberRecord* rec = &trec->members[ordinal];
+            hash = jube_digest_text(hash, rec->snake_name);
+            hash = jube_digest_text(hash, rec->camel_name);
+            hash = jube_digest_mix(hash, (uint64_t)rec->kind);
+            hash = jube_digest_mix(hash, (uint64_t)rec->arity);
+            hash = jube_digest_mix(hash, rec->can_raise ? 1 : 0);
+            hash = jube_digest_text(hash,
+                rec->result_type ? rec->result_type->name : NULL);
+            hash = jube_digest_text(hash, rec->bind ? rec->bind->name : NULL);
+        }
+    }
+    return hash;
+}
+
+extern "C" const JubeTypeDef* jube_iface_type_by_name(const char* name,
+                                                       uint32_t len) {
+    if (!name || len == 0) return NULL;
+    for (int i = 0; i < s_type_record_count; i++) {
+        JubeTypeRecord* trec = s_type_records[i];
+        if (!trec || !trec->type || !trec->type->name) continue;
+        if (strlen(trec->type->name) == len && memcmp(trec->type->name, name, len) == 0) {
+            return trec->type;
+        }
+    }
+    return NULL;
+}
+
+extern "C" int jube_iface_type_slot(const JubeTypeDef* type) {
+    JubeTypeRecord* trec = jube_record_for_type((const void*)type);
+    return trec ? trec->family_root_slot : -1;
+}
+
+extern "C" int jube_member_count(const JubeTypeDef* type) {
+    JubeTypeRecord* trec = jube_record_for_type((const void*)type);
+    return trec ? trec->member_count : -1;
+}
+
+extern "C" const char* jube_member_name_at(const JubeTypeDef* type, int ordinal,
+                                             bool camel_case) {
+    JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
+    if (!trec) return NULL;
+    return camel_case ? trec->members[ordinal].camel_name :
+                        trec->members[ordinal].snake_name;
+}
+
+extern "C" int jube_member_ordinal(const JubeTypeDef* type, const char* name,
+                                    uint32_t len) {
+    JubeTypeRecord* trec = jube_record_for_type((const void*)type);
+    if (!trec || !name || len == 0) return -1;
+    for (int i = 0; i < trec->member_count; i++) {
+        JubeMemberRecord* rec = &trec->members[i];
+        if ((strlen(rec->snake_name) == len && memcmp(rec->snake_name, name, len) == 0) ||
+            (strlen(rec->camel_name) == len && memcmp(rec->camel_name, name, len) == 0)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+extern "C" uint8_t jube_member_kind_at(const JubeTypeDef* type, int ordinal) {
+    JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
+    return trec ? trec->members[ordinal].kind : UINT8_MAX;
+}
+
+extern "C" bool jube_member_can_raise_at(const JubeTypeDef* type, int ordinal) {
+    JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
+    return trec ? trec->members[ordinal].can_raise : false;
+}
+
+extern "C" int jube_member_arity_at(const JubeTypeDef* type, int ordinal) {
+    JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
+    return trec ? trec->members[ordinal].arity : -1;
+}
+
+extern "C" const JubeTypeDef* jube_member_result_type_at(const JubeTypeDef* type,
+                                                          int ordinal) {
+    JubeTypeRecord* trec = jube_record_for_query(type, ordinal);
+    return trec ? trec->members[ordinal].result_type : NULL;
+}
+
+static JubeMemberRecord* jube_record_at_guarded(Item receiver, int slot,
+                                                uint32_t ordinal,
+                                                JubeTypeRecord** out_trec) {
+    if (out_trec) *out_trec = NULL;
+    JubeTypeRecord* trec = jube_record_for(receiver);
+    if (!trec || slot < 0 || trec->family_root_slot != slot ||
+            ordinal >= (uint32_t)trec->member_count) return NULL;
+    if (out_trec) *out_trec = trec;
+    return &trec->members[ordinal];
+}
+
+static int jube_dispatch_get_record(Item receiver, JubeMemberRecord* rec, Item* out) {
+    if (!rec || !out) return 0;
+    switch (rec->kind) {
+    case JUBE_MEMBER_CONST:
+        *out = jube_member_const_item(rec);
+        return 1;
+    case JUBE_MEMBER_METHOD:
+        // A method may have an availability handler for a feature-gated
+        // surface; the handler owns the semantic predicate, not the kernel.
+        if (rec->bind && rec->bind->get && !rec->bind->get(receiver, out)) return 0;
+        *out = jube_member_method_item(receiver, rec);
+        return 1;
+    default:
+        if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
+        return 0;
+    }
+}
+
+static int jube_dispatch_set_record(Item receiver, JubeTypeRecord* trec,
+                                    JubeMemberRecord* rec, Item value, Item* out) {
+    if (!trec || !rec || !out) return 0;
+    if (rec->readonly || rec->kind != JUBE_MEMBER_FIELD) {
+        if (trec->binding && trec->binding->named_set && receiver.vmap->host_data &&
+                trec->binding->named_set(receiver, jube_name_item(rec->camel_name),
+                                          value, out)) return 1;
+        *out = value;
+        return 1;
+    }
+    if (rec->bind && rec->bind->set && rec->bind->set(receiver, value, out)) return 1;
+    return 0;
+}
+
 static Item jube_type_prototype_for(JubeTypeRecord* trec) {
     if (trec->prototype_rooted) return trec->prototype;
     const JubeHostAPI* host = jube_internal_host_api();
@@ -370,6 +536,15 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
         }
     } else {
         trec->prototype = host->value->new_object();
+    }
+    if (trec->base_record) {
+        // DOM4 subtypes expose the declared interface hierarchy through the
+        // ordinary prototype chain while their compiled member rows retain
+        // the inherited prefix used by ordinal dispatch.
+        Item parent = jube_type_prototype_for(trec->base_record);
+        if (get_type_id(parent) == LMD_TYPE_MAP) {
+            js_set_prototype(trec->prototype, parent);
+        }
     }
     host->gc->register_root(&trec->prototype.item);
     trec->prototype_rooted = true;
@@ -418,29 +593,54 @@ extern "C" Item jube_type_prototype(const JubeTypeDef* type) {
     return jube_type_prototype_for(trec);
 }
 
+extern "C" int jube_member_get_by_ordinal(Item receiver, int slot,
+                                           uint32_t ordinal, Item* out) {
+    JubeTypeRecord* trec = NULL;
+    JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
+    if (!trec || !rec || !out) return 0;
+    if (!receiver.vmap->host_data) {
+        // the native payload is gone, but the wrapper identity remains a valid husk.
+        *out = jube_undefined_item();
+        return 1;
+    }
+    return jube_dispatch_get_record(receiver, rec, out);
+}
+
+extern "C" int jube_member_set_by_ordinal(Item receiver, int slot,
+                                           uint32_t ordinal, Item value, Item* out) {
+    JubeTypeRecord* trec = NULL;
+    JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
+    if (!trec || !rec || !out) return 0;
+    if (!receiver.vmap->host_data) {
+        *out = jube_undefined_item();
+        return 1;
+    }
+    return jube_dispatch_set_record(receiver, trec, rec, value, out);
+}
+
+extern "C" int jube_member_call_by_ordinal(Item receiver, int slot,
+                                            uint32_t ordinal, Item* args, int argc,
+                                            Item* out) {
+    JubeTypeRecord* trec = NULL;
+    JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
+    if (!trec || !rec || !out || rec->kind != JUBE_MEMBER_METHOD ||
+            !rec->bind || !rec->bind->call) return 0;
+    if (!receiver.vmap->host_data) return 0;
+    return rec->bind->call(receiver, args, argc, out) ? 1 : 0;
+}
+
 int jube_member_get(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    if (!receiver.vmap->host_data && !jube_legacy_ops(trec)) {
+    if (!receiver.vmap->host_data) {
         // neutered husk (post-release / document teardown): every read degrades
         // to undefined instead of touching the freed native payload
         *out = jube_undefined_item();
         return 1;
     }
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
-    if (rec) {
-        switch (rec->kind) {
-        case JUBE_MEMBER_CONST:
-            *out = jube_member_const_item(rec);
-            return 1;
-        case JUBE_MEMBER_METHOD:
-            *out = jube_member_method_item(receiver, rec);
-            return 1;
-        default:
-            if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
-            *out = jube_undefined_item();
-            return 1;
-        }
+    if (rec && jube_dispatch_get_record(receiver, rec, out)) {
+        return 1;
     }
     // array-index reads (sheet[0]) resolve through the indexed hook; JS index
     // keys arrive as ints or all-digit strings depending on the access path
@@ -462,10 +662,6 @@ int jube_member_get(Item receiver, Item key, Item* out) {
         }
         if (index >= 0 && trec->binding->indexed_get(receiver, index, out)) return 1;
     }
-    // transitional: unconverted names on a migrating type fall through to the
-    // caller's host_ops path, which owns key conversion (vmap snake->camel)
-    // and the legacy chains/side-table expandos/per-kind prototypes
-    if (jube_legacy_ops(trec)) return 0;
     if (trec->binding && trec->binding->named_get &&
             trec->binding->named_get(receiver, key, out)) {
         return 1;
@@ -503,51 +699,20 @@ int jube_member_projected_get(Item receiver, Item key, Item* out) {
     if (!rec) return 0;
     // Host own-property descriptors need declared record members only; full
     // jube_member_get may now continue into named hooks and expando fallback.
-    switch (rec->kind) {
-    case JUBE_MEMBER_CONST:
-        *out = jube_member_const_item(rec);
-        return 1;
-    case JUBE_MEMBER_METHOD:
-        *out = jube_member_method_item(receiver, rec);
-        return 1;
-    default:
-        if (rec->bind && rec->bind->get && rec->bind->get(receiver, out)) return 1;
-        *out = jube_undefined_item();
-        return 1;
-    }
+    return jube_dispatch_get_record(receiver, rec, out);
 }
 
 int jube_member_set(Item receiver, Item key, Item value, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    if (!receiver.vmap->host_data && !jube_legacy_ops(trec)) {
+    if (!receiver.vmap->host_data) {
         *out = jube_undefined_item();
         return 1;
     }
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
-    if (rec) {
-        if (rec->readonly || rec->kind != JUBE_MEMBER_FIELD) {
-            // migrating types: a converted getter without a converted setter
-            // must keep the legacy write behavior (id/className writes)
-            if (jube_legacy_ops(trec)) return 0;
-            if (trec->binding && trec->binding->named_set && receiver.vmap->host_data &&
-                    trec->binding->named_set(receiver, jube_name_item(rec->camel_name),
-                                             value, out)) {
-                // Getter-only projected DOM rows still need the record-owned
-                // named setter under the canonical JS name (className, htmlFor)
-                // after VMap snake/camel fallback is removed.
-                return 1;
-            }
-            // declared read-only surface swallows writes (pinned DOM1 behavior:
-            // no expando shadowing of projected members)
-            *out = value;
-            return 1;
-        }
-        if (rec->bind && rec->bind->set && rec->bind->set(receiver, value, out)) return 1;
-        *out = value;
+    if (rec && jube_dispatch_set_record(receiver, trec, rec, value, out)) {
         return 1;
     }
-    if (jube_legacy_ops(trec)) return 0;
     if (trec->binding && trec->binding->named_set &&
             trec->binding->named_set(receiver, key, value, out)) {
         return 1;
@@ -570,7 +735,6 @@ int jube_member_has(Item receiver, Item key, Item* out) {
             trec->binding->object_has(receiver, key, out)) {
         return 1;
     }
-    if (!present && jube_legacy_ops(trec)) return 0;
     if (!present && trec->binding && trec->binding->named_has &&
             receiver.vmap->host_data &&
             trec->binding->named_has(receiver, key, out)) {
@@ -598,7 +762,6 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
             trec->binding->object_delete(receiver, key, out)) {
         return 1;
     }
-    if (jube_legacy_ops(trec)) return 0;
     // open-name members (CSS properties on style objects) refuse deletion,
     // matching the projected-property non-configurable contract
     if (trec->binding && trec->binding->named_has && receiver.vmap->host_data) {
@@ -659,7 +822,6 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
         *out = jube_make_data_descriptor(value_root.get(), !rec->readonly, false);
         return 1;
     }
-    if (jube_legacy_ops(trec)) return 0;
     if (receiver_root.get().vmap->host_data) {
         expando_root.set(jube_expando_object(receiver_root.get(), false));
         if (get_type_id(expando_root.get()) == LMD_TYPE_MAP) {
@@ -691,13 +853,11 @@ int jube_member_own_keys(Item receiver, Item* out) {
             trec->binding->object_own_keys(rooted_receiver.get(), out)) {
         return 1;
     }
-    if (jube_legacy_ops(trec)) return 0;
     const JubeHostAPI* host = jube_internal_host_api();
     rooted_keys.set(host->value->array_new(0));
     for (int i = 0; i < trec->member_count; i++) {
         JubeMemberRecord* rec = &trec->members[i];
         if (!rec->enumerable) continue;
-        if (rec->bind && rec->bind->guard && !rec->bind->guard(rooted_receiver.get())) continue;
         rooted_name.set(jube_name_item(rec->camel_name));
         host->value->array_push(rooted_keys.get(), rooted_name.get());
     }
@@ -749,7 +909,6 @@ int jube_member_projection_keys(Item receiver, Item* out) {
     for (int i = 0; i < trec->member_count; i++) {
         JubeMemberRecord* rec = &trec->members[i];
         if (rec->kind != JUBE_MEMBER_FIELD) continue;
-        if (rec->bind && rec->bind->guard && !rec->bind->guard(rooted_receiver.get())) continue;
         if (jube_array_has_string_key(rooted_keys.get(), rec->snake_name)) continue;
         // Lambda projection iteration exposes declared snake_case fields; JS
         // own-key enumeration remains WebIDL/camelCase through object_own_keys.
@@ -774,8 +933,6 @@ int jube_member_prototype(Item receiver, Item* out) {
         // a static prototype_seed cannot preserve that WebIDL identity.
         return 1;
     }
-    // migrating types keep their legacy per-kind prototypes (Element/Node/...)
-    if (jube_legacy_ops(trec)) return 0;
     *out = jube_type_prototype_for(trec);
     return 1;
 }
@@ -789,6 +946,7 @@ typedef struct JubeParsedMember {
     bool is_method;
     int arity;
     bool can_raise;
+    char* result_type_name;
     bool has_default;
     bool default_is_str;
     int64_t default_int;
@@ -796,6 +954,54 @@ typedef struct JubeParsedMember {
 } JubeParsedMember;
 
 #define JUBE_PARSE_MEMBER_CAPACITY 256
+
+static const JubeTypeDef* jube_module_type_by_name(const JubeModuleDef* module,
+                                                   const char* name);
+
+static void jube_member_record_release_owned(JubeMemberRecord* record) {
+    if (!record) return;
+    if (record->snake_name) free(record->snake_name);
+    if (record->camel_name) free(record->camel_name);
+    if (record->const_str) free(record->const_str);
+}
+
+static void jube_member_record_init(JubeMemberRecord* record,
+                                    const JubeParsedMember* parsed,
+                                    const JubeMemberBind* bind,
+                                    const JubeModuleDef* module) {
+    if (!record || !parsed) return;
+    jube_member_record_release_owned(record);
+    memset(record, 0, sizeof(*record));
+    record->bind = bind;
+    record->snake_name = jube_strndup(parsed->name, strlen(parsed->name));
+    record->camel_name = (bind && bind->js_name)
+        ? jube_strndup(bind->js_name, strlen(bind->js_name))
+        : jube_derive_camel(record->snake_name);
+    if (parsed->is_method) {
+        record->kind = JUBE_MEMBER_METHOD;
+        record->arity = parsed->arity;
+        record->can_raise = parsed->can_raise;
+        record->result_type = parsed->result_type_name
+            ? jube_module_type_by_name(module, parsed->result_type_name) : NULL;
+        record->readonly = true;
+    } else if (!bind) {
+        record->kind = JUBE_MEMBER_CONST;
+        record->readonly = true;
+        record->const_int = parsed->default_int;
+        record->const_is_str = parsed->default_is_str;
+        record->const_str = parsed->default_str
+            ? jube_strndup(parsed->default_str, strlen(parsed->default_str)) : NULL;
+        record->result_type = parsed->result_type_name
+            ? jube_module_type_by_name(module, parsed->result_type_name) : NULL;
+    } else {
+        record->kind = JUBE_MEMBER_FIELD;
+        record->readonly = !bind->set && !bind->reflect_attr;
+        record->result_type = parsed->result_type_name
+            ? jube_module_type_by_name(module, parsed->result_type_name) : NULL;
+    }
+    record->enumerable = record->kind == JUBE_MEMBER_FIELD &&
+        !(bind && (bind->flags & JUBE_MEMBER_NON_ENUMERABLE));
+}
 
 static char* jube_node_text(const char* source, TSNode node) {
     uint32_t start = ts_node_start_byte(node);
@@ -810,9 +1016,10 @@ static bool jube_node_is(TSNode node, const char* type) {
 
 // count fn_param children and detect '^' in the return type of a fn_type node
 static void jube_parse_fn_type(const char* source, TSNode fn_node, int* arity,
-                               bool* can_raise) {
+                               bool* can_raise, char** result_type_name) {
     *arity = 0;
     *can_raise = false;
+    if (result_type_name) *result_type_name = NULL;
     uint32_t count = ts_node_named_child_count(fn_node);
     for (uint32_t i = 0; i < count; i++) {
         TSNode child = ts_node_named_child(fn_node, i);
@@ -820,8 +1027,13 @@ static void jube_parse_fn_type(const char* source, TSNode fn_node, int* arity,
         if (jube_node_is(child, "return_type")) {
             char* text = jube_node_text(source, child);
             if (text) {
-                if (strchr(text, '^')) *can_raise = true;
-                free(text);
+                char* raise_marker = strchr(text, '^');
+                if (raise_marker) {
+                    *can_raise = true;
+                    *raise_marker = '\0';
+                }
+                if (result_type_name) *result_type_name = text;
+                else free(text);
             }
         }
     }
@@ -855,6 +1067,7 @@ static void jube_free_parsed_members(JubeParsedMember* members, int count) {
     for (int i = 0; i < count; i++) {
         if (members[i].name) free(members[i].name);
         if (members[i].default_str) free(members[i].default_str);
+        if (members[i].result_type_name) free(members[i].result_type_name);
     }
 }
 
@@ -897,11 +1110,9 @@ static bool jube_index_insert(HashMap* index, const char* chars,
     JubeMemberIndexEntry* existing =
         (JubeMemberIndexEntry*)hashmap_get(index, &probe);
     if (existing) {
-        // same-spelling chain keeps declaration order for guard resolution
-        JubeMemberRecord* tail = existing->rec;
-        while (tail->next_same_name) tail = tail->next_same_name;
-        if (tail != rec) tail->next_same_name = rec;
-        return true;
+        // duplicate spellings are rejected by declaration validation; retain
+        // the first index entry if a malformed binding table slips through.
+        return existing->rec == rec;
     }
     probe.rec = rec;
     hashmap_set(index, &probe);
@@ -915,6 +1126,8 @@ static JubeTypeRecord* jube_find_compiled_base(const JubeModuleDef* module,
     if (!base_type) return NULL;
     return jube_record_for_type((const void*)base_type);
 }
+
+static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_roots);
 
 static int jube_compile_type(const JubeModuleDef* module, const char* source,
                              TSNode type_node, const JubeTypeBinding* bindings,
@@ -994,7 +1207,10 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         }
         if (jube_node_is(attr_type, "fn_type")) {
             member->is_method = true;
-            jube_parse_fn_type(source, attr_type, &member->arity, &member->can_raise);
+            jube_parse_fn_type(source, attr_type, &member->arity, &member->can_raise,
+                               &member->result_type_name);
+        } else {
+            member->result_type_name = jube_node_text(source, attr_type);
         }
         TSNode default_node = ts_node_child_by_field_name(child, "default", 7);
         if (!ts_node_is_null(default_node)) {
@@ -1062,12 +1278,32 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         free(type_name);
         return -1;
     }
+    if (!s_type_index) {
+        s_type_index = hashmap_new(sizeof(JubeTypeIndexEntry), 16, 0, 0,
+                                   jube_type_index_hash, jube_type_index_compare,
+                                   NULL, NULL);
+        if (!s_type_index) {
+            log_error("JUBE_IFACE: failed to allocate type index for '%s'", type_name);
+            jube_free_parsed_members(parsed, parsed_count);
+            free(type_name);
+            return -1;
+        }
+    }
 
     int base_count = base_rec ? base_rec->member_count : 0;
     int declared_record_count = 0;
     for (int i = 0; i < parsed_count; i++) {
         int matching_binds = jube_count_binds(binding, parsed[i].name);
-        declared_record_count += matching_binds > 0 ? matching_binds : 1;
+        bool overrides_base = false;
+        if (base_rec) {
+            for (int j = 0; j < base_count; j++) {
+                if (strcmp(base_rec->members[j].snake_name, parsed[i].name) == 0) {
+                    overrides_base = true;
+                    break;
+                }
+            }
+        }
+        if (!overrides_base) declared_record_count += matching_binds > 0 ? matching_binds : 1;
     }
     int total = base_count + declared_record_count;
     // Interface records survive runtime teardown and are released after the
@@ -1098,6 +1334,7 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         dst->enumerable = src->enumerable;
         dst->can_raise = src->can_raise;
         dst->arity = src->arity;
+        dst->result_type = src->result_type;
         dst->const_int = src->const_int;
         dst->const_is_str = src->const_is_str;
         dst->const_str = src->const_str
@@ -1110,6 +1347,40 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
 #endif
     for (int i = 0; i < parsed_count; i++) {
         int matching_binds = jube_count_binds(binding, parsed[i].name);
+        int base_ordinal = -1;
+        if (base_rec) {
+            for (int j = 0; j < base_count; j++) {
+                if (strcmp(base_rec->members[j].snake_name, parsed[i].name) == 0) {
+                    base_ordinal = j;
+                    break;
+                }
+            }
+        }
+        if (base_ordinal >= 0) {
+            // Derived interfaces override an inherited ordinal in place. This
+            // preserves the inherited prefix while replacing the base guard
+            // row with the concrete subtype's unambiguous operation.
+            if (matching_binds > 1) {
+                log_error("JUBE_IFACE: derived type '%s' overrides member '%s' "
+                          "with multiple bindings", type_name, parsed[i].name);
+                free(records);
+                free(trec);
+                jube_free_parsed_members(parsed, parsed_count);
+                free(type_name);
+                return -1;
+            }
+            const JubeMemberBind* override_bind = NULL;
+            for (int32_t j = 0; j < binding->member_count; j++) {
+                if (binding->members[j].name &&
+                        strcmp(binding->members[j].name, parsed[i].name) == 0) {
+                    override_bind = &binding->members[j];
+                    break;
+                }
+            }
+            jube_member_record_init(&records[base_ordinal], &parsed[i],
+                                    override_bind, module);
+            continue;
+        }
         int variants = matching_binds > 0 ? matching_binds : 1;
         int variant_index = 0;
         for (int32_t j = 0; j < binding->member_count ||
@@ -1120,45 +1391,41 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
                 continue;
             }
             JubeMemberRecord* rec = &records[out_count++];
-            rec->bind = bind;
-            rec->snake_name = jube_strndup(parsed[i].name,
-                                           strlen(parsed[i].name));
-            rec->camel_name = (bind && bind->js_name)
-                ? jube_strndup(bind->js_name, strlen(bind->js_name))
-                : jube_derive_camel(rec->snake_name);
-            if (parsed[i].is_method) {
-                rec->kind = JUBE_MEMBER_METHOD;
-                rec->arity = parsed[i].arity;
-                rec->can_raise = parsed[i].can_raise;
-                rec->readonly = true;
+            jube_member_record_init(rec, &parsed[i], bind, module);
+            if (rec->kind == JUBE_MEMBER_METHOD) {
 #ifndef NDEBUG
                 method_count++;
 #endif
-            } else if (!bind) {
-                rec->kind = JUBE_MEMBER_CONST;
-                rec->readonly = true;
-                rec->const_int = parsed[i].default_int;
-                rec->const_is_str = parsed[i].default_is_str;
-                rec->const_str = parsed[i].default_str
-                    ? jube_strndup(parsed[i].default_str,
-                                   strlen(parsed[i].default_str)) : NULL;
 #ifndef NDEBUG
+            } else if (rec->kind == JUBE_MEMBER_CONST) {
                 const_count++;
 #endif
-            } else {
-                rec->kind = JUBE_MEMBER_FIELD;
-                rec->readonly = !bind->set && !bind->reflect_attr;
             }
-            // Guard-overloaded WebIDL rows share one declaration. Compiling
-            // every binding preserves the index's declared guard chain; taking
-            // only the first made generic Node members disappear behind tag
-            // overloads once D6.2.2v2 removed name-selected call dispatch.
-            rec->enumerable = rec->kind == JUBE_MEMBER_FIELD &&
-                !(bind && (bind->flags & JUBE_MEMBER_NON_ENUMERABLE));
             variant_index++;
             if (variant_index >= variants) break;
         }
     }
+
+#ifndef NDEBUG
+    // H4 requires derived ordinals to retain the complete inherited prefix;
+    // catch a declaration-order regression before publishing the type record.
+    if (base_rec) {
+        for (int i = 0; i < base_count; i++) {
+            if (strcmp(records[i].snake_name, base_rec->members[i].snake_name) != 0) {
+                log_error("JUBE_IFACE: type '%s' broke inherited ordinal prefix at %d",
+                          type_name, i);
+                for (int j = 0; j < out_count; j++) {
+                    jube_member_record_release_owned(&records[j]);
+                }
+                free(records);
+                free(trec);
+                jube_free_parsed_members(parsed, parsed_count);
+                free(type_name);
+                return -1;
+            }
+        }
+    }
+#endif
 
     HashMap* index = hashmap_new(sizeof(JubeMemberIndexEntry), 16, 0, 0,
                                  jube_member_index_hash, jube_member_index_compare,
@@ -1173,10 +1440,21 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
 
     trec->type = host_brand;
     trec->binding = binding;
+    trec->base_record = base_rec;
+    trec->type_slot = s_type_record_count;
+    trec->family_root_slot = base_rec ? base_rec->family_root_slot : trec->type_slot;
     trec->members = records;
     trec->member_count = out_count;
     trec->index = index;
     trec->prototype = ItemNull;
+    JubeTypeIndexEntry type_entry = {host_brand, trec};
+    hashmap_set(s_type_index, &type_entry);
+    if (hashmap_oom(s_type_index)) {
+        jube_interface_release_record(trec, false);
+        jube_free_parsed_members(parsed, parsed_count);
+        free(type_name);
+        return -1;
+    }
     s_type_records[s_type_record_count++] = trec;
 
 #ifndef NDEBUG
@@ -1232,6 +1510,10 @@ extern "C" void jube_interface_remove_module(const JubeModuleDef* module) {
         }
         // Registration rollback must release module-owned compiled records
         // before dlclose, because the type descriptors live in that image.
+        if (s_type_index) {
+            JubeTypeIndexEntry probe = {trec->type, NULL};
+            hashmap_delete(s_type_index, &probe);
+        }
         jube_interface_release_record(trec, true);
         s_type_record_count--;
         s_type_records[i] = s_type_records[s_type_record_count];
@@ -1247,6 +1529,10 @@ extern "C" void jube_interface_cleanup(void) {
         int index = --s_type_record_count;
         jube_interface_release_record(s_type_records[index], false);
         s_type_records[index] = NULL;
+    }
+    if (s_type_index) {
+        hashmap_free(s_type_index);
+        s_type_index = NULL;
     }
 }
 

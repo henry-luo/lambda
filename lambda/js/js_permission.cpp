@@ -317,20 +317,28 @@ static bool js_permission_has_grant(JsPermissionGrant* grants, const char* path)
     return false;
 }
 
+static int js_permission_has_fs_grant(const char* path, JsPermissionGrant* grants) {
+    return js_permission_has_grant(grants, path) ? 1 : 0;
+}
+
+static int js_permission_has_full_fs_grant(JsPermissionGrant* grants) {
+    return (!g_permission_enabled || js_permission_grants_have_all(grants)) ? 1 : 0;
+}
+
 extern "C" int js_permission_has_fs_read(const char* path) {
-    return js_permission_has_grant(g_fs_read_grants, path) ? 1 : 0;
+    return js_permission_has_fs_grant(path, g_fs_read_grants);
 }
 
 extern "C" int js_permission_has_fs_write(const char* path) {
-    return js_permission_has_grant(g_fs_write_grants, path) ? 1 : 0;
+    return js_permission_has_fs_grant(path, g_fs_write_grants);
 }
 
 extern "C" int js_permission_has_full_fs_read(void) {
-    return (!g_permission_enabled || js_permission_grants_have_all(g_fs_read_grants)) ? 1 : 0;
+    return js_permission_has_full_fs_grant(g_fs_read_grants);
 }
 
 extern "C" int js_permission_has_full_fs_write(void) {
-    return (!g_permission_enabled || js_permission_grants_have_all(g_fs_write_grants)) ? 1 : 0;
+    return js_permission_has_full_fs_grant(g_fs_write_grants);
 }
 
 static void js_permission_drop_grants(JsPermissionGrant* grants, const char* path) {

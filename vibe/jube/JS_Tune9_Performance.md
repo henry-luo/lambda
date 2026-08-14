@@ -2,7 +2,10 @@
 
 **Date:** 2026-08-14
 
-**Status:** ANALYSIS COMPLETE; recovery is partially implemented; canonical post-tuning benchmark is pending
+**Status:** ANALYSIS COMPLETE; P1, P2.1, P2.2, and the P2.3 Test262 runner
+preflight are implemented with zero verified semantic regressions. Canonical
+post-tuning benchmark work remains pending; Test262 batch stability is
+confirmed with zero retry and a sub-10-second runner guard.
 
 **Analysis anchor:** `0b27a30ea4485a851bf36aa291e009b0c65713ab`
 
@@ -519,7 +522,7 @@ inside MIR and cross into the semantic kernel only on a miss.
 
 ## 8. Current recovery evidence
 
-The current tree contains four relevant recovery mechanisms:
+The current tree contains five relevant recovery mechanisms:
 
 1. `js_apply_resolved_constructed_prototype()` avoids an identical canonical
    prototype publication that would create array companion metadata.
@@ -528,6 +531,10 @@ The current tree contains four relevant recovery mechanisms:
    before falling back to the semantic operation.
 4. `js_elements_set_existing_dense_int_fast()` performs a guarded existing
    dense-element store while preserving generic fallback.
+5. Named-property feedback-vector lowering is selected by
+   `LAMBDA_INLINE_CACHE` in release as well as profile configurations;
+   `LAMBDA_JS_EXEC_PROFILE` now controls only observability, not whether
+   `js_get_name_id_ic()` / `js_set_name_id_ic()` are emitted.
 
 The local `temp/result29_tuned_clean_release.json` run, captured from commit
 `bf8cb8b6633f853d0a971eed3ae5fdd160086656`, produced this same-row comparison:
@@ -559,6 +566,123 @@ This recovery strongly validates the primary diagnosis. It is incomplete:
 
 The tuned JSON is therefore a diagnostic artifact. It must not replace
 Result29 or be labeled Result30.
+
+### 8.1 P2.1 release named-IC recovery (2026-08-14)
+
+P3 profiling of `awfy/nbody` identified a release-only compiler gate rather
+than a new property-semantics defect. The runtime already has guarded named
+load/store IC implementations. However, `js_mir_expression_lowering.cpp` also
+required `JS_EXEC_PROFILE_ENABLED` before emitting them. Consequently,
+`LAMBDA_INLINE_CACHE=1` was present in a normal release build but named member
+operations still bypassed those ICs and entered the generic property kernel.
+
+The fix preserves the D3.4.4v2/D4.6.1v2 `NameId` authority and the D8.4.3
+fallback ABI: only the existing `LAMBDA_INLINE_CACHE` guard now controls IC
+emission. A cache miss still calls the same semantic operation; profile builds
+only add counters. This is not a new semantic property implementation.
+
+Diagnostic evidence (not an acceptance measurement):
+
+| Configuration | `awfy/nbody` result | Interpretation |
+|---|---:|---|
+| Profile ICs enabled | 2,960.769 ms | Existing feedback path is effective. |
+| Profile ICs disabled | 8,486.388 ms | Same profile binary; validates the IC contribution. |
+| Release before the lowering fix | 7.38 s | One-sample residual probe; not interleaved. |
+| Release after the lowering fix | 2,364.617 / 2,374.176 / 2,363.807 ms | Three correct runs; median 2,364.617 ms, about 3.1x faster than the pre-fix probe. |
+| Final tree after the live-DOM IC boundary | 3,180.387 / 3,200.743 / 3,019.025 ms | Three correct release runs; median 3,180.387 ms, still about 2.3x faster than the pre-fix probe. |
+
+The two release sample groups were not interleaved and the later group followed
+the full baseline runs, so their difference is environmental noise until P0
+captures the controlled A/B bundle. They establish that the final guarded tree
+still executes the optimized path, not a publishable benchmark delta.
+
+The profile recorded 9,648,206 named-load probes and 2,700,039 named-store
+probes for this workload. The focused JS optimization contract suite passed all
+19 tests after the change, including named IC warming and the Tune9 indexed
+semantic guards. Enabling release ICs initially exposed a stale-read regression
+in live DOM form collections: their named entries are derived from the current
+tree and must run the existing refresh hook. The IC receiver admission now
+rejects only arrays registered as live DOM collections, so they use the single
+semantic fallback while ordinary array companion properties remain cacheable.
+
+`make test-lambda-baseline` passed **3,718/3,718** on this tree, including all
+21 JS MIR-emission fixtures and all 347 JS file tests. Two pinned Test262
+baseline runs completed with zero pass-to-fail regressions across all 40,261
+baseline entries. Both runs killed the same seven tests from four worker batches,
+but every affected test passed in its isolated retry. The repeatable batch-only
+failure was not a masked runtime result; the runner-level cause and its final
+zero-retry verification are recorded in P2.2 below.
+
+### 8.2 P2.2 Test262 intrinsic-function batch reset (2026-08-14)
+
+The seven repeatable batch-only recoveries were a hot-realm isolation defect,
+not a worker timeout or retry-policy failure. The reset snapshot restored each
+constructor and prototype Map, but a method value such as
+`String.prototype.split` is a separate function object with its own
+`properties_map`. A valid preceding Test262 source deletes the configurable
+`split.length` property. The prototype still pointed to the same function after
+reset, while that function's descriptor map remained mutated, so the following
+metadata test inherited the deletion. The same missing boundary affected
+`Array.prototype.forEach` metadata and other intrinsic method functions.
+
+`js_globals.cpp` now captures every function (including accessor getter/setter
+functions) reachable from the intrinsic constructor/prototype snapshot maps.
+It preserves and restores each function's own prototype and property maps,
+roots each pristine shadow across GC, and treats those maps as snapshot-backed
+when a descriptor mutation needs a private TypeMap. This extends the existing
+D6.2.2v2/D6.2.4 callable-object and precise-rooting boundaries without
+special-casing the recovered test names or changing Test262 runner
+classification.
+
+Focused `js-test-batch` probes first deleted then verified restoration of
+`String.prototype.split.length`, `Array.prototype.forEach.length`, and
+`Array.prototype.forEach.name`; all second sources passed after the reset. The
+authoritative release gate, with `ref/test262` pinned at
+`673e9bacbe28590f501e2dcd817aadcc31899191`, then reported:
+
+| Gate | Result |
+|---|---|
+| `make test-lambda-baseline` | 3,718 / 3,718 passed |
+| `make test262-baseline` | 40,261 / 40,261 fully passed; 0 non-fully-passing; 0 failed; 0 retry; 0 regressions; 211.0 s |
+
+### 8.3 P2.3 Test262 runner preflight (2026-08-14)
+
+`test/test_js_test262_gtest.exe --prelim` is a one-case GTest mode that
+executes the production preparation and `js-test-batch` path on five pinned
+Test262 fixtures. It verifies the baseline-pinned `ref/test262` checkout,
+comment-stripped body/canonical-harness selection, metadata-cache admission,
+and the special-preamble map before running:
+
+- a `String.prototype.split.length` delete/check pair in the same JS-harness
+  batch, which guards the intrinsic-function snapshot reset fixed in P2.2;
+- a `propertyHelper.js` fixture, which guards per-test harness includes;
+- an async `Promise.allSettled` fixture, admitted through the regular async
+  allowlist and completing through `$DONE`; and
+- an ES-module fixture, which exercises the module-source batch path.
+
+The preflight reuses `prepare_all_tests()` and `execute_t262_batch()` rather
+than a parallel test-only runner path. It forces the mutation-sensitive pair
+through the JS-harness batch because the native-harness shortcut cannot test
+the reusable intrinsic-global reset boundary. A hard in-test ten-second wall
+clock limit prevents the guard from becoming a surrogate full-suite run; the
+current direct measurement is **3.07 s**.
+
+`make test-js262-prelim` rebuilds the focused executable incrementally, then
+runs this mode. The Lambda baseline registers it as a runner-only configuration
+entry with the actual `test_js_test262_gtest.exe` artifact and
+`runner_args: ["--prelim"]`. `test_run.js` therefore consumes its normal GTest
+JSON, prints its named result and timing, and includes it in the final totals;
+it is not a trailing Make recipe. The entry is serialized after normal baseline
+jobs so its ten-second contract does not compete with nested workers. This is
+the D7.3.5 requirement that every conformance gate is named and wired into CI.
+
+The first integrated result was:
+
+| Gate | Result |
+|---|---|
+| `make test-js262-prelim` | 1 / 1 passed; `RunnerContracts` = 3.07 s |
+| `make test-lambda-baseline` | 3,719 / 3,719 passed, including `Test262 Runner Preflight` 1 / 1; runner wall time 3.99 s |
+| `make test262-baseline` | 40,261 / 40,261 fully passed; 0 non-fully-passing; 0 failed; 0 retry; 0 regressions; 215.1 s |
 
 ## 9. Tune9 performance architecture
 
@@ -668,6 +792,9 @@ fixture regression and no timeout.
   confined to misses.
 - Measure named IC hit/miss rates and eliminate repeated misses that can be
   guarded by shape/prototype epochs.
+- **Completed P2.1:** emit the existing guarded named load/store feedback slots
+  in normal release builds; the profile-only macro must not suppress them, and
+  exclude live DOM collections whose properties require a refresh hook.
 - Hoist constant `NameId`, IC-table base, and module slot loads without baking a
   context address into reusable code, preserving D5.4.3.
 - Add stable-callee direct call/construct feedback while preserving observable
@@ -796,11 +923,17 @@ difference.
 - [x] QuickJS matched-row comparison and physical fast-path analysis recorded.
 - [ ] Controlled archived Result28/Result29/current interleaved A/B completed.
 - [ ] Indexed access recovery complete across all semantic boundaries.
+- [x] P2.1 release named load/store IC lowering is enabled and has a measured
+  `nbody` diagnostic recovery.
 - [ ] Release named-property IC is independent of profiler instrumentation and
       has a measured normal-release A/B result.
 - [ ] Named property, module, and callable residuals profiled and tuned.
-- [ ] Focused optimization gtests and fixtures complete.
-- [ ] Lambda and Test262 baseline gates pass on the final tree.
+- [x] Focused optimization gtests and MIR/DOM regression fixtures complete.
+- [x] Lambda baseline passes on the final tree (3,718/3,718).
+- [x] Test262 baseline has zero pass-to-fail regression (40,261 entries).
+- [x] Test262 batch stability is confirmed with zero retry (P2.2).
+- [x] Test262 runner preflight covers batch reset, sync harness, async `$DONE`,
+  and module admission under ten seconds (P2.3).
 - [ ] Full 59-row release benchmark completes with no timeout.
 - [ ] Tune9 acceptance targets pass and the next numbered result is published.
 
@@ -836,6 +969,19 @@ Transient diagnostic evidence currently under `temp/`:
 - `temp/result29_sieve.trace`
 - `temp/result29_primes.profile`
 - `temp/result29_tuned_clean_release.json`
+- `temp/tune9_residual_probe.json`
+- `temp/tune9_nbody_profile.tsv`
+- `temp/tune9_lambda_baseline.log`
+- `temp/tune9_test262_baseline.log`
+- `temp/tune9_lambda_baseline_final.log`
+- `temp/tune9_test262_baseline_final.log`
+- `temp/_t262_batch_kills.txt`
+- `temp/tune9_function_metadata_reset_after.log`
+- `temp/tune9_intrinsic_method_reset_after.log`
+- `temp/tune9_batch_reset_lambda_baseline.log`
+- `temp/tune9_batch_reset_test262_baseline.log`
+- `temp/lambda_baseline_current.log`
+- `temp/test262_baseline_current.log`
 
 The transient files support this analysis but are not a reproducible benchmark
 archive. P0 must replace them with a complete capture bundle before Tune9 is

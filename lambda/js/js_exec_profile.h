@@ -202,61 +202,31 @@ void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason);
 #define JS_PROFILED_IT2D_NAME "it2d"
 #define JS_PROFILED_IT2I_NAME "it2i"
 
-static inline int js_exec_profile_mode(void) { return 0; }
-static inline void js_exec_profile_reset(void) {}
-static inline uint64_t js_exec_profile_enter(JsExecProfileEvent event) {
-    (void)event;
-    return 0;
-}
-static inline void js_exec_profile_leave(JsExecProfileEvent event, uint64_t token) {
-    (void)event;
-    (void)token;
-}
-static inline void js_exec_profile_count(JsExecProfileEvent event) { (void)event; }
-static inline void js_exec_profile_note_mir_call(const char* fn_name) { (void)fn_name; }
-static inline uint64_t* js_exec_profile_helper_call_counter(const char* fn_name) {
-    (void)fn_name;
-    return 0;
-}
-static inline void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_t owner_pool) {
-    (void)probes;
-    (void)hit;
-    (void)owner_pool;
-}
-static inline void js_exec_profile_name_lookup_bypassed(void) {}
-static inline void js_exec_profile_dump(void) {}
-static inline int js_opt_trace_is_enabled(void) { return 0; }
-static inline void js_opt_trace_set_enabled(int enabled) { (void)enabled; }
-static inline void js_opt_trace_reset(void) {}
-static inline void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
-        JsOptTraceOutcome outcome) {
-    (void)event;
-    (void)reason;
-    (void)outcome;
-}
-static inline void js_opt_trace_snapshot(JsOptTraceSnapshot* out) { (void)out; }
-static inline void js_opt_trace_dump(void) {}
-static inline void js_profile_property_set_site(uint32_t label_name_id) { (void)label_name_id; }
-static inline uint64_t js_profile_property_set_branch_enter(const char* label) {
-    (void)label;
-    return 0;
-}
-static inline void js_profile_property_set_branch_leave(const char* label, uint64_t token) {
-    (void)label;
-    (void)token;
-}
-static inline void js_profile_property_set_branch_add_count(const char* label, uint64_t count) {
-    (void)label;
-    (void)count;
-}
-static inline void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason) {
-    (void)label;
-    (void)reason;
-}
-static inline void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason) {
-    (void)label;
-    (void)reason;
-}
+#define JS_PROFILE_NOOP(name, return_type, args, body) \
+    static inline return_type name args body
+JS_PROFILE_NOOP(js_exec_profile_mode, int, (void), { return 0; })
+JS_PROFILE_NOOP(js_exec_profile_reset, void, (void), {})
+JS_PROFILE_NOOP(js_exec_profile_enter, uint64_t, (JsExecProfileEvent event), { (void)event; return 0; })
+JS_PROFILE_NOOP(js_exec_profile_leave, void, (JsExecProfileEvent event, uint64_t token), { (void)event; (void)token; })
+JS_PROFILE_NOOP(js_exec_profile_count, void, (JsExecProfileEvent event), { (void)event; })
+JS_PROFILE_NOOP(js_exec_profile_note_mir_call, void, (const char* fn_name), { (void)fn_name; })
+JS_PROFILE_NOOP(js_exec_profile_helper_call_counter, uint64_t*, (const char* fn_name), { (void)fn_name; return 0; })
+JS_PROFILE_NOOP(js_exec_profile_name_lookup, void, (uint64_t probes, int hit, uint32_t owner_pool), { (void)probes; (void)hit; (void)owner_pool; })
+JS_PROFILE_NOOP(js_exec_profile_name_lookup_bypassed, void, (void), {})
+JS_PROFILE_NOOP(js_exec_profile_dump, void, (void), {})
+JS_PROFILE_NOOP(js_opt_trace_is_enabled, int, (void), { return 0; })
+JS_PROFILE_NOOP(js_opt_trace_set_enabled, void, (int enabled), { (void)enabled; })
+JS_PROFILE_NOOP(js_opt_trace_reset, void, (void), {})
+JS_PROFILE_NOOP(js_opt_trace_record, void, (JsOptEvent event, JsOptReason reason, JsOptTraceOutcome outcome), { (void)event; (void)reason; (void)outcome; })
+JS_PROFILE_NOOP(js_opt_trace_snapshot, void, (JsOptTraceSnapshot* out), { (void)out; })
+JS_PROFILE_NOOP(js_opt_trace_dump, void, (void), {})
+JS_PROFILE_NOOP(js_profile_property_set_site, void, (uint32_t label_name_id), { (void)label_name_id; })
+JS_PROFILE_NOOP(js_profile_property_set_branch_enter, uint64_t, (const char* label), { (void)label; return 0; })
+JS_PROFILE_NOOP(js_profile_property_set_branch_leave, void, (const char* label, uint64_t token), { (void)label; (void)token; })
+JS_PROFILE_NOOP(js_profile_property_set_branch_add_count, void, (const char* label, uint64_t count), { (void)label; (void)count; })
+JS_PROFILE_NOOP(js_profile_load_ic_site, void, (const char* label, JsLoadICProfileReason reason), { (void)label; (void)reason; })
+JS_PROFILE_NOOP(js_profile_store_ic_site, void, (const char* label, JsStoreICProfileReason reason), { (void)label; (void)reason; })
+#undef JS_PROFILE_NOOP
 #endif
 
 #ifdef __cplusplus

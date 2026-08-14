@@ -48,6 +48,12 @@ extern Item js_super_instance_method_get(Item receiver, Item key);
 // Tune8 §2.2: super_property_set takes an explicit strict flag; the
 // non_strict variant has been removed.
 extern Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
+extern Item js_jube_member_get_by_ordinal(Item receiver, int64_t slot,
+    int64_t ordinal, Item key);
+extern Item js_jube_member_set_by_ordinal(Item receiver, int64_t slot,
+    int64_t ordinal, Item key, Item value, int64_t strict);
+extern Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
+    int64_t ordinal, Item key, Item* args, int64_t argc);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_get_async_iterator(Item iterable);
@@ -2091,6 +2097,12 @@ JitImport jit_runtime_imports[] = {
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
     {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
+    // DOM4 MIR lowering emits these names directly; omitting them leaves valid
+    // runtime symbols invisible to import_resolver and aborts every document
+    // compilation before layout can produce a tree.
+    {"js_jube_member_get_by_ordinal", FPTR(js_jube_member_get_by_ordinal)},
+    {"js_jube_member_set_by_ordinal", FPTR(js_jube_member_set_by_ordinal)},
+    {"js_jube_member_call_by_ordinal", FPTR(js_jube_member_call_by_ordinal)},
     {"js_set_this", FPTR(js_set_this),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),

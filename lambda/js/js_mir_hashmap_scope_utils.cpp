@@ -94,36 +94,27 @@ JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index) {
     return labels;
 }
 
-JsMirIteratorFrame* jm_for_of_iterator_at(JsMirTranspiler* mt, int index) {
-    if (!mt || !mt->for_of_iterators || index < 0 ||
-            !jm_stack_ensure_slot(mt->for_of_iterators, index)) {
+static void* jm_stack_item_at(ArrayList* stack, int index, size_t item_size) {
+    if (!stack || index < 0 || !jm_stack_ensure_slot(stack, index)) {
         return NULL;
     }
-    JsMirIteratorFrame* frame =
-        (JsMirIteratorFrame*)arraylist_get(mt->for_of_iterators, index);
-    if (!frame) {
-        frame = (JsMirIteratorFrame*)mem_calloc(1, sizeof(JsMirIteratorFrame),
-            MEM_CAT_JS_RUNTIME);
-        if (!frame) return NULL;
-        arraylist_set(mt->for_of_iterators, index, frame);
+    void* item = arraylist_get(stack, index);
+    if (!item) {
+        item = mem_calloc(1, item_size, MEM_CAT_JS_RUNTIME);
+        if (!item) return NULL;
+        arraylist_set(stack, index, item);
     }
-    return frame;
+    return item;
+}
+
+JsMirIteratorFrame* jm_for_of_iterator_at(JsMirTranspiler* mt, int index) {
+    return mt ? (JsMirIteratorFrame*)jm_stack_item_at(mt->for_of_iterators,
+        index, sizeof(JsMirIteratorFrame)) : NULL;
 }
 
 JsTryContext* jm_try_context_at(JsMirTranspiler* mt, int index) {
-    if (!mt || !mt->try_ctx_stack || index < 0 ||
-            !jm_stack_ensure_slot(mt->try_ctx_stack, index)) {
-        return NULL;
-    }
-    JsTryContext* context =
-        (JsTryContext*)arraylist_get(mt->try_ctx_stack, index);
-    if (!context) {
-        context = (JsTryContext*)mem_calloc(1, sizeof(JsTryContext),
-            MEM_CAT_JS_RUNTIME);
-        if (!context) return NULL;
-        arraylist_set(mt->try_ctx_stack, index, context);
-    }
-    return context;
+    return mt ? (JsTryContext*)jm_stack_item_at(mt->try_ctx_stack,
+        index, sizeof(JsTryContext)) : NULL;
 }
 
 JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
@@ -1011,6 +1002,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->from_catch_param) {
                 entry.var.from_catch_param = true;
             }
+            entry.var.jube_type = existing->jube_type;
             entry.var.binding_start = existing->binding_start;
             entry.var.binding_end = existing->binding_end;
             entry.var.gc_home_id = existing->gc_home_id;

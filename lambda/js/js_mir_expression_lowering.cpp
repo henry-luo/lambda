@@ -1193,6 +1193,10 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.named_key_index = UINT32_MAX;
     ref.named_key_id = NAME_ID_NONE;
     ref.named_ic_index = UINT32_MAX;
+    ref.jube_slot = -1;
+    ref.jube_ordinal = UINT32_MAX;
+    ref.jube_kind = UINT8_MAX;
+    ref.jube_can_raise = false;
 
     if (!node) return ref;
 
@@ -1253,6 +1257,23 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
                 jm_emit_error_lane_propagate_check(mt);
             }
         }
+        if (!ref.computed_key && !ref.is_private && mem->property &&
+                mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* property = (JsIdentifierNode*)mem->property;
+            const JubeTypeDef* receiver_type = jm_infer_jube_type(mt, mem->object);
+            if (receiver_type && property->name) {
+                int ordinal = jube_member_ordinal(receiver_type,
+                    property->name->chars, (uint32_t)property->name->len);
+                int slot = ordinal >= 0 ? jube_iface_type_slot(receiver_type) : -1;
+                if (ordinal >= 0 && slot >= 0) {
+                    ref.jube_slot = slot;
+                    ref.jube_ordinal = (uint32_t)ordinal;
+                    ref.jube_kind = jube_member_kind_at(receiver_type, ordinal);
+                    ref.jube_can_raise = jube_member_can_raise_at(receiver_type,
+                        ordinal);
+                }
+            }
+        }
         ref.base_reg = jm_transpile_box_item(mt, mem->object);
         // An assignment reference is evaluated before its RHS. Keep both parts
         // exact: a nested RHS write can collect before `bucket[index] = value`
@@ -1286,6 +1307,75 @@ static MIR_reg_t jm_emit_reference_name_id(JsMirTranspiler* mt,
         ref ? ref->named_key_index : UINT32_MAX);
 }
 
+static const JubeTypeDef* jm_jube_seed_type(JsMirTranspiler* mt,
+                                             JsIdentifierNode* id) {
+    if (!mt || !id || !id->name || mt->with_depth > 0 || mt->is_eval_direct ||
+            (mt->current_fc && (mt->current_fc->has_direct_eval ||
+                                mt->current_fc->uses_with))) {
+        return NULL;
+    }
+    const char* vname = jm_format_name("_js_%.*s", (int)id->name->len,
+                                       id->name->chars);
+    if (jm_find_var(mt, vname)) return NULL;
+    if (mt->module_consts) {
+        JsModuleConstEntry probe;
+        memset(&probe, 0, sizeof(probe));
+        probe.name = jm_persist_name(vname);
+        if (hashmap_get(mt->module_consts, &probe)) return NULL;
+    }
+    if (id->name->len == 8 && memcmp(id->name->chars, "document", 8) == 0) {
+        return jube_iface_type_by_name("document", 8);
+    }
+    return NULL;
+}
+
+// D4e keeps the proof deliberately small: only declared-signature results and
+// the immutable global seed participate. Unknown assignments and joins return
+// NULL, so the ordinary JS property path remains the semantic fallback.
+const JubeTypeDef* jm_infer_jube_type(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!mt || !node || mt->with_depth > 0 || mt->is_eval_direct ||
+            (mt->current_fc && (mt->current_fc->has_direct_eval ||
+                                mt->current_fc->uses_with))) {
+        return NULL;
+    }
+    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        const char* vname = id->name
+            ? jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars)
+            : NULL;
+        JsMirVarEntry* var = vname ? jm_find_var(mt, vname) : NULL;
+        if (var && var->jube_type) return var->jube_type;
+        return jm_jube_seed_type(mt, id);
+    }
+    if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (member->computed || !member->property ||
+                member->property->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+        JsIdentifierNode* property = (JsIdentifierNode*)member->property;
+        const JubeTypeDef* base = jm_infer_jube_type(mt, member->object);
+        if (!base || !property->name) return NULL;
+        int ordinal = jube_member_ordinal(base, property->name->chars,
+                                          (uint32_t)property->name->len);
+        return ordinal >= 0 ? jube_member_result_type_at(base, ordinal) : NULL;
+    }
+    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)node;
+        if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) {
+            return NULL;
+        }
+        JsMemberNode* member = (JsMemberNode*)call->callee;
+        if (member->computed || !member->property ||
+                member->property->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+        JsIdentifierNode* property = (JsIdentifierNode*)member->property;
+        const JubeTypeDef* base = jm_infer_jube_type(mt, member->object);
+        if (!base || !property->name) return NULL;
+        int ordinal = jube_member_ordinal(base, property->name->chars,
+                                          (uint32_t)property->name->len);
+        return ordinal >= 0 ? jube_member_result_type_at(base, ordinal) : NULL;
+    }
+    return NULL;
+}
+
 static void jm_emit_canonicalize_computed_key_for_get_put(JsMirTranspiler* mt, JsMirReference* ref) {
     if (!ref || ref->kind != JS_MIR_REF_PROPERTY || !ref->computed_key || ref->key_reg == 0) return;
     // computed update/compound references must preserve base-nullish errors while reusing one ToPropertyKey result.
@@ -1302,11 +1392,23 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
     if (!ref) return jm_emit_undefined(mt);
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY: {
+        if (ref->jube_slot >= 0 && ref->jube_ordinal != UINT32_MAX) {
+            MIR_reg_t result = jm_call_4(mt, "js_jube_member_get_by_ordinal",
+                MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->jube_slot),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->jube_ordinal),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
+            jm_emit_error_lane_propagate_check(mt);
+            return result;
+        }
         if (!ref->is_private && ref->named_key_index != UINT32_MAX) {
             MIR_reg_t lane = jm_emit_reference_name_id(mt, ref);
-            // consume the site reserved by reference construction; bypassing
-            // it sent warmed named accesses back through the generic helper.
-            if (ref->named_ic_index != UINT32_MAX && JS_EXEC_PROFILE_ENABLED) {
+            // The profile define instruments ICs; it must not decide whether a
+            // release MIR body emits them. Otherwise hot named reads silently
+            // fall back to the semantic kernel outside profile builds.
+#if LAMBDA_INLINE_CACHE
+            if (ref->named_ic_index != UINT32_MAX) {
                 MIR_reg_t ic = jm_active_module_ic_at_index(mt,
                     ref->named_ic_index);
                 if (ic) {
@@ -1316,6 +1418,7 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
                         MIR_T_P, MIR_new_reg_op(mt->ctx, ic));
                 }
             }
+#endif
             return jm_call_4(mt, "js_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
@@ -1362,6 +1465,17 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
     MIR_reg_t result = value;
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
+        if (ref->jube_slot >= 0 && ref->jube_ordinal != UINT32_MAX &&
+                !ref->is_private && !ref->computed_key) {
+            result = jm_call_6(mt, "js_jube_member_set_by_ordinal", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->jube_slot),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->jube_ordinal),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
+            break;
+        }
         // Tune8 §2.2: js_private_property_set absorbs the _strict variant
         // (4-arg form: obj, key, val, strict).
         if (ref->is_private) {
@@ -1383,10 +1497,10 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 ? jm_emit_reference_name_id(mt, ref)
                 : jm_call_1(mt, "js_property_lane_for_canonical_key",
                     MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            // stores share the reference-owned IC slot as loads do; otherwise
-            // store warming remains invisible to the contract trace.
-            if (!ref->is_private && ref->named_ic_index != UINT32_MAX &&
-                    JS_EXEC_PROFILE_ENABLED) {
+            // Keep the release store path symmetric with loads: profile-only
+            // instrumentation cannot suppress a valid IC specialization.
+#if LAMBDA_INLINE_CACHE
+            if (!ref->is_private && ref->named_ic_index != UINT32_MAX) {
                 MIR_reg_t ic = jm_active_module_ic_at_index(mt,
                     ref->named_ic_index);
                 if (ic) {
@@ -1399,6 +1513,7 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                     break;
                 }
             }
+#endif
             result = jm_call_5(mt, "js_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
@@ -4691,6 +4806,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 }
             }
             jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
+            var->jube_type = jm_infer_jube_type(mt, asgn->right);
             if (mt->with_depth > 0) {
                 return jm_emit_with_local_writeback(mt, var, vname,
                     simple_with_key, rhs, "lsa_res", strict_put);
@@ -4739,6 +4855,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
 
             jm_emit_mov(mt, var->reg, rhs);
+            var->jube_type = NULL;
             jm_emit_assignment_var_writeback(mt, var, vname, var->reg, false);
 
             jm_emit_label(mt, l_end);
@@ -4774,6 +4891,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         }
 
         jm_emit_mov(mt, var->reg, rhs);
+        var->jube_type = asgn->op == JS_OP_ASSIGN
+            ? jm_infer_jube_type(mt, asgn->right) : NULL;
 
         // Write-back to env if this is a captured variable
         // Write-back keeps captured variables, closure aliases, and arguments synchronized.
@@ -6523,12 +6642,61 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-            MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
+            bool args_have_yield = false;
+            bool args_have_spread = false;
+            jm_call_arg_flags(mt, call->arguments, &args_have_yield, &args_have_spread);
+
+            // A named non-optional call has one Reference evaluation. The
+            // ordinal probe and the generic fallback must consume that same
+            // receiver/key pair; probing by emitting the member expression a
+            // second time duplicates observable receiver evaluation.
+            bool can_reuse_reference = !m->optional && !call->optional &&
+                !jm_has_optional_chain(m->object) && !args_have_yield &&
+                !args_have_spread;
+            JsMirReference named_ref;
+            memset(&named_ref, 0, sizeof(named_ref));
+            if (can_reuse_reference) {
+                named_ref = jm_emit_reference(mt, (JsAstNode*)m);
+            }
+
+            // D4d: declared method calls may bypass the cached function object
+            // only after the complete Reference has been evaluated. The
+            // runtime helper retains Get-then-Call as its fallback shape.
+            if (can_reuse_reference && !named_ref.is_private) {
+                if (named_ref.jube_slot >= 0 &&
+                        named_ref.jube_ordinal != UINT32_MAX &&
+                        named_ref.jube_kind == JUBE_MEMBER_KIND_METHOD) {
+                    jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                            named_ref.base_reg));
+                    jm_emit_error_lane_propagate_check(mt);
+                    MIR_reg_t args_ptr = jm_build_args_array(mt,
+                        call->arguments, arg_count);
+                    MIR_reg_t direct_result = jm_call_6(mt,
+                        "js_jube_member_call_by_ordinal", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, named_ref.base_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx,
+                            (int64_t)named_ref.jube_slot),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx,
+                            (int64_t)named_ref.jube_ordinal),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, named_ref.key_reg),
+                        MIR_T_I64, args_ptr
+                            ? MIR_new_reg_op(mt->ctx, args_ptr)
+                            : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    jm_emit_error_lane_propagate_check(mt);
+                    jm_readback_closure_env(mt);
+                    return jm_publish_call_result(mt, direct_result);
+                }
+            }
+            MIR_reg_t recv = can_reuse_reference
+                ? named_ref.base_reg : jm_transpile_box_item(mt, m->object);
             String* method_key_name = jm_resolve_private_name(
                 mt, (JsAstNode*)m->property, prop->name);
-            MIR_reg_t method_name = jm_box_property_name_literal(
-                mt, method_key_name->chars, method_key_name->len);
-            if (jm_is_private_name(method_key_name)) {
+            MIR_reg_t method_name = can_reuse_reference
+                ? named_ref.key_reg : jm_box_property_name_literal(
+                    mt, method_key_name->chars, method_key_name->len);
+            if (!can_reuse_reference && jm_is_private_name(method_key_name)) {
                 method_name = jm_emit_private_key_for_access(
                     mt, (JsAstNode*)m->property, method_key_name);
             }
@@ -6540,9 +6708,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_emit_error_lane_propagate_check(mt);
             }
 
-            bool args_have_yield = false;
-            bool args_have_spread = false;
-            jm_call_arg_flags(mt, call->arguments, &args_have_yield, &args_have_spread);
             if (receiver_optional || call->optional) {
                 return jm_emit_optional_method_call(mt, recv, method_name, call,
                     arg_count, receiver_optional, call->optional,
@@ -7897,9 +8062,9 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     key_name->chars, key_name->len);
                 MIR_reg_t val = 0;
 #if LAMBDA_INLINE_CACHE
-                // direct member reads do not pass through Reference lowering,
-                // so they must consume their own module IC site here.
-                if (jm_load_ic_enabled() && JS_EXEC_PROFILE_ENABLED) {
+                // Direct member reads bypass Reference lowering, so they need
+                // their own release IC site; profiling only records the path.
+                if (jm_load_ic_enabled()) {
                     uint32_t ic_index = jm_module_ic_index(mt);
                     MIR_reg_t ic = ic_index != UINT32_MAX
                         ? jm_active_module_ic_at_index(mt, ic_index) : 0;

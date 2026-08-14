@@ -173,6 +173,26 @@ Item js_status_ok(void);
     (name) = (__VA_ARGS__); \
     if (item_is_error(name)) return (name); \
 } while (0)
+
+// Keep ABI adapters declarative when their only job is forwarding arguments.
+#define JS_FORWARD_ITEM(name, args, target, call_args) \
+    extern "C" Item name args { return target call_args; }
+#define JS_FORWARD_STATIC_ITEM(name, args, target, call_args) \
+    static Item name args { return target call_args; }
+#define JS_FORWARD_RETURN(type, name, args, target, call_args) \
+    extern "C" type name args { return target call_args; }
+#define JS_FORWARD_STATIC_RETURN(type, name, args, target, call_args) \
+    static type name args { return target call_args; }
+#define JS_FORWARD_VOID(name, args, target, call_args) \
+    extern "C" void name args { target call_args; }
+#define JS_FORWARD_STATIC_VOID(name, args, target, call_args) \
+    static void name args { target call_args; }
+#define JS_FORWARD_EXPRESSION(type, name, args, expression) \
+    extern "C" type name args { return expression; }
+#define JS_FORWARD_STATIC_EXPRESSION(type, name, args, expression) \
+    static type name args { return expression; }
+#define JS_FORWARD_LOCAL_RETURN(type, name, args, target, call_args) \
+    type name args { return target call_args; }
 int64_t js_is_nullish(Item value);
 
 // =============================================================================
@@ -1345,6 +1365,28 @@ Item js_new_native_function(JsNativeP5 target, int adapter_arity);
 Item js_new_native_function(JsNativeP6 target, int adapter_arity);
 Item js_new_native_function(JsNativeP7 target, int adapter_arity);
 Item js_new_native_function(JsNativeP8 target, int adapter_arity);
+
+// Shared compatibility-surface publication keeps direct native functions
+// cached exactly as the legacy Set-property spelling did. Overloads keep this
+// header usable before the C++ Item definition in lambda.hpp is visible.
+void js_set_native_method(Item object, const char* name, JsNativeP0 target);
+void js_set_native_method(Item object, const char* name, JsNativeP1 target);
+void js_set_native_method(Item object, const char* name, JsNativeP2 target);
+void js_set_native_method(Item object, const char* name, JsNativeP3 target);
+void js_set_native_method(Item object, const char* name, JsNativeP4 target);
+void js_set_native_method(Item object, const char* name, JsNativeP5 target);
+void js_set_native_method(Item object, const char* name, JsNativeP6 target);
+void js_set_native_method(Item object, const char* name, JsNativeP7 target);
+void js_set_native_method(Item object, const char* name, JsNativeP8 target);
+void js_set_native_key(Item object, Item key, JsNativeP0 target);
+void js_set_native_key(Item object, Item key, JsNativeP1 target);
+void js_set_native_key(Item object, Item key, JsNativeP2 target);
+void js_set_native_key(Item object, Item key, JsNativeP3 target);
+void js_set_native_key(Item object, Item key, JsNativeP4 target);
+void js_set_native_key(Item object, Item key, JsNativeP5 target);
+void js_set_native_key(Item object, Item key, JsNativeP6 target);
+void js_set_native_key(Item object, Item key, JsNativeP7 target);
+void js_set_native_key(Item object, Item key, JsNativeP8 target);
 Item js_install_native_method(Item object, const char* name,
                               JsNativeP0 target, int adapter_arity);
 Item js_install_native_method(Item object, const char* name,

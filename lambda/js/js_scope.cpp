@@ -84,11 +84,7 @@ static void js_parse_error_reset(JsTranspiler* tp) {
     tp->parse_error_col = 0;
     tp->parse_error_message[0] = '\0';
 }
-
-static bool js_parse_error_is_ident_char(char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-           c == '_' || c == '$';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_parse_error_is_ident_char, (char c), ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '$'))
 
 static void js_parse_error_record(JsTranspiler* tp, TSNode node, const char* source,
                                   size_t length, bool missing) {
@@ -141,10 +137,7 @@ extern "C" void js_scope_counters_get(JsScopeCounters* out) {
 extern "C" void js_identifier_counters_set_enabled(int enabled) {
     g_js_identifier_counters_enabled = (enabled != 0);
 }
-
-extern "C" void js_identifier_counters_reset(void) {
-    memset(&g_js_identifier_counters, 0, sizeof(g_js_identifier_counters));
-}
+JS_FORWARD_VOID( js_identifier_counters_reset, (void), memset, (&g_js_identifier_counters, 0, sizeof(g_js_identifier_counters)))
 
 extern "C" void js_identifier_counters_get(JsIdentifierCounters* out) {
     if (out) *out = g_js_identifier_counters;
@@ -589,18 +582,8 @@ static bool js_source_utf8_whitespace_at(const char* source, size_t length, size
     }
     return false;
 }
-
-static bool js_source_ident_char(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           (c >= '0' && c <= '9') || c == '_' || c == '$';
-}
-
-static bool js_source_u180e_at(const char* source, size_t length, size_t pos) {
-    return pos + 2 < length &&
-        (unsigned char)source[pos] == 0xE1 &&
-        (unsigned char)source[pos + 1] == 0xA0 &&
-        (unsigned char)source[pos + 2] == 0x8E;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_source_ident_char, (char c), ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '$'))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_source_u180e_at, (const char* source, size_t length, size_t pos), (pos + 2 < length && (unsigned char)source[pos] == 0xE1 && (unsigned char)source[pos + 1] == 0xA0 && (unsigned char)source[pos + 2] == 0x8E))
 
 static bool js_source_slash_starts_regex(const char* source, size_t pos) {
     if (!source) return false;
@@ -885,12 +868,19 @@ static bool js_source_soft_yield_identifier_at(const char* source, size_t length
     return false;
 }
 
-static bool js_source_has_soft_yield_identifier(const char* source, size_t length) {
+typedef bool (*JsSourceIdentifierCheck)(const char*, size_t, size_t);
+
+static bool js_source_has_identifier(const char* source, size_t length,
+                                     JsSourceIdentifierCheck check) {
     if (!source || length < 5) return false;
     for (size_t i = 0; i < length; i++) {
-        if (js_source_soft_yield_identifier_at(source, length, i)) return true;
+        if (check(source, length, i)) return true;
     }
     return false;
+}
+
+static bool js_source_has_soft_yield_identifier(const char* source, size_t length) {
+    return js_source_has_identifier(source, length, js_source_soft_yield_identifier_at);
 }
 
 static bool js_source_soft_await_identifier_at(const char* source, size_t length, size_t pos) {
@@ -915,14 +905,7 @@ static bool js_source_soft_await_identifier_at(const char* source, size_t length
 
     return false;
 }
-
-static bool js_source_has_soft_await_identifier(const char* source, size_t length) {
-    if (!source || length < 5) return false;
-    for (size_t i = 0; i < length; i++) {
-        if (js_source_soft_await_identifier_at(source, length, i)) return true;
-    }
-    return false;
-}
+JS_FORWARD_STATIC_RETURN(bool, js_source_has_soft_await_identifier, (const char* source, size_t length), js_source_has_identifier, (source, length, js_source_soft_await_identifier_at))
 
 static char* js_normalize_source_for_parser(const char* source, size_t length) {
     if (!source || length == 0) return NULL;

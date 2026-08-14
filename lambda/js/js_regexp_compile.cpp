@@ -15,10 +15,7 @@ typedef struct JsRegExpNameRef {
     const char* name;
     int len;
 } JsRegExpNameRef;
-
-static bool js_regexp_same_name(const JsRegExpNameRef* a, const char* b, int b_len) {
-    return a && a->len == b_len && memcmp(a->name, b, b_len) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_regexp_same_name, (const JsRegExpNameRef* a, const char* b, int b_len), (a && a->len == b_len && memcmp(a->name, b, b_len) == 0))
 
 static bool js_regexp_name_is_identifier(const char* name, int name_len) {
     if (!name || name_len <= 0) return false;

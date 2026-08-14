@@ -12,7 +12,8 @@
 Current Web-platform host objects are native VMaps branded by the
 Radiant/JS DOM bridges. Under **D3.4.7/D7.4.1–D7.4.3**, the property kernel
 resolves their host-family metadata and delegates through the single VMap/Jube
-bridge; `JubeTypeDef.host_ops` remains authoritative. Physical `MapKind` tags
+bridge; declared member records and record-owned hooks remain authoritative under
+D7.4.4. Physical `MapKind` tags
 are not DOM semantic classifiers. This document describes DOM-node VMaps,
 document/foreign-document VMaps, CSSOM/style host resources, and the
 the metadata-qualified CSS namespace ordinary object.

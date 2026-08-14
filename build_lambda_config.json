@@ -4769,6 +4769,24 @@
             "icon": "📦"
           },
           {
+            "source": "test/test_js_test262_gtest.cpp",
+            "name": "Test262 Runner Preflight",
+            "category": "baseline",
+            "runner_only": true,
+            "runner_name": "test_js_test262_prelim_gtest",
+            "runner_args": [
+              "--prelim"
+            ],
+            "dependencies": [],
+            "binary": "test_js_test262_gtest.exe",
+            "libraries": [
+              "gtest"
+            ],
+            "requires_lambda_exe": true,
+            "parallel": false,
+            "icon": "🛡️"
+          },
+          {
             "source": "test/test_lambda_std_gtest.cpp",
             "name": "Lambda Structured Tests",
             "dependencies": [

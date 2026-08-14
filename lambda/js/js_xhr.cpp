@@ -23,10 +23,7 @@
 #include <cstdlib>
 
 #define make_js_undef make_js_undefined
-
-static Item js_xhr_noop(void) {
-    return make_js_undef();
-}
+JS_FORWARD_STATIC_ITEM(js_xhr_noop, (void), make_js_undef, ())
 
 // ============================================================================
 // Per-XHR state
@@ -72,10 +69,8 @@ struct JsXhrRuntimeState {
     char* base_url = nullptr;
 };
 
-static JsXhrRuntimeState* js_xhr_runtime_state_get() {
-    if (!js_active_runtime_state) return nullptr;
-    return (JsXhrRuntimeState*)js_runtime_state.xhr_state;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsXhrRuntimeState*, js_xhr_runtime_state_get, (),
+    (js_active_runtime_state ? (JsXhrRuntimeState*)js_runtime_state.xhr_state : nullptr))
 
 static bool js_xhr_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
