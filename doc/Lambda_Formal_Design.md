@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.20.1 (2026-08-14)
+**Spec version:** 1.22.0 (2026-08-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -682,12 +682,44 @@ that carries them.
   never at boundaries. (Reinstates SF14-v1 two-lane returns; supersedes
   v1's caller-donated canonical homes — retired-ABI record in Appendix
   A.) [RV1–RV9, Return_Value §2–§5]
-- **D5.2.2** Scalar homes are raw payload words, never GC roots, colored
+- **D5.2.2v2*** Scalar homes are raw payload words, never GC roots, colored
   in a separate slot space from root slots; fully-unobserved lanes use a
   discard home; tail calls forward the incoming home. Destination-owned
   scalar storage exists at every ownership boundary (array tails, typed
-  fields, envs, module tables, async frames, task/message records).
-  [Stack_API §15.3, inv. 20–22]
+  fields, envs, module tables, async frames, task/message records) **and at
+  wide-capable mutable locals**: such a binding owns one slot allocated at
+  its declaration and held for its scope, and assigning a wide value copies
+  the payload into that slot rather than pushing a fresh home. A binding
+  declared inside a loop body is declared once per iteration and its slot
+  dies with the iteration; only the mutable form needs the reuse, since an
+  immutable binding is written once. (v1 enumerated only the non-local
+  boundaries; locals are added because D5.2.3's back-edge reclaim is sound
+  exactly when loop-carried wide values sit below the loop-entry watermark,
+  which declaration-time allocation guarantees.) [RV16, Return_Value §4a;
+  Stack_API §15.3, inv. 20–22]
+- **D5.2.3*** **Watermark ownership selects the wide-return transport.** An
+  entry that establishes a number-frame watermark tears it down at return,
+  so it may not return a pointer into its own extent: Lambda `fn`/`pn`
+  therefore use the companion lane (D5.2.1v2). An entry that establishes
+  none — a C helper or sys func — allocates in its **caller's** extent, so
+  it returns a wide scalar by pushing it on the number stack and handing
+  back an ordinary Item, already caller-homed and needing no adoption. The
+  rule is stated by ownership, not implementation language, so a sys func
+  written in Lambda takes the companion lane and a C helper that ever grew
+  a frame would too. Corollary: the per-call watermark snapshot-and-restore
+  around helper calls is retired — it is a space bound, not a correctness
+  requirement, since the frame epilogue already restores — and the bound is
+  re-established by an on-demand reclaim at loop back edges for loops the
+  compiler saw make a wide-capable helper call. That reclaim is sound only
+  when no loop-carried wide value lives in the reclaimed extent (open:
+  `DO24`). Second corollary, sound today and independent of the rest of this
+  ruling: the call-effect record already carries a per-callee **watermark
+  effect**, and a callee declaring that it leaves the watermark where it
+  found it discharges the adopt by the same argument, with no protocol
+  change. The emitter writes that effect and never reads it; reading it is
+  the cheapest available step. Its enum ordering is load-bearing — the
+  conservative value must be zero, so an unaudited row decodes as
+  "may allocate". [RV14, RV14a, RV15, RVO11, Return_Value §4a]
 
 ### D5.3 GC rooting
 
@@ -1187,6 +1219,8 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
+| D5.2.2v2 | v1 clauses ship; the local-binding clause added 2026-08-14 is not implemented. There is no per-source-binding scalar storage today: `MirScalarHomeBinding` associates a MIR *register* with a colored home — transient-value coloring, not binding ownership — and the `BindingStorage` classification (`REGISTER`/`SCOPE_ENV`/`MODULE`/`PERSISTENT`) has no consumer in the emitter at all. So a wide-valued mutable local is currently a register holding an Item that points at whatever home its producing expression happened to receive. Building the clause is new machinery, but it subsumes rather than adds: per-binding slots plus D5.2.3's bulk back-edge reclaim replace the interference/coloring pass in `em_finalize_scalar_homes`. Sequenced with Return_Value P2.7, which depends on it. |
+| D5.2.3 | Decided 2026-08-14, implementation pending (Return_Value P2.7). The companion-lane half is what P0–P1.3 landed; the C-helper half is untouched — helper returns still pay the v1 ritual (per-call watermark snapshot, a 20-instruction adopt cluster, a colored home), measured at **68% of all adopt sites** across AWFY (757 of 1108), the largest single population in the census. Retiring it is blocked only on `DO24`: the back-edge reclaim that re-establishes the space bound must first be shown safe for loop-carried wide values. The bound matters — without a reclaim, an untyped million-iteration loop over `int64` storage grows the side stack by 8 bytes per iteration, so the gate for this phase measures peak side-stack usage, not just correctness. |
 | D5.2.1v2 | Decided 2026-08-14, implementation pending (Return_Value P0–P4); until P4 the **retired v1 trailing-scalar-home ABI** remains the shipping mechanism. Record of the retired design: every function carried a hidden trailing home address (a liveness-colored number-stack slot, `_scalar_home`); the callee classified its boxed result inline — a 20-instruction adopt cluster per site (`em_adopt_scalar_item_value`) — and copied wide payloads into the donated home; unobserved lanes used a discard home and tail calls forwarded the incoming home (the D5.2.2 discard/forward clauses lapse with the ABI at P4; D5.2.2's destination-owned scalar storage is unaffected). Retirement evidence (2026-08-14 MIR census): the ritual was 9–39% of emitted MIR across AWFY (~11–16 executed instructions per boxed return), paid signature-blind while wide scalars almost never occurred. |
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
@@ -1313,6 +1347,18 @@ Numbered `DO#` (design-open); each links to its record.
   serialization; `CachedShape.ref_count` semantics (declared, always 0 —
   shapes are effectively arena-immortal); state explicitly that
   `byte_offset` is derivable and excluded from identity.
+- **DO24** Unnamed wide temporaries crossing a loop back edge, under
+  D5.2.3's reclaim. **D5.2.2v2 settles the named case**: a wide-capable
+  mutable local owns a slot allocated at its declaration, which precedes the
+  loop and therefore sits below the loop-entry watermark, so the reclaim
+  cannot reach it while per-iteration transients above it are freed. What
+  remains open is whether a *compiler-generated* wide temporary — not a
+  source binding, so it receives no slot — can be live across a back edge.
+  That set ought to be empty once bindings own their storage, but the
+  reclaim must be gated on the emitter positively establishing it, not on
+  the assumption: a wrong answer is a use-after-free, not a slowdown. The
+  question is now bounded and per-loop rather than open-ended.
+  [RVO11, Return_Value §4a]
 
 ## Appendix C — Decision-Record Index
 
@@ -1336,7 +1382,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D4.6 | NI1–NI16, W1–W6 | `Lambda_Design_Name_Identity.md` |
 | D4.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |
 | D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
-| D5.2, D2.7.2, D8.4.2 | RV1–RV13, RVO1–RVO9 | `Lambda_Design_Compiling_Return_Value.md` |
+| D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling.md` |
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |

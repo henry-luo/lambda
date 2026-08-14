@@ -156,6 +156,15 @@ inline bool load_budgets(const std::string& path, std::vector<Probe>* out, std::
     };
 
     std::string profile_specific = std::string(platform_key()) + "-" + host_config_key();
+    // The return-value convention is a build axis exactly like platform and
+    // config, and it changes emission shape. A v3 build looks for an explicit
+    // "<platform>-<config>-v3" entry first and otherwise falls through to the
+    // v2 numbers — which is the right default: a probe that SHRANK under v3
+    // passes and reports its tightening, while one that GREW fails loudly and
+    // asks for an explicit entry, exactly as an unmatched platform does. No
+    // silent slack either way.
+    std::string profile_convention = profile_specific + "-v3";
+    const bool convention_v3 = (LAMBDA_RETURN_CONVENTION_REVISION >= 3);
 
     for (size_t p = 0; p < probes->items.size(); p++) {
         const JsonValue& entry = probes->items[p];
@@ -187,8 +196,12 @@ inline bool load_budgets(const std::string& path, std::vector<Probe>* out, std::
             *error = "probe '" + probe.name + "' needs a 'budgets' object";
             return false;
         }
-        const JsonValue* selected = budgets->find(profile_specific);
-        probe.profile = profile_specific;
+        const JsonValue* selected = NULL;
+        if (convention_v3) {
+            selected = budgets->find(profile_convention);
+            probe.profile = profile_convention;
+        }
+        if (!selected) { selected = budgets->find(profile_specific); probe.profile = profile_specific; }
         if (!selected) { selected = budgets->find(platform_key()); probe.profile = platform_key(); }
         if (!selected) { selected = budgets->find("default"); probe.profile = "default"; }
         if (!selected || selected->kind != JsonValue::KObj) {

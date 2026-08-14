@@ -65,6 +65,19 @@ typedef enum FnReturnShape {
     RETURN_SHAPE_NATIVE_ERROR,  // [native, error]   typed `^E`
 } FnReturnShape;
 
+// How lane 2 travels. The SHAPE says whether a companion exists; the TRANSPORT
+// says where it lives (RV10a — the two are separate axes, and RV12's
+// "companion location, not companion register" is exactly this distinction).
+// A C prototype cannot receive a second MIR result on any platform, so every
+// entry reachable from C uses the context slot while JIT-to-JIT entries use
+// the register.
+typedef enum FnCompanionTransport {
+    FN_COMPANION_NONE = 0,      // shape 1 / 3: there is no lane 2
+    FN_COMPANION_HOME,          // v1: trailing caller-donated `_scalar_home`
+    FN_COMPANION_RESULT_REG,    // v3: second MIR result (JIT to JIT)
+    FN_COMPANION_CONTEXT_SLOT,  // v3: Context::mir_companion_slot (RV12)
+} FnCompanionTransport;
+
 // Shape 2 is the UNIVERSAL shape: every dynamic call site may assume it, so a
 // shape-1 callee still speaks it (writing a dummy lane 2).
 static inline bool fn_return_shape_is_pair(FnReturnShape shape) {

@@ -94,10 +94,20 @@ typedef enum JitExceptionEffect {
     JIT_EXCEPTION_CLEARS,
     JIT_EXCEPTION_SETS,
 } JitExceptionEffect;
+// PRESERVES means the call leaves `Context.side_number_top` where it found
+// it — the postcondition a caller needs to answer "did this call leave
+// anything above my pre-call top?". `em_call_import` reads it to skip the
+// wide-scalar adopt sequence entirely (RV14a).
 typedef enum JitNumberStackEffect {
     JIT_NUMBER_STACK_MAY_ALLOCATE = 0,
     JIT_NUMBER_STACK_PRESERVES,
 } JitNumberStackEffect;
+// The zero value must stay MAY_ALLOCATE: an unaudited registry row, or any
+// zero-initialized JitCallEffects, then decodes as the CONSERVATIVE answer.
+// Reversing the order would make silence mean "preserves", which the reader
+// above would take as permission to elide work the callee actually needs.
+LAMBDA_STATIC_ASSERT((int)JIT_NUMBER_STACK_MAY_ALLOCATE == 0,
+    "MAY_ALLOCATE must be the zero value so unaudited rows stay conservative");
 typedef enum JitArgEffect {
     JIT_ARG_BORROWED = 0,
     JIT_ARG_MAY_CAPTURE = 1u << 0,

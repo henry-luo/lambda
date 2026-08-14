@@ -803,6 +803,8 @@ typedef struct FnReturnAnalysis {
     // emitter site may recompute it locally — that divergence is the v27
     // havlak wrong-answer bug class.
     FnReturnShape shape;
+    // Where lane 2 travels for this entry (RV10a/RV12). Independent of shape.
+    FnCompanionTransport companion;
 } FnReturnAnalysis;
 typedef struct FnParamTypeInfo {
     TypeId semantic_type;

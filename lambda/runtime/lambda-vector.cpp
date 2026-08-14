@@ -3075,7 +3075,9 @@ Item fn_shape(Item vec) {
     RootFrame roots(1);
     Rooted<List*> rooted_result(roots, result);
     for (int i = 0; i < ndim; i++) {
-        Item dim = box_int64_value(dims[i]);
+        // v5: an axis length fits the int53 band; inline boxing keeps this loop
+        // off the number stack entirely.
+        Item dim = {.item = i2it(dims[i])};
         result = rooted_result.get();
         list_push(result, dim);
     }
@@ -3086,14 +3088,16 @@ Item fn_shape(Item vec) {
 Item fn_ndim(Item vec) {
     GUARD_ERROR1(vec);
     TypeId vt = get_type_id(vec);
-    if (vt != LMD_TYPE_ARRAY_NUM) return box_int64_value(0);
+    // v5: a dimension count is an `int`; boxing 0/1/ndim as int64 took a number
+    // home for values that fit inline several times over.
+    if (vt != LMD_TYPE_ARRAY_NUM) return {.item = i2it(0)};
     ArrayNum* arr = vec.array_num;
-    if (!arr) return box_int64_value(0);
+    if (!arr) return {.item = i2it(0)};
     if (arr->is_ndim && arr->extra) {
         ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
-        return box_int64_value((int64_t)shape->ndim);
+        return {.item = i2it(shape->ndim)};
     }
-    return box_int64_value(1);
+    return {.item = i2it(1)};
 }
 
 // ============================================================================

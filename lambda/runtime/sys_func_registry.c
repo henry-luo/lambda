@@ -1657,10 +1657,18 @@ JitImport jit_runtime_imports[] = {
     // Field access / indexing
     // ========================================================================
     {"fn_index", FPTR(fn_index)},
+    // Member reads never leave a wide payload above the caller's watermark:
+    // int64/uint64 map fields come back as `l2it(field_ptr)` pointing at the
+    // map's own persistent storage (D5.2.2), native lanes box inline, and the
+    // two metadata arms that used to call box_int64_value (path.size,
+    // datetime.unix) now box inline as v5 `int`. Audited to skip the adopt
+    // sequence entirely — this row alone is ~80% of the post-P2.6 helper
+    // adopts (havlak 78, deltablue 148, richards 49, json 43).
     {"fn_member", FPTR(fn_member),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM)}},
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
     // ========================================================================
     // Path functions
     // ========================================================================

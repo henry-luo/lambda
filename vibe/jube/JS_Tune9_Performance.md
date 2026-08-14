@@ -43,6 +43,11 @@ failure is in the performance architecture used to realize them:
 4. Tune5 and Tune6 declared non-regression performance gates, then closed
    implementation without release A/B evidence. Mechanism/LOC completion was
    allowed to outrun measured hot-path acceptance.
+5. Normal release lowering currently gates named-property IC use on
+   `JS_EXEC_PROFILE_ENABLED`. Because `make release` does not define
+   `LAMBDA_JS_EXEC_PROFILE`, ordinary release binaries reserve IC sites but
+   route named reads and writes through `js_get`/`js_set`. This is an
+   implementation defect, not a requirement of the redesign.
 
 The local post-Result29 tuning run at `bf8cb8b6633…` confirms this diagnosis. On
 the 57 rows with numeric values in all three datasets and an `ok` tuned-run
@@ -56,6 +61,9 @@ publishable Result30.
 Tune9 therefore has two obligations: retain the redesign's observable
 semantics, and recover the old design's hot-path efficiency through exact
 guards, direct operations, hoisted facts, and a single authoritative fallback.
+The QuickJS comparison sharpens that obligation: LambdaJS imported much of
+QuickJS's semantic organization, but not the compact physical hot paths that
+make ordinary property, indexed, and call operations cheap.
 
 ## 2. Authority and invariants
 
@@ -359,6 +367,159 @@ work before proceeding to additional broad migrations.
 7. **Structural metrics were overweighted.** Helper/LOC consolidation is useful
    only when correctness and performance remain within their budgets.
 
+### 7.3 Why following QuickJS did not produce QuickJS performance
+
+The redesign followed QuickJS at the semantic-architecture level. It adopted
+or converged on atoms/`NameId`, in-band exceptions, class metadata plus exotic
+operations, built-ins represented as function objects, and one authoritative
+property semantic path. It deliberately did **not** copy QuickJS's interpreter,
+bytecode representation, reference-counted ownership model, or object storage
+verbatim. It also planned V8-style elements kinds and feedback vectors as later
+optimization phases.
+
+That distinction matters. The redesign imported the rules and abstractions,
+but Result29 executed many of those rules through C runtime helpers from MIR.
+QuickJS makes the common physical route short first, then enters its generic
+semantic machinery only on a miss. LambdaJS often reached the semantic kernel
+before it had proved whether the case was ordinary.
+
+#### Measured LambdaJS/QuickJS gap
+
+Using only matched benchmark rows from the checked-in JSON snapshots, lower is
+better:
+
+| Dataset | Matched rows | LambdaJS / QuickJS geomean |
+|---|---:|---:|
+| Result28 | 53 | 2.24× |
+| Result29 | 53 | 6.88× |
+| post-Result29 tuned LambdaJS vs Result29 QuickJS | 51 | 3.58× |
+
+The final row combines later tuned LambdaJS measurements with Result29 QuickJS
+measurements, so it is diagnostic rather than an interleaved A/B result. It
+nevertheless shows both that the dense-index repairs recovered a large part of
+the loss and that a substantial dynamic-runtime gap remains.
+
+The distribution identifies the missing layer more clearly than the aggregate.
+The tuned LambdaJS result is competitive with QuickJS on MIR-friendly numeric
+kernels such as `kostya/collatz` (0.36×), `larceny/diviter` (0.37×),
+`r7rs/sumfp` (0.41×), `r7rs/sum` (0.48×), `larceny/pnpoly` (0.54×), and
+`awfy/mandelbrot` (0.54×). It remains far slower on object-, property-, call-,
+and allocation-heavy workloads:
+
+| Benchmark | Tuned LambdaJS / QuickJS |
+|---|---:|
+| `text/microdiff` | 44.94× |
+| `awfy/nbody` | 37.15× |
+| `awfy/havlak` | 34.12× |
+| `awfy/bounce` | 33.90× |
+| `awfy/richards` | 33.73× |
+| `awfy/cd` | 30.50× |
+| `awfy/deltablue` | 28.25× |
+| `awfy/towers` | 27.38× |
+| `r7rs/fft` | 24.25× |
+| `awfy/json` | 19.64× |
+
+The MIR numeric backend is therefore not the general problem. The remaining
+gap is concentrated in the dynamic object system and its boundary with MIR.
+
+#### What QuickJS does right
+
+1. **Fast physical routes precede generic semantics.** QuickJS bytecode embeds
+   the atom for a named field. The ordinary path can search the receiver's
+   shape and read a data slot directly; accessors, exotics, and prototype
+   complexity enter the slower path. This is compatible with LambdaJS's one
+   semantic authority under D3.4.4v2 and D4.6.1v2–D4.6.2v2. It demonstrates
+   that one authority does not imply one physical route.
+2. **Integer keys stay integer.** QuickJS represents common integer keys as
+   immediate integer atoms. Indexed bytecodes test the object tag, integer tag,
+   array class, and bounds, then load or store the element directly. The common
+   path does not perform `ToPropertyKey`, create a string, or resolve an atom.
+3. **Dense arrays remain coherent objects.** A QuickJS array carries explicit
+   fast-array state, a dense value buffer, count, and capacity. Named properties
+   live in normal shape/property storage and do not by themselves poison dense
+   indexed access. Append is guarded by exact array/prototype/extensibility
+   facts rather than by a coarse “has companion metadata” test.
+4. **The generic kernel is still cheap.** Even generic array operations benefit
+   from early integer-index branches. `Array.prototype.fill`, for example,
+   still loops through a generic setter in current QuickJS, but that setter can
+   reach the dense integer store before expensive property semantics.
+5. **Calls reuse an existing stack representation.** Compact call opcodes pass
+   arguments already present on the VM stack, while compile-time stack-depth
+   calculation and direct bytecode generation reduce frame and startup costs.
+   LambdaJS instead pays MIR compilation and can cross a native-helper ABI at
+   each un-inlined dynamic operation.
+6. **Shapes and atoms are engineered as hot data structures.** Shared shapes
+   reduce per-object metadata and make ordinary slot lookup predictable. Atoms
+   are 32-bit identities, with a range reserved for immediate integer literals,
+   so common keys do not repeatedly enter a name-pool lookup.
+
+QuickJS's reference counting is not the lesson to copy. It also pays retain and
+free costs, while LambdaJS must preserve D5's precise GC/rooting model. Nor is
+QuickJS's value width a simple advantage: its 64-bit build uses a wider
+`JSValue` representation than LambdaJS's 64-bit `Item`. The measured LambdaJS
+profiles point first to helper/property dispatch and repeated classification,
+not to value width or GC policy.
+
+Primary QuickJS evidence:
+
+- [QuickJS documentation: bytecode, objects, atoms, numbers, and calls](https://bellard.org/quickjs/quickjs.html)
+- [QuickJS object, shape, and property storage](https://github.com/bellard/quickjs/blob/master/quickjs.c#L879-L943)
+- [QuickJS integer-atom representation](https://github.com/bellard/quickjs/blob/master/quickjs.c#L2706-L2733)
+- [QuickJS named-field opcode path](https://github.com/bellard/quickjs/blob/master/quickjs.c#L18175-L18220)
+- [QuickJS indexed read path](https://github.com/bellard/quickjs/blob/master/quickjs.c#L18456-L18470)
+- [QuickJS indexed write and append guards](https://github.com/bellard/quickjs/blob/master/quickjs.c#L18596-L18640)
+- [QuickJS property-value fast append](https://github.com/bellard/quickjs/blob/master/quickjs.c#L9399-L9435)
+- [QuickJS call opcodes](https://github.com/bellard/quickjs/blob/master/quickjs.c#L17271-L17297)
+
+#### Concrete LambdaJS release-path defect
+
+The current tree has an additional issue beyond the architectural gap:
+
+- named read and write lowering in `js_mir_expression_lowering.cpp` checks
+  `JS_EXEC_PROFILE_ENABLED` before using the IC path;
+- `js_exec_profile.h` defines that flag only when
+  `LAMBDA_JS_EXEC_PROFILE` is present;
+- the normal release configuration defines `NDEBUG` and
+  `LAMBDA_HOME_RELEASE`, while the profiling configuration separately adds
+  `LAMBDA_JS_EXEC_PROFILE`;
+- the Result29 workflow verifies that profiling markers are absent from its
+  ordinary release binary.
+
+Consequently, Result29's normal release could reserve IC sites while routing
+named reads through `js_get` and writes through `js_set` plus assignment-result
+handling. The old Result28 tree used its general named IC in normal release.
+Optimization availability must be independent of instrumentation availability.
+
+Simply removing the profile condition is necessary but not sufficient. The
+current IC helper resolves `NameId` through the `NamePool` before probing the
+cache and is classified as `MAY_GC`/reentrant. Because MIR cannot inline a
+native C import, an IC hit can still pay a helper ABI boundary, root/safepoint
+handling, and name resolution. The target design is:
+
+```text
+load per-function IC table base and canonical NameId once
+    -> compare receiver shape/prototype epoch in MIR
+    -> read/write the proven slot directly on hit
+    -> call the C semantic/miss helper only on miss
+```
+
+The same principle applies to indexed access. Current lowering can call
+`js_number_key_to_index_fast()` and
+`js_elements_set_existing_dense_int_fast()` for operations whose checks and
+loads/stores QuickJS fuses into its opcode. Tune9 should move the guards and
+direct operations into MIR where D5 rooting and D8.4.3 error invariants permit,
+while retaining the existing helper as the sole miss authority.
+
+#### Design verdict
+
+The QuickJS-inspired semantic design is sound. The performance mistake was to
+treat semantic consolidation, old-fast-path deletion, and replacement-fast-path
+delivery as separate milestones. QuickJS succeeds because its shared semantics
+sit behind specialized ordinary-object, integer-index, and call machinery.
+LambdaJS should retain D3.4.4v2, D3.4.7, D4.6.1v2–D4.6.2v2, D5,
+D6.2.2v2, and D8.4.3, but make each common operation prove its ordinary case
+inside MIR and cross into the semantic kernel only on a miss.
+
 ## 8. Current recovery evidence
 
 The current tree contains five relevant recovery mechanisms:
@@ -600,6 +761,9 @@ observationally invisible and enter the same semantic operation used today.
   median, geometric means, timeouts, and environment metadata.
 - Capture the same profile counters for representative dense array, typed array,
   named property, call, module, and startup workloads.
+- Add a release-build inspection that distinguishes optimization support from
+  profiler instrumentation: ordinary release must retain IC/direct-path
+  lowering while containing no profiling hooks.
 
 **Exit:** the Result28→Result29 regression and current recovery reproduce under
 controlled conditions, or this diagnosis is revised before more tuning.
@@ -621,12 +785,18 @@ fixture regression and no timeout.
 
 ### P2 — Recover named property and call sites
 
+- Remove the `JS_EXEC_PROFILE_ENABLED` dependency from named-property IC
+  availability and validate the change with normal-release A/B measurements.
+- Inline the monomorphic IC hit in MIR: shape/prototype guard followed by direct
+  slot access, with `NamePool` resolution, `MAY_GC`, and semantic helper work
+  confined to misses.
 - Measure named IC hit/miss rates and eliminate repeated misses that can be
   guarded by shape/prototype epochs.
 - **Completed P2.1:** emit the existing guarded named load/store feedback slots
   in normal release builds; the profile-only macro must not suppress them, and
   exclude live DOM collections whose properties require a refresh hook.
-- Hoist constant `NameId` and module slot loads.
+- Hoist constant `NameId`, IC-table base, and module slot loads without baking a
+  context address into reusable code, preserving D5.4.3.
 - Add stable-callee direct call/construct feedback while preserving observable
   `Get`, receiver, bound function, `newTarget`, and prototype behavior under
   D6.2.2v2.
@@ -679,6 +849,12 @@ session, including:
    D8.4.3 error propagation;
 9. profile counters or test-only observability prove both a fast-path hit and a
    guarded fallback, rather than testing only the final value.
+10. an ordinary release build, without `LAMBDA_JS_EXEC_PROFILE`, still emits
+    and uses named-property IC/direct-path lowering while profiler
+    instrumentation remains absent;
+11. a monomorphic named-property hit avoids `NamePool` resolution and the
+    `MAY_GC` semantic helper, while shape/prototype misses still enter the
+    authoritative property kernel.
 
 Tests should assert semantic and structural invariants. They must not hard-code
 benchmark inputs or special-case benchmark names.
@@ -718,6 +894,7 @@ difference.
 
 - one semantic property implementation remains authoritative;
 - direct paths are guarded and fall back rather than duplicating semantics;
+- optimization availability is independent of profile instrumentation;
 - no conservative stack scanning or weakened precise-rooting rule;
 - no benchmark-specific branch or hard-coded workaround;
 - every completed Tune phase includes its release A/B evidence;
@@ -743,10 +920,13 @@ difference.
 - [x] Dominant array companion/index-lane root cause identified.
 - [x] Tune1–Tune8 design and performance assessment recorded.
 - [x] Current partial recovery measured and labeled diagnostic.
+- [x] QuickJS matched-row comparison and physical fast-path analysis recorded.
 - [ ] Controlled archived Result28/Result29/current interleaved A/B completed.
 - [ ] Indexed access recovery complete across all semantic boundaries.
 - [x] P2.1 release named load/store IC lowering is enabled and has a measured
   `nbody` diagnostic recovery.
+- [ ] Release named-property IC is independent of profiler instrumentation and
+      has a measured normal-release A/B result.
 - [ ] Named property, module, and callable residuals profiled and tuned.
 - [x] Focused optimization gtests and MIR/DOM regression fixtures complete.
 - [x] Lambda baseline passes on the final tree (3,718/3,718).
@@ -776,6 +956,12 @@ Checked-in evidence:
 - `vibe/jube/JS_Tune8_Module.md`
 - `doc/Lambda_Formal_Design.md`
 - `doc/Lambda_Formal_Semantics.md`
+- `lambda/js/js_mir_expression_lowering.cpp`
+- `lambda/js/js_exec_profile.h`
+- `lambda/js/js_runtime.cpp`
+- `lambda/runtime/sys_func_registry.c`
+- `utils/generate_premake.py`
+- `Makefile`
 
 Transient diagnostic evidence currently under `temp/`:
 

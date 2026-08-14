@@ -2776,7 +2776,9 @@ Item item_attr(Item data, const char* key) {
                 return (Item){.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
             }
             if (strcmp(key, "size") == 0) {
-                return box_int64_value(meta->size);  // int64_t size
+                // v5: a byte count fits the int53 band, so it boxes inline
+                // (mirrors the path.size arm in fn_member).
+                return (Item){.item = i2it(meta->size)};
             }
             if (strcmp(key, "modified") == 0) {
                 return push_k(meta->modified);  // DateTime

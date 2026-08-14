@@ -1,12 +1,15 @@
 # Lambda Impl Plan — Return-Value Convention v3 (Companion-Lane Returns)
 
-**Date**: 2026-08-14  **Status**: NOT STARTED — plan for
-[`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV13 DECIDED 2026-08-14;
-formal spec D5.2.1v2 / D2.7.2v2 / D8.4.2v2, v1.20.1). Open design residue:
-RVO3 (interp bridge), RVO4 (async/yield), RVO8 (GVN multi-out), RVO9
-(dummy lane-2) — each is resolved by a concrete step below.
-**Tree anchor**: master `af254850f` (line refs are as of this commit;
-anchor by symbol name when they drift).
+**Date**: 2026-08-14  **Status**: **P0 / P1.1 / P1.2 / P1.3 / P1.5 / P1.6
+LANDED** behind `LAMBDA_RETURN_V3` (default 0); P1.4 partial, P1.7 partial.
+Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV16 + addenda
+RV3a / RV10a / RV14a; formal spec D5.2.1v2 / **D5.2.2v2** / **D5.2.3** /
+D2.7.2v2 / D8.4.2v2, **v1.22.0**). Open design residue: RVO8 (GVN multi-out),
+RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide temporaries across a loop
+back edge — gates P2.7's reclaim). RVO3 and RVO4 closed 2026-08-14; RVO10
+superseded by RV14/RV15.
+**Tree anchor**: master `af254850f`, plus `7187898f1` for the landed phases
+(line refs are as of those commits; anchor by symbol name when they drift).
 
 **Goal**: retire the trailing-scalar-home ABI. Boxed returns become
 `[item, scalar]` pairs discriminated by the pending-Item tag `0x1E`; typed
@@ -15,6 +18,20 @@ to beat (2026-08-14, `utils/analyze_scalar_homes.py` over debug
 `temp/mir_dump.txt`): home protocol = 9–39% of emitted MIR across AWFY
 (deltablue 413 adopt sites / 38.7%), ~11–16 executed insns per boxed
 return, 70–100% of functions carrying `_scalar_home`.
+
+**Scope correction (2026-08-14, measured).** The pair convention alone reaches
+**14%** of the adopt census, not all of it. The other two populations need
+mechanisms outside §2–§6 of the design, each matched to *who owns a watermark*
+(design §1.4, §4a):
+
+| population | share | phase |
+|---|---|---|
+| return-side, internal bodies | 14% | **P1** — landed |
+| helper-call adopts | 68% | **P2.6** (free subset) + **P2.7** (RV14/RV15/RV16) |
+| return-side, C-reachable `_b` wrappers + dynamic dispatch | 18% | **P3** (RV12 slot; not Windows-specific) |
+
+P5's deletion is therefore gated on P2.7 and P3 as well — the home apparatus
+keeps real callers until both land.
 
 ---
 
@@ -287,7 +304,401 @@ R26 is the named canary — typed must win again); no untyped regression.
   anchor), js262 suite stable — rule 18 applies: failures are runtime
   bugs to fix, never test edits.
 
-### P3 — Windows lowering *(RV12)*
+### P2.6 — Read the watermark effect *(RV14a; independent, land first)*
+
+Smallest available win and the only new phase that needs no protocol change,
+no ABI change and no design question answered. Sound under the **v1** protocol
+as it ships, so it is not gated on `LAMBDA_RETURN_V3` at all.
+
+1. `em_call_import` (`mir_emitter_shared.hpp`) currently decides the adopt on
+   `scalar_mode != MIR_SCALAR_RETURN_NONE`, i.e. on `scalar_class` alone. Add
+   the second condition: skip the whole snapshot/home/classify/restore
+   sequence when `resolved.call.effects.number_stack ==
+   JIT_NUMBER_STACK_PRESERVES`. The field is already written at `:180` and has
+   **no reader today** — this is the reader.
+2. Debug assert in `lambda_side_number_alloc` (`side_stack.h` / its definition)
+   that fires when it is reached from an import declaring `PRESERVES`.
+   Reading the flag turns an audited claim into a correctness dependency, so
+   an untruthful row must fail loudly rather than silently dangle. Needs a
+   per-call "current import declares PRESERVES" marker in the Context, set
+   around audited calls in debug builds only — keep it out of release
+   emission so the MIR stays build-identical (§3 last row).
+3. Fix the ordering hazard while here: `vibe/Lambda_Design_Stack_API.md` §7.1
+   declared `JIT_NUMBER_STACK_PRESERVES` as enum value 0 while the shipping
+   header has `MAY_ALLOCATE = 0`. Corrected in the doc 2026-08-14; add a
+   `LAMBDA_STATIC_ASSERT(JIT_NUMBER_STACK_MAY_ALLOCATE == 0, …)` beside the
+   enum so silence can never come to mean "preserves".
+4. Optional, same shape: direct Lambda→Lambda calls hard-code
+   `JIT_NUMBER_STACK_MAY_ALLOCATE` (`:3562`) although a `fn`/`pn` restores its
+   own extent at its epilogue and therefore does preserve the watermark from
+   the caller's view. Harmless while unread; correct it with the reader.
+
+**Gate**: baseline 100%; MIR emission fixtures; MT7 ratchet should *drop* —
+re-ratchet. Expected: 30 registry rows declare the flag, 3 of them return
+boxed Items and pay the ritual today; `lambda_name_id_to_item` alone is 78
+havlak sites = **1,560 instructions, 7.6% of that module**.
+**Size**: small — one condition, one assert, one static assert.
+
+### P2.7 — C-helper convention *(RV14 / RV15 / RV16)*
+
+Retires the largest census population (68% of adopt sites, §1.4 of the design
+doc). Order matters inside this phase: **RV16 first — the reclaim is unsound
+without it.**
+
+**P2.7.0 — `fn_member` is 80% of what P2.6 left; it may be reachable without
+any of the below.** *(measured 2026-08-14, post-P2.6)* Remaining helper-call
+adopts: havlak 78 of 99, deltablue 148 of 182, richards 49 of 58, json 43 of
+58 — **318 of 397 across the four, all `fn_member`**. Its entire
+number-stack exposure is two lines, `path.size` and `datetime.unix`, both
+`box_int64_value`. Both values sit comfortably inside the v5 int53 band (a
+file size in bytes reaches 9 PB; unix-ms reaches year 285,000), so returning
+`int` — which boxes **inline**, no number stack — rather than `int64` looks
+like the semantically correct answer and a pre-v5 leftover from when `int`
+was 32-bit. That change would make `fn_member` genuinely non-pushing, letting
+it be marked `RESULT_SCALAR_STABLE`, with **no protocol change and no RVO11
+dependency**. It is held pending a ruling because it moves an observable
+type: `type(dt.unix)` is `int64` today (verified: `1745663445000` / `int64`).
+Not in the RV14/RV15/RV16 scope; recorded here because it dominates the
+measured residue and is two lines.
+
+**P2.7.0 LANDED 2026-08-14** *(ruling: return `int`, and audit the rest)*.
+
+Changed six boxing sites from `box_int64_value` (number-stack home) to `i2it`
+/ `lambda_int_box_lane` (inline, total, saturating per v5 §4.9):
+
+| site | value | why in-band |
+|---|---|---|
+| `fn_member` `path.size` | file size in bytes | int53 reaches 9 PB |
+| `fn_member` `datetime.unix` | unix ms | int53 reaches year 285,000 |
+| `lambda-data-runtime` `meta->size` | same, second path | — |
+| `fn_shape` `dims[i]` | axis length | — |
+| `fn_ndim` ×4 | literal `0`/`1`, `shape->ndim` | boxing the constant 1 as int64 took a number home |
+
+Then marked `fn_member` `RESULT_SCALAR_STABLE | NUMBER_STACK_PRESERVES`,
+which is what actually pays. Verified non-pushing before marking it, and the
+decisive fact is not in `fn_member` at all: an `int64`/`uint64` **map field
+comes back as `l2it(field_ptr)`**, pointing at the map's own persistent
+storage — *"the map field is the persistent scalar owner; preserve its
+payload address rather than copying wide values into a transient number
+home"* — and native lanes box inline via `lambda_int_box_lane`. So member
+reads never left a payload above the caller's watermark once those two
+metadata arms stopped doing it.
+
+**Cumulative effect, v1 baseline → now, with `LAMBDA_RETURN_V3` still off:**
+
+| bench | adopt sites | module insns | home share |
+|---|---|---|---|
+| deltablue | 413 → **117** | 22,639 → **15,776** (−30.3%) | 38.7% → **16.1%** |
+| richards | 156 → **58** | 10,209 → **7,935** (−22.3%) | 32.2% → **15.5%** |
+| havlak | 292 → **136** | 20,470 → **16,815** (−17.9%) | 30.5% → **17.7%** |
+| json | 183 → **97** | 11,852 → **9,780** (−17.5%) | 32.6% → **21.0%** |
+
+**Gate: PASS** — 3719/3719, forced-GC 67/67, JS 347/347, and **no golden
+file needed updating** despite the type change (`type(dt.unix)` is now `int`;
+the corpus compares values, not types). MT7 ratchet unchanged at 16/16 with
+zero tightenings: its probes don't exercise map member access, which is
+exactly where this win lands — worth knowing that the ratchet is blind to
+this class of improvement.
+
+**Found during the audit, NOT changed — needs its own ruling.** `fn_int()`
+(`lambda-eval-num.cpp`) still thresholds on **INT32**, not the v5 band: an
+INT64 input above `INT32_MAX` returns `push_d(dval)` — a *float* — while
+NUM_SIZED / UINT64 / DECIMAL inputs above `INT32_MAX` return
+`box_int64_value`. Under v5 all of these are `int` when inside ±(2^53−1) and
+`±inf` outside it, which is exactly `i2it`'s contract. That is a change to
+`int()`'s observable result for large inputs, owned by
+`Lambda_Semantics_Int_Type.md` §5 rather than by this doc, so it is recorded
+here and left alone.
+
+Other `box_int64_value` sites were checked and are correct as they stand:
+array `ELEM_INT64`/`ELEM_UINT64` element reads, `scalar_storage_read`,
+bitwise `band`/`bor`/`bxor`/`bnot`/`shl`/`shr` (which deliberately preserve
+the wide lane — `bitwise_lane_preservation.ls` pins it), `type_contract`
+conversions to declared int64/uint64, `fn_abs` on int64,
+`lambda_item_resolve_pending`, and the PRNG state in `fn_random` (a full
+64-bit mix — nearly changed it, and it would have been wrong).
+
+### 2026-08-14 — P2.7.0b: the audit generalized, and it obviates most of P2.7
+
+Attempting P2.7.1 started with a measurement, which redirected the work. After
+P2.6 + P2.7.0 the split had **inverted** — return-side 340 (77%), helper-call
+101 (23%), against v1's 351 / 757 (32% / 68%). So the population RV14/RV15/RV16
+was designed to attack had already mostly gone.
+
+Attributing the remaining 101 needed care: a "nearest preceding call" heuristic
+blamed `pn_print` for 78, and spot-checking one site showed the adopted
+register was actually defined by `fn_fill`. Re-doing it by **tracing the
+adopted register's defining instruction** confirmed `pn_print` at 78 anyway —
+but the near-miss is the lesson: attribute by definition, never by proximity.
+(That is the third heuristic in this effort to mislead, after the `if`-node
+call graph and the `get -> Item -> push_d` paths.)
+
+`pn_print` returns `ItemNull` unconditionally and is declared `&TYPE_NULL`, so
+its 78 adopts were pure waste. The cause was general, in
+`jit_import_get_metadata` (`mir.c`): when an import has no audited `ret_class`,
+it falls back to the sys-func table and maps `C_RET_ITEM` → `BOXED_ITEM` —
+"a boxed Item comes back" — while **the declared Lambda return type sits in the
+same row, unread**.
+
+The fix is type-driven and general: a declared return type that cannot be a
+wide scalar sets `RESULT_SCALAR_STABLE`. This narrows by *proof*, not by an
+audit promise, and wide declarations fall through and keep their adopt. To
+avoid two copies of the "which types are wide" rule (rule 13), the decision now
+lives in `lambda_type_id_may_be_wide_scalar()` in `lambda.h`, which
+`em_scalar_return_mode_for_type()` defers to and `mir.c` uses directly.
+
+**Helper-call adopts: 101 → 23.** Cumulative from v1: **757 → 23, −97%.**
+
+| bench | module insns (v1 → now) | home share |
+|---|---|---|
+| deltablue | 22,639 → **15,063** (−33.5%) | 38.7% → **12.6%** |
+| richards | 10,209 → **7,751** (−24.1%) | 32.2% → **13.7%** |
+| havlak | 20,470 → **16,419** (−19.8%) | 30.5% → **15.9%** |
+| json | 11,852 → **9,504** (−19.8%) | 32.6% → **19.0%** |
+| storage | 1,334 → **1,081** (−19.0%) | 34.8% → **21.6%** |
+| sieve | 699 → **584** (−16.5%) | 29.9% → **17.8%** |
+
+Gate: 3719/3719, forced-GC 67/67, ratchet re-baselined (2 further tightenings).
+
+**The 23 survivors are legitimate**: `fn_fill` 12, `fn_abs` 4, `pn_push` 4,
+`fn_slice3` 2, `pn_splice` 2, `fn_floor` 1 — helpers that really can return a
+wide scalar (`abs` of an int64, `floor` of a large float).
+
+**Consequence for P2.7.1 and the rest of P2.7 — read before starting it.**
+The residue is now **340 return-side (94%) vs 23 helper-call (6%)**, and the
+340 splits **190 `_b` wrapper / 150 internal body**. So:
+
+- **RV14/RV15/RV16 now address 23 sites.** Per-binding slots, retiring the
+  eager restore, the back-edge reclaim and the RVO11 liveness obligation were
+  designed against 757. The cost/benefit has inverted with the population.
+- **The 150 internal-body adopts are already implemented** — they are what P1
+  deletes; they persist only because `LAMBDA_RETURN_V3` ships off.
+- **The 190 `_b` wrapper adopts are P3's** (RV12 slot transport), now the
+  single largest remaining block.
+
+P2.7.1 is therefore left unstarted deliberately, not abandoned: it is a large
+change to shared var/assign emission, with no standalone payoff, gated behind
+liveness machinery that does not exist, in service of 6% of the residue. P3 and
+flipping the flag are both worth more. RV14/RV15/RV16 stay ruled and recorded;
+what changed is their priority, and the evidence for that is above.
+
+### 2026-08-14 — P3 landed (RV12 slot transport); the home protocol is gone
+
+`Context::mir_companion_slot` beside the existing `mir_return_lane` and
+`mir_bitcast_scratch`, same contract (never GC-scanned, single-thread-owned,
+dead outside its window). The public `_b` wrapper drops its trailing
+`_scalar_home` parameter entirely, builds the pending pair as the register form
+does, stores lane 2 into the slot, restores the watermark, and returns one
+result. Callers resolve: generated code loads the slot inline; C callers go
+through the new `lambda_item_resolve_pending_slot()`, which passes a resolved
+Item straight through so no call site needs a test of its own.
+
+Both C bridges converted: `lambda_dynamic_invoke_by_count`'s function-pointer
+cast loses its trailing operand and resolves, and the
+`fn_call_boxed_N_into` trampoline family does the same through its macro. The
+trampolines keep their own `result_home` parameter (now unused) so generated
+call sites needed no change.
+
+**Descriptor change: transport is now a first-class field.** `FnReturnShape`
+says whether a companion exists; the new `FnCompanionTransport`
+{`NONE`, `HOME`, `RESULT_REG`, `CONTEXT_SLOT`} says where it lives — RV10a's
+"separate axes" and RV12's "companion location, not companion register" made
+explicit. `em_companion_transport()` derives it once from shape plus
+C-reachability.
+
+**Two bugs the conversion surfaced, both caught by machinery added earlier:**
+
+1. `em_returns_result_pair()` was mask-based (`shape is pair && mask == 0`).
+   A slot-transport entry also has a zero mask, so the wrapper epilogue emitted
+   a **two-operand `ret` from an nres=1 function** — a `MIR_finish_func` crash.
+   Fixed by making the predicate transport-based, which is what it should
+   always have been.
+2. Shape 4 (`NATIVE_ERROR`) counts as a pair under RV1, but **P2 is not
+   implemented** — native `^E` bodies still signal through
+   `Context::mir_return_lane` with one MIR result. The descriptor therefore
+   promised a companion the emitter never produced. This surfaced as
+   `em_assert_callee_result_count` aborting with *"call site expects 2
+   result(s), callee declares 1"* on six error-path tests, rather than as a
+   wrong answer — which is precisely why P1.4 added that check. Shape 4 now
+   stays on the v2 transport until P2 lands.
+
+**Effect — the design's goal, reached.** Under v3, `_scalar_home` parameters
+across the AWFY set: **0**. Return-side adopts: **0**.
+
+| bench | v1 | flag-off today | **v3 + P3** |
+|---|---|---|---|
+| deltablue | 22,639 / 38.7% | 15,063 / 12.6% | **15,227 / 0.9%** |
+| havlak | 20,470 / 30.5% | 16,419 / 15.9% | **16,276 / 0.7%** |
+| json | 11,852 / 32.6% | 9,504 / 19.0% | **9,129 / 0.7%** |
+| richards | 10,209 / 32.2% | 7,751 / 13.7% | **7,544 / 0.3%** |
+
+(Home-protocol share of emitted MIR. The 9–39% the census opened with is now
+under 1% everywhere.)
+
+**Gates: 3719/3719 in BOTH configurations.** Forced-GC sweep 67/67, JS
+347/347, MIR emission 38/38, ratchet 16/16.
+
+**Test infrastructure gained a convention axis, mirroring the sidecar work.**
+`mir_budgets.json` lookup now tries `<platform>-<config>-v3` before the v2
+chain: a probe that shrinks under v3 passes and reports its tightening, one
+that grows fails loudly and asks for an explicit entry — the same "no silent
+slack" rule the file already applied to platforms. Two probes grew and got
+explicit `darwin-debug-v3` entries (`lambda_scalar_home_donation` main +6, as
+the caller now resolves instead of donating; `lambda_cow_nested_store` +1), and
+`closure_scalar_rehome` gained a v3 check group asserting the wrapper has no
+home and reaches `ret` through the pending classify.
+
+### 2026-08-15 — P2 attempted; shape 4 PARKED with a reproducible defect
+
+Shape 4 as a register pair is written end to end — `em_companion_transport`
+un-parked for `NATIVE_ERROR`, `mir_body_returns_pair` extended to
+`RETURN_LANE_ERROR`, a pair epilogue and overflow exit, `em_call_direct`
+handing lane 2 back as `call_result.error`, and both the direct caller and the
+`_b` wrapper reading a register instead of `Context::mir_return_lane`. RV9's
+`ItemNull` encoding is implemented for the pair (the v1 context lane keeps its
+`0`/`BT` form; both are one instruction, so the two encodings coexist per
+transport rather than being unified for its own sake).
+
+**It does not work, and the failure is sharp: `int^` and `float^` return
+correctly, `int64^` does not.** For an `int64^` signature the caller's value
+lane comes back as `ITEM_NULL` bits. Diagnostics run, in order:
+
+| diagnostic | result | conclusion |
+|---|---|---|
+| dump the callee | `func i64, i64, …` / `ret %r17, %r6`, %r6 = ItemNull on success | callee emission is correct |
+| dump both protos | `proto i64, i64, p:a, i64:a` | nres agrees at every call site |
+| `ret first, first` | caller takes the error branch | **lane 2 is read correctly** |
+| `ret first, ITEM_NULL` (const) | value still `ITEM_NULL` | lane 1 is not observed |
+| `ret 777, ITEM_NULL` (both const) | value still `ITEM_NULL` | lane 1 is not observed *even as a constant* |
+| `ret 111, 222` | error branch taken | lane 2 correct again |
+| flag-off control | correct value | regression is P2's, not pre-existing |
+
+So the caller observes lane 2 faithfully and never observes lane 1 — while
+the identical two-result mechanism works for shape 2 and for `int^`/`float^`
+shape 4. That points at something specific to the `int64` value lane rather
+than to the pair mechanism.
+
+One ordering defect was found and fixed along the way and is worth keeping
+regardless: P2 initially deferred shape 4's result publication (as shape 2
+must, for RV4.1), which moved it after `after_may_gc_call` — where the root
+machinery reloads live values. Shape 4's value lane is a native scalar that is
+never pending, so it must publish at the original point; `callee_defers_publication`
+now excludes it. This did not fix the `int64^` defect, so it was not the cause.
+
+**Shape 4 is therefore parked back on the v1 context-lane transport** (a
+single `em_companion_transport` exclusion), which restores v3 to its
+post-P3 state. The pair code is left in place, dormant and commented, since it
+is correct as far as the dump shows and the remaining question is narrow.
+Next step for whoever resumes: instrument the generated code around an
+`int64^` call to see what the first result register actually receives, and
+compare the register allocation against the working `int^` case — the
+difference must be in how an `int64` value lane is classified
+(`lambda_value_rep(LMD_TYPE_INT64)`), not in the two-result convention.
+
+### 2026-08-15 — js_tune6 emission growth: NOT ours (incoming merge)
+
+*(Resolved after the note below was written; kept because the reasoning is
+the useful part.)* The growth is from an **in-progress merge of 11 commits
+from `origin/master`** that landed in the working tree mid-session, touching
+`js_mir_analysis.cpp`, `js_mir_expression_lowering.cpp`,
+`js_mir_function_class_lowering.cpp`, `js_mir_statement_lowering.cpp`,
+`js_runtime*.cpp` and more. That is exactly why it is flag-independent,
+deterministic, and unattributable to any P2 edit — it is not a P2 edit. The
+same merge explains the baseline count moving 3719 → 3720 (a Test262 runner
+preflight test appeared).
+
+Two consequences worth recording. First, the instinct that saved this from
+becoming a wrong conclusion was refusing to lift a 0%-slack budget for growth
+nobody had explained — had it been raised, the merge's emission change would
+have been silently absorbed into a Return_Value commit. Second, **the gates
+run after the merge appeared were measuring a partially-merged tree**, so the
+final P2/P3 numbers in this log should be re-taken once the merge is
+resolved. The pre-merge gates (through P3, commit `c565f1e7d`) stand.
+
+The remaining budget action belongs to whoever finishes the merge: re-run the
+ratchet and re-baseline `js_tune6_exact_collection` as part of *that* commit,
+where the JS emission change is visible in review.
+
+### (original note, superseded above) unattributed js_tune6 emission growth
+
+`js_tune6_exact_collection` grew **+176 module instructions** (14,411 →
+14,587), with `scalar_homes` 6 → 15, `root_stores` 806 → 773, `safepoints`
+2,111 → 2,102. Deterministic across runs and **identical in both flag
+states**, so it is not a v3 effect. It was green at the P3 gate, so it
+appeared during the P2 edits — but every P2 edit is either `#if
+LAMBDA_RETURN_V3`-guarded or gated on a `companion` value that is
+`HOME`/`NONE` at flag-off, and the one unguarded change
+(`mir_error_lane_no_error_op`) is behaviourally identical to the constant it
+replaced. The `+176 ≈ 9 × 20` reading that suggested nine new adopt clusters
+is wrong: the whole dump contains exactly **one** adopt.
+
+**The budget was deliberately NOT lifted.** MT7 is a 0%-slack ratchet whose
+stated contract is that growth is reviewed and justified in the same commit;
+raising it for growth nobody has explained would convert the one mechanism
+that noticed into noise. Recorded here as the open item instead.
+
+**P2.7.1 — Per-binding slots for wide-capable mutable locals (RV16).**
+- No per-source-binding scalar storage exists today. `MirScalarHomeBinding`
+  (`mir_emitter_shared.hpp:459`) maps a MIR *register* to a colored home —
+  transient-value coloring, not binding ownership — and `BindingStorage`
+  (`value_rep.h`: `REGISTER`/`SCOPE_ENV`/`MODULE`/`PERSISTENT`) has no
+  consumer in the emitter at all. Both need extending, not just reading.
+- A `var` binding whose type is wide-capable gets one number slot at its
+  declaration, held for its scope. Assignment copies the payload into that
+  slot and retags — the same operation `lambda_item_adopt_scalar_home`
+  performs, but statically typed and therefore a plain store when the
+  binding's inferred type is wide (`var acc = 0i64`), with the 2-instruction
+  test only for ANY-typed mutable bindings.
+- Note for the census at this phase: the adopt does not disappear so much as
+  **move** — from once per helper call (dynamic, 20 instructions) to once per
+  wide assignment (usually static, one store). Expect the site count to fall
+  far more than the instruction count.
+
+**P2.7.2 — Retire the eager per-call restore (RV14/RV15).**
+- Delete the snapshot/home/adopt/restore sequence in `em_call_import`
+  (`:3194–3219` region). A C helper owns no watermark, so its push lands in
+  the calling frame's extent and the returned Item is already caller-homed.
+- Add the back-edge reclaim: for a loop whose body emitted a call with
+  `scalar_class != SCALAR_RETURN_NONE`, restore `side_number_top` to the
+  loop-entry watermark at the back edge.
+
+**P2.7.3 — Close RVO11 before emitting the restore.**
+- RV16 settles loop-carried *source bindings*. What remains is whether a
+  compiler-generated wide temporary can be live across a back edge. Establish
+  this positively in the emitter; do not assume it. A wrong answer here is a
+  use-after-free, not a slowdown, so P2.7.2's reclaim must not ship until
+  P2.7.3 answers.
+- **Survey done 2026-08-14; there is nothing existing to hang it on.**
+  `MirFrameState.root_backedge_reloads` is declared with no writer and no
+  reader — the third declared-but-unconsumed field found in this area, after
+  `JitCallEffects.number_stack` (which P2.6 gave a reader) and
+  `BindingStorage` (which P2.7.1 must give one). So the emitter does not
+  track loop structure today. Emitting the restore is the easy half — the
+  back edge is a `MIR_JMP` the loop lowering already writes.
+- Recommended placement: **`em_finalize_scalar_homes`**, which already
+  computes home live ranges and interference at function finalization. Emit
+  the back-edge restore unconditionally during lowering, then delete any
+  restore whose loop body has a home live range crossing its edge. This
+  inverts the obligation from "prove nothing crosses" to "detect what crosses
+  and back off" — the safe direction. **Sequencing consequence:** the
+  coloring pass must survive long enough to validate these reclaims, so it
+  cannot be deleted in the same step that RV16 makes it redundant.
+
+**Gate**: baseline + forced-GC sweep, **plus a peak-side-stack measurement** —
+correctness alone does not gate this phase, because the whole point of RV15 is
+the space bound. Required probes: a million-iteration untyped loop over
+`int64` array elements, and the same over `int64` map fields; record peak
+`side_number_top` displacement, which must stay O(1) in the iteration count.
+Census re-run: helper-call adopt sites → 0.
+
+### P3 — Slot transport *(RV12; not Windows-specific)*
+
+Re-scoped 2026-08-14: this is not a platform-coverage phase. Per the design
+doc §7 it is what lets C-reachable entries speak the convention on *every*
+platform — the public `_b` wrappers reached through the `fn_call_boxed_N_into`
+trampolines and `fn->invoke`, plus the `fn_callN_into` dynamic dispatchers —
+and per §1.4 that is **18% of all adopt sites**, the largest block shape 2
+alone cannot reach. Windows CI is a consequence, not the motivation.
 
 - Add `Context::mir_companion_slot` beside `mir_return_lane` (`:1955`) —
   same non-GC-scanned, single-thread-owned contract as the existing
@@ -297,18 +708,44 @@ R26 is the named canary — typed must win again); no untyped regression.
   `mir_return_lane` mechanism (it already is this pattern). `nres` stays
   1 on Windows; everything else — descriptor, pending tag, resolution
   protocol — is byte-identical (RV12).
+- **C-reachable entries on every platform** (the re-scoped part): the `_b`
+  wrapper returns a pending Item and writes the payload to the slot, and the
+  C side resolves. This removes the trailing `uint64_t* result_home` from
+  `fn_call_into` / `fn_call0..3_into` (`lambda.h:1141–1145`), from
+  `lambda_dynamic_invoke_by_count`'s function-pointer cast — which validates
+  and forwards it today — from `LAMBDA_SCALAR_HOME`, and from ~14 JS
+  transpiler entry points (`js_transpiler.hpp`). Also drop
+  `dyn_scalar_home` in the dynamic-dispatch lowering
+  (`transpile-mir.cpp:16527`), which is only there because that path is
+  C-mediated end to end.
+- Single-live discipline crosses into hand-written C here: a converted entry
+  must leave the slot correct on return, including across its own internal
+  calls. Weaker than compiler enforcement — add a debug generation counter
+  on the slot so a stale read traps.
 - Gate: Windows CI build + baseline; no mainline (SysV/aarch64) emission
-  change at all.
+  change beyond the C-reachable entries above; census re-run showing the
+  wrapper-side return adopts → 0.
 
 ### P4 — Formal/doc closure
 
-- Already staged: D5.2.1v2 / D2.7.2v2 / D8.4.2v2 (spec 1.20.1). At this
-  point flip the Appendix A footnotes from "decided, v1 ships" to landed
-  status, and record the D5.2.2 discard-home/tail-forward clause lapse.
+- Already staged: D5.2.1v2 / D2.7.2v2 / D8.4.2v2, plus **D5.2.2v2** (locals
+  as destination-owned storage, RV16) and **D5.2.3** (watermark ownership
+  selects the transport, RV14/RV14a/RV15) — spec **1.22.0**. At this point
+  flip the Appendix A footnotes from "decided, v1 ships" to landed status,
+  record the D5.2.2 discard-home/tail-forward clause lapse, and close
+  **DO24** if P2.7.3 settled it.
 - Update `Lambda_Design_Stack_Frame.md` SF14 entry with the v3
   supersession note; refresh LR/JS overview docs' return-ABI sections.
 
-### P5 — Delete v2 machinery *(gated on P1 + P2 + P2.5 all landed)*
+### P5 — Delete v2 machinery *(gated on P1 + P2 + P2.5 + P2.7 + P3)*
+
+Gating widened 2026-08-14. The original list assumed shape 2 alone emptied
+the home machinery; §1.4 of the design doc measures that it empties 14% of
+it. `em_scalar_home_*` and `em_finalize_scalar_homes` keep real callers until
+**P2.7** (helper side, 68%) and **P3** (C-reachable entries, 18%) have both
+landed — those are the phases that actually leave the apparatus with no
+remaining caller, and RV16's per-binding slots subsume the coloring pass
+rather than the deletion removing it.
 
 - Remove the flag (v3 becomes the only convention) and delete:
   `em_adopt_scalar_item_value` / `em_adopt_scalar_item`, the
@@ -334,7 +771,11 @@ R26 is the named canary — typed must win again); no untyped regression.
 | Async/generator suspension observes lane 2 | next-call rule resolves before any suspending call; P1.6 assert + dedicated tests |
 | Dummy lane-2 traffic on shape-2 fast path (RVO9) | measured in P1.7 dumps; escalate to shape refinement only if visible in timing |
 | GVN multi-out exclusion (RVO8) | measure in P1.7 by diffing optimized dumps of hot pair-returning loops; if real, adjust emission shape (e.g. copy result out of the call insn early), never patch MIR |
-| Debug/release divergence | the v2 emitter deliberately emitted identical MIR in all builds (`:971` comment); v3 keeps that rule — flag is the only axis |
+| Debug/release divergence | the v2 emitter deliberately emitted identical MIR in all builds (`:971` comment); v3 keeps that rule — flag is the only axis. P2.6's `PRESERVES` assert must therefore be debug-only *state*, never debug-only emission |
+| An untruthful `NUMBER_STACK_PRESERVES` row (P2.6) | reading the flag makes an audited claim load-bearing; the `lambda_side_number_alloc` assert turns a silent dangling pointer into a loud failure. Also static-assert the enum ordering so unaudited rows can never decode as "preserves" |
+| Unbounded number-stack growth once the eager restore goes (P2.7) | RV16 gives loop-carried bindings a declaration-time slot below the watermark; the back-edge reclaim bounds per-iteration transients. **The gate measures peak side-stack, not just correctness** — a million-iteration untyped loop over `int64` array elements and over `int64` map fields |
+| RVO11: an unnamed wide temporary live across a back edge (P2.7) | the reclaim ships only once the emitter *positively establishes* the set is empty; assumption is not sufficient, because a wrong answer is a use-after-free rather than a regression |
+| Slot single-live discipline crossing into hand-written C (P3) | debug generation counter on `mir_companion_slot` so a stale read traps rather than returning a plausible payload |
 
 ---
 
@@ -345,18 +786,58 @@ R26 is the named canary — typed must win again); no untyped regression.
 - [x] P1.2 callee pair returns; epilogue adopt deleted (flagged)
 - [x] P1.3 caller resolution protocol + patch helper *(EAGER form; RV6 lazy
       `maybe_pending` propagation is the remaining refinement)*
-- [ ] P1.4 dynamic/universal entries, wrapper + invoke metadata
-      *(includes the non-`local_func` direct-call fallback — see log)*
-- [ ] P1.5 interp/ff bridges (RVO3 closed)
-- [ ] P1.6 async/yield audit + tests (RVO4 closed)
+- [~] P1.4 descriptor↔`nres` cross-check landed and wired into both call
+      paths (residue closed); pair-returning dynamic entries and `nres=2`
+      wrappers are BLOCKED on the RV12 slot transport — the dynamic path is
+      C-mediated end to end (see log)
+- [x] P1.5 interp/ff bridges — **RVO3 closed by audit**, guard already
+      enforced the invariant; comment added so it stays that way
+- [x] P1.6 async/yield audit + test — **RVO4 closed**; found and fixed a real
+      spill/root publication defect in P1.3
 - [~] P1.7 gate: baseline green both ways + emission fixtures cover both
       conventions; STILL OPEN — census re-run, MT7 re-ratchet, AWFY stdout
       diff, release timing/R26 canaries, RVO8/RVO9 measurements
-- [ ] P2 native lanes + error lane; can_raise un-deopt; RV9 assert
+- [~] **P2 native lanes + error lane** — pair emission written end to end and
+      RV9's `ItemNull` encoding implemented, but **PARKED**: `int64^` value
+      lanes do not reach the caller while `int^`/`float^` do. Diagnostic table
+      and next step in the 2026-08-15 log. A publication-ordering defect found
+      on the way IS fixed and kept.
 - [ ] P2.5 LambdaJS migration (node/js262 gates)
-- [ ] P3 Windows slot lowering (RV12)
-- [ ] P4 formal-doc closure (footnotes → landed; SF14 note)
-- [ ] P5 delete v2 machinery; final census + ratchet
+- [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
+      2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).
+      deltablue −15.1%, richards −11.0%, havlak −8.8%, js_tune6 −33%. The
+      `lambda_side_number_alloc` assert was dropped with reasons — the skip
+      removes the restore too, so an untruthful row leaks space rather than
+      dangling (see log).*
+- [x] **P2.7.0 in-band boxing audit + `fn_member` stable** — *landed + gated
+      2026-08-14: 3719/3719. Cumulative from v1: deltablue −30.3%, richards
+      −22.3%, havlak −17.9%, json −17.5%; home share 38.7%→16.1% on
+      deltablue. Achieved with the v3 flag OFF. `fn_int`'s pre-v5 INT32
+      thresholds found and left for a semantics ruling.*
+- [x] **P2.7.0b type-driven sys-func metadata** — *landed + gated 2026-08-14:
+      helper-call adopts 101 → 23 (v1: 757, −97%). deltablue −33.5% total,
+      home share 38.7%→12.6%.*
+- [ ] **P2.7 C-helper convention (RV14/RV15/RV16)** — **DEPRIORITIZED**: now
+      addresses 23 of 363 remaining adopts (6%). See the 2026-08-14 log entry.
+      In order, if revived:
+  - [ ] P2.7.1 per-binding slots for wide-capable mutable locals (RV16)
+  - [ ] P2.7.2 retire the eager per-call restore + helper adopt; add the
+        back-edge reclaim
+  - [ ] P2.7.3 **close RVO11 before the reclaim ships** — positively
+        establish no unnamed wide temporary crosses a back edge
+  - [ ] peak-side-stack probes (not just correctness)
+- [x] **P3 slot transport (RV12)** — *landed + gated 2026-08-14: 3719/3719
+      both configurations. Under v3 the `_scalar_home` parameter and every
+      return-side adopt are **gone** (home share 30–39% → under 1%).
+      `FnCompanionTransport` added; both C bridges converted; budgets gained a
+      `-v3` profile axis. Windows lowering itself still untested (no CI here) —
+      the slot path it needs is now the shipping v3 mechanism, so the
+      remaining Windows work is `nres` selection, already handled by
+      `em_companion_transport`.*
+- [ ] P4 formal-doc closure (footnotes → landed; SF14 note; D5.2.2v2 /
+      D5.2.3 / DO24 status)
+- [ ] P5 delete v2 machinery; final census + ratchet *(now gated on P2.7 and
+      P3 as well — shape 2 alone empties only 14% of the apparatus)*
 - [ ] RVO8/RVO9 measurements recorded in this doc's log section
 
 ---
@@ -523,4 +1004,123 @@ builds a proto by hand and targets `MIR_new_import(fn_mangled)`) has no callee
 descriptor at all, so it cannot honour a pair-returning callee. It fails
 loudly rather than silently (a pending Item reaching an accessor trips the P0
 tripwire), but P1.4 should either route it through the descriptor or assert it
-unreachable.
+unreachable. *(Closed below.)*
+
+### 2026-08-14 — P1.4 (partial), P1.5, P1.6
+
+**P1.4 — blocked on the C bridge, and now provably so.** The plan's P1.4 asks
+for pair-returning dynamic entries and `nres=2` public wrappers. Both are
+unreachable before the RV12 slot transport, for one verified reason: the whole
+dynamic path is C-mediated. `transpile-mir.cpp` calls `fn_callN_into`, which
+are ordinary C functions (`Item fn_call1_into(Function*, Item, uint64_t*)`)
+that resolve the callable and invoke it through a C function-pointer cast in
+`lambda_dynamic_invoke_by_count`. A C prototype has no portable spelling for
+MIR's two-result convention, so `dyn_scalar_home` stays until lane 2 has a
+memory transport. Recorded at the emission site and in design §7/§1.4; this is
+what re-scopes P3 away from being a Windows-only phase.
+
+What P1.4 *did* land is the anti-mismatch machinery it exists for:
+
+- **`em_assert_callee_result_count()`** — a call site derives its result count
+  from the callee's descriptor, and the callee derived its `nres` from the same
+  descriptor at creation. When the target is a defined function in this module
+  its real `MIR_func->nres` is available, so the two derivations are now
+  cross-checked instead of trusted to stay in step. A disagreement aborts with
+  both numbers named. This is the v27 havlak class made impossible to
+  reintroduce silently, and it is exactly the check RV10 asks for — previously
+  a comment, now enforced.
+- Wired into `em_call_direct` **and** the hand-rolled non-`local_func`
+  fallback, which closes the residue above: that path hard-codes `nres=1`, and
+  now asserts its target really is single-result rather than assuming it.
+
+**P1.6 — found and fixed a real defect in P1.3.** `em_after_resolved_call`
+publishes a call's result to two consumers: the async spill tracker
+(`after_call_result`) and the root machinery (`root_call_value`, which fires
+for any `JIT_VALUE_BOXED_ITEM` result). P1.3 as first written handed it the
+**raw** pair result — so a pending Item could be spilled across a suspension
+and, worse, written into a GC root slot, where its `0x1E` tag is outside the
+traceable TypeId range. Both are direct RV4.1 violations ("a pending Item
+never lives in memory").
+
+It survived the earlier forced-GC sweep only because eager resolution
+overwrites the slot almost immediately and wide returns are rare in the
+corpus — i.e. it was latent, not benign. Fixed by splitting
+`em_publish_call_result()` out of `em_after_resolved_call()`: pair call sites
+pass result operand `0` (keeping the call-site and exception bookkeeping) and
+publish the **resolved** register afterwards, exactly once. The pair is GC-safe
+in the window between, per RV5's safepoint row — lane 1 is tag bits, lane 2
+raw non-pointer bits, so a collector has nothing to trace.
+
+New test `test/lambda/proc/wide_scalar_across_await.ls` (+ `.txt`) carries an
+int64 and a subnormal double across a `start`/`wait` suspension, as call
+results and as operands derived from them, and checks value, arithmetic and
+`type()` on both sides. Byte-identical output under v2 and v3.
+
+**P1.5 — RVO3 closed by audit, no code change needed.** The interpreter/JIT
+crossing casts `fn->ptr` to a single-Item C prototype with a trailing home
+(`lambda_dynamic_invoke_by_count`). That cast is already gated: dispatch
+rejects any `entry_abi` outside {`LAMBDA_BOXED_FUNCTION`,
+`LAMBDA_BOXED_PROCEDURE`, `HOST_ADAPTER`}, and the boxed markers are applied
+only when a function is published through its `_b` wrapper
+(`emit_mir_function_abi_markers`, `uses_wrapper`). Pair-returning bodies never
+carry those markers, so they cannot reach the cast — a pending Item cannot
+cross into interpreter or host code by construction. The pre-existing guard
+now carries a comment saying it also holds this invariant, so a future edit
+does not relax it unknowingly. MIR-interpreter mode needs nothing: `nres=2` is
+native there, and every C entry point (`main`, `_b` wrappers) is single-result.
+
+**Gates:** `LAMBDA_RETURN_V3=0` **3719/3719**; `LAMBDA_RETURN_V3=1`
+**3719/3719** (both counts include the new async test). Forced-GC sweep 67/67,
+MIR emission 38/38, ratchet 16/16 under v3.
+
+### 2026-08-14 — P2.6 landed (RV14a: read the watermark effect)
+
+One condition in `em_call_import` — skip the snapshot / home / classify /
+restore sequence when `resolved.call.effects.number_stack ==
+JIT_NUMBER_STACK_PRESERVES` — plus a static assert pinning `MAY_ALLOCATE` as
+the zero value. Flag-independent: this is the v1 path, so it ships on by
+default.
+
+**The runtime assert in the plan turned out to be unnecessary, and the reason
+is worth keeping.** The skip drops the *restore* along with the adopt. So an
+untruthful `PRESERVES` row degrades to a **space leak, not a dangling
+pointer**: nothing reclaims the helper's push, the payload simply lives to the
+frame epilogue, and the returned Item stays valid. The one residual hazard is
+a helper that allocates, restores itself, *and* returns an Item pointing into
+the region it released — but that is broken on its own terms regardless of
+this change. Since the emitter must produce identical MIR in debug and release
+(§3), buying a marginal assert with debug-only emission was the wrong trade.
+
+**Effect — measured, same 8 benchmarks:**
+
+| bench | adopt sites | module insns | |
+|---|---|---|---|
+| deltablue | 413 → 265 | 22,639 → 19,231 | **−15.1%** |
+| richards | 156 → 107 | 10,209 → 9,082 | **−11.0%** |
+| havlak | 292 → 214 | 20,470 → 18,670 | **−8.8%** |
+| json | 183 → 140 | 11,852 → 10,856 | **−8.4%** |
+
+havlak's drop is exactly the 78 `lambda_name_id_to_item` sites predicted from
+the audit, and the module fell more than the 1,560 cluster instructions alone
+because the snapshot and home materialization went with them.
+
+**Only two helpers actually change**, confirmed by enumerating the registry:
+`lambda_name_id_to_item` and `js_error_lane_payload`. Both audits verified
+truthful by reading the sources — the first returns interned name-pool data
+(`name_pool_resolve_id`: "immutable, outside GC, never individually
+ref-counted"), the second returns a stored `thrown_value_item`. A third row,
+`js_finalize_function`, declares `BOXED_ITEM` but the function returns `void`
+and is emitted through `jm_call_void_6`, so it never adopted and is unaffected
+— a stale audit field, harmless, worth cleaning up separately.
+
+`lambda_name_id_to_item` is also why the LambdaJS probes move so much: LJS
+materializes property keys through NameIds, making it the hottest helper in
+emitted JS. `js_tune6_exact_collection` fell 21,474 → 14,411 module
+instructions (**−33%**), with `js_main`'s scalar homes 26 → 6.
+
+**Gate: PASS.** Baseline 3719/3719 at the shipping default, forced-GC sweep
+67/67, MIR emission 38/38. MT7 re-ratcheted: 24 budget tightenings applied
+across 8 probes (`test/mir/mir_budgets.json`), after which the ratchet reports
+zero remaining slack. `js_tune6`'s `linux-debug` and `default` profiles are
+left alone — they are separate platform measurements and this host cannot take
+them; the file's own convention is that each platform re-baselines its own.
