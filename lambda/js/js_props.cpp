@@ -10,6 +10,7 @@
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../core/name_pool.hpp"
+#include "../runtime/lambda-root-frame.hpp"
 #include <math.h>
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
@@ -275,10 +276,20 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item k
 
 extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
         Item Receiver, Item* out_value, bool* out_borrowed) {
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> receiver_root(roots, Receiver);
+    object = object_root.get();
+    key = key_root.get();
+    Receiver = receiver_root.get();
+
     if (out_borrowed) *out_borrowed = false;
-    // This is the shared property-key boundary for direct and generic gets.
-    // Parser/Input STRING records are pooled but not runtime-canonical, so
-    // canonicalize by bytes before resolving the shape's NameId.
+    // this is the shared property-key boundary for direct and generic gets.
+    // parser/Input STRING records are pooled but not runtime-canonical, so
+    // canonicalize by bytes before resolving the shape's NameId.  The
+    // canonicalization allocates and may collect, so keep all incoming values
+    // rooted across it.
     TypeId kt = key._type_id;
     if (kt == LMD_TYPE_STRING) {
         String* string_key = it2s(key);

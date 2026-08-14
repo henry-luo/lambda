@@ -41,12 +41,28 @@ static void js_regexp_transfer_payload(Item destination, Item source);
 static Item js_get_regexp_prototype();
 static Item js_make_iter_result(Item value, bool done);
 
+template <typename KeyFactory, typename FunctionFactory>
+static void js_publish_native_function(Item object, KeyFactory key_factory,
+        FunctionFactory function_factory) {
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key_factory());
+    // function construction and the property store can both collect before
+    // their callers publish the values, so root the complete publication set.
+    Rooted<Item> function_root(roots, function_factory());
+    js_set_key_default(object_root.get(), key_root.get(), function_root.get());
+}
+
 #define JS_DEFINE_NATIVE_PUBLISHERS(arity) \
     void js_set_native_method(Item object, const char* name, JsNativeP##arity target) { \
-        js_set_key_default(object, make_string_item(name), js_new_native_function(target)); \
+        js_publish_native_function(object, [name]() { return make_string_item(name); }, [target]() { \
+            return js_new_native_function(target); \
+        }); \
     } \
     void js_set_native_key(Item object, Item key, JsNativeP##arity target) { \
-        js_set_key_default(object, key, js_new_native_function(target)); \
+        js_publish_native_function(object, [key]() { return key; }, [target]() { \
+            return js_new_native_function(target); \
+        }); \
     }
 
 JS_DEFINE_NATIVE_PUBLISHERS(0)
@@ -63,16 +79,39 @@ JS_DEFINE_NATIVE_PUBLISHERS(8)
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_runtime_set_native_method, (Item object, const char* name, Target target), js_set_native_method, (object, name, target))
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_span_method, (Item object, const char* name,         JsNativeSpan target), js_set_key_default, (object, make_string_item(name), js_new_native_span_function(target)))
+
+static void js_set_native_span_method(Item object, const char* name,
+        JsNativeSpan target) {
+    js_publish_native_function(object, [name]() { return make_string_item(name); }, [target]() {
+        return js_new_native_span_function(target);
+    });
+}
+
+JS_FORWARD_STATIC_VOID( js_runtime_set_native_span_method, (Item object, const char* name,         JsNativeSpan target), js_set_native_span_method, (object, name, target))
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_runtime_set_native_key, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
 
 template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_rest_key, (Item object, Item key, Target target), js_set_key_default, (object, key, js_new_native_rest_function(target)))
+static void js_set_native_rest_key_rooted(Item object, Item key, Target target) {
+    js_publish_native_function(object, [key]() { return key; }, [target]() {
+        return js_new_native_rest_function(target);
+    });
+}
 
 template <typename Target>
-JS_FORWARD_STATIC_VOID( js_runtime_set_native_constructor_key, (Item object, Item key, Target target), js_set_key_default, (object, key, js_new_native_constructor(target)))
+JS_FORWARD_STATIC_VOID( js_runtime_set_native_rest_key, (Item object, Item key, Target target), js_set_native_rest_key_rooted, (object, key, target))
+
+template <typename Target>
+static void js_set_native_constructor_key_rooted(Item object, Item key,
+        Target target) {
+    js_publish_native_function(object, [key]() { return key; }, [target]() {
+        return js_new_native_constructor(target);
+    });
+}
+
+template <typename Target>
+JS_FORWARD_STATIC_VOID( js_runtime_set_native_constructor_key, (Item object, Item key, Target target), js_set_native_constructor_key_rooted, (object, key, target))
 
 extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     if (get_type_id(value) != LMD_TYPE_STRING || !buf || buf_size <= 0) return NULL;
