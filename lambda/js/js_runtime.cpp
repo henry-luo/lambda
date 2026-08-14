@@ -4752,6 +4752,24 @@ static Item js_function_inherited_property_get(Item function, Item key) {
     return found ? result : make_js_undefined();
 }
 
+extern "C" int js_is_window_event_global_property(Item object, Item key);
+extern "C" Item js_get_window_event_global_value(void);
+extern "C" int radiant_dom_window_get_property(Item object, Item key, Item* out);
+
+static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
+    if (js_is_window_event_global_property(object, key)) {
+        if (out) *out = js_get_window_event_global_value();
+        return true;
+    }
+
+    Item window_value = ItemNull;
+    if (radiant_dom_window_get_property(object, key, &window_value)) {
+        if (out) *out = window_value;
+        return true;
+    }
+    return false;
+}
+
 extern "C" Item js_get_key_core(Item object, Item key,
                                                 Item receiver) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
@@ -4840,21 +4858,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
         key = js_symbol_to_key(key);
         key_root.set(key);
     }
-    {
-        extern int js_is_window_event_global_property(Item object, Item key);
-        extern Item js_get_window_event_global_value(void);
-        if (js_is_window_event_global_property(object, key)) {
-            return js_get_window_event_global_value();
-        }
-    }
-    {
-        extern int radiant_dom_window_get_property(Item object, Item key, Item* out);
-        Item window_value = ItemNull;
-        // Browser globals are live host state; stored preamble placeholders
-        // only make the names resolvable and must never shadow current metrics.
-        if (radiant_dom_window_get_property(object, key, &window_value)) {
-            return window_value;
-        }
+    Item host_value = ItemNull;
+    // Browser globals are live host state; stored preamble placeholders only
+    // make the names resolvable and must never shadow current metrics.
+    if (js_get_host_dynamic_property(object, key, &host_value)) {
+        return host_value;
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
@@ -8544,6 +8552,13 @@ static Item js_get_name_id_ic_impl(Item object, NameId name_id,
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
     if (!key || key->len > 2147483647u) {
         return js_get_name_id_ic_slow(object, name_id);
+    }
+    Item host_value = ItemNull;
+    // Live window properties cannot be cached from the preamble's placeholder
+    // map because resize and scroll mutate their host-backed values in place.
+    if (js_get_host_dynamic_property(object,
+            (Item){.item = s2it(key)}, &host_value)) {
+        return host_value;
     }
     const char* name = key->chars;
     int name_len = (int)key->len;

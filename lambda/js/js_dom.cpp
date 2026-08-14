@@ -119,6 +119,7 @@ extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
 extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
+extern "C" void js_dom_after_srcdoc_set(void* dom_elem);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
@@ -9831,7 +9832,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (strcmp(prop, "srcdoc") == 0 && _is_tag(elem, "iframe")) {
         const char* srcdoc = fn_to_cstr(value);
         elem->set_attribute("srcdoc", srcdoc ? srcdoc : "");
-        _schedule_iframe_load(elem);
+        // srcdoc can be assigned after the browsing context was lazily cached;
+        // rehydrate that existing blank document before dispatching its load.
+        js_dom_after_srcdoc_set((void*)elem);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }

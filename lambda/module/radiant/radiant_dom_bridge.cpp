@@ -679,6 +679,48 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
     return arr_item;
 }
 
+static bool radiant_dom_label_contains_control(DomElement* label,
+                                               DomElement* control) {
+    if (!label || !control) return false;
+    for (DomNode* child = label->first_child; child; child = child->next_sibling) {
+        if (child == (DomNode*)control) return true;
+        if (child->is_element() && radiant_dom_label_contains_control(
+                child->as_element(), control)) return true;
+    }
+    return false;
+}
+
+static void radiant_dom_collect_labels(DomElement* root, DomElement* control,
+                                       Item result) {
+    if (!root || !control) return;
+    if (radiant_dom_is_tag(root, "label")) {
+        const char* label_for = root->get_attribute("for");
+        const char* control_id = control->get_attribute("id");
+        bool explicitly_for = label_for && label_for[0] && control_id &&
+            control_id[0] && strcmp(label_for, control_id) == 0;
+        bool wrapping = (!label_for || !label_for[0]) &&
+            radiant_dom_label_contains_control(root, control);
+        if (explicitly_for || wrapping) {
+            radiant_host_api->value->array_push(result,
+                radiant_dom_node_item((DomNode*)root));
+        }
+    }
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            radiant_dom_collect_labels(child->as_element(), control, result);
+        }
+    }
+}
+
+static Item radiant_dom_labels_item(DomElement* control) {
+    Item result = radiant_dom_array_item();
+    if (!control || !control->doc || !control->doc->root) return result;
+    // A missing labels property sends libraries into a less-compatible manual
+    // ancestor path; expose the actual label association from the DOM tree.
+    radiant_dom_collect_labels(control->doc->root, control, result);
+    return result;
+}
+
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
     DomNode* current = node;
     while (current) {
@@ -2021,9 +2063,11 @@ RADIANT_C_API int radiant_dom_member_node_type_any(Item receiver, Item* out) {
     if (!node || !out) return 0;
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        // DocumentFragment uses the shared container storage internally, but
-        // its projected DOM discriminator must remain nodeType 11.
+        // Document and DocumentFragment share element storage internally, but
+        // ancestor walks must stop at their DOM node types instead of treating
+        // the shell as another Element.
         *out = radiant_dom_int_item(
+            radiant_dom_is_tag(elem, "#document") ? 9 :
             radiant_dom_is_tag(elem, "#document-fragment") ? 11 :
             (int64_t)elem->node_type);
         return 1;
@@ -2220,6 +2264,18 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     const char* prop = fn_to_cstr(prop_name);
+    if (node && node->is_element() && prop && strcmp(prop, "labels") == 0) {
+        DomElement* elem = node->as_element();
+        if (radiant_dom_is_tag(elem, "input") ||
+            radiant_dom_is_tag(elem, "select") ||
+            radiant_dom_is_tag(elem, "textarea") ||
+            radiant_dom_is_tag(elem, "button") ||
+            radiant_dom_is_tag(elem, "output") ||
+            radiant_dom_is_tag(elem, "meter") ||
+            radiant_dom_is_tag(elem, "progress")) {
+            return radiant_dom_labels_item(elem);
+        }
+    }
     if (node && node->is_element() && prop &&
         (strcmp(prop, "offsetWidth") == 0 || strcmp(prop, "offsetHeight") == 0 ||
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
@@ -2252,6 +2308,12 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
                                                   Item* args, int argc) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     if (!node) return ItemNull;
+    if (operation == JUBE_DOM_CLONE_NODE && !node->is_element()) {
+        // Text nodes are valid Node receivers; the element-only clone bridge
+        // passed them a null DomElement and made jQuery clone cleanup crash.
+        DomNode* clone = dom_node_clone(node, argc > 0 && js_is_truthy(args[0]));
+        return radiant_dom_node_item(clone);
+    }
     if (operation == JUBE_DOM_CONTAINS) {
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
         return (Item){.item = b2it(radiant_dom_node_contains(node, other) ? 1 : 0)};

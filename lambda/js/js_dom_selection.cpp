@@ -24,6 +24,7 @@
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../runtime/heap_api.h"
 #include "../runtime/transpiler.hpp"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
@@ -227,12 +228,12 @@ JS_DOM_PROTOTYPE_VALUE(js_dom_selection_get_prototype_value, "Selection")
 // Reuse cached JS wrapper if the native object already has one; else build.
 static Item js_object_for_range(DomRange* r) {
     if (!r) return ItemNull;
-    if (r->host_wrapper) return (Item){ .vmap = (VMap*)r->host_wrapper };
+    if (r->host_wrapper_root) return (Item){ .item = r->host_wrapper_root };
     return build_range_object(r);
 }
 static Item js_object_for_selection(DomSelection* s) {
     if (!s) return ItemNull;
-    if (s->host_wrapper) return (Item){ .vmap = (VMap*)s->host_wrapper };
+    if (s->host_wrapper_root) return (Item){ .item = s->host_wrapper_root };
     return build_selection_object(s);
 }
 
@@ -599,6 +600,11 @@ static Item build_range_object(DomRange* r) {
     // Range wrappers have no Map shell; the host brand is the unwrap invariant.
     obj.vmap->host_type = radiant_dom_range_host_type();
     obj.vmap->host_data = r;
+    r->host_wrapper_root = obj.item;
+    if (!heap_try_register_gc_root(&r->host_wrapper_root)) {
+        r->host_wrapper_root = 0;
+        return obj;
+    }
     r->host_wrapper = obj.vmap;
     dom_range_retain(r);  // released in js_dom_selection_reset
     return obj;
@@ -1022,6 +1028,11 @@ static Item build_selection_object(DomSelection* s) {
     // Selection wrappers have no Map shell; the host brand is the unwrap invariant.
     obj.vmap->host_type = radiant_dom_selection_host_type();
     obj.vmap->host_data = s;
+    s->host_wrapper_root = obj.item;
+    if (!heap_try_register_gc_root(&s->host_wrapper_root)) {
+        s->host_wrapper_root = 0;
+        return obj;
+    }
     s->host_wrapper = obj.vmap;
     return obj;
 }
@@ -1425,10 +1436,16 @@ extern "C" void js_dom_selection_reset(void) {
         if (r->host_wrapper) {
             // Native selection ranges also live in this list but have no JS retain;
             // only a materialized wrapper pairs with build_range_object's retain.
+            heap_unregister_gc_root(&r->host_wrapper_root);
+            r->host_wrapper_root = 0;
             r->host_wrapper = nullptr;
             dom_range_release(r);
         }
         r = next;
     }
-    if (state->dom_selection) state->dom_selection->host_wrapper = nullptr;
+    if (state->dom_selection) {
+        heap_unregister_gc_root(&state->dom_selection->host_wrapper_root);
+        state->dom_selection->host_wrapper_root = 0;
+        state->dom_selection->host_wrapper = nullptr;
+    }
 }

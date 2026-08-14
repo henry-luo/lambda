@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<body>
+  <div id="host">selection wrapper survives collection</div>
+  <output id="status">pending</output>
+  <script>
+    var host = document.getElementById('host');
+    var selection = window.getSelection();
+    var range = document.createRange();
+    range.selectNodeContents(host);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    // The native selection retains the range after the JS wrapper is dropped.
+    // Repeated collection must not make getRangeAt return a stale VMap.
+    range = null;
+    gc();
+    var recovered = selection.getRangeAt(0);
+    var firstRead = recovered.toString() === 'selection wrapper survives collection';
+
+    gc();
+    var recoveredAgain = selection.getRangeAt(0);
+    var secondRead = recoveredAgain.toString() === 'selection wrapper survives collection';
+    document.getElementById('status').textContent =
+      [selection.rangeCount, firstRead, secondRead].join('|');
+  </script>
+</body>
+</html>

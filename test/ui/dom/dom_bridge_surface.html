@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<body>
+  <label for="explicit-control">Explicit</label>
+  <input id="explicit-control">
+  <label id="wrapping-label">Wrapped <input id="wrapped-control"></label>
+  <label for="other-control">Unrelated</label>
+  <input id="unlabeled-control">
+  <output id="status">pending</output>
+  <script>
+    var fragment = document.createDocumentFragment();
+    var source = document.createTextNode('bridge-text');
+    fragment.appendChild(source);
+    var clone = source.cloneNode(false);
+    var explicit = document.getElementById('explicit-control');
+    var wrapped = document.getElementById('wrapped-control');
+    var unlabeled = document.getElementById('unlabeled-control');
+
+    document.getElementById('status').textContent = [
+      document.nodeType,
+      fragment.nodeType,
+      clone.nodeType,
+      clone.textContent,
+      explicit.labels.length,
+      wrapped.labels.length,
+      unlabeled.labels.length
+    ].join('|');
+  </script>
+</body>
+</html>

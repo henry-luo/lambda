@@ -1139,6 +1139,10 @@ Item push_d_safe(double val) {
 extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
     if (!gc) return;
     gc_finalize_all_objects(gc);
+    // teardown has already released every callback-owned payload; disabling
+    // both hooks here protects callers that destroy this heap directly.
+    gc->js_native_destroy = NULL;
+    gc->external_destroy = NULL;
 }
 
 void heap_destroy() {
@@ -1152,7 +1156,6 @@ void heap_destroy() {
             heap_finalize_gc_objects(context->heap->gc);
             // The full finalizer has already released every live native Map
             // payload with one shared duplicate-owner set.
-            context->heap->gc->js_native_destroy = NULL;
             gc_heap_destroy(context->heap->gc);
         }
         lambda_region_destroy_caches(context->heap);
@@ -1218,6 +1221,12 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         }
         void *obj = (void*)(current + 1);
         uint16_t tag = current->type_tag;
+
+        // heap finalization bypasses gc_heap_destroy's callback pass, so release
+        // live external payloads here before the helper disarms teardown hooks.
+        if (gc->external_destroy) {
+            gc->external_destroy(obj, tag);
+        }
 
         if (tag == LMD_TYPE_VMAP) {
             VMap *vm = (VMap*)obj;
