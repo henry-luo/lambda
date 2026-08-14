@@ -182,6 +182,20 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
             case C_RET_ITEM:
             case C_RET_RETITEM:
                 metadata->ret_class = JIT_VALUE_BOXED_ITEM;
+                // RV14a, type-driven: `C_RET_ITEM` says only "a boxed Item
+                // comes back", which made every sys func pay the wide-scalar
+                // adopt. The row already carries the DECLARED Lambda return
+                // type, and a declaration that cannot be a wide scalar
+                // (`null`, `bool`, `string`, a container, ...) proves the
+                // result needs no rehoming. `print` is declared `null` and
+                // returns `ItemNull` unconditionally, yet was 78 of the 101
+                // remaining helper adopts across AWFY. Wide declarations
+                // (int64/uint64/float) fall through and keep their adopt, so
+                // this narrows by proof rather than by an audit promise.
+                if (info->return_type && !lambda_type_id_may_be_wide_scalar(
+                        info->return_type->type_id)) {
+                    metadata->flags |= JIT_IMPORT_RESULT_SCALAR_STABLE;
+                }
                 break;
             case C_RET_STRING:
             case C_RET_SYMBOL:

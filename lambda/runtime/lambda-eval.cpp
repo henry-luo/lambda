@@ -1016,16 +1016,31 @@ template <int... indices>
 struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
     static Item invoke(Function* fn, const Item* args, uint64_t* result_home,
             const char* caller) {
+        // A published Core entry must retain its hidden context operand. This
+        // blocks raw/native bodies from being reinterpreted as boxed calls —
+        // and return convention v3 (RVO3) leans on it, because the casts below
+        // are single-result C prototypes and must never be applied to a
+        // pair-returning body.
+        //
+        // Under v3 the trailing result-home operand is gone: the wrapper hands
+        // lane 2 back through `Context::mir_companion_slot` instead (RV12), so
+        // `requires_scalar_result_home` is no longer part of the contract and
+        // the caller resolves after the call rather than donating storage
+        // before it.
+#if LAMBDA_RETURN_V3
+        if (!fn->requires_runtime_context) {
+#else
         if (!fn->requires_scalar_result_home || !fn->requires_runtime_context) {
-            // A published Core entry must retain both hidden operands. This
-            // blocks raw/native bodies from being reinterpreted as boxed calls.
+#endif
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
                 "boxed Lambda entry is missing its context/result-home ABI metadata");
         }
+#if !LAMBDA_RETURN_V3
         if (!result_home) {
             return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
                 "boxed Lambda entry requires a caller-owned scalar result home");
         }
+#endif
         Context* runtime = fn->runtime_context;
         if (!runtime) {
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
@@ -1035,6 +1050,18 @@ struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
                 "boxed Lambda entry belongs to a different runtime context");
         }
+#if LAMBDA_RETURN_V3
+        // RV12: no trailing home operand; resolve lane 2 from the context slot
+        // immediately, before anything else can clobber it (RV4.2).
+        if (fn->closure_env) {
+            return lambda_item_resolve_pending_slot(
+                ((Item (*)(Context*, void*, LambdaHostedItem<indices>...))fn->ptr)(
+                    runtime, fn->closure_env, args[indices]...));
+        }
+        return lambda_item_resolve_pending_slot(
+            ((Item (*)(Context*, LambdaHostedItem<indices>...))fn->ptr)(
+                runtime, args[indices]...));
+#else
         if (fn->closure_env) {
             return ((Item (*)(Context*, void*, LambdaHostedItem<indices>...,
                 uint64_t*))fn->ptr)(runtime, fn->closure_env, args[indices]...,
@@ -1042,6 +1069,7 @@ struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
         }
         return ((Item (*)(Context*, LambdaHostedItem<indices>..., uint64_t*))fn->ptr)(
             runtime, args[indices]..., result_home);
+#endif
     }
 };
 
@@ -1276,6 +1304,32 @@ Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, I
     return ((Item(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h);
 }
 
+// v3/RV12: the `_b` wrapper no longer takes a trailing home — it returns a
+// pending Item and leaves lane 2 in `Context::mir_companion_slot` — so the
+// inner cast loses that operand and the trampoline resolves before returning.
+// The trampoline's OWN signature keeps `result_home` so generated call sites
+// need no change; the argument is simply unused on this path.
+#if LAMBDA_RETURN_V3
+Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
+    Context* runtime = (Context*)context;
+    if (!runtime) return ItemError;
+    (void)result_home;
+    return lambda_item_resolve_pending_slot(
+        ((Item(*)(Context*))fp)(runtime));
+}
+
+#define EXPAND_BOXED_CALL_PARAMS(...) __VA_ARGS__
+#define DEFINE_BOXED_CALL_INTO(count, params, args) \
+    Item fn_call_boxed_##count##_into(void* fp, \
+            EXPAND_BOXED_CALL_PARAMS params, uint64_t* result_home) { \
+        Context* runtime = (Context*)context; \
+        if (!runtime) return ItemError; \
+        (void)result_home; \
+        return lambda_item_resolve_pending_slot( \
+            ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params))fp)( \
+                runtime, EXPAND_BOXED_CALL_PARAMS args)); \
+    }
+#else
 Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
     Context* runtime = (Context*)context;
     if (!runtime) return ItemError;
@@ -1291,6 +1345,7 @@ Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
         return ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params, uint64_t*))fp)( \
             runtime, EXPAND_BOXED_CALL_PARAMS args, result_home); \
     }
+#endif
 
 DEFINE_BOXED_CALL_INTO(1, (Item a), (a))
 DEFINE_BOXED_CALL_INTO(2, (Item a, Item b), (a, b))
@@ -4169,7 +4224,11 @@ Item fn_member(Item item, Item key) {
 
                     // metadata properties (require stat'd metadata)
                     if (path->meta && (path->flags & PATH_FLAG_META_LOADED)) {
-                        if (strcmp(k, "size") == 0) return box_int64_value(path->meta->size);
+                        // v5: a byte count is an `int` (the int53 band reaches
+                        // 9 PB), so it boxes inline. `box_int64_value` here was
+                        // a pre-v5 leftover from 32-bit `int`, and it was the
+                        // only reason fn_member could touch the number stack.
+                        if (strcmp(k, "size") == 0) return {.item = i2it(path->meta->size)};
                         if (strcmp(k, "modified") == 0) return push_k(path->meta->modified);
                         if (strcmp(k, "is_dir") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_DIR) != 0)};
                         if (strcmp(k, "is_link") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_LINK) != 0)};
@@ -4249,7 +4308,9 @@ Item fn_member(Item item, Item key) {
         }
 
         // meta properties
-        if (strcmp(k, "unix") == 0)           return box_int64_value(datetime_to_unix_ms(&dt));
+        // v5: unix-ms is an `int` (the int53 band reaches year 285,000), so it
+        // boxes inline rather than taking a number home — same pre-v5 leftover.
+        if (strcmp(k, "unix") == 0)           return {.item = i2it(datetime_to_unix_ms(&dt))};
         if (strcmp(k, "is_date") == 0)        return {.item = b2it(dt.precision == DATETIME_PRECISION_DATE_ONLY || dt.precision == DATETIME_PRECISION_YEAR_ONLY)};
         if (strcmp(k, "is_time") == 0)        return {.item = b2it(dt.precision == DATETIME_PRECISION_TIME_ONLY)};
         if (strcmp(k, "is_leap_year") == 0)   return {.item = b2it(datetime_is_leap_year_dt(&dt))};

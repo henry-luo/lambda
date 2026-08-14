@@ -7,8 +7,13 @@
 > **[measured 2026-08-14]** below were revised from proposal fidelity to
 > observed behaviour once shape 2 was emitting; §1.4 corrects §1.2's site
 > split, §8 is re-costed against it, and RVO10 is new.
-> Ledger **RV1–RV13** (+ measured addenda RV3a, RV10a) + open issues
-> **RVO1–RVO10**. The trailing-scalar-home
+> Ledger **RV1–RV16** (+ addenda RV3a, RV10a, RV14a) + open issues
+> **RVO1–RVO11**. **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
+> boundary: a C helper or sys func returns a wide scalar by pushing it on the
+> number stack and returning an ordinary Item, because it owns no watermark
+> to tear down; the eager per-call restore that made that unsafe is retired
+> in favour of an on-demand loop-end reclaim, which a wide-capable mutable
+> local's own number slot makes safe for loop-carried values. The trailing-scalar-home
 > ABI is retired in favor of the companion-lane convention; the formal spec
 > is revised (**D5.2.1v2**, **D2.7.2v2**, **D8.4.2v2**, spec v1.20.0), with
 > the retired-ABI record in its Appendix A. The v1 ABI remains the shipping
@@ -44,6 +49,12 @@ than two lanes**:
 | 2 | boxed return, may carry a wide scalar | `[item, scalar]` | raw 64-bit payload, live iff lane 1 is a pending Item |
 | 3 | native return, infallible (TE-17) | `[native]` | — |
 | 4 | native return, `^E` | `[native, error]` | error Item (`ItemNull` when no error) |
+
+These are the shapes for entries that **own a number-frame watermark** —
+Lambda `fn`/`pn`. A C helper or sys func owns none, so it needs no shape at
+all: it pushes a wide scalar on the number stack and returns an ordinary
+Item, which is already caller-homed (RV14, §4a). One rule decides which side
+an entry falls on, and it is about watermark ownership, not language.
 
 Two goals: **(a)** wide scalars return *inline* in a register instead of
 through a caller-donated memory home, and **(b)** typed functions return in
@@ -163,16 +174,36 @@ holds for all eight benchmarks with no residual.
    `fn_call_boxed_N_into` trampolines and `fn->invoke`), and a C prototype
    cannot receive two MIR results on *any* platform. See RV12 below: the
    context-slot transport, not the register pair, is what unlocks these.
-3. **Helper-call adopts (68%) — outside this design entirely.** §1.2 said
-   "the rest adopt call results into local homes, which shape 2 converts to
-   'patch only on escape'". That is **not** what they are. They sit in
+3. **Helper-call adopts (68%) — a different problem, resolved by §4a.** §1.2
+   said "the rest adopt call results into local homes, which shape 2 converts
+   to 'patch only on escape'". That is **not** what they are. They sit in
    `em_call_import`, after calls to C helpers (`fn_member`,
    `lambda_name_id_to_item`, `pn_print`, …), and RV12 already states the
    pair protocol is JIT⇄JIT — so shape 2 cannot convert them. Their cause is
    unrelated to the return ABI: the caller snapshots `side_number_top`
    before the helper call and restores it immediately after, so a payload
    the helper homed in the caller's own extent would be reclaimed; the adopt
-   copies it somewhere stable first. Tracked as **RVO10**.
+   copies it somewhere stable first. **RV14 rules the restore away instead of
+   the payload** — a C helper owns no watermark, so its push is already
+   caller-homed and needs no rescue. (Was RVO10; superseded by RV14/RV15,
+   with the surviving question recorded as RVO11.)
+
+   Worth recording why an audit-only fix does **not** reach this population,
+   because it looks like it should: the adopt is gated by a conservative
+   opt-out flag (`RESULT_SCALAR_STABLE`), so marking helpers stable appears
+   to dissolve it. It does not. Verified by reading the sources, these
+   genuinely allocate on the number stack — `box_int64_value`,
+   `box_uint64_value`, `box_int64_result_or_error`, `push_d_safe`,
+   `js_profiled_push_d` (boxing *is* their job), and, the common case,
+   everything that materializes a wide scalar out of non-Item storage:
+   `array_num_read_item` (`ELEM_INT64` → `box_int64_value`, `ELEM_FLOAT64`
+   → `push_d`) and `scalar_storage_read` ("re-home its interior scalar
+   references in the current number frame before escape"), reached through
+   `owned_item_slot_read`, `js_get`, `fn_string_ascii_at`. A wide scalar read
+   out of storage has nowhere to live but a number home — that is what the
+   number stack is *for*. Only `int2it`/`int2it_i64` (v5 `int` boxes inline)
+   and `lambda_name_id_to_item` (interned name-pool symbols) are genuinely
+   push-free. The population is real; the transport is what changes.
 
 The trailing home *argument* at call sites did drop sharply, which is the
 per-call argument-register win §8 claims: havlak 229 → 36 sites, json
@@ -180,9 +211,10 @@ per-call argument-register win §8 claims: havlak 229 → 36 sites, json
 of its calls target public wrappers).
 
 Net static effect of P1 as landed: 9–39% → 7.5–35.4% of emitted MIR. The
-design's larger number is still reachable, but it is gated on population 2
-(RV12 slot transport for C-reachable entries) and population 3 (RVO10), not
-on anything in §2–§6.
+design's larger number is reached by two further mechanisms, each matched to
+who owns a watermark: population 2 by the RV12 slot transport for C-reachable
+entries, population 3 by RV14/RV15. Neither is in §2–§6 — shape 2 alone was
+never going to deliver them.
 
 ---
 
@@ -344,6 +376,171 @@ returns cost 2 movs; non-wide returns cost nothing; there is no dynamic
 
 ---
 
+## 4a. The C boundary — watermark ownership decides the transport
+
+**RV14 — A C helper or sys func returns a wide scalar by pushing it on the
+number stack and returning an ordinary Item that points there.** *(ruled
+2026-08-14)* No adopt cluster, no caller-donated home, no companion lane.
+The Item is a normal boxed wide scalar; every existing consumer already
+handles it.
+
+The rule underneath is **watermark ownership**, not the implementation
+language:
+
+| entry | owns a number-frame watermark? | wide return rides |
+|---|---|---|
+| C helper / sys func | **no** | the number stack directly (RV14) |
+| Lambda `fn` / `pn` | **yes** — torn down at return | the companion lane (RV1 shape 2) |
+
+A C helper establishes no watermark frame (SF6), so `box_int64_value` inside
+it allocates in the **calling JIT frame's** extent and the returned Item stays
+valid for that frame's whole activation. A `fn`/`pn` cannot do this: its own
+epilogue restores the watermark, so a pointer into its extent is dangling by
+the time the caller sees it — which is exactly why shape 2 exists.
+
+Stating it by ownership rather than by language keeps it true for the cases
+that blur: a sys func implemented in Lambda has a frame and takes the
+companion lane; a C helper that ever grew a frame would too. The nesting
+property that makes RV14 safe is the same one: a Lambda call made *after* the
+helper sets its `number_base` above the helper's payload and restores only to
+there, so the payload survives.
+
+*What this replaces.* v1 made helper results pay the full ritual — snapshot
+the watermark, materialize a colored home, run the 20-instruction classify,
+copy the payload down, restore. §1.4 measures that at **68% of all adopt
+sites** (757 of 1108), the single largest population in the census. RV14
+deletes all of it. The classify existed only because of the eager restore
+below; remove the restore and there is nothing to rescue.
+
+**RV14a — Consult the watermark effect the audit already declares.**
+*(implementation corollary of RV14; independent of it, and landable first.)*
+
+The emitter records, per import, whether the callee leaves the number-stack
+watermark where it found it:
+
+```c
+entry->call.effects.number_stack =
+    entry->audit.flags & JIT_IMPORT_NUMBER_STACK_PRESERVES
+    ? JIT_NUMBER_STACK_PRESERVES : JIT_NUMBER_STACK_MAY_ALLOCATE;
+```
+
+`JitCallEffects.number_stack` has exactly one writer and **no reader**. The
+adopt decision instead consults only `scalar_class`, i.e. "boxed Item and not
+marked `RESULT_SCALAR_STABLE`". So a helper that has *declared* it cannot
+leave anything above the caller's pre-call top still gets the full ritual:
+watermark snapshot, colored home, 20-instruction classify, restore.
+
+The declaration is exactly the premise RV14 reasons from, so it discharges the
+adopt on its own: if the top on return equals `source_base`, the region the
+restore reclaims is empty, nothing the returned Item points at can be inside
+it, and anything it points at that *is* on the number stack was allocated
+before the call — below `source_base`, which the restore never touches.
+
+Gate the adopt on `scalar_class != NONE` **and**
+`number_stack != PRESERVES`. Thirty registry rows declare the flag; three of
+them return boxed Items and so pay the ritual today. One is
+`lambda_name_id_to_item`, which havlak calls 78 times — **1,560 instructions,
+7.6% of that module** — for a helper whose body cannot allocate at all:
+
+```c
+extern "C" Item lambda_name_id_to_item(NameId name_id) {
+    if (name_id == NAME_ID_NONE) return ItemNull;
+    NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
+    return name ? (Item){.item = s2it(name)} : ItemNull;   // interned name-pool symbol
+}
+```
+
+Two cautions. First, this converts a documentation claim into a correctness
+dependency — a row that declares `PRESERVES` untruthfully becomes a
+use-after-free rather than a comment that is merely wrong. Pair it with a
+debug assert in `lambda_side_number_alloc` that fires when it is reached from
+a helper declaring `PRESERVES`, which turns a silent lie into a loud one.
+Second, the enum ordering is load-bearing: `MAY_ALLOCATE` must remain value 0
+so an unaudited or zero-initialized row decodes conservatively.
+(`Lambda_Design_Stack_API.md` §7.1 declared it the other way round and was
+corrected 2026-08-14; the shipping header was always right.)
+
+Note also that direct Lambda-to-Lambda calls hard-code `MAY_ALLOCATE`
+regardless of callee, though a `fn`/`pn` restores its own extent at its
+epilogue and therefore does preserve the watermark from the caller's view.
+Harmless while nothing reads the field; worth correcting alongside the reader.
+
+**RV15 — The eager per-call watermark restore is retired; reclaim moves to
+loop end, on demand.** *(ruled 2026-08-14)* Today the caller snapshots
+`side_number_top` before each helper call and restores it immediately after.
+That restore is what invalidates RV14's payload, so it goes. Correctness does
+not depend on it — the frame epilogue already restores to `number_base`, so
+nothing escapes the activation either way. It is purely a **space** bound.
+
+Removing it moves that bound from *peak liveness* (what the home coloring in
+`em_finalize_scalar_homes` buys) to *total allocations in the frame*. Bounded
+code is unaffected; a loop is not:
+
+```
+for i in 1 to 1_000_000 { sum = sum + arr[i] }   // untyped, arr is int64[]
+```
+
+Each `arr[i]` reaches `array_num_read_item` → `box_int64_value` → 8 bytes,
+live to the end of the function. Typed code escapes through native lanes, but
+untyped loops over `int64`/`float64` storage are precisely the shape that
+pushes.
+
+So the reclaim moves to the loop back edge, emitted **only when the compiler
+believes the loop accumulates**: the emitter already knows, per loop body,
+whether it emitted a call whose audited result class can be a wide scalar —
+the same `scalar_class != SCALAR_RETURN_NONE` test that drives the v1 adopt.
+When it did, the back edge restores the watermark to the loop-entry value.
+One restore per iteration replaces a 20-instruction cluster per call, and the
+bound becomes peak-per-iteration, which is what the coloring was buying.
+
+**The safety condition is loop-carried wide values.** A back-edge reclaim
+kills anything still living in the reclaimed region, so it is sound only when
+no loop-carried wide value lives above the loop-entry watermark. RV16 answers
+this for the case that matters; the residue is **RVO11**.
+
+**RV16 — A wide-capable mutable local owns a number slot; assignment stores
+into it.** *(ruled 2026-08-14)*
+
+```
+var acc = 0i64                    // one slot, allocated at the declaration
+for … { acc = acc + arr[i] }      // assignment STORES into that slot
+```
+
+The binding gets its slot once and keeps it for its scope; assigning a wide
+value copies the payload into that slot and retags, rather than pushing a
+fresh home. This is the D5.2.2 move — the binding becomes **destination-owned
+storage** — applied to locals.
+
+*Why it makes RV15 sound.* The slot is allocated at the declaration, which
+precedes the loop, so it sits **below** the loop-entry watermark and a
+back-edge reclaim cannot reach it. Every per-iteration transient — `arr[i]`'s
+push — sits above and is reclaimed. Loop-carried below, per-iteration above,
+which is exactly the split the reclaim needs.
+
+The sub-cases fall out rather than needing rules of their own: a `let` or
+`var` declared *inside* the body binds once per iteration, so its slot is
+above the watermark and dies with the iteration, which is correct. `let` is
+immutable, so a loop accumulator is necessarily `var` — the mutable form is
+the only one that needs the reuse.
+
+*Cost.* Assignment becomes a store. For a statically wide binding
+(`var acc = 0i64` infers int64) that is a plain store with no classify; only
+an ANY-typed mutable binding needs the 2-instruction wide test and a rare
+copy. One store per assignment replaces a 20-instruction cluster per helper
+call. In typed code the accumulator uses a native i64 lane and never touches
+the number stack at all — the slot exists only for the boxed path.
+
+*What it costs to build.* This machinery does not exist yet.
+`MirScalarHomeBinding` associates a MIR **register** with a colored home —
+transient-value coloring, not source-binding ownership — and `BindingStorage`
+(`REGISTER` / `SCOPE_ENV` / `MODULE` / `PERSISTENT`) has no consumer in the
+emitter, so there is no per-binding storage notion to extend. It is new, but
+small, and it *subsumes* rather than adds: per-binding slots plus a bulk
+back-edge reclaim replace the interference/coloring pass in
+`em_finalize_scalar_homes`.
+
+---
+
 ## 5. Lane discipline
 
 **RV8 — Lane 2 is one raw i64; never a pointer.** Doubles travel as bitcast
@@ -378,6 +575,19 @@ edge, decided here, not two.
 
 ## 6. ABI identity and dispatch
 
+> **[measured 2026-08-14] — the descriptor is now cross-checked, not
+> trusted.** RV10 names the single-source-of-truth defence but leaves it as
+> discipline. In practice two derivations exist: a call site computes its
+> result count from the callee's descriptor, and the callee computed its
+> `nres` from the same descriptor when it was created. Nothing forced them to
+> agree, and a disagreement is silent at the MIR level — precisely the v27
+> havlak failure. `em_assert_callee_result_count()` closes this: whenever the
+> target is a defined function in the module, its real `MIR_func->nres` is
+> compared against what the call site is about to emit, and a mismatch aborts
+> naming both numbers. Forward/import items are skipped and checked when the
+> definition lands. Cheap enough to run unconditionally, so it is not a debug
+> build's privilege.
+
 **RV10 — One convention descriptor, consumed everywhere.** The shape is
 stored once in the function record (and mirrored in ValueRep at call
 sites); wrappers, `fn->invoke` entries, the interpreter bridge, and the L1
@@ -392,6 +602,16 @@ of this bug class; the descriptor is the single-source-of-truth defense.
   is the same entry (lane 2 dummy); for shape-3/4 functions the boxed
   public entry (D8.3 dual-func) boxes the native result — producing a
   pending pair only when the value is actually wide.
+
+  > **[measured 2026-08-14]** This is the part of §6 that the register pair
+  > cannot deliver on its own. Dynamic dispatch is C-mediated end to end:
+  > generated code calls `fn_callN_into`, ordinary C functions
+  > (`Item fn_call1_into(Function*, Item, uint64_t*)`) that resolve the
+  > callable and invoke it through a C function-pointer cast. Neither hop can
+  > carry two MIR results on any platform. So "every function has a
+  > shape-2-speaking entry" is true of the *convention* but is realized
+  > through the RV12 companion **location**, not the register form — the same
+  > conclusion §7 reaches for public wrappers, arrived at independently.
 - **Entry equivalence (DF9)** extends: all entries of one function agree on
   observable results *and* on the pair protocol.
 - C2MIR stays frozen on v2 single-Item returns (rule 14); the MIR
@@ -504,17 +724,22 @@ three populations:
 | trailing home *argument* at call sites | **mostly gone** (havlak 229 → 36, json 101 → 2, richards 63 → 1) | — |
 | return-side adopt cluster, internal bodies | **gone** — 14% of all adopt sites | — |
 | return-side adopt cluster, public `_b` wrappers | remains — 18% of all sites | RV12 slot transport for C-reachable entries (§7, P3) |
-| helper-call adopt cluster (`em_call_import`) | remains — **68%** of all sites | **RVO10** — not a return-ABI problem |
-| `em_scalar_home_*` coloring / liveness machinery | remains | the two rows above |
-| `lambda_item_adopt_scalar_home` + import | remains | the two rows above |
+| helper-call adopt cluster, callee declares `PRESERVES` | — | **RV14a** — already provable today, no protocol change (havlak: 78 sites, 7.6% of the module) |
+| helper-call adopt cluster (`em_call_import`) | **68%** of all sites | **RV14** deletes it (§4a); the eager per-call restore goes with it |
+| eager per-call watermark snapshot + restore | — | **RV15** replaces it with an on-demand loop-end reclaim |
+| `em_scalar_home_*` coloring / liveness machinery | remains | RV12 slot (wrappers) + RV14 (helpers) — after both, nothing allocates a home |
+| `lambda_item_adopt_scalar_home` + import | remains | same two |
 | `INT64_ERROR` on return paths | remains | P2 (RV9) |
 
-Static share moved 9–39% → 7.5–35.4%. The headline number in §1.2 is still
-reachable, but §8's framing invited reading it as a consequence of shape 2
-alone; it is not. Shape 2 delivers the *per-call argument register* and the
-*body* return ritual. The remaining 86% of adopt sites need the slot
-transport (§7) and RVO10 respectively — two separate pieces of work that
-this design does not by itself perform.
+Static share moved 9–39% → 7.5–35.4% with shape 2 alone. §8's original
+framing invited reading the full number as a consequence of shape 2; it is
+not. Shape 2 delivers the per-call argument register and the *body* return
+ritual — 14% of sites. The other 86% fall to two mechanisms outside §2–§6,
+each matched to watermark ownership: the slot transport for C-reachable
+Lambda entries (18%), and RV14 for C helpers (68%). With all three landed,
+`lambda_item_adopt_scalar_home` and the entire home apparatus —
+`em_scalar_home_new/bind/for_reg/ref`, `em_finalize_scalar_homes`, every
+`_scalar_home` and `result_home` parameter — have no remaining caller.
 
 ---
 
@@ -531,6 +756,24 @@ this design does not by itself perform.
   checks, retire `INT64_ERROR` returns. Gate: typed benchmark suite; the
   R26 regression rows (tak, fannkuch, pnpoly) as canaries against
   reintroducing per-call check taxes.
+- **P2.6 — read the watermark effect** (RV14a). Gate the helper-side adopt on
+  `number_stack != PRESERVES` as well as `scalar_class`, and add the
+  `lambda_side_number_alloc` debug assert that keeps the audit honest. A few
+  lines, no ABI or protocol change, and it stands on its own whether or not
+  P2.7 ever lands — it removes 7.6% of havlak's emitted MIR by itself. Gate:
+  baseline + emission fixtures; the ratchet should drop.
+- **P2.7 — C-helper convention** (RV14/RV15/RV16). Give wide-capable mutable
+  locals their own declaration-time slot **first** (RV16) — the reclaim is
+  unsound without it — then drop the eager per-call watermark
+  snapshot/restore and the helper-side adopt in `em_call_import`, and add the
+  loop-end reclaim, emitted only for loops the emitter saw make a
+  wide-capable helper call. Settle RVO11 (unnamed wide temporaries crossing
+  the back edge) *before* emitting the restore. Independent of P2 and P3 — it touches neither the
+  return ABI nor any entry signature — so it can land in any order among
+  them. Gate: baseline + forced-GC sweep, plus a peak-side-stack measurement
+  on a million-iteration untyped loop over `int64` array elements and over
+  `int64` map fields. Correctness alone does not gate this one; the point of
+  RV15 is the space bound, so the gate has to measure space.
 - **P3 — slot transport** (RV12 slot form) + Windows CI coverage.
   *(**[measured 2026-08-14]** — re-scoped: this is not a platform-coverage
   phase. Per §7 it is what lets C-reachable public wrappers speak the
@@ -545,16 +788,23 @@ Ordering note: P1 before P2 because shape 2 is the universal entry every
 dynamic call assumes (§6); typed lanes plug into an already-correct boxed
 world.
 
-**[measured 2026-08-14] — status.** P0, P1.1, P1.2 and P1.3 (in its eager
-form, see RV7's note) are implemented behind `LAMBDA_RETURN_V3`, default
-off. Both configurations gate green on the Lambda baseline (3718/3718 with
-the flag off; the flag-on run's only failure is a known heavy-test parallel
-flake, and the JS suite is 347/347 standalone). Emission fixtures now assert
-both conventions rather than one. Remaining in P1: P1.4 (dynamic dispatch
-still materializes `dyn_scalar_home`), P1.5 bridges, P1.6 async audit, and
-P1.7's measurement half — MT7 re-ratchet, AWFY stdout diff, release timing
-against the R26 canaries, RVO8/RVO9. Full log:
-[`Lambda_Impl_Return_Value.md`] §5.
+**[measured 2026-08-14] — status.** P0, P1.1, P1.2, P1.3 (in its eager form,
+see RV7's note), P1.5 and P1.6 are implemented behind `LAMBDA_RETURN_V3`,
+default off. Both configurations gate green on the Lambda baseline at
+**3719/3719**. Emission fixtures assert both conventions rather than one.
+
+- **RVO3 and RVO4 are closed** (§10). RVO4 was not a formality: it exposed a
+  real defect in which a shape-2 call site published its raw result to the
+  async spill tracker and the GC root machinery before resolving.
+- **P1.4 is partial by necessity.** Its descriptor cross-check landed
+  (`em_assert_callee_result_count`, see §6), but pair-returning dynamic
+  entries and `nres=2` public wrappers are blocked on the RV12 slot
+  transport, for the C-mediation reason recorded in §6 and §7. That work
+  belongs to P3, whose scope §1.4 and §7 both re-cost.
+- **Remaining in P1:** P1.7's measurement half — MT7 re-ratchet, AWFY stdout
+  diff, release timing against the R26 canaries, RVO8/RVO9.
+
+Full log: [`Lambda_Impl_Return_Value.md`] §5.
 
 ---
 
@@ -566,13 +816,34 @@ encoding — were resolved 2026-08-14 and folded into rulings RV12, RV13,
 RV8, and RV9 respectively; IDs retired, listed here only so the ledger
 numbering stays traceable.)*
 
-- **RVO3 — Interpreter/JIT bridge.** `lambda-eval.cpp` returns plain Items;
-  crossing wrappers must resolve pending pairs in both directions. Audit
-  all `fn->invoke` entry kinds.
-- **RVO4 — Async/generator transport.** RV5 makes suspension a resolution
-  point; verify the async spill tracker and generator `yield` lanes (SF14
-  reference) never observe a pending Item, and decide whether `yield`
-  itself may use the pair shape upward.
+- ~~**RVO3 — Interpreter/JIT bridge.**~~ **Closed by audit, [measured
+  2026-08-14].** The crossing casts `fn->ptr` to a single-Item C prototype,
+  and that cast is already gated on `entry_abi` ∈ {`LAMBDA_BOXED_FUNCTION`,
+  `LAMBDA_BOXED_PROCEDURE`, `HOST_ADAPTER`}. Those markers are applied only
+  to entries published through a `_b` wrapper, so a pair-returning body can
+  never reach the cast and a pending Item cannot cross into interpreter or
+  host code — by construction, with no new code. MIR-interpreter mode needs
+  nothing either: `nres = 2` is native there, and every C entry point
+  (`main`, `_b` wrappers) is single-result. The guard now documents that it
+  carries this invariant so a later edit cannot relax it unknowingly.
+- ~~**RVO4 — Async/generator transport.**~~ **Closed, [measured
+  2026-08-14]** — and it was not vacuous. Publishing a call result to the
+  async spill tracker and to the root machinery happens on the *same* path
+  (`em_after_resolved_call`), and the root machinery fires for every boxed
+  Item result. A shape-2 call site that published its raw result would
+  therefore spill a pending Item across a suspension *and* write it into a
+  GC root slot, where its `0x1E` tag is outside the traceable TypeId range —
+  two RV4.1 violations from one omission, latent rather than benign because
+  eager resolution overwrites the slot almost immediately. Publication is now
+  split so pair sites announce only the resolved register, once. The
+  suspension-crossing test is
+  `test/lambda/proc/wide_scalar_across_await.ls`. `yield` using the pair
+  shape upward remains undecided and unneeded.
+  **Generalized lesson for the remaining phases:** RV5's site taxonomy lists
+  *semantic* resolution points (stores, arguments, calls, suspensions). The
+  emitter has *bookkeeping* consumers that also write results to memory, and
+  those are not in the table. Any new consumer of a call result must be
+  checked against RV4.1, not just the ones the taxonomy names.
 - **RVO8 — GVN exclusion.** Measure whether `multi_out_insn_p`'s combine
   skip costs anything on hot pair-returning loops; if so, it is a Lambda-side
   emission-shape question, not a vendor patch. *(Still open — P1 landed
@@ -585,17 +856,57 @@ numbering stays traceable.)*
   the expected `mov comp, 0`; whether the generator eliminates it is the
   part not yet measured. Note RV3a makes this ~1 of the 5 fast-path
   instructions, so it is now a larger fraction of a much smaller cost.)*
-- **RVO10 — Helper-call adopts. *(new, [measured 2026-08-14])*** §1.4 finds
-  **68% of all adopt sites** sit after C-helper calls in `em_call_import`,
-  untouched by anything in this design. Their cause is not the return ABI:
-  the caller snapshots `side_number_top` before the call and restores it
-  immediately after, so a wide payload the helper homed in the caller's own
-  extent (SF6) would be reclaimed — the adopt copies it somewhere stable
-  first. Two candidate directions, neither yet analysed: **(a)** stop
-  restoring the watermark per helper call and let the extent run to the
-  frame's own epilogue, trading number-stack footprint for the whole ritual;
-  **(b)** give wide-producing helpers the RV12 slot, which C *can* write —
-  the possibility RV12 already notes ("a portable way for C builtins to
-  produce wide results") but discounts as largely unnecessary, a judgement
-  §1.4's 68% now puts in question. This is the largest remaining item in the
-  adopt census and deserves its own design pass rather than a P-phase.
+- ~~**RVO10 — Helper-call adopts.**~~ **Ruled 2026-08-14 → RV14/RV15 (§4a).**
+  Direction (a) was taken: stop restoring the watermark per helper call, and
+  let a C helper's push stand as an ordinary caller-homed Item, because a C
+  helper owns no watermark to tear down. Direction (b) — giving helpers the
+  RV12 slot — was not needed and would have been the more invasive of the
+  two, since a helper returning a *pending* Item breaks its C-to-C callers
+  (`box_int64_value` alone has 32) and would have required a second entry
+  point per helper. The `WideItem { Item; uint64_t }` struct-return variant
+  was rejected with it: it pessimizes the ~99% non-wide path, changes ~1400
+  registry rows plus every C-to-C caller, and works only by an ABI
+  coincidence (SysV `rax:rdx` / AArch64 `x0:x1` happen to match MIR's
+  two-result convention, while Win64 returns 16-byte structs via hidden
+  pointer) — exactly the coincidence RV12 set out to avoid.
+- **RVO11 — Unnamed wide temporaries crossing a loop back edge.** *(opened
+  and narrowed 2026-08-14)* **RV16 settles the named case**: a wide-capable
+  mutable local owns a slot allocated at its declaration, below the
+  loop-entry watermark, so the reclaim cannot reach it. What remains is
+  whether a *compiler-generated* wide temporary — one that is not a source
+  binding, so RV16 gives it no slot — can be live across a back edge. With
+  binding promotion in place that set ought to be empty, but "ought to be" is
+  the difference between a use-after-free and a slowdown if it is wrong.
+  **Gate the reclaim on the emitter positively establishing the set is
+  empty, not on the assumption.** The question is now bounded and local —
+  "does any unnamed wide value cross this back edge?" — rather than the
+  open-ended "where do loop-carried wide values live?" it started as.
+
+  *Refinement — reclaim at statement boundaries, not back edges.* Given RV16,
+  the values that survive a *statement* are exactly those stored into a
+  binding (RV16 slot, allocated at the declaration) or into destination-owned
+  storage (D5.2.2). Everything else a statement produced is dead at its end —
+  that is what a statement boundary means in an expression-oriented language.
+  So the reclaim can take its watermark at statement start and restore at
+  statement end, which is **sound for the same reason as the back-edge form
+  but bounds growth tighter** (per statement rather than per iteration) and
+  needs no loop-structure tracking at all. The back-edge form remains the
+  fallback for statements that legitimately carry a wide temporary across
+  their own boundary, if any exist. This does not remove the RVO11 obligation
+  — it relocates it to a place the emitter already has structure for.
+
+  *Implementation survey, 2026-08-14.* The emitter has no loop-structure
+  tracking to hang this on: `MirFrameState.root_backedge_reloads` exists but
+  has no writer or reader — declared and unconsumed, like
+  `JitCallEffects.number_stack` was before RV14a and like `BindingStorage`
+  still is. Emitting the restore is easy (the back edge is a `MIR_JMP` the
+  loop lowering already writes); deciding whether it is *safe* is what needs
+  a home. The promising placement is **`em_finalize_scalar_homes`**, which
+  already computes home live ranges and interference at function
+  finalization: emit the back-edge restore unconditionally during lowering,
+  then during finalization delete any restore whose loop body has a home live
+  range crossing its edge. That inverts the problem from "prove nothing
+  crosses" to "detect what crosses and back off", which is the safe
+  direction, and it reuses the pass RV16 would otherwise retire — so
+  sequencing matters: the coloring pass must outlive RV16 long enough to
+  validate the reclaims, or the check needs its own liveness.

@@ -1042,6 +1042,10 @@ Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
 // v3 (RV5): resolve a shape-2 call result whose lane 1 came back pending.
 // Boxes the lane-2 payload into the CALLING frame's number extent.
 Item lambda_item_resolve_pending(Item pending, uint64_t payload);
+// v3 (RV12): same, reading lane 2 from `Context::mir_companion_slot`. This is
+// how C callers of a boxed Lambda entry resolve; a resolved Item passes
+// through untouched, so no caller-side test is required.
+Item lambda_item_resolve_pending_slot(Item value);
 int64_t lambda_restore_number_frame_top(uint64_t* top);
 // A terminal native consumer owns this word only until it unboxes, discards, or
 // copies the result into destination-owned storage; never return its Item.
@@ -1346,6 +1350,18 @@ static inline bool is_numeric_type_id(TypeId type_id) {
            type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT ||
            type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_NUM_SIZED ||
            type_id == LMD_TYPE_COMPLEX;
+}
+
+// Can a value of this DECLARED type ever be a wide scalar — one that needs a
+// number home (v1) or the companion lane (v3)? Everything else is inline,
+// pointer-backed or a container, and so needs no rehoming at any boundary.
+// This is the single source of the "NONE" decision: the emitter's
+// `em_scalar_return_mode_for_type()` defers to it, and the C-side sys-func
+// metadata fallback in mir.c uses it directly, so the two cannot drift.
+static inline bool lambda_type_id_may_be_wide_scalar(TypeId type_id) {
+    return type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ||
+           type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
+           type_id == LMD_TYPE_ANY;
 }
 
 static inline bool is_native_numeric_type_id(TypeId type_id) {
@@ -2078,6 +2094,19 @@ struct Context {
     // as a tagged Item. Single-thread-owned by the same invariant as the
     // side-stack pointers above, and dead between the store and its load.
     uint64_t mir_bitcast_scratch;
+    // Return-value convention v3, RV12: lane 2 as a *location* rather than a
+    // register. A C prototype has no portable spelling for MIR's two-result
+    // convention, so every entry reachable from C — the public `_b` wrappers
+    // called through the boxed-call trampolines and `fn->invoke` — hands its
+    // wide payload back here instead, with lane 1 carrying the pending Item.
+    // The protocol is otherwise byte-identical to the register form: single
+    // live value, dead at the next call, resolved at the caller's first
+    // resolution point.
+    //
+    // Same contract as the two cells above: never GC-scanned (raw payload
+    // bits, never a pointer — RV8), single-thread-owned, and dead outside the
+    // window between a shape-2 return and its resolution.
+    uint64_t mir_companion_slot;
 };
 
 // A property key specification is compiler-neutral data stored in the sealed

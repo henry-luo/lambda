@@ -1063,6 +1063,21 @@ extern "C" Item lambda_item_resolve_pending(Item pending, uint64_t payload) {
     }
 }
 
+// RV12: the C-side half of the slot transport. A boxed Lambda entry that
+// returned a pending Item left its payload in `Context::mir_companion_slot`;
+// read it there and resolve. Safe to call on any Item — a resolved one passes
+// straight through, so callers need no test of their own.
+extern "C" Item lambda_item_resolve_pending_slot(Item value) {
+    if (!lambda_item_is_pending(value.item)) return value;
+    if (!context) {
+        // No owning context means no slot to read; a pending Item here would
+        // decode as a bogus TypeId, so fail loudly rather than silently.
+        lambda_item_debug_trap();
+        return ItemError;
+    }
+    return lambda_item_resolve_pending(value, context->mir_companion_slot);
+}
+
 Item box_int64_value(int64_t lval) {
     if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("int64 number-home boxing called with invalid context");
