@@ -1582,7 +1582,18 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
         if (em_returns_result_pair(mt->em.frame.plan.companion)) {
             // v3 shape 4: the overflow exit reports through lane 2 like any
             // other failure, so there is no context store on this path either.
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2, first,
+            // The VALUE lane must be a DIFFERENT constant from the error lane
+            // (0 here — it is dead once lane 2 carries an error): MIR's
+            // simplify value-numbers identical constant operands into ONE temp
+            // (`ret ITEM_ERROR, ITEM_ERROR` -> `ret t, t`), and make_one_ret
+            // then uses the LAST ret's operands as the merge homes for every
+            // other ret in the function — collapsing all normal returns to a
+            // single lane. Cost us the full shape-4 outage to find; do not
+            // emit identical constant pairs in any multi-result ret.
+            MIR_op_t dead_value = mt->em.frame.return_type == MIR_T_D
+                ? MIR_new_double_op(mt->ctx, 0.0)
+                : MIR_new_int_op(mt->ctx, 0);
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2, dead_value,
                 MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
         } else {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,

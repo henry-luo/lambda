@@ -573,10 +573,116 @@ lane comes back as `ITEM_NULL` bits. Diagnostics run, in order:
 | `ret 111, 222` | error branch taken | lane 2 correct again |
 | flag-off control | correct value | regression is P2's, not pre-existing |
 
-So the caller observes lane 2 faithfully and never observes lane 1 — while
-the identical two-result mechanism works for shape 2 and for `int^`/`float^`
-shape 4. That points at something specific to the `int64` value lane rather
-than to the pair mechanism.
+So the caller observes lane 2 faithfully and never observes lane 1.
+
+**Follow-up round (2026-08-15), four more hypotheses eliminated:**
+
+1. **`lambda_value_rep(LMD_TYPE_INT64)` — dead.** It is `VALUE_REP_I64`,
+   *identical* to `LMD_TYPE_INT`, so `em_mir_type_for_rep` gives `MIR_T_I64`
+   and `em_value_class_for_rep` gives `NON_GC_SCALAR` for both. No rooting, no
+   representational difference. The original suspicion was wrong.
+2. **The `int^` comparison was FALSE, and this is the important correction.**
+   Dumping the three signatures with shape 4 parked:
+
+   | signature | emitted body | native? |
+   |---|---|---|
+   | `int^` | `func i64, i64, p:runtime, i64:%p1` | **no** — a boxed body on shape 2 |
+   | `i64^` | `func i64, p:runtime, i64:%p1, p:_scalar_home` | yes |
+   | `float^` | `func d, p:runtime, i64:%p1, p:_scalar_home` | yes |
+
+   `int^` never exercised shape 4 at all — it takes the shape-2 pair, which
+   works. So the real evidence is narrower than "int works, int64 doesn't":
+   **the only shape-4 case that ever worked is `float^`, whose two lanes sit
+   in different register classes (`d` + `i64`); the failing case is the one
+   with two same-class integer lanes.**
+3. **Operand order — dead.** Swapping the callee's `ret` operands moves the
+   value to lane 2 and the error to lane 1, exactly as written: the caller
+   reads operand 0 as result 0. There is no ordering mismatch.
+4. **Result liveness across the following helper call — dead.** Copying both
+   result registers into fresh registers as the first thing after the call
+   changes nothing, so the value is already wrong *at* the call, not clobbered
+   by the `box_int64_value` that follows.
+
+What survives: shape 2 also returns two same-class `i64` results and works, so
+"two integer results" is not broken in general. The difference between the
+working shape-2 pair and the failing shape-4 pair is not in the descriptor,
+the rep, the operand order, or downstream liveness. The next step is
+machine-level rather than MIR-level — disassemble the generated code for an
+`i64^` callee/caller pair and compare the actual result-register handoff
+against the shape-2 case; MIR-level inspection has been exhausted.
+
+### 2026-08-15 — ROOT CAUSE FOUND AND FIXED; shape 4 is LIVE
+
+The machine-level step was never needed — the missing observation layer was
+**post-simplify MIR**, not disassembly. Diagnosis chain, with what each step
+eliminated:
+
+1. **Two cheap discriminators first.** The failure reproduces under
+   `--mir-interp` — so it is NOT a mir-gen lowering/regalloc/inlining bug;
+   interp and gen share only the MIR data structures and `MIR_simplify_func`.
+2. **Runtime probes beat inference.** A temporary `lambda_dbg_lanes` helper
+   emitted on both sides of the boundary gave ground truth in one run: the
+   callee holds `(123456789012345, ItemNull)` at the `ret`; the caller
+   receives `(ItemNull, ItemNull)`. With `ret 111, 222` the caller receives
+   `(222, 222)` — **both result slots get the LAST ret operand**. (This also
+   explained every ambiguous earlier diagnostic: `ret 777, ITEM_NULL` showed
+   value=2⁵⁶ *and* e=null only under "both ← op2".)
+3. **A faithful standalone vendor repro works.** Forward-routed call, two ret
+   sites, helper call before ret, scratch dance, both engines — all correct.
+   So the trigger was not in the mechanics but in something this function's
+   *content* feeds them.
+4. **The missing layer: `LAMBDA_MIR_GEN_DEBUG`.** The finalized-MIR artifact
+   is PRE-simplify; both engines execute POST-simplify code. A new env-gated
+   hook in `jit_init` (kept permanently — this gap cost the whole outage)
+   dumps gen-internal stages. It showed the executed callee epilogue as:
+
+   ```
+   mov  t26, %r24     ; value  -> t26
+   mov  t26, %r6      ; error  -> t26   (clobbers the value)
+   ret  t26, t26
+   ```
+
+   against the working shape-2 case's `ret t28, t11`.
+
+**Root cause — a two-stage vendor interaction, Lambda-triggered.** In
+`MIR_simplify_func` (shared by interp and gen, hence both engines):
+
+- `simplify_op` passes constant operands through **value numbering**
+  (`vn_add_val`), which returns the SAME temp for the same (type, value) —
+  so a ret whose operands are the *identical constant twice* becomes
+  `ret t, t`.
+- `make_one_ret` then merges all rets by using the **last** ret's operands as
+  the return-value homes for every other ret: each earlier ret is rewritten
+  to `mov home[j], op[j]` + jmp. With `home[0] == home[1] == t`, the last
+  move wins and every return in the function collapses to its lane-2 value.
+
+The last ret in every generated function is the stack-overflow exit, and
+P2's shape-4 overflow exit emitted `ret ITEM_ERROR, ITEM_ERROR` — the
+identical-constant pair. Shape 2's overflow exit is `ret ITEM_ERROR, 0` —
+distinct constants, distinct temps — which is the entire reason shape 2
+worked and shape 4 failed. Registers are never value-numbered, so
+register-operand rets are immune; the hazard is exactly **a multi-result
+`ret` whose constant operands repeat, in a function with more than one ret**.
+
+**Fix (Lambda-side, one operand):** the overflow exit's value lane is dead
+once lane 2 carries the error, so it now returns `0` (or `0.0` for a double
+lane) — `ret 0, ITEM_ERROR`. A comment at the emission site records the
+invariant: *never emit identical constant pairs in any multi-result ret*.
+Shape 4 is un-parked; the earlier `lambda_value_rep` suspicion and the
+"machine-level next" recommendation are both superseded.
+
+**Vendor note (rule 16).** `make_one_ret`'s assumption that the last ret's
+operands are distinct locations is arguably an upstream defect (value
+numbering legitimately produces `ret t, t`). Not patched here per rule 16;
+if it recurs in another guise the upstream conversation should cite this
+analysis. The Lambda-side rule above is sufficient and principled — the
+dead lane has no business carrying a meaningful constant anyway.
+
+**Verified:** `i64^` and `float^`, success and error paths, all four correct;
+the six error-path tests that caught the original regression pass; both
+configurations gate at **3720/3720** (flag-on with shape 4 live, and the
+shipping default). The diagnostic probes are removed; the
+`LAMBDA_MIR_GEN_DEBUG` hook stays.
 
 One ordering defect was found and fixed along the way and is worth keeping
 regardless: P2 initially deferred shape 4's result publication (as shape 2
@@ -615,9 +721,21 @@ run after the merge appeared were measuring a partially-merged tree**, so the
 final P2/P3 numbers in this log should be re-taken once the merge is
 resolved. The pre-merge gates (through P3, commit `c565f1e7d`) stand.
 
-The remaining budget action belongs to whoever finishes the merge: re-run the
-ratchet and re-baseline `js_tune6_exact_collection` as part of *that* commit,
-where the JS emission change is visible in review.
+**Closed once the merge landed.** With the merge committed the growth became
+attributable, and to the incoming work's own stated change: Tune9 **P2.1**,
+*"emit the existing guarded named load/store feedback slots in normal release
+builds"* — IC feedback slots are precisely what adds instructions and scalar
+homes to `js_main` (+176 insns, `scalar_homes` 6 → 15), and that doc's
+checklist already records a measured `nbody` diagnostic recovery for it. So
+the growth is intended by the commit that caused it; the ratchet simply was
+not re-baselined there.
+
+`darwin-debug` for that probe is now re-baselined to the post-merge numbers
+(module 14,587; `js_main` 5,686 insns, roots 11, root_stores 773,
+scalar_homes 15, safepoints 2,102), and the `darwin-debug-v3` entry added
+earlier was **removed** — it held identical values, and the lookup falls back
+to `darwin-debug`, so keeping it would have been a duplicate to maintain.
+Post-merge gate: **3720/3720**, ratchet 16/16 with zero slack.
 
 ### (original note, superseded above) unattributed js_tune6 emission growth
 
@@ -797,11 +915,14 @@ rather than the deletion removing it.
 - [~] P1.7 gate: baseline green both ways + emission fixtures cover both
       conventions; STILL OPEN — census re-run, MT7 re-ratchet, AWFY stdout
       diff, release timing/R26 canaries, RVO8/RVO9 measurements
-- [~] **P2 native lanes + error lane** — pair emission written end to end and
-      RV9's `ItemNull` encoding implemented, but **PARKED**: `int64^` value
-      lanes do not reach the caller while `int^`/`float^` do. Diagnostic table
-      and next step in the 2026-08-15 log. A publication-ordering defect found
-      on the way IS fixed and kept.
+- [x] **P2 native lanes + error lane (shape 4)** — *landed + gated
+      2026-08-15: 3720/3720 both configurations.* The outage was a
+      simplify-level interaction (value-numbered identical constants in the
+      overflow exit's `ret` + `make_one_ret` merge homes); fixed by returning
+      a dead 0 on the value lane there. Root-cause chain + the new
+      `LAMBDA_MIR_GEN_DEBUG` observation layer in the 2026-08-15 log.
+      Remaining P2 items: `can_raise` un-deopt measurement, RV9 debug assert,
+      INT64_ERROR retirement (scoped follow-up).
 - [ ] P2.5 LambdaJS migration (node/js262 gates)
 - [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
       2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).
