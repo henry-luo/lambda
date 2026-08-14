@@ -112,6 +112,7 @@ Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int index);
 Item js_typed_array_fill(Item ta, Item value, int start, int end,
                          bool array_semantics);
 bool js_is_typed_array(Item val);
+int64_t js_typed_array_matches_type(Item val, int64_t type_id);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
 void* js_typed_array_current_data_ptr(Item ta_item);
 void* js_typed_array_prepare_write_ptr(Item ta_item);

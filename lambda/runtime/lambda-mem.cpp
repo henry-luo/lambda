@@ -302,6 +302,13 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     js_regex_map_heap_destroy(map, seen_native);
 }
 
+static void js_native_map_gc_destroy(void* data) {
+    gc_native_seen_t seen_native;
+    gc_native_seen_init(&seen_native);
+    gc_finalize_js_native_map((Map*)data, &seen_native);
+    gc_native_seen_dispose(&seen_native);
+}
+
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
@@ -410,6 +417,7 @@ static void heap_finish_init(void) {
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
+    context->heap->gc->js_native_destroy = js_native_map_gc_destroy;
     context->heap->gc->js_function_trace = js_function_gc_trace;
     context->heap->gc->js_function_compact = js_function_gc_compact;
     context->heap->gc->external_destroy = gc_destroy_external_payload;
@@ -1102,6 +1110,9 @@ void heap_destroy() {
             // finalize all GC-managed objects: free sub-allocations (items[], data, mpd_t, closure_env)
             // that were malloc'd/calloc'd separately from the pool
             heap_finalize_gc_objects(context->heap->gc);
+            // The full finalizer has already released every live native Map
+            // payload with one shared duplicate-owner set.
+            context->heap->gc->js_native_destroy = NULL;
             gc_heap_destroy(context->heap->gc);
         }
         lambda_region_destroy_caches(context->heap);

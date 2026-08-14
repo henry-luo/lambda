@@ -1181,15 +1181,20 @@ JsMirVarEntry* jm_get_typed_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
 bool jm_typed_array_is_int(int ta_type);
 MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, int ta_type,
-                                               MIR_reg_t h_data , MIR_reg_t h_len );
+                                               MIR_reg_t h_data , MIR_reg_t h_len,
+                                               MIR_reg_t type_guard);
 MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                       MIR_reg_t idx_native, int ta_type,
                                                       TypeId target_type,
-                                                      MIR_reg_t h_data );
+                                                      MIR_reg_t h_data,
+                                                      MIR_reg_t type_guard);
 MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
-                                               MIR_reg_t h_data , MIR_reg_t h_len );
+                                               MIR_reg_t h_data , MIR_reg_t h_len,
+                                               MIR_reg_t type_guard,
+                                               bool strict);
+MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg);
 // A2 forward declarations
 JsMirVarEntry* jm_get_js_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
 MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
@@ -1394,8 +1399,10 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         if (mem->computed) {
             JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
             if (ta_var) {
-                return jm_typed_array_is_int(ta_var->typed_array_type)
-                    ? LMD_TYPE_INT : LMD_TYPE_FLOAT;
+                // Constructor spelling only identifies a guarded candidate.
+                // Treating its element as statically numeric made a shadowed
+                // Uint8Array change `"0" + 1` into numeric addition (D6.2.2v2).
+                return LMD_TYPE_ANY;
             }
         }
         // .length returns INT only for known arrays, strings, functions, typed arrays
@@ -1850,14 +1857,23 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 if (idx_type == LMD_TYPE_INT) {
                     idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
                 } else if (idx_type == LMD_TYPE_FLOAT) {
-                    MIR_reg_t idx_float = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_FLOAT);
-                    idx_native = jm_emit_double_to_int(mt, idx_float);
+                    MIR_reg_t number_key = jm_transpile_as_native(mt,
+                        mem->property, idx_type, LMD_TYPE_FLOAT);
+                    MIR_reg_t boxed = jm_transpile_typed_array_get_number(mt,
+                        ta_var->reg, number_key, ta_var->typed_array_type,
+                        ta_var->hoisted_data_reg, ta_var->hoisted_len_reg,
+                        ta_var->typed_array_guard_reg);
+                    return target_type == LMD_TYPE_FLOAT
+                        ? jm_emit_unbox_float(mt, boxed)
+                        : jm_emit_unbox_int(mt, boxed);
                 } else {
-                    // Unknown type: might be a Symbol at runtime. Fall through to boxed path.
+                    // Native doubles may be fractional, so they use the
+                    // number-key seam below instead of truncating an index.
                     goto skip_ta_native;
                 }
                 return jm_transpile_typed_array_get_native(mt, ta_var->reg, idx_native,
-                    ta_var->typed_array_type, target_type, ta_var->hoisted_data_reg);
+                    ta_var->typed_array_type, target_type,
+                    ta_var->hoisted_data_reg, ta_var->typed_array_guard_reg);
             }
             skip_ta_native:
 
@@ -1875,14 +1891,28 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                         idx_native, arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
                 } else {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-                    boxed_result = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                    jm_create_gc_root_slot(mt, obj_reg);
+                    jm_emit_error_lane_propagate_check(mt);
+                    boxed_result = jm_transpile_array_get_inline(mt, obj_reg,
+                        idx_native, 0, 0);
                 }
+                jm_emit_error_lane_propagate_check(mt);
                 if (target_type == LMD_TYPE_FLOAT)
                     return jm_emit_unbox_float(mt, boxed_result);
                 else
                     return jm_emit_unbox_int(mt, boxed_result);
+            } else if (idx_type == LMD_TYPE_FLOAT) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                jm_create_gc_root_slot(mt, obj_reg);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t number_key = jm_transpile_as_native(mt,
+                    mem->property, idx_type, LMD_TYPE_FLOAT);
+                MIR_reg_t boxed_result = jm_transpile_number_get(mt,
+                    obj_reg, number_key);
+                jm_emit_error_lane_propagate_check(mt);
+                return target_type == LMD_TYPE_FLOAT
+                    ? jm_emit_unbox_float(mt, boxed_result)
+                    : jm_emit_unbox_int(mt, boxed_result);
             }
         }
     }

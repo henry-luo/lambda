@@ -4223,6 +4223,41 @@ static MIR_reg_t jm_emit_destructure_assignment(JsMirTranspiler* mt,
     return src;
 }
 
+static MIR_reg_t jm_transpile_index_assignment_kernel(JsMirTranspiler* mt,
+        MIR_reg_t object_reg, MIR_reg_t index_reg, MIR_reg_t value_reg,
+        bool strict) {
+    MIR_reg_t result = jm_new_reg(mt, "index_set_result", MIR_T_I64);
+    MIR_label_t l_fallback = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    MIR_reg_t dense_stored = jm_call_3(mt,
+        "js_elements_set_existing_dense_int_fast", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, object_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, index_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fallback),
+        MIR_new_reg_op(mt->ctx, dense_stored)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, value_reg)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, l_fallback);
+    MIR_reg_t fallback = jm_call_4(mt, "js_set_index_assignment", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, object_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, index_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, strict ? 1 : 0));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fallback)));
+    jm_emit_label(mt, l_end);
+    // D8.4.3: the branch result, not the path-local fallback call register,
+    // is the merged completion lane at this join.
+    jm_publish_call_result(mt, result);
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+    jm_emit_error_lane_propagate_check(mt);
+    return result;
+}
+
 MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
     if (!asgn->left || !asgn->right) return jm_emit_null(mt);
 
@@ -4749,9 +4784,13 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
     // Member assignment: obj.prop = expr, obj[key] = expr
     if (asgn->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* member = (JsMemberNode*)asgn->left;
+        bool member_is_super = jm_js_ident_name_eq(member->object, "super", 5);
 
         // P9: typed array direct write: arr[i] = val
-        if (member->computed) {
+        if (member->computed && !member_is_super) {
+            // D8.4.3: super references own a lexical lookup base distinct from
+            // their receiver. Indexed specialization would erase the null-base
+            // TypeError and must never consume that Reference Record.
             JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, member->object);
             if (ta_var) {
                 // Get native index
@@ -4759,11 +4798,21 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 TypeId idx_type = jm_get_effective_type(mt, member->property);
                 if (idx_type == LMD_TYPE_INT) {
                     idx_native = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
-                } else if (idx_type == LMD_TYPE_FLOAT) {
-                    MIR_reg_t idx_float = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_FLOAT);
-                    idx_native = jm_emit_double_to_int(mt, idx_float);
+                } else if (idx_type == LMD_TYPE_FLOAT &&
+                        asgn->op == JS_OP_ASSIGN) {
+                    MIR_reg_t number_key = jm_transpile_as_native(mt,
+                        member->property, idx_type, LMD_TYPE_FLOAT);
+                    MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                    return jm_transpile_typed_array_set_number(mt,
+                        ta_var->reg, number_key, new_val,
+                        ta_var->typed_array_type, ta_var->hoisted_data_reg,
+                        ta_var->hoisted_len_reg,
+                        ta_var->typed_array_guard_reg,
+                        mt->is_global_strict || mt->is_module ||
+                            (mt->current_fc && mt->current_fc->is_strict));
                 } else {
-                    // Unknown type: might be Symbol. Fall through to generic property set.
+                    // Native doubles can be fractional; the number-key seam
+                    // below guards integer identity before indexed dispatch.
                     goto skip_ta_write;
                 }
 
@@ -4773,14 +4822,18 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 } else {
                     // Compound: get current value, apply operation, set result
                     MIR_reg_t cur_val = jm_transpile_typed_array_get(mt, ta_var->reg, idx_native, ta_var->typed_array_type,
-                        ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
+                        ta_var->hoisted_data_reg, ta_var->hoisted_len_reg,
+                        ta_var->typed_array_guard_reg);
                     MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
                     new_val = jm_call_2(mt, jm_compound_assign_fn(asgn->op), MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, rval));
                 }
                 return jm_transpile_typed_array_set(mt, ta_var->reg, idx_native, new_val, ta_var->typed_array_type,
-                    ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
+                    ta_var->hoisted_data_reg, ta_var->hoisted_len_reg,
+                    ta_var->typed_array_guard_reg,
+                    mt->is_global_strict || mt->is_module ||
+                        (mt->current_fc && mt->current_fc->is_strict));
             }
             skip_ta_write:
 
@@ -4791,6 +4844,83 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             TypeId idx_type = jm_get_effective_type(mt, member->property);
             bool strict_member_set = mt->is_global_strict || mt->is_module ||
                 (mt->current_fc && mt->current_fc->is_strict);
+            if (idx_type == LMD_TYPE_FLOAT && asgn->op == JS_OP_ASSIGN &&
+                    !jm_expression_can_suspend(mt, member->property) &&
+                    !jm_expression_can_suspend(mt, asgn->right)) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
+                jm_create_gc_root_slot(mt, obj_reg);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t number_key = jm_transpile_as_native(mt,
+                    member->property, idx_type, LMD_TYPE_FLOAT);
+                MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t result = jm_new_reg(mt,
+                    "number_set_result", MIR_T_I64);
+                MIR_reg_t index = jm_call_1(mt,
+                    "js_number_key_to_index_fast", MIR_T_I64,
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, number_key));
+                MIR_reg_t valid = jm_new_reg(mt,
+                    "number_set_index_valid", MIR_T_I64);
+                MIR_label_t l_number_fallback = jm_new_label(mt);
+                MIR_label_t l_number_end = jm_new_label(mt);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
+                    MIR_new_reg_op(mt->ctx, valid),
+                    MIR_new_reg_op(mt->ctx, index),
+                    MIR_new_int_op(mt->ctx, 0)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, l_number_fallback),
+                    MIR_new_reg_op(mt->ctx, valid)));
+                MIR_reg_t indexed = jm_transpile_index_assignment_kernel(mt,
+                    obj_reg, index, new_val, strict_member_set);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, indexed)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, l_number_end)));
+                jm_emit_label(mt, l_number_fallback);
+                MIR_reg_t fallback = jm_call_4(mt,
+                    "js_set_number_assignment", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, number_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx,
+                        strict_member_set ? 1 : 0));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, fallback)));
+                jm_emit_label(mt, l_number_end);
+                // D8.4.3: publish the merged branch result before testing the
+                // completion lane; the fallback register is path-local.
+                jm_publish_call_result(mt, result);
+                jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+                jm_sync_arguments_param_after_write(mt, member);
+                jm_readback_closure_env(mt);
+                jm_scope_env_reload_vars(mt);
+                jm_emit_error_lane_propagate_check(mt);
+                return result;
+            }
+            if (idx_type == LMD_TYPE_INT && asgn->op == JS_OP_ASSIGN &&
+                    !jm_expression_can_suspend(mt, member->property) &&
+                    !jm_expression_can_suspend(mt, asgn->right)) {
+                // D8.4.3: exact integer keys need neither a generic Reference
+                // nor repeated ToPropertyKey/lane adapters. The fused kernel
+                // retains Proxy, TypedArray, descriptor, and strict failures.
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
+                jm_create_gc_root_slot(mt, obj_reg);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t idx_native = jm_transpile_as_native(mt,
+                    member->property, idx_type, LMD_TYPE_INT);
+                MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t index_result = jm_transpile_index_assignment_kernel(
+                    mt, obj_reg, idx_native, new_val, strict_member_set);
+
+                jm_sync_arguments_param_after_write(mt, member);
+                jm_readback_closure_env(mt);
+                jm_scope_env_reload_vars(mt);
+                jm_emit_error_lane_propagate_check(mt);
+                return index_result;
+            }
             if ((idx_type == LMD_TYPE_INT || idx_type == LMD_TYPE_FLOAT) && !strict_member_set) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
                 MIR_reg_t new_val;
@@ -4844,9 +4974,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
 
         // super.x = val — use shared Reference Record handling for correct
         // receiver binding and derived-constructor this/key evaluation order.
-        if (asgn->op == JS_OP_ASSIGN && member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
-            if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
+        if (asgn->op == JS_OP_ASSIGN && member_is_super) {
                 JsMirReference ref = jm_emit_reference(mt, asgn->left);
                 jm_emit_error_lane_propagate_check(mt);
                 if (ref.uninitialized_this) {
@@ -4867,7 +4995,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 MIR_reg_t super_set_result = jm_emit_put_value(mt, &ref, new_val);
                 jm_emit_error_lane_propagate_check(mt);
                 return super_set_result;
-            }
         }
 
         JsMirReference ref = jm_emit_reference(mt, asgn->left);
@@ -7016,6 +7143,40 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     return result;
 }
 
+MIR_reg_t jm_transpile_number_get(JsMirTranspiler* mt, MIR_reg_t object_reg,
+        MIR_reg_t number_key) {
+    MIR_reg_t result = jm_new_reg(mt, "number_get", MIR_T_I64);
+    MIR_reg_t index = jm_call_1(mt, "js_number_key_to_index_fast", MIR_T_I64,
+        MIR_T_D, MIR_new_reg_op(mt->ctx, number_key));
+    MIR_reg_t valid = jm_new_reg(mt, "number_index_valid", MIR_T_I64);
+    MIR_label_t l_fallback = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
+        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, index),
+        MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fallback),
+        MIR_new_reg_op(mt->ctx, valid)));
+    MIR_reg_t indexed = jm_transpile_array_get_inline(mt, object_reg, index, 0, 0);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, indexed)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, l_fallback);
+    MIR_reg_t fallback = jm_call_2(mt, "js_get_number_reference", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, object_reg),
+        MIR_T_D, MIR_new_reg_op(mt->ctx, number_key));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fallback)));
+    jm_emit_label(mt, l_end);
+    // D8.4.3: fast reads do not define the fallback call register, so the
+    // merged value is the only valid ERROR-lane carrier at the join.
+    jm_publish_call_result(mt, result);
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+    jm_emit_error_lane_propagate_check(mt);
+    return result;
+}
+
 // Returns whether a typed array stores integer elements (vs float)
 bool jm_typed_array_is_int(int ta_type) {
     return ta_type != JS_TYPED_FLOAT16 && ta_type != JS_TYPED_FLOAT32 && ta_type != JS_TYPED_FLOAT64;
@@ -7060,7 +7221,8 @@ static void jm_prepare_typed_array_data(JsMirTranspiler* mt,
 //   if (idx < 0 || idx >) return ITEM_NULL
 //   element     = data_ptr[idx]                 // sized load
 //   return box(element)
-MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
+static MIR_reg_t jm_transpile_typed_array_get_unchecked(JsMirTranspiler* mt,
+                                               MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, int ta_type,
                                                MIR_reg_t h_data, MIR_reg_t h_len) {
     if (ta_type == JS_TYPED_FLOAT16) {
@@ -7199,6 +7361,41 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     return result;
 }
 
+MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt,
+        MIR_reg_t arr_reg, MIR_reg_t idx_native, int ta_type,
+        MIR_reg_t h_data, MIR_reg_t h_len, MIR_reg_t type_guard) {
+    MIR_reg_t result = jm_new_reg(mt, "ta_guard_get", MIR_T_I64);
+    MIR_label_t l_fallback = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    MIR_reg_t matches = type_guard ? type_guard :
+        jm_call_2(mt, "js_typed_array_matches_type", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, ta_type));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fallback),
+        MIR_new_reg_op(mt->ctx, matches)));
+
+    MIR_reg_t fast_result = jm_transpile_typed_array_get_unchecked(mt,
+        arr_reg, idx_native, ta_type, h_data, h_len);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, fast_result)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_fallback);
+    MIR_reg_t fallback_result = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, fallback_result)));
+
+    jm_emit_label(mt, l_end);
+    return result;
+}
+
 // Emit inline typed array element GET returning NATIVE value.
 // For integer typed arrays, returns native int64. For float, returns native double.
 static MIR_reg_t jm_emit_typed_array_element_address(JsMirTranspiler* mt,
@@ -7214,70 +7411,18 @@ static MIR_reg_t jm_emit_typed_array_element_address(JsMirTranspiler* mt,
 MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                       MIR_reg_t idx_native, int ta_type,
                                                       TypeId target_type,
-                                                      MIR_reg_t h_data) {
-    if (ta_type == JS_TYPED_FLOAT16) {
-        MIR_reg_t idx_boxed = jm_box_int_reg(mt, idx_native);
-        MIR_reg_t boxed = jm_call_2(mt, "js_typed_array_get", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
-        if (target_type == LMD_TYPE_INT) return jm_emit_unbox_int(mt, boxed);
-        return jm_emit_unbox_float(mt, boxed);
-    }
-
-    MIR_reg_t data_ptr;
-    jm_prepare_typed_array_data(mt, arr_reg, ta_type, h_data, 0,
-        false, false, &data_ptr, NULL);
-
-    // Compute element address: data_ptr + idx * elem_size.
-    MIR_reg_t elem_addr = jm_emit_typed_array_element_address(mt, data_ptr, idx_native, ta_type);
-
-    // Load element with appropriate width, return native
-    bool is_int_type = jm_typed_array_is_int(ta_type);
-
-    if (is_int_type) {
-        MIR_reg_t raw = jm_new_reg(mt, "ta_ni", MIR_T_I64);
-        MIR_type_t load_type;
-        switch (ta_type) {
-        case JS_TYPED_INT8:           load_type = MIR_T_I8;  break;
-        case JS_TYPED_UINT8:
-        case JS_TYPED_UINT8_CLAMPED:  load_type = MIR_T_U8;  break;
-        case JS_TYPED_INT16:          load_type = MIR_T_I16; break;
-        case JS_TYPED_UINT16:         load_type = MIR_T_U16; break;
-        case JS_TYPED_INT32:          load_type = MIR_T_I32; break;
-        case JS_TYPED_UINT32:         load_type = MIR_T_U32; break;
-        default:                      load_type = MIR_T_I32; break;
-        }
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
-            MIR_new_mem_op(mt->ctx, load_type, 0, elem_addr, 0, 1)));
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_emit_int_to_double(mt, raw);
-        return raw;
-    } else {
-        // Float32 or Float64
-        if (ta_type == JS_TYPED_FLOAT32) {
-            MIR_reg_t raw_f = jm_new_reg(mt, "ta_nf32", MIR_T_F);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_FMOV, MIR_new_reg_op(mt->ctx, raw_f),
-                MIR_new_mem_op(mt->ctx, MIR_T_F, 0, elem_addr, 0, 1)));
-            MIR_reg_t raw_d = jm_new_reg(mt, "ta_nf2d", MIR_T_D);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_F2D, MIR_new_reg_op(mt->ctx, raw_d),
-                MIR_new_reg_op(mt->ctx, raw_f)));
-            if (target_type == LMD_TYPE_INT)
-                return jm_emit_double_to_int(mt, raw_d);
-            return raw_d;
-        } else {
-            MIR_reg_t raw_d = jm_new_reg(mt, "ta_nf64", MIR_T_D);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, raw_d),
-                MIR_new_mem_op(mt->ctx, MIR_T_D, 0, elem_addr, 0, 1)));
-            if (target_type == LMD_TYPE_INT)
-                return jm_emit_double_to_int(mt, raw_d);
-            return raw_d;
-        }
-    }
+                                                      MIR_reg_t h_data,
+                                                      MIR_reg_t type_guard) {
+    MIR_reg_t boxed = jm_transpile_typed_array_get(mt, arr_reg, idx_native,
+        ta_type, h_data, 0, type_guard);
+    return target_type == LMD_TYPE_INT
+        ? jm_emit_unbox_int(mt, boxed) : jm_emit_unbox_float(mt, boxed);
 }
 
 // Emit inline typed array element SET: arr[idx] = val (boxed)
 // Returns the value (as convention for assignment expressions)
-MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
+static MIR_reg_t jm_transpile_typed_array_set_unchecked(JsMirTranspiler* mt,
+                                               MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
                                                MIR_reg_t h_data, MIR_reg_t h_len) {
@@ -7395,6 +7540,122 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     return val_boxed;
 }
 
+MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt,
+        MIR_reg_t arr_reg, MIR_reg_t idx_native, MIR_reg_t val_boxed,
+        int ta_type, MIR_reg_t h_data, MIR_reg_t h_len,
+        MIR_reg_t type_guard, bool strict) {
+    MIR_reg_t result = jm_new_reg(mt, "ta_guard_set", MIR_T_I64);
+    MIR_label_t l_fallback = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    MIR_reg_t matches = type_guard ? type_guard :
+        jm_call_2(mt, "js_typed_array_matches_type", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, ta_type));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fallback),
+        MIR_new_reg_op(mt->ctx, matches)));
+
+    MIR_reg_t fast_result = jm_transpile_typed_array_set_unchecked(mt,
+        arr_reg, idx_native, val_boxed, ta_type, h_data, h_len);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, fast_result)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_fallback);
+    MIR_reg_t fallback_result = jm_call_4(mt, "js_set_index_assignment",
+        MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, val_boxed),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, strict ? 1 : 0));
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, fallback_result)));
+
+    jm_emit_label(mt, l_end);
+    return result;
+}
+
+MIR_reg_t jm_transpile_typed_array_get_number(JsMirTranspiler* mt,
+        MIR_reg_t arr_reg, MIR_reg_t number_key, int ta_type,
+        MIR_reg_t h_data, MIR_reg_t h_len, MIR_reg_t type_guard) {
+    MIR_reg_t result = jm_new_reg(mt, "ta_number_get", MIR_T_I64);
+    MIR_reg_t index = jm_call_1(mt, "js_number_key_to_index_fast", MIR_T_I64,
+        MIR_T_D, MIR_new_reg_op(mt->ctx, number_key));
+    MIR_reg_t valid = jm_new_reg(mt, "ta_number_index_valid", MIR_T_I64);
+    MIR_label_t l_fallback = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
+        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, index),
+        MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fallback),
+        MIR_new_reg_op(mt->ctx, valid)));
+    MIR_reg_t indexed = jm_transpile_typed_array_get(mt, arr_reg, index,
+        ta_type, h_data, h_len, type_guard);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, indexed)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, l_fallback);
+    MIR_reg_t fallback = jm_call_2(mt, "js_get_number_reference", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+        MIR_T_D, MIR_new_reg_op(mt->ctx, number_key));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fallback)));
+    jm_emit_label(mt, l_end);
+    jm_publish_call_result(mt, result);
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+    jm_emit_error_lane_propagate_check(mt);
+    return result;
+}
+
+MIR_reg_t jm_transpile_typed_array_set_number(JsMirTranspiler* mt,
+        MIR_reg_t arr_reg, MIR_reg_t number_key, MIR_reg_t value_reg,
+        int ta_type, MIR_reg_t h_data, MIR_reg_t h_len,
+        MIR_reg_t type_guard, bool strict) {
+    MIR_reg_t result = jm_new_reg(mt, "ta_number_set", MIR_T_I64);
+    MIR_reg_t index = jm_call_1(mt, "js_number_key_to_index_fast", MIR_T_I64,
+        MIR_T_D, MIR_new_reg_op(mt->ctx, number_key));
+    MIR_reg_t valid = jm_new_reg(mt, "ta_number_set_index_valid", MIR_T_I64);
+    MIR_label_t l_fallback = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
+        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, index),
+        MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fallback),
+        MIR_new_reg_op(mt->ctx, valid)));
+    MIR_reg_t indexed = jm_transpile_typed_array_set(mt, arr_reg, index,
+        value_reg, ta_type, h_data, h_len, type_guard, strict);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, indexed)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, l_fallback);
+    MIR_reg_t fallback = jm_call_4(mt, "js_set_number_assignment", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+        MIR_T_D, MIR_new_reg_op(mt->ctx, number_key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, strict ? 1 : 0));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fallback)));
+    jm_emit_label(mt, l_end);
+    jm_publish_call_result(mt, result);
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+    jm_emit_error_lane_propagate_check(mt);
+    return result;
+}
+
+// Emit inline typed array .length access: returns native int64
+MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg) {
+    // The runtime helper handles detached and length-tracking buffers.
+    return jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
+}
 // Member expression
 static MIR_reg_t jm_transpile_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
     if (mem->computed) return jm_transpile_box_item(mt, mem->property);
@@ -7479,8 +7740,12 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             if (idx_type == LMD_TYPE_INT) {
                 idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
             } else if (idx_type == LMD_TYPE_FLOAT) {
-                MIR_reg_t idx_float = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_FLOAT);
-                idx_native = jm_emit_double_to_int(mt, idx_float);
+                MIR_reg_t number_key = jm_transpile_as_native(mt,
+                    mem->property, idx_type, LMD_TYPE_FLOAT);
+                return jm_transpile_typed_array_get_number(mt, ta_var->reg,
+                    number_key, ta_var->typed_array_type,
+                    ta_var->hoisted_data_reg, ta_var->hoisted_len_reg,
+                    ta_var->typed_array_guard_reg);
             } else {
                 // Unknown type: might be a Symbol at runtime.
                 // Fall through to js_get_reference for safe handling.
@@ -7491,7 +7756,8 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed));
             }
             return jm_transpile_typed_array_get(mt, ta_var->reg, idx_native,
-                ta_var->typed_array_type, ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
+                ta_var->typed_array_type, ta_var->hoisted_data_reg,
+                ta_var->hoisted_len_reg, ta_var->typed_array_guard_reg);
         }
 
         // P9b: this.prop[idx] where prop is a known typed array from class fields
@@ -7520,11 +7786,13 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                             idx_native2 = jm_transpile_as_native(mt, mem->property, idx_type2, LMD_TYPE_INT);
                         } else if (idx_type2 == LMD_TYPE_FLOAT) {
                             MIR_reg_t idx_f = jm_transpile_as_native(mt, mem->property, idx_type2, LMD_TYPE_FLOAT);
-                            idx_native2 = jm_emit_double_to_int(mt, idx_f);
+                            return jm_transpile_typed_array_get_number(mt,
+                                ta_reg, idx_f, ta_type);
                         } else {
                             MIR_reg_t idx_b = jm_transpile_box_item(mt, mem->property);
-                            idx_native2 = jm_call_1(mt, JS_PROFILED_IT2I_NAME,
-                                MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
+                            return jm_call_2(mt, "js_get_reference", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ta_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
                         }
                         log_debug("P9b: inline this.%.*s[idx] as typed array type %d",
                                   (int)prop_id->name->len, prop_id->name->chars, ta_type);
@@ -7538,11 +7806,25 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         // bypassing js_get_number() conversion overhead
         // Skip when optional chaining (?.) — need null/undefined guard first
         TypeId idx_type = jm_get_effective_type(mt, mem->property);
+        if (idx_type == LMD_TYPE_FLOAT && !mem->optional &&
+                !jm_has_optional_chain(mem->object)) {
+            MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+            jm_create_gc_root_slot(mt, obj_reg);
+            jm_emit_error_lane_propagate_check(mt);
+            MIR_reg_t number_key = jm_transpile_as_native(mt,
+                mem->property, idx_type, LMD_TYPE_FLOAT);
+            MIR_reg_t result = jm_transpile_number_get(mt, obj_reg, number_key);
+            jm_emit_error_lane_propagate_check(mt);
+            return result;
+        }
         if (idx_type == LMD_TYPE_INT && !mem->optional && !jm_has_optional_chain(mem->object)) {
-            MIR_reg_t idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
             TypeId obj_type = jm_get_effective_type(mt, mem->object);
             if (obj_type == LMD_TYPE_STRING) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                jm_create_gc_root_slot(mt, obj_reg);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t idx_native = jm_transpile_as_native(mt,
+                    mem->property, idx_type, LMD_TYPE_INT);
                 return jm_call_2(mt, "js_string_get_int", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
@@ -7552,16 +7834,23 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             // holes/prototype lookup, and stale non-array bindings.
             JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
             if (arr_var) {
+                MIR_reg_t idx_native = jm_transpile_as_native(mt,
+                    mem->property, idx_type, LMD_TYPE_INT);
                 return jm_transpile_array_get_inline(mt, arr_var->reg, idx_native,
                     arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
             }
-            // A4: Unknown array type — use the generic property path so sparse
-            // numeric hash entries and companion descriptors are honored.
+            // The inline kernel starts with representation/shape/bounds/hole
+            // guards and preserves non-array, sparse, descriptor, Proxy,
+            // primitive, and prototype semantics through its runtime fallback.
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-            MIR_reg_t key_item = jm_box_int_reg(mt, idx_native);
-            return jm_call_2(mt, "js_get_reference", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item));
+            jm_create_gc_root_slot(mt, obj_reg);
+            jm_emit_error_lane_propagate_check(mt);
+            MIR_reg_t idx_native = jm_transpile_as_native(mt,
+                mem->property, idx_type, LMD_TYPE_INT);
+            MIR_reg_t int_result = jm_transpile_array_get_inline(mt,
+                obj_reg, idx_native, 0, 0);
+            jm_emit_error_lane_propagate_check(mt);
+            return int_result;
         }
     }
 

@@ -399,6 +399,12 @@ static void expect_ok_output(const char* output) {
     ASSERT_NE(strstr(output, "OPT_OK"), nullptr) << output;
 }
 
+static char* read_fixture_mir(const char* name) {
+    char mir_path[512];
+    snprintf(mir_path, sizeof(mir_path), "%s/%s.mir", kOptDir, name);
+    return read_text(mir_path);
+}
+
 static const char* find_last_before(const char* begin, const char* end,
         const char* pattern) {
     if (!begin || !end || !pattern || begin >= end) return NULL;
@@ -578,7 +584,9 @@ TEST(JsOpt, RegexShortCaptureUsesFreshWrapper) {
 
 TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     const char* source =
-        "var a = []; a[0] = 1; a[1] = 2;\n"
+        // A tagged element array reaches the fused Set kernel; an empty
+        // numeric array is intentionally handled by its separate storage lane.
+        "var a = [1, 'seed']; a[0] = 2; a[1] = 3;\n"
         "console.log(a[0] + a[1]); console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
@@ -591,7 +599,7 @@ TEST(JsOpt, DenseArrayStoreTakesFastPath) {
 
 TEST(JsOpt, NonExtensibleArrayFallsBack) {
     const char* source =
-        "var a = []; Object.preventExtensions(a); a[0] = 1;\n"
+        "var a = [1, 'seed']; Object.preventExtensions(a); a[2] = 1;\n"
         "console.log(a.length); console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
@@ -601,6 +609,157 @@ TEST(JsOpt, NonExtensibleArrayFallsBack) {
     EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_GUARD_FAIL][2], 0u);
     EXPECT_GT(trace.reasons[JS_OPT_REASON_NOT_EXTENSIBLE], 0u);
     expect_trace_off_same("array_non_extensible", source, output);
+}
+
+TEST(JsOpt, Result29NumberIndexedLaneUsesGuardedHelpers) {
+    const char* source =
+        "var array = [10, 20]; var numberKey = 1.0;\n"
+        "var old = array[numberKey]; array[numberKey] = old + 5;\n"
+        "if (old !== 20 || array[1] !== 25) throw new Error('bad indexed lane');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_number_indexed_lane", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("result29_number_indexed_lane");
+    ASSERT_NE(mir, nullptr);
+    // D6.2.2v2/D8.4.3: numeric keys keep the integer lane only after the
+    // identity guard; the non-identity lane must retain Reference semantics.
+    EXPECT_NE(strstr(mir, "js_get_number_reference"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set_number_assignment"), nullptr);
+    free(mir);
+    expect_trace_off_same("result29_number_indexed_lane", source, output);
+}
+
+TEST(JsOpt, Result29TypedArrayGuardUsesRuntimeFact) {
+    const char* source =
+        "function indexedGuards() {\n"
+        "  const typed = new Uint8Array(8); const exact = 1 | 0;\n"
+        "  typed[exact] = 3; typed[2] = 5;\n"
+        "  return typed[exact] + typed[2];\n"
+        "}\n"
+        "if (indexedGuards() !== 8) throw new Error('typed array lane changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_typed_array_guard", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("result29_typed_array_guard");
+    ASSERT_NE(mir, nullptr);
+    // D6.2.2v2: direct element access is valid only after the runtime
+    // constructor/type fact guard has accepted the receiver.
+    EXPECT_NE(strstr(mir, "js_typed_array_matches_type"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_prepare_write_ptr"), nullptr);
+    EXPECT_NE(strstr(mir, "js_elements_get_int"), nullptr);
+    free(mir);
+    expect_trace_off_same("result29_typed_array_guard", source, output);
+}
+
+TEST(JsOpt, Result29TypedArrayGuardRejectsShadowedConstructor) {
+    const char* source =
+        "function shadowed(Uint8Array) {\n"
+        "  var values = new Uint8Array(2); values[0] = 7; return values[0];\n"
+        "}\n"
+        "function FakeTypedArray(length) { return {0: 1, length: length}; }\n"
+        "if (shadowed(FakeTypedArray) !== 7 || shadowed(globalThis.Uint8Array) !== 7)\n"
+        "  throw new Error('shadowed constructor was specialized');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_shadowed_typed_array", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    // D6.2.2v2: a builtin-looking identifier is not a capability fact when
+    // the lexical binding can be shadowed; semantics must remain generic.
+    expect_trace_off_same("result29_shadowed_typed_array", source, output);
+}
+
+TEST(JsOpt, Result29DenseFillPreservesHoles) {
+    const char* source =
+        "var values = new Array(20000); values.fill(3, 100, 19900);\n"
+        "if (0 in values || !(100 in values) || 19999 in values ||\n"
+        "    values[100] !== 3 || values[19899] !== 3) throw new Error('fill changed holes');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_dense_fill", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    // D6.2.2v2: the bulk fill may reserve storage, but it cannot materialize
+    // elements outside the selected interval or change hole observability.
+    expect_trace_off_same("result29_dense_fill", source, output);
+}
+
+TEST(JsOpt, Result29ArrayConstructedPrototypeIsPreserved) {
+    const char* source =
+        "function NewTarget() {}\n"
+        "NewTarget.prototype = {marker: 23};\n"
+        "var reflected = Reflect.construct(Array, [3], NewTarget);\n"
+        "if (Object.getPrototypeOf(reflected).marker !== 23 || reflected.length !== 3)\n"
+        "  throw new Error('constructed prototype was lost');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_array_constructed_prototype", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    // D6.2.2v2: skipping canonical prototype re-installation is valid only
+    // when an explicit newTarget prototype remains observable and intact.
+    expect_trace_off_same("result29_array_constructed_prototype", source, output);
+}
+
+TEST(JsOpt, Result29IndexedFallbacksPreserveReferenceSemantics) {
+    const char* source =
+        "'use strict';\n"
+        "var accessorArray = []; accessorArray[1] = 3; var seen = 0;\n"
+        "Object.defineProperties(accessorArray, {\n"
+        "  '1': {set: function (value) { seen = value; }, enumerable: true, configurable: true}\n"
+        "});\n"
+        "accessorArray[1] = 11;\n"
+        "var rejectingProxy = new Proxy({}, {set: function () { return false; }});\n"
+        "var proxyError = ''; try { rejectingProxy[4] = 10; } catch (error) { proxyError = error.name; }\n"
+        "var fractional = [10, 20]; fractional[1.5] = 7;\n"
+        "if (seen !== 11 || accessorArray[1] !== undefined || proxyError !== 'TypeError' ||\n"
+        "    fractional[1.5] !== 7 || fractional[1] !== 20) throw new Error('indexed fallback changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_indexed_fallbacks", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_GUARD_FAIL][2], 0u);
+    EXPECT_GT(trace.reasons[JS_OPT_REASON_SHAPE_CHANGED], 0u);
+    expect_trace_off_same("result29_indexed_fallbacks", source, output);
+}
+
+TEST(JsOpt, Result29SuperIndexedAssignmentKeepsNullBaseError) {
+    const char* source =
+        "'use strict';\n"
+        "var count = 0;\n"
+        "class NullSuperWrite {\n"
+        "  static run() { super[0] = count += 1; }\n"
+        "}\n"
+        "Object.setPrototypeOf(NullSuperWrite, null);\n"
+        "var errorName = ''; try { NullSuperWrite.run(); } catch (error) { errorName = error.name; }\n"
+        "if (errorName !== 'TypeError' || count !== 1) throw new Error('super reference changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("result29_super_indexed_assignment", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("result29_super_indexed_assignment");
+    ASSERT_NE(mir, nullptr);
+    // D8.4.3: super's lexical base must reach PutValue before indexed
+    // specialization; otherwise a null parent incorrectly becomes a write.
+    EXPECT_NE(strstr(mir, "js_super_property_set"), nullptr);
+    free(mir);
+    expect_trace_off_same("result29_super_indexed_assignment", source, output);
 }
 
 TEST(JsOpt, NamedLoadStoreICWarms) {

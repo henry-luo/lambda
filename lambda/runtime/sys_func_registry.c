@@ -1125,6 +1125,15 @@ extern Item js_to_property_key(Item key);
 extern uint64_t js_property_lane_for_canonical_key(Item key);
 extern Item js_get(Item target, uint64_t lane, Item observable_key, Item receiver);
 extern Item js_set(Item target, uint64_t lane, Item observable_key, Item value, Item receiver);
+extern Item js_set_index_assignment(Item target, int64_t index, Item value,
+    int64_t strict);
+extern Item js_get_number_reference(Item target, double number_key);
+extern Item js_set_number_assignment(Item target, double number_key, Item value,
+    int64_t strict);
+extern int64_t js_number_key_to_index_fast(double number_key);
+extern int64_t js_typed_array_matches_type(Item value, int64_t type_id);
+extern int64_t js_elements_set_existing_dense_int_fast(Item array,
+    int64_t index, Item value);
 extern Item js_delete(Item target, uint64_t lane, Item observable_key);
 extern Item js_has_property(Item target, uint64_t lane, Item observable_key);
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
@@ -1841,6 +1850,28 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
     {"js_set", FPTR(js_set)},
+    {"js_set_index_assignment", FPTR(js_set_index_assignment),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR)}},
+    {"js_get_number_reference", FPTR(js_get_number_reference),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_set_number_assignment", FPTR(js_set_number_assignment),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR)}},
+    {"js_number_key_to_index_fast", FPTR(js_number_key_to_index_fast),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_delete", FPTR(js_delete)},
     {"js_has_property", FPTR(js_has_property)},
     {"js_assignment_set_result", FPTR(js_assignment_set_result)},
@@ -2025,8 +2056,20 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
-    {"js_elements_get_int", FPTR(js_elements_get_int)},
+    {"js_elements_get_int", FPTR(js_elements_get_int),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
+    {"js_elements_set_existing_dense_int_fast",
+     FPTR(js_elements_set_existing_dense_int_fast),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_elements_set_number", FPTR(js_elements_set_number)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
@@ -2265,6 +2308,12 @@ JitImport jit_runtime_imports[] = {
     // typed arrays
     {"js_typed_array_get", FPTR(js_typed_array_get)},
     {"js_typed_array_length", FPTR(js_typed_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_typed_array_matches_type", FPTR(js_typed_array_matches_type),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_is_typed_array", FPTR(js_is_typed_array), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_get_typed_array_ptr", FPTR(js_get_typed_array_ptr)},
     {"js_typed_array_current_data_ptr", FPTR(js_typed_array_current_data_ptr)},
@@ -3251,6 +3300,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish",
+        "js_typed_array_matches_type", "js_number_key_to_index_fast",
+        "js_elements_set_existing_dense_int_fast",
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",

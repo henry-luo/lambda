@@ -302,6 +302,8 @@ Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 Item js_elements_get_int(Item array, int64_t index);
 Item js_elements_set_int(Item array, int64_t index, Item value);
+int64_t js_elements_set_existing_dense_int_fast(Item array, int64_t index,
+                                                Item value);
 // Returns a boolean Set completion for the narrow ordinary-array index fast
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
 Item js_elements_set_int_completion(Item array, int64_t index, Item value);
