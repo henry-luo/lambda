@@ -61,6 +61,9 @@ struct VarEntry {
     // can legally shadow the promoted variable.
     bool is_iife_module_var_binding;
     int typed_array_type;
+    // A const binding initialized from a typed-array candidate can retain the
+    // one runtime element-type proof for all subsequent guarded accesses.
+    MIR_reg_t typed_array_guard_reg;
     bool is_js_array;
     JsClassEntry* class_entry;
     Type* full_type;

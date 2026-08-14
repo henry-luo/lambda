@@ -2968,6 +2968,28 @@ static Item js_get_prototype_from_constructor(Item new_target,
         js_intrinsic_construct_typed_array_type(policy));
 }
 
+static Item js_apply_resolved_constructed_prototype(Item result,
+        Item prototype) {
+    if (!js_construct_result_is_object(result) ||
+            !js_construct_result_is_object(prototype)) return result;
+    RootFrame roots(2);
+    Rooted<Item> result_root(roots, result);
+    Rooted<Item> prototype_root(roots, prototype);
+    if (get_type_id(result_root.get()) != LMD_TYPE_ARRAY) {
+        js_set_prototype(result_root.get(), prototype_root.get());
+        return result_root.get();
+    }
+    Item current_prototype = js_get_prototype_of(result_root.get());
+    if (item_is_error(current_prototype)) return current_prototype;
+    if (current_prototype.item != prototype_root.get().item) {
+        // D6.2.2v2: GetPrototypeFromConstructor remains observable, but a
+        // redundant canonical Array prototype slot creates a companion map
+        // that incorrectly disables dense element kernels such as fill/set.
+        js_set_prototype(result_root.get(), prototype_root.get());
+    }
+    return result_root.get();
+}
+
 static Item js_apply_constructed_default_prototype(Item result,
         Item new_target, int default_class) {
     if (!js_construct_result_is_object(result)) return result;
@@ -2978,10 +3000,8 @@ static Item js_apply_constructed_default_prototype(Item result,
         js_get_prototype_from_constructor_default(target_root.get(),
             default_class, -1));
     if (item_is_error(prototype_root.get())) return prototype_root.get();
-    if (js_construct_result_is_object(prototype_root.get())) {
-        js_set_prototype(result_root.get(), prototype_root.get());
-    }
-    return result_root.get();
+    return js_apply_resolved_constructed_prototype(result_root.get(),
+        prototype_root.get());
 }
 
 static Item js_apply_constructed_intrinsic_prototype(Item result,
@@ -2997,9 +3017,9 @@ static Item js_apply_constructed_intrinsic_prototype(Item result,
     // GetPrototypeFromConstructor is observable even for the canonical
     // intrinsic: skipping it made a replaced `.prototype` affect classes but
     // not direct `new` calls (D6.2.2v2).
-    if (js_construct_result_is_object(prototype_root.get())) {
-        js_set_prototype(result_root.get(), prototype_root.get());
-    }
+    result_root.set(js_apply_resolved_constructed_prototype(result_root.get(),
+        prototype_root.get()));
+    if (item_is_error(result_root.get())) return result_root.get();
     if (policy == JS_INTRINSIC_CONSTRUCT_PROMISE) {
         // D6.2.2v2: Promise's wrapper factory publishes an own constructor
         // cache, so forwarded newTarget must replace the base-realm value.
@@ -3184,10 +3204,8 @@ static Item js_intrinsic_construct_with_policy(
             target_root.get(), policy));
         if (item_is_error(prototype_root.get())) return prototype_root.get();
         result_root.set(js_new_object());
-        if (js_construct_result_is_object(prototype_root.get())) {
-            js_set_prototype(result_root.get(), prototype_root.get());
-        }
-        return result_root.get();
+        return js_apply_resolved_constructed_prototype(result_root.get(),
+            prototype_root.get());
     }
     if (policy != JS_INTRINSIC_CONSTRUCT_PROXY) {
         // GetPrototypeFromConstructor precedes allocation for the intrinsic
@@ -3201,9 +3219,9 @@ static Item js_intrinsic_construct_with_policy(
         policy, callee_root.get(), args, argc));
     if (item_is_error(result_root.get())) return result_root.get();
     if (policy == JS_INTRINSIC_CONSTRUCT_PROXY) return result_root.get();
-    if (js_construct_result_is_object(prototype_root.get())) {
-        js_set_prototype(result_root.get(), prototype_root.get());
-    }
+    result_root.set(js_apply_resolved_constructed_prototype(result_root.get(),
+        prototype_root.get()));
+    if (item_is_error(result_root.get())) return result_root.get();
     if (policy == JS_INTRINSIC_CONSTRUCT_PROMISE) {
         Item constructor_key = (Item){.item = s2it(heap_create_name(
             "constructor", 11))};
@@ -9827,8 +9845,40 @@ extern "C" Item js_elements_set_int(Item array, int64_t index, Item value) {
     return js_elements_set_int_mode(array, index, value, false, false);
 }
 
+static bool js_array_set_existing_dense_no_gc(Item array, int64_t index,
+        Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0 ||
+            index > 0xFFFFFFFELL || lambda_item_uses_scalar_home(value)) {
+        return false;
+    }
+    Array* arr = array.array;
+    if (!arr || arr->is_content == 1 || arr->extra != 0 ||
+            !js_is_extensible(array) ||
+            js_array_companion_has_array_index_shape(arr) ||
+            js_array_proto_index_guard_is_dirty(array) ||
+            index >= arr->length || index >= js_array_dense_capacity(arr) ||
+            arr->items[index].item == JS_DELETED_SENTINEL_VAL) {
+        return false;
+    }
+    // These guards exclude growth and scalar-home adoption, so the owned
+    // write cannot allocate or re-enter while holding the raw Array pointer.
+    AutoAssertNoGC no_gc;
+    js_array_store_owned(arr, index, value);
+    js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    return true;
+}
+
+extern "C" int64_t js_elements_set_existing_dense_int_fast(Item array,
+        int64_t index, Item value) {
+    return js_array_set_existing_dense_no_gc(array, index, value) ? 1 : 0;
+}
+
 extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
                                                  Item value) {
+    if (js_array_set_existing_dense_no_gc(array, index, value)) {
+        return (Item){.item = b2it(true)};
+    }
     if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0 ||
             index > 0xFFFFFFFELL) {
         js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
@@ -25742,17 +25792,39 @@ static Item js_array_method_property_key(int64_t index) {
 
 static bool js_array_try_fast_fill(Item object, Item value, int64_t start, int64_t end) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
-    Array* arr = object.array;
+    RootFrame roots(2);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> value_root(roots, value);
+    if (!roots.valid()) return false;
+    Array* arr = object_root.get().array;
     if (!arr) return false;
     if (start >= end) return true;
     if (start < 0 || end < start || end > arr->length) return false;
     if (arr->is_content == 1 || js_array_has_props(arr)) return false;
-    if (!js_is_extensible(object)) return false;
-    if (end > js_array_dense_capacity(arr) || !arr->items) return false;
-    if (js_array_proto_index_guard_is_dirty(object)) return false;
+    if (!js_is_extensible(object_root.get())) return false;
+    if (js_array_proto_index_guard_is_dirty(object_root.get())) return false;
+
+    int64_t initialized_capacity = js_array_dense_capacity(arr);
+    while (!arr->items || end > js_array_dense_capacity(arr)) {
+        int64_t old_capacity = arr->capacity;
+        expand_list((List*)arr, nullptr);
+        arr = object_root.get().array;
+        if (!arr || arr->capacity <= old_capacity) return false;
+    }
+    if (js_array_dense_capacity(arr) > initialized_capacity) {
+        // Length-only sparse arrays have no hole buffer. Reserving once here
+        // avoids fill's per-index semantic Set cliff, but every logical slot
+        // outside the selected range must still begin as an actual hole.
+        Item hole = lam::hole_sentinel_item();
+        int64_t hole_end = arr->length < js_array_dense_capacity(arr)
+            ? arr->length : js_array_dense_capacity(arr);
+        for (int64_t k = initialized_capacity; k < hole_end; k++) {
+            arr->items[k] = hole;
+        }
+    }
 
     for (int64_t k = start; k < end; k++) {
-        js_array_store_owned(arr, k, value);
+        js_array_store_owned(arr, k, value_root.get());
     }
     return true;
 }

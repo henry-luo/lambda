@@ -812,8 +812,11 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
             JSPD_DELETED);
     } else {
         js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
-        js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
     }
+    // D3.4.4v2: pooled string identity does not erase array-index shape facts.
+    // Missing this mark let dense stores bypass numeric accessors installed in
+    // an Array companion map through the NameId branch.
+    js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
     return js_status_ok();
 }
 

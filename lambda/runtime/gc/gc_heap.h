@@ -91,6 +91,7 @@ typedef void (*gc_vmap_destroy_fn)(void* obj, void* data);
 typedef void (*gc_error_trace_fn)(void* data, gc_heap_t* gc);
 typedef void (*gc_error_destroy_fn)(void* data);
 typedef void (*gc_js_native_trace_fn)(void* data, gc_heap_t* gc);
+typedef void (*gc_js_native_destroy_fn)(void* data);
 typedef int (*gc_js_function_trace_fn)(void* data, gc_heap_t* gc);
 typedef int (*gc_js_function_compact_fn)(void* data, gc_heap_t* gc);
 // Releases refcounted/native payloads embedded in otherwise zone-owned objects.
@@ -273,6 +274,7 @@ typedef struct gc_heap {
     gc_error_trace_fn error_trace;   // traces heap-owned LambdaError cause chain
     gc_error_destroy_fn error_destroy; // frees LambdaError external payload fields
     gc_js_native_trace_fn js_native_trace; // traces native payload edges on JS Map wrappers
+    gc_js_native_destroy_fn js_native_destroy; // frees native payloads on dead JS Map wrappers
     gc_js_function_trace_fn js_function_trace; // recognizes and traces GC-owned JsFunction objects
     gc_js_function_compact_fn js_function_compact; // updates JsFunction data-zone edges
     gc_external_destroy_fn external_destroy; // frees generic external payloads at sweep/teardown

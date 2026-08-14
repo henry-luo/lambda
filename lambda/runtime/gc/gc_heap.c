@@ -501,6 +501,7 @@ gc_heap_t* gc_heap_create(void) {
     gc->error_trace = NULL;
     gc->error_destroy = NULL;
     gc->js_native_trace = NULL;
+    gc->js_native_destroy = NULL;
     gc->js_function_trace = NULL;
     gc->external_destroy = NULL;
     // Initialize bump-pointer allocator
@@ -530,6 +531,10 @@ void gc_heap_destroy(gc_heap_t* gc) {
         while (current) {
             if (!(current->gc_flags & GC_FLAG_FREED)) {
                 gc->external_destroy((void*)(current + 1), current->type_tag);
+                if (current->type_tag == LMD_TYPE_MAP_ &&
+                        gc->js_native_destroy) {
+                    gc->js_native_destroy((void*)(current + 1));
+                }
             }
             current = current->next;
         }
@@ -1990,6 +1995,11 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         }
     }
     else if (tag == LMD_TYPE_MAP_) {
+        if (gc->js_native_destroy) {
+            // D4.1.4v4: Map wrappers can own tracked raw allocations, so sweep
+            // must release those payloads when the GC owner dies.
+            gc->js_native_destroy(obj);
+        }
         uint8_t* p = (uint8_t*)obj;
         uint8_t map_kind = p[3];
         if (map_kind == MAP_KIND_ARRAY_SPARSE_) {

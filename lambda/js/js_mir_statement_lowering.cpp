@@ -1153,6 +1153,49 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
 
+                        if (d->init->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+                            JsCallNode* new_call = (JsCallNode*)d->init;
+                            if (new_call->callee && new_call->callee->node_type ==
+                                    JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* ctor =
+                                    (JsIdentifierNode*)new_call->callee;
+                                if (ctor->name->len == 5 &&
+                                        strncmp(ctor->name->chars, "Array", 5) == 0) {
+                                    JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                    if (var_entry) var_entry->is_js_array = true;
+                                }
+                            }
+                        }
+
+                        int typed_array_candidate =
+                            jm_detect_typed_array_new(d->init);
+                        if (typed_array_candidate >= 0) {
+                            JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                            if (var_entry) {
+                                // D6.2.2v2: syntax only selects a guarded
+                                // candidate. Every direct load/store verifies
+                                // the resulting object's element type before
+                                // entering the representation-specific lane.
+                                var_entry->typed_array_type =
+                                    typed_array_candidate;
+                                if (var->kind == JS_VAR_CONST) {
+                                    // The binding cannot be replaced, and a
+                                    // typed array's element type is immutable;
+                                    // retain this runtime identity proof rather
+                                    // than re-entering the guard on every loop
+                                    // iteration (D6.2.2v2).
+                                    var_entry->typed_array_guard_reg = jm_call_2(
+                                        mt, "js_typed_array_matches_type",
+                                        MIR_T_I64,
+                                        MIR_T_I64,
+                                        MIR_new_reg_op(mt->ctx, val),
+                                        MIR_T_I64,
+                                        MIR_new_int_op(mt->ctx,
+                                            typed_array_candidate));
+                                }
+                            }
+                        }
+
                         // propagate typed array type from this.prop in class methods
                         if (d->init->node_type == JS_AST_NODE_MEMBER_EXPRESSION && mt->current_class) {
                             JsMemberNode* im = (JsMemberNode*)d->init;

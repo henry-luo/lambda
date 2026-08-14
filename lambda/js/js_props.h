@@ -77,6 +77,16 @@ Item js_get(Item target, JsPropertyLane lane, Item observable_key,
             Item receiver);
 Item js_set(Item target, JsPropertyLane lane, Item observable_key,
             Item value, Item receiver);
+// Exact integer assignment kernel used by MIR after evaluating base/key/RHS in
+// source order. It returns the assignment value or an abrupt Item completion.
+Item js_set_index_assignment(Item target, int64_t index, Item value,
+                             int64_t strict);
+// Native-double computed keys use this seam so integer-valued JS Numbers can
+// enter indexed kernels without truncating fractional property names.
+Item js_get_number_reference(Item target, double number_key);
+Item js_set_number_assignment(Item target, double number_key, Item value,
+                              int64_t strict);
+int64_t js_number_key_to_index_fast(double number_key);
 Item js_delete(Item target, JsPropertyLane lane, Item observable_key);
 Item js_has_property(Item target, JsPropertyLane lane, Item observable_key);
 

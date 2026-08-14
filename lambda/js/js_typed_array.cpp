@@ -2169,10 +2169,38 @@ extern "C" bool js_is_typed_array(Item val) {
     return ptr != NULL;
 }
 
+extern "C" int64_t js_typed_array_matches_type(Item val, int64_t type_id) {
+    if (!js_is_typed_array(val)) return 0;
+    JsTypedArray* typed_array = js_get_typed_array_ptr(val.map);
+    return typed_array && (int64_t)typed_array->element_type == type_id;
+}
+
 // Get the typed trailing payload after validating the physical carrier.
 extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
     if (!m || m->map_kind != MAP_KIND_TYPED_ARRAY) return NULL;
     return &((JsTypedArrayMapCarrier*)m)->payload;
+}
+
+static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
+        Item buffer_item, bool length_tracking) {
+    JsTypedArrayMapCarrier* carrier = (JsTypedArrayMapCarrier*)heap_calloc(
+        sizeof(JsTypedArrayMapCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemNull;
+    Map* map = &carrier->base;
+    map->type_id = LMD_TYPE_MAP;
+    map->map_kind = MAP_KIND_TYPED_ARRAY;
+    map->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
+    if (!map->type) map->type = &EmptyMap;
+    map->data = NULL;
+    map->data_cap = 0;
+    JsTypedArray* typed_array = &carrier->payload;
+    typed_array->element_type = element_type;
+    typed_array->buffer = js_get_arraybuffer_ptr(buffer_item.map);
+    typed_array->buffer_item = buffer_item.item;
+    typed_array->length_tracking = length_tracking;
+    typed_array->is_buffer = false;
+    typed_array->view = NULL;
+    return (Item){.map = map};
 }
 
 // Create a standalone typed array (owns its buffer)
@@ -2181,38 +2209,27 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     int elem_size = typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> buffer_root(roots, js_arraybuffer_wrap(ab));
     Rooted<Item> view_root(roots, ItemNull);
     if (!js_is_arraybuffer(buffer_root.get())) return ItemNull;
-
-    JsTypedArrayMapCarrier* carrier = (JsTypedArrayMapCarrier*)heap_calloc(
-        sizeof(JsTypedArrayMapCarrier), LMD_TYPE_MAP);
-    if (!carrier) return ItemNull;
-    JsTypedArray* ta = &carrier->payload;
-    ta->element_type = arr_type;
-    ta->buffer = ab;
-    ta->buffer_item = ItemNull.item;
-    ta->length_tracking = false;
-    ta->is_buffer = false;
+    Rooted<Item> carrier_root(roots, js_typed_array_alloc_carrier(
+        arr_type, buffer_root.get(), false));
+    if (!js_is_typed_array(carrier_root.get())) return ItemNull;
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     view_root.set((Item){.array_num = array_num_new_buffer_view(
         (Container*)buffer_root.get().map, &ab->handle,
         js_typed_array_elem_type(arr_type), 0, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
-
-    Map* m = &carrier->base;
-    m->type_id = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_TYPED_ARRAY;
-    m->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
-    if (!m->type) m->type = &EmptyMap;
-    m->data = NULL;
-    m->data_cap = 0;
-    // The backing ArrayBuffer may move while its view is allocated; store the
-    // refreshed rooted Item only after the final typed-array Map allocation.
+    // D5.3.3: the view allocation can collect before the typed-array carrier
+    // reaches its caller, so both the carrier and backing buffer stay rooted.
+    JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    ta->buffer = ab;
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
     ta->buffer_item = buffer_root.get().item;
-    return (Item){.map = m};
+    return carrier_root.get();
 }
 
 extern "C" Item js_buffer_from_bytes(const char* data, int len) {
@@ -2311,7 +2328,7 @@ extern "C" Item binary_from_dataview(JsDataView* dv) {
 
 // Create a typed array as a view over an ArrayBuffer
 extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> buffer_root(roots, buffer_item);
     Rooted<Item> view_root(roots, ItemNull);
     buffer_item = buffer_root.get();
@@ -2359,36 +2376,24 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         return js_throw_range_error("Invalid typed array length");
     }
 
-    JsTypedArrayMapCarrier* carrier = (JsTypedArrayMapCarrier*)heap_calloc(
-        sizeof(JsTypedArrayMapCarrier), LMD_TYPE_MAP);
-    if (!carrier) return ItemNull;
-    JsTypedArray* ta = &carrier->payload;
-    // Native view setup and the wrapper-map allocation can collect before the
-    // map trace owns this edge, so keep both transient GC values exact-rooted.
-    buffer_item = buffer_root.get();
-    ab = js_get_arraybuffer_ptr(buffer_item.map);
+    Rooted<Item> carrier_root(roots, js_typed_array_alloc_carrier(
+        arr_type, buffer_root.get(), length_tracking));
+    if (!js_is_typed_array(carrier_root.get())) return ItemNull;
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
-    ta->element_type = arr_type;
-    ta->buffer = ab;
-    ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
-    ta->length_tracking = length_tracking;
-    ta->is_buffer = false;
-    view_root.set((Item){.array_num = array_num_new_buffer_view((Container*)buffer_item.map, &ab->handle,
+    view_root.set((Item){.array_num = array_num_new_buffer_view(
+        (Container*)buffer_root.get().map, &ab->handle,
         js_typed_array_elem_type(arr_type), byte_offset, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
+    // D5.3.3: refresh every interior pointer from its exact root after the
+    // view allocation; forced collections may relocate either carrier.
+    JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    ta->buffer = ab;
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
-
-    Map* m = &carrier->base;
-    m->type_id = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_TYPED_ARRAY;
-    m->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
-    if (!m->type) m->type = &EmptyMap;
-    m->data = NULL;
-    m->data_cap = 0;
-
     ta->buffer_item = buffer_root.get().item;
-    return (Item){.map = m};
+    return carrier_root.get();
 }
 
 // Create a typed array from another array (copy)

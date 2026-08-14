@@ -7,12 +7,14 @@
 #include "js_property_attrs.h"
 #include "js_function.hpp"
 #include "js_state_guards.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../core/name_pool.hpp"
 #include <math.h>
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern String* heap_create_name(const char* name, size_t len);
+extern Item js_make_number(double d);
 extern __thread EvalContext* context;
 extern "C" NameId js_symbol_name_id(Item sym);
 
@@ -1347,6 +1349,83 @@ extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
     // Set owns the completion; Reflect.set is only a public caller policy.
     return js_set_completion_with_key(target_root.get(), key_root.get(),
                                       value_root.get(), receiver_root.get());
+}
+
+extern "C" Item js_set_index_assignment(Item target, int64_t index,
+                                           Item value, int64_t strict) {
+    RootFrame roots(3);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, ItemNull);
+    if (!roots.valid()) return ItemError;
+
+    if (js_is_typed_array(target_root.get()) &&
+            index >= INT32_MIN && index <= INT32_MAX) {
+        // Integer-indexed exotic Set has no inherited-setter lane when the
+        // receiver is the target. Keep coercion/errors in the typed-array
+        // kernel while avoiding canonical key allocation on every hot store.
+        Item typed_result = js_typed_array_set(target_root.get(),
+            (Item){.item = i2it(index)}, value_root.get());
+        return item_is_error(typed_result) ? typed_result : value_root.get();
+    }
+
+    if (index >= 0 && index <= (int64_t)JS_PROPERTY_INDEX_MAX &&
+            get_type_id(target_root.get()) == LMD_TYPE_ARRAY) {
+        Item fast_result = js_elements_set_int_completion(target_root.get(),
+            index, value_root.get());
+        if (fast_result.item != ItemNull.item) return value_root.get();
+    }
+
+    // D8.4.3: fallback materializes the one observable ToPropertyKey result
+    // before Proxy/descriptor dispatch, then applies strict assignment policy
+    // to the boolean Set completion.
+    key_root.set(js_to_property_key((Item){.item = i2it(index)}));
+    if (item_is_error(key_root.get())) return key_root.get();
+    Item set_result = js_set_completion_with_key(target_root.get(),
+        key_root.get(), value_root.get(), target_root.get());
+    return js_assignment_set_result(value_root.get(), key_root.get(),
+        set_result, strict, target_root.get());
+}
+
+extern "C" int64_t js_number_key_to_index_fast(double number_key) {
+    if (!isfinite(number_key) || number_key < 0.0 ||
+            floor(number_key) != number_key ||
+            number_key > (double)JS_PROPERTY_INDEX_MAX) {
+        return -1;
+    }
+    int64_t index = (int64_t)number_key;
+    return (double)index == number_key ? index : -1;
+}
+
+extern "C" Item js_get_number_reference(Item target, double number_key) {
+    int64_t index = js_number_key_to_index_fast(number_key);
+    if (index >= 0) {
+        return js_elements_get_int(target, index);
+    }
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots, js_make_number(number_key));
+    if (!roots.valid()) return ItemError;
+    // D8.4.3: fractional, non-finite, and 2^32-1 keys remain ordinary
+    // property spellings; truncating them would address another element.
+    return js_get_reference(target_root.get(), key_root.get());
+}
+
+extern "C" Item js_set_number_assignment(Item target, double number_key,
+        Item value, int64_t strict) {
+    int64_t index = js_number_key_to_index_fast(number_key);
+    if (index >= 0) {
+        return js_set_index_assignment(target, index, value, strict);
+    }
+    RootFrame roots(3);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, js_to_property_key(js_make_number(number_key)));
+    if (!roots.valid() || item_is_error(key_root.get())) return ItemError;
+    Item set_result = js_set_completion_with_key(target_root.get(),
+        key_root.get(), value_root.get(), target_root.get());
+    return js_assignment_set_result(value_root.get(), key_root.get(),
+        set_result, strict, target_root.get());
 }
 
 extern "C" Item js_delete(Item target, JsPropertyLane lane,

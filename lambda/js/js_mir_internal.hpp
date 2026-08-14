@@ -458,15 +458,28 @@ MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id);
 MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg);
 MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, int ta_type,
-                                               MIR_reg_t h_data = 0, MIR_reg_t h_len = 0);;
+                                               MIR_reg_t h_data = 0, MIR_reg_t h_len = 0,
+                                               MIR_reg_t type_guard = 0);;
 MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                       MIR_reg_t idx_native, int ta_type,
                                                       TypeId target_type,
-                                                      MIR_reg_t h_data = 0);;
+                                                      MIR_reg_t h_data = 0,
+                                                      MIR_reg_t type_guard = 0);;
 MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
-                                               MIR_reg_t h_data = 0, MIR_reg_t h_len = 0);;
+                                               MIR_reg_t h_data = 0, MIR_reg_t h_len = 0,
+                                               MIR_reg_t type_guard = 0,
+                                               bool strict = false);;
+MIR_reg_t jm_transpile_number_get(JsMirTranspiler* mt, MIR_reg_t object_reg,
+                                  MIR_reg_t number_key);
+MIR_reg_t jm_transpile_typed_array_get_number(JsMirTranspiler* mt,
+    MIR_reg_t arr_reg, MIR_reg_t number_key, int ta_type,
+    MIR_reg_t h_data = 0, MIR_reg_t h_len = 0, MIR_reg_t type_guard = 0);
+MIR_reg_t jm_transpile_typed_array_set_number(JsMirTranspiler* mt,
+    MIR_reg_t arr_reg, MIR_reg_t number_key, MIR_reg_t value_reg, int ta_type,
+    MIR_reg_t h_data = 0, MIR_reg_t h_len = 0, MIR_reg_t type_guard = 0,
+    bool strict = false);
 MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                 MIR_reg_t idx_native,
                                                 MIR_reg_t h_items = 0, MIR_reg_t h_len = 0);;
@@ -582,15 +595,27 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
 bool jm_typed_array_is_int(int ta_type);
 MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, int ta_type,
-                                               MIR_reg_t h_data, MIR_reg_t h_len);
+                                               MIR_reg_t h_data, MIR_reg_t h_len,
+                                               MIR_reg_t type_guard);
 MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                       MIR_reg_t idx_native, int ta_type,
                                                       TypeId target_type,
-                                                      MIR_reg_t h_data);
+                                                      MIR_reg_t h_data,
+                                                      MIR_reg_t type_guard);
 MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
-                                               MIR_reg_t h_data, MIR_reg_t h_len);
+                                               MIR_reg_t h_data, MIR_reg_t h_len,
+                                               MIR_reg_t type_guard,
+                                               bool strict);
+MIR_reg_t jm_transpile_number_get(JsMirTranspiler* mt, MIR_reg_t object_reg,
+                                  MIR_reg_t number_key);
+MIR_reg_t jm_transpile_typed_array_get_number(JsMirTranspiler* mt,
+    MIR_reg_t arr_reg, MIR_reg_t number_key, int ta_type,
+    MIR_reg_t h_data, MIR_reg_t h_len, MIR_reg_t type_guard);
+MIR_reg_t jm_transpile_typed_array_set_number(JsMirTranspiler* mt,
+    MIR_reg_t arr_reg, MIR_reg_t number_key, MIR_reg_t value_reg, int ta_type,
+    MIR_reg_t h_data, MIR_reg_t h_len, MIR_reg_t type_guard, bool strict);
 MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg);
 MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem);
 MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr);
