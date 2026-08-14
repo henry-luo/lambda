@@ -2,10 +2,10 @@
 
 **Date:** 2026-08-14
 
-**Status:** ANALYSIS COMPLETE; P1, P2.1, and P2.2 recovery slices are
-implemented with zero verified semantic regressions. Canonical post-tuning
-benchmark work remains pending; Test262 batch stability is confirmed with zero
-retry.
+**Status:** ANALYSIS COMPLETE; P1, P2.1, P2.2, and the P2.3 Test262 runner
+preflight are implemented with zero verified semantic regressions. Canonical
+post-tuning benchmark work remains pending; Test262 batch stability is
+confirmed with zero retry and a sub-10-second runner guard.
 
 **Analysis anchor:** `0b27a30ea4485a851bf36aa291e009b0c65713ab`
 
@@ -484,6 +484,45 @@ authoritative release gate, with `ref/test262` pinned at
 | `make test-lambda-baseline` | 3,718 / 3,718 passed |
 | `make test262-baseline` | 40,261 / 40,261 fully passed; 0 non-fully-passing; 0 failed; 0 retry; 0 regressions; 211.0 s |
 
+### 8.3 P2.3 Test262 runner preflight (2026-08-14)
+
+`test/test_js_test262_gtest.exe --prelim` is a one-case GTest mode that
+executes the production preparation and `js-test-batch` path on five pinned
+Test262 fixtures. It verifies the baseline-pinned `ref/test262` checkout,
+comment-stripped body/canonical-harness selection, metadata-cache admission,
+and the special-preamble map before running:
+
+- a `String.prototype.split.length` delete/check pair in the same JS-harness
+  batch, which guards the intrinsic-function snapshot reset fixed in P2.2;
+- a `propertyHelper.js` fixture, which guards per-test harness includes;
+- an async `Promise.allSettled` fixture, admitted through the regular async
+  allowlist and completing through `$DONE`; and
+- an ES-module fixture, which exercises the module-source batch path.
+
+The preflight reuses `prepare_all_tests()` and `execute_t262_batch()` rather
+than a parallel test-only runner path. It forces the mutation-sensitive pair
+through the JS-harness batch because the native-harness shortcut cannot test
+the reusable intrinsic-global reset boundary. A hard in-test ten-second wall
+clock limit prevents the guard from becoming a surrogate full-suite run; the
+current direct measurement is **3.07 s**.
+
+`make test-js262-prelim` rebuilds the focused executable incrementally, then
+runs this mode. The Lambda baseline registers it as a runner-only configuration
+entry with the actual `test_js_test262_gtest.exe` artifact and
+`runner_args: ["--prelim"]`. `test_run.js` therefore consumes its normal GTest
+JSON, prints its named result and timing, and includes it in the final totals;
+it is not a trailing Make recipe. The entry is serialized after normal baseline
+jobs so its ten-second contract does not compete with nested workers. This is
+the D7.3.5 requirement that every conformance gate is named and wired into CI.
+
+The first integrated result was:
+
+| Gate | Result |
+|---|---|
+| `make test-js262-prelim` | 1 / 1 passed; `RunnerContracts` = 3.07 s |
+| `make test-lambda-baseline` | 3,719 / 3,719 passed, including `Test262 Runner Preflight` 1 / 1; runner wall time 3.99 s |
+| `make test262-baseline` | 40,261 / 40,261 fully passed; 0 non-fully-passing; 0 failed; 0 retry; 0 regressions; 215.1 s |
+
 ## 9. Tune9 performance architecture
 
 ### 9.1 Guarded direct operation with one fallback
@@ -713,6 +752,8 @@ difference.
 - [x] Lambda baseline passes on the final tree (3,718/3,718).
 - [x] Test262 baseline has zero pass-to-fail regression (40,261 entries).
 - [x] Test262 batch stability is confirmed with zero retry (P2.2).
+- [x] Test262 runner preflight covers batch reset, sync harness, async `$DONE`,
+  and module admission under ten seconds (P2.3).
 - [ ] Full 59-row release benchmark completes with no timeout.
 - [ ] Tune9 acceptance targets pass and the next numbered result is published.
 
@@ -753,6 +794,8 @@ Transient diagnostic evidence currently under `temp/`:
 - `temp/tune9_intrinsic_method_reset_after.log`
 - `temp/tune9_batch_reset_lambda_baseline.log`
 - `temp/tune9_batch_reset_test262_baseline.log`
+- `temp/lambda_baseline_current.log`
+- `temp/test262_baseline_current.log`
 
 The transient files support this analysis but are not a reproducible benchmark
 archive. P0 must replace them with a complete capture bundle before Tune9 is
