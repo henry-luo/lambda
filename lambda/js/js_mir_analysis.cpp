@@ -227,6 +227,18 @@ typedef enum JsSuspensionKind {
 } JsSuspensionKind;
 
 // Yield and await counting share the same AST walk; only suspension-node and lane-specific spill rules differ.
+typedef struct JmSuspensionCountCtx {
+    JsSuspensionKind kind;
+    int count;
+} JmSuspensionCountCtx;
+
+static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind);
+
+static void jm_count_suspensions_child(JsAstNode* child, void* ctx) {
+    JmSuspensionCountCtx* state = (JmSuspensionCountCtx*)ctx;
+    state->count += jm_count_suspensions(child, state->kind);
+}
+
 static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
 #define JM_COUNT(child) jm_count_suspensions((child), kind)
     if (!node) return 0;
@@ -241,52 +253,10 @@ static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
         JsAwaitNode* a = (JsAwaitNode*)node;
         return 1 + JM_COUNT(a->argument);
     }
-    // Don't count yields inside nested functions
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-        return 0;
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        int count = 0;
-        JsAstNode* s = blk->statements;
-        while (s) { count += JM_COUNT(s); s = s->next; }
-        return count;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
-        return JM_COUNT(es->expression);
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
-        int count = 0;
-        JsAstNode* d = v->declarations;
-        while (d) { count += JM_COUNT(d); d = d->next; }
-        return count;
-    }
     case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        // a declarator's pattern is not part of the enclosing suspension count
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
         return JM_COUNT(d->init);
-    }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* r = (JsReturnNode*)node;
-        return JM_COUNT(r->argument);
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        return JM_COUNT(ifn->test) + JM_COUNT(ifn->consequent) + JM_COUNT(ifn->alternate);
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        return JM_COUNT(w->test) + JM_COUNT(w->body);
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        return JM_COUNT(dw->body) + JM_COUNT(dw->test);
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        return JM_COUNT(f->init) + JM_COUNT(f->test) + JM_COUNT(f->update) + JM_COUNT(f->body);
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT: {
@@ -296,112 +266,14 @@ static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
         return implicit_await + JM_COUNT(fo->left) + JM_COUNT(fo->right) +
             JM_COUNT(fo->body);
     }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        int count = JM_COUNT(sw->discriminant);
-        JsAstNode* c = sw->cases;
-        while (c) { count += JM_COUNT(c); c = c->next; }
-        return count;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        int count = JM_COUNT(sc->test);
-        JsAstNode* s = sc->consequent;
-        while (s) { count += JM_COUNT(s); s = s->next; }
-        return count;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        return JM_COUNT(t->block) + JM_COUNT(t->handler) + JM_COUNT(t->finalizer);
-    }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* cc = (JsCatchNode*)node;
         return JM_COUNT(cc->body);
-    }
-    // Binary/unary/call expressions: recurse into their sub-expressions
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        return JM_COUNT(bin->left) + JM_COUNT(bin->right);
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        return JM_COUNT(un->operand);
-    }
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* a = (JsAssignmentNode*)node;
-        return JM_COUNT(a->left) + JM_COUNT(a->right);
-    }
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        int count = JM_COUNT(call->callee);
-        JsAstNode* arg = call->arguments;
-        while (arg) { count += JM_COUNT(arg); arg = arg->next; }
-        return count;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* c = (JsConditionalNode*)node;
-        return JM_COUNT(c->test) + JM_COUNT(c->consequent) + JM_COUNT(c->alternate);
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* m = (JsMemberNode*)node;
-        return JM_COUNT(m->object) + JM_COUNT(m->property);
-    }
-    case JS_AST_NODE_TEMPLATE_LITERAL: {
-        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
-        int count = 0;
-        JsAstNode* e = tl->expressions;
-        while (e) { count += JM_COUNT(e); e = e->next; }
-        return count;
-    }
-    case JS_AST_NODE_TAGGED_TEMPLATE: {
-        JsTaggedTemplateNode* tt = (JsTaggedTemplateNode*)node;
-        int count = JM_COUNT(tt->tag);
-        if (tt->quasi) { JsAstNode* e = tt->quasi->expressions; while (e) { count += JM_COUNT(e); e = e->next; } }
-        return count;
-    }
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* ae = (JsArrayNode*)node;
-        int count = 0;
-        JsAstNode* e = ae->elements;
-        while (e) { count += JM_COUNT(e); e = e->next; }
-        return count;
-    }
-    case JS_AST_NODE_OBJECT_EXPRESSION: {
-        JsObjectNode* oe = (JsObjectNode*)node;
-        int count = 0;
-        JsAstNode* p = oe->properties;
-        while (p) { count += JM_COUNT(p); p = p->next; }
-        return count;
     }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* prop = (JsPropertyNode*)node;
         int count = prop->computed ? JM_COUNT(prop->key) : 0;
         return count + JM_COUNT(prop->value);
-    }
-    case JS_AST_NODE_SPREAD_ELEMENT: {
-        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
-        return JM_COUNT(sp->argument);
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        int count = 0;
-        JsAstNode* e = seq->expressions;
-        while (e) { count += JM_COUNT(e); e = e->next; }
-        return count;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
-        return JM_COUNT(ls->body);
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* ws = (JsWithStatementNode*)node;
-        return JM_COUNT(ws->object) + JM_COUNT(ws->body);
-    }
-    // destructuring patterns: yield can appear in default values
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
-        return JM_COUNT(ap->left) + JM_COUNT(ap->right);
     }
     case JS_AST_NODE_ARRAY_PATTERN: {
         JsArrayPatternNode* arrp = (JsArrayPatternNode*)node;
@@ -419,21 +291,6 @@ static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
             e = e->next;
         }
         return count;
-    }
-    case JS_AST_NODE_OBJECT_PATTERN: {
-        JsObjectPatternNode* objp = (JsObjectPatternNode*)node;
-        int count = 0;
-        JsAstNode* p = objp->properties;
-        while (p) { count += JM_COUNT(p); p = p->next; }
-        return count;
-    }
-    case JS_AST_NODE_REST_ELEMENT: {
-        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
-        return JM_COUNT(sp->argument);
-    }
-    case JS_AST_NODE_THROW_STATEMENT: {
-        JsThrowNode* thr = (JsThrowNode*)node;
-        return JM_COUNT(thr->argument);
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         // Count yields in computed property names of class members (they're in outer generator scope)
@@ -453,8 +310,25 @@ static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
         JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)node;
         return fd->computed ? JM_COUNT(fd->key) : 0;
     }
-    default:
+    // A nested function has its own suspension count, and these kinds were
+    // never counted; not descending is deliberate, so it is stated here rather
+    // than left to the shared child table.
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+    case JS_AST_NODE_STATIC_BLOCK:
+    case JS_AST_NODE_REST_PROPERTY:
+    case JS_AST_NODE_PROGRAM:
+    case JS_AST_NODE_IMPORT_DECLARATION:
+    case JS_AST_NODE_EXPORT_DECLARATION:
         return 0;
+    default: {
+        // every remaining kind is a plain sum over its children
+        JmSuspensionCountCtx state = { kind, 0 };
+        js_ast_visit_children(node, jm_count_suspensions_child, &state);
+        return state.count;
+    }
     }
 #undef JM_COUNT
 }
