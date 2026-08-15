@@ -1526,7 +1526,9 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
+	# Pin the baseline's optimization contract to its ordinary debug host;
+	# otherwise a stale standalone profile binary could be selected implicitly.
+	@LAMBDA_TEST_HEAVY_LOAD=1 LAMBDA_JS_OPT_EXE=./lambda.exe node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline

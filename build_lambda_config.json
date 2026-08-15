@@ -1045,7 +1045,10 @@
       ],
       "linker_flags": [],
       "build_dir": "build_debug",
-      "debug": true
+      "debug": true,
+      "defines": [
+        "LAMBDA_JS_EXEC_PROFILE"
+      ]
     },
     "debug_profile": {
       "output": "lambda-debug-profile.exe",
