@@ -1044,11 +1044,9 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
     }
 }
 
-static Item js_private_display_name_item(Item name_item) {
-    // Private NameRecords retain their source spelling; rewriting it could
-    // conflate a valid #123_name with a former compiler-private encoding.
-    return name_item;
-}
+// Private NameRecords retain their source spelling; rewriting it could
+// conflate a valid #123_name with a former compiler-private encoding.
+JS_FORWARD_STATIC_EXPRESSION(Item, js_private_display_name_item, (Item name_item), name_item)
 
 static int js_function_name_from_symbol_key(NameRef key, char* out, int out_size) {
     if (!key || !property_key_requires_identity(key) ||

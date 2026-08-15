@@ -1351,14 +1351,12 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     return event_root.get();
 }
 
-Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed) {
-    return js_create_event_init_with_class(type, bubbles, cancelable, composed,
-        JS_CLASS_EVENT);
-}
-
-Item js_create_event(const char* type, bool bubbles, bool cancelable) {
-    return js_create_event_init(type, bubbles, cancelable, false);
-}
+JS_FORWARD_ITEM(js_create_event_init,
+    (const char* type, bool bubbles, bool cancelable, bool composed),
+    js_create_event_init_with_class,
+    (type, bubbles, cancelable, composed, JS_CLASS_EVENT))
+JS_FORWARD_ITEM(js_create_event, (const char* type, bool bubbles, bool cancelable),
+    js_create_event_init, (type, bubbles, cancelable, false))
 
 Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
                                bool composed, Item view, const char* data) {

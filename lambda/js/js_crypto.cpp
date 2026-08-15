@@ -783,21 +783,7 @@ extern "C" Item js_crypto_randomFill(Item target_item, Item offset_item, Item si
 }
 
 static bool crypto_random_values_is_integer_array(JsTypedArray* ta) {
-    if (!ta) return false;
-    switch (ta->element_type) {
-        case JS_TYPED_INT8:
-        case JS_TYPED_UINT8:
-        case JS_TYPED_UINT8_CLAMPED:
-        case JS_TYPED_INT16:
-        case JS_TYPED_UINT16:
-        case JS_TYPED_INT32:
-        case JS_TYPED_UINT32:
-        case JS_TYPED_BIGINT64:
-        case JS_TYPED_BIGUINT64:
-            return true;
-        default:
-            return false;
-    }
+    return ta && js_typed_array_is_integer_type(ta->element_type);
 }
 
 extern "C" Item js_crypto_getRandomValues(Item target_item) {

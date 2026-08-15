@@ -33,22 +33,24 @@ extern "C" NameId js_symbol_name_id(Item sym);
 #  include "../lambda.h"
 #endif
 
-static inline bool js_props_is_deleted_sentinel(Item v) {
-    return v.item == JS_DELETED_SENTINEL_VAL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_props_is_deleted_sentinel, (Item v),
+    v.item == JS_DELETED_SENTINEL_VAL)
 
-static inline bool js_props_is_array(Item object) {
-    return get_type_id(object) == LMD_TYPE_ARRAY ||
-        js_is_ordinary_numeric_array(object);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_props_is_array, (Item object),
+    get_type_id(object) == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object))
 
 static inline Item js_props_undefined() {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-static inline bool js_props_key_is_symbol(Item key) {
-    return get_type_id(key) == LMD_TYPE_INT &&
-        it2i(key) <= -(int64_t)JS_SYMBOL_BASE;
+JS_FORWARD_STATIC_EXPRESSION(bool, js_props_key_is_symbol, (Item key),
+    get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE)
+
+extern "C" bool js_descriptor_is_enumerable(Item desc) {
+    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
+    bool found = false;
+    Item enumerable = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &found);
+    return found && js_is_truthy(enumerable);
 }
 
 extern "C" bool js_property_name_to_array_index(const char* name,
@@ -348,10 +350,9 @@ extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
     return JS_OWN_READY;
 }
 
-extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
-        Item Receiver, Item* out_value) {
-    return js_ordinary_get_own_ex(object, key, Receiver, out_value, NULL);
-}
+JS_FORWARD_RETURN(JsOwnGetStatus, js_ordinary_get_own,
+    (Item object, Item key, Item Receiver, Item* out_value), js_ordinary_get_own_ex,
+    (object, key, Receiver, out_value, NULL))
 
 // External: defined in js_property_attrs.cpp; walks own + proto chain looking
 // for an IS_ACCESSOR pair under `name`. Returns nullptr if no own/inherited
@@ -382,21 +383,13 @@ static JsSetterDispatchResult js_dispatch_accessor_setter(Item object,
     return js_setter_dispatch_result(JS_SET_NO_SETTER, ItemNull);
 }
 
-extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor(Item object,
-                                                                 const char* name,
-                                                                 int name_len,
-                                                                 Item value,
-                                                                 Item Receiver) {
-    return js_dispatch_accessor_setter(object,
-        js_find_accessor_pair_inheritable(object, name, name_len), value, Receiver);
-}
-
-extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor_name_id(
-        Item object, NameId name_id, Item value, Item Receiver) {
-    return js_dispatch_accessor_setter(object,
-        js_find_accessor_pair_inheritable_name_id(object, name_id), value,
-        Receiver);
-}
+JS_FORWARD_RETURN(JsSetterDispatchResult, js_ordinary_set_via_accessor,
+    (Item object, const char* name, int name_len, Item value, Item Receiver),
+    js_dispatch_accessor_setter,
+    (object, js_find_accessor_pair_inheritable(object, name, name_len), value, Receiver))
+JS_FORWARD_RETURN(JsSetterDispatchResult, js_ordinary_set_via_accessor_name_id,
+    (Item object, NameId name_id, Item value, Item Receiver), js_dispatch_accessor_setter,
+    (object, js_find_accessor_pair_inheritable_name_id(object, name_id), value, Receiver))
 
 extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
                                                          const char* name,

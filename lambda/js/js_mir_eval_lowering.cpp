@@ -163,10 +163,9 @@ static JsDynFuncCacheState* js_dynfunc_cache_state_ensure(void) {
     return (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state;
 }
 
-static JsDynFuncCacheState* js_dynfunc_cache_state_current(void) {
-    return js_active_runtime_state ?
-        (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state : NULL;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsDynFuncCacheState*, js_dynfunc_cache_state_current, (void),
+    js_active_runtime_state ?
+        (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state : NULL)
 
 #define js_dynfunc_cache_state (*js_dynfunc_cache_state_current())
 #define js_dynfunc_cache (js_dynfunc_cache_state.entries)
@@ -501,14 +500,12 @@ static uint64_t js_dynfunc_preamble_hash(void) {
     return h;
 }
 
-static bool js_dynfunc_is_ident_start(char ch) {
-    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-        ch == '_' || ch == '$';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dynfunc_is_ident_start, (char ch),
+    (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+    ch == '_' || ch == '$')
 
-static bool js_dynfunc_is_ident_part(char ch) {
-    return js_dynfunc_is_ident_start(ch) || (ch >= '0' && ch <= '9');
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dynfunc_is_ident_part, (char ch),
+    js_dynfunc_is_ident_start(ch) || (ch >= '0' && ch <= '9'))
 
 static bool js_dynfunc_preamble_matches_token(const char* token, size_t token_len,
         char* first_name, int first_name_cap) {
@@ -1191,15 +1188,12 @@ extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* runtime_state) 
     runtime_state->dynamic_function_cache_state = NULL;
 }
 
-extern "C" Item js_new_function_from_string(Item* args, int argc) {
-    return js_new_function_from_string_kind(args, argc, "function",
-        "function anonymous", false);
-}
-
-extern "C" Item js_new_async_function_from_string(Item* args, int argc) {
-    return js_new_function_from_string_kind(args, argc, "async function",
-        "async function anonymous", false);
-}
+JS_FORWARD_ITEM(js_new_function_from_string, (Item* args, int argc),
+    js_new_function_from_string_kind,
+    (args, argc, "function", "function anonymous", false))
+JS_FORWARD_ITEM(js_new_async_function_from_string, (Item* args, int argc),
+    js_new_function_from_string_kind,
+    (args, argc, "async function", "async function anonymous", false))
 
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async) {
     if (is_async) {
@@ -1307,10 +1301,9 @@ char* eval_try_insert_return(const char* code, size_t len) {
 }
 
 // ============================================================================
-static bool js_eval_is_ident_char(char ch) {
-    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-        (ch >= '0' && ch <= '9') || ch == '_' || ch == '$';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_eval_is_ident_char, (char ch),
+    (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+    (ch >= '0' && ch <= '9') || ch == '_' || ch == '$')
 
 static bool js_eval_at_word(const char* source, size_t len, size_t pos, const char* word, size_t word_len) {
     if (pos + word_len > len) return false;
@@ -1410,9 +1403,9 @@ static bool js_source_contains_import_meta(const char* source, size_t len) {
     return false;
 }
 
-static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len) {
-    return source && len >= 2 && source[0] == '#' && source[1] == '!';
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dynamic_function_source_has_hashbang,
+    (const char* source, size_t len),
+    source && len >= 2 && source[0] == '#' && source[1] == '!')
 
 static bool js_dynamic_function_param_has_line_terminator_before(const char* source, size_t pos) {
     for (size_t i = 0; i < pos; i++) {
@@ -2243,10 +2236,9 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
     return result;
 }
 
-extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
-    return js_builtin_eval_with_options(code_item, eval_flags,
-        (Item){.item = ITEM_JS_UNDEFINED}, 0, 0);
-}
+JS_FORWARD_ITEM(js_builtin_eval, (Item code_item, int64_t eval_flags),
+    js_builtin_eval_with_options, (code_item, eval_flags,
+        (Item){.item = ITEM_JS_UNDEFINED}, 0, 0))
 
 // ============================================================================
 // Public entry point: transpile a pre-built JS AST to MIR (used by TS transpiler)

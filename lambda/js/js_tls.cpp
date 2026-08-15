@@ -1787,12 +1787,11 @@ extern "C" Item js_tls_socket_getProtocol(void) {
     return proto ? make_string_item(proto) : make_string_item("TLSv1.2");
 }
 
-extern "C" Item js_tls_socket_getSession(void) {
-    // Node exposes a Buffer session token before/after the session event; the
-    // current TLS layer does not resume mbedTLS sessions, but fixtures compare
-    // identity-like bytes to decide whether to open the second connection.
-    return js_buffer_from_bytes("lambda-tls-session", 18);
-}
+// Node exposes a Buffer session token before/after the session event; the
+// current TLS layer does not resume mbedTLS sessions, but fixtures compare
+// identity-like bytes to decide whether to open the second connection.
+JS_FORWARD_ITEM(js_tls_socket_getSession, (void), js_buffer_from_bytes,
+    ("lambda-tls-session", 18))
 
 extern "C" Item js_tls_socket_getTLSTicket(void) {
     Item self = js_get_this();

@@ -395,9 +395,8 @@ static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capa
     js_array_runtime_items_register(arr, items);
 }
 
-static inline int64_t js_array_dense_capacity(const Array* arr) {
-    return container_dense_capacity(arr);
-}
+JS_FORWARD_STATIC_RETURN(int64_t, js_array_dense_capacity, (const Array* arr),
+    container_dense_capacity, (arr))
 
 // J1: the growth-sizing value for js_array_store_owned (its only caller).
 //
@@ -1070,9 +1069,8 @@ static TypeMap* js_object_type_for_class_impl(int class_id) {
     return tm;
 }
 
-extern "C" TypeMap* js_object_type_for_class(int class_id) {
-    return js_object_type_for_class_impl(class_id);
-}
+JS_FORWARD_RETURN(TypeMap*, js_object_type_for_class, (int class_id),
+    js_object_type_for_class_impl, (class_id))
 
 extern "C" Item js_new_object_with_class(int class_id) {
     TypeMap* tm = js_object_type_for_class_impl(class_id);
@@ -2670,17 +2668,15 @@ static Item js_init_class_instance_fields_with_private_init(Item callee,
     return result;
 }
 
-extern "C" Item js_init_class_instance_fields(Item callee, Item object) {
-    return js_init_class_instance_fields_with_private_init(callee, object, true);
-}
+JS_FORWARD_ITEM(js_init_class_instance_fields, (Item callee, Item object),
+    js_init_class_instance_fields_with_private_init, (callee, object, true))
 
-extern "C" Item js_init_class_instance_fields_after_super(Item callee,
-        Item object) {
-    // The derived constructor owns this exact post-super point. It must bypass
-    // only its own deferred marker; parent construction remains responsible for
-    // parent fields, preserving the D6.2.2v2 construct capability boundary.
-    return js_init_class_instance_fields_with_private_init(callee, object, false);
-}
+// The derived constructor owns this exact post-super point. It must bypass
+// only its own deferred marker; parent construction remains responsible for
+// parent fields, preserving the D6.2.2v2 construct capability boundary.
+JS_FORWARD_ITEM(js_init_class_instance_fields_after_super,
+    (Item callee, Item object), js_init_class_instance_fields_with_private_init,
+    (callee, object, false))
 
 extern "C" Item js_private_brand_add(Item object, Item private_key, Item callee) {
     if (!js_can_host_private_slots(object)) return js_status_ok();
@@ -14665,23 +14661,20 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
 }
 
-static Item js_call_constructor_body(Item function, Item this_value,
-        Item* args, int argc, Item new_target, uint64_t* result_home,
-        bool args_prerooted) {
-    // [[Construct]] enters the same executable body as [[Call]], but the
-    // explicit newTarget operand is rooted and scoped by that body invocation.
-    // This helper is private to construct entries.
-    return js_call_function_impl_mode(function, this_value, args, argc,
-        result_home, args_prerooted, new_target);
-}
+// [[Construct]] enters the same executable body as [[Call]], but the explicit
+// newTarget operand is rooted and scoped by that body invocation. This helper
+// is private to construct entries.
+JS_FORWARD_STATIC_ITEM(js_call_constructor_body,
+    (Item function, Item this_value, Item* args, int argc, Item new_target,
+        uint64_t* result_home, bool args_prerooted), js_call_function_impl_mode,
+    (function, this_value, args, argc, result_home, args_prerooted, new_target))
 
 // The generic dispatcher expressed as a call entry: the semantic authority for
 // every shape, and the entry every function starts with.
-Item js_call_entry_generic(Item func_item, Item this_val, Item* args,
-        int arg_count, uint64_t* result_home, bool args_prerooted) {
-    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
-        result_home, args_prerooted, (Item){0});
-}
+JS_FORWARD_LOCAL_RETURN(Item, js_call_entry_generic,
+    (Item func_item, Item this_val, Item* args, int arg_count,
+        uint64_t* result_home, bool args_prerooted), js_call_function_impl_mode,
+    (func_item, this_val, args, arg_count, result_home, args_prerooted, (Item){0}))
 
 // The generic entry is the sole ordinary-call semantic authority. Tune7's
 // specialized templates duplicated its rooting, state switching, and restore
@@ -18341,17 +18334,17 @@ static const char* js_regex_copy_stable_span(const char* text, int length) {
     return copy;
 }
 
-extern "C" Item js_create_regex(const char* pattern, int pattern_len,
-        const char* flags, int flags_len) {
-    return js_create_regex_impl(js_regex_copy_stable_span(pattern, pattern_len),
-        pattern_len, js_regex_copy_stable_span(flags, flags_len), flags_len, false);
-}
+JS_FORWARD_ITEM(js_create_regex,
+    (const char* pattern, int pattern_len, const char* flags, int flags_len),
+    js_create_regex_impl,
+    (js_regex_copy_stable_span(pattern, pattern_len), pattern_len,
+        js_regex_copy_stable_span(flags, flags_len), flags_len, false))
 
-extern "C" Item js_create_regex_literal(const char* pattern, int pattern_len,
-        const char* flags, int flags_len) {
-    return js_create_regex_impl(js_regex_copy_stable_span(pattern, pattern_len),
-        pattern_len, js_regex_copy_stable_span(flags, flags_len), flags_len, true);
-}
+JS_FORWARD_ITEM(js_create_regex_literal,
+    (const char* pattern, int pattern_len, const char* flags, int flags_len),
+    js_create_regex_impl,
+    (js_regex_copy_stable_span(pattern, pattern_len), pattern_len,
+        js_regex_copy_stable_span(flags, flags_len), flags_len, true))
 
 extern "C" Item js_create_regex_literal_items(Item pattern_item, Item flags_item) {
     RootFrame regex_roots(2);
@@ -19901,9 +19894,8 @@ static bool js_can_be_held_weakly(Item key) {
     return false;
 }
 
-extern "C" bool js_can_be_held_weakly_pub(Item key) {
-    return js_can_be_held_weakly(key);
-}
+JS_FORWARD_RETURN(bool, js_can_be_held_weakly_pub, (Item key),
+    js_can_be_held_weakly, (key))
 
 static JsCollectionData* js_get_collection_data(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map ||
@@ -20149,13 +20141,10 @@ static Item js_collection_new_from(Item iterable, bool is_map) {
     return collection_root.get();
 }
 
-extern "C" Item js_set_collection_new_from(Item iterable) {
-    return js_collection_new_from(iterable, false);
-}
-
-extern "C" Item js_map_collection_new_from(Item iterable) {
-    return js_collection_new_from(iterable, true);
-}
+JS_FORWARD_ITEM(js_set_collection_new_from, (Item iterable), js_collection_new_from,
+    (iterable, false))
+JS_FORWARD_ITEM(js_map_collection_new_from, (Item iterable), js_collection_new_from,
+    (iterable, true))
 
 // Map/Set method dispatch
 // method_id: 0=set/add, 1=get, 2=has, 3=delete, 4=clear,
@@ -21009,13 +20998,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 if (start + count > len) count = len - start;
                 if (count <= 0) return obj;
                 if (js_typed_array_raw_copy_within(obj, target, start, count)) return obj;
-                int elem_size = 1;
-                switch (ta->element_type) {
-                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
-                case JS_TYPED_INT16: case JS_TYPED_UINT16: case JS_TYPED_FLOAT16: elem_size = 2; break;
-                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
-                case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: elem_size = 8; break;
-                }
+                int elem_size = js_typed_array_element_size(ta->element_type);
                 void* data = js_typed_array_prepare_write_ptr(obj);
                 if (!data) {
                     if (!array_semantics) {
@@ -21803,16 +21786,15 @@ static Item js_string_replace_nonws_global_fast_impl(Item str, Item replacement,
     return js_replace_nonws_runs(str, s, repl);
 }
 
-extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) {
-    return js_string_replace_nonws_global_fast_impl(str, replacement, false);
-}
+JS_FORWARD_ITEM(js_string_replace_nonws_global_fast, (Item str, Item replacement),
+    js_string_replace_nonws_global_fast_impl, (str, replacement, false))
 
-extern "C" Item js_string_replace_nonws_global_fast_no_dollar(Item str, Item replacement) {
-    // MIR only calls this for literal replacements that were scanned at
-    // compile time and contain no '$' patterns.  Keeping that fact in the
-    // callee avoids rechecking the same literal inside tight test262 scans.
-    return js_string_replace_nonws_global_fast_impl(str, replacement, true);
-}
+// MIR only calls this for literal replacements that were scanned at compile
+// time and contain no '$' patterns. Keeping that fact in the callee avoids
+// rechecking the same literal inside tight test262 scans.
+JS_FORWARD_ITEM(js_string_replace_nonws_global_fast_no_dollar,
+    (Item str, Item replacement), js_string_replace_nonws_global_fast_impl,
+    (str, replacement, true))
 
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
     String* s = it2s(str);
@@ -23454,13 +23436,10 @@ static Item js_throw_not_callable(const char* method_name) {
 }
 
 // v20: Helper: throw RangeError
-extern "C" Item js_throw_range_error(const char* message) {
-    return js_throw_named_error_text("RangeError", message);
-}
-
-extern "C" Item js_throw_type_error(const char* message) {
-    return js_throw_named_error_text("TypeError", message);
-}
+JS_FORWARD_ITEM(js_throw_range_error, (const char* message), js_throw_named_error_text,
+    ("RangeError", message))
+JS_FORWARD_ITEM(js_throw_type_error, (const char* message), js_throw_named_error_text,
+    ("TypeError", message))
 
 static Item js_throw_named_error_code(const char* type_name, const char* code,
                                       const char* message) {
@@ -23474,21 +23453,14 @@ static Item js_throw_named_error_code(const char* type_name, const char* code,
 }
 
 // Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE)
-extern "C" Item js_throw_type_error_code(const char* code, const char* message) {
-    return js_throw_named_error_code("TypeError", code, message);
-}
-
-extern "C" Item js_throw_uri_error_code(const char* code, const char* message) {
-    return js_throw_named_error_code("URIError", code, message);
-}
-
-extern "C" Item js_throw_range_error_code(const char* code, const char* message) {
-    return js_throw_named_error_code("RangeError", code, message);
-}
-
-extern "C" Item js_throw_error_with_code(const char* code, const char* message) {
-    return js_throw_named_error_code("Error", code, message);
-}
+JS_FORWARD_ITEM(js_throw_type_error_code, (const char* code, const char* message),
+    js_throw_named_error_code, ("TypeError", code, message))
+JS_FORWARD_ITEM(js_throw_uri_error_code, (const char* code, const char* message),
+    js_throw_named_error_code, ("URIError", code, message))
+JS_FORWARD_ITEM(js_throw_range_error_code, (const char* code, const char* message),
+    js_throw_named_error_code, ("RangeError", code, message))
+JS_FORWARD_ITEM(js_throw_error_with_code, (const char* code, const char* message),
+    js_throw_named_error_code, ("Error", code, message))
 
 static void js_format_invalid_arg_string(char* out, int out_size, String* str) {
     if (out_size <= 0) return;
@@ -23681,13 +23653,8 @@ extern "C" Item js_throw_named_error(int64_t kind, Item message) {
     return js_throw_value(error);
 }
 
-extern "C" Item js_throw_syntax_error(Item message) {
-    return js_throw_named_error(0, message);
-}
-
-extern "C" Item js_throw_reference_error(Item message) {
-    return js_throw_named_error(1, message);
-}
+JS_FORWARD_ITEM(js_throw_syntax_error, (Item message), js_throw_named_error, (0, message))
+JS_FORWARD_ITEM(js_throw_reference_error, (Item message), js_throw_named_error, (1, message))
 
 // helper: read array element, checking for accessor properties (getters via defineProperty)
 static inline Item js_array_element(Item arr_item, int64_t idx) {
@@ -24244,12 +24211,10 @@ static bool js_array_find_own_element(Item arr, lam::GcPtr<Array> a,
     return true;
 }
 
-static bool js_array_find_next_own_element_cached(Item arr, lam::GcPtr<Array> a,
-        int64_t start, int64_t len, int64_t* out_index, Item* out_elem,
-        JsArraySparseKeyCursor* cursor) {
-    return js_array_find_own_element(arr, a, start, len, false,
-        out_index, out_elem, cursor);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_array_find_next_own_element_cached,
+    (Item arr, lam::GcPtr<Array> a, int64_t start, int64_t len,
+        int64_t* out_index, Item* out_elem, JsArraySparseKeyCursor* cursor),
+    js_array_find_own_element, (arr, a, start, len, false, out_index, out_elem, cursor))
 
 static bool js_array_has_numeric_own_accessors(lam::GcPtr<Array> a) {
     if (!js_array_has_props(a.get())) return false;
@@ -24265,11 +24230,10 @@ static bool js_array_has_numeric_own_accessors(lam::GcPtr<Array> a) {
     return false;
 }
 
-static bool js_array_find_prev_own_element_cached(Item arr, lam::GcPtr<Array> a, int64_t start,
-        int64_t* out_index, Item* out_elem, JsArraySparseKeyCursor* cursor) {
-    return js_array_find_own_element(arr, a, start, a ? a->length : 0,
-        true, out_index, out_elem, cursor);
-}
+JS_FORWARD_STATIC_RETURN(bool, js_array_find_prev_own_element_cached,
+    (Item arr, lam::GcPtr<Array> a, int64_t start, int64_t* out_index,
+        Item* out_elem, JsArraySparseKeyCursor* cursor), js_array_find_own_element,
+    (arr, a, start, a ? a->length : 0, true, out_index, out_elem, cursor))
 
 // J39-7: returns true if length is non-writable (frozen array or
 // defineProperty(arr, "length", {writable:false}) set the length ShapeEntry flag).
@@ -24649,9 +24613,8 @@ static Item js_delete_property_or_throw_status(Item object, Item key) {
     return ItemNull;
 }
 
-static bool js_delete_property_or_throw(Item object, Item key) {
-    return !item_is_error(js_delete_property_or_throw_status(object, key));
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_delete_property_or_throw,
+    (Item object, Item key), !item_is_error(js_delete_property_or_throw_status(object, key)))
 
 static Item js_array_move_or_delete(Item object, Item from_key, Item to_key,
         bool strict_set) {
@@ -25585,11 +25548,10 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
     return accumulator_root.get();
 }
 
-static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right,
-        uint64_t* result_home) {
-    return js_array_generic_reduce_with_object(object, object, args, argc, from_right,
-        result_home);
-}
+JS_FORWARD_STATIC_ITEM(js_array_generic_reduce,
+    (Item object, Item* args, int argc, bool from_right, uint64_t* result_home),
+    js_array_generic_reduce_with_object,
+    (object, object, args, argc, from_right, result_home))
 
 static Item js_array_generic_find_last(Item object, Item* args, int argc, bool return_index) {
     int64_t len = 0;
@@ -26480,12 +26442,10 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
     return ItemError;
 }
 
-static Item js_array_intrinsic_algorithm(Item arr, Item operation_receiver,
-        JsIndexedIntrinsicOp operation, Item* args, int argc) {
-    return js_array_intrinsic_algorithm_impl(
-        arr, operation_receiver, operation, args,
-        argc, NULL);
-}
+JS_FORWARD_STATIC_ITEM(js_array_intrinsic_algorithm,
+    (Item arr, Item operation_receiver, JsIndexedIntrinsicOp operation,
+        Item* args, int argc), js_array_intrinsic_algorithm_impl,
+    (arr, operation_receiver, operation, args, argc, NULL))
 
 static Item js_array_intrinsic_algorithm_into(Item arr,
         Item operation_receiver, JsIndexedIntrinsicOp operation, Item* args,
@@ -26509,17 +26469,15 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 // backing store for user-defined Math properties (e.g. Math.sumPrecise polyfill)
 #define js_math_object (js_runtime_state.namespaces.math)
 
-static bool js_runtime_namespaces_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.namespaces.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_runtime_namespaces_ensure_roots, (void),
+    js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.namespaces.roots))
 
-static bool js_namespace_cache_is_empty(Item value) {
-    // Root-range cleanup clears the context-owned slots to zero. Treat that
-    // representation like ItemNull so a later realm rebuilds its namespace
-    // instead of dereferencing a null map as a cached object.
-    return value.item == 0 || value.item == ITEM_NULL;
-}
+// Root-range cleanup clears the context-owned slots to zero. Treat that
+// representation like ItemNull so a later realm rebuilds its namespace
+// instead of dereferencing a null map as a cached object.
+JS_FORWARD_STATIC_EXPRESSION(bool, js_namespace_cache_is_empty, (Item value),
+    value.item == 0 || value.item == ITEM_NULL)
 
 void js_reset_math_object() {
     js_math_object = (Item){.item = ITEM_NULL};
@@ -26573,9 +26531,7 @@ static Item js_get_math_object() {
 }
 
 // v18n: externally callable for transpiler to resolve bare `Math` identifier
-extern "C" Item js_get_math_object_value() {
-    return js_get_math_object();
-}
+JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
 
 // v18n: JSON and console as global objects for bare identifier resolution
 #define js_json_object (js_runtime_state.namespaces.json)
@@ -27920,11 +27876,8 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
     return ItemNull;
 }
 
-extern "C" Item js_prototype_lookup_ex(Item object, Item property,
-                                        bool* out_found) {
-    return js_prototype_lookup_ex_with_receiver(object, property, object,
-                                                 out_found);
-}
+JS_FORWARD_ITEM(js_prototype_lookup_ex, (Item object, Item property, bool* out_found),
+    js_prototype_lookup_ex_with_receiver, (object, property, object, out_found))
 
 extern "C" Item js_prototype_lookup(Item object, Item property) {
     bool _f;
@@ -28036,9 +27989,8 @@ static Item js_make_iter_result(Item value, bool done) {
     return result_root.get();
 }
 
-static Item js_async_generator_wrap_yield_value(Item value) {
-    return js_make_iter_result(value, false);
-}
+JS_FORWARD_STATIC_ITEM(js_async_generator_wrap_yield_value, (Item value),
+    js_make_iter_result, (value, false))
 
 static Item js_async_generator_yield_result(Item value) {
     Item promise = js_promise_resolve(value);
@@ -28290,10 +28242,8 @@ extern "C" Item js_generator_create_mir(void* func_ptr, Item* env,
     return js_generator_create_current(func_ptr, env, env_size, is_async);
 }
 
-extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size,
-        int is_async) {
-    return js_generator_create_current(func_ptr, env, env_size, is_async);
-}
+JS_FORWARD_ITEM(js_generator_create, (void* func_ptr, Item* env, int env_size, int is_async),
+    js_generator_create_current, (func_ptr, env, env_size, is_async))
 
 static JsGenerator* js_get_generator(Item gen_obj) {
     if (!js_object_has_class(gen_obj, JS_CLASS_GENERATOR)) return NULL;
@@ -28840,9 +28790,8 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
 }
 
 // v15: Check if an object carries the generator native state.
-extern "C" bool js_is_generator(Item obj) {
-    return js_object_has_class(obj, JS_CLASS_GENERATOR);
-}
+JS_FORWARD_RETURN(bool, js_is_generator, (Item obj), js_object_has_class,
+    (obj, JS_CLASS_GENERATOR))
 
 extern "C" bool js_is_async_generator(Item obj) {
     JsGenerator* gen = js_get_generator(obj);
@@ -29228,9 +29177,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     }
 }
 
-extern "C" Item js_get_iterator(Item iterable) {
-    return js_get_iterator_impl(iterable, true);
-}
+JS_FORWARD_ITEM(js_get_iterator, (Item iterable), js_get_iterator_impl, (iterable, true))
 
 extern "C" Item js_get_async_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
@@ -29245,9 +29192,7 @@ extern "C" Item js_get_async_iterator(Item iterable) {
     return js_get_iterator(iterable);
 }
 
-extern "C" Item js_get_iterator_lazy(Item iterable) {
-    return js_get_iterator_impl(iterable, false);
-}
+JS_FORWARD_ITEM(js_get_iterator_lazy, (Item iterable), js_get_iterator_impl, (iterable, false))
 
 // IteratorStep: call iterator.next(), return result {done, value}
 // Returns JS_ITER_DONE_SENTINEL on completion (done=true) or the value on success.
@@ -29648,9 +29593,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 #define js_domain_stack (js_domain_stack_state.roots.slots)
 #define js_domain_stack_count (js_domain_stack_state.depth)
 
-static JsPromise* js_promise_from_vmap_data(void* data) {
-    return (JsPromise*)data;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsPromise*, js_promise_from_vmap_data,
+    (void* data), (JsPromise*)data)
 
 static JsPromise* js_get_promise(Item promise_obj);
 
@@ -29722,23 +29666,40 @@ static void js_promise_vmap_trace(void* data, gc_heap_t* gc) {
 // Promise carriers keep ordinary user properties in a traced side Map while
 // their state/reactions remain native slots. These callbacks make the carrier
 // obey the same property-operation seam as other native-payload classes.
+typedef struct JsPromisePropertyContext {
+    JsPromise* promise;
+    Item key;
+    Item expando;
+    Item receiver;
+} JsPromisePropertyContext;
+
+static bool js_promise_property_prepare(Item target, Item key, Item receiver,
+        bool create, JsPromisePropertyContext* out) {
+    if (!out) return false;
+    out->promise = js_get_promise(target);
+    if (!out->promise) return false;
+    out->key = js_to_property_key(key);
+    out->expando = js_promise_expando(out->promise, create);
+    out->receiver = receiver.item == ItemNull.item ? target : receiver;
+    return true;
+}
+
 static JsPropertyOpResult js_promise_property_get(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
     (void)lane; (void)value; (void)descriptor;
-    JsPromise* promise = js_get_promise(target);
-    if (!promise) return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
-    key = js_to_property_key(key);
-    Item expando = js_promise_expando(promise, false);
-    if (get_type_id(expando) == LMD_TYPE_MAP) {
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
+        return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
+    }
+    if (get_type_id(ctx.expando) == LMD_TYPE_MAP) {
         Item own = ItemNull;
-        JsOwnGetStatus status = js_ordinary_get_own(expando, key,
-            receiver.item == ItemNull.item ? target : receiver, &own);
+        JsOwnGetStatus status = js_ordinary_get_own(ctx.expando, ctx.key,
+            ctx.receiver, &own);
         if (status == JS_OWN_READY) return {JS_PROPERTY_OP_COMPLETE, own};
     }
     Item proto = js_get_prototype(target);
     if (proto.item != ItemNull.item && proto.item != ITEM_JS_UNDEFINED) {
-        Item inherited = js_get_key_core(proto, key,
-            receiver.item == ItemNull.item ? target : receiver);
+        Item inherited = js_get_key_core(proto, ctx.key, ctx.receiver);
         return {JS_PROPERTY_OP_COMPLETE, inherited};
     }
     return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
@@ -29746,31 +29707,32 @@ static JsPropertyOpResult js_promise_property_get(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)receiver; (void)descriptor;
-    JsPromise* promise = js_get_promise(target);
-    if (!promise) return {JS_PROPERTY_OP_COMPLETE, value};
-    key = js_to_property_key(key);
-    Item expando = js_promise_expando(promise, true);
-    if (get_type_id(expando) != LMD_TYPE_MAP) {
+    (void)lane; (void)descriptor;
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
+        return {JS_PROPERTY_OP_COMPLETE, value};
+    }
+    if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
         return {JS_PROPERTY_OP_COMPLETE, js_throw_type_error(
             "Cannot create Promise property storage")};
     }
-    Item stored = js_set_storage_mode(expando, key, value, expando, true, false);
+    Item stored = js_set_storage_mode(ctx.expando, ctx.key, value,
+        ctx.expando, true, false);
     return {JS_PROPERTY_OP_COMPLETE, stored};
 }
 
 static JsPropertyOpResult js_promise_property_define(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
     (void)lane; (void)value; (void)receiver;
-    JsPromise* promise = js_get_promise(target);
-    if (!promise) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
-    key = js_to_property_key(key);
-    Item expando = js_promise_expando(promise, true);
-    if (get_type_id(expando) != LMD_TYPE_MAP) {
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
+        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
+    }
+    if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
         return {JS_PROPERTY_OP_COMPLETE, js_throw_type_error(
             "Cannot create Promise property storage")};
     }
-    Item result = js_object_define_property(expando, key, descriptor);
+    Item result = js_object_define_property(ctx.expando, ctx.key, descriptor);
     if (item_is_error(result)) return {JS_PROPERTY_OP_COMPLETE, result};
     return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
 }
@@ -29778,33 +29740,34 @@ static JsPropertyOpResult js_promise_property_define(Item target, uint64_t lane,
 static JsPropertyOpResult js_promise_property_delete(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
     (void)lane; (void)value; (void)receiver; (void)descriptor;
-    JsPromise* promise = js_get_promise(target);
-    if (!promise) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
-    key = js_to_property_key(key);
-    Item expando = js_promise_expando(promise, false);
-    if (get_type_id(expando) != LMD_TYPE_MAP) {
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
     }
-    return {JS_PROPERTY_OP_COMPLETE, js_delete_property(expando, key)};
+    if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
+        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+    }
+    return {JS_PROPERTY_OP_COMPLETE, js_delete_property(ctx.expando, ctx.key)};
 }
 
 static JsPropertyOpResult js_promise_property_has(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
     (void)lane; (void)value; (void)receiver; (void)descriptor;
-    JsPromise* promise = js_get_promise(target);
-    if (!promise) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
-    key = js_to_property_key(key);
-    Item expando = js_promise_expando(promise, false);
-    if (get_type_id(expando) == LMD_TYPE_MAP && it2b(js_has_own_property(expando, key))) {
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
+        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
+    }
+    if (get_type_id(ctx.expando) == LMD_TYPE_MAP &&
+            it2b(js_has_own_property(ctx.expando, ctx.key))) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
     }
     Item proto = js_get_prototype(target);
     if (proto.item != ItemNull.item && proto.item != ITEM_JS_UNDEFINED) {
-        if (it2b(js_has_own_property(proto, key))) {
+        if (it2b(js_has_own_property(proto, ctx.key))) {
             return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
         }
         bool found = false;
-        (void)js_prototype_lookup_ex(proto, key, &found);
+        (void)js_prototype_lookup_ex(proto, ctx.key, &found);
         if (found) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
     }
     return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
@@ -29813,23 +29776,26 @@ static JsPropertyOpResult js_promise_property_has(Item target, uint64_t lane,
 static JsPropertyOpResult js_promise_property_descriptor(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
     (void)lane; (void)value; (void)receiver; (void)descriptor;
-    JsPromise* promise = js_get_promise(target);
-    if (!promise) return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
-    key = js_to_property_key(key);
-    Item expando = js_promise_expando(promise, false);
-    if (get_type_id(expando) != LMD_TYPE_MAP) {
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
     }
-    return {JS_PROPERTY_OP_COMPLETE, js_object_get_own_property_descriptor(expando, key)};
+    if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
+        return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
+    }
+    return {JS_PROPERTY_OP_COMPLETE,
+        js_object_get_own_property_descriptor(ctx.expando, ctx.key)};
 }
 
 static JsPropertyOpResult js_promise_property_own_keys(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)key; (void)value; (void)receiver; (void)descriptor;
-    JsPromise* promise = js_get_promise(target);
-    Item expando = js_promise_expando(promise, false);
-    return {JS_PROPERTY_OP_COMPLETE, get_type_id(expando) == LMD_TYPE_MAP
-        ? js_object_get_own_property_names(expando) : js_array_new(0)};
+    (void)lane; (void)value; (void)descriptor;
+    JsPromisePropertyContext ctx;
+    if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
+        return {JS_PROPERTY_OP_COMPLETE, js_array_new(0)};
+    }
+    return {JS_PROPERTY_OP_COMPLETE, get_type_id(ctx.expando) == LMD_TYPE_MAP
+        ? js_object_get_own_property_names(ctx.expando) : js_array_new(0)};
 }
 
 extern const JsPropertyOps js_promise_property_ops = {
@@ -30751,9 +30717,8 @@ static Item js_promise_make_settled(Item value, JsPromiseState state) {
     return promise_root.get();
 }
 
-extern "C" Item js_promise_resolve(Item value) {
-    return js_promise_make_settled(value, JS_PROMISE_FULFILLED);
-}
+JS_FORWARD_ITEM(js_promise_resolve, (Item value), js_promise_make_settled,
+    (value, JS_PROMISE_FULFILLED))
 
 extern "C" Item js_promise_create_pending(void) {
     JsPromise* p = js_alloc_promise();
@@ -30777,9 +30742,8 @@ extern "C" void js_promise_reject_existing(Item promise, Item reason) {
     js_promise_settle(p, JS_PROMISE_REJECTED, reason);
 }
 
-extern "C" Item js_promise_reject(Item reason) {
-    return js_promise_make_settled(reason, JS_PROMISE_REJECTED);
-}
+JS_FORWARD_ITEM(js_promise_reject, (Item reason), js_promise_make_settled,
+    (reason, JS_PROMISE_REJECTED))
 
 static bool js_promise_is_builtin_promise_constructor(Item constructor) {
     Item intrinsic = js_get_constructor(
@@ -30907,15 +30871,12 @@ static Item js_promise_finally_common(JsNativeP2 thunk, Item on_finally,
     return js_promise_invoke_then(result_root.get(), thunk_root.get(), make_js_undefined());
 }
 
-static Item js_promise_then_finally(Item on_finally, Item constructor, Item value) {
-    return js_promise_finally_common(js_promise_finally_value_thunk,
-        on_finally, constructor, value);
-}
-
-static Item js_promise_catch_finally(Item on_finally, Item constructor, Item reason) {
-    return js_promise_finally_common(js_promise_finally_throw_thunk,
-        on_finally, constructor, reason);
-}
+JS_FORWARD_STATIC_ITEM(js_promise_then_finally,
+    (Item on_finally, Item constructor, Item value), js_promise_finally_common,
+    (js_promise_finally_value_thunk, on_finally, constructor, value))
+JS_FORWARD_STATIC_ITEM(js_promise_catch_finally,
+    (Item on_finally, Item constructor, Item reason), js_promise_finally_common,
+    (js_promise_finally_throw_thunk, on_finally, constructor, reason))
 
 static Item js_promise_make_finally_wrapper(JsNativeP3 target,
         Item on_finally, Item constructor) {
@@ -30937,9 +30898,8 @@ static bool js_promise_capability_slot_is_undefined(Item value) {
            value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED;
 }
 
-static Item js_promise_capability_normalize_arg(Item value) {
-    return js_promise_capability_slot_is_undefined(value) ? make_js_undefined() : value;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_promise_capability_normalize_arg, (Item value),
+    js_promise_capability_slot_is_undefined(value) ? make_js_undefined() : value)
 
 // NewPromiseCapability executor. Bound arg: holder object.
 static Item js_promise_capability_executor(Item holder, Item resolve, Item reject) {
@@ -31380,9 +31340,8 @@ static Item js_promise_with_resolvers_for_constructor(Item constructor) {
     return result_root.get();
 }
 
-extern "C" Item js_promise_with_resolvers(void) {
-    return js_promise_with_resolvers_for_constructor(js_promise_default_constructor());
-}
+JS_FORWARD_ITEM(js_promise_with_resolvers, (void), js_promise_with_resolvers_for_constructor,
+    (js_promise_default_constructor()))
 
 // Phase 5: Synchronous await — unwraps resolved promises, throws on rejected
 extern "C" Item js_await_sync(Item value) {
@@ -31553,9 +31512,7 @@ extern "C" Item js_async_must_suspend(Item value) {
 }
 
 // Get the cached resolved value after js_async_must_suspend returned 0
-extern "C" Item js_async_get_resolved(void) {
-    return js_async_resolved_value;
-}
+JS_FORWARD_EXPRESSION(Item, js_async_get_resolved, (void), js_async_resolved_value)
 
 // Forward declarations for async callbacks
 static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value);
@@ -31714,10 +31671,8 @@ extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
     return js_async_context_create_current(fn_ptr, env, env_size, this_val);
 }
 
-extern "C" Item js_async_context_create(void* fn_ptr, Item* env,
-        int64_t env_size, Item this_val) {
-    return js_async_context_create_current(fn_ptr, env, env_size, this_val);
-}
+JS_FORWARD_ITEM(js_async_context_create, (void* fn_ptr, Item* env, int64_t env_size, Item this_val),
+    js_async_context_create_current, (fn_ptr, env, env_size, this_val))
 
 // Start execution of an async state machine (initial call at state 0)
 extern "C" Item js_async_start(Item ctx_idx_item) {
@@ -31909,13 +31864,11 @@ static Item js_promise_element_call_capability(Item counter_obj, const char* key
     return js_call_function(capability, make_js_undefined(), args, 1);
 }
 
-static Item js_promise_call_stored_capability(Item counter_obj,
-                                              JsPromiseCapabilityAction action,
-                                              Item value) {
-    return js_promise_element_call_capability(counter_obj,
-        action == JS_PROMISE_CAPABILITY_REJECT ? "__cap_reject" : "__cap_resolve",
-        action == JS_PROMISE_CAPABILITY_REJECT ? 12 : 13, value);
-}
+JS_FORWARD_STATIC_ITEM(js_promise_call_stored_capability,
+    (Item counter_obj, JsPromiseCapabilityAction action, Item value),
+    js_promise_element_call_capability,
+    (counter_obj, action == JS_PROMISE_CAPABILITY_REJECT ? "__cap_reject" : "__cap_resolve",
+        action == JS_PROMISE_CAPABILITY_REJECT ? 12 : 13, value))
 
 static Item js_promise_settle_combinator_result(Item counter_obj, Item result_item,
                                                 JsPromiseCapabilityAction action,
@@ -32392,9 +32345,7 @@ static Item js_promise_run_race(Item iterable) {
     return result_root.get();
 }
 
-extern "C" Item js_promise_race(Item iterable) {
-    return js_promise_run_race(iterable);
-}
+JS_FORWARD_ITEM(js_promise_race, (Item iterable), js_promise_run_race, (iterable))
 
 extern "C" Item js_promise_any(Item iterable) {
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
@@ -32507,9 +32458,8 @@ extern "C" Item js_get_import_meta() {
 // it's lowering is the outermost (the "entry" — keep all statements) or a
 // nested import (TLA modules drop post-await statements so siblings see the
 // pre-await state at evaluation time). 1 = compiling entry, >= 2 = nested.
-extern "C" int js_tla_module_depth_get(void) {
-    return js_active_runtime_state ? g_tla_module_depth : 0;
-}
+JS_FORWARD_EXPRESSION(int, js_tla_module_depth_get, (void),
+    js_active_runtime_state ? g_tla_module_depth : 0)
 
 extern "C" void js_tla_enter_module(void) {
     g_tla_module_depth++;
@@ -32653,26 +32603,26 @@ extern "C" Item js_get_live_binding_default(Item specifier) {
     return js_get_key_default(ns, key);
 }
 
+static JsModule* js_module_find(Item specifier);
+
 extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return;
 
     String* spec = it2s(specifier);
-    // Check for existing registration
-    for (JsModule* module = js_module_first; module; module = module->next) {
-        if (module->specifier->len == spec->len &&
-            memcmp(module->specifier->chars, spec->chars, spec->len) == 0) {
-            module->specifier_item = specifier;
-            module->namespace_obj = namespace_obj;
-            js_module_ensure_roots();
-            if (module->roots_epoch != js_get_heap_epoch()) {
-                heap_register_gc_root(&module->specifier_item.item);
-                heap_register_gc_root(&module->namespace_obj.item);
-                heap_register_gc_root(&module->awaited_target.item);
-                heap_register_gc_root(&module->evaluation_error.item);
-                module->roots_epoch = js_get_heap_epoch();
-            }
-            return;
+    // registration and lookup share one scan so specifier identity cannot drift
+    JsModule* module = js_module_find(specifier);
+    if (module) {
+        module->specifier_item = specifier;
+        module->namespace_obj = namespace_obj;
+        js_module_ensure_roots();
+        if (module->roots_epoch != js_get_heap_epoch()) {
+            heap_register_gc_root(&module->specifier_item.item);
+            heap_register_gc_root(&module->namespace_obj.item);
+            heap_register_gc_root(&module->awaited_target.item);
+            heap_register_gc_root(&module->evaluation_error.item);
+            module->roots_epoch = js_get_heap_epoch();
         }
+        return;
     }
 
     JsModule* m = (JsModule*)mem_calloc(1, sizeof(JsModule), MEM_CAT_JS_RUNTIME);
@@ -32985,9 +32935,8 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
 // P5's old 64-slot thunk bank made namespace capture a global mutable table.
 // A native closure owns the captured Item directly, so concurrent dynamic
 // imports no longer alias slots or require a fixed root range.
-static Item js_p5_dynamic_import_handler(Item namespace_obj) {
-    return namespace_obj;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_p5_dynamic_import_handler,
+    (Item namespace_obj), namespace_obj)
 
 extern "C" Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj) {
     Item* env = js_alloc_env(1);
@@ -33769,9 +33718,8 @@ static Item js_dc_throw_invalid_arg_type(const char* message) {
     return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", full_message);
 }
 
-static Item js_dc_context_or_new(Item context) {
-    return js_is_nullish(context) ? js_new_object() : context;
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_dc_context_or_new, (Item context),
+    js_is_nullish(context) ? js_new_object() : context)
 
 static Item js_dc_channel_marker_key(void) {
     return (Item){.item = s2it(heap_create_name("__lambda_dc_channel__", 21))};
@@ -34203,25 +34151,14 @@ static const char* js_dc_tracing_sub_names[] = {
 };
 static const char* js_dc_bounded_sub_names[] = {"start", "end"};
 
-static Item js_dc_tc_subscribe(Item handlers) {
-    return js_dc_update_subscriptions(js_get_this(), handlers,
-        js_dc_tracing_sub_names, 5, false);
-}
-
-static Item js_dc_tc_unsubscribe(Item handlers) {
-    return js_dc_update_subscriptions(js_get_this(), handlers,
-        js_dc_tracing_sub_names, 5, true);
-}
-
-static Item js_dc_bc_subscribe(Item handlers) {
-    return js_dc_update_subscriptions(js_get_this(), handlers,
-        js_dc_bounded_sub_names, 2, false);
-}
-
-static Item js_dc_bc_unsubscribe(Item handlers) {
-    return js_dc_update_subscriptions(js_get_this(), handlers,
-        js_dc_bounded_sub_names, 2, true);
-}
+JS_FORWARD_STATIC_ITEM(js_dc_tc_subscribe, (Item handlers), js_dc_update_subscriptions,
+    (js_get_this(), handlers, js_dc_tracing_sub_names, 5, false))
+JS_FORWARD_STATIC_ITEM(js_dc_tc_unsubscribe, (Item handlers), js_dc_update_subscriptions,
+    (js_get_this(), handlers, js_dc_tracing_sub_names, 5, true))
+JS_FORWARD_STATIC_ITEM(js_dc_bc_subscribe, (Item handlers), js_dc_update_subscriptions,
+    (js_get_this(), handlers, js_dc_bounded_sub_names, 2, false))
+JS_FORWARD_STATIC_ITEM(js_dc_bc_unsubscribe, (Item handlers), js_dc_update_subscriptions,
+    (js_get_this(), handlers, js_dc_bounded_sub_names, 2, true))
 
 // Helper: publish a message on a channel object
 static Item js_dc_channel_publish_on(Item channel, Item message) {
@@ -34780,11 +34717,18 @@ static Item js_domain_create(void) {
     js_set_key_cstr(d, "members", js_array_new(0));
     return d;
 }
-static bool js_runtime_string_equals(Item value, const char* expected) {
+extern "C" bool js_string_equals(Item value, const char* expected) {
     if (get_type_id(value) != LMD_TYPE_STRING || !expected) return false;
     String* s = it2s(value);
     size_t len = strlen(expected);
-    return s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
+    return s && s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
+}
+
+extern "C" bool js_is_vm_context_error(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_get_key_cstr(value, "__vm_context_error__");
+    return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
+           (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
 }
 
 #define js_cluster_primary_options (js_runtime_state.cluster.primary_options)
@@ -34821,7 +34765,7 @@ static bool js_cluster_is_worker_process(void) {
 
 static Item js_cluster_worker_on(Item event_item, Item callback) {
     Item self = js_get_this();
-    if (js_runtime_string_equals(event_item, "exit") && js_is_callable(callback)) {
+    if (js_string_equals(event_item, "exit") && js_is_callable(callback)) {
         Item args[2] = {
             (Item){.item = i2it(0)},
             ItemNull
@@ -35302,9 +35246,8 @@ static Item js_repl_input_data(Item repl, Item data_item) {
     return js_call_function(js_get_key_default(repl, js_repl_key("write")), repl, &data_item, 1);
 }
 
-static Item js_repl_input_end(Item repl) {
-    return js_call_function(js_get_key_default(repl, js_repl_key("close")), repl, NULL, 0);
-}
+JS_FORWARD_STATIC_ITEM(js_repl_input_end, (Item repl), js_call_function,
+    (js_get_key_default(repl, js_repl_key("close")), repl, NULL, 0))
 
 static Item js_repl_input_keypress(Item repl, Item ch, Item key) {
     Item args[2] = { (Item){.item = s2it(heap_create_name("", 0))}, key };
@@ -35319,9 +35262,7 @@ static Item js_repl_close_repl(Item repl) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-static Item js_repl_close(void) {
-    return js_repl_close_repl(js_get_this());
-}
+JS_FORWARD_STATIC_ITEM(js_repl_close, (void), js_repl_close_repl, (js_get_this()))
 
 static Item js_repl_once(Item event_item, Item cb) {
     Item repl = js_get_this();
@@ -35893,10 +35834,8 @@ static bool js_trace_value_to_category_string(Item value, char* out, int out_siz
     return true;
 }
 
-static Item js_trace_throw_invalid_arg(void) {
-    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-        "The \"options.categories\" property must be an array of strings.");
-}
+JS_FORWARD_STATIC_ITEM(js_trace_throw_invalid_arg, (void), js_throw_type_error_code,
+    ("ERR_INVALID_ARG_TYPE", "The \"options.categories\" property must be an array of strings."))
 
 static Item js_trace_enable(void) {
     Item self = js_get_this();
@@ -36225,19 +36164,16 @@ extern "C" void js_async_hooks_drain_destroy_queue(void) {
     js_async_hooks_after_gc();
 }
 
-extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len) {
-    return js_async_hooks_stamp_resource(js_new_object(), type_chars, type_len);
-}
+JS_FORWARD_ITEM(js_async_hooks_create_resource, (const char* type_chars, int type_len),
+    js_async_hooks_stamp_resource, (js_new_object(), type_chars, type_len))
 
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource) {
     js_async_resource_emit_destroy(resource);
 }
 
 // AsyncResource
-static Item js_async_hooks_throw_invalid_async_id(void) {
-    return js_throw_range_error_code("ERR_INVALID_ASYNC_ID",
-        "triggerAsyncId must be an integer greater than or equal to -1");
-}
+JS_FORWARD_STATIC_ITEM(js_async_hooks_throw_invalid_async_id, (void), js_throw_range_error_code,
+    ("ERR_INVALID_ASYNC_ID", "triggerAsyncId must be an integer greater than or equal to -1"))
 
 static bool js_async_hooks_parse_async_id(Item value, int64_t* out_id) {
     TypeId type = get_type_id(value);
@@ -37235,9 +37171,8 @@ static Item js_node_binding_key(const char* name, int len) {
     return (Item){.item = s2it(heap_create_name(name, len))};
 }
 
-static Item js_node_binding_key(const char* name) {
-    return js_node_binding_key(name, (int)strlen(name));
-}
+JS_FORWARD_STATIC_ITEM(js_node_binding_key, (const char* name), js_node_binding_key,
+    (name, (int)strlen(name)))
 
 static bool js_node_binding_is_missing(Item value) {
     TypeId type = get_type_id(value);
@@ -38000,14 +37935,8 @@ extern "C" Item js_module_get_builtin(Item specifier) {
 extern "C" Item js_module_get(Item specifier) {
     Item builtin = js_module_get_builtin(specifier);
     if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
-    if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
-    String* spec = it2s(specifier);
-    for (JsModule* module = js_module_first; module; module = module->next) {
-        if (module->specifier->len == spec->len &&
-            memcmp(module->specifier->chars, spec->chars, spec->len) == 0) {
-            return module->namespace_obj;
-        }
-    }
+    JsModule* module = js_module_find(specifier);
+    if (module) return module->namespace_obj;
     return ItemNull;
 }
 
@@ -38313,13 +38242,8 @@ static Item js_weak_collection_new(bool is_map) {
     return obj;
 }
 
-extern "C" Item js_weakmap_new(void) {
-    return js_weak_collection_new(true);
-}
-
-extern "C" Item js_weakset_new(void) {
-    return js_weak_collection_new(false);
-}
+JS_FORWARD_ITEM(js_weakmap_new, (void), js_weak_collection_new, (true))
+JS_FORWARD_ITEM(js_weakset_new, (void), js_weak_collection_new, (false))
 
 extern "C" Item js_weakref_new(Item target) {
     if (!js_can_be_held_weakly(target)) {
@@ -38480,13 +38404,10 @@ static Item js_weak_collection_new_with_iter(Item iterable, bool is_map) {
     return obj;
 }
 
-extern "C" Item js_weakmap_new_with_iter(Item iterable) {
-    return js_weak_collection_new_with_iter(iterable, true);
-}
-
-extern "C" Item js_weakset_new_with_iter(Item iterable) {
-    return js_weak_collection_new_with_iter(iterable, false);
-}
+JS_FORWARD_ITEM(js_weakmap_new_with_iter, (Item iterable), js_weak_collection_new_with_iter,
+    (iterable, true))
+JS_FORWARD_ITEM(js_weakset_new_with_iter, (Item iterable), js_weak_collection_new_with_iter,
+    (iterable, false))
 
 // Public collection type checks (for instanceof)
 extern "C" bool js_is_map_instance(Item obj) {

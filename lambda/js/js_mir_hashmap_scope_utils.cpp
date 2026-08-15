@@ -944,7 +944,6 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.async_slot = -1;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
-    entry.var.typed_array_type = -1;  // P9: not a typed array by default
 
     // Preserve metadata from an existing same-named binding. Prefer the target
     // scope so a nested let/const shadow does not inherit an outer capture slot.

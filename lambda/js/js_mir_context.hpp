@@ -92,23 +92,6 @@ struct JsModuleConstEntry {
     const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
-struct JsImportGraphNode {
-    char* path;            // resolved file path (owned)
-    char* source;          // source text (owned)
-    int* deps;             // indices of dependency nodes (owned)
-    int dep_count;
-    int dep_cap;
-    int depth;             // topological depth (-1 = uncomputed)
-    MIR_context_t mir_ctx;
-    void* js_main_func;    // typed as js_main_func_t at call sites
-    uint32_t module_var_count;
-    PropertyKeySpec* module_property_specs;
-    uint32_t module_property_count;
-    uint32_t module_property_bytes_size;
-    uint32_t ic_count;
-    bool compiled;
-};
-
 struct JsNameSetEntry {
     const char* name;   // NamePool-owned semantic binding name
     int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)
@@ -229,7 +212,6 @@ struct JsFuncCollected {
     bool ctor_shape_overflow;       // optimization disabled after exceeding shape metadata capacity
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
     int ctor_prop_lens[16];         // lengths of each property name
-    int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
     // immutable post-collection scope facts; cache AST walks shared by capture,

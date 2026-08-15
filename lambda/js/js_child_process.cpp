@@ -1750,11 +1750,10 @@ static Item spawn_add_listener(Item self, Item event_item, Item callback, bool o
 }
 JS_FORWARD_ITEM(js_spawn_on, (Item event_item, Item callback), spawn_add_listener, (js_get_this(), event_item, callback, false))
 
-extern "C" Item js_spawn_once(Item event_item, Item callback) {
-    // fork cleanup commonly waits on once('message'); treating it as missing
-    // leaves IPC children and transferred sockets referenced until drain.
-    return spawn_add_listener(js_get_this(), event_item, callback, true);
-}
+// fork cleanup commonly waits on once('message'); treating it as missing
+// leaves IPC children and transferred sockets referenced until drain.
+JS_FORWARD_ITEM(js_spawn_once, (Item event_item, Item callback), spawn_add_listener,
+    (js_get_this(), event_item, callback, true))
 
 // on() for stdout/stderr stream sub-objects
 JS_FORWARD_ITEM(js_spawn_stream_on, (Item event_item, Item callback), spawn_add_listener, (js_get_this(), event_item, callback, false))

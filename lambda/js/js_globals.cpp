@@ -1310,9 +1310,8 @@ extern "C" Item js_process_stdin_pipe(Item dest) {
 
 // Performance time is realm semantics, not thread semantics: browser document
 // callbacks can share a worker thread while retaining distinct time origins.
-static JsPerformanceState* js_performance_state() {
-    return js_active_runtime_state ? &js_runtime_state.performance : NULL;
-}
+JS_FORWARD_STATIC_EXPRESSION(JsPerformanceState*, js_performance_state, (void),
+    js_active_runtime_state ? &js_runtime_state.performance : NULL)
 
 extern "C" double js_performance_monotonic_now_ms(void) {
     JsPerformanceState* state = js_performance_state();
@@ -1524,9 +1523,8 @@ static double js_date_make_date_double(double day, double time) {
     return day_ms + time;
 }
 
-static time_t js_date_seconds_from_ms(double ms) {
-    return (time_t)floor(ms / 1000.0);
-}
+JS_FORWARD_STATIC_EXPRESSION(time_t, js_date_seconds_from_ms, (double ms),
+    (time_t)floor(ms / 1000.0))
 
 static int js_date_millis_from_ms(double ms, time_t secs) {
     int millis = (int)(ms - (double)secs * 1000.0);
@@ -2071,10 +2069,8 @@ static const char** js_process_bootstrap_exec_argv_raw = NULL;
 static int js_process_bootstrap_argc_raw = 0;
 static int js_process_bootstrap_exec_argc_raw = 0;
 
-static bool* js_process_exit_requested_slot(void) {
-    return js_active_runtime_state ? &js_runtime_state.process.exit_requested
-        : NULL;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
+    js_active_runtime_state ? &js_runtime_state.process.exit_requested : NULL)
 #define js_process_argv_items (js_runtime_state.process.argv)
 #define js_process_exec_argv_items (js_runtime_state.process.exec_argv)
 #define js_process_argv_raw js_process_bootstrap_argv_raw
@@ -2102,11 +2098,10 @@ static bool* js_process_exit_requested_slot(void) {
 #define js_process_ipc_cap (js_runtime_state.process.ipc_capacity)
 JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.process.roots)))
 
-static bool js_process_cache_is_empty(Item value) {
-    // Root-range cleanup clears expired realm cache slots to zero, while an
-    // explicit realm reset uses ItemNull; neither value is a JS object.
-    return value.item == 0 || value.item == ITEM_NULL;
-}
+// root-range cleanup clears expired realm cache slots to zero, while an
+// explicit realm reset uses ItemNull; neither value is a JS object.
+JS_FORWARD_STATIC_EXPRESSION(bool, js_process_cache_is_empty, (Item value),
+    value.item == 0 || value.item == ITEM_NULL)
 
 // v20: Date setter methods — mutate internal _time timestamp
 // method_id: 20=setTime, 21=setFullYear, 22=setMonth, 23=setDate,
@@ -2560,10 +2555,8 @@ JS_FORWARD_VOID( js_set_process_exec_argv, (int argc, const char** argv), js_set
 JS_FORWARD_ITEM(js_get_process_argv, (void), js_get_process_argv_item, (&js_process_argv_items, js_process_argc_raw, js_process_argv_raw, js_set_process_argv))
 JS_FORWARD_ITEM(js_get_process_exec_argv, (void), js_get_process_argv_item, (&js_process_exec_argv_items, js_process_exec_argc_raw, js_process_exec_argv_raw, js_set_process_exec_argv))
 
-extern "C" int js_is_process_object_value(Item object) {
-    return !js_process_cache_is_empty(js_process_object) &&
-        object.item == js_process_object.item;
-}
+JS_FORWARD_EXPRESSION(int, js_is_process_object_value, (Item object),
+    !js_process_cache_is_empty(js_process_object) && object.item == js_process_object.item)
 
 // process.exit([code])
 extern "C" void js_process_emit_exit(int code); // forward declaration
@@ -3171,9 +3164,8 @@ typedef struct JsProcessIpcWriteReq {
     Item callback;
 } JsProcessIpcWriteReq;
 
-static uv_pipe_t* js_process_ipc_pipe_ptr(void) {
-    return (uv_pipe_t*)js_runtime_state.process.ipc_pipe;
-}
+JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
+    (uv_pipe_t*)js_runtime_state.process.ipc_pipe)
 #define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
 
 typedef struct JsProcessIpcScope {
@@ -5506,18 +5498,12 @@ static bool js_class_matches_instanceof_target(JsClass actual, JsClass target) {
     return false;
 }
 
-static bool js_instanceof_is_host_error_constructor(JsFuncName* fn) {
-    // Cross-realm VM errors are classified by the constructor's immutable
-    // intrinsic policy; observable `.name` is freely redefinable (D6.2.2v2).
-    return fn && js_class_is_error_like((JsClass)fn->intrinsic_class);
-}
+// cross-realm VM errors are classified by the constructor's immutable
+// intrinsic policy; observable `.name` is freely redefinable (D6.2.2v2).
+JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_host_error_constructor,
+    (JsFuncName* fn), fn && js_class_is_error_like((JsClass)fn->intrinsic_class))
 
-static bool js_instanceof_is_vm_context_error(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return false;
-        Item marker = js_get_key_cstr(value, "__vm_context_error__");
-    return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
-           (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
-}
+#define js_instanceof_is_vm_context_error js_is_vm_context_error
 JS_FORWARD_ITEM(js_instanceof, (Item left, Item right), js_instanceof_impl, (left, right, false))
 
 // OrdinaryHasInstance — same as instanceof but skips Symbol.hasInstance check
@@ -6545,10 +6531,18 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
             if (receiver.item == target.item) {
-                JS_ASSIGN_OR_RETURN(set_result, js_define_own_key_storage(target, key, value));
+                // Integer-indexed Set must write the backing bytes; generic
+                // DefineOwn storage only publishes a map slot, which made
+                // shared-buffer Atomics observe the old zero after the MIR
+                // specialization was removed (S#7.3.32).
+                JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set_numeric(target,
+                    numeric_index, is_negative_zero, value));
                 return (Item){.item = b2it(true)};
             }
             bool target_valid_index = js_ta_numeric_index_valid(target, numeric_index, is_negative_zero, NULL);
+            // An altered receiver returns before value coercion when the
+            // target index is invalid; only the same-receiver path performs
+            // TypedArraySetElement (S#7.3.32).
             if (!target_valid_index) return (Item){.item = b2it(true)};
             TypeId rt = get_type_id(receiver);
             bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_VMAP ||
@@ -6558,7 +6552,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             if (rt == LMD_TYPE_MAP && js_object_has_class(receiver, JS_CLASS_TYPED_ARRAY)) {
                 bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero, NULL);
                 if (!receiver_valid_index) return (Item){.item = b2it(false)};
-                JS_ASSIGN_OR_RETURN(set_result, js_define_own_key_storage(receiver, key, value));
+                JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set_numeric(receiver,
+                    numeric_index, is_negative_zero, value));
                 return (Item){.item = b2it(true)};
             }
             Item recv_own = js_object_get_own_property_descriptor(receiver, key);
@@ -7591,9 +7586,7 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
 // lazily-created companion Map with normal ShapeEntry metadata.
 // =============================================================================
 
-static Map* js_array_props_map(Array* arr) {
-    return js_array_props(arr);
-}
+JS_FORWARD_STATIC_RETURN(Map*, js_array_props_map, (Array* arr), js_array_props, (arr))
 
 static bool js_array_own_dense_index(Item object, int64_t index,
         bool enumerable_only) {
@@ -11718,9 +11711,8 @@ extern "C" Item js_json_raw_json(Item text) {
     return js_object_freeze(obj);
 }
 
-extern "C" Item js_json_is_raw_json_builtin(Item value) {
-    return (Item){.item = b2it(js_json_is_raw_json_object(value))};
-}
+JS_FORWARD_EXPRESSION(Item, js_json_is_raw_json_builtin, (Item value),
+    (Item){.item = b2it(js_json_is_raw_json_object(value))})
 
 static Item js_json_array_index_key(int64_t index) {
     // JSON SerializeJSONProperty passes array indices to toJSON/replacer as
@@ -13110,10 +13102,9 @@ extern "C" Item js_escape(Item str_item) {
 #define js_global_lexical_epoch (js_runtime_state.global_bindings.lexical_epoch)
 #define js_global_lexical_global (js_runtime_state.global_bindings.lexical_global)
 
-static bool js_global_bindings_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.global_bindings.roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_global_bindings_ensure_roots, (void),
+    js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.global_bindings.roots))
 
 static bool js_key_is_event_name(Item key) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
@@ -13126,18 +13117,14 @@ static void js_window_event_ensure_rooted() {
     js_global_bindings_ensure_roots();
 }
 
-extern "C" int js_is_window_event_global_property(Item object, Item key) {
-    // native DOM hit-testing can build JS-shaped objects outside an eval frame;
-    // window.event interception has no meaning until the owning runtime is bound.
-    return js_active_runtime_state && js_window_event_intercept_enabled &&
-        js_global_this_obj.item != 0 &&
-        object.item == js_global_this_obj.item &&
-        js_key_is_event_name(key);
-}
-
-extern "C" int js_is_global_this_object_value(Item object) {
-    return js_global_this_obj.item != 0 && object.item == js_global_this_obj.item;
-}
+// native DOM hit-testing can build JS-shaped objects outside an eval frame;
+// window.event interception has no meaning until the owning runtime is bound.
+JS_FORWARD_EXPRESSION(int, js_is_window_event_global_property, (Item object, Item key),
+    js_active_runtime_state && js_window_event_intercept_enabled &&
+        js_global_this_obj.item != 0 && object.item == js_global_this_obj.item &&
+        js_key_is_event_name(key))
+JS_FORWARD_EXPRESSION(int, js_is_global_this_object_value, (Item object),
+    js_global_this_obj.item != 0 && object.item == js_global_this_obj.item)
 
 extern "C" Item js_get_window_event_global_value(void) {
     js_window_event_ensure_rooted();
@@ -13510,9 +13497,8 @@ extern "C" Item js_abort_controller_abort(Item reason) {
 // MessagePort / MessageChannel stubs
 // =============================================================================
 
-static Item js_mp_stub_noop(void) {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
+JS_FORWARD_STATIC_EXPRESSION(Item, js_mp_stub_noop, (void),
+    (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)})
 
 static bool js_message_port_event_name_matches(Item event, const char* expected) {
     if (get_type_id(event) != LMD_TYPE_STRING || !expected) return false;
@@ -13553,9 +13539,8 @@ extern "C" Item js_worker_is_marked_as_untransferable(Item value) {
     return (Item){.item = b2it(marked.item == ITEM_TRUE)};
 }
 
-static bool js_message_port_is_port(Item value) {
-    return js_message_port_is_object(value) && js_class_id(value) == JS_CLASS_MESSAGE_PORT;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_message_port_is_port, (Item value),
+    js_message_port_is_object(value) && js_class_id(value) == JS_CLASS_MESSAGE_PORT)
 
 static const char* js_message_port_listener_key(Item event) {
     if (js_message_port_event_name_matches(event, "message")) return "__message_listeners__";
@@ -14383,10 +14368,9 @@ JS_FORWARD_ITEM(js_get_global_object, (), js_get_global_this, ())
 // any allocation inside the with body can collect the scope object and
 // subsequent unqualified-name lookups read freed memory. Keep both exact
 // ranges registered before publishing either a scope or a cache entry.
-static bool js_with_ensure_roots(void) {
-    return js_root_range_ensure_registered(&js_with_stack_state.roots) &&
-        js_root_range_ensure_registered(&js_last_with_binding_roots);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_with_ensure_roots, (void),
+    js_root_range_ensure_registered(&js_with_stack_state.roots) &&
+        js_root_range_ensure_registered(&js_last_with_binding_roots))
 
 static Item js_throw_binding_reference_error(Item key);
 
@@ -14437,9 +14421,7 @@ extern "C" void js_with_pop() {
     }
 }
 
-extern "C" int js_with_save_depth() {
-    return js_with_stack_depth;
-}
+JS_FORWARD_EXPRESSION(int, js_with_save_depth, (void), js_with_stack_depth)
 
 extern "C" void js_with_restore_depth(int depth) {
     if (depth < 0) depth = 0;
@@ -14485,9 +14467,7 @@ extern "C" Item* js_with_capture_stack(int* out_depth) {
     return captured;
 }
 
-extern "C" int64_t js_with_depth_active(void) {
-    return js_with_stack_depth > 0 ? 1 : 0;
-}
+JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth > 0 ? 1 : 0)
 
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
@@ -15452,9 +15432,7 @@ extern "C" int64_t js_eval_env_has_binding(Item key) {
     return 0;
 }
 
-extern "C" int64_t js_eval_env_is_active(void) {
-    return js_eval_env_frame_depth > 0 ? 1 : 0;
-}
+JS_FORWARD_EXPRESSION(int64_t, js_eval_env_is_active, (void), js_eval_env_frame_depth > 0 ? 1 : 0)
 
 extern "C" void js_eval_env_track_global_binding(Item key) {
     if (js_eval_env_frame_depth <= 0) return;
@@ -15714,7 +15692,7 @@ void js_ctor_cache_reset() {
 }
 
 // Dummy func_ptr for constructors (makes typeof return "function")
-static Item js_ctor_placeholder() { return ItemNull; }
+JS_FORWARD_STATIC_EXPRESSION(Item, js_ctor_placeholder, (void), ItemNull)
 
 // Event(type, init) / CustomEvent(type, init) -- called without 'new' too.
 // Honours EventInitDict {bubbles, cancelable, composed [, detail]} per spec.
@@ -16254,10 +16232,8 @@ static void js_proto_snapshot_take_intrinsic_function_maps(
         js_proto_snapshot_collect_intrinsic_functions, state);
 }
 
-static bool js_proto_snapshot_map_requires_typemap_detach(const MapSnapshot* snap,
-        Map* map) {
-    return snap && map && snap->m == map && snap->type == map->type;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_proto_snapshot_map_requires_typemap_detach,
+    (const MapSnapshot* snap, Map* map), snap && map && snap->m == map && snap->type == map->type)
 
 extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
     if (!js_active_runtime_state) return false;
@@ -16432,9 +16408,7 @@ extern "C" void js_reset_constructor_prototypes() {
     js_global_this_obj = (Item){0};
 }
 
-extern "C" bool js_proto_snapshot_is_valid() {
-    return js_proto_snapshot_valid;
-}
+JS_FORWARD_EXPRESSION(bool, js_proto_snapshot_is_valid, (void), js_proto_snapshot_valid)
 
 // Invalidate snapshot — must be called before pool/heap teardown that frees
 // the underlying ctor / Map allocations (e.g. crash recovery in batch mode).
@@ -16649,20 +16623,6 @@ static void js_populate_number_ctor(Item fn_item) {
 // Populate Symbol constructor with well-known symbol properties (deferred — called from js_create_constructor)
 static void js_populate_symbol_ctor(Item fn_item);
 
-static JsClass js_constructor_intrinsic_class(int ctor_id, const char* name) {
-    switch (ctor_id) {
-    case JS_CTOR_INT8ARRAY: case JS_CTOR_UINT8ARRAY:
-    case JS_CTOR_UINT8CLAMPEDARRAY: case JS_CTOR_INT16ARRAY:
-    case JS_CTOR_UINT16ARRAY: case JS_CTOR_INT32ARRAY:
-    case JS_CTOR_UINT32ARRAY: case JS_CTOR_FLOAT16ARRAY:
-    case JS_CTOR_FLOAT32ARRAY: case JS_CTOR_FLOAT64ARRAY:
-    case JS_CTOR_BIGINT64ARRAY: case JS_CTOR_BIGUINT64ARRAY:
-        return JS_CLASS_TYPED_ARRAY;
-    default:
-        return name ? js_class_from_name(name, (int)strlen(name)) : JS_CLASS_NONE;
-    }
-}
-
 static int js_typed_array_element_type_for_constructor_id(int ctor_id) {
     switch (ctor_id) {
     case JS_CTOR_INT8ARRAY: return JS_TYPED_INT8;
@@ -16711,9 +16671,11 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     fn->native_policy = JS_NATIVE_CALL_BODY;
     fn->catalog_id = target->catalog_id;
     fn->param_count = param_count;
-    fn->intrinsic_class = (uint8_t)js_constructor_intrinsic_class(ctor_id, name);
     int typed_array_element_type =
         js_typed_array_element_type_for_constructor_id(ctor_id);
+    fn->intrinsic_class = (uint8_t)(typed_array_element_type >= 0
+        ? JS_CLASS_TYPED_ARRAY
+        : (name ? js_class_from_name(name, (int)strlen(name)) : JS_CLASS_NONE));
     if (typed_array_element_type >= 0) {
         // The target owns its concrete element policy; changing `.name` can
         // never redirect TypedArray allocation or species behavior (D6.2.2v2).
@@ -17053,10 +17015,9 @@ extern "C" void js_symbol_registry_batch_reset(void) {
 
 // create Item encoding for a symbol: use LMD_TYPE_INT with a high-bit marker
 // symbol items are encoded as negative ints that won't collide with normal ints
-static Item js_make_symbol_item(uint64_t id) {
-    // encode as an int with a special range: -(id + JS_SYMBOL_BASE)
-    return (Item){.item = i2it(-(int64_t)(id + JS_SYMBOL_BASE))};
-}
+// encode as an int with a special range: -(id + JS_SYMBOL_BASE)
+JS_FORWARD_STATIC_EXPRESSION(Item, js_make_symbol_item, (uint64_t id),
+    (Item){.item = i2it(-(int64_t)(id + JS_SYMBOL_BASE))})
 
 static bool js_is_symbol_item(Item item) {
     if (get_type_id(item) != LMD_TYPE_INT) return false;
@@ -17064,9 +17025,8 @@ static bool js_is_symbol_item(Item item) {
     return v <= -(int64_t)JS_SYMBOL_BASE;
 }
 
-static uint64_t js_symbol_item_id(Item item) {
-    return (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE));
-}
+JS_FORWARD_STATIC_EXPRESSION(uint64_t, js_symbol_item_id, (Item item),
+    (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE)))
 
 struct JsWellKnownSymbolSpec {
     const char* name;
@@ -17402,11 +17362,10 @@ extern "C" Item js_symbol_well_known(Item name) {
 
 extern "C" Item js_url_search_params_new(Item init);
 
-static bool js_activate_url_primitives(void) {
-    // URL globals are installed before node-core; initialize their shared host
-    // primitives without turning on the optional Node compatibility namespace.
-    return jube_activate_node_shared_primitives();
-}
+// URL globals are installed before node-core; initialize their shared host
+// primitives without turning on the optional Node compatibility namespace.
+JS_FORWARD_STATIC_RETURN(bool, js_activate_url_primitives, (void),
+    jube_activate_node_shared_primitives, ())
 
 extern "C" Item js_global_url_search_params_new(Item init) {
     if (!js_activate_url_primitives()) {
@@ -17583,9 +17542,8 @@ static Item js_readable_stream_error_with_code(const char* name, const char* cod
     return err;
 }
 
-static bool js_web_stream_item_is_true(Item item) {
-    return get_type_id(item) == LMD_TYPE_BOOL && it2b(item);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_web_stream_item_is_true, (Item item),
+    get_type_id(item) == LMD_TYPE_BOOL && it2b(item))
 
 static bool js_readable_stream_view_is_detached(Item view) {
     if (!js_is_typed_array(view)) return true;

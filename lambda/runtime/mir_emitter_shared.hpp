@@ -64,11 +64,6 @@ struct VarEntry {
     // Name matches alone are insufficient because a nested lexical declaration
     // can legally shadow the promoted variable.
     bool is_iife_module_var_binding;
-    int typed_array_type;
-    // A const binding initialized from a typed-array candidate can retain the
-    // one runtime element-type proof for all subsequent guarded accesses.
-    MIR_reg_t typed_array_guard_reg;
-    bool is_js_array;
     JsClassEntry* class_entry;
     Type* full_type;
     bool is_let_const;
@@ -79,8 +74,6 @@ struct VarEntry {
     bool tdz_active;
     uint32_t binding_start;
     uint32_t binding_end;
-    MIR_reg_t hoisted_data_reg;
-    MIR_reg_t hoisted_len_reg;
     bool from_hoist;
     bool cow_marked;
     bool cow_children_may_be_shared;

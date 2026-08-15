@@ -166,9 +166,8 @@ static String* js_dom_fragment_text(Item item) {
 // internally (e.g. createElementNS records the namespace URI as
 // "__lambda_ns_uri") and must not leak through JS-facing attribute
 // enumeration, getAttribute lookup, or serialization.
-static inline bool js_dom_is_internal_attr(const char* name) {
-    return name && strncmp(name, "__lambda_", 9) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_is_internal_attr, (const char* name),
+    name && strncmp(name, "__lambda_", 9) == 0)
 // ============================================================================
 // Unique type markers for DOM-adjacent Maps
 // ============================================================================
@@ -454,9 +453,8 @@ extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, voi
 }
 JS_FORWARD_VOID( js_dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), js_dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
 
-extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc) {
-    return doc ? doc->mutation_epoch : 0;
-}
+JS_FORWARD_EXPRESSION(uint64_t, js_dom_mutation_epoch, (DomDocument* doc),
+    doc ? doc->mutation_epoch : 0)
 
 static bool js_dom_mutation_node_overlaps_root(DomNode* node, DomNode* root) {
     if (!node || !root) return false;
@@ -521,11 +519,10 @@ extern "C" bool js_dom_commit_headless_layout_checkpoint(void) {
     return true;
 }
 
-extern "C" bool js_dom_commit_headless_layout(void) {
-    // Keep the older entry point as a boundary wrapper: geometry readers must
-    // use the same mutation reconciliation checkpoint as the event loop.
-    return js_dom_commit_headless_layout_checkpoint();
-}
+// keep the older entry point as a boundary wrapper: geometry readers must use
+// the same mutation reconciliation checkpoint as the event loop.
+JS_FORWARD_RETURN(bool, js_dom_commit_headless_layout, (void),
+    js_dom_commit_headless_layout_checkpoint, ())
 
 // ----------------------------------------------------------------------------
 // Phase 3: live-range mutation envelopes — thin wrappers that bail when no
@@ -533,9 +530,8 @@ extern "C" bool js_dom_commit_headless_layout(void) {
 // mutation paths in this file route through these to keep boundary points
 // in sync per WHATWG DOM §5.3.
 // ----------------------------------------------------------------------------
-static inline DocState* js_dom_current_state() {
-    return _js_current_document ? _js_current_document->state : nullptr;
-}
+JS_FORWARD_STATIC_EXPRESSION(DocState*, js_dom_current_state, (void),
+    _js_current_document ? _js_current_document->state : nullptr)
 
 static DocState* js_dom_testdriver_state() {
     if (!_js_current_document) return nullptr;
@@ -739,21 +735,14 @@ static DomNode* js_dom_visible_sibling(DomNode* node, bool forward) {
     return nullptr;
 }
 
-static DomNode* js_dom_next_script_visible_sibling(DomNode* node) {
-    return js_dom_visible_sibling(node, true);
-}
-
-static DomNode* js_dom_prev_script_visible_sibling(DomNode* node) {
-    return js_dom_visible_sibling(node, false);
-}
-
-static DomNode* js_dom_first_script_visible_child(DomElement* elem) {
-    return js_dom_visible_child(elem, true);
-}
-
-static DomNode* js_dom_last_script_visible_child(DomElement* elem) {
-    return js_dom_visible_child(elem, false);
-}
+JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_next_script_visible_sibling,
+    (DomNode* node), js_dom_visible_sibling, (node, true))
+JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_prev_script_visible_sibling,
+    (DomNode* node), js_dom_visible_sibling, (node, false))
+JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_first_script_visible_child,
+    (DomElement* elem), js_dom_visible_child, (elem, true))
+JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_last_script_visible_child,
+    (DomElement* elem), js_dom_visible_child, (elem, false))
 
 static uint32_t js_dom_utf16_length_from_utf8(const char* text, size_t len) {
     if (!text) return 0;
@@ -1297,11 +1286,10 @@ static SelectorMatcher* js_dom_create_selector_matcher(DomDocument* doc) {
     return matcher;
 }
 
-extern "C" void* js_dom_create_selector_matcher_bridge(void* dom_doc) {
-    // Native-module selector fast paths must share the DOM resolver so live
-    // form state, including option:checked, agrees with ordinary JS queries.
-    return js_dom_create_selector_matcher((DomDocument*)dom_doc);
-}
+// native-module selector fast paths must share the DOM resolver so live form
+// state, including option:checked, agrees with ordinary JS queries.
+JS_FORWARD_RETURN(void*, js_dom_create_selector_matcher_bridge, (void* dom_doc),
+    js_dom_create_selector_matcher, ((DomDocument*)dom_doc))
 
 // Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
 // "submit", "button", "text"). Falls back to "text" when missing.
@@ -1544,21 +1532,19 @@ extern "C" void js_dom_set_document(void* dom_doc) {
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
 
-extern "C" void* js_dom_get_document(void) {
-    // Host setup may query before it has bound a document Runtime. There is
-    // no ambient document to borrow in that phase; normal DOM execution binds
-    // the owning EvalContext before accessing this context-local pointer.
-    return js_active_runtime_state ? (void*)_js_current_document : nullptr;
-}
+// host setup may query before it has bound a document Runtime. There is no
+// ambient document to borrow in that phase; normal DOM execution binds the
+// owning EvalContext before accessing this context-local pointer.
+JS_FORWARD_EXPRESSION(void*, js_dom_get_document, (void),
+    js_active_runtime_state ? (void*)_js_current_document : nullptr)
 
 extern "C" void js_dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
 }
 
-extern "C" void* js_dom_get_ui_context(void) {
-    return js_active_runtime_state ? (void*)_js_current_ui_context : nullptr;
-}
+JS_FORWARD_EXPRESSION(void*, js_dom_get_ui_context, (void),
+    js_active_runtime_state ? (void*)_js_current_ui_context : nullptr)
 
 // ============================================================================
 // Document-as-Node stub
@@ -1741,20 +1727,16 @@ extern "C" Item js_dom_get_prototype_value(Item obj) {
 
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 
-extern "C" Item js_dom_wrap_element(void* dom_elem) {
-    // Jube POC: keep existing JS callers stable while wrapper identity moves
-    // behind the radiant module boundary.
-    return radiant_dom_wrap_node(dom_elem);
-}
+// Jube POC: keep existing JS callers stable while wrapper identity moves
+// behind the radiant module boundary.
+JS_FORWARD_ITEM(js_dom_wrap_element, (void* dom_elem), radiant_dom_wrap_node, (dom_elem))
 
 extern "C" void* radiant_dom_unwrap_node(Item item);
 extern "C" bool radiant_dom_is_node(Item item);
 
-extern "C" void* js_dom_unwrap_element(Item item) {
-    // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
-    // nodes no longer depend on the retired DOM map wrapper shell.
-    return radiant_dom_unwrap_node(item);
-}
+// Jube POC: unwrap/type policy is exposed through the radiant module so DOM
+// nodes no longer depend on the retired DOM map wrapper shell.
+JS_FORWARD_RETURN(void*, js_dom_unwrap_element, (Item item), radiant_dom_unwrap_node, (item))
 
 extern "C" void* js_dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
@@ -1768,11 +1750,9 @@ extern "C" void* js_dom_unwrap_element_impl(Item item) {
     return nullptr;
 }
 
-extern "C" bool js_is_dom_node(Item item) {
-    // Jube POC: use the module-owned type test so later native wrappers do not
-    // need every caller to know the concrete carrier representation.
-    return radiant_dom_is_node(item);
-}
+// Jube POC: use the module-owned type test so later native wrappers do not
+// need every caller to know the concrete carrier representation.
+JS_FORWARD_RETURN(bool, js_is_dom_node, (Item item), radiant_dom_is_node, (item))
 
 struct SelectOptionsOwnerEntry {
     Array* array;
@@ -2515,9 +2495,8 @@ extern "C" Item js_get_document_object_value() {
 }
 
 // Dispatch property access on the document proxy object.
-extern "C" Item js_document_proxy_get_property(Item prop_name) {
-    return js_document_get_property(prop_name);
-}
+JS_FORWARD_ITEM(js_document_proxy_get_property, (Item prop_name),
+    js_document_get_property, (prop_name))
 
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of js_set_key_default to avoid
@@ -2988,11 +2967,9 @@ extern "C" Item js_create_foreign_html_doc(const char* title) {
     return wrap_foreign_doc(fd);
 }
 
-static Item js_dom_parser_constructor(void) {
-    // Native construction must retain the receiver carrying DOMParser's
-    // prototype; returning another object would discard parseFromString.
-    return make_js_undefined();
-}
+// native construction must retain the receiver carrying DOMParser's
+// prototype; returning another object would discard parseFromString.
+JS_FORWARD_STATIC_ITEM(js_dom_parser_constructor, (void), make_js_undefined, ())
 
 static Element* js_dom_parser_xml_document_element(Input* input) {
     if (!input || get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
@@ -3021,11 +2998,10 @@ static Element* js_dom_parser_xml_document_element(Input* input) {
     return document_element;
 }
 
-static Item js_dom_parser_error_document(void) {
-    // DOMParser reports XML parse failures through a document containing a
-    // parsererror element, which lets callers use normal DOM inspection.
-    return js_create_foreign_xml_doc("parsererror");
-}
+// DOMParser reports XML parse failures through a document containing a
+// parsererror element, which lets callers use normal DOM inspection.
+JS_FORWARD_STATIC_ITEM(js_dom_parser_error_document, (void),
+    js_create_foreign_xml_doc, ("parsererror"))
 
 static Item js_dom_parser_parse_xml(const char* source) {
     Input* parent_input = _js_current_document ? _js_current_document->input : nullptr;
@@ -6519,10 +6495,9 @@ JS_DOM_EVENT_LISTENER_BRIDGE(js_dom_remove_event_listener_bridge,
     js_dom_remove_event_listener)
 #undef JS_DOM_EVENT_LISTENER_BRIDGE
 
-extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item) {
-    // Dispatch keeps the wrapped target identity shared with listener lookup.
-    return js_dom_dispatch_event(target_item, event_item);
-}
+// dispatch keeps the wrapped target identity shared with listener lookup.
+JS_FORWARD_ITEM(js_dom_dispatch_event_bridge, (Item target_item, Item event_item),
+    js_dom_dispatch_event, (target_item, event_item))
 
 static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg) {
@@ -12505,9 +12480,8 @@ static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg);
 
-static float js_dom_item_to_float(Item value) {
-    return js_dom_svg_number(value, 0.0f);
-}
+JS_FORWARD_STATIC_EXPRESSION(float, js_dom_item_to_float, (Item value),
+    js_dom_svg_number(value, 0.0f))
 JS_FORWARD_STATIC_ITEM(js_dom_float_item, (float value), js_make_number, ((double)value))
 
 static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
@@ -15046,13 +15020,11 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
     return ItemNull;
 }
 
-extern "C" Item js_dom_style_set_property_bridge(void* dom_elem, Item prop_arg,
-                                                 Item value_arg, Item priority_arg,
-                                                 bool has_priority) {
-    // inline style parsing and mutation invalidation remain centralized here.
-    return js_dom_style_set_property_for_elem((DomElement*)dom_elem, prop_arg,
-        value_arg, priority_arg, has_priority);
-}
+// inline style parsing and mutation invalidation remain centralized here.
+JS_FORWARD_ITEM(js_dom_style_set_property_bridge,
+    (void* dom_elem, Item prop_arg, Item value_arg, Item priority_arg, bool has_priority),
+    js_dom_style_set_property_for_elem,
+    ((DomElement*)dom_elem, prop_arg, value_arg, priority_arg, has_priority))
 
 static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_arg) {
     if (!elem) return (Item){.item = s2it(heap_create_name(""))};
@@ -15080,10 +15052,9 @@ static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_ar
     return old_val;
 }
 
-extern "C" Item js_dom_style_remove_property_bridge(void* dom_elem, Item prop_arg) {
-    // old-value serialization and mutation invalidation remain centralized here.
-    return js_dom_style_remove_property_for_elem((DomElement*)dom_elem, prop_arg);
-}
+// old-value serialization and mutation invalidation remain centralized here.
+JS_FORWARD_ITEM(js_dom_style_remove_property_bridge, (void* dom_elem, Item prop_arg),
+    js_dom_style_remove_property_for_elem, ((DomElement*)dom_elem, prop_arg))
 
 
 // ============================================================================
@@ -15333,9 +15304,8 @@ static JsWebAnimationHost* js_web_animation_host(Item value) {
     return nullptr;
 }
 
-static float js_web_animation_number(Item value, float fallback) {
-    return js_dom_svg_number(value, fallback);
-}
+JS_FORWARD_STATIC_EXPRESSION(float, js_web_animation_number, (Item value, float fallback),
+    js_dom_svg_number(value, fallback))
 
 static CssAnimComposite js_web_animation_composite(Item value) {
     const char* text = fn_to_cstr(value);
@@ -15410,11 +15380,9 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
     return keyframes;
 }
 
-static Item js_web_animation_pause(void) {
-    // The headless runner samples currentTime explicitly; pausing only needs
-    // to prevent an implicit clock from changing that deterministic sample.
-    return ItemNull;
-}
+// the headless runner samples currentTime explicitly; pausing only needs to
+// prevent an implicit clock from changing that deterministic sample.
+JS_FORWARD_STATIC_EXPRESSION(Item, js_web_animation_pause, (void), ItemNull)
 
 static Item js_web_animation_current_time_get(void) {
     JsWebAnimationHost* host = js_web_animation_host(js_get_this());

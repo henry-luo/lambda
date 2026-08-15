@@ -362,12 +362,7 @@ static bool js_util_inspect_is_object_like(Item value) {
 
 #define js_util_inspect_is_undefined(value) (get_type_id(value) == LMD_TYPE_UNDEFINED)
 
-static bool js_util_inspect_string_equals(Item value, const char* text) {
-    if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
-    String* s = it2s(value);
-    size_t len = strlen(text);
-    return s && s->len == len && memcmp(s->chars, text, len) == 0;
-}
+#define js_util_inspect_string_equals js_string_equals
 
 static bool js_util_inspect_is_assertion_error(Item value) {
     if (!js_util_inspect_is_object_like(value)) return false;
@@ -1619,12 +1614,7 @@ static int64_t js_util_array_length_for_deep(Item value) {
     return -1;
 }
 
-static bool js_util_string_equals(Item value, const char* text) {
-    if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
-    String* s = it2s(value);
-    size_t len = strlen(text);
-    return s && s->len == len && memcmp(s->chars, text, len) == 0;
-}
+#define js_util_string_equals js_string_equals
 
 static bool js_util_has_constructor_prototype(Item value, const char* ctor_name, int ctor_len) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
@@ -1661,12 +1651,6 @@ static bool js_util_is_error_like_value(Item value) {
 
 static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bool strict);
 
-static bool js_util_descriptor_is_enumerable(Item desc) {
-    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    bool found = false;
-    Item enumerable = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &found);
-    return found && js_is_truthy(enumerable);
-}
 JS_FORWARD_STATIC_EXPRESSION(bool, js_util_key_is_symbol, (Item key), (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE))
 
 static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
@@ -1714,7 +1698,7 @@ static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
     for (int64_t i = 0; i < symbol_count; i++) {
         Item key = js_elements_get_int(symbols, i);
         Item desc = js_object_get_own_property_descriptor(object, key);
-        if (js_util_descriptor_is_enumerable(desc)) js_array_push(result, key);
+        if (js_descriptor_is_enumerable(desc)) js_array_push(result, key);
     }
     return result;
 }

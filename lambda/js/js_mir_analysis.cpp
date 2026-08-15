@@ -1427,7 +1427,6 @@ static JsMirVarEntry* jm_set_current_scope_var_fresh(JsMirTranspiler* mt, const 
     entry.var.reg = reg;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
-    entry.var.typed_array_type = -1;
     jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
 
     JsVarScopeEntry key;
