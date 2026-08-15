@@ -9743,6 +9743,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                                 strcasecmp(elem->tag_name, "body") == 0));
 
         if (is_root_scroll_target && elem->doc) {
+            // A pending viewport request has no signed element range yet;
+            // preserve the DOM non-negative origin until layout commits it.
+            if (scroll_value < 0.0f) scroll_value = 0.0f;
             if (is_vertical) {
                 elem->doc->pending_viewport_scroll_y = scroll_value;
             } else {
@@ -9755,6 +9758,12 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
         bool layout_pending = elem->doc && elem->doc->state &&
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
+        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f) {
+            // Without a committed pane there is no writing-mode-specific
+            // signed range to validate against, so a pending element scroll
+            // must retain the ordinary zero origin.
+            scroll_value = 0.0f;
+        }
         if (elem->scroller && elem->scroll()->pane && !layout_pending) {
             float current_x = 0.0f;
             float current_y = 0.0f;

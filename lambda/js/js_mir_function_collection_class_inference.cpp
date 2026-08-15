@@ -1167,6 +1167,77 @@ bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len)
     return false;
 }
 
+// detect typed array constructor type from a new expression
+// also detects chained method calls like new Uint8Array(n).map(fn)
+int jm_detect_typed_array_new(JsAstNode* rhs) {
+    if (!rhs) return -1;
+    // direct: new TypedArray(...)
+    if (rhs->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+        JsCallNode* new_call = (JsCallNode*)rhs;
+        if (!new_call->callee || new_call->callee->node_type != JS_AST_NODE_IDENTIFIER) return -1;
+        JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Uint8Array", 10) == 0) return JS_TYPED_UINT8;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int32Array", 10) == 0) return JS_TYPED_INT32;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int16Array", 10) == 0) return JS_TYPED_INT16;
+        if (ctor->name->len == 9 && strncmp(ctor->name->chars, "Int8Array", 9) == 0) return JS_TYPED_INT8;
+        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint32Array", 11) == 0) return JS_TYPED_UINT32;
+        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint16Array", 11) == 0) return JS_TYPED_UINT16;
+        if (ctor->name->len == 17 && strncmp(ctor->name->chars, "Uint8ClampedArray", 17) == 0) return JS_TYPED_UINT8_CLAMPED;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float16Array", 12) == 0) return JS_TYPED_FLOAT16;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float64Array", 12) == 0) return JS_TYPED_FLOAT64;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float32Array", 12) == 0) return JS_TYPED_FLOAT32;
+        return -1;
+    }
+    // chained: new TypedArray(n).map(fn) / .filter(fn) / .slice(...) etc.
+    // TypedArray methods that preserve type: map, filter, slice, sort, reverse, subarray
+    if (rhs->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)rhs;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* cm = (JsMemberNode*)call->callee;
+            if (!cm->computed && cm->property &&
+                cm->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* method = (JsIdentifierNode*)cm->property;
+                bool preserves_type = false;
+                if (method->name->len == 3 && strncmp(method->name->chars, "map", 3) == 0) preserves_type = true;
+                else if (method->name->len == 6 && strncmp(method->name->chars, "filter", 6) == 0) preserves_type = true;
+                else if (method->name->len == 5 && strncmp(method->name->chars, "slice", 5) == 0) preserves_type = true;
+                else if (method->name->len == 4 && strncmp(method->name->chars, "sort", 4) == 0) preserves_type = true;
+                else if (method->name->len == 7 && strncmp(method->name->chars, "reverse", 7) == 0) preserves_type = true;
+                else if (method->name->len == 8 && strncmp(method->name->chars, "subarray", 8) == 0) preserves_type = true;
+                if (preserves_type) {
+                    return jm_detect_typed_array_new(cm->object);
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+// look up typed array type for a class instance field by name.
+// checks the class and its superclass chain for instance fields with typed array initializers.
+int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len) {
+    while (ce) {
+        for (int i = 0; i < ce->instance_field_count; i++) {
+            JsInstanceFieldEntry* f = &ce->instance_fields[i];
+            if (f->name && (int)f->name->len == prop_len &&
+                strncmp(f->name->chars, prop_name, prop_len) == 0) {
+                return jm_detect_typed_array_new(f->initializer);
+            }
+        }
+        // also check ctor_prop_ta_types for constructor body assignments
+        if (ce->constructor && ce->constructor->fc) {
+            JsFuncCollected* fc = ce->constructor->fc;
+            for (int i = 0; i < fc->ctor_prop_count; i++) {
+                if (fc->ctor_prop_lens[i] == prop_len &&
+                    strncmp(fc->ctor_prop_ptrs[i], prop_name, prop_len) == 0) {
+                    return fc->ctor_prop_ta_types[i];
+                }
+            }
+        }
+        ce = ce->superclass;
+    }
+    return -1;
+}
 
 // P1: Detect field type from constructor init expression (this.x ).
 // Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING for literals,
@@ -1244,6 +1315,8 @@ static void jm_scan_ctor_prop_assignment(JsFuncCollected* fc, JsAssignmentNode* 
     if (is_new_prop) idx = fc->ctor_prop_count;
     fc->ctor_prop_ptrs[idx] = prop->name->chars;
     fc->ctor_prop_lens[idx] = (int)prop->name->len;
+    int ta_type = jm_detect_typed_array_new(asgn->right);
+    if (ta_type >= 0 || is_new_prop) fc->ctor_prop_ta_types[idx] = ta_type;
     TypeId detected_type = jm_detect_ctor_field_type(asgn->right);
     if (detected_type != LMD_TYPE_NULL || is_new_prop) {
         fc->ctor_prop_types[idx] = detected_type;

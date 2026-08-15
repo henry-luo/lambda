@@ -1105,7 +1105,8 @@ static MIR_reg_t jm_box_native_impl(JsMirTranspiler* mt, MIR_reg_t reg,
     switch (type_id) {
     case LMD_TYPE_INT:   return jm_box_int_reg(mt, reg);
     case LMD_TYPE_FLOAT: {
-        // Native FLOAT values may arrive in an integer MIR register; push_d requires D.
+        // P6 inlining can preserve a widened FLOAT semantic type while the
+        // emitted native value is still an integer register; push_d requires D.
         MIR_reg_t d = jm_ensure_native_float(mt, reg, type_id);
         return jm_box_float(mt, d);
     }
@@ -1175,6 +1176,29 @@ MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg) {
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
 // Phase 5 forward declarations
+// P9 forward declarations
+JsMirVarEntry* jm_get_typed_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
+bool jm_typed_array_is_int(int ta_type);
+MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
+                                               MIR_reg_t idx_native, int ta_type,
+                                               MIR_reg_t h_data , MIR_reg_t h_len,
+                                               MIR_reg_t type_guard);
+MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr_reg,
+                                                      MIR_reg_t idx_native, int ta_type,
+                                                      TypeId target_type,
+                                                      MIR_reg_t h_data,
+                                                      MIR_reg_t type_guard);
+MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
+                                               MIR_reg_t idx_native, MIR_reg_t val_boxed,
+                                               int ta_type,
+                                               MIR_reg_t h_data , MIR_reg_t h_len,
+                                               MIR_reg_t type_guard,
+                                               bool strict);
+// A2 forward declarations
+JsMirVarEntry* jm_get_js_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
+MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
+                                                MIR_reg_t idx_native,
+                                                MIR_reg_t h_items , MIR_reg_t h_len );
 // A5 forward declaration
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
 
@@ -1369,8 +1393,18 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     }
 
     case JS_AST_NODE_MEMBER_EXPRESSION: {
+        // P9: typed array element type inference
         JsMemberNode* mem = (JsMemberNode*)node;
-        // .length is statically numeric only for built-in values whose shape is known.
+        if (mem->computed) {
+            JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
+            if (ta_var) {
+                // Constructor spelling only identifies a guarded candidate.
+                // Treating its element as statically numeric made a shadowed
+                // Uint8Array change `"0" + 1` into numeric addition (D6.2.2v2).
+                return LMD_TYPE_ANY;
+            }
+        }
+        // .length returns INT only for known arrays, strings, functions, typed arrays
         if (!mem->computed && mem->property &&
             mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
@@ -1378,6 +1412,10 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                 // Only infer INT for known types where .length is guaranteed numeric
                 TypeId obj_t = jm_get_effective_type(mt, mem->object);
                 if (obj_t == LMD_TYPE_ARRAY || obj_t == LMD_TYPE_STRING)
+                    return LMD_TYPE_INT;
+                // Check if it's a typed array variable
+                JsMirVarEntry* ta = jm_get_typed_array_var(mt, mem->object);
+                if (ta)
                     return LMD_TYPE_INT;
                 // For functions, .length is param_count (INT)
                 if (obj_t == LMD_TYPE_FUNC)
@@ -1791,6 +1829,78 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         }
     }
 
+    // P9: MEMBER_EXPRESSION — typed array element access returns native directly
+    if (expr && expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* mem = (JsMemberNode*)expr;
+
+        if (mem->computed) {
+            JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
+            if (ta_var) {
+                // Get native int index
+                MIR_reg_t idx_native;
+                TypeId idx_type = jm_get_effective_type(mt, mem->property);
+                if (idx_type == LMD_TYPE_INT) {
+                    idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
+                } else if (idx_type == LMD_TYPE_FLOAT) {
+                    MIR_reg_t number_key = jm_transpile_as_native(mt,
+                        mem->property, idx_type, LMD_TYPE_FLOAT);
+                    MIR_reg_t boxed = jm_transpile_typed_array_get_number(mt,
+                        ta_var->reg, number_key, ta_var->typed_array_type,
+                        ta_var->hoisted_data_reg, ta_var->hoisted_len_reg,
+                        ta_var->typed_array_guard_reg);
+                    return target_type == LMD_TYPE_FLOAT
+                        ? jm_emit_unbox_float(mt, boxed)
+                        : jm_emit_unbox_int(mt, boxed);
+                } else {
+                    // Native doubles may be fractional, so they use the
+                    // number-key seam below instead of truncating an index.
+                    goto skip_ta_native;
+                }
+                return jm_transpile_typed_array_get_native(mt, ta_var->reg, idx_native,
+                    ta_var->typed_array_type, target_type,
+                    ta_var->hoisted_data_reg, ta_var->typed_array_guard_reg);
+            }
+            skip_ta_native:
+
+            // A3: Regular array element access — get boxed Item then unbox to target.
+            // When used in a float expression (target_type == FLOAT), the caller needs
+            // a native double. Get the boxed result via js_elements_get_int (avoiding
+            // boxing the index), then unbox to float directly.
+            TypeId idx_type = jm_get_effective_type(mt, mem->property);
+            if (idx_type == LMD_TYPE_INT) {
+                MIR_reg_t idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
+                JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
+                MIR_reg_t boxed_result;
+                if (arr_var) {
+                    boxed_result = jm_transpile_array_get_inline(mt, arr_var->reg,
+                        idx_native, arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
+                } else {
+                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                    jm_create_gc_root_slot(mt, obj_reg);
+                    jm_emit_error_lane_propagate_check(mt);
+                    boxed_result = jm_transpile_array_get_inline(mt, obj_reg,
+                        idx_native, 0, 0);
+                }
+                jm_emit_error_lane_propagate_check(mt);
+                if (target_type == LMD_TYPE_FLOAT)
+                    return jm_emit_unbox_float(mt, boxed_result);
+                else
+                    return jm_emit_unbox_int(mt, boxed_result);
+            } else if (idx_type == LMD_TYPE_FLOAT) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                jm_create_gc_root_slot(mt, obj_reg);
+                jm_emit_error_lane_propagate_check(mt);
+                MIR_reg_t number_key = jm_transpile_as_native(mt,
+                    mem->property, idx_type, LMD_TYPE_FLOAT);
+                MIR_reg_t boxed_result = jm_transpile_number_get(mt,
+                    obj_reg, number_key);
+                jm_emit_error_lane_propagate_check(mt);
+                return target_type == LMD_TYPE_FLOAT
+                    ? jm_emit_unbox_float(mt, boxed_result)
+                    : jm_emit_unbox_int(mt, boxed_result);
+            }
+        }
+    }
 
     // All other expressions: get boxed value and unbox to target type
     MIR_reg_t boxed = jm_transpile_box_item(mt, expr);

@@ -1932,6 +1932,848 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 
 
 // ============================================================================
+// P6: Return type resolver with local variable tracing
+// When param types are known, trace local variables back through their
+// declarations and assignments to resolve return expression types.
+// ============================================================================
+
+// Resolve expression types from formal types and AST-owned local declaration facts.
+static bool jm_p6_expr_has_bigint_literal(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        return lit->literal_type == JS_LITERAL_NUMBER && lit->is_bigint;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_p6_expr_has_bigint_literal(bin->left) || jm_p6_expr_has_bigint_literal(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_p6_expr_has_bigint_literal(un->operand);
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        return jm_p6_expr_has_bigint_literal(cond->test) ||
+               jm_p6_expr_has_bigint_literal(cond->consequent) ||
+               jm_p6_expr_has_bigint_literal(cond->alternate);
+    }
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (jm_p6_expr_has_bigint_literal(call->callee)) return true;
+        JsAstNode* arg = call->arguments;
+        while (arg) {
+            if (jm_p6_expr_has_bigint_literal(arg)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        return jm_p6_expr_has_bigint_literal(ret->argument);
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        JsAstNode* decl = vd->declarations;
+        while (decl) {
+            if (jm_p6_expr_has_bigint_literal(decl)) return true;
+            decl = decl->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
+        return jm_p6_expr_has_bigint_literal(vd->init);
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        return jm_p6_expr_has_bigint_literal(es->expression);
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_p6_expr_has_bigint_literal(ifn->test) ||
+               jm_p6_expr_has_bigint_literal(ifn->consequent) ||
+               jm_p6_expr_has_bigint_literal(ifn->alternate);
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* stmt = blk->statements;
+        while (stmt) {
+            if (jm_p6_expr_has_bigint_literal(stmt)) return true;
+            stmt = stmt->next;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+static bool jm_p6_type_is_numeric(TypeId type) {
+    return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT;
+}
+
+static bool jm_p6_call_matches_name(JsCallNode* call, const char* name) {
+    if (!call || !name || !name[0] || !call->callee ||
+            call->callee->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    if (!id->name) return false;
+    const char* cname = jm_format_name("_js_%.*s",
+        (int)id->name->len, id->name->chars);
+    return strcmp(cname, name) == 0;
+}
+
+static bool jm_p6_expr_has_self_call(JsAstNode* expr, const char* self_name) {
+    if (!expr || !self_name || !self_name[0]) return false;
+    switch (expr->node_type) {
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)expr;
+        if (jm_p6_call_matches_name(call, self_name)) return true;
+        if (jm_p6_expr_has_self_call(call->callee, self_name)) return true;
+        JsAstNode* arg = call->arguments;
+        while (arg) {
+            if (jm_p6_expr_has_self_call(arg, self_name)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)expr;
+        return jm_p6_expr_has_self_call(bin->left, self_name) ||
+            jm_p6_expr_has_self_call(bin->right, self_name);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)expr;
+        return jm_p6_expr_has_self_call(un->operand, self_name);
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)expr;
+        return jm_p6_expr_has_self_call(cond->test, self_name) ||
+            jm_p6_expr_has_self_call(cond->consequent, self_name) ||
+            jm_p6_expr_has_self_call(cond->alternate, self_name);
+    }
+    default:
+        return false;
+    }
+}
+
+typedef struct JsP6InferenceContext {
+    JsFunctionNode* fn;
+    const String** param_bindings;
+    TypeId* param_types;
+    int param_count;
+    const char* self_name;
+    TypeId self_return_type;
+} JsP6InferenceContext;
+
+// p6 only tracks declarations directly in the function body.  Keep the
+// binding lookup on the AST so repeated P6 passes cannot retain a copied name
+// or accidentally confuse equal long-name prefixes.
+static TypeId jm_p6_local_type(const JsP6InferenceContext* p6,
+        JsIdentifierNode* identifier) {
+    if (!p6 || !p6->fn || !identifier || !identifier->entry ||
+            !p6->fn->body ||
+            p6->fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return LMD_TYPE_ANY;
+    }
+    uint32_t use_start = ts_node_is_null(identifier->node)
+        ? UINT32_MAX : ts_node_start_byte(identifier->node);
+    JsBlockNode* body = (JsBlockNode*)p6->fn->body;
+    TypeId found = LMD_TYPE_ANY;
+    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)stmt;
+        for (JsAstNode* node = declaration->declarations; node; node = node->next) {
+            if (node->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)node;
+            if (!declarator->id || declarator->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+            JsIdentifierNode* binding = (JsIdentifierNode*)declarator->id;
+            if (binding->entry != identifier->entry) continue;
+            if (!ts_node_is_null(declarator->node) &&
+                    ts_node_start_byte(declarator->node) > use_start) {
+                continue;
+            }
+            if (jm_p6_type_is_numeric(declarator->p6_type)) {
+                found = declarator->p6_type;
+            }
+        }
+    }
+    return found;
+}
+
+static TypeId jm_p6_expr_type(JsAstNode* expr, const JsP6InferenceContext* p6) {
+    if (!expr) return LMD_TYPE_ANY;
+    if (expr->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* lit = (JsLiteralNode*)expr;
+        if (lit->literal_type == JS_LITERAL_NUMBER)
+            return lit->is_bigint ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
+        // A boolean is LMD_TYPE_BOOL, not INT. Reporting INT here opted `let
+        // flag = false` into P6's native *numeric* local lane (jm_p6_local_walk
+        // admits only INT/FLOAT), so a later `flag = true` stored 1 and the
+        // value came back an INT-tagged number: `typeof` said "number" and
+        // `=== true` was false. Every other literal-typing site in the JS
+        // front end already answers BOOL.
+        if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
+        if (lit->literal_type == JS_LITERAL_STRING) return LMD_TYPE_STRING;
+        return LMD_TYPE_ANY;
+    }
+    if (expr->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)expr;
+        for (int i = 0; i < p6->param_count; i++)
+            if (jm_js_name_equal(id->name, p6->param_bindings[i])) return p6->param_types[i];
+        return jm_p6_local_type(p6, id);
+    }
+    if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)expr;
+        switch (bin->op) {
+        case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+        case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+            return LMD_TYPE_BOOL;
+        case JS_OP_DIV: case JS_OP_EXP:
+            return LMD_TYPE_FLOAT;
+        default: {
+            TypeId lt = jm_p6_expr_type(bin->left, p6);
+            TypeId rt = jm_p6_expr_type(bin->right, p6);
+            if (bin->op == JS_OP_BIT_AND || bin->op == JS_OP_BIT_OR || bin->op == JS_OP_BIT_XOR ||
+                bin->op == JS_OP_BIT_LSHIFT || bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT) {
+                // bigint bitwise/shift operators stay boxed; treating them as Number loses the BigInt lane.
+                if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
+                return LMD_TYPE_ANY;
+            }
+            if (bin->op == JS_OP_ADD) {
+                if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
+                if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt))
+                    return LMD_TYPE_FLOAT;
+                return LMD_TYPE_ANY;
+            }
+            // SUB, MUL, MOD produce JS Number values.
+            if (jm_p6_type_is_numeric(lt) && jm_p6_type_is_numeric(rt)) return LMD_TYPE_FLOAT;
+            return LMD_TYPE_ANY;
+        }}
+    }
+    if (expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+        JsUnaryNode* un = (JsUnaryNode*)expr;
+        if (un->op == JS_OP_BIT_NOT) return LMD_TYPE_FLOAT;
+        if (un->op == JS_OP_NOT) return LMD_TYPE_BOOL;
+        if (un->op == JS_OP_TYPEOF) return LMD_TYPE_STRING;
+        if (un->op == JS_OP_MINUS || un->op == JS_OP_PLUS)
+            return jm_p6_expr_type(un->operand, p6);
+        if (un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT)
+            return jm_p6_expr_type(un->operand, p6);
+    }
+    if (expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
+        JsConditionalNode* cond = (JsConditionalNode*)expr;
+        TypeId ct = jm_p6_expr_type(cond->consequent, p6);
+        TypeId at = jm_p6_expr_type(cond->alternate, p6);
+        if (ct == at) return ct;
+        if ((ct == LMD_TYPE_INT && at == LMD_TYPE_FLOAT) || (ct == LMD_TYPE_FLOAT && at == LMD_TYPE_INT))
+            return LMD_TYPE_FLOAT;
+        return LMD_TYPE_ANY;
+    }
+    if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)expr;
+        if (jm_p6_call_matches_name(call, p6->self_name)) return p6->self_return_type;
+    }
+    return LMD_TYPE_ANY;
+}
+
+static void jm_p6_collect_locals(JsP6InferenceContext* p6) {
+    if (!p6 || !p6->fn || !p6->fn->body ||
+            p6->fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    JsBlockNode* blk = (JsBlockNode*)p6->fn->body;
+
+    // clear every direct local before recomputing: P6 runs again after
+    // call-site narrowing, and a later declaration must not leak an old fact
+    // into an earlier initializer on the next pass.
+    for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)stmt;
+        for (JsAstNode* node = declaration->declarations; node; node = node->next) {
+            if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                ((JsVariableDeclaratorNode*)node)->p6_type = LMD_TYPE_ANY;
+            }
+        }
+    }
+
+    JsAstNode* stmt = blk->statements;
+    while (stmt) {
+        if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
+            JsAstNode* decl = vd->declarations;
+            while (decl) {
+                if (decl->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
+                    if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER && d->init) {
+                        TypeId init_type = jm_p6_expr_type(d->init, p6);
+                        if (init_type == LMD_TYPE_INT || init_type == LMD_TYPE_FLOAT) {
+                            d->p6_type = init_type;
+                        }
+                    }
+                }
+                decl = decl->next;
+            }
+        }
+        stmt = stmt->next;
+    }
+}
+
+// Walk return statements and resolve their types from AST-owned binding facts.
+static void jm_p6_return_walk(JsAstNode* node, const JsP6InferenceContext* p6,
+        TypeId* collected, int* count, int max_count, bool skip_self_unknown) {
+    if (!node || *count >= max_count) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        if (!ret->argument) { collected[(*count)++] = LMD_TYPE_NULL; return; }
+        TypeId t = jm_p6_expr_type(ret->argument, p6);
+        if (skip_self_unknown && t == LMD_TYPE_ANY &&
+                jm_p6_expr_has_self_call(ret->argument, p6->self_name)) {
+            return;
+        }
+        collected[(*count)++] = t;
+        return;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_p6_return_walk(s, p6, collected, count, max_count,
+                        skip_self_unknown); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        jm_p6_return_walk(n->consequent, p6, collected, count, max_count, skip_self_unknown);
+        jm_p6_return_walk(n->alternate, p6, collected, count, max_count, skip_self_unknown);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* n = (JsWhileNode*)node;
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* n = (JsForNode*)node;
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* n = (JsDoWhileNode*)node;
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* n = (JsTryNode*)node;
+        jm_p6_return_walk(n->block, p6, collected, count, max_count, skip_self_unknown);
+        jm_p6_return_walk(n->handler, p6, collected, count, max_count, skip_self_unknown);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* n = (JsCatchNode*)node;
+        jm_p6_return_walk(n->body, p6, collected, count, max_count, skip_self_unknown);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* n = (JsSwitchNode*)node;
+        JsAstNode* c = n->cases;
+        while (c) { jm_p6_return_walk(c, p6, collected, count, max_count,
+            skip_self_unknown); c = c->next; }
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
+        JsAstNode* s = n->consequent;
+        while (s) { jm_p6_return_walk(s, p6, collected, count, max_count,
+            skip_self_unknown); s = s->next; }
+        break;
+    }
+    default: break;
+    }
+}
+
+static TypeId jm_p6_unify_return_types(TypeId* collected, int count, bool* ok) {
+    TypeId unified = LMD_TYPE_ANY;
+    bool has_concrete = false;
+    bool has_any = false;
+    if (ok) *ok = true;
+
+    for (int i = 0; i < count; i++) {
+        if (collected[i] == LMD_TYPE_ANY) { has_any = true; continue; }
+        if (collected[i] == LMD_TYPE_NULL) continue;
+        if (!has_concrete) {
+            unified = collected[i];
+            has_concrete = true;
+        } else if (collected[i] != unified) {
+            if ((unified == LMD_TYPE_INT && collected[i] == LMD_TYPE_FLOAT) ||
+                (unified == LMD_TYPE_FLOAT && collected[i] == LMD_TYPE_INT)) {
+                unified = LMD_TYPE_FLOAT;
+            } else {
+                if (ok) *ok = false;
+                return LMD_TYPE_ANY;
+            }
+        }
+    }
+
+    if (has_concrete && !has_any) return unified;
+    return LMD_TYPE_ANY;
+}
+
+// P6: Re-infer the return type of a function using param types and local variable tracing.
+void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
+    JsFunctionNode* fn = fc->node;
+    if (!fn || !fn->body) return;
+    if (jm_p6_expr_has_bigint_literal(fn->body)) {
+        fc->return_type = LMD_TYPE_ANY;
+        return;
+    }
+
+    // Keep formal bindings as AST-owned names; fixed C-string copies made
+    // return inference sensitive to source-name length.
+    const String** param_bindings = (const String**)mem_calloc(
+        (size_t)fc->param_count, sizeof(*param_bindings), MEM_CAT_JS_RUNTIME);
+    int param_count = fc->param_count;
+    TypeId* param_types = (TypeId*)mem_calloc((size_t)param_count,
+        sizeof(*param_types), MEM_CAT_JS_RUNTIME);
+    if ((param_count > 0 && !param_bindings) ||
+            (param_count > 0 && !param_types)) {
+        if (param_bindings) mem_free(param_bindings);
+        if (param_types) mem_free(param_types);
+        return;
+    }
+    JsAstNode* pn = fn->params;
+    for (int i = 0; i < param_count; i++) {
+        param_bindings[i] = jm_param_binding_name(pn);
+        param_types[i] = jm_param_type(fc, i);
+        pn = pn ? pn->next : NULL;
+    }
+
+    JsP6InferenceContext p6 = {};
+    p6.fn = fn;
+    p6.param_bindings = param_bindings;
+    p6.param_types = param_types;
+    p6.param_count = param_count;
+    jm_p6_collect_locals(&p6);
+
+    const char* self_name = NULL;
+    if (fn->name) {
+        self_name = jm_format_name("_js_%.*s",
+            (int)fn->name->len, fn->name->chars);
+    }
+    p6.self_name = self_name;
+
+    // seed recursive return inference from concrete non-recursive returns, then
+    // re-walk all returns with that self type. This keeps `+` numeric only after
+    // recursive calls and the other operand are both proven numeric.
+    TypeId collected[32];
+    int count = 0;
+    p6.self_return_type = LMD_TYPE_ANY;
+    jm_p6_return_walk(fn->body, &p6, collected, &count, 32, true);
+
+    bool ok = true;
+    TypeId inferred = jm_p6_unify_return_types(collected, count, &ok);
+    if (!ok) {
+        mem_free(param_bindings);
+        mem_free(param_types);
+        return;
+    }
+
+    if (inferred != LMD_TYPE_ANY && self_name && self_name[0]) {
+        for (int pass = 0; pass < 4; pass++) {
+            count = 0;
+            p6.self_return_type = inferred;
+            jm_p6_return_walk(fn->body, &p6, collected, &count, 32, false);
+            if (count == 0) {
+                fc->return_type = LMD_TYPE_NULL;
+                mem_free(param_bindings);
+                mem_free(param_types);
+                return;
+            }
+            TypeId next = jm_p6_unify_return_types(collected, count, &ok);
+            if (!ok || next == LMD_TYPE_ANY) {
+                mem_free(param_bindings);
+                mem_free(param_types);
+                return;
+            }
+            if (next == inferred) break;
+            inferred = next;
+        }
+    } else {
+        count = 0;
+        p6.self_return_type = LMD_TYPE_ANY;
+        jm_p6_return_walk(fn->body, &p6, collected, &count, 32, false);
+        if (count == 0) {
+            fc->return_type = LMD_TYPE_NULL;
+            mem_free(param_bindings);
+            mem_free(param_types);
+            return;
+        }
+        inferred = jm_p6_unify_return_types(collected, count, &ok);
+        if (!ok || inferred == LMD_TYPE_ANY) {
+            mem_free(param_bindings);
+            mem_free(param_types);
+            return;
+        }
+    }
+
+    if (inferred != LMD_TYPE_ANY) {
+        fc->return_type = inferred;
+        log_info("P6 re-inferred return type for %s: %s",
+                 fc->name, inferred == LMD_TYPE_INT ? "INT" : inferred == LMD_TYPE_FLOAT ? "FLOAT" : "OTHER");
+    }
+    mem_free(param_bindings);
+    mem_free(param_types);
+}
+
+// ============================================================================
+// P6: Call-site type narrowing
+// After body-scan inference (Phase 1.75) and widening (Phase 1.76),
+// narrow ANY params to INT/FLOAT when ALL call sites agree on the type.
+// ============================================================================
+
+static TypeId jm_p6_binary_result_type(JsOperator op, TypeId left, TypeId right) {
+    switch (op) {
+    case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+    case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+        return LMD_TYPE_BOOL;
+    default:
+        break;
+    }
+    if (left == LMD_TYPE_DECIMAL || right == LMD_TYPE_DECIMAL) return LMD_TYPE_ANY;
+    switch (op) {
+    case JS_OP_ADD:
+        if (left == LMD_TYPE_STRING || right == LMD_TYPE_STRING) return LMD_TYPE_STRING;
+        if (jm_p6_type_is_numeric(left) && jm_p6_type_is_numeric(right)) return LMD_TYPE_FLOAT;
+        return LMD_TYPE_ANY;
+    case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
+        if (jm_p6_type_is_numeric(left) && jm_p6_type_is_numeric(right)) return LMD_TYPE_FLOAT;
+        return LMD_TYPE_ANY;
+    case JS_OP_DIV: case JS_OP_EXP:
+        return LMD_TYPE_FLOAT;
+    case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
+    case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
+        // bigint bitwise/shift operators stay boxed; treating them as Number loses the BigInt lane.
+        if (jm_p6_type_is_numeric(left) && jm_p6_type_is_numeric(right)) return LMD_TYPE_FLOAT;
+        return LMD_TYPE_ANY;
+    default:
+        return LMD_TYPE_ANY;
+    }
+}
+
+// Determine argument type statically from AST (no compiled scope needed).
+TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
+    if (!arg) return LMD_TYPE_ANY;
+    if (arg->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* lit = (JsLiteralNode*)arg;
+        if (lit->literal_type == JS_LITERAL_NUMBER) {
+            if (lit->is_bigint) return LMD_TYPE_DECIMAL;
+            return LMD_TYPE_FLOAT;
+        }
+        if (lit->literal_type == JS_LITERAL_STRING) return LMD_TYPE_STRING;
+        if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
+        return LMD_TYPE_ANY;
+    }
+    if (arg->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)arg;
+        // check module constants
+        if (mt->module_consts) {
+            JsModuleConstEntry lookup;
+            lookup.name = jm_format_name("_js_%.*s",
+                (int)id->name->len, id->name->chars);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (mc) {
+                if (mc->const_type == MCONST_INT) return LMD_TYPE_INT;
+                if (mc->const_type == MCONST_FLOAT) return LMD_TYPE_FLOAT;
+                if (mc->const_type == MCONST_MODVAR) {
+                    if (mc->modvar_type == LMD_TYPE_INT) return LMD_TYPE_INT;
+                    if (mc->modvar_type == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+                    if (mc->modvar_type == LMD_TYPE_DECIMAL) return LMD_TYPE_DECIMAL;
+                }
+            }
+        }
+        return LMD_TYPE_ANY;
+    }
+    if (arg->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)arg;
+        TypeId lt = jm_p6_static_arg_type(mt, bin->left);
+        TypeId rt = jm_p6_static_arg_type(mt, bin->right);
+        return jm_p6_binary_result_type(bin->op, lt, rt);
+    }
+    if (arg->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+        JsUnaryNode* un = (JsUnaryNode*)arg;
+        if (un->op == JS_OP_MINUS || un->op == JS_OP_SUB ||
+            un->op == JS_OP_PLUS || un->op == JS_OP_ADD)
+            return jm_p6_static_arg_type(mt, un->operand);
+        if (un->op == JS_OP_BIT_NOT) return LMD_TYPE_FLOAT;
+        if (un->op == JS_OP_TYPEOF) return LMD_TYPE_STRING;
+        if (un->op == JS_OP_NOT) return LMD_TYPE_BOOL;
+        return LMD_TYPE_ANY;
+    }
+    if (arg->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        // check if the callee has a known return type
+        JsCallNode* call = (JsCallNode*)arg;
+        JsFuncCollected* callee_fc = jm_find_collected_func_for_call(mt, call);
+        if (callee_fc && callee_fc->return_type != LMD_TYPE_ANY)
+            return callee_fc->return_type;
+    }
+    return LMD_TYPE_ANY;
+}
+
+static int jm_p6_param_index_for_identifier(JsAstNode* arg, JsFuncCollected* fc) {
+    if (!arg || arg->node_type != JS_AST_NODE_IDENTIFIER || !fc || !fc->node) return -1;
+    JsIdentifierNode* id = (JsIdentifierNode*)arg;
+    JsAstNode* p = fc->node->params;
+    for (int i = 0; p && i < fc->param_count; i++, p = p->next) {
+        if (jm_js_name_equal(id->name, jm_param_binding_name(p))) return i;
+    }
+    return -1;
+}
+
+static TypeId jm_p6_evidence_type(FnParamEvidence* e) {
+    if (!e || e->other_evidence > 0) return LMD_TYPE_ANY;
+    if (e->float_evidence > 0) return LMD_TYPE_FLOAT;
+    if (e->int_evidence > 0) return LMD_TYPE_FLOAT;
+    return LMD_TYPE_ANY;
+}
+
+static bool jm_p6_function_has_duplicate_param_names(JsFunctionNode* fn) {
+    if (!fn) return false;
+    int count = 0;
+    for (JsAstNode* p = fn->params; p; p = p->next) {
+        const String* pname = jm_param_binding_name(p);
+        JsAstNode* prior = fn->params;
+        for (int i = 0; prior && i < count; i++, prior = prior->next) {
+            if (jm_js_name_equal(pname, jm_param_binding_name(prior))) return true;
+        }
+        count++;
+    }
+    return false;
+}
+
+static bool jm_p6_function_allows_native_specialization(JsFuncCollected* fc) {
+    if (!fc || !fc->node) return false;
+    JsFunctionNode* fn = fc->node;
+    if (jm_p6_function_has_duplicate_param_names(fn)) return false;
+    if (fn->is_arrow && fn->body &&
+        fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) return false;
+    return true;
+}
+
+static TypeId jm_p6_arg_type_with_evidence(JsMirTranspiler* mt, JsAstNode* arg,
+                                           JsFuncCollected* fc,
+                                           FnParamEvidence* evidence_for_func) {
+    int param_index = jm_p6_param_index_for_identifier(arg, fc);
+    if (param_index >= 0) {
+        TypeId evidence_type = jm_p6_evidence_type(&evidence_for_func[param_index]);
+        if (evidence_type != LMD_TYPE_ANY) return evidence_type;
+    }
+    if (!arg || arg->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return jm_p6_static_arg_type(mt, arg);
+    }
+
+    JsBinaryNode* bin = (JsBinaryNode*)arg;
+    TypeId lt = jm_p6_arg_type_with_evidence(mt, bin->left, fc, evidence_for_func);
+    TypeId rt = jm_p6_arg_type_with_evidence(mt, bin->right, fc, evidence_for_func);
+    TypeId result = jm_p6_binary_result_type(bin->op, lt, rt);
+    return result != LMD_TYPE_ANY ? result : jm_p6_static_arg_type(mt, arg);
+}
+
+// Per-function, per-param call-site evidence
+// Walk AST collecting call-site argument types for narrowing
+void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
+                               FnParamEvidence** evidence) {
+    if (!node || !evidence) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        JsFuncCollected* callee_fc = jm_find_collected_func_for_call(mt, call);
+        if (callee_fc) {
+            int fi = (int)(callee_fc - mt->func_entries);
+            if (fi >= 0 && fi < mt->func_count && evidence[fi]) {
+                JsAstNode* arg = call->arguments;
+                for (int pi = 0; pi < callee_fc->param_count; pi++) {
+                    TypeId at = arg ? jm_p6_arg_type_with_evidence(mt, arg, callee_fc, evidence[fi]) : LMD_TYPE_ANY;
+                    // boolean arguments must stay boxed; treating them as INT makes
+                    // native conditions read boxed boolean tags as nonzero numbers.
+                    if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
+                        evidence[fi][pi].float_evidence++;
+                    else
+                        evidence[fi][pi].other_evidence++;
+                    if (arg) arg = arg->next;
+                }
+            }
+        }
+        // recurse into arguments
+        JsAstNode* a = call->arguments;
+        while (a) { jm_p6_narrow_walk(mt, a, evidence); a = a->next; }
+        jm_p6_narrow_walk(mt, call->callee, evidence);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_p6_narrow_walk(mt, bin->left, evidence);
+        jm_p6_narrow_walk(mt, bin->right, evidence);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        jm_p6_narrow_walk(mt, un->operand, evidence);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        jm_p6_narrow_walk(mt, asgn->right, evidence);
+        jm_p6_narrow_walk(mt, asgn->left, evidence);
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        jm_p6_narrow_walk(mt, mem->object, evidence);
+        if (mem->computed) jm_p6_narrow_walk(mt, mem->property, evidence);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_p6_narrow_walk(mt, cond->test, evidence);
+        jm_p6_narrow_walk(mt, cond->consequent, evidence);
+        jm_p6_narrow_walk(mt, cond->alternate, evidence);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        jm_p6_narrow_walk(mt, ret->argument, evidence);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        JsAstNode* d = vd->declarations;
+        while (d) { jm_p6_narrow_walk(mt, d, evidence); d = d->next; }
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
+        jm_p6_narrow_walk(mt, vd->init, evidence);
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        jm_p6_narrow_walk(mt, es->expression, evidence);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_p6_narrow_walk(mt, ifn->test, evidence);
+        jm_p6_narrow_walk(mt, ifn->consequent, evidence);
+        jm_p6_narrow_walk(mt, ifn->alternate, evidence);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_p6_narrow_walk(mt, s, evidence); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        jm_p6_narrow_walk(mt, w->test, evidence);
+        jm_p6_narrow_walk(mt, w->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        jm_p6_narrow_walk(mt, f->init, evidence);
+        jm_p6_narrow_walk(mt, f->test, evidence);
+        jm_p6_narrow_walk(mt, f->update, evidence);
+        jm_p6_narrow_walk(mt, f->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* fin = (JsForInNode*)node;
+        jm_p6_narrow_walk(mt, fin->right, evidence);
+        jm_p6_narrow_walk(mt, fin->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        jm_p6_narrow_walk(mt, sw->discriminant, evidence);
+        JsAstNode* c = sw->cases;
+        while (c) { jm_p6_narrow_walk(mt, c, evidence); c = c->next; }
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        jm_p6_narrow_walk(mt, sc->test, evidence);
+        JsAstNode* s = sc->consequent;
+        while (s) { jm_p6_narrow_walk(mt, s, evidence); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        jm_p6_narrow_walk(mt, t->block, evidence);
+        jm_p6_narrow_walk(mt, t->handler, evidence);
+        jm_p6_narrow_walk(mt, t->finalizer, evidence);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        jm_p6_narrow_walk(mt, cc->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dw = (JsDoWhileNode*)node;
+        jm_p6_narrow_walk(mt, dw->body, evidence);
+        jm_p6_narrow_walk(mt, dw->test, evidence);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* arr = (JsArrayNode*)node;
+        JsAstNode* e = arr->elements;
+        while (e) { jm_p6_narrow_walk(mt, e, evidence); e = e->next; }
+        break;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* obj = (JsObjectNode*)node;
+        JsAstNode* p = obj->properties;
+        while (p) { jm_p6_narrow_walk(mt, p, evidence); p = p->next; }
+        break;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)node;
+        jm_p6_narrow_walk(mt, prop->value, evidence);
+        break;
+    }
+    case JS_AST_NODE_TEMPLATE_LITERAL: {
+        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
+        if (tl->expressions) {
+            JsAstNode* e = tl->expressions;
+            while (e) { jm_p6_narrow_walk(mt, e, evidence); e = e->next; }
+        }
+        break;
+    }
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* ne = (JsCallNode*)node;
+        JsAstNode* a = ne->arguments;
+        while (a) { jm_p6_narrow_walk(mt, a, evidence); a = a->next; }
+        break;
+    }
+    case JS_AST_NODE_THROW_STATEMENT: {
+        JsThrowNode* th = (JsThrowNode*)node;
+        jm_p6_narrow_walk(mt, th->argument, evidence);
+        break;
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT: {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
+        jm_p6_narrow_walk(mt, sp->argument, evidence);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+// ============================================================================
 // Phase 3.5: Call-site type propagation
 // A contradictory argument shape no longer revokes an inferred native body: its
 // boxed entry guards the raw call and runs complete boxed lowering on a miss.
@@ -4721,6 +5563,120 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
+    // Phase 1.77: P6 call-site narrowing — for params still ANY after body-scan,
+    // narrow to INT/FLOAT when ALL call sites pass compatible types.
+    if (mt->func_count > 0) {
+        // allocate evidence rows to each function's actual formal count;
+        // the old 16-column matrix was only a transient optimization cap.
+        FnParamEvidence** evi = (FnParamEvidence**)mem_calloc(
+            (size_t)mt->func_count, sizeof(*evi), MEM_CAT_JS_RUNTIME);
+        if (evi) {
+            for (int i = 0; i < mt->func_count; i++) {
+                if (mt->func_entries[i].param_count > 0) {
+                    evi[i] = (FnParamEvidence*)mem_calloc(
+                        (size_t)mt->func_entries[i].param_count,
+                        sizeof(FnParamEvidence), MEM_CAT_JS_RUNTIME);
+                }
+            }
+        }
+        // Program bodies are linked statement lists; walking only the head
+        // misses later top-level calls that seed recursive parameter types.
+        for (JsAstNode* top = (JsAstNode*)program->body; top; top = top->next) {
+            jm_p6_narrow_walk(mt, top, evi);
+        }
+        // walk all function bodies
+        for (int i = 0; i < mt->func_count; i++) {
+            JsFuncCollected* fc = &mt->func_entries[i];
+            if (fc->node && fc->node->body)
+                jm_p6_narrow_walk(mt, (JsAstNode*)fc->node->body, evi);
+        }
+        // apply narrowing
+        for (int i = 0; i < mt->func_count; i++) {
+            JsFuncCollected* fc = &mt->func_entries[i];
+            if (fc->node && (fc->node->is_generator || fc->node->is_async)) continue;
+            if (fc->has_scope_env) continue; // params may be captured by child closures — don't narrow
+            bool narrowed = false;
+            for (int p = 0; p < fc->param_count; p++) {
+                if (jm_param_type(fc, p) != LMD_TYPE_ANY || !evi || !evi[i]) continue;
+                FnParamEvidence* e = &evi[i][p];
+                int total = e->int_evidence + e->float_evidence + e->other_evidence;
+                if (total == 0) continue; // never called
+                if (e->other_evidence > 0) continue; // something non-numeric passed
+                if (e->float_evidence > 0 && e->int_evidence == 0) {
+                    jm_set_param_type(fc, p, LMD_TYPE_FLOAT);
+                    narrowed = true;
+                    log_info("P6 narrow %s param[%d] → FLOAT (calls: %d int, %d float, %d other)",
+                             fc->name, p, e->int_evidence, e->float_evidence, e->other_evidence);
+                } else {
+                    // mixed int+float → narrow to FLOAT (int is promotable)
+                    jm_set_param_type(fc, p, LMD_TYPE_FLOAT);
+                    narrowed = true;
+                    log_info("P6 narrow %s param[%d] → FLOAT (mixed: %d int, %d float)",
+                             fc->name, p, e->int_evidence, e->float_evidence);
+                }
+            }
+            if (narrowed) {
+                // re-infer return type now that params are typed
+                jm_p6_reinfer_return_type(fc);
+                // recompute native eligibility
+                bool eligible = (fc->capture_count == 0 &&
+                                 !(fc->node && fc->node->is_generator) &&
+                                 !(fc->node && fc->node->is_async) &&
+                                 // arguments object setup lives in the boxed prologue;
+                                 // P6 must not re-enable native after the first gate vetoed it.
+                                 !fc->uses_arguments &&
+                                 jm_p6_function_allows_native_specialization(fc) &&
+                                 !fc->has_non_simple_params);
+                if (getenv("LAMBDA_AST_TUNE_NO_NATIVE_BODIES")) eligible = false;
+                bool has_native_param = false;
+                if (eligible) {
+                    for (int p = 0; p < fc->param_count; p++) {
+                        TypeId pt = jm_param_type(fc, p);
+                        if (pt == LMD_TYPE_INT || pt == LMD_TYPE_FLOAT) {
+                            has_native_param = true;
+                            continue;
+                        }
+                        if (pt != LMD_TYPE_ANY) {
+                            eligible = false; break;
+                        }
+                    }
+                    if (eligible) {
+                        TypeId rt = fc->return_type;
+                        if (rt != LMD_TYPE_INT && rt != LMD_TYPE_FLOAT)
+                            eligible = false;
+                    }
+                }
+                if (!has_native_param) eligible = false;
+                if (eligible && !fc->has_native_version) {
+                    fc->has_native_version = true;
+                    fc->native_return_kind = fc->return_type == LMD_TYPE_FLOAT
+                        ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
+                    log_info("P6 enabled native version for %s (return_type=%d)", fc->name, fc->return_type);
+                } else if (!eligible) {
+                    fc->has_native_version = false;
+                    fc->native_func_item = 0;
+                    fc->native_return_kind = NATIVE_RETURN_NONE;
+                }
+                // P6 can make recursive accumulator functions native-eligible;
+                // recompute TCO after narrowing so deep tail calls stay loops.
+                bool all_native_params = has_native_param;
+                for (int p = 0; p < fc->param_count; p++) {
+                    if (jm_param_type(fc, p) == LMD_TYPE_ANY) {
+                        all_native_params = false;
+                        break;
+                    }
+                }
+                fc->is_tco_eligible = eligible && all_native_params &&
+                    jm_has_tail_call(fc->node->body, fc);
+            }
+        }
+        if (evi) {
+            for (int i = 0; i < mt->func_count; i++) {
+                if (evi[i]) mem_free(evi[i]);
+            }
+            mem_free(evi);
+        }
+    }
         fc->boxed_return_scalar_class = jm_infer_boxed_return_scalar_class(fc);
         FnAnalysis* analysis = &fc->analysis;
         analysis->variant_count = 0;

@@ -2,6 +2,7 @@
 #include "runtime-state.h"
 #include "transpiler.hpp"
 #include "heap_api.h"
+#include "side_stack.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
 
@@ -22,6 +23,15 @@ bool eval_context_thread_initialize(EvalContext* owner) {
         return false;
     }
     context = owner;
+    // The side-stack regions are thread-local while EvalContext is reusable;
+    // rebinding here prevents a context handoff from pairing stale pointers
+    // with the new thread's uninitialized native root region.
+    if (!lambda_side_stack_bind_for((Context*)owner)) {
+        context = nullptr;
+        log_error("eval-thread-init: failed to bind side stack for owner=%p",
+                  (void*)owner);
+        return false;
+    }
     return true;
 }
 
