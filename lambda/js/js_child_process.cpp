@@ -82,24 +82,24 @@ static Item make_uv_spawn_error(int status, const char* file, Item spawnargs) {
     snprintf(msg, sizeof(msg), "spawn %s %s", file ? file : "", code);
 
     Item err = js_new_error(make_string_item(msg));
-    js_set_key_default(err, make_string_item("code"), make_string_item(code));
-    js_set_key_default(err, make_string_item("errno"), (Item){.item = i2it(status)});
+    js_set_key_cstr(err, "code", make_string_item(code));
+    js_set_key_cstr(err, "errno", (Item){.item = i2it(status)});
     char syscall[512];
     snprintf(syscall, sizeof(syscall), "spawn %s", file ? file : "");
-    js_set_key_default(err, make_string_item("syscall"), make_string_item(syscall));
-    if (file) js_set_key_default(err, make_string_item("path"), make_string_item(file));
-    js_set_key_default(err, make_string_item("spawnargs"), spawnargs);
+    js_set_key_cstr(err, "syscall", make_string_item(syscall));
+    if (file) js_set_key_cstr(err, "path", make_string_item(file));
+    js_set_key_cstr(err, "spawnargs", spawnargs);
     (void)errstr;
     return err;
 }
 
 static void emit_shell_args_warning(void) {
     Item warning = js_new_object();
-    js_set_key_default(warning, make_string_item("name"), make_string_item("DeprecationWarning"));
-    js_set_key_default(warning, make_string_item("message"), make_string_item(
+    js_set_key_cstr(warning, "name", make_string_item("DeprecationWarning"));
+    js_set_key_cstr(warning, "message", make_string_item(
         "Passing args to a child process with shell option true can lead to security "
         "vulnerabilities, as the arguments are not escaped, only concatenated."));
-    js_set_key_default(warning, make_string_item("code"), make_string_item("DEP0190"));
+    js_set_key_cstr(warning, "code", make_string_item("DEP0190"));
     js_process_emit(make_string_item("warning"), warning);
 }
 
@@ -354,8 +354,7 @@ static void maybe_complete(JsChildProcess* cp) {
             snprintf(emsg, sizeof(emsg), "%s maxBuffer length exceeded",
                      cp->max_buffer_stream[0] ? cp->max_buffer_stream : "stdout");
             err = js_new_error_with_name(make_string_item("RangeError"), make_string_item(emsg));
-            js_set_key_default(err, make_string_item("code"),
-                            make_string_item("ERR_CHILD_PROCESS_STDIO_MAXBUFFER"));
+            js_set_key_cstr(err, "code", make_string_item("ERR_CHILD_PROCESS_STDIO_MAXBUFFER"));
         } else if (cp->exit_code != 0) {
             char emsg[1024];
             if (cp->stderr_buf && cp->stderr_len > 0) {
@@ -386,10 +385,10 @@ static void maybe_complete(JsChildProcess* cp) {
 static Item child_abort_error(Item reason) {
     Item err = js_new_error_with_name(make_string_item("AbortError"),
                                       make_string_item("The operation was aborted"));
-    js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    js_set_key_cstr(err, "name", make_string_item("AbortError"));
+    js_set_key_cstr(err, "code", make_string_item("ABORT_ERR"));
     if (!is_nullish_item(reason)) {
-        js_set_key_default(err, make_string_item("cause"), reason);
+        js_set_key_cstr(err, "cause", reason);
     }
     return err;
 }
@@ -403,7 +402,7 @@ static Item child_abort_with_env(Item env_item, Item event_item) {
     }
     cp->aborted = true;
     cp->abort_reason = is_object_item(cp->abort_signal)
-        ? js_get_key_default(cp->abort_signal, make_string_item("reason"))
+        ? js_get_key_cstr(cp->abort_signal, "reason")
         : make_js_undefined();
     // AbortSignal owns cancellation for exec(); without killing the shell child,
     // long-running commands stay as refed UV_PROCESS handles until the drain watchdog.
@@ -414,14 +413,14 @@ JS_FORWARD_STATIC_ITEM(child_abort_later, (Item env_item), child_abort_with_env,
 
 static bool child_signal_is_abort_signal(Item signal) {
     if (!is_object_item(signal)) return false;
-    Item add_listener = js_get_key_default(signal, make_string_item("addEventListener"));
-    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
+    Item add_listener = js_get_key_cstr(signal, "addEventListener");
+    Item aborted = js_get_key_cstr(signal, "aborted");
     return is_callable(add_listener) && get_type_id(aborted) == LMD_TYPE_BOOL;
 }
 
 static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     if (!cp || !is_object_item(options)) return;
-    Item signal = js_get_key_default(options, make_string_item("signal"));
+    Item signal = js_get_key_cstr(options, "signal");
     if (is_nullish_item(signal)) return;
     cp->abort_signal = signal;
     cp->abort_kill_signal = SIGTERM;
@@ -430,11 +429,11 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     cp->abort_env = abort_env;
     Item listener = js_new_native_closure(child_abort_with_env, 1, abort_env, 1);
     cp->abort_listener = listener;
-    Item add_listener = js_get_key_default(signal, make_string_item("addEventListener"));
+    Item add_listener = js_get_key_cstr(signal, "addEventListener");
     Item args[2] = {make_string_item("abort"), listener};
     js_call_function(add_listener, signal, args, 2);
     js_microtask_flush();
-    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
+    Item aborted = js_get_key_cstr(signal, "aborted");
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
         Item abort_tick = js_new_native_closure(child_abort_later, 0, abort_env, 1);
         js_next_tick_enqueue(abort_tick);
@@ -443,7 +442,7 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
 
 static void child_remove_abort_signal(JsChildProcess* cp) {
     if (!cp || !is_object_item(cp->abort_signal) || !is_callable(cp->abort_listener)) return;
-    Item remove_listener = js_get_key_default(cp->abort_signal, make_string_item("removeEventListener"));
+    Item remove_listener = js_get_key_cstr(cp->abort_signal, "removeEventListener");
     if (is_callable(remove_listener)) {
         Item args[2] = {make_string_item("abort"), cp->abort_listener};
         js_call_function(remove_listener, cp->abort_signal, args, 2);
@@ -557,7 +556,7 @@ static Item validate_exec_args(Item rest_args, Item* out_command, Item* out_opti
         return js_throw_invalid_arg_type("options", "object", second);
     }
     if (is_object_item(options)) {
-        JS_ASSIGN_OR_RETURN(signal, js_get_key_default(options, make_string_item("signal")));
+        JS_ASSIGN_OR_RETURN(signal, js_get_key_cstr(options, "signal"));
         if (!is_nullish_item(signal) && !child_signal_is_abort_signal(signal)) {
             return js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
         }
@@ -728,19 +727,18 @@ static Item spawn_signal_name_item(int signal_number);
 #define CP_STDIO_HANDLE 5
 
 static void spawn_set_connected(Item obj, bool connected) {
-    js_set_key_default(obj, make_string_item("connected"),
-                    (Item){.item = b2it(connected)});
+    js_set_key_cstr(obj, "connected", (Item){.item = b2it(connected)});
 }
 
 static Item spawn_listener_callback(Item record) {
     if (is_callable(record)) return record;
-    if (is_object_item(record)) return js_get_key_default(record, make_string_item("listener"));
+    if (is_object_item(record)) return js_get_key_cstr(record, "listener");
     return make_js_undefined();
 }
 
 static bool spawn_listener_once(Item record) {
     if (!is_object_item(record)) return false;
-    Item once = js_get_key_default(record, make_string_item("once"));
+    Item once = js_get_key_cstr(record, "once");
     return once.item == ITEM_TRUE || once.item == b2it(true);
 }
 
@@ -805,8 +803,8 @@ static void spawn_queue_ipc_message(Item obj, Item message, Item handle) {
         js_set_key_default(obj, key, pending);
     }
     Item entry = js_new_object();
-    js_set_key_default(entry, make_string_item("message"), message);
-    js_set_key_default(entry, make_string_item("handle"), handle);
+    js_set_key_cstr(entry, "message", message);
+    js_set_key_cstr(entry, "handle", handle);
     js_array_push(pending, entry);
 }
 
@@ -834,8 +832,8 @@ static void spawn_flush_queued_ipc_messages(Item obj) {
     int64_t len = js_array_length(pending);
     for (int64_t i = 0; i < len; i++) {
         Item entry = js_elements_get_int(pending, i);
-        Item message = js_get_key_default(entry, make_string_item("message"));
-        Item handle = js_get_key_default(entry, make_string_item("handle"));
+        Item message = js_get_key_cstr(entry, "message");
+        Item handle = js_get_key_cstr(entry, "handle");
         spawn_emit_ipc_message_or_queue(obj, message, handle);
     }
 }
@@ -951,7 +949,7 @@ static void schedule_spawn_event(Item obj) {
 
 static Item make_ipc_channel_closed_error(void) {
     Item err = js_new_error(make_string_item("Channel closed"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ERR_IPC_CHANNEL_CLOSED"));
+    js_set_key_cstr(err, "code", make_string_item("ERR_IPC_CHANNEL_CLOSED"));
     return err;
 }
 
@@ -982,8 +980,7 @@ static Item spawn_signal_name_item(int signal_number) {
 
 static void spawn_set_process_signal_state(JsSpawnProcess* sp, int signal_number) {
     if (!sp) return;
-    js_set_key_default(sp->js_object, make_string_item("signalCode"),
-                    signal_number == 0 ? ItemNull : spawn_signal_name_item(signal_number));
+    js_set_key_cstr(sp->js_object, "signalCode", signal_number == 0 ? ItemNull : spawn_signal_name_item(signal_number));
 }
 
 static Item spawn_kill_with_env(Item env_item, Item signal_item) {
@@ -995,7 +992,7 @@ static Item spawn_kill_with_env(Item env_item, Item signal_item) {
     int signal_number = spawn_signal_number(signal_item);
     int r = uv_process_kill(&sp->process, signal_number);
     if (r == 0) {
-        js_set_key_default(sp->js_object, make_string_item("killed"), (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(sp->js_object, "killed", (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = b2it(r == 0)};
 }
@@ -1251,7 +1248,7 @@ static Item spawn_abort_with_env(Item env_item, Item event_item) {
         return make_js_undefined();
     }
     Item reason = is_object_item(sp->abort_signal)
-        ? js_get_key_default(sp->abort_signal, make_string_item("reason"))
+        ? js_get_key_cstr(sp->abort_signal, "reason")
         : make_js_undefined();
     uv_process_kill(&sp->process, sp->abort_kill_signal ? sp->abort_kill_signal : SIGTERM);
     spawn_emit_abort_error_once(sp, reason);
@@ -1261,11 +1258,11 @@ JS_FORWARD_STATIC_ITEM(spawn_abort_later, (Item env_item), spawn_abort_with_env,
 
 static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item options) {
     if (!sp || !is_object_item(options)) return;
-    Item signal = js_get_key_default(options, make_string_item("signal"));
+    Item signal = js_get_key_cstr(options, "signal");
     if (!is_object_item(signal)) return;
 
     sp->abort_signal = signal;
-    sp->abort_kill_signal = spawn_signal_number(js_get_key_default(options, make_string_item("killSignal")));
+    sp->abort_kill_signal = spawn_signal_number(js_get_key_cstr(options, "killSignal"));
 
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
@@ -1273,14 +1270,14 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
     Item listener = js_new_native_closure(spawn_abort_with_env, 1, abort_env, 1);
     sp->abort_listener = listener;
 
-    Item add_listener = js_get_key_default(signal, make_string_item("addEventListener"));
+    Item add_listener = js_get_key_cstr(signal, "addEventListener");
     if (is_callable(add_listener)) {
         Item args[2] = {make_string_item("abort"), listener};
         js_call_function(add_listener, signal, args, 2);
         js_microtask_flush();
     }
 
-    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
+    Item aborted = js_get_key_cstr(signal, "aborted");
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
         Item abort_tick = js_new_native_closure(spawn_abort_later, 0, abort_env, 1);
         js_next_tick_enqueue(abort_tick);
@@ -1290,7 +1287,7 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
 
 static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
     if (!sp || !is_object_item(sp->abort_signal) || !is_callable(sp->abort_listener)) return;
-    Item remove_listener = js_get_key_default(sp->abort_signal, make_string_item("removeEventListener"));
+    Item remove_listener = js_get_key_cstr(sp->abort_signal, "removeEventListener");
     if (is_callable(remove_listener)) {
         Item args[2] = {make_string_item("abort"), sp->abort_listener};
         js_call_function(remove_listener, sp->abort_signal, args, 2);
@@ -1306,9 +1303,8 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
     Item wire_message = message;
     if (send_handle) {
         wire_message = js_new_object();
-        js_set_key_default(wire_message, make_string_item("__lambda_ipc_has_handle__"),
-                        (Item){.item = ITEM_TRUE});
-        js_set_key_default(wire_message, make_string_item("__lambda_ipc_payload__"), message);
+        js_set_key_cstr(wire_message, "__lambda_ipc_has_handle__", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(wire_message, "__lambda_ipc_payload__", message);
     }
     Item json = js_json_stringify(wire_message);
     if (item_is_error(json) || get_type_id(json) != LMD_TYPE_STRING) return false;
@@ -1383,7 +1379,7 @@ static uv_stream_t* spawn_duplicate_tcp_send_handle(Item handle_item) {
 static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
     if (!sp || !sp->ipc_pipe_active || uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) return;
     Item control = js_new_object();
-    js_set_key_default(control, make_string_item("__lambda_ipc_disconnect__"), (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(control, "__lambda_ipc_disconnect__", (Item){.item = ITEM_TRUE});
     Item json = js_json_stringify(control);
     if (!item_is_error(json) && get_type_id(json) == LMD_TYPE_STRING) {
         String* s = it2s(json);
@@ -1611,8 +1607,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     sp->process_exited = true;
     spawn_drain_transferred_connections(sp);
     spawn_remove_abort_signal(sp);
-    js_set_key_default(sp->js_object, make_string_item("exitCode"),
-                    term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);
+    js_set_key_cstr(sp->js_object, "exitCode", term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);
     spawn_set_process_signal_state(sp, term_signal);
 
     Item args[2] = {
@@ -1654,7 +1649,7 @@ static Item js_spawn_stream_resume(void) {
 static Item spawn_stream_pipe_on_data(Item env_item, Item chunk) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item dest = env ? env[0] : make_js_undefined();
-    Item write = js_get_key_default(dest, make_string_item("write"));
+    Item write = js_get_key_cstr(dest, "write");
     if (is_callable(write)) {
         js_call_function(write, dest, &chunk, 1);
         js_microtask_flush();
@@ -1667,7 +1662,7 @@ static Item spawn_stream_pipe_on_end(Item env_item) {
     Item dest = env ? env[0] : make_js_undefined();
     bool should_end = !env || env[1].item != ITEM_FALSE;
     if (should_end) {
-        Item end = js_get_key_default(dest, make_string_item("end"));
+        Item end = js_get_key_cstr(dest, "end");
         if (is_callable(end)) {
             js_call_function(end, dest, NULL, 0);
             js_microtask_flush();
@@ -1685,7 +1680,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
 
     Item should_end = (Item){.item = ITEM_TRUE};
     if (is_object_item(options)) {
-        Item end_opt = js_get_key_default(options, make_string_item("end"));
+        Item end_opt = js_get_key_cstr(options, "end");
         if (end_opt.item == ITEM_FALSE) should_end = (Item){.item = ITEM_FALSE};
     }
     Item* end_env = js_alloc_env(2);
@@ -1713,8 +1708,8 @@ static Item make_stream_object(void) {
 static Item spawn_make_listener_record(Item callback, bool once) {
     if (!once) return callback;
     Item record = js_new_object();
-    js_set_key_default(record, make_string_item("listener"), callback);
-    js_set_key_default(record, make_string_item("once"), (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(record, "listener", callback);
+    js_set_key_cstr(record, "once", (Item){.item = ITEM_TRUE});
     return record;
 }
 
@@ -1766,10 +1761,10 @@ JS_FORWARD_ITEM(js_spawn_stream_on, (Item event_item, Item callback), spawn_add_
 JS_FORWARD_ITEM(js_spawn_stream_once, (Item event_item, Item callback), spawn_add_listener, (js_get_this(), event_item, callback, true))
 
 static void spawn_mark_stream_destroyed(Item stream_obj) {
-    js_set_key_default(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(stream_obj, make_string_item("closed"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(stream_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(stream_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(stream_obj, "destroyed", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(stream_obj, "closed", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(stream_obj, "readable", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(stream_obj, "writable", (Item){.item = ITEM_FALSE});
 }
 
 static void spawn_destroy_stdio_pipe(JsSpawnProcess* sp, int kind, Item stream_obj) {
@@ -1814,14 +1809,11 @@ static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
     env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     env[1] = (Item){.item = i2it(kind)};
     if (out_env) *out_env = env;
-    js_set_key_default(stream_obj, make_string_item("destroy"),
-                    js_new_native_closure(js_spawn_stream_destroy, 1, env, 2));
-    js_set_key_default(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(stream_obj, make_string_item("closed"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
-                    (Item){.item = i2it((int64_t)(uintptr_t)sp)});
-    js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
-                    (Item){.item = i2it(kind)});
+    js_set_key_cstr(stream_obj, "destroy", js_new_native_closure(js_spawn_stream_destroy, 1, env, 2));
+    js_set_key_cstr(stream_obj, "destroyed", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(stream_obj, "closed", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(stream_obj, "__lambda_spawn_stdio_owner__", (Item){.item = i2it((int64_t)(uintptr_t)sp)});
+    js_set_key_cstr(stream_obj, "__lambda_spawn_stdio_kind__", (Item){.item = i2it(kind)});
 }
 
 static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp) {
@@ -1830,17 +1822,15 @@ static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp) {
     for (int i = 0; i < 3; i++) {
         Item stream_obj = js_get_key_default(sp->js_object, make_string_item(names[i]));
         if (!is_object_item(stream_obj)) continue;
-        js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
-                        make_js_undefined());
-        js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
-                        make_js_undefined());
+        js_set_key_cstr(stream_obj, "__lambda_spawn_stdio_owner__", make_js_undefined());
+        js_set_key_cstr(stream_obj, "__lambda_spawn_stdio_kind__", make_js_undefined());
     }
 }
 
 static void spawn_resume_stdio_stream(Item stream_obj) {
     if (!is_object_item(stream_obj)) return;
-    Item owner_item = js_get_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"));
-    Item kind_item = js_get_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"));
+    Item owner_item = js_get_key_cstr(stream_obj, "__lambda_spawn_stdio_owner__");
+    Item kind_item = js_get_key_cstr(stream_obj, "__lambda_spawn_stdio_kind__");
     if (get_type_id(owner_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT) return;
     JsSpawnProcess* owner = (JsSpawnProcess*)(uintptr_t)it2i(owner_item);
     int kind = (int)it2i(kind_item);
@@ -1865,8 +1855,8 @@ static int spawn_dup_uv_fd(const uv_handle_t* handle) {
 
 static int spawn_dup_stdio_handle_fd(Item handle_item) {
     if (!is_object_item(handle_item)) return js_net_dup_ipc_stdio_fd(handle_item);
-    Item owner_item = js_get_key_default(handle_item, make_string_item("__lambda_spawn_stdio_owner__"));
-    Item kind_item = js_get_key_default(handle_item, make_string_item("__lambda_spawn_stdio_kind__"));
+    Item owner_item = js_get_key_cstr(handle_item, "__lambda_spawn_stdio_owner__");
+    Item kind_item = js_get_key_cstr(handle_item, "__lambda_spawn_stdio_kind__");
     if (get_type_id(owner_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT) {
         return js_net_dup_ipc_stdio_fd(handle_item);
     }
@@ -1935,7 +1925,7 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
         return validation_error;
     }
 
-    Item connected = js_get_key_default(self, make_string_item("connected"));
+    Item connected = js_get_key_cstr(self, "connected");
     if (connected.item == ITEM_FALSE || !sp || !sp->ipc_pipe_active) {
         Item err = make_ipc_channel_closed_error();
         if (is_callable(cb)) schedule_spawn_send_callback(cb, err);
@@ -1952,7 +1942,7 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
             return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
         }
         Item keep_open = is_object_item(options)
-            ? js_get_key_default(options, make_string_item("keepOpen"))
+            ? js_get_key_cstr(options, "keepOpen")
             : make_js_undefined();
         close_send_handle_after = keep_open.item != ITEM_TRUE && keep_open.item != b2it(true);
         if (!close_send_handle_after) {
@@ -1986,7 +1976,7 @@ extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item
         return validation_error;
     }
 
-    Item connected = js_get_key_default(self, make_string_item("connected"));
+    Item connected = js_get_key_cstr(self, "connected");
     if (connected.item == ITEM_FALSE) {
         Item err = make_ipc_channel_closed_error();
         if (is_callable(cb)) schedule_spawn_send_callback(cb, err);
@@ -2027,16 +2017,16 @@ static Item make_child_process_object(void) {
     js_array_push(stdio, stdout_obj);
     js_array_push(stdio, stderr_obj);
 
-    js_set_key_default(obj, make_string_item("stdin"), stdin_obj);
-    js_set_key_default(obj, make_string_item("stdout"), stdout_obj);
-    js_set_key_default(obj, make_string_item("stderr"), stderr_obj);
-    js_set_key_default(obj, make_string_item("stdio"), stdio);
+    js_set_key_cstr(obj, "stdin", stdin_obj);
+    js_set_key_cstr(obj, "stdout", stdout_obj);
+    js_set_key_cstr(obj, "stderr", stderr_obj);
+    js_set_key_cstr(obj, "stdio", stdio);
     js_set_native_key(obj, make_string_item("on"), js_spawn_on);
     js_set_native_key(obj, make_string_item("once"), js_spawn_once);
-    js_set_key_default(obj, make_string_item("pid"), make_js_undefined());
-    js_set_key_default(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(obj, make_string_item("exitCode"), ItemNull);
-    js_set_key_default(obj, make_string_item("signalCode"), ItemNull);
+    js_set_key_cstr(obj, "pid", make_js_undefined());
+    js_set_key_cstr(obj, "killed", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(obj, "exitCode", ItemNull);
+    js_set_key_cstr(obj, "signalCode", ItemNull);
     return obj;
 }
 
@@ -2045,21 +2035,18 @@ static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
     Item* send_env = js_alloc_env(1);
     send_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->send_env = send_env;
-    js_set_key_default(obj, make_string_item("send"),
-                    js_new_native_closure(js_spawn_send_with_env, 4, send_env, 1));
+    js_set_key_cstr(obj, "send", js_new_native_closure(js_spawn_send_with_env, 4, send_env, 1));
     Item* disconnect_env = js_alloc_env(1);
     disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->disconnect_env = disconnect_env;
-    js_set_key_default(obj, make_string_item("disconnect"),
-                    js_new_native_closure(js_spawn_disconnect_with_env, 0, disconnect_env, 1));
+    js_set_key_cstr(obj, "disconnect", js_new_native_closure(js_spawn_disconnect_with_env, 0, disconnect_env, 1));
 }
 
 static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     Item* kill_env = js_alloc_env(1);
     kill_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->kill_env = kill_env;
-    js_set_key_default(obj, make_string_item("kill"),
-                    js_new_native_closure(spawn_kill_with_env, 1, kill_env, 1));
+    js_set_key_cstr(obj, "kill", js_new_native_closure(spawn_kill_with_env, 1, kill_env, 1));
     Item* dispose_env = js_alloc_env(1);
     dispose_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->dispose_env = dispose_env;
@@ -2072,14 +2059,12 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     Item* ref_env = js_alloc_env(1);
     ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->ref_env = ref_env;
-    js_set_key_default(obj, make_string_item("ref"),
-                    js_new_native_closure(spawn_ref_with_env, 0, ref_env, 1));
+    js_set_key_cstr(obj, "ref", js_new_native_closure(spawn_ref_with_env, 0, ref_env, 1));
 
     Item* unref_env = js_alloc_env(1);
     unref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->unref_env = unref_env;
-    js_set_key_default(obj, make_string_item("unref"),
-                    js_new_native_closure(spawn_unref_with_env, 0, unref_env, 1));
+    js_set_key_cstr(obj, "unref", js_new_native_closure(spawn_unref_with_env, 0, unref_env, 1));
 }
 
 static void install_ipc_legacy_surface(Item obj) {
@@ -2174,7 +2159,7 @@ static Item apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
 
 static Item normalize_stdio_options(SpawnRequest* req) {
     if (!is_object_item(req->options)) return js_status_ok();
-    JS_ASSIGN_OR_RETURN(stdio, js_get_key_default(req->options, make_string_item("stdio")));
+    JS_ASSIGN_OR_RETURN(stdio, js_get_key_cstr(req->options, "stdio"));
     if (is_nullish_item(stdio)) return js_status_ok();
     if (item_string_equals(stdio, "inherit")) {
         req->stdio_mode[0] = CP_STDIO_INHERIT;
@@ -2229,7 +2214,7 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->env = make_js_undefined();
     Item process_obj = js_get_process_object_value();
     if (is_object_item(process_obj)) {
-        Item process_env = js_get_key_default(process_obj, make_string_item("env"));
+        Item process_env = js_get_key_cstr(process_obj, "env");
         if (is_object_item(process_env)) req->env = process_env;
     }
 
@@ -2276,11 +2261,11 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     if (is_object_item(req->options)) {
         JS_RETURN_IF_ERROR(validate_uid_gid_option(req->options, "uid"));
         JS_RETURN_IF_ERROR(validate_uid_gid_option(req->options, "gid"));
-        JS_ASSIGN_OR_RETURN(shell, js_get_key_default(req->options, make_string_item("shell")));
+        JS_ASSIGN_OR_RETURN(shell, js_get_key_cstr(req->options, "shell"));
         req->shell = get_type_id(shell) == LMD_TYPE_BOOL && it2b(shell);
-        JS_ASSIGN_OR_RETURN(detached, js_get_key_default(req->options, make_string_item("detached")));
+        JS_ASSIGN_OR_RETURN(detached, js_get_key_cstr(req->options, "detached"));
         req->detached = get_type_id(detached) == LMD_TYPE_BOOL && it2b(detached);
-        JS_ASSIGN_OR_RETURN(env, js_get_key_default(req->options, make_string_item("env")));
+        JS_ASSIGN_OR_RETURN(env, js_get_key_cstr(req->options, "env"));
         if (is_object_item(env)) req->env = env;
         JS_RETURN_IF_ERROR(normalize_stdio_options(req));
     }
@@ -2453,9 +2438,8 @@ extern "C" Item js_cp_spawn(Item rest_args) {
 
     // create JS object with stdout/stderr sub-objects
     Item obj = make_child_process_object();
-    js_set_key_default(obj, make_string_item("spawnfile"),
-                    make_string_item(req.shell ? argv[0] : req.file));
-    js_set_key_default(obj, make_string_item("spawnargs"), spawnargs);
+    js_set_key_cstr(obj, "spawnfile", make_string_item(req.shell ? argv[0] : req.file));
+    js_set_key_cstr(obj, "spawnargs", spawnargs);
 
     sp->js_object = obj;
     install_spawn_lifecycle_surface(obj, sp);
@@ -2469,35 +2453,33 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         uv_pipe_init(loop, &sp->stdin_pipe, 0);
         sp->stdin_pipe.data = sp;
         sp->handles_expected++;
-        Item stdin_obj = js_get_key_default(obj, make_string_item("stdin"));
+        Item stdin_obj = js_get_key_cstr(obj, "stdin");
         Item* stdin_env = js_alloc_env(1);
         stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
         sp->stdin_env = stdin_env;
-        js_set_key_default(stdin_obj, make_string_item("write"),
-                        js_new_native_closure(js_spawn_stdin_write, 1, stdin_env, 1));
-        js_set_key_default(stdin_obj, make_string_item("end"),
-                        js_new_native_closure(js_spawn_stdin_end, 1, stdin_env, 1));
+        js_set_key_cstr(stdin_obj, "write", js_new_native_closure(js_spawn_stdin_write, 1, stdin_env, 1));
+        js_set_key_cstr(stdin_obj, "end", js_new_native_closure(js_spawn_stdin_end, 1, stdin_env, 1));
         install_spawn_stream_destroy(stdin_obj, sp, 0, &sp->stdin_destroy_env);
-        js_set_key_default(stdin_obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
-        js_set_key_default(stdin_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
+        js_set_key_cstr(stdin_obj, "writable", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(stdin_obj, "readable", (Item){.item = ITEM_FALSE});
     }
     if (sp->stdout_pipe_active) {
         uv_pipe_init(loop, &sp->stdout_pipe, 0);
         sp->stdout_pipe.data = sp;
         sp->handles_expected++;
-        Item stdout_obj = js_get_key_default(obj, make_string_item("stdout"));
+        Item stdout_obj = js_get_key_cstr(obj, "stdout");
         install_spawn_stream_destroy(stdout_obj, sp, 1, &sp->stdout_env);
-        js_set_key_default(stdout_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
-        js_set_key_default(stdout_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+        js_set_key_cstr(stdout_obj, "readable", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(stdout_obj, "writable", (Item){.item = ITEM_FALSE});
     }
     if (sp->stderr_pipe_active) {
         uv_pipe_init(loop, &sp->stderr_pipe, 0);
         sp->stderr_pipe.data = sp;
         sp->handles_expected++;
-        Item stderr_obj = js_get_key_default(obj, make_string_item("stderr"));
+        Item stderr_obj = js_get_key_cstr(obj, "stderr");
         install_spawn_stream_destroy(stderr_obj, sp, 2, &sp->stderr_env);
-        js_set_key_default(stderr_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
-        js_set_key_default(stderr_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+        js_set_key_cstr(stderr_obj, "readable", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(stderr_obj, "writable", (Item){.item = ITEM_FALSE});
     }
     if (req.ipc) {
         // ipc stdio pipes need descriptor passing enabled for sendHandle.
@@ -2643,8 +2625,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         return obj;
     }
 
-    js_set_key_default(obj, make_string_item("pid"),
-                    (Item){.item = i2it(sp->process.pid)});
+    js_set_key_cstr(obj, "pid", (Item){.item = i2it(sp->process.pid)});
 
     spawn_install_abort_signal(obj, sp, req.options);
 
@@ -2737,7 +2718,7 @@ static Item validate_execfile_args(Item rest_args) {
 
 static size_t execfile_max_buffer_from_options(Item options) {
     if (!is_object_item(options)) return 1024 * 1024;
-    Item value = js_get_key_default(options, make_string_item("maxBuffer"));
+    Item value = js_get_key_cstr(options, "maxBuffer");
     if (is_nullish_item(value)) return 1024 * 1024;
     TypeId type = get_type_id(value);
     double number = 0;
@@ -2857,15 +2838,15 @@ extern "C" Item js_cp_fork(Item rest_args) {
     }
 
     Item process_obj = js_get_process_object_value();
-    Item exec_path = js_get_key_default(process_obj, make_string_item("execPath"));
+    Item exec_path = js_get_key_cstr(process_obj, "execPath");
     if (is_object_item(options)) {
-        Item opt_exec_path = js_get_key_default(options, make_string_item("execPath"));
+        Item opt_exec_path = js_get_key_cstr(options, "execPath");
         if (get_type_id(opt_exec_path) == LMD_TYPE_STRING) exec_path = opt_exec_path;
     }
 
-    Item exec_argv = js_get_key_default(process_obj, make_string_item("execArgv"));
+    Item exec_argv = js_get_key_cstr(process_obj, "execArgv");
     if (is_object_item(options)) {
-        Item opt_exec_argv = js_get_key_default(options, make_string_item("execArgv"));
+        Item opt_exec_argv = js_get_key_cstr(options, "execArgv");
         if (get_type_id(opt_exec_argv) == LMD_TYPE_ARRAY) exec_argv = opt_exec_argv;
     }
 
@@ -2884,18 +2865,18 @@ extern "C" Item js_cp_fork(Item rest_args) {
 
     Item spawn_options = js_new_object();
     if (is_object_item(options)) {
-        JS_ASSIGN_OR_RETURN(env, js_get_key_default(options, make_string_item("env")));
-        if (is_object_item(env)) js_set_key_default(spawn_options, make_string_item("env"), env);
-        JS_ASSIGN_OR_RETURN(detached, js_get_key_default(options, make_string_item("detached")));
+        JS_ASSIGN_OR_RETURN(env, js_get_key_cstr(options, "env"));
+        if (is_object_item(env)) js_set_key_cstr(spawn_options, "env", env);
+        JS_ASSIGN_OR_RETURN(detached, js_get_key_cstr(options, "detached"));
         if (get_type_id(detached) == LMD_TYPE_BOOL) {
-            js_set_key_default(spawn_options, make_string_item("detached"), detached);
+            js_set_key_cstr(spawn_options, "detached", detached);
         }
     }
     Item stdio = js_array_new(0);
     bool copied_stdio = false;
     bool stdio_has_ipc = false;
     if (is_object_item(options)) {
-        JS_ASSIGN_OR_RETURN(opt_stdio, js_get_key_default(options, make_string_item("stdio")));
+        JS_ASSIGN_OR_RETURN(opt_stdio, js_get_key_cstr(options, "stdio"));
         if (!is_nullish_item(opt_stdio)) {
             if (item_string_equals(opt_stdio, "pipe") ||
                 item_string_equals(opt_stdio, "inherit") ||
@@ -2920,7 +2901,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
         }
     }
     if (!copied_stdio) {
-        JS_ASSIGN_OR_RETURN(silent, is_object_item(options) ? js_get_key_default(options, make_string_item("silent")) : make_js_undefined());
+        JS_ASSIGN_OR_RETURN(silent, is_object_item(options) ? js_get_key_cstr(options, "silent") : make_js_undefined());
         const char* default_stdio = (get_type_id(silent) == LMD_TYPE_BOOL && it2b(silent)) ? "pipe" : "ignore";
         // fork({ silent: true }) exposes child stdout/stderr; using the default
         // ignore mode hides child output and breaks detached child handshakes.
@@ -2929,7 +2910,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
         js_array_push(stdio, make_string_item(default_stdio));
     }
     if (!stdio_has_ipc) js_array_push(stdio, make_string_item("ipc"));
-    js_set_key_default(spawn_options, make_string_item("stdio"), stdio);
+    js_set_key_cstr(spawn_options, "stdio", stdio);
 
     Item spawn_rest = js_array_new(0);
     js_array_push(spawn_rest, exec_path);
@@ -3089,7 +3070,7 @@ static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item
         append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
         pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
     }
-    Item env = is_object_item(options_item) ? js_get_key_default(options_item, make_string_item("env")) : make_js_undefined();
+    Item env = is_object_item(options_item) ? js_get_key_cstr(options_item, "env") : make_js_undefined();
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_HOST", env);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_PROMISE", env);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_DNS", env);
@@ -3137,7 +3118,7 @@ static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item, 
         append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
         pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
     }
-    Item env = is_object_item(options_item) ? js_get_key_default(options_item, make_string_item("env")) : make_js_undefined();
+    Item env = is_object_item(options_item) ? js_get_key_cstr(options_item, "env") : make_js_undefined();
     cp_append_env_assignments(full_cmd, full_cmd_size, &pos, env);
     Item cmd_item = make_string_item(cmd);
     if (!append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item)) return false;
@@ -3185,7 +3166,7 @@ static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
 
 static bool cp_sync_output_wants_string(Item options_item) {
     if (!is_object_item(options_item)) return false;
-    Item encoding = js_get_key_default(options_item, make_string_item("encoding"));
+    Item encoding = js_get_key_cstr(options_item, "encoding");
     if (is_nullish_item(encoding)) return false;
     if (get_type_id(encoding) != LMD_TYPE_STRING) return false;
     String* s = it2s(encoding);
@@ -3244,7 +3225,7 @@ static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
 
 static Item cp_sync_write_input_file(Item options_item, const char* input_path) {
     if (!is_object_item(options_item) || !input_path) return js_status_ok();
-    JS_ASSIGN_OR_RETURN(input, js_get_key_default(options_item, make_string_item("input")));
+    JS_ASSIGN_OR_RETURN(input, js_get_key_cstr(options_item, "input"));
     if (is_nullish_item(input)) return js_status_ok();
     const char* data = NULL;
     size_t len = 0;
@@ -3270,7 +3251,7 @@ static Item cp_sync_write_input_file(Item options_item, const char* input_path) 
 
 static bool cp_sync_has_input(Item options_item) {
     if (!is_object_item(options_item)) return false;
-    Item input = js_get_key_default(options_item, make_string_item("input"));
+    Item input = js_get_key_cstr(options_item, "input");
     return !is_nullish_item(input);
 }
 
@@ -3346,7 +3327,7 @@ static int cp_get_kill_signal(Item options_item, const char** signal_name) {
     int sig = SIGTERM;
     const char* name = "SIGTERM";
     if (is_object_item(options_item)) {
-        Item value = js_get_key_default(options_item, make_string_item("killSignal"));
+        Item value = js_get_key_cstr(options_item, "killSignal");
         TypeId type = get_type_id(value);
         if (type == LMD_TYPE_INT) {
             int requested = (int)it2i(value);
@@ -3438,13 +3419,13 @@ static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_
 
 static Item cp_make_spawn_sync_timeout_error(const char* cmd, Item args_item) {
     Item err = js_new_error(make_string_item("spawnSync ETIMEDOUT"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ETIMEDOUT"));
-    js_set_key_default(err, make_string_item("errno"), (Item){.item = i2it((int64_t)UV_ETIMEDOUT)});
+    js_set_key_cstr(err, "code", make_string_item("ETIMEDOUT"));
+    js_set_key_cstr(err, "errno", (Item){.item = i2it((int64_t)UV_ETIMEDOUT)});
     char syscall[512];
     snprintf(syscall, sizeof(syscall), "spawnSync %s", cmd ? cmd : "");
-    js_set_key_default(err, make_string_item("syscall"), make_string_item(syscall));
-    if (cmd) js_set_key_default(err, make_string_item("path"), make_string_item(cmd));
-    js_set_key_default(err, make_string_item("spawnargs"), make_spawn_error_args_array(args_item));
+    js_set_key_cstr(err, "syscall", make_string_item(syscall));
+    if (cmd) js_set_key_cstr(err, "path", make_string_item(cmd));
+    js_set_key_cstr(err, "spawnargs", make_spawn_error_args_array(args_item));
     return err;
 }
 
@@ -3560,18 +3541,16 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 
     Item result = js_new_object();
     if (timed_out) {
-        js_set_key_default(result, make_string_item("status"), ItemNull);
-        js_set_key_default(result, make_string_item("signal"), make_string_item(timeout_signal_name));
-        js_set_key_default(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, effective_args));
+        js_set_key_cstr(result, "status", ItemNull);
+        js_set_key_cstr(result, "signal", make_string_item(timeout_signal_name));
+        js_set_key_cstr(result, "error", cp_make_spawn_sync_timeout_error(cmd, effective_args));
     } else {
-        js_set_key_default(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
-        js_set_key_default(result, make_string_item("signal"), ItemNull);
+        js_set_key_cstr(result, "status", (Item){.item = i2it(exit_code)});
+        js_set_key_cstr(result, "signal", ItemNull);
     }
     bool output_as_string = cp_sync_output_wants_string(effective_options);
-    js_set_key_default(result, make_string_item("stdout"),
-                    cp_sync_stdio_output_item(stdio_mode[1], out_buf, out_len, output_as_string));
-    js_set_key_default(result, make_string_item("stderr"),
-                    cp_sync_stdio_output_item(stdio_mode[2], err_buf, err_len, output_as_string));
+    js_set_key_cstr(result, "stdout", cp_sync_stdio_output_item(stdio_mode[1], out_buf, out_len, output_as_string));
+    js_set_key_cstr(result, "stderr", cp_sync_stdio_output_item(stdio_mode[2], err_buf, err_len, output_as_string));
     if (out_buf) mem_free(out_buf);
     if (err_buf) mem_free(err_buf);
     unlink(stdout_path);
@@ -3591,6 +3570,12 @@ JS_FORWARD_STATIC_RETURN(bool, js_cp_register_namespace_root, (void), js_root_ra
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_cp_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
+#define JS_CP_METHODS(M) \
+    M("exec", js_cp_exec, -1) M("execSync", js_cp_execSync, 2) \
+    M("spawn", js_cp_spawn, -1) M("spawnSync", js_cp_spawnSync, 3) \
+    M("execFile", js_cp_execFile, -1) M("execFileSync", js_cp_execSync, 2) \
+    M("fork", js_cp_fork, -1)
+
 extern "C" Item js_get_child_process_namespace(void) {
     if (!js_active_runtime_state) return ItemError;
     if (!js_cp_register_namespace_root()) return ItemError;
@@ -3601,13 +3586,10 @@ extern "C" Item js_get_child_process_namespace(void) {
     cp_namespace = js_new_object();
     namespace_root.set(cp_namespace);
 
-    js_cp_set_method(namespace_root.get(), "exec",       js_cp_exec, -1);
-    js_cp_set_method(namespace_root.get(), "execSync",   js_cp_execSync, 2);
-    js_cp_set_method(namespace_root.get(), "spawn",      js_cp_spawn, -1);
-    js_cp_set_method(namespace_root.get(), "spawnSync",  js_cp_spawnSync, 3);
-    js_cp_set_method(namespace_root.get(), "execFile",   js_cp_execFile, -1);
-    js_cp_set_method(namespace_root.get(), "execFileSync", js_cp_execSync, 2);
-    js_cp_set_method(namespace_root.get(), "fork",       js_cp_fork, -1);
+#define JS_CP_INSTALL(name, target, arity) \
+    js_cp_set_method(namespace_root.get(), name, target, arity);
+    JS_CP_METHODS(JS_CP_INSTALL)
+#undef JS_CP_INSTALL
 
     // set "default" for `import cp from 'child_process'`
     Item default_key = make_string_item("default");
@@ -3617,6 +3599,8 @@ extern "C" Item js_get_child_process_namespace(void) {
     cp_namespace = namespace_root.get();
     return namespace_root.get();
 }
+
+#undef JS_CP_METHODS
 
 extern "C" void js_child_process_reset(void) {
     if (!js_active_runtime_state) return;

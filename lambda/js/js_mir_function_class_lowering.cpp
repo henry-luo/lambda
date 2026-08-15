@@ -26,16 +26,21 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
     return super_val;
 }
 
+static void jm_init_resumable_env_entry(JsMirTranspiler* mt,
+        JsVarScopeEntry* entry, const char* name, MIR_reg_t value, int env_slot) {
+    memset(entry, 0, sizeof(*entry));
+    entry->name = mir_em_persist_cstr(&mt->em, name).str;
+    entry->var.reg = value;
+    entry->var.from_env = true;
+    entry->var.env_slot = env_slot;
+    entry->var.env_reg = mt->gen_env_reg;
+    entry->var.typed_array_type = -1;
+}
+
 static void jm_install_generator_env_var(JsMirTranspiler* mt, const char* name,
         MIR_reg_t value, int env_slot) {
     JsVarScopeEntry entry;
-    memset(&entry, 0, sizeof(entry));
-    entry.name = mir_em_persist_cstr(&mt->em, name).str;
-    entry.var.reg = value;
-    entry.var.from_env = true;
-    entry.var.env_slot = env_slot;
-    entry.var.env_reg = mt->gen_env_reg;
-    entry.var.typed_array_type = -1;
+    jm_init_resumable_env_entry(mt, &entry, name, value, env_slot);
     jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
 }
 
@@ -816,25 +821,24 @@ static bool jm_is_ascii_ident_start(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '$';
 }
 
-static bool jm_is_ascii_ident_part(char c) {
-    return jm_is_ascii_ident_start(c) || (c >= '0' && c <= '9');
-}
-
 static bool jm_eval_source_declares_var_name(String* source, const char* name, int name_len) {
     if (!source || !name || name_len <= 0) return false;
     const char* src = source->chars;
     int len = (int)source->len;
     for (int i = 0; i + 3 <= len; i++) {
         if (src[i] != 'v' || src[i + 1] != 'a' || src[i + 2] != 'r') continue;
-        if (i > 0 && jm_is_ascii_ident_part(src[i - 1])) continue;
-        if (i + 3 < len && jm_is_ascii_ident_part(src[i + 3])) continue;
+        if (i > 0 && (jm_is_ascii_ident_start(src[i - 1]) ||
+                (src[i - 1] >= '0' && src[i - 1] <= '9'))) continue;
+        if (i + 3 < len && (jm_is_ascii_ident_start(src[i + 3]) ||
+                (src[i + 3] >= '0' && src[i + 3] <= '9'))) continue;
 
         int pos = i + 3;
         while (pos < len && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n' || src[pos] == '\r')) pos++;
         while (pos < len) {
             if (!jm_is_ascii_ident_start(src[pos])) break;
             int ident_start = pos++;
-            while (pos < len && jm_is_ascii_ident_part(src[pos])) pos++;
+            while (pos < len && (jm_is_ascii_ident_start(src[pos]) ||
+                    (src[pos] >= '0' && src[pos] <= '9'))) pos++;
             int ident_len = pos - ident_start;
             if (ident_len == name_len && strncmp(src + ident_start, name, name_len) == 0) return true;
             while (pos < len && src[pos] != ',' && src[pos] != ';' && src[pos] != '\n' && src[pos] != '\r') pos++;
@@ -1133,6 +1137,292 @@ static MIR_reg_t jm_emit_exact_native_shape_test(JsMirTranspiler* mt,
     return result;
 }
 
+// Generator and async state machines must bind parameters before entering their
+// resumable body; keeping this kernel shared prevents their destructuring and
+// default-value semantics from drifting apart.
+static void jm_emit_resumable_param_bindings(JsMirTranspiler* mt,
+        JsFunctionNode* fn, int param_count, int param_offset) {
+    JsAstNode* sm_param_node = fn->params;
+    for (int i = 0; i < param_count; i++) {
+        if (sm_param_node) {
+            const char* vname = jm_get_param_name(sm_param_node, i);
+            MIR_reg_t preg = jm_new_reg(mt, vname, MIR_T_I64);
+            jm_emit_load_i64(mt, preg,
+                (param_offset + i) * (int)sizeof(uint64_t), mt->gen_env_reg);
+            JsVarScopeEntry entry;
+            jm_init_resumable_env_entry(mt, &entry, vname, preg, param_offset + i);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
+
+            if (sm_param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)sm_param_node;
+                if (ap->right) {
+                    MIR_label_t skip_label = jm_new_label(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                        MIR_new_label_op(mt->ctx, skip_label),
+                        MIR_new_reg_op(mt->ctx, preg),
+                        MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+                    MIR_reg_t def_val = jm_transpile_default_param_value(mt,
+                        fn, ap->right);
+                    jm_emit_mov(mt, preg, def_val);
+                    jm_emit_label(mt, skip_label);
+                }
+            }
+
+            JsAstNode* destr_pat = sm_param_node;
+            if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
+            if (destr_pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
+            if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+                jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
+                jm_emit_object_destructure(mt, destr_pat, preg);
+            }
+            if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN)
+                jm_emit_array_destructure(mt, destr_pat, preg);
+        }
+        sm_param_node = sm_param_node ? sm_param_node->next : NULL;
+    }
+}
+
+static void jm_emit_resumable_captures(JsMirTranspiler* mt,
+        JsFuncCollected* fc, JsFunctionNode* fn, int cap_offset,
+        bool include_nfe_binding) {
+    const char* self_capture_name = fn->name
+        ? jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars) : NULL;
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        // Per-closure module-var snapshots are stale; shared scope-env captures
+        // remain live and must still be loaded from the resumable environment.
+        bool has_scope_slot = (fc->captures[ci].scope_env_slot >= 0);
+        bool is_self_capture = (self_capture_name && self_capture_name[0] &&
+            strcmp(fc->captures[ci].name, self_capture_name) == 0);
+        if (!has_scope_slot && !is_self_capture && mt->module_consts) {
+            JsModuleConstEntry mclookup;
+            mclookup.name = jm_persist_name(fc->captures[ci].name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(
+                mt->module_consts, &mclookup);
+            if (mc && mc->const_type == MCONST_MODVAR &&
+                    !fc->captures[ci].force_env_capture) {
+                continue;
+            }
+        }
+
+        MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
+        jm_emit_load_i64(mt, cap_reg, (cap_offset + ci) * (int)sizeof(uint64_t),
+            mt->gen_env_reg);
+        JsVarScopeEntry entry;
+        jm_init_resumable_env_entry(mt, &entry, fc->captures[ci].name,
+            cap_reg, cap_offset + ci);
+        if (include_nfe_binding) {
+            entry.var.is_nfe_binding = fc->captures[ci].is_nfe_binding ||
+                jm_capture_is_nfe_binding(mt, fc, fc->captures[ci].name);
+        }
+        if (fc->captures[ci].is_let_const) {
+            entry.var.tdz_active = true;
+            entry.var.is_let_const = true;
+            entry.var.is_const = fc->captures[ci].is_const;
+        }
+        jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
+    }
+}
+
+static void jm_emit_resumable_this_arguments(JsMirTranspiler* mt,
+        JsFuncCollected* fc, JsFunctionNode* fn, int this_slot, int args_slot) {
+    if (this_slot >= 0) {
+        MIR_reg_t this_reg = jm_new_reg(mt, "_js_this", MIR_T_I64);
+        jm_emit_load_i64(mt, this_reg, this_slot * (int)sizeof(uint64_t),
+            mt->gen_env_reg);
+        jm_install_generator_env_var(mt, "_js_this", this_reg, this_slot);
+    }
+    if (args_slot >= 0 && fc->uses_arguments) {
+        MIR_reg_t args_reg = jm_new_reg(mt, "_js_arguments", MIR_T_I64);
+        jm_emit_load_i64(mt, args_reg, args_slot * (int)sizeof(uint64_t),
+            mt->gen_env_reg);
+        jm_install_generator_env_var(mt, "_js_arguments", args_reg, args_slot);
+        jm_activate_arguments_aliasing(mt, fc, fn, args_reg);
+    }
+}
+
+static MIR_label_t jm_emit_resumable_state_dispatch(JsMirTranspiler* mt,
+        int state_count, bool needs_error_lane) {
+    for (int si = 0; si <= state_count; si++) {
+        mt->gen_state_labels[si] = jm_new_label(mt);
+    }
+    mt->gen_done_label = jm_new_label(mt);
+    MIR_label_t error_lane_label = 0;
+    if (needs_error_lane) {
+        error_lane_label = jm_new_label(mt);
+        mt->func_error_lane_label = error_lane_label;
+    }
+    for (int si = 0; si <= state_count; si++) {
+        MIR_reg_t cmp = jm_new_reg(mt, "scmp", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_EQS, cmp, mt->gen_state_reg,
+            MIR_new_int_op(mt->ctx, (int64_t)si));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, mt->gen_state_labels[si]),
+            MIR_new_reg_op(mt->ctx, cmp)));
+    }
+    // Unknown state → done; only known resume states may re-enter the body.
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, mt->gen_done_label)));
+    jm_emit_label(mt, mt->gen_state_labels[0]);
+    return error_lane_label;
+}
+
+typedef struct JsMirResumableLayout {
+    int capture_offset;
+    int param_offset;
+    int local_offset;
+    int env_total_slots;
+    int this_slot;
+    int args_slot;
+    int dynamic_start;
+    int spill_start;
+    int active_iterator_slot;
+} JsMirResumableLayout;
+
+static JsMirResumableLayout jm_resumable_layout(JsFuncCollected* fc,
+        int param_count, int local_count, bool is_arrow, bool uses_arguments) {
+    JsMirResumableLayout layout = {0, fc->capture_count,
+        fc->capture_count + param_count, 0, -1, -1, 0, 0, -1};
+    layout.env_total_slots = layout.local_offset + local_count;
+    if (!is_arrow) {
+        layout.this_slot = layout.env_total_slots++;
+    }
+    if (uses_arguments) {
+        layout.args_slot = layout.env_total_slots++;
+    }
+    layout.dynamic_start = layout.env_total_slots;
+    layout.env_total_slots += 32;
+    layout.spill_start = layout.env_total_slots;
+    layout.env_total_slots += 128;
+    layout.active_iterator_slot = layout.env_total_slots++;
+    return layout;
+}
+
+typedef struct JsMirResumableStateMachine {
+    MIR_item_t item;
+    MIR_func_t func;
+    char name[160];
+} JsMirResumableStateMachine;
+
+static JsMirResumableStateMachine jm_create_resumable_state_machine(
+        JsMirTranspiler* mt, JsFuncCollected* fc, const char* prefix) {
+    JsMirResumableStateMachine machine = {NULL, NULL, {0}};
+    snprintf(machine.name, sizeof(machine.name), "%s_%s_%d", prefix, fc->name,
+        mt->em.label_counter++);
+    MIR_var_t params[4] = {
+        {MIR_T_P, "ctx", 0}, {MIR_T_I64, "gen_env", 0},
+        {MIR_T_I64, "gen_input", 0}, {MIR_T_I64, "gen_state", 0}
+    };
+    MIR_type_t ret_type = MIR_T_I64;
+    machine.item = MIR_new_func_arr(mt->ctx, machine.name, 1, &ret_type, 4, params);
+    machine.func = MIR_get_item_func(mt->ctx, machine.item);
+    jm_register_local_func(mt, machine.name, machine.item);
+    return machine;
+}
+
+static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
+        JsFunctionNode* fn, JsFuncCollected* fc,
+        const JsMirResumableLayout* layout, int state_count, bool is_async,
+        bool reset_eval_local_frame, MIR_item_t func_item, MIR_func_t func) {
+    if (jm_has_use_strict_directive(fn)) fc->is_strict = true;
+    mt->em.func_item = func_item;
+    mt->em.func = func;
+    mt->loop_depth = 0;
+    mt->for_of_depth = 0;
+    mt->pending_label_name = NULL;
+    mt->pending_label_len = 0;
+    mt->in_native_func = false;
+    mt->in_main = false;
+    mt->current_fc = fc;
+    mt->current_class = NULL;
+    mt->arguments_reg = 0;
+    mt->arguments_params = NULL;
+    mt->arguments_param_scope_depth = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = (int)(fc - mt->func_entries);
+    mt->func_error_lane_label = 0;
+    mt->in_generator = true;
+    mt->in_async = is_async;
+    mt->gen_yield_index = 0;
+    mt->gen_yield_count = state_count;
+    mt->gen_capture_offset = layout->capture_offset;
+    mt->gen_param_offset = layout->param_offset;
+    mt->gen_local_offset = layout->local_offset;
+    mt->gen_local_slot_count = layout->dynamic_start;
+    mt->gen_dynamic_slot_limit = layout->spill_start;
+    mt->gen_spill_slot_next = layout->spill_start;
+    mt->gen_active_iterator_slot = layout->active_iterator_slot;
+    if (reset_eval_local_frame) mt->eval_local_frame_reg = 0;
+
+    jm_begin_function_frame(mt, MIR_T_I64, true, MIR_SCALAR_RETURN_DYNAMIC,
+        MIR_reg(mt->ctx, "ctx", func), false);
+    mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
+    jm_push_scope(mt);
+    mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", func);
+    mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", func);
+    mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", func);
+    jm_create_gc_root_slot(mt, mt->gen_env_reg);
+    jm_register_owned_env(mt, mt->gen_env_reg);
+}
+
+typedef struct JsMirFunctionStateSnapshot {
+    MIR_item_t func_item;
+    MIR_func_t func;
+    int scope_depth;
+    int loop_depth;
+    bool in_native_func;
+    bool in_main;
+    JsFuncCollected* current_fc;
+    JsClassEntry* current_class;
+    MIR_reg_t scope_env_reg;
+    int scope_env_slot_count;
+    int current_func_index;
+    bool in_generator;
+    bool in_async;
+    MIR_reg_t arguments_reg;
+    JsAstNode* arguments_params;
+    int arguments_param_scope_depth;
+} JsMirFunctionStateSnapshot;
+
+// Nested function emission temporarily retargets one transpiler. Capture and
+// restore the shared fields together so a new emitter cannot leak state across
+// generator, async, native, or boxed function boundaries.
+static JsMirFunctionStateSnapshot jm_capture_function_state(JsMirTranspiler* mt) {
+    JsMirFunctionStateSnapshot state = {
+        mt->em.func_item, mt->em.func, mt->scope_depth, mt->loop_depth,
+        mt->in_native_func, mt->in_main, mt->current_fc, mt->current_class,
+        mt->scope_env_reg, mt->scope_env_slot_count, mt->current_func_index,
+        mt->in_generator, mt->in_async, mt->arguments_reg, mt->arguments_params,
+        mt->arguments_param_scope_depth
+    };
+    return state;
+}
+
+static void jm_restore_function_state(JsMirTranspiler* mt,
+        const JsMirFunctionStateSnapshot* state) {
+    mt->em.func_item = state->func_item;
+    mt->em.func = state->func;
+    mt->scope_depth = state->scope_depth;
+    mt->loop_depth = state->loop_depth;
+    mt->in_native_func = state->in_native_func;
+    mt->in_main = state->in_main;
+    mt->current_fc = state->current_fc;
+    mt->current_class = state->current_class;
+    mt->scope_env_reg = state->scope_env_reg;
+    mt->scope_env_slot_count = state->scope_env_slot_count;
+    mt->current_func_index = state->current_func_index;
+    mt->in_generator = state->in_generator;
+    mt->in_async = state->in_async;
+    mt->arguments_reg = state->arguments_reg;
+    mt->arguments_params = state->arguments_params;
+    mt->arguments_param_scope_depth = state->arguments_param_scope_depth;
+}
+
 void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int param_count = jm_count_params(fn);
@@ -1409,101 +1699,29 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Count distinct locals
         int local_count = jm_hashmap_entry_count(gen_locals);
 
-        // Env layout: [captures... | params... | locals... | this | arguments | padding(32 for for-of internals)]
-        int cap_offset = 0;
-        int param_offset = fc->capture_count;
-        int local_offset = fc->capture_count + param_count;
-        gen_env_total_slots = local_offset + local_count;
-        if (!fn->is_arrow) {
-            gen_this_slot = gen_env_total_slots;  // reserve slot for dynamic this
-            gen_env_total_slots += 1;
-        }
-        if (fc->uses_arguments) {
-            gen_args_slot = gen_env_total_slots;  // reserve slot for 'arguments'
-            gen_env_total_slots += 1;
-        }
-        int gen_dynamic_start = gen_env_total_slots;
-        gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
-        int gen_spill_start = gen_env_total_slots;  // spill slots start here
-        gen_env_total_slots += 128;  // padding for generator yield spill slots (temporaries across yields)
-        gen_active_iterator_slot = gen_env_total_slots++;
+        JsMirResumableLayout layout = jm_resumable_layout(fc, param_count,
+            local_count, fn->is_arrow, fc->uses_arguments);
+        int cap_offset = layout.capture_offset;
+        int param_offset = layout.param_offset;
+        int local_offset = layout.local_offset;
+        gen_env_total_slots = layout.env_total_slots;
+        gen_this_slot = layout.this_slot;
+        gen_args_slot = layout.args_slot;
+        gen_active_iterator_slot = layout.active_iterator_slot;
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
-        char sm_name[160];
-        snprintf(sm_name, sizeof(sm_name), "gen_sm_%s_%d", fc->name, mt->em.label_counter++);
+        JsMirResumableStateMachine machine =
+            jm_create_resumable_state_machine(mt, fc, "gen_sm");
+        gen_sm_func_item = machine.item;
+        MIR_func_t sm_func = machine.func;
+        const char* sm_name = machine.name;
 
-        MIR_var_t sm_params[4] = {
-            {MIR_T_P, "ctx", 0},
-            {MIR_T_I64, "gen_env", 0},   // Item* env (passed as i64)
-            {MIR_T_I64, "gen_input", 0},  // Item sent_value
-            {MIR_T_I64, "gen_state", 0}   // int64_t state
-        };
-        MIR_type_t sm_ret = MIR_T_I64;
-        gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 4, sm_params);
-        MIR_func_t sm_func = MIR_get_item_func(mt->ctx, gen_sm_func_item);
-        jm_register_local_func(mt, sm_name, gen_sm_func_item);
-
-        // Save transpiler state
-        MIR_item_t saved_item_sm = mt->em.func_item;
-        MIR_func_t saved_func_sm = mt->em.func;
-        int saved_scope_depth_sm = mt->scope_depth;
-        int saved_loop_depth_sm = mt->loop_depth;
-        bool saved_in_native_sm = mt->in_native_func;
-        bool saved_in_main_sm = mt->in_main;
-        JsFuncCollected* saved_fc_sm = mt->current_fc;
-        JsClassEntry* saved_class_sm = mt->current_class;
-        MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
-        int saved_scope_env_slot_sm = mt->scope_env_slot_count;
-        int saved_func_index_sm = mt->current_func_index;
+        // Save transpiler state.
+        JsMirFunctionStateSnapshot saved_sm_state = jm_capture_function_state(mt);
         MIR_reg_t saved_eval_local_frame_reg_sm = mt->eval_local_frame_reg;
-        bool saved_in_generator = mt->in_generator;
-        bool saved_in_async = mt->in_async;
-        MIR_reg_t saved_arguments_reg_sm = mt->arguments_reg;
-        JsAstNode* saved_arguments_params_sm = mt->arguments_params;
-        int saved_arguments_param_scope_depth_sm = mt->arguments_param_scope_depth;
 
-        if (jm_has_use_strict_directive(fn)) {
-            fc->is_strict = true;
-        }
-
-        mt->em.func_item = gen_sm_func_item;
-        mt->em.func = sm_func;
-        mt->loop_depth = 0;
-        mt->for_of_depth = 0;
-        mt->pending_label_name = NULL;
-        mt->pending_label_len = 0;
-        mt->in_native_func = false;
-        mt->in_main = false;
-        mt->current_fc = fc;
-        mt->current_class = NULL;
-        mt->arguments_reg = 0;
-        mt->arguments_params = NULL;
-        mt->arguments_param_scope_depth = -1;
-        mt->scope_env_reg = 0;
-        mt->scope_env_slot_count = 0;
-        mt->current_func_index = (int)(fc - mt->func_entries);
-        mt->func_error_lane_label = 0;  // reset for generator state machine
-        mt->eval_local_frame_reg = 0;
-
-        // Set up generator state
-        mt->in_generator = true;
-        mt->in_async = fn->is_async;
-        mt->gen_yield_index = 0;
-        mt->gen_yield_count = yield_count;
-        mt->gen_capture_offset = cap_offset;
-        mt->gen_param_offset = param_offset;
-        mt->gen_local_offset = local_offset;
-        // An arrow without `arguments` has neither a this nor arguments slot;
-        // starting at zero would overwrite its persisted captures and locals.
-        mt->gen_local_slot_count = gen_dynamic_start;
-        mt->gen_dynamic_slot_limit = gen_spill_start;
-        mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
-        mt->gen_active_iterator_slot = gen_active_iterator_slot;
-
-        jm_begin_function_frame(mt, sm_ret, true,
-            MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func), false);
-        mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
-        jm_push_scope(mt);
+        jm_begin_resumable_state_machine(mt, fn, fc, &layout,
+            yield_count, fn->is_async, true, gen_sm_func_item, sm_func);
         if (fc->has_direct_eval) {
             // Only direct eval can publish caller-local bindings; ordinary
             // resumable bodies must not pay for a dormant eval frame.
@@ -1511,33 +1729,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_emit_reg_op(mt, MIR_MOV, mt->eval_local_frame_reg, MIR_new_int_op(mt->ctx, 0));
         }
 
+        jm_emit_resumable_state_dispatch(mt, yield_count, false);
+
         // Get parameters from function signature
         mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
         mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
         mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
         jm_create_gc_root_slot(mt, mt->gen_env_reg);
         jm_register_owned_env(mt, mt->gen_env_reg);
-
-        // Create state labels
-        for (int si = 0; si <= yield_count; si++) {
-            mt->gen_state_labels[si] = jm_new_label(mt);
-        }
-        mt->gen_done_label = jm_new_label(mt);
-
-        // Emit state dispatch: switch on state
-        for (int si = 0; si <= yield_count; si++) {
-            MIR_reg_t cmp = jm_new_reg(mt, "scmp", MIR_T_I64);
-            jm_emit_reg_binary_op(mt, MIR_EQS, cmp, mt->gen_state_reg, MIR_new_int_op(mt->ctx, (int64_t)si));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, mt->gen_state_labels[si]),
-                MIR_new_reg_op(mt->ctx, cmp)));
-        }
-        // Unknown state → done
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, mt->gen_done_label)));
-
-        // State 0 label (initial entry)
-        jm_emit_label(mt, mt->gen_state_labels[0]);
 
         // Pre-register ONLY destructured param variable names with env slots.
         // This must happen before param destructuring so that the variables created
@@ -1558,13 +1757,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
                     jm_emit_reg_op(mt, MIR_MOV, vr, MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED));
                     JsVarScopeEntry entry;
-                    memset(&entry, 0, sizeof(entry));
-                    entry.name = mir_em_persist_cstr(&mt->em, ns->name).str;
-                    entry.var.reg = vr;
-                    entry.var.from_env = true;
-                    entry.var.env_slot = local_offset + li;
-                    entry.var.env_reg = mt->gen_env_reg;
-                    entry.var.typed_array_type = -1;
+                    jm_init_resumable_env_entry(mt, &entry, ns->name, vr,
+                        local_offset + li);
                     entry.var.from_hoist = true;
                     jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
                     li++;
@@ -1585,102 +1779,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // Captures must be visible during generator parameter initialization.
-        // Default parameter expressions can create closures that reference outer
-        // captures or the named generator expression's private self binding.
-        const char* gen_self_capture_name = fn->name
-            ? jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars) : NULL;
-        for (int ci = 0; ci < fc->capture_count; ci++) {
-            // Skip MCONST_MODVAR captures only for non-scope-env captures:
-            // Per-closure envs have stale snapshots, so module vars read live.
-            // Scope_env captures are live (shared env), so always load from env.
-            bool has_scope_slot = (fc->captures[ci].scope_env_slot >= 0);
-            bool is_self_capture = (gen_self_capture_name && gen_self_capture_name[0] &&
-                strcmp(fc->captures[ci].name, gen_self_capture_name) == 0);
-            if (!has_scope_slot && !is_self_capture && mt->module_consts) {
-                JsModuleConstEntry mclookup;
-                mclookup.name = jm_persist_name(fc->captures[ci].name);
-                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                if (mc && mc->const_type == MCONST_MODVAR && !fc->captures[ci].force_env_capture) {
-                    continue;
-                }
-            }
+        jm_emit_resumable_captures(mt, fc, fn, cap_offset, true);
 
-            MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
-            jm_emit_load_i64(mt, cap_reg, (cap_offset + ci) * (int)sizeof(uint64_t), mt->gen_env_reg);
-            JsVarScopeEntry entry;
-            memset(&entry, 0, sizeof(entry));
-            entry.name = mir_em_persist_cstr(&mt->em, fc->captures[ci].name).str;
-            entry.var.reg = cap_reg;
-            entry.var.from_env = true;
-            entry.var.env_slot = cap_offset + ci;
-            entry.var.env_reg = mt->gen_env_reg;
-            entry.var.typed_array_type = -1;
-            entry.var.is_nfe_binding = fc->captures[ci].is_nfe_binding ||
-                jm_capture_is_nfe_binding(mt, fc, fc->captures[ci].name);
-            if (fc->captures[ci].is_let_const) {
-                entry.var.tdz_active = true;
-                entry.var.is_let_const = true;
-                entry.var.is_const = fc->captures[ci].is_const;
-            }
-            jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
-        }
-
-        // Load parameters from env (stored there during generator creation)
-        JsAstNode* sm_param_node = fn->params;
-        for (int i = 0; i < param_count; i++) {
-            if (sm_param_node) {
-                const char* vname = jm_get_param_name(sm_param_node, i);
-                MIR_reg_t preg = jm_new_reg(mt, vname, MIR_T_I64);
-                // Load from env[param_offset + i]
-                jm_emit_load_i64(mt, preg, (param_offset + i) * (int)sizeof(uint64_t), mt->gen_env_reg);
-                JsVarScopeEntry entry;
-                memset(&entry, 0, sizeof(entry));
-                entry.name = mir_em_persist_cstr(&mt->em, vname).str;
-                entry.var.reg = preg;
-                entry.var.from_env = true;
-                entry.var.env_slot = param_offset + i;
-                entry.var.env_reg = mt->gen_env_reg;
-                entry.var.typed_array_type = -1;
-                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
-
-                // Default parameter handling (assignment pattern)
-                if (sm_param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                    JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)sm_param_node;
-                    if (ap->right) {
-                        MIR_label_t skip_label = jm_new_label(mt);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                            MIR_new_label_op(mt->ctx, skip_label),
-                            MIR_new_reg_op(mt->ctx, preg),
-                            MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
-                        MIR_reg_t def_val = jm_transpile_default_param_value(mt, fn, ap->right);
-                        jm_emit_mov(mt, preg, def_val);
-                        jm_emit_label(mt, skip_label);
-                    }
-                }
-
-                // Unwrap assignment pattern for destructured default params
-                JsAstNode* destr_pat = sm_param_node;
-                if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
-                    destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
-                if (destr_pat->node_type == JS_AST_NODE_REST_ELEMENT ||
-                    destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
-                    destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
-
-                // Object destructuring with RequireObjectCoercible check
-                if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                    jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
-                    jm_emit_object_destructure(mt, destr_pat, preg);
-                }
-
-                // Array destructuring
-                if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                    jm_emit_array_destructure(mt, destr_pat, preg);
-                }
-            }
-            sm_param_node = sm_param_node ? sm_param_node->next : NULL;
-        }
+        // Load parameters from env (stored there during generator creation).
+        jm_emit_resumable_param_bindings(mt, fn, param_count, param_offset);
 
         // === Implicit "param binding" yield ===
         // ES spec: FunctionDeclarationInstantiation (parameter binding including
@@ -1709,20 +1811,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_emit_resume_env_restore(mt);
         }
 
-        // Load 'this' from env[this_slot] and register as _js_this variable
-        if (gen_this_slot >= 0) {
-            MIR_reg_t this_reg = jm_new_reg(mt, "_js_this", MIR_T_I64);
-            jm_emit_load_i64(mt, this_reg, gen_this_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
-            jm_install_generator_env_var(mt, "_js_this", this_reg, gen_this_slot);
-        }
-
-        // Load 'arguments' from env[args_slot] if this generator uses arguments
-        if (gen_args_slot >= 0 && fc->uses_arguments) {
-            MIR_reg_t args_reg = jm_new_reg(mt, "_js_arguments", MIR_T_I64);
-            jm_emit_load_i64(mt, args_reg, gen_args_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
-            jm_install_generator_env_var(mt, "_js_arguments", args_reg, gen_args_slot);
-            jm_activate_arguments_aliasing(mt, fc, fn, args_reg);
-        }
+        jm_emit_resumable_this_arguments(mt, fc, fn, gen_this_slot, gen_args_slot);
 
         // Hoist body-local var declarations with env slots.
         // Destructured param names were already pre-registered before state 0;
@@ -1741,13 +1830,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     jm_emit_reg_op(mt, MIR_MOV, vr, MIR_new_int_op(mt->ctx, (int64_t)hoist_init));
                     jm_emit_store_i64(mt, (local_offset + li) * (int)sizeof(uint64_t), mt->gen_env_reg, vr);
                     JsVarScopeEntry entry;
-                    memset(&entry, 0, sizeof(entry));
-                    entry.name = mir_em_persist_cstr(&mt->em, ns->name).str;
-                    entry.var.reg = vr;
-                    entry.var.from_env = true;
-                    entry.var.env_slot = local_offset + li;
-                    entry.var.env_reg = mt->gen_env_reg;
-                    entry.var.typed_array_type = -1;
+                    jm_init_resumable_env_entry(mt, &entry, ns->name, vr,
+                        local_offset + li);
                     entry.var.from_hoist = true;
                     if (is_lexical) {
                         entry.var.is_let_const = true;
@@ -1812,24 +1896,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_finish_function_frame(mt, sm_name);
         MIR_finish_func(mt->ctx);
 
-        // Restore transpiler state
-        mt->em.func_item = saved_item_sm;
-        mt->em.func = saved_func_sm;
-        mt->scope_depth = saved_scope_depth_sm;
-        mt->loop_depth = saved_loop_depth_sm;
-        mt->in_native_func = saved_in_native_sm;
-        mt->in_main = saved_in_main_sm;
-        mt->current_fc = saved_fc_sm;
-        mt->current_class = saved_class_sm;
-        mt->scope_env_reg = saved_scope_env_reg_sm;
-        mt->scope_env_slot_count = saved_scope_env_slot_sm;
-        mt->current_func_index = saved_func_index_sm;
+        // Restore transpiler state.
+        jm_restore_function_state(mt, &saved_sm_state);
         mt->eval_local_frame_reg = saved_eval_local_frame_reg_sm;
-        mt->in_generator = saved_in_generator;
-        mt->in_async = saved_in_async;
-        mt->arguments_reg = saved_arguments_reg_sm;
-        mt->arguments_params = saved_arguments_params_sm;
-        mt->arguments_param_scope_depth = saved_arguments_param_scope_depth_sm;
 
         hashmap_free(gen_lexicals);
         hashmap_free(gen_locals);
@@ -1851,242 +1920,41 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             int local_count = jm_hashmap_entry_count(async_locals);
 
-            // Env layout: [captures... | params... | locals... | this | arguments | padding(32 for for-of internals)]
-            int cap_offset = 0;
-            int param_offset_sm = fc->capture_count;
-            int local_offset = fc->capture_count + param_count;
-            gen_env_total_slots = local_offset + local_count;
-            if (!fn->is_arrow) {
-                // An async arrow already serializes lexical this in its capture
-                // env; a dynamic slot would overwrite it with the microtask receiver.
-                gen_this_slot = gen_env_total_slots;
-                gen_env_total_slots += 1;
-            }
-            if (fc->uses_arguments) {
-                gen_args_slot = gen_env_total_slots;  // reserve slot for 'arguments'
-                gen_env_total_slots += 1;
-            }
-            int gen_dynamic_start = gen_env_total_slots;
-            gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
-            int gen_spill_start = gen_env_total_slots;  // spill slots start here
-            gen_env_total_slots += 128;  // padding for async yield spill slots
-            gen_active_iterator_slot = gen_env_total_slots++;
+            JsMirResumableLayout layout = jm_resumable_layout(fc, param_count,
+                local_count, fn->is_arrow, fc->uses_arguments);
+            int cap_offset = layout.capture_offset;
+            int param_offset_sm = layout.param_offset;
+            int local_offset = layout.local_offset;
+            gen_env_total_slots = layout.env_total_slots;
+            gen_this_slot = layout.this_slot;
+            gen_args_slot = layout.args_slot;
+            gen_active_iterator_slot = layout.active_iterator_slot;
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
-            char sm_name[160];
-            snprintf(sm_name, sizeof(sm_name), "async_sm_%s_%d", fc->name, mt->em.label_counter++);
+            JsMirResumableStateMachine machine =
+                jm_create_resumable_state_machine(mt, fc, "async_sm");
+            gen_sm_func_item = machine.item;
+            MIR_func_t sm_func = machine.func;
+            const char* sm_name = machine.name;
 
-            MIR_var_t sm_params[4] = {
-                {MIR_T_P, "ctx", 0},
-                {MIR_T_I64, "gen_env", 0},
-                {MIR_T_I64, "gen_input", 0},
-                {MIR_T_I64, "gen_state", 0}
-            };
-            MIR_type_t sm_ret = MIR_T_I64;
-            gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 4, sm_params);
-            MIR_func_t sm_func = MIR_get_item_func(mt->ctx, gen_sm_func_item);
-            jm_register_local_func(mt, sm_name, gen_sm_func_item);
-
-            // Save transpiler state
-            MIR_item_t saved_item_sm = mt->em.func_item;
-            MIR_func_t saved_func_sm = mt->em.func;
-            int saved_scope_depth_sm = mt->scope_depth;
-            int saved_loop_depth_sm = mt->loop_depth;
-            bool saved_in_native_sm = mt->in_native_func;
-            bool saved_in_main_sm = mt->in_main;
-            JsFuncCollected* saved_fc_sm = mt->current_fc;
-            JsClassEntry* saved_class_sm = mt->current_class;
-            MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
-            int saved_scope_env_slot_sm = mt->scope_env_slot_count;
-            int saved_func_index_sm = mt->current_func_index;
-            bool saved_in_generator = mt->in_generator;
-            bool saved_in_async = mt->in_async;
+            // Save transpiler state.
+            JsMirFunctionStateSnapshot saved_sm_state = jm_capture_function_state(mt);
             MIR_label_t saved_error_lane_label_sm = mt->func_error_lane_label;
             JsErrorLaneTrack saved_error_lane_track_sm = mt->error_lane_track;
             MIR_reg_t saved_last_call_result_sm = mt->last_call_result_reg;
             MIR_reg_t saved_func_error_lane_value_sm = mt->func_error_lane_value_reg;
-            MIR_reg_t saved_arguments_reg_sm = mt->arguments_reg;
-            JsAstNode* saved_arguments_params_sm = mt->arguments_params;
-            int saved_arguments_param_scope_depth_sm = mt->arguments_param_scope_depth;
 
-            if (jm_has_use_strict_directive(fn)) {
-                fc->is_strict = true;
-            }
+            jm_begin_resumable_state_machine(mt, fn, fc, &layout, await_count, true, false,
+                gen_sm_func_item, sm_func);
 
-            mt->em.func_item = gen_sm_func_item;
-            mt->em.func = sm_func;
-            mt->loop_depth = 0;
-            mt->for_of_depth = 0;
-            mt->pending_label_name = NULL;
-            mt->pending_label_len = 0;
-            mt->in_native_func = false;
-            mt->in_main = false;
-            mt->current_fc = fc;
-            mt->current_class = NULL;
-            mt->arguments_reg = 0;
-            mt->arguments_params = NULL;
-            mt->arguments_param_scope_depth = -1;
-            mt->scope_env_reg = 0;
-            mt->scope_env_slot_count = 0;
-            mt->current_func_index = (int)(fc - mt->func_entries);
-            mt->func_error_lane_label = 0;
+            MIR_label_t async_sm_catch_label = jm_emit_resumable_state_dispatch(
+                mt, await_count, true);
 
-            // Set both flags: in_generator reuses gen_* infrastructure, in_async for await handling
-            mt->in_generator = true;
-            mt->in_async = true;
-            mt->gen_yield_index = 0;
-            mt->gen_yield_count = await_count;
-            mt->gen_capture_offset = cap_offset;
-            mt->gen_param_offset = param_offset_sm;
-            mt->gen_local_offset = local_offset;
-            // An arrow without `arguments` has neither a this nor arguments slot;
-            // starting at zero would overwrite its persisted captures and locals.
-            mt->gen_local_slot_count = gen_dynamic_start;
-            mt->gen_dynamic_slot_limit = gen_spill_start;
-            mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
-            mt->gen_active_iterator_slot = gen_active_iterator_slot;
+            // Load parameters from env.
+            jm_emit_resumable_param_bindings(mt, fn, param_count, param_offset_sm);
 
-            jm_begin_function_frame(mt, sm_ret, true,
-                MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func), false);
-            mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
-            jm_push_scope(mt);
-
-            mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
-            mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
-            mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
-            jm_create_gc_root_slot(mt, mt->gen_env_reg);
-            jm_register_owned_env(mt, mt->gen_env_reg);
-
-            // Create state labels (one per await + one for initial entry)
-            for (int si = 0; si <= await_count; si++) {
-                mt->gen_state_labels[si] = jm_new_label(mt);
-            }
-            mt->gen_done_label = jm_new_label(mt);
-            MIR_label_t async_sm_catch_label = jm_new_label(mt);
-            mt->func_error_lane_label = async_sm_catch_label;
-
-            // Emit state dispatch: switch on state
-            for (int si = 0; si <= await_count; si++) {
-                MIR_reg_t cmp = jm_new_reg(mt, "scmp", MIR_T_I64);
-                jm_emit_reg_binary_op(mt, MIR_EQS, cmp, mt->gen_state_reg, MIR_new_int_op(mt->ctx, (int64_t)si));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                    MIR_new_label_op(mt->ctx, mt->gen_state_labels[si]),
-                    MIR_new_reg_op(mt->ctx, cmp)));
-            }
-            // Unknown state → done
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                MIR_new_label_op(mt->ctx, mt->gen_done_label)));
-
-            // State 0 label (initial entry)
-            jm_emit_label(mt, mt->gen_state_labels[0]);
-
-            // Load parameters from env
-            JsAstNode* sm_param_node = fn->params;
-            for (int i = 0; i < param_count; i++) {
-                if (sm_param_node) {
-                    const char* vname = jm_get_param_name(sm_param_node, i);
-                    MIR_reg_t preg = jm_new_reg(mt, vname, MIR_T_I64);
-                    jm_emit_load_i64(mt, preg, (param_offset_sm + i) * (int)sizeof(uint64_t), mt->gen_env_reg);
-                    JsVarScopeEntry entry;
-                    memset(&entry, 0, sizeof(entry));
-                    entry.name = mir_em_persist_cstr(&mt->em, vname).str;
-                    entry.var.reg = preg;
-                    entry.var.from_env = true;
-                    entry.var.env_slot = param_offset_sm + i;
-                    entry.var.env_reg = mt->gen_env_reg;
-                    entry.var.typed_array_type = -1;
-                    jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
-
-                    // Default parameter handling (assignment pattern)
-                    if (sm_param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)sm_param_node;
-                        if (ap->right) {
-                            MIR_label_t skip_label = jm_new_label(mt);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                                MIR_new_label_op(mt->ctx, skip_label),
-                                MIR_new_reg_op(mt->ctx, preg),
-                                MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
-                            MIR_reg_t def_val = jm_transpile_default_param_value(mt, fn, ap->right);
-                            jm_emit_mov(mt, preg, def_val);
-                            jm_emit_label(mt, skip_label);
-                        }
-                    }
-
-                    // Unwrap assignment pattern for destructured default params
-                    JsAstNode* destr_pat = sm_param_node;
-                    if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
-                        destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
-                    if (destr_pat->node_type == JS_AST_NODE_REST_ELEMENT ||
-                        destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
-                        destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
-
-                    // Object destructuring with RequireObjectCoercible check
-                    if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                        jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                        jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
-                        jm_emit_object_destructure(mt, destr_pat, preg);
-                    }
-
-                    // Array destructuring
-                    if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                        jm_emit_array_destructure(mt, destr_pat, preg);
-                    }
-                }
-                sm_param_node = sm_param_node ? sm_param_node->next : NULL;
-            }
-
-            // Build self-capture name for detecting self-references
-            const char* async_self_capture_name = fn->name
-                ? jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars) : NULL;
-
-            // Load captured variables from env
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                // Skip MCONST_MODVAR captures only for non-scope-env captures.
-                bool has_scope_slot = (fc->captures[ci].scope_env_slot >= 0);
-                bool is_self_capture = (async_self_capture_name && async_self_capture_name[0] &&
-                    strcmp(fc->captures[ci].name, async_self_capture_name) == 0);
-                if (!has_scope_slot && !is_self_capture && mt->module_consts) {
-                    JsModuleConstEntry mclookup;
-                    mclookup.name = jm_persist_name(fc->captures[ci].name);
-                    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_MODVAR && !fc->captures[ci].force_env_capture) {
-                        continue;
-                    }
-                }
-
-                MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
-                jm_emit_load_i64(mt, cap_reg, (cap_offset + ci) * (int)sizeof(uint64_t), mt->gen_env_reg);
-                JsVarScopeEntry entry;
-                memset(&entry, 0, sizeof(entry));
-                entry.name = mir_em_persist_cstr(&mt->em, fc->captures[ci].name).str;
-                entry.var.reg = cap_reg;
-                entry.var.from_env = true;
-                entry.var.env_slot = cap_offset + ci;
-                entry.var.env_reg = mt->gen_env_reg;
-                entry.var.typed_array_type = -1;
-                if (fc->captures[ci].is_let_const) {
-                    entry.var.tdz_active = true;
-                    entry.var.is_let_const = true;
-                    entry.var.is_const = fc->captures[ci].is_const;
-                }
-                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
-            }
-
-            // Load 'this' from env[this_slot] and register as _js_this variable
-            if (gen_this_slot >= 0) {
-                MIR_reg_t this_reg = jm_new_reg(mt, "_js_this", MIR_T_I64);
-                jm_emit_load_i64(mt, this_reg, gen_this_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
-                jm_install_generator_env_var(mt, "_js_this", this_reg, gen_this_slot);
-            }
-
-            // Load 'arguments' from env[args_slot] if this async function uses arguments
-            if (gen_args_slot >= 0 && fc->uses_arguments) {
-                MIR_reg_t args_reg = jm_new_reg(mt, "_js_arguments", MIR_T_I64);
-                jm_emit_load_i64(mt, args_reg, gen_args_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
-                jm_install_generator_env_var(mt, "_js_arguments", args_reg, gen_args_slot);
-                jm_activate_arguments_aliasing(mt, fc, fn, args_reg);
-            }
+            jm_emit_resumable_captures(mt, fc, fn, cap_offset, false);
+            jm_emit_resumable_this_arguments(mt, fc, fn, gen_this_slot, gen_args_slot);
 
             // Hoist var declarations with env slots
             if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -2109,15 +1977,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                             initial = jm_emit_null(mt);
                         }
                         jm_emit_mov(mt, vr, initial);
-                        JsVarScopeEntry entry;
-                        memset(&entry, 0, sizeof(entry));
-                        entry.name = mir_em_persist_cstr(&mt->em, ns->name).str;
-                        entry.var.reg = vr;
-                        entry.var.from_env = true;
-                        entry.var.env_slot = local_offset + li;
-                        entry.var.env_reg = mt->gen_env_reg;
-                        entry.var.typed_array_type = -1;
-                        entry.var.from_hoist = true;  // v50: mark as hoisted
+                    JsVarScopeEntry entry;
+                    jm_init_resumable_env_entry(mt, &entry, ns->name, vr,
+                        local_offset + li);
+                    entry.var.from_hoist = true;  // v50: mark as hoisted
                         jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
                         li++;
                     }
@@ -2205,27 +2068,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_finish_function_frame(mt, sm_name);
             MIR_finish_func(mt->ctx);
 
-            // Restore transpiler state
-            mt->em.func_item = saved_item_sm;
-            mt->em.func = saved_func_sm;
-            mt->scope_depth = saved_scope_depth_sm;
-            mt->loop_depth = saved_loop_depth_sm;
-            mt->in_native_func = saved_in_native_sm;
-            mt->in_main = saved_in_main_sm;
-            mt->current_fc = saved_fc_sm;
-            mt->current_class = saved_class_sm;
-            mt->scope_env_reg = saved_scope_env_reg_sm;
-            mt->scope_env_slot_count = saved_scope_env_slot_sm;
-            mt->current_func_index = saved_func_index_sm;
+            // Restore transpiler state.
+            jm_restore_function_state(mt, &saved_sm_state);
             mt->func_error_lane_label = saved_error_lane_label_sm;
             mt->error_lane_track = saved_error_lane_track_sm;
             mt->last_call_result_reg = saved_last_call_result_sm;
             mt->func_error_lane_value_reg = saved_func_error_lane_value_sm;
-            mt->in_generator = saved_in_generator;
-            mt->in_async = saved_in_async;
-            mt->arguments_reg = saved_arguments_reg_sm;
-            mt->arguments_params = saved_arguments_params_sm;
-            mt->arguments_param_scope_depth = saved_arguments_param_scope_depth_sm;
 
             hashmap_free(async_locals);
 

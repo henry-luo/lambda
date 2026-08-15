@@ -381,10 +381,10 @@
           ]
         },
         "darwin-debug": {
-          "module_insns": 14411,
+          "module_insns": 14587,
           "functions": {
             "js_main": {
-              "insns": 5510
+              "insns": 5686
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 10
@@ -393,11 +393,11 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 12,
-              "root_stores": 806,
-              "scalar_homes": 6,
+              "roots": 11,
+              "root_stores": 773,
+              "scalar_homes": 15,
               "number_scratch": 0,
-              "safepoints": 2111
+              "safepoints": 2102
             }
           ]
         },
@@ -419,27 +419,6 @@
               "scalar_homes": 16,
               "number_scratch": 0,
               "safepoints": 2176
-            }
-          ]
-        },
-        "darwin-debug-v3": {
-          "module_insns": 14587,
-          "functions": {
-            "js_main": {
-              "insns": 5686
-            },
-            "Tune6ExactCollection_m128_128": {
-              "insns": 10
-            }
-          },
-          "frames": [
-            {
-              "name": "js_main",
-              "roots": 12,
-              "root_stores": 806,
-              "scalar_homes": 15,
-              "number_scratch": 0,
-              "safepoints": 2111
             }
           ]
         }

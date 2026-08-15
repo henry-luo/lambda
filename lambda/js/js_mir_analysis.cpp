@@ -1247,7 +1247,7 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
     }
 }
 
-static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
+void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
     if (!pat || !names) return;
     struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);

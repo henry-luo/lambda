@@ -136,12 +136,9 @@ static Item js_xhr_get_status(void) {
 
 static void xhr_define_status_accessor(Item obj) {
     Item descriptor = js_new_object();
-    js_set_key_default(descriptor, (Item){.item = s2it(heap_create_name("get"))},
-        js_new_native_function(js_xhr_get_status));
-    js_set_key_default(descriptor, (Item){.item = s2it(heap_create_name("enumerable"))},
-        (Item){.item = ITEM_TRUE});
-    js_set_key_default(descriptor, (Item){.item = s2it(heap_create_name("configurable"))},
-        (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(descriptor, "get", js_new_native_function(js_xhr_get_status));
+    js_set_key_cstr(descriptor, "enumerable", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(descriptor, "configurable", (Item){.item = ITEM_TRUE});
     js_object_define_property(obj,
         (Item){.item = s2it(heap_create_name("status"))}, descriptor);
 }
@@ -380,64 +377,41 @@ extern "C" Item js_xhr_new(void) {
     xhr_set_int(obj, "OPENED", 1);
     xhr_set_int(obj, "UNSENT", 0);
 
-    // attach methods
-    Item open_fn = js_new_native_function(js_xhr_open);
     xhr_set_str(obj, "", ""); // dummy to avoid collision
-    Item k;
-
-    k = (Item){.item = s2it(heap_create_name("open"))};
-    js_set_key_default(obj, k, open_fn);
-
-    Item send_fn = js_new_native_function(js_xhr_send);
-    k = (Item){.item = s2it(heap_create_name("send"))};
-    js_set_key_default(obj, k, send_fn);
-
-    Item srh_fn = js_new_native_function(js_xhr_set_request_header);
-    k = (Item){.item = s2it(heap_create_name("setRequestHeader"))};
-    js_set_key_default(obj, k, srh_fn);
-
-    Item abort_fn = js_new_native_function(js_xhr_abort);
-    k = (Item){.item = s2it(heap_create_name("abort"))};
-    js_set_key_default(obj, k, abort_fn);
-
-    Item grh_fn = js_new_native_function(js_xhr_get_response_header);
-    k = (Item){.item = s2it(heap_create_name("getResponseHeader"))};
-    js_set_key_default(obj, k, grh_fn);
-
-    Item garh_fn = js_new_native_function(js_xhr_get_all_response_headers);
-    k = (Item){.item = s2it(heap_create_name("getAllResponseHeaders"))};
-    js_set_key_default(obj, k, garh_fn);
-
-    Item override_mime_fn = js_new_native_function(js_xhr_override_mime_type);
-    k = (Item){.item = s2it(heap_create_name("overrideMimeType"))};
-    js_set_key_default(obj, k, override_mime_fn);
+    // attach the stable XHR surface from one method catalog.
+#define JS_XHR_METHODS(M) \
+    M("open", js_xhr_open) M("send", js_xhr_send) \
+    M("setRequestHeader", js_xhr_set_request_header) M("abort", js_xhr_abort) \
+    M("getResponseHeader", js_xhr_get_response_header) \
+    M("getAllResponseHeaders", js_xhr_get_all_response_headers) \
+    M("overrideMimeType", js_xhr_override_mime_type)
+#define JS_XHR_INSTALL_METHOD(name, target) \
+    js_set_key_default(obj, make_string_item(name), js_new_native_function(target));
+    JS_XHR_METHODS(JS_XHR_INSTALL_METHOD)
+#undef JS_XHR_INSTALL_METHOD
+#undef JS_XHR_METHODS
 
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
     Item noop_fn = js_new_native_function(js_xhr_noop);
-    k = (Item){.item = s2it(heap_create_name("addEventListener"))};
-    js_set_key_default(obj, k, noop_fn);
-    k = (Item){.item = s2it(heap_create_name("removeEventListener"))};
-    js_set_key_default(obj, k, noop_fn);
+    js_set_key_default(obj, make_string_item("addEventListener"), noop_fn);
+    js_set_key_default(obj, make_string_item("removeEventListener"), noop_fn);
 
     Item upload = js_new_object();
     // XMLHttpRequestUpload is a distinct EventTarget; request libraries
     // register progress listeners on both targets before send().
-    k = (Item){.item = s2it(heap_create_name("addEventListener"))};
-    js_set_key_default(upload, k, noop_fn);
-    k = (Item){.item = s2it(heap_create_name("removeEventListener"))};
-    js_set_key_default(upload, k, noop_fn);
-    k = (Item){.item = s2it(heap_create_name("upload"))};
-    js_set_key_default(obj, k, upload);
+    js_set_key_default(upload, make_string_item("addEventListener"), noop_fn);
+    js_set_key_default(upload, make_string_item("removeEventListener"), noop_fn);
+    js_set_key_default(obj, make_string_item("upload"), upload);
 
     // callback slots (initially null)
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onreadystatechange"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onload"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onerror"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("ontimeout"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onabort"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onloadend"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onloadstart"))}, ItemNull);
-    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("onprogress"))}, ItemNull);
+    js_set_key_cstr(obj, "onreadystatechange", ItemNull);
+    js_set_key_cstr(obj, "onload", ItemNull);
+    js_set_key_cstr(obj, "onerror", ItemNull);
+    js_set_key_cstr(obj, "ontimeout", ItemNull);
+    js_set_key_cstr(obj, "onabort", ItemNull);
+    js_set_key_cstr(obj, "onloadend", ItemNull);
+    js_set_key_cstr(obj, "onloadstart", ItemNull);
+    js_set_key_cstr(obj, "onprogress", ItemNull);
 
     log_debug("xhr: created XHR id=%d", id);
     return obj;

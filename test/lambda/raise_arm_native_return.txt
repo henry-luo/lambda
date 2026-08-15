@@ -1,0 +1,11 @@
+"destructure"
+[4, type.null]
+[null, error]
+[4, type.null]
+[null, error]
+[42, type.null]
+[null, error]
+"or-recovery"
+[3, 99]
+"arithmetic on a recovered value"
+6

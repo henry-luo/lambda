@@ -274,6 +274,18 @@ MIR_context_t jit_init(unsigned int optimize_level) {
         // Note: MIR inlines CALL instructions for functions under 50 instructions at levels > 0
         log_info("MIR JIT optimization level: %u", optimize_level);
         MIR_gen_set_optimize_level(ctx, optimize_level);
+        // Dump gen-internal MIR stages (post-simplify, per pass) when asked.
+        // The finalized-MIR artifact shows PRE-simplify code only; simplify's
+        // make_one_ret / value-numbering rewrites are invisible there, which
+        // is exactly what hid the shape-4 ret collapse. Level 4 = full detail.
+        const char* gen_dbg = getenv("LAMBDA_MIR_GEN_DEBUG");
+        if (gen_dbg) {
+            FILE* f = fopen("temp/mir_gen_debug.txt", "w");
+            if (f) {
+                MIR_gen_set_debug_file(ctx, f);
+                MIR_gen_set_debug_level(ctx, atoi(gen_dbg));
+            }
+        }
     }
     return ctx;
 }

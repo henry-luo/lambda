@@ -27,6 +27,60 @@ JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str, int len),
 JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str),
     js_make_string, (str))
 
+bool js_store_typed_value(void* field_ptr, TypeId value_type,
+        Item value) {
+    if (!field_ptr) return false;
+    // All raw shape writers must use the same representation map; otherwise a
+    // fast store can leave a slot readable only through a different type path.
+    switch (value_type) {
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        break;
+    case LMD_TYPE_UNDEFINED:
+        *(bool*)field_ptr = false;
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;
+        break;
+    case LMD_TYPE_INT:
+        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
+        break;
+    case LMD_TYPE_INT64:
+        *(int64_t*)field_ptr = value.get_int64();
+        break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        break;
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = value.get_double();
+        break;
+    case LMD_TYPE_DTIME:
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
+        break;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    case LMD_TYPE_BINARY:
+        *(Binary**)field_ptr = value.get_safe_binary();
+        break;
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        break;
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
+        break;
+    default:
+        return false;
+    }
+    return true;
+}
+
 static inline bool js_number_like_type(TypeId type) {
     return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
            type == LMD_TYPE_FLOAT64 || type == LMD_TYPE_NUM_SIZED;
@@ -796,6 +850,24 @@ extern "C" int64_t js_is_nullish(Item value) {
     return (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) ? 1 : 0;
 }
 
+extern "C" bool js_get_constructor_name(Item value, char* out, int out_size) {
+    if (!out || out_size <= 0 || get_type_id(value) != LMD_TYPE_MAP) return false;
+    out[0] = '\0';
+    Item ctor = js_get_key_cstr(value, "constructor");
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
+        Item proto = js_get_prototype_of(value);
+        if (get_type_id(proto) == LMD_TYPE_MAP) ctor = js_get_key_cstr(proto, "constructor");
+    }
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
+    Item name = js_get_key_cstr(ctor, "name");
+    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
+    if (!ns || ns->len == 0) return false;
+    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
+    memcpy(out, ns->chars, len);
+    out[len] = '\0';
+    return true;
+}
+
 // =============================================================================
 // v23 Performance Facades — compound operations returning raw int64_t
 // =============================================================================
@@ -890,29 +962,15 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
 // op codes:  0=LT (a<b)  1=GT (a>b)  2=LE (a<=b)  3=GE (a>=b)
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
 static Item js_compare_boxed(int64_t op, Item left, Item right) {
-    switch (op) {
-    case 0: {  // LT — Abstract Relational Comparison (left, right, leftFirst=true)
-        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(left, right));
-        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return result;
-    }
-    case 1: {  // GT — a > b => ARC(right, left, leftFirst=false)
-        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(right, left, false));
-        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return result;
-    }
-    case 2: {  // LE — a <= b => !(b < a); NaN → false
-        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(right, left, false));
-        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(!it2b(result))};
-    }
-    case 3: {  // GE — a >= b => !(a < b); NaN → false
-        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(left, right));
-        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(!it2b(result))};
-    }
-    default: return (Item){.item = b2it(false)};
-    }
+    if (op < 0 || op > 3) return (Item){.item = b2it(false)};
+    bool reverse = op == 1 || op == 2;
+    bool invert = op >= 2;
+    // ARC operand order is observable through ToPrimitive side effects, so only
+    // the comparison direction and final boolean inversion may be shared here.
+    JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(
+        reverse ? right : left, reverse ? left : right, !reverse));
+    if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+    return invert ? (Item){.item = b2it(!it2b(result))} : result;
 }
 
 extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
@@ -1058,10 +1116,10 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
             if (!js_ta_numeric_index_valid(proto, numeric_index, is_negative_zero, &idx)) return true;
 
             Item desc = js_new_object();
-            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
-            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_set_key_cstr(desc, "value", value);
+            js_set_key_cstr(desc, "writable", (Item){.item = b2it(true)});
+            js_set_key_cstr(desc, "enumerable", (Item){.item = b2it(true)});
+            js_set_key_cstr(desc, "configurable", (Item){.item = b2it(true)});
             Item define_result = js_object_define_property(receiver, key, desc);
             // Preserve a failed receiver definition for strict assignment;
             // this path is still the caller's [[Set]] completion.

@@ -81,7 +81,6 @@ bool js_ta_define_own_numeric_index(Item object, Item key, Item desc,
     bool* out_handled, Item* out_error);
 // Pick the thinnest entry whose protocol still covers this callee's shape.
 // Only the classifier above may call this.
-JsCallEntry js_function_select_call_entry(JsFunction* fn);
 
 // v22 / P8 + Js58.2: Maximum index/capacity gap considered for dense array
 // expansion before forcing sparse companion-map storage. Js58.2 restores the

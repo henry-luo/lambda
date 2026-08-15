@@ -283,139 +283,65 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     if (!state) return;
     JsEvalState* eval = &state->eval;
     JsEvalSourceState* source = &eval->source;
-    js_root_range_set_storage(&source->filename_roots, source->filename_slots,
-        JS_EVAL_SOURCE_STACK_MAX, "eval source filenames");
-    js_root_range_set_storage(&source->code_roots, source->code_slots,
-        JS_EVAL_SOURCE_STACK_MAX, "eval source code");
-
     JsEvalBridgeState* bridge = &eval->bridge;
-    js_root_range_set_storage(&bridge->env_key_roots, bridge->env_keys,
-        JS_EVAL_ENV_BIND_MAX, "eval env keys");
-    js_root_range_set_storage(&bridge->env_old_value_roots, bridge->env_old_values,
-        JS_EVAL_ENV_BIND_MAX, "eval env old values");
-    js_root_range_set_storage(&bridge->global_lexical_key_roots, bridge->global_lexical_keys,
-        JS_EVAL_ENV_BIND_MAX, "eval global lexical keys");
-    js_root_range_set_storage(&bridge->global_lexical_old_value_roots,
-        bridge->global_lexical_old_values, JS_EVAL_ENV_BIND_MAX, "eval global lexical old values");
-    js_root_range_set_storage(&bridge->private_unscoped_key_roots, bridge->private_unscoped_keys,
-        JS_EVAL_PRIVATE_BIND_MAX, "eval private unscoped keys");
-    js_root_range_set_storage(&bridge->private_scoped_key_roots, bridge->private_scoped_keys,
-        JS_EVAL_PRIVATE_BIND_MAX, "eval private scoped keys");
-
     JsEvalLocalState* local = &eval->local;
-    js_root_range_set_storage(&local->key_roots, local->keys,
-        JS_EVAL_LOCAL_BIND_MAX, "eval local keys");
-    js_root_range_set_storage(&local->value_roots, local->values,
-        JS_EVAL_LOCAL_BIND_MAX, "eval local values");
-    js_root_range_set_storage(&local->lexical_key_roots, local->lexical_keys,
-        JS_EVAL_LEXICAL_BIND_MAX, "eval lexical keys");
-    js_root_range_set_storage(&local->immutable_key_roots, local->immutable_keys,
-        JS_EVAL_IMMUTABLE_BIND_MAX, "eval immutable keys");
-
-    js_root_range_set_storage(&state->super_this_values.roots,
-        state->super_this_value_slots, 128, "super-this values");
-
-    JsCjsState* cjs = &state->cjs;
-    js_root_range_set_storage(&cjs->module_stack.roots, cjs->module_stack_slots,
-        JS_CJS_STACK_MAX, "CommonJS module stack");
-
-    JsWithScopeState* with_scope = &state->with_scope;
-    js_root_range_set_storage(&with_scope->stack.roots, with_scope->stack_slots,
-        JS_WITH_STACK_MAX, "with-scope stack");
-    js_root_range_set_storage(&with_scope->last_binding_roots,
-        with_scope->last_binding_slots, 2, "with binding cache");
-
-    js_root_range_set_storage(&state->builtin_cache.roots,
-        state->builtin_cache.entries, JS_INTRINSIC_BINDING_COUNT,
-        "intrinsic binding function cache");
-    js_root_range_set_storage(&state->readline.roots,
-        &state->readline.namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX,
-        "readline namespaces and input map");
-    js_root_range_set_storage(&state->buffer.roots,
-        &state->buffer.namespace_object, 2, "Buffer namespace and prototype");
-    js_root_range_set_storage(&state->https.roots,
-        &state->https.agent_prototype, 2, "HTTPS namespace and Agent prototype");
-    js_root_range_set_storage(&state->util.roots,
-        &state->util.namespace_object, 1, "util namespace");
-    js_root_range_set_storage(&state->crypto.roots,
-        &state->crypto.namespace_object, 1, "crypto namespace");
-    js_root_range_set_storage(&state->child_process.roots,
-        &state->child_process.namespace_object, 1, "child_process namespace");
-    js_root_range_set_storage(&state->zlib.roots,
-        state->zlib.constructor_prototypes, 9, "zlib constructors and namespace");
-    js_root_range_set_storage(&state->tls.roots,
-        &state->tls.namespace_object, 5, "TLS namespace and certificate caches");
-    js_root_range_set_storage(&state->stream.roots,
-        // 33 keys, 9 prototypes/internal namespaces, and 2 public namespaces.
-        &state->stream.key_on, 44, "stream keys, prototypes, and namespaces");
-    js_root_range_set_storage(&state->http.roots,
-        &state->http.server_prototype, 5, "HTTP namespace and prototypes");
-    js_root_range_set_storage(&state->net.roots,
-        &state->net.socket_prototype, 5, "net namespace and prototypes");
-    js_root_range_set_storage(&state->fs.roots,
-        &state->fs.internal_binding_namespace, 7,
-        "fs namespaces and prototypes");
-    js_root_range_set_storage(&state->clipboard.roots,
-        &state->clipboard.blob_prototype, 7,
-        "clipboard prototypes and drag session");
-    js_root_range_set_storage(&state->dom.roots,
-        &state->dom.implementation, 5,
-        "DOM singleton wrappers");
-    js_root_range_set_storage(&state->string_concat.roots,
-        &state->string_concat.last_four_byte_escape, 273,
-        "string concatenation fast caches");
-    js_root_range_set_storage(&state->global_var_module_bindings.roots,
-        &state->global_var_module_bindings.global,
-        1 + JS_GLOBAL_VAR_MODULE_BINDING_CAP,
-        "global var module bindings");
-    js_root_range_set_storage(&state->runtime_core_cache.roots,
-        &state->runtime_core_cache.proto_key, 1, "runtime prototype key cache");
-    js_root_range_set_storage(&state->function_prototypes.roots,
-        &state->function_prototypes.generator_function, 3,
-        "generator function prototypes");
-    js_root_range_set_storage(&state->global_string_caches.roots,
-        &state->global_string_caches.uri_last_four_byte_string, 132,
-        "global URI and ASCII string caches");
-    js_root_range_set_storage(&state->global_bindings.roots,
-        &state->global_bindings.global_this,
-        1 + 64 + 1 + 1 + 1 + 2 * JS_GLOBAL_LEX_BIND_MAX,
-        "global object and lexical bindings");
-    js_root_range_set_storage(&state->constructors.roots,
-        state->constructors.global_builtin_functions,
-        JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT,
-        "global builtin and constructor caches");
-    js_root_range_set_storage(&state->namespaces.roots,
-        &state->namespaces.math, 8, "core JS namespace objects");
-    js_root_range_set_storage(&state->test262_agent.roots,
-        &state->test262_agent.object,
-        1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX,
-        "Test262 agent state");
-    js_root_range_set_storage(&state->process.roots, &state->process.argv,
-        3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state");
-    js_root_range_set_storage(&state->iterators.roots,
-        &state->iterators.generator_return_marker, 13,
-        "generator and iterator prototype caches");
-    js_root_range_set_storage(&state->diagnostics_channels.roots,
-        state->diagnostics_channels.channel_names,
-        2 * JS_DIAGNOSTICS_CHANNEL_MAX + 6 + JS_DIAGNOSTICS_DEFERRED_ERROR_MAX,
-        "diagnostics channel state");
-    js_root_range_set_storage(&state->async_hooks.roots,
-        &state->async_hooks.root_resource,
-        2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX,
-        "async hooks state");
-    js_root_range_set_storage(&state->promises.roots,
-        &state->promises.unhandled_storage, 3,
-        "Promise unhandled queue and domain state");
-    js_root_range_set_storage(&state->promises.domain_stack.roots,
-        state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack");
-    js_root_range_set_storage(&state->async_local_storage.roots,
-        state->async_local_storage.instances, JS_MAX_ALS_INSTANCES,
-        "AsyncLocalStorage instances");
-    js_root_range_set_storage(&state->event_loop_queue_roots,
-        state->event_loop.queue_storage, 2, "JS async queue storage");
-    js_root_range_set_storage(&state->event_loop_raf_roots,
-        state->event_loop.raf_callback, JS_EVENT_RAF_CAPACITY,
-        "JS animation frame callbacks");
+    // Keep every precise root descriptor in one catalog so a new state cache
+    // cannot bypass the same initialization and GC registration invariant.
+#define JS_SET_RUNTIME_ROOT(range, slots, count, label) \
+    js_root_range_set_storage(range, slots, count, label);
+#define JS_RUNTIME_ROOT_STORAGE(M) \
+    M(&source->filename_roots, source->filename_slots, JS_EVAL_SOURCE_STACK_MAX, "eval source filenames") \
+    M(&source->code_roots, source->code_slots, JS_EVAL_SOURCE_STACK_MAX, "eval source code") \
+    M(&bridge->env_key_roots, bridge->env_keys, JS_EVAL_ENV_BIND_MAX, "eval env keys") \
+    M(&bridge->env_old_value_roots, bridge->env_old_values, JS_EVAL_ENV_BIND_MAX, "eval env old values") \
+    M(&bridge->global_lexical_key_roots, bridge->global_lexical_keys, JS_EVAL_ENV_BIND_MAX, "eval global lexical keys") \
+    M(&bridge->global_lexical_old_value_roots, bridge->global_lexical_old_values, JS_EVAL_ENV_BIND_MAX, "eval global lexical old values") \
+    M(&bridge->private_unscoped_key_roots, bridge->private_unscoped_keys, JS_EVAL_PRIVATE_BIND_MAX, "eval private unscoped keys") \
+    M(&bridge->private_scoped_key_roots, bridge->private_scoped_keys, JS_EVAL_PRIVATE_BIND_MAX, "eval private scoped keys") \
+    M(&local->key_roots, local->keys, JS_EVAL_LOCAL_BIND_MAX, "eval local keys") \
+    M(&local->value_roots, local->values, JS_EVAL_LOCAL_BIND_MAX, "eval local values") \
+    M(&local->lexical_key_roots, local->lexical_keys, JS_EVAL_LEXICAL_BIND_MAX, "eval lexical keys") \
+    M(&local->immutable_key_roots, local->immutable_keys, JS_EVAL_IMMUTABLE_BIND_MAX, "eval immutable keys") \
+    M(&state->super_this_values.roots, state->super_this_value_slots, 128, "super-this values") \
+    M(&state->cjs.module_stack.roots, state->cjs.module_stack_slots, JS_CJS_STACK_MAX, "CommonJS module stack") \
+    M(&state->with_scope.stack.roots, state->with_scope.stack_slots, JS_WITH_STACK_MAX, "with-scope stack") \
+    M(&state->with_scope.last_binding_roots, state->with_scope.last_binding_slots, 2, "with binding cache") \
+    M(&state->builtin_cache.roots, state->builtin_cache.entries, JS_INTRINSIC_BINDING_COUNT, "intrinsic binding function cache") \
+    M(&state->readline.roots, &state->readline.namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX, "readline namespaces and input map") \
+    M(&state->buffer.roots, &state->buffer.namespace_object, 2, "Buffer namespace and prototype") \
+    M(&state->https.roots, &state->https.agent_prototype, 2, "HTTPS namespace and Agent prototype") \
+    M(&state->util.roots, &state->util.namespace_object, 1, "util namespace") \
+    M(&state->crypto.roots, &state->crypto.namespace_object, 1, "crypto namespace") \
+    M(&state->child_process.roots, &state->child_process.namespace_object, 1, "child_process namespace") \
+    M(&state->zlib.roots, state->zlib.constructor_prototypes, 9, "zlib constructors and namespace") \
+    M(&state->tls.roots, &state->tls.namespace_object, 5, "TLS namespace and certificate caches") \
+    M(&state->stream.roots, &state->stream.key_on, 44, "stream keys, prototypes, and namespaces") \
+    M(&state->http.roots, &state->http.server_prototype, 5, "HTTP namespace and prototypes") \
+    M(&state->net.roots, &state->net.socket_prototype, 5, "net namespace and prototypes") \
+    M(&state->fs.roots, &state->fs.internal_binding_namespace, 7, "fs namespaces and prototypes") \
+    M(&state->clipboard.roots, &state->clipboard.blob_prototype, 7, "clipboard prototypes and drag session") \
+    M(&state->dom.roots, &state->dom.implementation, 5, "DOM singleton wrappers") \
+    M(&state->string_concat.roots, &state->string_concat.last_four_byte_escape, 273, "string concatenation fast caches") \
+    M(&state->global_var_module_bindings.roots, &state->global_var_module_bindings.global, 1 + JS_GLOBAL_VAR_MODULE_BINDING_CAP, "global var module bindings") \
+    M(&state->runtime_core_cache.roots, &state->runtime_core_cache.proto_key, 1, "runtime prototype key cache") \
+    M(&state->function_prototypes.roots, &state->function_prototypes.generator_function, 3, "generator function prototypes") \
+    M(&state->global_string_caches.roots, &state->global_string_caches.uri_last_four_byte_string, 132, "global URI and ASCII string caches") \
+    M(&state->global_bindings.roots, &state->global_bindings.global_this, 1 + 64 + 1 + 1 + 1 + 2 * JS_GLOBAL_LEX_BIND_MAX, "global object and lexical bindings") \
+    M(&state->constructors.roots, state->constructors.global_builtin_functions, JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT, "global builtin and constructor caches") \
+    M(&state->namespaces.roots, &state->namespaces.math, 8, "core JS namespace objects") \
+    M(&state->test262_agent.roots, &state->test262_agent.object, 1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX, "Test262 agent state") \
+    M(&state->process.roots, &state->process.argv, 3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state") \
+    M(&state->iterators.roots, &state->iterators.generator_return_marker, 13, "generator and iterator prototype caches") \
+    M(&state->diagnostics_channels.roots, state->diagnostics_channels.channel_names, 2 * JS_DIAGNOSTICS_CHANNEL_MAX + 6 + JS_DIAGNOSTICS_DEFERRED_ERROR_MAX, "diagnostics channel state") \
+    M(&state->async_hooks.roots, &state->async_hooks.root_resource, 2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX, "async hooks state") \
+    M(&state->promises.roots, &state->promises.unhandled_storage, 3, "Promise unhandled queue and domain state") \
+    M(&state->promises.domain_stack.roots, state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack") \
+    M(&state->async_local_storage.roots, state->async_local_storage.instances, JS_MAX_ALS_INSTANCES, "AsyncLocalStorage instances") \
+    M(&state->event_loop_queue_roots, state->event_loop.queue_storage, 2, "JS async queue storage") \
+    M(&state->event_loop_raf_roots, state->event_loop.raf_callback, JS_EVENT_RAF_CAPACITY, "JS animation frame callbacks")
+    JS_RUNTIME_ROOT_STORAGE(JS_SET_RUNTIME_ROOT)
+#undef JS_RUNTIME_ROOT_STORAGE
+#undef JS_SET_RUNTIME_ROOT
 }
 
 bool js_root_range_register_reset(JsRootRange* range, void* owner,
@@ -1288,9 +1214,6 @@ extern "C" void js_batch_reset() {
     js_batch_reset_runtime_caches("js_batch_reset pre-cleanup", true);
 }
 
-// Get current module var count (for checkpointing)
-JS_FORWARD_EXPRESSION(int, js_get_module_var_count, (void), js_module_var_count)
-
 extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
     js_reset_module_vars();
     if (declaration_count < 0) declaration_count = 0;
@@ -1394,9 +1317,7 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     // IterableToList is part of construction, so an abrupt iterator result must
     // escape instead of being installed as the new error's `.errors` value.
     if (item_is_error(errors_array_root.get())) return errors_array_root.get();
-    JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(err_root.get(),
-        (Item){.item = s2it(heap_create_name("errors", 6))},
-        errors_array_root.get()));
+    JS_ASSIGN_OR_RETURN(set_result, js_set_key_cstr(err_root.get(), "errors", errors_array_root.get()));
     return err_root.get();
 }
 
@@ -1473,8 +1394,7 @@ static int js_error_stack_trace_limit(void) {
     if (!context || !context->debug_info) return 0;
     Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return 10;
-    Item limit = js_get_key_default(error_ctor,
-        (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
+    Item limit = js_get_key_cstr(error_ctor, "stackTraceLimit");
     TypeId limit_type = get_type_id(limit);
     if (limit_type != LMD_TYPE_INT && limit_type != LMD_TYPE_INT64 &&
             limit_type != LMD_TYPE_FLOAT) return 10;
@@ -1649,8 +1569,8 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     Rooted<Item> error_root(roots, error_obj);
     // Error property reads can allocate and move the unified carrier; read
     // through the rooted object so the raw-stack owner is never invalidated.
-    Rooted<Item> name_root(roots, js_get_key_default(error_root.get(), make_string_item("name")));
-    Rooted<Item> message_root(roots, js_get_key_default(error_root.get(), make_string_item("message")));
+    Rooted<Item> name_root(roots, js_get_key_cstr(error_root.get(), "name"));
+    Rooted<Item> message_root(roots, js_get_key_cstr(error_root.get(), "message"));
     Rooted<Item> prepared_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> native_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> eval_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
@@ -1779,11 +1699,11 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
 extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
     if (get_type_id(target) == LMD_TYPE_MAP) {
         Item stack_key = (Item){.item = s2it(heap_create_name("stack", 5))};
-        Item name = js_get_key_default(target, (Item){.item = s2it(heap_create_name("name", 4))});
+        Item name = js_get_key_cstr(target, "name");
         if (get_type_id(name) != LMD_TYPE_STRING) {
             name = (Item){.item = s2it(heap_create_name("Error", 5))};
         }
-        Item message = js_get_key_default(target, (Item){.item = s2it(heap_create_name("message", 7))});
+        Item message = js_get_key_cstr(target, "message");
         if (get_type_id(message) != LMD_TYPE_STRING) {
             message = (Item){.item = ITEM_JS_UNDEFINED};
         }
@@ -1977,10 +1897,10 @@ extern "C" Item js_build_arguments_object() {
     key_root.set((Item){.item = s2it(heap_create_name("length", 6))});
     descriptor_root.set(js_new_object());
     js_set_prototype(descriptor_root.get(), ItemNull);
-    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(argc)});
-    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    js_set_key_cstr(descriptor_root.get(), "value", (Item){.item = i2it(argc)});
+    js_set_key_cstr(descriptor_root.get(), "writable", (Item){.item = b2it(true)});
+    js_set_key_cstr(descriptor_root.get(), "enumerable", (Item){.item = b2it(false)});
+    js_set_key_cstr(descriptor_root.get(), "configurable", (Item){.item = b2it(true)});
     js_object_define_property(companion_root.get(), key_root.get(), descriptor_root.get());
 
     tag_key_root.set(js_well_known_symbol_key(4));
@@ -1991,8 +1911,7 @@ extern "C" Item js_build_arguments_object() {
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
     iterator_key_root.set(js_well_known_symbol_key(1));
     Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
-    iterator_root.set(js_get_key_default(array_proto,
-        (Item){.item = s2it(heap_create_name("values", 6))}));
+    iterator_root.set(js_get_key_cstr(array_proto, "values"));
     js_set_key_default(companion_root.get(), iterator_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());
 
@@ -2004,18 +1923,17 @@ extern "C" Item js_build_arguments_object() {
         js_install_native_accessor(companion_root.get(), callee_key_root.get(),
                                    thrower_root.get(), thrower_root.get(),
                                    JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
-        js_set_key_default(companion_root.get(), (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
-                        (Item){.item = b2it(true)});
+        js_set_key_cstr(companion_root.get(), "__strict_arguments__", (Item){.item = b2it(true)});
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
         if (callee_root.get().item != 0) {
             callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
             descriptor_root.set(js_new_object());
             js_set_prototype(descriptor_root.get(), ItemNull);
-            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, callee_root.get());
-            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_set_key_cstr(descriptor_root.get(), "value", callee_root.get());
+            js_set_key_cstr(descriptor_root.get(), "writable", (Item){.item = b2it(true)});
+            js_set_key_cstr(descriptor_root.get(), "enumerable", (Item){.item = b2it(false)});
+            js_set_key_cstr(descriptor_root.get(), "configurable", (Item){.item = b2it(true)});
             js_object_define_property(companion_root.get(), callee_key_root.get(), descriptor_root.get());
         }
     }

@@ -215,7 +215,7 @@ static Item get_dom_constructor_prototype(const char* ctor_name) {
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, make_key(ctor_name));
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto = js_get_key_default(ctor, make_key("prototype"));
+    Item proto = js_get_key_cstr(ctor, "prototype");
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
@@ -490,14 +490,14 @@ struct RangeClientRectCollector {
 
 static Item js_dom_make_rect(float x, float y, float w, float h) {
     Item rect = js_new_object();
-    js_set_key_default(rect, make_key("x"), make_number_from_float(x));
-    js_set_key_default(rect, make_key("y"), make_number_from_float(y));
-    js_set_key_default(rect, make_key("left"), make_number_from_float(x));
-    js_set_key_default(rect, make_key("top"), make_number_from_float(y));
-    js_set_key_default(rect, make_key("right"), make_number_from_float(x + w));
-    js_set_key_default(rect, make_key("bottom"), make_number_from_float(y + h));
-    js_set_key_default(rect, make_key("width"), make_number_from_float(w));
-    js_set_key_default(rect, make_key("height"), make_number_from_float(h));
+    js_set_key_cstr(rect, "x", make_number_from_float(x));
+    js_set_key_cstr(rect, "y", make_number_from_float(y));
+    js_set_key_cstr(rect, "left", make_number_from_float(x));
+    js_set_key_cstr(rect, "top", make_number_from_float(y));
+    js_set_key_cstr(rect, "right", make_number_from_float(x + w));
+    js_set_key_cstr(rect, "bottom", make_number_from_float(y + h));
+    js_set_key_cstr(rect, "width", make_number_from_float(w));
+    js_set_key_cstr(rect, "height", make_number_from_float(h));
     return rect;
 }
 
@@ -1046,17 +1046,12 @@ static Item build_selection_object(DomSelection* s) {
 static Item js_selection_node_value(DomNode* node) {
     return node ? js_dom_wrap_element(node) : ItemNull;
 }
-static Item js_selection_anchor_node_value(DomSelection* s) {
-    return js_selection_node_value(dom_selection_anchor_node(s));
-}
-static Item js_selection_focus_node_value(DomSelection* s) {
-    return js_selection_node_value(dom_selection_focus_node(s));
-}
 JS_SELECTION_GETTER(js_selection_get_anchor_node,
-    js_selection_anchor_node_value(s))
+    js_selection_node_value(dom_selection_anchor_node(s)))
 JS_SELECTION_GETTER(js_selection_get_anchor_offset,
     make_int((int64_t)dom_selection_anchor_offset(s)))
-JS_SELECTION_GETTER(js_selection_get_focus_node, js_selection_focus_node_value(s))
+JS_SELECTION_GETTER(js_selection_get_focus_node,
+    js_selection_node_value(dom_selection_focus_node(s)))
 JS_SELECTION_GETTER(js_selection_get_focus_offset,
     make_int((int64_t)dom_selection_focus_offset(s)))
 JS_SELECTION_GETTER(js_selection_get_is_collapsed,
@@ -1193,7 +1188,7 @@ extern "C" Item js_dom_get_selection_function_for_document(void* doc) {
 extern "C" void js_dom_selection_install_globals(void) {
     Item global = js_get_global_this();
     Item fn = js_new_native_function(js_global_get_selection);
-    js_set_key_default(global, make_key("getSelection"), fn);
+    js_set_key_cstr(global, "getSelection", fn);
     // Ensure `window` resolves to globalThis so `window.getSelection()` works.
     Item window_key = make_key("window");
     Item existing = js_get_key_default(global, window_key);
@@ -1201,7 +1196,7 @@ extern "C" void js_dom_selection_install_globals(void) {
         js_set_key_default(global, window_key, global);
     } else {
         // window is already a real object — install getSelection on it too
-        js_set_key_default(existing, make_key("getSelection"), fn);
+        js_set_key_cstr(existing, "getSelection", fn);
     }
     // Stage 4C: `window.document` must resolve to the document proxy. Bare
     // `document` is special-cased in the transpiler (js_mir_expression_lowering
@@ -1213,15 +1208,15 @@ extern "C" void js_dom_selection_install_globals(void) {
     // and it is the same item bare `document` yields, so `window.document ===
     // document` holds.
     Item doc_proxy = js_get_document_object_value();
-    js_set_key_default(global, make_key("document"), doc_proxy);
+    js_set_key_cstr(global, "document", doc_proxy);
     if (get_type_id(existing) == LMD_TYPE_MAP)
-        js_set_key_default(existing, make_key("document"), doc_proxy);
+        js_set_key_cstr(existing, "document", doc_proxy);
 
     Item flush_fn = js_new_native_this_span_function(
         js_dom_flush_selectionchange);
-    js_set_key_default(global, make_key("__lambdaFlushSelectionChange"), flush_fn);
+    js_set_key_cstr(global, "__lambdaFlushSelectionChange", flush_fn);
     if (get_type_id(existing) == LMD_TYPE_MAP)
-        js_set_key_default(existing, make_key("__lambdaFlushSelectionChange"), flush_fn);
+        js_set_key_cstr(existing, "__lambdaFlushSelectionChange", flush_fn);
 
     // Install placeholder Selection / Range constructors so `instanceof Selection`
     // and feature-detection (`window.Selection`) succeed. The constructors are
@@ -1232,23 +1227,23 @@ extern "C" void js_dom_selection_install_globals(void) {
     Item range_ctor = js_new_native_constructor(js_dom_create_range);
     js_set_function_name(sel_ctor, make_key("Selection"));
     js_set_function_name(range_ctor, make_key("Range"));
-    js_set_key_default(global, make_key("Selection"), sel_ctor);
-    js_set_key_default(global, make_key("Range"),     range_ctor);
+    js_set_key_cstr(global, "Selection", sel_ctor);
+    js_set_key_cstr(global, "Range", range_ctor);
 
     // Install Selection.prototype and Range.prototype with method stubs so
     // WPT idl checks like `Selection.prototype.deleteFromDocument.length`
     // succeed. The methods themselves are never invoked through the
     // prototype path (instances are DOM resources and dispatch through their
     // own get_property hooks); these are pure idl shape.
-    Item sel_proto = js_get_key_default(sel_ctor, make_key("prototype"));
+    Item sel_proto = js_get_key_cstr(sel_ctor, "prototype");
     if (get_type_id(sel_proto) != LMD_TYPE_MAP) {
         sel_proto = js_new_object();
-        js_set_key_default(sel_ctor, make_key("prototype"), sel_proto);
+        js_set_key_cstr(sel_ctor, "prototype", sel_proto);
     }
-    Item range_proto = js_get_key_default(range_ctor, make_key("prototype"));
+    Item range_proto = js_get_key_cstr(range_ctor, "prototype");
     if (get_type_id(range_proto) != LMD_TYPE_MAP) {
         range_proto = js_new_object();
-        js_set_key_default(range_ctor, make_key("prototype"), range_proto);
+        js_set_key_cstr(range_ctor, "prototype", range_proto);
     }
     // DOM3: force the jube type prototypes now that the ctors' .prototype
     // objects exist — this publishes the declared method function objects onto

@@ -1194,7 +1194,6 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t h_data , MIR_reg_t h_len,
                                                MIR_reg_t type_guard,
                                                bool strict);
-MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg);
 // A2 forward declarations
 JsMirVarEntry* jm_get_js_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
 MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
@@ -1491,20 +1490,6 @@ static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* n
         if (hashmap_get(scope, &key)) return true;
     }
     return false;
-}
-
-static bool jm_scope_env_name_matches_binding(const char* scope_name, const char* name,
-        JsAstNode* binding_node) {
-    if (!scope_name || !name) return false;
-    if (strcmp(scope_name, name) == 0) return true;
-    const char* at = strchr(scope_name, '@');
-    if (!at) return false;
-    size_t base_len = (size_t)(at - scope_name);
-    if (strlen(name) != base_len || strncmp(scope_name, name, base_len) != 0) return false;
-    if (!binding_node || ts_node_is_null(binding_node->node)) return false;
-    const char* key = jm_format_name("%s@%u:%u", name,
-        ts_node_start_byte(binding_node->node), ts_node_end_byte(binding_node->node));
-    return strcmp(scope_name, key) == 0;
 }
 
 static JsFuncCollected* jm_current_scope_env_func(JsMirTranspiler* mt) {

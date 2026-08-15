@@ -1411,9 +1411,9 @@ static Item js_performance_entries_by_type(Item type_item) {
         return entries;
     }
     Item navigation = js_new_object();
-    js_set_key_default(navigation, make_string_item("type"), make_string_item("navigate"));
-    js_set_key_default(navigation, make_string_item("transferSize"), (Item){.item = i2it(1)});
-    js_set_key_default(navigation, make_string_item("deliveryType"), make_string_item(""));
+    js_set_key_cstr(navigation, "type", make_string_item("navigate"));
+    js_set_key_cstr(navigation, "transferSize", (Item){.item = i2it(1)});
+    js_set_key_cstr(navigation, "deliveryType", make_string_item(""));
     js_array_push(entries, navigation);
     return entries;
 }
@@ -2608,8 +2608,7 @@ extern "C" int js_process_current_exit_code(void) {
     int code = js_process_exit_code_value;
     if (!js_process_cache_is_empty(js_process_object) &&
         context && context->name_pool) {
-        Item prop = js_get_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("exitCode", 8))});
+        Item prop = js_get_key_cstr(js_process_object, "exitCode");
         TypeId type = get_type_id(prop);
         if (type == LMD_TYPE_INT) code = (int)it2i(prop);
         else if (type == LMD_TYPE_FLOAT) code = (int)it2d(prop);
@@ -2647,9 +2646,7 @@ static Item build_process_env(void) {
         }
     }
     // Skip Node.js flag-checking in common test module — Lambda doesn't support V8 flags
-    js_set_key_default(env,
-        (Item){.item = s2it(heap_create_name("NODE_SKIP_FLAG_CHECK", 20))},
-        (Item){.item = s2it(heap_create_name("1", 1))});
+    js_set_key_cstr(env, "NODE_SKIP_FLAG_CHECK", (Item){.item = s2it(heap_create_name("1", 1))});
     return env_root.get();
 }
 
@@ -2669,14 +2666,16 @@ JS_FORWARD_STATIC_ITEM(build_process_stdout, (void), build_process_stdio, (js_pr
 static Item build_process_stdin(void) {
     RootFrame roots(1);
     Rooted<Item> stdin_root(roots, js_new_object());
-    js_set_key_cstr(stdin_root.get(), "read", js_new_native_function(js_process_stdin_read));
-    js_set_key_cstr(stdin_root.get(), "destroy", js_new_native_function(js_process_stdin_destroy));
-    js_set_key_cstr(stdin_root.get(), "setRawMode", js_new_native_function(js_process_stdin_setRawMode));
-    js_set_key_cstr(stdin_root.get(), "on", js_new_native_function(js_process_stdin_on));
-    js_set_key_cstr(stdin_root.get(), "addListener", js_new_native_function(js_process_stdin_on));
-    js_set_key_cstr(stdin_root.get(), "pipe", js_new_native_function(js_process_stdin_pipe));
-    js_set_key_cstr(stdin_root.get(), "resume", js_new_native_function(js_process_stdin_resume));
-    js_set_key_cstr(stdin_root.get(), "pause", js_new_native_function(js_process_stdin_pause));
+#define JS_PROCESS_STDIN_METHODS(M) \
+    M("read", js_process_stdin_read) M("destroy", js_process_stdin_destroy) \
+    M("setRawMode", js_process_stdin_setRawMode) M("on", js_process_stdin_on) \
+    M("addListener", js_process_stdin_on) M("pipe", js_process_stdin_pipe) \
+    M("resume", js_process_stdin_resume) M("pause", js_process_stdin_pause)
+#define JS_PROCESS_STDIN_METHOD(name, target) \
+    js_set_key_cstr(stdin_root.get(), name, js_new_native_function(target));
+    JS_PROCESS_STDIN_METHODS(JS_PROCESS_STDIN_METHOD)
+#undef JS_PROCESS_STDIN_METHOD
+#undef JS_PROCESS_STDIN_METHODS
     js_set_key_cstr(stdin_root.get(), "fd", (Item){.item = i2it(0)});
     js_set_key_cstr(stdin_root.get(), "isTTY",
         (Item){.item = b2it(isatty(0))});
@@ -2715,9 +2714,9 @@ extern "C" Item js_process_binding(Item name) {
     // process.binding('config') — return config object
     if (s->len == 6 && memcmp(s->chars, "config", 6) == 0) {
         Item cfg = js_new_object();
-        js_set_key_default(cfg, (Item){.item = s2it(heap_create_name("hasOpenSSL", 10))}, (Item){.item = ITEM_TRUE});
-        js_set_key_default(cfg, (Item){.item = s2it(heap_create_name("hasCrypto", 9))}, (Item){.item = ITEM_TRUE});
-        js_set_key_default(cfg, (Item){.item = s2it(heap_create_name("fipsMode", 8))}, (Item){.item = ITEM_FALSE});
+        js_set_key_cstr(cfg, "hasOpenSSL", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(cfg, "hasCrypto", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(cfg, "fipsMode", (Item){.item = ITEM_FALSE});
         return cfg;
     }
     if ((s->len == 2 && memcmp(s->chars, "uv", 2) == 0) ||
@@ -2742,21 +2741,16 @@ extern "C" Item js_set_has_stub(Item self, Item key) {
 extern "C" Item js_process_report_getReport(void) {
     Item report = js_new_object();
     Item header = js_new_object();
-    js_set_key_default(header,
-        (Item){.item = s2it(heap_create_name("nodeVersion", 11))},
-        (Item){.item = s2it(heap_create_name("v20.0.0", 7))});
-    js_set_key_default(header,
-        (Item){.item = s2it(heap_create_name("platform", 8))},
+    js_set_key_cstr(header, "nodeVersion", make_string_item("v20.0.0"));
+    js_set_key_cstr(header, "platform",
 #ifdef __APPLE__
-        (Item){.item = s2it(heap_create_name("darwin", 6))});
+        make_string_item("darwin"));
 #elif defined(__linux__)
-        (Item){.item = s2it(heap_create_name("linux", 5))});
+        make_string_item("linux"));
 #else
-        (Item){.item = s2it(heap_create_name("win32", 5))});
+        make_string_item("win32"));
 #endif
-    js_set_key_default(report,
-        (Item){.item = s2it(heap_create_name("header", 6))},
-        header);
+    js_set_key_cstr(report, "header", header);
     return report;
 }
 
@@ -2768,33 +2762,33 @@ extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_i
     Item warning_obj;
     if (get_type_id(warning) == LMD_TYPE_STRING) {
         warning_obj = js_new_object();
-        js_set_key_default(warning_obj, (Item){.item = s2it(heap_create_name("message", 7))}, warning);
+        js_set_key_cstr(warning_obj, "message", warning);
 
         // Check if type_item is an options object { type, code, detail }
         if (get_type_id(type_item) == LMD_TYPE_MAP) {
-            Item opt_type = js_get_key_default(type_item, (Item){.item = s2it(heap_create_name("type", 4))});
-            Item opt_code = js_get_key_default(type_item, (Item){.item = s2it(heap_create_name("code", 4))});
-            Item opt_detail = js_get_key_default(type_item, (Item){.item = s2it(heap_create_name("detail", 6))});
-            js_set_key_default(warning_obj, (Item){.item = s2it(heap_create_name("name", 4))},
+            Item opt_type = js_get_key_cstr(type_item, "type");
+            Item opt_code = js_get_key_cstr(type_item, "code");
+            Item opt_detail = js_get_key_cstr(type_item, "detail");
+            js_set_key_cstr(warning_obj, "name",
                 get_type_id(opt_type) == LMD_TYPE_STRING ? opt_type :
-                    (Item){.item = s2it(heap_create_name("Warning", 7))});
+                    make_string_item("Warning"));
             if (get_type_id(opt_code) == LMD_TYPE_STRING)
-                js_set_key_default(warning_obj, (Item){.item = s2it(heap_create_name("code", 4))}, opt_code);
+                js_set_key_cstr(warning_obj, "code", opt_code);
             if (get_type_id(opt_detail) == LMD_TYPE_STRING)
-                js_set_key_default(warning_obj, (Item){.item = s2it(heap_create_name("detail", 6))}, opt_detail);
+                js_set_key_cstr(warning_obj, "detail", opt_detail);
         } else {
-            js_set_key_default(warning_obj, (Item){.item = s2it(heap_create_name("name", 4))},
+            js_set_key_cstr(warning_obj, "name",
                 get_type_id(type_item) == LMD_TYPE_STRING ? type_item :
-                    (Item){.item = s2it(heap_create_name("Warning", 7))});
+                    make_string_item("Warning"));
             if (get_type_id(code_item) == LMD_TYPE_STRING) {
-                js_set_key_default(warning_obj, (Item){.item = s2it(heap_create_name("code", 4))}, code_item);
+                js_set_key_cstr(warning_obj, "code", code_item);
             }
         }
     } else {
         warning_obj = warning;
     }
 
-    Item warning_message = js_get_key_default(warning_obj, (Item){.item = s2it(heap_create_name("message", 7))});
+    Item warning_message = js_get_key_cstr(warning_obj, "message");
     if (get_type_id(warning_message) == LMD_TYPE_STRING) {
         String* msg = it2s(warning_message);
         if (msg) {
@@ -2807,10 +2801,8 @@ extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_i
 
             // warning observers expect the default stderr write to happen
             // before process emits the public 'warning' event.
-            Item stderr_obj = js_get_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("stderr", 6))});
-            Item write_fn = js_get_key_default(stderr_obj,
-                (Item){.item = s2it(heap_create_name("write", 5))});
+            Item stderr_obj = js_get_key_cstr(js_process_object, "stderr");
+            Item write_fn = js_get_key_cstr(stderr_obj, "write");
             if (js_is_callable(write_fn)) {
                 JS_ASSIGN_OR_RETURN(write_result, js_call_function(write_fn, stderr_obj, &line_item, 1));
             } else {
@@ -2930,9 +2922,7 @@ static void js_process_clear_fixed_list(Item event_name) {
 static void js_process_record_uncaught_handler_failure(void) {
     js_process_exit_code_value = 1;
     if (js_process_object.item != ITEM_NULL) {
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("exitCode", 8))},
-            (Item){.item = i2it(1)});
+        js_set_key_cstr(js_process_object, "exitCode", (Item){.item = i2it(1)});
     }
     log_error("js-process-uncaught-fatal: uncaughtException listener threw");
 }
@@ -3065,9 +3055,7 @@ extern "C" Item js_process_once(Item event_name, Item listener) {
 }
 
 static void js_process_update_events_count(void) {
-    js_set_key_default(js_process_object,
-        (Item){.item = s2it(heap_create_name("_eventsCount", 12))},
-        (Item){.item = i2it((int64_t)process_total_listener_count)});
+    js_set_key_cstr(js_process_object, "_eventsCount", (Item){.item = i2it((int64_t)process_total_listener_count)});
 }
 
 static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener) {
@@ -3214,10 +3202,8 @@ static void js_process_ipc_refresh_ref(void) {
     if (!js_process_ipc_active || js_process_ipc_closing) return;
     bool should_ref = js_process_ipc_force_ref || process_ipc_liveness_listener_count > 0;
     if (process_listener_map.item != 0) {
-        Item message_arr = js_get_key_default(process_listener_map,
-            (Item){.item = s2it(heap_create_name("message", 7))});
-        Item disconnect_arr = js_get_key_default(process_listener_map,
-            (Item){.item = s2it(heap_create_name("disconnect", 10))});
+        Item message_arr = js_get_key_cstr(process_listener_map, "message");
+        Item disconnect_arr = js_get_key_cstr(process_listener_map, "disconnect");
         should_ref = should_ref ||
             (get_type_id(message_arr) == LMD_TYPE_ARRAY && js_array_length(message_arr) > 0) ||
             (get_type_id(disconnect_arr) == LMD_TYPE_ARRAY && js_array_length(disconnect_arr) > 0);
@@ -3240,9 +3226,7 @@ extern "C" void js_process_ipc_clear_force_ref(void) {
 
 static void js_process_set_connected(bool connected) {
     if (js_process_cache_is_empty(js_process_object)) return;
-    js_set_key_default(js_process_object,
-        (Item){.item = s2it(heap_create_name("connected", 9))},
-        (Item){.item = b2it(connected)});
+    js_set_key_cstr(js_process_object, "connected", (Item){.item = b2it(connected)});
 }
 
 static void js_process_ipc_emit_disconnect_once(void) {
@@ -3303,7 +3287,7 @@ static Item js_process_ipc_take_pending_handle(void) {
 
 static bool js_process_has_message_listener(void) {
     Item map = get_process_listener_map();
-    Item arr = js_get_key_default(map, (Item){.item = s2it(heap_create_name("message", 7))});
+    Item arr = js_get_key_cstr(map, "message");
     return get_type_id(arr) == LMD_TYPE_ARRAY && js_array_length(arr) > 0;
 }
 
@@ -3313,8 +3297,8 @@ static void js_process_ipc_queue_message(Item message, Item handle) {
         js_process_ipc_pending_messages = js_array_new(0);
     }
     Item entry = js_new_object();
-    js_set_key_default(entry, (Item){.item = s2it(heap_create_name("message", 7))}, message);
-    js_set_key_default(entry, (Item){.item = s2it(heap_create_name("handle", 6))}, handle);
+    js_set_key_cstr(entry, "message", message);
+    js_set_key_cstr(entry, "handle", handle);
     js_array_push(js_process_ipc_pending_messages, entry);
 }
 
@@ -3360,8 +3344,8 @@ static void js_process_ipc_flush_pending(void) {
     int64_t len = js_array_length(pending);
     for (int64_t i = 0; i < len; i++) {
         Item entry = js_elements_get_int(pending, i);
-        Item message = js_get_key_default(entry, (Item){.item = s2it(heap_create_name("message", 7))});
-        Item handle = js_get_key_default(entry, (Item){.item = s2it(heap_create_name("handle", 6))});
+        Item message = js_get_key_cstr(entry, "message");
+        Item handle = js_get_key_cstr(entry, "handle");
         Item emit_result = js_process_ipc_emit_message(message, handle);
         if (item_is_error(emit_result)) return;
     }
@@ -3372,8 +3356,7 @@ static bool js_process_ipc_is_disconnect_control(Item message) {
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }
-    Item value = js_get_key_default(message,
-        (Item){.item = s2it(heap_create_name("__lambda_ipc_disconnect__", 25))});
+    Item value = js_get_key_cstr(message, "__lambda_ipc_disconnect__");
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
@@ -3383,11 +3366,9 @@ static bool js_process_ipc_unwrap_handle_message(Item* message) {
         get_type_id(*message) != LMD_TYPE_VMAP)) {
         return false;
     }
-    Item has_handle = js_get_key_default(*message,
-        (Item){.item = s2it(heap_create_name("__lambda_ipc_has_handle__", 25))});
+    Item has_handle = js_get_key_cstr(*message, "__lambda_ipc_has_handle__");
     if (has_handle.item != ITEM_TRUE && has_handle.item != b2it(true)) return false;
-    Item payload = js_get_key_default(*message,
-        (Item){.item = s2it(heap_create_name("__lambda_ipc_payload__", 22))});
+    Item payload = js_get_key_cstr(*message, "__lambda_ipc_payload__");
     // only handle-bearing IPC messages consume a pending descriptor; otherwise
     // a later no-handle control/user message can steal an earlier queued fd.
     *message = payload;
@@ -3555,9 +3536,7 @@ extern "C" Item js_process_send(Item msg, Item callback) {
 extern "C" void js_process_ipc_notify_socket_closed(void) {
     if (!js_process_ipc_active || js_process_ipc_closing) return;
     Item control = js_new_object();
-    js_set_key_default(control,
-        (Item){.item = s2it(heap_create_name("__lambda_ipc_socket_closed__", 28))},
-        (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(control, "__lambda_ipc_socket_closed__", (Item){.item = ITEM_TRUE});
     // receiver-side socket close is an internal accounting edge for a
     // transferred fd; userland must not observe this as a message event.
     (void)js_process_send(control, make_js_undefined());
@@ -3566,9 +3545,7 @@ extern "C" void js_process_ipc_notify_socket_closed(void) {
 extern "C" void js_process_ipc_notify_handle_accepted(void) {
     if (!js_process_ipc_active || js_process_ipc_closing) return;
     Item control = js_new_object();
-    js_set_key_default(control,
-        (Item){.item = s2it(heap_create_name("__lambda_ipc_handle_accepted__", 30))},
-        (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(control, "__lambda_ipc_handle_accepted__", (Item){.item = ITEM_TRUE});
     // descriptor ownership transfers only after uv_accept succeeds in the
     // receiver; this internal frame lets the sender close its endpoint then.
     (void)js_process_send(control, make_js_undefined());
@@ -3594,11 +3571,9 @@ extern "C" Item js_get_process_object_value(void) {
         js_set_key_default(js_process_object, argv_key, js_get_process_argv());
 
         // pid, ppid
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("pid", 3))},
+        js_set_key_cstr(js_process_object, "pid",
             (Item){.item = i2it((int64_t)getpid())});
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("ppid", 4))},
+        js_set_key_cstr(js_process_object, "ppid",
 #ifdef _WIN32
             (Item){.item = i2it((int64_t)js_get_parent_pid_win32())});
 #else
@@ -3607,32 +3582,20 @@ extern "C" Item js_get_process_object_value(void) {
 
         // platform, arch, version
 #ifdef __APPLE__
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("platform", 8))},
-            (Item){.item = s2it(heap_create_name("darwin", 6))});
+        js_set_key_cstr(js_process_object, "platform", make_string_item("darwin"));
 #elif defined(__linux__)
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("platform", 8))},
-            (Item){.item = s2it(heap_create_name("linux", 5))});
+        js_set_key_cstr(js_process_object, "platform", make_string_item("linux"));
 #elif defined(_WIN32)
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("platform", 8))},
-            (Item){.item = s2it(heap_create_name("win32", 5))});
+        js_set_key_cstr(js_process_object, "platform", make_string_item("win32"));
 #endif
 
 #if defined(__aarch64__) || defined(_M_ARM64)
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("arch", 4))},
-            (Item){.item = s2it(heap_create_name("arm64", 5))});
+        js_set_key_cstr(js_process_object, "arch", make_string_item("arm64"));
 #elif defined(__x86_64__) || defined(_M_X64)
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("arch", 4))},
-            (Item){.item = s2it(heap_create_name("x64", 3))});
+        js_set_key_cstr(js_process_object, "arch", make_string_item("x64"));
 #endif
 
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("version", 7))},
-            (Item){.item = s2it(heap_create_name("v20.0.0", 7))});
+        js_set_key_cstr(js_process_object, "version", make_string_item("v20.0.0"));
 
         // Host-owned process lifecycle and event-loop methods.
         js_process_set_method(js_process_object, "exit", js_process_exit, 1);
@@ -3640,75 +3603,59 @@ extern "C" Item js_get_process_object_value(void) {
         if (getenv("LAMBDA_JS_IPC")) {
             js_process_set_method(js_process_object, "send", js_process_send, 2);
             js_process_set_method(js_process_object, "disconnect", js_process_disconnect, 0);
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("connected", 9))},
-                (Item){.item = b2it(true)});
+            js_set_key_cstr(js_process_object, "connected", (Item){.item = b2it(true)});
             js_process_ipc_init_from_env();
         }
-        js_process_set_method(js_process_object, "on", js_process_on, 2);
-        js_process_set_method(js_process_object, "addListener", js_process_on, 2);
-        js_process_set_method(js_process_object, "once", js_process_once, 2);
-        js_process_set_method(js_process_object, "emit", js_process_emit, 2);
-        js_process_set_method(js_process_object, "off", js_process_removeListener, 2);
-        js_process_set_method(js_process_object, "removeListener", js_process_removeListener, 2);
-        js_process_set_method(js_process_object, "removeAllListeners", js_process_removeAllListeners, 1);
-        js_process_set_method(js_process_object, "listenerCount", js_process_listenerCount, 1);
-        js_process_set_method(js_process_object, "listeners", js_process_listeners, 1);
-        js_process_set_method(js_process_object, "prependListener", js_process_on, 2);
-        js_process_set_method(js_process_object, "prependOnceListener", js_process_once, 2);
+#define JS_PROCESS_EVENT_METHODS(M) \
+        M("on", js_process_on, 2) M("addListener", js_process_on, 2) \
+        M("once", js_process_once, 2) M("emit", js_process_emit, 2) \
+        M("off", js_process_removeListener, 2) M("removeListener", js_process_removeListener, 2) \
+        M("removeAllListeners", js_process_removeAllListeners, 1) \
+        M("listenerCount", js_process_listenerCount, 1) M("listeners", js_process_listeners, 1) \
+        M("prependListener", js_process_on, 2) M("prependOnceListener", js_process_once, 2)
+#define JS_PROCESS_INSTALL_EVENT_METHOD(name, target, arity) \
+        js_process_set_method(js_process_object, name, target, arity);
+        JS_PROCESS_EVENT_METHODS(JS_PROCESS_INSTALL_EVENT_METHOD)
+#undef JS_PROCESS_INSTALL_EVENT_METHOD
+#undef JS_PROCESS_EVENT_METHODS
 
         // versions object
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("versions", 8))}, build_process_versions());
+        js_set_key_cstr(js_process_object, "versions", build_process_versions());
 
         // title
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("title", 5))},
-            (Item){.item = s2it(heap_create_name("lambda", 6))});
+        js_set_key_cstr(js_process_object, "title", make_string_item("lambda"));
 
         // env
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("env", 3))}, build_process_env());
+        js_set_key_cstr(js_process_object, "env", build_process_env());
 
         // stdout, stderr, stdin
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("stdout", 6))}, build_process_stdout());
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("stderr", 6))}, build_process_stderr());
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("stdin", 5))}, build_process_stdin());
+        js_set_key_cstr(js_process_object, "stdout", build_process_stdout());
+        js_set_key_cstr(js_process_object, "stderr", build_process_stderr());
+        js_set_key_cstr(js_process_object, "stdin", build_process_stdin());
 
         // exitCode — default 0
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("exitCode", 8))},
-            (Item){.item = i2it(0)});
+        js_set_key_cstr(js_process_object, "exitCode", (Item){.item = i2it(0)});
 
         // execPath — absolute path to the lambda.exe binary
         if (js_process_argv_raw && js_process_argc_raw > 0) {
             char execpath_buf[1024];
             if (realpath(js_process_argv_raw[0], execpath_buf)) {
-                js_set_key_default(js_process_object,
-                    (Item){.item = s2it(heap_create_name("execPath", 8))},
+                js_set_key_cstr(js_process_object, "execPath",
                     (Item){.item = s2it(heap_create_name(execpath_buf, (int)strlen(execpath_buf)))});
             } else {
-                js_set_key_default(js_process_object,
-                    (Item){.item = s2it(heap_create_name("execPath", 8))},
+                js_set_key_cstr(js_process_object, "execPath",
                     (Item){.item = s2it(heap_create_name(js_process_argv_raw[0]))});
             }
         }
 
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("execArgv", 8))},
-            js_get_process_exec_argv());
+        js_set_key_cstr(js_process_object, "execArgv", js_get_process_exec_argv());
 
         // process.permission — present only when Node permission model is enabled.
         if (js_permission_enabled()) {
             Item permission = js_new_object();
             js_set_native_key(permission, (Item){.item = s2it(heap_create_name("has", 3))}, js_process_permission_has);
             js_set_native_key(permission, (Item){.item = s2it(heap_create_name("drop", 4))}, js_process_permission_drop);
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("permission", 10))},
-                permission);
+            js_set_key_cstr(js_process_object, "permission", permission);
         }
 
         // config — minimal process.config for Node.js compat
@@ -3716,79 +3663,34 @@ extern "C" Item js_get_process_object_value(void) {
             RootFrame roots(2);
             Rooted<Item> config_root(roots, js_new_object());
             Rooted<Item> variables_root(roots, js_new_object());
-            js_set_key_default(variables_root.get(),
-                (Item){.item = s2it(heap_create_name("v8_enable_i18n_support", 22))},
-                (Item){.item = i2it(0)});
-            js_set_key_default(variables_root.get(),
-                (Item){.item = s2it(heap_create_name("node_shared", 11))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(variables_root.get(),
-                (Item){.item = s2it(heap_create_name("node_use_ffi", 12))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(config_root.get(),
-                (Item){.item = s2it(heap_create_name("variables", 9))},
-                variables_root.get());
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("config", 6))},
-                config_root.get());
+            js_set_key_cstr(variables_root.get(), "v8_enable_i18n_support", (Item){.item = i2it(0)});
+            js_set_key_cstr(variables_root.get(), "node_shared", (Item){.item = ITEM_FALSE});
+            js_set_key_cstr(variables_root.get(), "node_use_ffi", (Item){.item = ITEM_FALSE});
+            js_set_key_cstr(config_root.get(), "variables", variables_root.get());
+            js_set_key_cstr(js_process_object, "config", config_root.get());
         }
 
         // features — minimal process.features for Node.js compat
         {
             RootFrame roots(1);
             Rooted<Item> features_root(roots, js_new_object());
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("inspector", 9))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("debug", 5))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("uv", 2))},
-                (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("tls_alpn", 8))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("tls_sni", 7))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("tls_ocsp", 8))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("tls", 3))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("ipv6", 4))},
-                (Item){.item = ITEM_TRUE});
-            // Lambda's mbedTLS-backed crypto does not expose OpenSSL legacy
-            // provider digests; use the BoringSSL-compatible feature gate for
-            // Node tests that distinguish those algorithms.
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("openssl_is_boringssl", 20))},
-                (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("quic", 4))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("cached_builtins", 15))},
-                (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("require_module", 14))},
-                (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_root.get(),
-                (Item){.item = s2it(heap_create_name("typescript", 10))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("features", 8))},
-                features_root.get());
+#define JS_PROCESS_FEATURES(M) \
+            M("inspector", ITEM_FALSE) M("debug", ITEM_FALSE) M("uv", ITEM_TRUE) \
+            M("tls_alpn", ITEM_FALSE) M("tls_sni", ITEM_FALSE) M("tls_ocsp", ITEM_FALSE) \
+            M("tls", ITEM_FALSE) M("ipv6", ITEM_TRUE) M("openssl_is_boringssl", ITEM_TRUE) \
+            M("quic", ITEM_FALSE) M("cached_builtins", ITEM_TRUE) \
+            M("require_module", ITEM_TRUE) M("typescript", ITEM_FALSE)
+#define JS_PROCESS_SET_FEATURE(name, value) \
+            js_set_key_cstr(features_root.get(), name, (Item){.item = value});
+            JS_PROCESS_FEATURES(JS_PROCESS_SET_FEATURE)
+#undef JS_PROCESS_SET_FEATURE
+#undef JS_PROCESS_FEATURES
+            js_set_key_cstr(js_process_object, "features", features_root.get());
         }
 
         // POSIX: process.getuid(), getgid(), geteuid(), getegid()
         // process.argv0 — the original argv[0] value
-        js_set_key_default(js_process_object,
-            (Item){.item = s2it(heap_create_name("argv0", 5))},
-            (Item){.item = s2it(heap_create_name("lambda", 6))});
+        js_set_key_cstr(js_process_object, "argv0", make_string_item("lambda"));
 
         // process.emitWarning(warning, type, code)
         js_set_native_key(js_process_object, (Item){.item = s2it(heap_create_name("emitWarning", 11))}, js_process_emitWarning);
@@ -3797,12 +3699,8 @@ extern "C" Item js_get_process_object_value(void) {
         {
             RootFrame roots(1);
             Rooted<Item> release_root(roots, js_new_object());
-            js_set_key_default(release_root.get(),
-                (Item){.item = s2it(heap_create_name("name", 4))},
-                (Item){.item = s2it(heap_create_name("node", 4))});
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("release", 7))},
-                release_root.get());
+            js_set_key_cstr(release_root.get(), "name", (Item){.item = s2it(heap_create_name("node", 4))});
+            js_set_key_cstr(js_process_object, "release", release_root.get());
         }
 
         // process.binding(name) — deprecated, but tests check it exists
@@ -3820,9 +3718,7 @@ extern "C" Item js_get_process_object_value(void) {
             Rooted<Item> flags_root(roots, js_new_object());
             extern Item js_set_has_stub(Item self, Item key);
             js_set_key_cstr(flags_root.get(), "has", js_new_native_function(js_set_has_stub));
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("allowedNodeEnvironmentFlags", 27))},
-                flags_root.get());
+            js_set_key_cstr(js_process_object, "allowedNodeEnvironmentFlags", flags_root.get());
         }
 
         // process.report — diagnostic report stub
@@ -3832,27 +3728,13 @@ extern "C" Item js_get_process_object_value(void) {
             extern Item js_process_report_getReport(void);
             js_set_key_cstr(report_root.get(), "getReport",
                 js_new_native_function(js_process_report_getReport));
-            js_set_key_default(report_root.get(),
-                (Item){.item = s2it(heap_create_name("directory", 9))},
-                (Item){.item = s2it(heap_create_name("", 0))});
-            js_set_key_default(report_root.get(),
-                (Item){.item = s2it(heap_create_name("filename", 8))},
-                (Item){.item = s2it(heap_create_name("", 0))});
-            js_set_key_default(report_root.get(),
-                (Item){.item = s2it(heap_create_name("compact", 7))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(report_root.get(),
-                (Item){.item = s2it(heap_create_name("reportOnFatalError", 18))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(report_root.get(),
-                (Item){.item = s2it(heap_create_name("reportOnSignal", 14))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(report_root.get(),
-                (Item){.item = s2it(heap_create_name("reportOnUncaughtException", 25))},
-                (Item){.item = ITEM_FALSE});
-            js_set_key_default(js_process_object,
-                (Item){.item = s2it(heap_create_name("report", 6))},
-                report_root.get());
+            js_set_key_cstr(report_root.get(), "directory", make_string_item(""));
+            js_set_key_cstr(report_root.get(), "filename", make_string_item(""));
+            js_set_key_cstr(report_root.get(), "compact", (Item){.item = ITEM_FALSE});
+            js_set_key_cstr(report_root.get(), "reportOnFatalError", (Item){.item = ITEM_FALSE});
+            js_set_key_cstr(report_root.get(), "reportOnSignal", (Item){.item = ITEM_FALSE});
+            js_set_key_cstr(report_root.get(), "reportOnUncaughtException", (Item){.item = ITEM_FALSE});
+            js_set_key_cstr(js_process_object, "report", report_root.get());
         }
 
         // `process` itself is an ordinary JS global. Activating node-core here
@@ -5274,10 +5156,8 @@ typedef enum JsConsoleLevel {
 static Item js_console_arg_to_string(Item value) {
     if (get_type_id(value) == LMD_TYPE_MAP &&
         js_class_is_error_like(js_class_id(value))) {
-        Item name = js_get_key_default(value,
-            (Item){.item = s2it(heap_create_name("name", 4))});
-        Item message = js_get_key_default(value,
-            (Item){.item = s2it(heap_create_name("message", 7))});
+        Item name = js_get_key_cstr(value, "name");
+        Item message = js_get_key_cstr(value, "message");
         String* name_string = get_type_id(name) == LMD_TYPE_STRING
             ? it2s(name) : nullptr;
         String* message_string = get_type_id(message) == LMD_TYPE_STRING
@@ -5496,15 +5376,12 @@ extern "C" Item js_console_clear_fn(void) {
     // check process.stdout.isTTY
     Item process = js_get_process_object_value();
     if (process.item != ITEM_NULL) {
-        Item stdout_obj = js_get_key_default(process,
-            (Item){.item = s2it(heap_create_name("stdout", 6))});
+        Item stdout_obj = js_get_key_cstr(process, "stdout");
         if (stdout_obj.item != ITEM_NULL && get_type_id(stdout_obj) != LMD_TYPE_UNDEFINED) {
-            Item isTTY = js_get_key_default(stdout_obj,
-                (Item){.item = s2it(heap_create_name("isTTY", 5))});
+            Item isTTY = js_get_key_cstr(stdout_obj, "isTTY");
             if (js_is_truthy(isTTY)) {
                 // ESC[1;1H ESC[0J — move cursor to 1,1 and clear screen down
-                Item write_fn = js_get_key_default(stdout_obj,
-                    (Item){.item = s2it(heap_create_name("write", 5))});
+                Item write_fn = js_get_key_cstr(stdout_obj, "write");
                 if (js_is_callable(write_fn)) {
                     Item seq = (Item){.item = s2it(heap_create_name("\x1b[1;1H\x1b[0J", 10))};
                     js_call_function(write_fn, stdout_obj, &seq, 1);
@@ -5637,7 +5514,7 @@ static bool js_instanceof_is_host_error_constructor(JsFuncName* fn) {
 
 static bool js_instanceof_is_vm_context_error(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item marker = js_get_key_default(value, (Item){.item = s2it(heap_create_name("__vm_context_error__", 20))});
+        Item marker = js_get_key_cstr(value, "__vm_context_error__");
     return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
            (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
 }
@@ -6355,18 +6232,10 @@ extern "C" Item js_get_prototype_of(Item object) {
 // js_array_push already declared above as extern "C" Item js_array_push(Item, Item)
 extern "C" bool js_can_be_held_weakly_pub(Item key);
 
-static bool js_reflect_is_object_like(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-        js_is_ordinary_numeric_array(value) ||
-        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
-        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
-}
-
 static Item js_reflect_create_list_from_array_like(Item array_like, Item** out_args, int* out_argc) {
     *out_args = NULL;
     *out_argc = 0;
-    if (!js_reflect_is_object_like(array_like)) {
+    if (!js_is_object_value(array_like)) {
         return js_throw_type_error("CreateListFromArrayLike requires an object");
     }
     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
@@ -8226,7 +8095,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
 // Array.isArray — check if value is an array
 // =============================================================================
 
-extern "C" Item js_array_is_array(Item value) {
+static Item js_unwrap_proxy_chain(Item value) {
     int depth = 0;
     while (js_is_proxy(value) && depth < 32) {
         JsProxyData* pd = js_get_proxy_data(value);
@@ -8236,6 +8105,12 @@ extern "C" Item js_array_is_array(Item value) {
         value = (Item){.item = pd->target};
         depth++;
     }
+    return value;
+}
+
+extern "C" Item js_array_is_array(Item value) {
+    JS_ASSIGN_OR_RETURN(unwrapped, js_unwrap_proxy_chain(value));
+    value = unwrapped;
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP) {
         bool is_proto = false;
@@ -10406,8 +10281,7 @@ static Item js_object_copy_enumerable_own(Item target, Item source,
             source_root.get(), key_root.get()));
         if (item_is_error(descriptor_root.get())) return descriptor_root.get();
         if (get_type_id(descriptor_root.get()) != LMD_TYPE_MAP) continue;
-        Item enumerable = js_get_key_default(descriptor_root.get(),
-            (Item){.item = s2it(heap_create_name("enumerable", 10))});
+        Item enumerable = js_get_key_cstr(descriptor_root.get(), "enumerable");
         if (item_is_error(enumerable)) return enumerable;
         if (!it2b(js_to_boolean(enumerable))) continue;
         value_root.set(js_get_key_default(source_root.get(), key_root.get()));
@@ -11121,10 +10995,10 @@ static Item js_array_from_define_index_or_throw(Item object, int64_t index, Item
     Rooted<Item> desc_root(roots, ItemNull);
     key_root.set(js_property_index_key(index));
     desc_root.set(js_new_object());
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, value_root.get());
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-    js_set_key_default(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    js_set_key_cstr(desc_root.get(), "value", value_root.get());
+    js_set_key_cstr(desc_root.get(), "writable", (Item){.item = b2it(true)});
+    js_set_key_cstr(desc_root.get(), "enumerable", (Item){.item = b2it(true)});
+    js_set_key_cstr(desc_root.get(), "configurable", (Item){.item = b2it(true)});
     return js_object_define_property(object_root.get(), key_root.get(), desc_root.get());
 }
 
@@ -11188,9 +11062,7 @@ static Item js_array_from_array_like_into(Item result, Item iterable, int64_t le
         JS_ASSIGN_OR_RETURN(define_result, js_array_from_define_index_or_throw(
             result_root.get(), k, value_root.get()));
     }
-    JS_ASSIGN_OR_RETURN(length_result, js_set_key_default(result_root.get(),
-        (Item){.item = s2it(heap_create_name("length", 6))},
-        (Item){.item = i2it((int)len)}));
+    JS_ASSIGN_OR_RETURN(length_result, js_set_key_cstr(result_root.get(), "length", (Item){.item = i2it((int)len)}));
     return ItemNull;
 }
 
@@ -11256,9 +11128,7 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
         }
         k++;
     }
-    JS_ASSIGN_OR_RETURN(length_result, js_set_key_default(result_root.get(),
-        (Item){.item = s2it(heap_create_name("length", 6))},
-        (Item){.item = i2it((int)k)}));
+    JS_ASSIGN_OR_RETURN(length_result, js_set_key_cstr(result_root.get(), "length", (Item){.item = i2it((int)k)}));
     return result_root.get();
 }
 
@@ -11867,15 +11737,8 @@ static Item js_json_array_index_key(int64_t index) {
 
 static Item js_json_is_array(Item value, bool* out_is_array) {
     *out_is_array = false;
-    int depth = 0;
-    while (js_is_proxy(value) && depth < 32) {
-        JsProxyData* pd = js_get_proxy_data(value);
-        if (!pd || pd->revoked) {
-            return js_throw_type_error("Cannot perform operation on a revoked proxy");
-        }
-        value = (Item){.item = pd->target};
-        depth++;
-    }
+    JS_ASSIGN_OR_RETURN(unwrapped, js_unwrap_proxy_chain(value));
+    value = unwrapped;
     TypeId type = get_type_id(value);
     *out_is_array = js_is_js_array(value) &&
         !(type == LMD_TYPE_ARRAY && value.array->is_content == 1);
@@ -13355,12 +13218,23 @@ extern "C" void js_globals_batch_reset() {
 // AbortController / AbortSignal implementation
 // =============================================================================
 
+extern "C" Item js_abort_signal_addEventListener(Item event, Item handler);
+extern "C" Item js_abort_signal_removeEventListener(Item event, Item handler);
+extern "C" Item js_abort_signal_throwIfAborted(void);
+
 // AbortSignal constructor — creates an AbortSignal object
 static Item js_make_abort_signal() {
     Item signal = js_new_object_with_class(JS_CLASS_ABORT_SIGNAL);
-    js_set_key_default(signal, make_string_item("aborted"), (Item){.item = b2it(false)});
-    js_set_key_default(signal, make_string_item("reason"), make_js_undefined());
-    js_set_key_default(signal, make_string_item("__listeners__"), js_array_new(0));
+    js_set_key_cstr(signal, "aborted", (Item){.item = b2it(false)});
+    js_set_key_cstr(signal, "reason", make_js_undefined());
+    js_set_key_cstr(signal, "__listeners__", js_array_new(0));
+    // Every AbortSignal construction path exposes the same three methods; keeping
+    // them on the base builder prevents static factories and AbortController from
+    // drifting into different observable signal shapes.
+    js_globals_set_native_method(signal, "addEventListener", js_abort_signal_addEventListener);
+    js_globals_set_native_method(signal, "removeEventListener", js_abort_signal_removeEventListener);
+    js_globals_set_native_method(signal, "throwIfAborted", js_abort_signal_throwIfAborted);
+    js_set_key_cstr(signal, "onabort", ItemNull);
     return signal;
 }
 
@@ -13368,11 +13242,11 @@ static Item js_make_abort_signal() {
 extern "C" Item js_abort_signal_addEventListener(Item event, Item handler) {
     Item self = js_get_this();
     // store in __listeners__ array
-    Item listeners = js_get_key_default(self, make_string_item("__listeners__"));
+    Item listeners = js_get_key_cstr(self, "__listeners__");
     if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
         Item entry = js_new_object();
-        js_set_key_default(entry, make_string_item("type"), event);
-        js_set_key_default(entry, make_string_item("handler"), handler);
+        js_set_key_cstr(entry, "type", event);
+        js_set_key_cstr(entry, "handler", handler);
         js_array_push(listeners, entry);
     }
     return make_js_undefined();
@@ -13389,7 +13263,7 @@ static bool js_abort_listener_type_matches(Item a, Item b) {
 // signal.removeEventListener
 extern "C" Item js_abort_signal_removeEventListener(Item event, Item handler) {
     Item self = js_get_this();
-    Item listeners = js_get_key_default(self, make_string_item("__listeners__"));
+    Item listeners = js_get_key_cstr(self, "__listeners__");
     if (get_type_id(listeners) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     Item filtered = js_array_new(0);
@@ -13397,8 +13271,8 @@ extern "C" Item js_abort_signal_removeEventListener(Item event, Item handler) {
     bool removed = false;
     for (int64_t i = 0; i < len; i++) {
         Item entry = js_elements_get_int(listeners, i);
-        Item type = js_get_key_default(entry, make_string_item("type"));
-        Item entry_handler = js_get_key_default(entry, make_string_item("handler"));
+        Item type = js_get_key_cstr(entry, "type");
+        Item entry_handler = js_get_key_cstr(entry, "handler");
         if (!removed && js_abort_listener_type_matches(type, event) &&
             entry_handler.item == handler.item) {
             removed = true;
@@ -13406,16 +13280,16 @@ extern "C" Item js_abort_signal_removeEventListener(Item event, Item handler) {
         }
         js_array_push(filtered, entry);
     }
-    js_set_key_default(self, make_string_item("__listeners__"), filtered);
+    js_set_key_cstr(self, "__listeners__", filtered);
     return make_js_undefined();
 }
 
 // signal.throwIfAborted()
 extern "C" Item js_abort_signal_throwIfAborted(void) {
     Item self = js_get_this();
-    Item aborted = js_get_key_default(self, make_string_item("aborted"));
+    Item aborted = js_get_key_cstr(self, "aborted");
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
-        Item reason = js_get_key_default(self, make_string_item("reason"));
+        Item reason = js_get_key_cstr(self, "reason");
         return reason; // caller should throw this
     }
     return make_js_undefined();
@@ -13424,22 +13298,17 @@ extern "C" Item js_abort_signal_throwIfAborted(void) {
 // AbortSignal.abort(reason) — creates an already-aborted signal
 extern "C" Item js_abort_signal_abort(Item reason) {
     Item signal = js_make_abort_signal();
-    // set methods on the signal
-    js_globals_set_native_method(signal, "addEventListener", js_abort_signal_addEventListener);
-    js_globals_set_native_method(signal, "removeEventListener", js_abort_signal_removeEventListener);
-    js_globals_set_native_method(signal, "throwIfAborted", js_abort_signal_throwIfAborted);
-    js_set_key_default(signal, make_string_item("onabort"), ItemNull);
     // mark as already aborted
-    js_set_key_default(signal, make_string_item("aborted"), (Item){.item = b2it(true)});
+    js_set_key_cstr(signal, "aborted", (Item){.item = b2it(true)});
     // default reason: DOMException "AbortError"
     if (get_type_id(reason) == LMD_TYPE_UNDEFINED || get_type_id(reason) == LMD_TYPE_NULL) {
         Item err = js_new_object_with_class(JS_CLASS_DOM_EXCEPTION);
-        js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
-        js_set_key_default(err, make_string_item("message"), make_string_item("This operation was aborted"));
-        js_set_key_default(err, make_string_item("code"), (Item){.item = i2it(20)});
+        js_set_key_cstr(err, "name", make_string_item("AbortError"));
+        js_set_key_cstr(err, "message", make_string_item("This operation was aborted"));
+        js_set_key_cstr(err, "code", (Item){.item = i2it(20)});
         reason = err;
     }
-    js_set_key_default(signal, make_string_item("reason"), reason);
+    js_set_key_cstr(signal, "reason", reason);
     return signal;
 }
 
@@ -13447,10 +13316,6 @@ extern "C" Item js_abort_signal_abort(Item reason) {
 extern "C" Item js_abort_signal_timeout(Item ms_item) {
     // create signal (not yet aborted)
     Item signal = js_make_abort_signal();
-    js_globals_set_native_method(signal, "addEventListener", js_abort_signal_addEventListener);
-    js_globals_set_native_method(signal, "removeEventListener", js_abort_signal_removeEventListener);
-    js_globals_set_native_method(signal, "throwIfAborted", js_abort_signal_throwIfAborted);
-    js_set_key_default(signal, make_string_item("onabort"), ItemNull);
     // TODO: actually schedule a timeout to abort after ms
     // for now just return the un-aborted signal
     return signal;
@@ -13462,8 +13327,8 @@ extern "C" Item js_option_new(Item text_arg, Item value_arg) {
     Item obj = js_new_object();
     const char* text = fn_to_cstr(text_arg);
     const char* val  = fn_to_cstr(value_arg);
-    if (text) js_set_key_default(obj, make_string_item("text"),  make_string_item(text));
-    if (val)  js_set_key_default(obj, make_string_item("value"), make_string_item(val));
+    if (text) js_set_key_cstr(obj, "text", make_string_item(text));
+    if (val)  js_set_key_cstr(obj, "value", make_string_item(val));
     return obj;
 }
 
@@ -13473,9 +13338,9 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
 
     // message (default: "")
     if (get_type_id(message) == LMD_TYPE_STRING) {
-        js_set_key_default(obj, make_string_item("message"), message);
+        js_set_key_cstr(obj, "message", message);
     } else {
-        js_set_key_default(obj, make_string_item("message"), make_string_item(""));
+        js_set_key_cstr(obj, "message", make_string_item(""));
     }
 
     // name can be a string or an options object { name, cause }
@@ -13488,7 +13353,7 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
         actual_name = name_arg;
     } else if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
         // options object: { name: "...", cause: ... }
-        Item name_prop = js_get_key_default(name_arg, make_string_item("name"));
+        Item name_prop = js_get_key_cstr(name_arg, "name");
         if (get_type_id(name_prop) == LMD_TYPE_STRING) {
             actual_name = name_prop;
         }
@@ -13496,15 +13361,15 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
         Item has_cause_item = js_has_own_property(name_arg, make_string_item("cause"));
         if (get_type_id(has_cause_item) == LMD_TYPE_BOOL && it2b(has_cause_item)) {
             has_cause = true;
-            cause_val = js_get_key_default(name_arg, make_string_item("cause"));
+            cause_val = js_get_key_cstr(name_arg, "cause");
         }
     }
 
-    js_set_key_default(obj, make_string_item("name"), actual_name);
+    js_set_key_cstr(obj, "name", actual_name);
 
     // set cause if present
     if (has_cause) {
-        js_set_key_default(obj, make_string_item("cause"), cause_val);
+        js_set_key_cstr(obj, "cause", cause_val);
     }
 
     // DOMException legacy code mappings
@@ -13533,10 +13398,10 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
             }
         }
     }
-    js_set_key_default(obj, make_string_item("code"), (Item){.item = i2it(code)});
+    js_set_key_cstr(obj, "code", (Item){.item = i2it(code)});
 
     // stack property (empty for DOMException)
-    js_set_key_default(obj, make_string_item("stack"), make_string_item(""));
+    js_set_key_cstr(obj, "stack", make_string_item(""));
 
     return obj;
 }
@@ -13549,12 +13414,7 @@ extern "C" Item js_new_AbortController(void) {
     Item controller = js_new_object_with_class(JS_CLASS_ABORT_CONTROLLER);
 
     Item signal = js_make_abort_signal();
-    // set signal methods
-    js_globals_set_native_method(signal, "addEventListener", js_abort_signal_addEventListener);
-    js_globals_set_native_method(signal, "removeEventListener", js_abort_signal_removeEventListener);
-    js_globals_set_native_method(signal, "throwIfAborted", js_abort_signal_throwIfAborted);
-    js_set_key_default(signal, make_string_item("onabort"), ItemNull);
-    js_set_key_default(controller, make_string_item("signal"), signal);
+    js_set_key_cstr(controller, "signal", signal);
 
     // abort method directly on instance
     js_globals_set_native_method(controller, "abort", js_abort_controller_abort);
@@ -13565,76 +13425,76 @@ extern "C" Item js_new_AbortController(void) {
 // AbortController.prototype.abort(reason)
 extern "C" Item js_abort_controller_abort(Item reason) {
     Item self = js_get_this();
-    Item signal = js_get_key_default(self, make_string_item("signal"));
+    Item signal = js_get_key_cstr(self, "signal");
     if (get_type_id(signal) != LMD_TYPE_MAP) return make_js_undefined();
 
     // no-op if already aborted
-    Item already = js_get_key_default(signal, make_string_item("aborted"));
+    Item already = js_get_key_cstr(signal, "aborted");
     if (get_type_id(already) == LMD_TYPE_BOOL && it2b(already))
         return make_js_undefined();
 
     // mark as aborted
-    js_set_key_default(signal, make_string_item("aborted"), (Item){.item = b2it(true)});
+    js_set_key_cstr(signal, "aborted", (Item){.item = b2it(true)});
 
     // set reason (default: DOMException "AbortError")
     if (get_type_id(reason) == LMD_TYPE_NULL || get_type_id(reason) == LMD_TYPE_UNDEFINED) {
         Item err = js_new_object();
-        js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
-        js_set_key_default(err, make_string_item("message"), make_string_item("The operation was aborted"));
-        js_set_key_default(err, make_string_item("code"), (Item){.item = i2it(20)});
+        js_set_key_cstr(err, "name", make_string_item("AbortError"));
+        js_set_key_cstr(err, "message", make_string_item("The operation was aborted"));
+        js_set_key_cstr(err, "code", (Item){.item = i2it(20)});
         reason = err;
     }
-    js_set_key_default(signal, make_string_item("reason"), reason);
+    js_set_key_cstr(signal, "reason", reason);
 
     // create abort event once, shared by onabort and addEventListener handlers
     Item event = js_new_object();
-    js_set_key_default(event, make_string_item("type"), make_string_item("abort"));
-    js_set_key_default(event, make_string_item("target"), signal);
-    js_set_key_default(event, make_string_item("isTrusted"), (Item){.item = b2it(true)});
+    js_set_key_cstr(event, "type", make_string_item("abort"));
+    js_set_key_cstr(event, "target", signal);
+    js_set_key_cstr(event, "isTrusted", (Item){.item = b2it(true)});
 
     // fire onabort handler
-    Item onabort = js_get_key_default(signal, make_string_item("onabort"));
+    Item onabort = js_get_key_cstr(signal, "onabort");
     if (js_is_callable(onabort)) {
         Item argv[1] = { event };
         js_call_function(onabort, signal, argv, 1);
     }
 
     // fire 'abort' event listeners
-    Item listeners = js_get_key_default(signal, make_string_item("__listeners__"));
+    Item listeners = js_get_key_cstr(signal, "__listeners__");
     if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(listeners);
         for (int i = 0; i < (int)len; i++) {
             Item entry = js_elements_get_int(listeners, i);
-            Item type = js_get_key_default(entry, make_string_item("type"));
+            Item type = js_get_key_cstr(entry, "type");
             if (get_type_id(type) == LMD_TYPE_STRING) {
                 String* ts = it2s(type);
                 if (ts->len == 5 && memcmp(ts->chars, "abort", 5) == 0) {
                     // check for timer promise reject entry
-                    Item timer_reject = js_get_key_default(entry, make_string_item("__timer_reject__"));
+                    Item timer_reject = js_get_key_cstr(entry, "__timer_reject__");
                     if (js_is_callable(timer_reject)) {
                         // reject promise with AbortError and clear the timer
-                        Item timer_signal = js_get_key_default(entry, make_string_item("__timer_signal__"));
+                        Item timer_signal = js_get_key_cstr(entry, "__timer_signal__");
                         Item abort_err = js_new_object_with_class(JS_CLASS_ABORT_ERROR);
-                        js_set_key_default(abort_err, make_string_item("name"), make_string_item("AbortError"));
-                        js_set_key_default(abort_err, make_string_item("code"), make_string_item("ABORT_ERR"));
-                        js_set_key_default(abort_err, make_string_item("message"), make_string_item("The operation was aborted"));
+                        js_set_key_cstr(abort_err, "name", make_string_item("AbortError"));
+                        js_set_key_cstr(abort_err, "code", make_string_item("ABORT_ERR"));
+                        js_set_key_cstr(abort_err, "message", make_string_item("The operation was aborted"));
                         // propagate cause from signal reason
                         if (get_type_id(timer_signal) == LMD_TYPE_MAP) {
-                            Item sig_reason = js_get_key_default(timer_signal, make_string_item("reason"));
+                            Item sig_reason = js_get_key_cstr(timer_signal, "reason");
                             if (get_type_id(sig_reason) != LMD_TYPE_UNDEFINED && get_type_id(sig_reason) != LMD_TYPE_NULL) {
-                                js_set_key_default(abort_err, make_string_item("cause"), sig_reason);
+                                js_set_key_cstr(abort_err, "cause", sig_reason);
                             }
                         }
                         Item argv[1] = { abort_err };
                         js_call_function(timer_reject, ItemNull, argv, 1);
                         // clear the associated timer
-                        Item timer_id = js_get_key_default(entry, make_string_item("__timer_id__"));
+                        Item timer_id = js_get_key_cstr(entry, "__timer_id__");
                         if (get_type_id(timer_id) == LMD_TYPE_INT) {
                             js_clearTimeout(timer_id);
                         }
                         continue;
                     }
-                    Item handler = js_get_key_default(entry, make_string_item("handler"));
+                    Item handler = js_get_key_cstr(entry, "handler");
                     if (js_is_callable(handler)) {
                         Item argv[1] = { event };
                         js_call_function(handler, signal, argv, 1);
@@ -13675,8 +13535,7 @@ static bool js_worker_transfer_markable(Item value) {
 
 extern "C" Item js_worker_mark_as_untransferable(Item value) {
     if (js_worker_transfer_markable(value)) {
-        js_set_key_default(value, make_string_item("__worker_untransferable__"),
-            (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(value, "__worker_untransferable__", (Item){.item = ITEM_TRUE});
     }
     return make_js_undefined();
 }
@@ -13747,39 +13606,39 @@ static void js_message_port_emit_listener_array(Item target, const char* key, It
 
 static Item js_message_port_make_message_event(Item msg) {
     Item event = js_new_object();
-    js_set_key_default(event, make_string_item("data"), msg);
-    js_set_key_default(event, make_string_item("type"), make_string_item("message"));
+    js_set_key_cstr(event, "data", msg);
+    js_set_key_cstr(event, "type", make_string_item("message"));
     return event;
 }
 
 static Item js_message_port_make_message_error_event(Item data) {
     Item event = js_new_object();
-    js_set_key_default(event, make_string_item("data"), data);
-    js_set_key_default(event, make_string_item("type"), make_string_item("messageerror"));
+    js_set_key_cstr(event, "data", data);
+    js_set_key_cstr(event, "type", make_string_item("messageerror"));
     return event;
 }
 
 static Item js_message_port_make_close_event(void) {
     Item event = js_new_object();
-    js_set_key_default(event, make_string_item("type"), make_string_item("close"));
+    js_set_key_cstr(event, "type", make_string_item("close"));
     return event;
 }
 
 static Item js_message_port_queue(Item port) {
     RootFrame roots(2);
     Rooted<Item> port_root(roots, port);
-    Item queue = js_get_key_default(port_root.get(), make_string_item("__message_queue__"));
+    Item queue = js_get_key_cstr(port_root.get(), "__message_queue__");
     Rooted<Item> queue_root(roots, queue);
     if (get_type_id(queue) != LMD_TYPE_ARRAY) {
         queue_root.set(js_array_new(0));
         // The fallback queue allocation and key creation can compact the port.
-        js_set_key_default(port_root.get(), make_string_item("__message_queue__"), queue_root.get());
+        js_set_key_cstr(port_root.get(), "__message_queue__", queue_root.get());
     }
     return queue_root.get();
 }
 
 static Item js_message_port_shift_message(Item port) {
-    Item queue = js_get_key_default(port, make_string_item("__message_queue__"));
+    Item queue = js_get_key_cstr(port, "__message_queue__");
     if (get_type_id(queue) != LMD_TYPE_ARRAY) return make_js_undefined();
     int64_t len = js_array_length(queue);
     if (len <= 0) return make_js_undefined();
@@ -13789,13 +13648,13 @@ static Item js_message_port_shift_message(Item port) {
     for (int64_t i = 1; i < len; i++) {
         js_array_push(next_queue, js_elements_get_int(queue, i));
     }
-    js_set_key_default(port, make_string_item("__message_queue__"), next_queue);
+    js_set_key_cstr(port, "__message_queue__", next_queue);
     return value;
 }
 
 static bool js_message_port_is_filehandle(Item value) {
     if (!js_message_port_is_object(value)) return false;
-    Item fd = js_get_key_default(value, make_string_item("__fd"));
+    Item fd = js_get_key_cstr(value, "__fd");
     return get_type_id(fd) == LMD_TYPE_INT;
 }
 
@@ -13812,8 +13671,8 @@ JS_FORWARD_STATIC_ITEM(js_message_port_data_clone_error, (const char* message), 
 
 static bool js_message_port_is_detached(Item port) {
     if (!js_message_port_is_port(port)) return false;
-    Item closed = js_get_key_default(port, make_string_item("__closed__"));
-    Item detached = js_get_key_default(port, make_string_item("__detached__"));
+    Item closed = js_get_key_cstr(port, "__closed__");
+    Item detached = js_get_key_cstr(port, "__detached__");
     return closed.item == ITEM_TRUE || detached.item == ITEM_TRUE;
 }
 
@@ -13866,14 +13725,14 @@ static void js_message_port_detach_arraybuffers_in_transfer_list(Item transfer_l
 static Item js_message_port_clone_for_transfer(Item port) {
     if (!js_message_port_is_port(port)) return port;
     Item moved = js_message_port_new();
-    Item peer = js_get_key_default(port, make_string_item("__peer__"));
+    Item peer = js_get_key_cstr(port, "__peer__");
     if (js_message_port_is_port(peer)) {
-        js_set_key_default(moved, make_string_item("__peer__"), peer);
-        js_set_key_default(peer, make_string_item("__peer__"), moved);
+        js_set_key_cstr(moved, "__peer__", peer);
+        js_set_key_cstr(peer, "__peer__", moved);
     }
-    js_set_key_default(port, make_string_item("__closed__"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(port, make_string_item("__detached__"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(port, make_string_item("__peer__"), make_js_undefined());
+    js_set_key_cstr(port, "__closed__", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(port, "__detached__", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(port, "__peer__", make_js_undefined());
     return moved;
 }
 
@@ -13889,7 +13748,7 @@ static bool js_message_port_transfer_list_has_marked(Item transfer_list) {
 }
 
 static Item js_message_port_clone_filehandle_for_transfer(Item handle) {
-    Item fd = js_get_key_default(handle, make_string_item("__fd"));
+    Item fd = js_get_key_cstr(handle, "__fd");
     if (get_type_id(fd) != LMD_TYPE_INT) return handle;
 
     Item moved = js_new_object();
@@ -13898,16 +13757,15 @@ static Item js_message_port_clone_filehandle_for_transfer(Item handle) {
         proto = js_get_prototype_of(handle);
     }
     if (js_message_port_is_object(proto)) js_set_prototype(moved, proto);
-    js_set_key_default(moved, make_string_item("__fd"), fd);
-    js_set_key_default(handle, make_string_item("__fd"), (Item){.item = i2it(-1)});
+    js_set_key_cstr(moved, "__fd", fd);
+    js_set_key_cstr(handle, "__fd", (Item){.item = i2it(-1)});
     return moved;
 }
 
 static Item js_message_port_context_unavailable_error(void) {
     Item err = js_new_error_with_name(make_string_item("Error"),
         make_string_item("Message target context is unavailable"));
-    js_set_key_default(err, make_string_item("code"),
-        make_string_item("ERR_MESSAGE_TARGET_CONTEXT_UNAVAILABLE"));
+    js_set_key_cstr(err, "code", make_string_item("ERR_MESSAGE_TARGET_CONTEXT_UNAVAILABLE"));
     return err;
 }
 
@@ -13918,7 +13776,7 @@ static Item js_message_port_emit_message_error_tick(Item env_item) {
     Item data = env[1];
     if (!js_message_port_is_port(target)) return make_js_undefined();
 
-    Item onmessageerror = js_get_key_default(target, make_string_item("onmessageerror"));
+    Item onmessageerror = js_get_key_cstr(target, "onmessageerror");
     if (js_is_callable(onmessageerror)) {
         Item event = js_message_port_make_message_error_event(data);
         Item args[1] = {event};
@@ -13996,7 +13854,7 @@ static Item js_message_port_deliver(Item env_item) {
     Item msg = js_message_port_shift_message(target);
     if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
 
-    Item onmessage = js_get_key_default(target, make_string_item("onmessage"));
+    Item onmessage = js_get_key_cstr(target, "onmessage");
     if (js_is_callable(onmessage)) {
         Item event = js_message_port_make_message_event(msg);
         Item args[1] = {event};
@@ -14022,7 +13880,7 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     Rooted<Item> clone_root(roots, ItemNull);
     Rooted<Item> queue_root(roots, ItemNull);
     Rooted<Item> deliver_root(roots, ItemNull);
-    Item closed = js_get_key_default(self_root.get(), make_string_item("__closed__"));
+    Item closed = js_get_key_cstr(self_root.get(), "__closed__");
     if (closed.item == ITEM_TRUE) return make_js_undefined();
     if (js_is_callable(message_root.get())) {
         Item msg_str = js_to_string(message_root.get());
@@ -14042,15 +13900,15 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
         return js_throw_value(js_message_port_data_clone_error("FileHandle object could not be cloned."));
     }
     JS_ASSIGN_OR_RETURN(transfer_status, js_message_port_validate_transfer_list(transfer_root.get()));
-    peer_root.set(js_get_key_default(self_root.get(), make_string_item("__peer__")));
+    peer_root.set(js_get_key_cstr(self_root.get(), "__peer__"));
     if (!js_message_port_is_port(peer_root.get())) return make_js_undefined();
-    Item peer_closed = js_get_key_default(peer_root.get(), make_string_item("__closed__"));
+    Item peer_closed = js_get_key_cstr(peer_root.get(), "__closed__");
     if (peer_closed.item == ITEM_TRUE) return make_js_undefined();
 
     clone_root.set(transfer_filehandle ?
         js_message_port_clone_filehandle_for_transfer(message_root.get()) :
         structured_clone_transfer_impl(message_root.get(), transfer_root.get(), 0));
-    Item peer_moved = js_get_key_default(peer_root.get(), make_string_item("__moved_context__"));
+    Item peer_moved = js_get_key_cstr(peer_root.get(), "__moved_context__");
     if (transfer_filehandle && peer_moved.item == ITEM_TRUE) {
         js_message_port_schedule_message_error(peer_root.get(), js_message_port_context_unavailable_error());
         return make_js_undefined();
@@ -14073,9 +13931,9 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
 
 static Item js_message_port_close(Item callback) {
     Item self = js_get_this();
-    Item closed = js_get_key_default(self, make_string_item("__closed__"));
+    Item closed = js_get_key_cstr(self, "__closed__");
     if (closed.item == ITEM_TRUE) return make_js_undefined();
-    js_set_key_default(self, make_string_item("__closed__"), (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(self, "__closed__", (Item){.item = ITEM_TRUE});
     js_message_port_emit_listener_array(self, "__close_listeners__", NULL, 0);
     Item event = js_message_port_make_close_event();
     Item args[1] = {event};
@@ -14089,12 +13947,12 @@ static Item js_message_port_close(Item callback) {
 extern "C" Item js_message_port_move_to_context(Item port, Item context) {
     (void)context;
     if (js_message_port_is_port(port)) {
-        Item closed = js_get_key_default(port, make_string_item("__closed__"));
+        Item closed = js_get_key_cstr(port, "__closed__");
         if (closed.item == ITEM_TRUE) {
             return js_throw_type_error_code(JS_ERR_CLOSED_MESSAGE_PORT,
                 "Cannot send data on closed MessagePort");
         }
-        js_set_key_default(port, make_string_item("__moved_context__"), (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(port, "__moved_context__", (Item){.item = ITEM_TRUE});
         return port;
     }
     return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE,
@@ -14115,34 +13973,34 @@ extern "C" Item js_message_port_receive_message_on_port(Item port) {
     Rooted<Item> result_root(roots, result);
     // The envelope/key allocations can compact after dequeuing the message,
     // so both values stay rooted until the result property owns the payload.
-    js_set_key_default(result_root.get(), make_string_item("message"), message_root.get());
+    js_set_key_cstr(result_root.get(), "message", message_root.get());
     return result_root.get();
 }
 
 extern "C" Item js_message_port_new(void) {
     Item port = js_new_object_with_class(JS_CLASS_MESSAGE_PORT);
-    js_globals_set_native_method(port, "postMessage", js_message_port_postMessage);
-    js_globals_set_native_method(port, "close", js_message_port_close);
-    js_set_key_default(port, make_string_item("onmessage"), ItemNull);
-    js_set_key_default(port, make_string_item("onmessageerror"), ItemNull);
-    js_set_key_default(port, make_string_item("__closed__"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(port, make_string_item("__detached__"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(port, make_string_item("__moved_context__"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(port, make_string_item("__message_listeners__"), js_array_new(0));
-    js_set_key_default(port, make_string_item("__close_listeners__"), js_array_new(0));
-    js_set_key_default(port, make_string_item("__message_event_listeners__"), js_array_new(0));
-    js_set_key_default(port, make_string_item("__close_event_listeners__"), js_array_new(0));
-    js_set_key_default(port, make_string_item("__message_queue__"), js_array_new(0));
-    // EventEmitter methods
-    js_globals_set_native_method(port, "on", js_message_port_add_listener);
-    js_globals_set_native_method(port, "once", js_message_port_add_once_listener);
-    js_globals_set_native_method(port, "addEventListener", js_message_port_add_event_listener);
-    js_globals_set_native_method(port, "removeEventListener", js_message_port_remove_event_listener);
-    js_globals_set_native_method(port, "removeListener", js_message_port_remove_listener);
-    js_globals_set_native_method(port, "off", js_message_port_remove_listener);
-    js_globals_set_native_method(port, "start", js_mp_stub_noop);
-    js_globals_set_native_method(port, "ref", js_mp_stub_noop);
-    js_globals_set_native_method(port, "unref", js_mp_stub_noop);
+#define JS_MESSAGE_PORT_EVENT_METHODS(M) \
+    M("on", js_message_port_add_listener) M("once", js_message_port_add_once_listener) \
+    M("addEventListener", js_message_port_add_event_listener) \
+    M("removeEventListener", js_message_port_remove_event_listener) \
+    M("removeListener", js_message_port_remove_listener) M("off", js_message_port_remove_listener) \
+    M("start", js_mp_stub_noop) M("ref", js_mp_stub_noop) M("unref", js_mp_stub_noop)
+#define JS_INSTALL_MESSAGE_PORT_METHOD(name, target) js_globals_set_native_method(port, name, target);
+    JS_INSTALL_MESSAGE_PORT_METHOD("postMessage", js_message_port_postMessage)
+    JS_INSTALL_MESSAGE_PORT_METHOD("close", js_message_port_close)
+    js_set_key_cstr(port, "onmessage", ItemNull);
+    js_set_key_cstr(port, "onmessageerror", ItemNull);
+    js_set_key_cstr(port, "__closed__", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(port, "__detached__", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(port, "__moved_context__", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(port, "__message_listeners__", js_array_new(0));
+    js_set_key_cstr(port, "__close_listeners__", js_array_new(0));
+    js_set_key_cstr(port, "__message_event_listeners__", js_array_new(0));
+    js_set_key_cstr(port, "__close_event_listeners__", js_array_new(0));
+    js_set_key_cstr(port, "__message_queue__", js_array_new(0));
+    JS_MESSAGE_PORT_EVENT_METHODS(JS_INSTALL_MESSAGE_PORT_METHOD)
+#undef JS_INSTALL_MESSAGE_PORT_METHOD
+#undef JS_MESSAGE_PORT_EVENT_METHODS
     return port;
 }
 
@@ -14150,10 +14008,10 @@ extern "C" Item js_message_channel_new(void) {
     Item channel = js_new_object_with_class(JS_CLASS_MESSAGE_CHANNEL);
     Item port1 = js_message_port_new();
     Item port2 = js_message_port_new();
-    js_set_key_default(port1, make_string_item("__peer__"), port2);
-    js_set_key_default(port2, make_string_item("__peer__"), port1);
-    js_set_key_default(channel, make_string_item("port1"), port1);
-    js_set_key_default(channel, make_string_item("port2"), port2);
+    js_set_key_cstr(port1, "__peer__", port2);
+    js_set_key_cstr(port2, "__peer__", port1);
+    js_set_key_cstr(channel, "port1", port1);
+    js_set_key_cstr(channel, "port2", port2);
     return channel;
 }
 
@@ -14210,14 +14068,12 @@ extern "C" Item js_get_global_this() {
         if (!js_global_bindings_ensure_roots()) return ItemNull;
         js_global_this_obj = js_new_object();
         // populate standard globals
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, make_js_undefined());
+        js_set_key_cstr(js_global_this_obj, "undefined", make_js_undefined());
         // Legacy IE-style `window.event` — initially undefined, set to the
         // in-flight event during dispatch by js_dom_dispatch_event.
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("event", 5))}, make_js_undefined());
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))},
-            push_d(NAN));
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))},
-            push_d(INFINITY));
+        js_set_key_cstr(js_global_this_obj, "event", make_js_undefined());
+        js_set_key_cstr(js_global_this_obj, "NaN", push_d(NAN));
+        js_set_key_cstr(js_global_this_obj, "Infinity", push_d(INFINITY));
 
         // ES spec: NaN, Infinity, undefined are non-writable, non-enumerable, non-configurable
         static const char* ro_globals[] = {"NaN", "Infinity", "undefined", NULL};
@@ -14244,19 +14100,19 @@ extern "C" Item js_get_global_this() {
             }
         }
         // globalThis self-reference
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("globalThis", 10))}, js_global_this_obj);
+        js_set_key_cstr(js_global_this_obj, "globalThis", js_global_this_obj);
         // HTML / Web Workers spec aliases of the global object.
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("self", 4))}, js_global_this_obj);
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("window", 6))}, js_global_this_obj);
+        js_set_key_cstr(js_global_this_obj, "self", js_global_this_obj);
+        js_set_key_cstr(js_global_this_obj, "window", js_global_this_obj);
 
         // populate namespace objects on globalThis (Math, JSON, Reflect, console)
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
+        js_set_key_cstr(js_global_this_obj, "Math", js_get_math_object_value());
+        js_set_key_cstr(js_global_this_obj, "JSON", js_get_json_object_value());
         extern Item js_get_intl_object_value(void);
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("Intl", 4))}, js_get_intl_object_value());
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("Atomics", 7))}, js_get_atomics_object_value());
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("console", 7))}, js_get_console_object_value());
+        js_set_key_cstr(js_global_this_obj, "Intl", js_get_intl_object_value());
+        js_set_key_cstr(js_global_this_obj, "Reflect", js_get_reflect_object_value());
+        js_set_key_cstr(js_global_this_obj, "Atomics", js_get_atomics_object_value());
+        js_set_key_cstr(js_global_this_obj, "console", js_get_console_object_value());
         // Node compatibility namespaces are ordinary own data slots, but their
         // large method graphs are built only when read. Tune4 requires this
         // whole-object transaction when eager real properties exceed the realm
@@ -14264,10 +14120,8 @@ extern "C" Item js_get_global_this() {
         js_install_lazy_host_globals(js_global_this_obj);
         // D6.2.2v2: the retired direct-global lowering used to fabricate this
         // namespace; generic global Get now requires the real realm property.
-        js_set_key_default(js_global_this_obj,
-            (Item){.item = s2it(heap_create_name("$262", 4))},
-            js_get_262_object_value());
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
+        js_set_key_cstr(js_global_this_obj, "$262", js_get_262_object_value());
+        js_set_key_cstr(js_global_this_obj, "CSS", js_get_css_object_value());
         // Install lazy slots after the eager JS globals. A Jube session is
         // created only when one of these slots or a module specifier is read.
         js_install_jube_global_namespaces(js_global_this_obj);
@@ -14287,7 +14141,7 @@ extern "C" Item js_get_global_this() {
         }
 
         // Node.js: 'global' is an alias for globalThis
-        js_set_key_default(js_global_this_obj, (Item){.item = s2it(heap_create_name("global", 6))}, js_global_this_obj);
+        js_set_key_cstr(js_global_this_obj, "global", js_global_this_obj);
 
         extern Item js_cjs_enter(Item module, Item filename);
         extern Item js_cjs_complete(Item module);
@@ -14315,12 +14169,8 @@ extern "C" Item js_get_global_this() {
         js_install_native_constructor(js_global_this_obj, "XMLHttpRequest",
             js_xhr_new);
 
-        js_set_key_default(js_global_this_obj,
-            (Item){.item = s2it(heap_create_name("localStorage", 12))},
-            js_storage_local_object());
-        js_set_key_default(js_global_this_obj,
-            (Item){.item = s2it(heap_create_name("sessionStorage", 14))},
-            js_storage_session_object());
+        js_set_key_cstr(js_global_this_obj, "localStorage", js_storage_local_object());
+        js_set_key_cstr(js_global_this_obj, "sessionStorage", js_storage_session_object());
         js_install_native_method(js_global_this_obj, "matchMedia",
             js_match_media);
         js_install_native_constructor(js_global_this_obj, "MutationObserver",
@@ -14328,9 +14178,7 @@ extern "C" Item js_get_global_this() {
         // Editor sanitizers use the standard NodeFilter mask with a detached
         // document TreeWalker; expose the shared DOM constants rather than
         // giving an editor-specific traversal path.
-        js_set_key_default(js_global_this_obj,
-            (Item){.item = s2it(heap_create_name("NodeFilter", 10))},
-            js_node_filter_new());
+        js_set_key_cstr(js_global_this_obj, "NodeFilter", js_node_filter_new());
         js_install_native_constructor(js_global_this_obj, "ResizeObserver",
             js_resize_observer_new);
         js_install_native_constructor(js_global_this_obj, "IntersectionObserver",
@@ -14344,14 +14192,11 @@ extern "C" Item js_get_global_this() {
             Rooted<Item> ac_proto_root(abort_controller_roots, js_new_object());
             // D5.4.3: constructor and prototype are unpublished across
             // allocating setup calls and therefore need explicit roots.
-            js_set_key_default(ac_ctor_root.get(), make_string_item("prototype"),
-                ac_proto_root.get());
+            js_set_key_cstr(ac_ctor_root.get(), "prototype", ac_proto_root.get());
             // abort method on instances (set by constructor), but also add as static for access
             js_install_native_method(ac_proto_root.get(), "abort",
                 js_abort_controller_abort);
-            js_set_key_default(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("AbortController", 15))},
-                ac_ctor_root.get());
+            js_set_key_cstr(js_global_this_obj, "AbortController", ac_ctor_root.get());
         }
 
         // AbortSignal — global with static methods abort() and timeout()
@@ -14365,9 +14210,7 @@ extern "C" Item js_get_global_this() {
             js_install_native_method(as_ctor_root.get(), "abort", js_abort_signal_abort);
             js_install_native_method(as_ctor_root.get(), "timeout",
                 js_abort_signal_timeout);
-            js_set_key_default(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("AbortSignal", 11))},
-                as_ctor_root.get());
+            js_set_key_cstr(js_global_this_obj, "AbortSignal", as_ctor_root.get());
         }
 
         // TextEncoder / TextDecoder constructors as globals
@@ -14378,9 +14221,9 @@ extern "C" Item js_get_global_this() {
             Rooted<Item> decoder_ctor(text_codec_roots,
                 js_new_native_constructor(js_text_decoder_new));
             Rooted<Item> encoder_proto(text_codec_roots,
-                js_get_key_default(encoder_ctor.get(), make_string_item("prototype")));
+                js_get_key_cstr(encoder_ctor.get(), "prototype"));
             Rooted<Item> decoder_proto(text_codec_roots,
-                js_get_key_default(decoder_ctor.get(), make_string_item("prototype")));
+                js_get_key_cstr(decoder_ctor.get(), "prototype"));
             Rooted<Item> encode_method(text_codec_roots,
                 js_new_native_this_span_function(js_text_encoder_encode_method));
             Rooted<Item> decode_method(text_codec_roots,
@@ -14396,12 +14239,8 @@ extern "C" Item js_get_global_this() {
             js_set_key_default(decoder_proto.get(), decode_key.get(), decode_method.get());
             js_mark_non_enumerable(encoder_proto.get(), encode_key.get());
             js_mark_non_enumerable(decoder_proto.get(), decode_key.get());
-            js_set_key_default(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("TextEncoder", 11))},
-                encoder_ctor.get());
-            js_set_key_default(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("TextDecoder", 11))},
-                decoder_ctor.get());
+            js_set_key_cstr(js_global_this_obj, "TextEncoder", encoder_ctor.get());
+            js_set_key_cstr(js_global_this_obj, "TextDecoder", decoder_ctor.get());
         }
 
         // Web Streams constructors as globals
@@ -14438,8 +14277,7 @@ extern "C" Item js_get_global_this() {
             js_set_key_cstr(perf, "timeOrigin", origin_root.get());
             timing_root.set(js_new_object());
             js_set_key_cstr(perf, "timing", timing_root.get());
-            js_set_key_default(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
+            js_set_key_cstr(js_global_this_obj, "performance", perf);
             Item perf_observer = js_new_native_constructor(
                 js_performance_observer_new);
             observer_root.set(perf_observer);
@@ -14482,13 +14320,9 @@ extern "C" Item js_get_global_this() {
             Rooted<Item> proto_root(dom_exception_roots, js_new_object());
             // D5.4.3: neither side of the constructor/prototype cycle is
             // published when the first allocating property store runs.
-            js_set_key_default(proto_root.get(), make_string_item("constructor"),
-                ctor_root.get());
-            js_set_key_default(ctor_root.get(), make_string_item("prototype"),
-                proto_root.get());
-            js_set_key_default(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("DOMException", 12))},
-                ctor_root.get());
+            js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+            js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
+            js_set_key_cstr(js_global_this_obj, "DOMException", ctor_root.get());
         }
 
         // globalThis.Option constructor (HTMLOptionElement)
@@ -16815,36 +16649,8 @@ static void js_populate_number_ctor(Item fn_item) {
 // Populate Symbol constructor with well-known symbol properties (deferred — called from js_create_constructor)
 static void js_populate_symbol_ctor(Item fn_item);
 
-static JsClass js_constructor_intrinsic_class(int ctor_id) {
+static JsClass js_constructor_intrinsic_class(int ctor_id, const char* name) {
     switch (ctor_id) {
-    case JS_CTOR_OBJECT: return JS_CLASS_OBJECT;
-    case JS_CTOR_ARRAY: return JS_CLASS_ARRAY;
-    case JS_CTOR_FUNCTION: return JS_CLASS_FUNCTION;
-    case JS_CTOR_STRING: return JS_CLASS_STRING;
-    case JS_CTOR_NUMBER: return JS_CLASS_NUMBER;
-    case JS_CTOR_BOOLEAN: return JS_CLASS_BOOLEAN;
-    case JS_CTOR_SYMBOL: return JS_CLASS_SYMBOL;
-    case JS_CTOR_BIGINT: return JS_CLASS_BIGINT;
-    case JS_CTOR_ERROR: return JS_CLASS_ERROR;
-    case JS_CTOR_TYPE_ERROR: return JS_CLASS_TYPE_ERROR;
-    case JS_CTOR_RANGE_ERROR: return JS_CLASS_RANGE_ERROR;
-    case JS_CTOR_REFERENCE_ERROR: return JS_CLASS_REFERENCE_ERROR;
-    case JS_CTOR_SYNTAX_ERROR: return JS_CLASS_SYNTAX_ERROR;
-    case JS_CTOR_URI_ERROR: return JS_CLASS_URI_ERROR;
-    case JS_CTOR_EVAL_ERROR: return JS_CLASS_EVAL_ERROR;
-    case JS_CTOR_AGGREGATE_ERROR: return JS_CLASS_AGGREGATE_ERROR;
-    case JS_CTOR_REGEXP: return JS_CLASS_REGEXP;
-    case JS_CTOR_DATE: return JS_CLASS_DATE;
-    case JS_CTOR_PROMISE: return JS_CLASS_PROMISE;
-    case JS_CTOR_MAP: return JS_CLASS_MAP;
-    case JS_CTOR_SET: return JS_CLASS_SET;
-    case JS_CTOR_WEAKMAP: return JS_CLASS_WEAK_MAP;
-    case JS_CTOR_WEAKSET: return JS_CLASS_WEAK_SET;
-    case JS_CTOR_WEAKREF: return JS_CLASS_WEAK_REF;
-    case JS_CTOR_FINALIZATION_REGISTRY: return JS_CLASS_FINALIZATION_REGISTRY;
-    case JS_CTOR_ARRAY_BUFFER: return JS_CLASS_ARRAY_BUFFER;
-    case JS_CTOR_SHARED_ARRAY_BUFFER: return JS_CLASS_SHARED_ARRAY_BUFFER;
-    case JS_CTOR_DATAVIEW: return JS_CLASS_DATA_VIEW;
     case JS_CTOR_INT8ARRAY: case JS_CTOR_UINT8ARRAY:
     case JS_CTOR_UINT8CLAMPEDARRAY: case JS_CTOR_INT16ARRAY:
     case JS_CTOR_UINT16ARRAY: case JS_CTOR_INT32ARRAY:
@@ -16852,23 +16658,8 @@ static JsClass js_constructor_intrinsic_class(int ctor_id) {
     case JS_CTOR_FLOAT32ARRAY: case JS_CTOR_FLOAT64ARRAY:
     case JS_CTOR_BIGINT64ARRAY: case JS_CTOR_BIGUINT64ARRAY:
         return JS_CLASS_TYPED_ARRAY;
-    case JS_CTOR_EVENT: return JS_CLASS_EVENT;
-    case JS_CTOR_CUSTOM_EVENT: return JS_CLASS_CUSTOM_EVENT;
-    case JS_CTOR_EVENT_TARGET: return JS_CLASS_EVENT_TARGET;
-    case JS_CTOR_UI_EVENT: return JS_CLASS_UI_EVENT;
-    case JS_CTOR_FOCUS_EVENT: return JS_CLASS_FOCUS_EVENT;
-    case JS_CTOR_MOUSE_EVENT: return JS_CLASS_MOUSE_EVENT;
-    case JS_CTOR_WHEEL_EVENT: return JS_CLASS_WHEEL_EVENT;
-    case JS_CTOR_KEYBOARD_EVENT: return JS_CLASS_KEYBOARD_EVENT;
-    case JS_CTOR_COMPOSITION_EVENT: return JS_CLASS_COMPOSITION_EVENT;
-    case JS_CTOR_INPUT_EVENT: return JS_CLASS_INPUT_EVENT;
-    case JS_CTOR_POINTER_EVENT: return JS_CLASS_POINTER_EVENT;
-    case JS_CTOR_STATIC_RANGE: return JS_CLASS_STATIC_RANGE;
-    case JS_CTOR_TIMEOUT: return JS_CLASS_TIMEOUT;
-    case JS_CTOR_IMMEDIATE: return JS_CLASS_IMMEDIATE;
-    case JS_CTOR_TRANSITION_EVENT: return JS_CLASS_TRANSITION_EVENT;
-    case JS_CTOR_ANIMATION_EVENT: return JS_CLASS_ANIMATION_EVENT;
-    default: return JS_CLASS_NONE;
+    default:
+        return name ? js_class_from_name(name, (int)strlen(name)) : JS_CLASS_NONE;
     }
 }
 
@@ -16920,7 +16711,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     fn->native_policy = JS_NATIVE_CALL_BODY;
     fn->catalog_id = target->catalog_id;
     fn->param_count = param_count;
-    fn->intrinsic_class = (uint8_t)js_constructor_intrinsic_class(ctor_id);
+    fn->intrinsic_class = (uint8_t)js_constructor_intrinsic_class(ctor_id, name);
     int typed_array_element_type =
         js_typed_array_element_type_for_constructor_id(ctor_id);
     if (typed_array_element_type >= 0) {
@@ -17003,58 +16794,10 @@ extern "C" Item js_get_constructor(Item name_item) {
 }
 
 static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out_name, int* out_len) {
-    const char* name = NULL;
-    int len = 0;
-    switch (cls) {
-        case JS_CLASS_OBJECT:                name = "Object"; len = 6; break;
-        case JS_CLASS_ARRAY:                 name = "Array"; len = 5; break;
-        case JS_CLASS_FUNCTION:              name = "Function"; len = 8; break;
-        case JS_CLASS_STRING:                name = "String"; len = 6; break;
-        case JS_CLASS_NUMBER:                name = "Number"; len = 6; break;
-        case JS_CLASS_BOOLEAN:               name = "Boolean"; len = 7; break;
-        case JS_CLASS_SYMBOL:                name = "Symbol"; len = 6; break;
-        case JS_CLASS_BIGINT:                name = "BigInt"; len = 6; break;
-        case JS_CLASS_ERROR:                 name = "Error"; len = 5; break;
-        case JS_CLASS_TYPE_ERROR:            name = "TypeError"; len = 9; break;
-        case JS_CLASS_RANGE_ERROR:           name = "RangeError"; len = 10; break;
-        case JS_CLASS_REFERENCE_ERROR:       name = "ReferenceError"; len = 14; break;
-        case JS_CLASS_SYNTAX_ERROR:          name = "SyntaxError"; len = 11; break;
-        case JS_CLASS_URI_ERROR:             name = "URIError"; len = 8; break;
-        case JS_CLASS_EVAL_ERROR:            name = "EvalError"; len = 9; break;
-        case JS_CLASS_AGGREGATE_ERROR:       name = "AggregateError"; len = 14; break;
-        case JS_CLASS_REGEXP:                name = "RegExp"; len = 6; break;
-        case JS_CLASS_DATE:                  name = "Date"; len = 4; break;
-        case JS_CLASS_PROMISE:               name = "Promise"; len = 7; break;
-        case JS_CLASS_MAP:                   name = "Map"; len = 3; break;
-        case JS_CLASS_SET:                   name = "Set"; len = 3; break;
-        case JS_CLASS_WEAK_MAP:              name = "WeakMap"; len = 7; break;
-        case JS_CLASS_WEAK_SET:              name = "WeakSet"; len = 7; break;
-        case JS_CLASS_WEAK_REF:              name = "WeakRef"; len = 7; break;
-        case JS_CLASS_FINALIZATION_REGISTRY: name = "FinalizationRegistry"; len = 20; break;
-        case JS_CLASS_ARRAY_BUFFER:          name = "ArrayBuffer"; len = 11; break;
-        case JS_CLASS_SHARED_ARRAY_BUFFER:   name = "SharedArrayBuffer"; len = 17; break;
-        case JS_CLASS_DATA_VIEW:             name = "DataView"; len = 8; break;
-        case JS_CLASS_EVENT:                 name = "Event"; len = 5; break;
-        case JS_CLASS_CUSTOM_EVENT:          name = "CustomEvent"; len = 11; break;
-        case JS_CLASS_EVENT_TARGET:          name = "EventTarget"; len = 11; break;
-        case JS_CLASS_UI_EVENT:              name = "UIEvent"; len = 7; break;
-        case JS_CLASS_FOCUS_EVENT:           name = "FocusEvent"; len = 10; break;
-        case JS_CLASS_MOUSE_EVENT:           name = "MouseEvent"; len = 10; break;
-        case JS_CLASS_WHEEL_EVENT:           name = "WheelEvent"; len = 10; break;
-        case JS_CLASS_KEYBOARD_EVENT:        name = "KeyboardEvent"; len = 13; break;
-        case JS_CLASS_COMPOSITION_EVENT:     name = "CompositionEvent"; len = 16; break;
-        case JS_CLASS_INPUT_EVENT:           name = "InputEvent"; len = 10; break;
-        case JS_CLASS_POINTER_EVENT:         name = "PointerEvent"; len = 12; break;
-        case JS_CLASS_STATIC_RANGE:          name = "StaticRange"; len = 11; break;
-        case JS_CLASS_TRANSITION_EVENT:      name = "TransitionEvent"; len = 15; break;
-        case JS_CLASS_ANIMATION_EVENT:       name = "AnimationEvent"; len = 14; break;
-        case JS_CLASS_TIMEOUT:               name = "Timeout"; len = 7; break;
-        case JS_CLASS_IMMEDIATE:             name = "Immediate"; len = 9; break;
-        default: break;
-    }
+    const char* name = js_class_to_name(cls);
     if (!name) return false;
     *out_name = name;
-    *out_len = len;
+    *out_len = (int)strlen(name);
     return true;
 }
 
@@ -17757,8 +17500,7 @@ static Item js_url_to_object(Url* url) {
         } else {
             search_str = (Item){.item = s2it(heap_create_name("", 0))};
         }
-        js_set_key_default(obj, (Item){.item = s2it(heap_create_name("searchParams"))},
-                        js_url_search_params_new(search_str));
+        js_set_key_cstr(obj, "searchParams", js_url_search_params_new(search_str));
     }
 
     url_destroy(url);
@@ -17819,10 +17561,10 @@ static Item js_web_stream_key(const char* name) {
 static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
-    Item chunks = js_get_key_default(env[0], js_web_stream_key("__chunks__"));
+    Item chunks = js_get_key_cstr(env[0], "__chunks__");
     if (get_type_id(chunks) != LMD_TYPE_ARRAY) {
         chunks = js_array_new(0);
-        js_set_key_default(env[0], js_web_stream_key("__chunks__"), chunks);
+        js_set_key_cstr(env[0], "__chunks__", chunks);
     }
     js_array_push(chunks, chunk);
     return make_js_undefined();
@@ -17831,13 +17573,13 @@ static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
 static Item js_readable_stream_controller_close(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
-    js_set_key_default(env[0], js_web_stream_key("__closed__"), (Item){.item = b2it(true)});
+    js_set_key_cstr(env[0], "__closed__", (Item){.item = b2it(true)});
     return make_js_undefined();
 }
 
 static Item js_readable_stream_error_with_code(const char* name, const char* code, const char* message) {
     Item err = js_new_error_with_name(js_web_stream_key(name), js_web_stream_key(message));
-    js_set_key_default(err, js_web_stream_key("code"), js_web_stream_key(code));
+    js_set_key_cstr(err, "code", js_web_stream_key(code));
     return err;
 }
 
@@ -17877,7 +17619,7 @@ static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item vi
         return js_throw_type_error_code("ERR_INVALID_STATE",
             "Invalid state: View buffer is detached");
     }
-    if (js_web_stream_item_is_true(js_get_key_default(stream, js_web_stream_key("__closed__")))) {
+    if (js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
         int view_len = js_typed_array_byte_length(view);
         int buffer_len = js_readable_stream_view_buffer_length(view);
         // Byte-stream BYOB close keeps the read request's backing store invariant;
@@ -17895,8 +17637,7 @@ static Item js_readable_stream_make_byob_request(Item stream, Item view) {
     env[0] = stream;
     env[1] = view;
     Item request = js_new_object();
-    js_set_key_default(request, js_web_stream_key("respondWithNewView"),
-                    js_new_native_closure(js_readable_stream_byob_respond_with_new_view,
+    js_set_key_cstr(request, "respondWithNewView", js_new_native_closure(js_readable_stream_byob_respond_with_new_view,
                                    1, env, 2));
     return request;
 }
@@ -17912,50 +17653,47 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
             "ERR_INVALID_STATE", "Invalid state: View has zero byteLength"));
     }
 
-    Item chunks = js_get_key_default(stream, js_web_stream_key("__chunks__"));
+    Item chunks = js_get_key_cstr(stream, "__chunks__");
     int64_t index = 0;
-    Item index_item = js_get_key_default(stream, js_web_stream_key("__read_index__"));
+    Item index_item = js_get_key_cstr(stream, "__read_index__");
     if (get_type_id(index_item) == LMD_TYPE_INT) index = it2i(index_item);
 
     Item result = js_new_object();
     int64_t len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
     if (index < len) {
-        js_set_key_default(result, js_web_stream_key("value"), js_elements_get_int(chunks, index));
-        js_set_key_default(result, js_web_stream_key("done"), (Item){.item = b2it(false)});
-        js_set_key_default(stream, js_web_stream_key("__read_index__"), (Item){.item = i2it(index + 1)});
+        js_set_key_cstr(result, "value", js_elements_get_int(chunks, index));
+        js_set_key_cstr(result, "done", (Item){.item = b2it(false)});
+        js_set_key_cstr(stream, "__read_index__", (Item){.item = i2it(index + 1)});
     } else {
-        Item pull_fn = js_get_key_default(stream, js_web_stream_key("__pull__"));
+        Item pull_fn = js_get_key_cstr(stream, "__pull__");
         if (js_is_callable(pull_fn) &&
-            !js_web_stream_item_is_true(js_get_key_default(stream, js_web_stream_key("__closed__")))) {
+            !js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
             Item* controller_env = js_alloc_env(2);
             controller_env[0] = stream;
             controller_env[1] = view;
             Item controller = js_new_object();
-            js_set_key_default(controller, js_web_stream_key("enqueue"),
-                            js_new_native_closure(js_readable_stream_controller_enqueue, 1,
+            js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1,
                                            controller_env, 2));
-            js_set_key_default(controller, js_web_stream_key("close"),
-                            js_new_native_closure(js_readable_stream_controller_close, 0,
+            js_set_key_cstr(controller, "close", js_new_native_closure(js_readable_stream_controller_close, 0,
                                            controller_env, 2));
-            js_set_key_default(controller, js_web_stream_key("byobRequest"),
-                            js_readable_stream_make_byob_request(stream, view));
+            js_set_key_cstr(controller, "byobRequest", js_readable_stream_make_byob_request(stream, view));
             JS_ASSIGN_OR_RETURN(pull_result, js_call_function(pull_fn,
-                js_get_key_default(stream, js_web_stream_key("__source__")), &controller, 1));
-            chunks = js_get_key_default(stream, js_web_stream_key("__chunks__"));
+                js_get_key_cstr(stream, "__source__"), &controller, 1));
+            chunks = js_get_key_cstr(stream, "__chunks__");
             len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
             if (index < len) {
-                js_set_key_default(result, js_web_stream_key("value"), js_elements_get_int(chunks, index));
-                js_set_key_default(result, js_web_stream_key("done"), (Item){.item = b2it(false)});
-                js_set_key_default(stream, js_web_stream_key("__read_index__"), (Item){.item = i2it(index + 1)});
+                js_set_key_cstr(result, "value", js_elements_get_int(chunks, index));
+                js_set_key_cstr(result, "done", (Item){.item = b2it(false)});
+                js_set_key_cstr(stream, "__read_index__", (Item){.item = i2it(index + 1)});
                 return js_promise_resolve(result);
             }
         }
         if (is_byob && js_is_typed_array(view) &&
-            js_web_stream_item_is_true(js_get_key_default(stream, js_web_stream_key("__closed__")))) {
+            js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
             js_readable_stream_detach_byob_view(view);
         }
-        js_set_key_default(result, js_web_stream_key("value"), make_js_undefined());
-        js_set_key_default(result, js_web_stream_key("done"), (Item){.item = b2it(true)});
+        js_set_key_cstr(result, "value", make_js_undefined());
+        js_set_key_cstr(result, "done", (Item){.item = b2it(true)});
     }
     return js_promise_resolve(result);
 }
@@ -17964,7 +17702,7 @@ static Item js_readable_stream_get_reader_stub(Item options) {
     Item stream = js_get_this();
     bool byob = false;
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT) {
-        Item mode = js_get_key_default(options, js_web_stream_key("mode"));
+        Item mode = js_get_key_cstr(options, "mode");
         if (get_type_id(mode) == LMD_TYPE_STRING) {
             String* s = it2s(mode);
             byob = s && s->len == 4 && memcmp(s->chars, "byob", 4) == 0;
@@ -17974,32 +17712,28 @@ static Item js_readable_stream_get_reader_stub(Item options) {
     env[0] = stream;
     env[1] = (Item){.item = b2it(byob)};
     Item reader = js_new_object();
-    js_set_key_default(reader, js_web_stream_key("read"),
-                    js_new_native_closure(js_readable_stream_reader_read, 1, env, 2));
+    js_set_key_cstr(reader, "read", js_new_native_closure(js_readable_stream_reader_read, 1, env, 2));
     return reader;
 }
 
 extern "C" Item js_readable_stream_new(Item underlying_source) {
     Item obj = js_new_object_with_class(JS_CLASS_READABLE_STREAM);
-    js_set_key_default(obj, js_web_stream_key("__chunks__"), js_array_new(0));
-    js_set_key_default(obj, js_web_stream_key("__closed__"), (Item){.item = b2it(false)});
-    js_set_key_default(obj, js_web_stream_key("__read_index__"), (Item){.item = i2it(0)});
+    js_set_key_cstr(obj, "__chunks__", js_array_new(0));
+    js_set_key_cstr(obj, "__closed__", (Item){.item = b2it(false)});
+    js_set_key_cstr(obj, "__read_index__", (Item){.item = i2it(0)});
     Item get_reader_key = (Item){.item = s2it(heap_create_name("getReader"))};
     Item get_reader_fn = js_new_native_function(js_readable_stream_get_reader_stub);
     js_set_key_default(obj, get_reader_key, get_reader_fn);
-    js_set_key_default(obj, js_web_stream_key("__source__"), underlying_source);
-    js_set_key_default(obj, js_web_stream_key("__pull__"),
-                    js_get_key_default(underlying_source, js_web_stream_key("pull")));
+    js_set_key_cstr(obj, "__source__", underlying_source);
+    js_set_key_cstr(obj, "__pull__", js_get_key_cstr(underlying_source, "pull"));
 
-    Item start_fn = js_get_key_default(underlying_source, js_web_stream_key("start"));
+    Item start_fn = js_get_key_cstr(underlying_source, "start");
     if (js_is_callable(start_fn)) {
         Item* env = js_alloc_env(1);
         env[0] = obj;
         Item controller = js_new_object();
-        js_set_key_default(controller, js_web_stream_key("enqueue"),
-                        js_new_native_closure(js_readable_stream_controller_enqueue, 1, env, 1));
-        js_set_key_default(controller, js_web_stream_key("close"),
-                        js_new_native_closure(js_readable_stream_controller_close, 0, env, 1));
+        js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1, env, 1));
+        js_set_key_cstr(controller, "close", js_new_native_closure(js_readable_stream_controller_close, 0, env, 1));
         js_call_function(start_fn, underlying_source, &controller, 1);
     }
     return obj;
@@ -18008,8 +17742,8 @@ extern "C" Item js_readable_stream_new(Item underlying_source) {
 static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_resolve(make_js_undefined());
-    Item sink = js_get_key_default(env[0], js_web_stream_key("__sink__"));
-    Item write_fn = js_get_key_default(sink, js_web_stream_key("write"));
+    Item sink = js_get_key_cstr(env[0], "__sink__");
+    Item write_fn = js_get_key_cstr(sink, "write");
     if (js_is_callable(write_fn)) {
         js_call_function(write_fn, sink, &chunk, 1);
     }
@@ -18019,12 +17753,12 @@ static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
 static Item js_writable_stream_writer_close(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_resolve(make_js_undefined());
-    Item sink = js_get_key_default(env[0], js_web_stream_key("__sink__"));
-    Item close_fn = js_get_key_default(sink, js_web_stream_key("close"));
+    Item sink = js_get_key_cstr(env[0], "__sink__");
+    Item close_fn = js_get_key_cstr(sink, "close");
     if (js_is_callable(close_fn)) {
         js_call_function(close_fn, sink, NULL, 0);
     }
-    js_set_key_default(env[0], js_web_stream_key("__closed__"), (Item){.item = b2it(true)});
+    js_set_key_cstr(env[0], "__closed__", (Item){.item = b2it(true)});
     return js_promise_resolve(make_js_undefined());
 }
 
@@ -18033,17 +17767,15 @@ static Item js_writable_stream_get_writer_stub(void) {
     Item* env = js_alloc_env(1);
     env[0] = stream;
     Item writer = js_new_object();
-    js_set_key_default(writer, js_web_stream_key("write"),
-                    js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
-    js_set_key_default(writer, js_web_stream_key("close"),
-                    js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));
+    js_set_key_cstr(writer, "write", js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
+    js_set_key_cstr(writer, "close", js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));
     return writer;
 }
 
 extern "C" Item js_writable_stream_new(Item underlying_sink) {
     Item obj = js_new_object_with_class(JS_CLASS_WRITABLE_STREAM);
-    js_set_key_default(obj, js_web_stream_key("__sink__"), underlying_sink);
-    js_set_key_default(obj, js_web_stream_key("__closed__"), (Item){.item = b2it(false)});
+    js_set_key_cstr(obj, "__sink__", underlying_sink);
+    js_set_key_cstr(obj, "__closed__", (Item){.item = b2it(false)});
     Item get_writer_key = (Item){.item = s2it(heap_create_name("getWriter"))};
     Item get_writer_fn = js_new_native_function(js_writable_stream_get_writer_stub);
     js_set_key_default(obj, get_writer_key, get_writer_fn);

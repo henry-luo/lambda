@@ -862,6 +862,7 @@ static inline FnCompanionTransport em_companion_transport(FnReturnShape shape,
         bool c_reachable, uint8_t scalar_home_lane_mask) {
     if (!fn_return_shape_is_pair(shape)) return FN_COMPANION_NONE;
 #if LAMBDA_RETURN_V3
+#if 0  // DIAGNOSTIC: shape 4 un-parked for root-cause work
     // Shape 4 (P2) is PARKED on the v1 context-lane transport. The callee-side
     // pair emission is written and verifiably correct in the dump — the body
     // declares two results and returns `ret <value>, <error>` — but the value
@@ -873,6 +874,7 @@ static inline FnCompanionTransport em_companion_transport(FnReturnShape shape,
     if (shape == RETURN_SHAPE_NATIVE_ERROR) {
         return scalar_home_lane_mask ? FN_COMPANION_HOME : FN_COMPANION_NONE;
     }
+#endif
     #if defined(_WIN32)
         (void)c_reachable; (void)scalar_home_lane_mask;
         return FN_COMPANION_CONTEXT_SLOT;   // MIR rejects nres > 1 here
