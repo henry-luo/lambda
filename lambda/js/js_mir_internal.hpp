@@ -450,6 +450,40 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true))
 #define jm_call_void_6(mt, fn, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->em, fn, __VA_ARGS__, true))
+
+// Register-operand call shorthand. The overwhelming majority of helper calls
+// pass every argument as an I64 register; jm_callr_N spells that directly
+// instead of repeating `MIR_T_I64, MIR_new_reg_op(mt->ctx, x)` per argument.
+// Mixed sites keep the explicit jm_call_N form.
+#define JM_REG(mt, r) MIR_T_I64, MIR_new_reg_op((mt)->ctx, (r))
+#define jm_callr_1(mt, fn, ret, a1) jm_call_1(mt, fn, ret, JM_REG(mt, a1))
+#define jm_callr_2(mt, fn, ret, a1, a2) \
+    jm_call_2(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2))
+#define jm_callr_3(mt, fn, ret, a1, a2, a3) \
+    jm_call_3(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3))
+#define jm_callr_4(mt, fn, ret, a1, a2, a3, a4) \
+    jm_call_4(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4))
+#define jm_callr_5(mt, fn, ret, a1, a2, a3, a4, a5) \
+    jm_call_5(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5))
+#define jm_callr_6(mt, fn, ret, a1, a2, a3, a4, a5, a6) \
+    jm_call_6(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5), JM_REG(mt, a6))
+#define jm_callr_void_1(mt, fn, a1) jm_call_void_1(mt, fn, JM_REG(mt, a1))
+#define jm_callr_void_2(mt, fn, a1, a2) \
+    jm_call_void_2(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2))
+#define jm_callr_void_3(mt, fn, a1, a2, a3) \
+    jm_call_void_3(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3))
+#define jm_callr_void_4(mt, fn, a1, a2, a3, a4) \
+    jm_call_void_4(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4))
+#define jm_callr_void_5(mt, fn, a1, a2, a3, a4, a5) \
+    jm_call_void_5(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5))
+#define jm_callr_void_6(mt, fn, a1, a2, a3, a4, a5, a6) \
+    jm_call_void_6(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5), JM_REG(mt, a6))
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,

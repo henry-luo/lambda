@@ -429,8 +429,7 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value) {
 static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
         JsTryContext* forced_context, bool force_finally) {
     if (!mt) return;
-    MIR_reg_t thrown = jm_call_1(mt, "js_throw_value", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    MIR_reg_t thrown = jm_callr_1(mt, "js_throw_value", MIR_T_I64, value);
     JsTryContext* context = forced_context ? forced_context :
         jm_find_completion_context(mt, JS_MIR_COMPLETION_THROW);
     MIR_label_t target;

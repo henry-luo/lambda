@@ -25,16 +25,14 @@ JM_EMIT_ITERATOR_CALL(jm_emit_iterator_collect_rest, "js_iterator_collect_rest",
 #undef JM_EMIT_ITERATOR_CALL
 
 void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator) {
-    jm_call_1(mt, "js_iterator_close", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_callr_1(mt, "js_iterator_close", MIR_T_I64, iterator);
 }
 
 void jm_emit_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator) {
     // Normal-completion IteratorClose must forward a failing return lookup or
     // call; exception-cleanup callers use the unchecked form to preserve the
     // original abrupt completion while closing.
-    jm_call_1(mt, "js_iterator_close", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_callr_1(mt, "js_iterator_close", MIR_T_I64, iterator);
     jm_emit_error_lane_propagate_check(mt);
 }
 
@@ -57,8 +55,7 @@ void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t
 
     jm_emit_label(mt, rethrow_only);
     jm_emit_label(mt, after_close);
-    jm_call_1(mt, "js_throw_value", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc));
+    jm_callr_1(mt, "js_throw_value", MIR_T_I64, saved_exc);
     jm_emit_jmp(mt, target);
     jm_emit_label(mt, no_exc);
     // the fallthrough edge is the normal completion path; leaving the

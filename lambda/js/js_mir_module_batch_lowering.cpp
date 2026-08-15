@@ -61,9 +61,7 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
         MIR_label_t global_export = jm_new_label(mt);
         MIR_label_t export_done = jm_new_label(mt);
         jm_emit_branch(mt, MIR_BF, global_export, eval_env_active);
-        jm_call_void_2(mt, "js_eval_local_export_var",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+        jm_callr_void_2(mt, "js_eval_local_export_var", fk, var_reg);
         MIR_reg_t evalscript_local_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
         MIR_label_t skip_evalscript_global = jm_new_label(mt);
         jm_emit_branch(mt, MIR_BF, skip_evalscript_global, evalscript_local_active);
@@ -1896,10 +1894,7 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
     const char* export_key = is_default ? "default" : name;
     int export_key_len = is_default ? 7 : name_len;
     MIR_reg_t key = jm_box_property_name_literal(mt, export_key, export_key_len);
-    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    jm_callr_3(mt, "js_set_key_default", MIR_T_I64, mt->namespace_reg, key, val);
 }
 
 // Js52 P1: aliased export — resolve the value via local_name, publish under export_name.
@@ -1914,10 +1909,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
     MIR_reg_t key = jm_box_property_name_literal(mt, export_name, export_len);
-    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    jm_callr_3(mt, "js_set_key_default", MIR_T_I64, mt->namespace_reg, key, val);
 }
 
 
@@ -2088,10 +2080,7 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
 static void jm_emit_evalscript_global_decl_check_name(JsMirTranspiler* mt, String* name, bool is_func) {
     if (!name || name->len <= 0) return;
     MIR_reg_t key_reg = jm_box_property_name_literal(mt, name->chars, name->len);
-    jm_call_1(mt,
-        is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl",
-        MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+    jm_callr_1(mt, is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl", MIR_T_I64, key_reg);
     jm_emit_error_lane_propagate_check(mt);
 }
 
@@ -2100,16 +2089,14 @@ static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, c
     if (strncmp(name, "_js_", 4) == 0) name += 4;
     if (!name[0]) return;
     MIR_reg_t key_reg = jm_box_property_name_literal(mt, name, strlen(name));
-    jm_call_1(mt, "js_evalscript_check_global_var_decl", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+    jm_callr_1(mt, "js_evalscript_check_global_var_decl", MIR_T_I64, key_reg);
     jm_emit_error_lane_propagate_check(mt);
 }
 
 static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, String* name) {
     if (!name || name->len <= 0) return;
     MIR_reg_t key_reg = jm_box_property_name_literal(mt, name->chars, name->len);
-    jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+    jm_callr_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64, key_reg);
     jm_emit_error_lane_propagate_check(mt);
 }
 
@@ -2140,8 +2127,7 @@ static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsA
                 const char* name = entry->name;
                 if (strncmp(name, "_js_", 4) == 0) name += 4;
                 MIR_reg_t key_reg = jm_box_property_name_literal(mt, name, strlen(name));
-                jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                jm_callr_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64, key_reg);
                 jm_emit_error_lane_propagate_check(mt);
             }
             hashmap_free(names);
@@ -4879,8 +4865,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Global lexical declarations are checked during script
                     // declaration instantiation and tracked separately from
                     // globalThis properties for later evalScript collision checks.
-                    jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    jm_callr_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64, key_reg);
                     jm_emit_error_lane_propagate_check(mt);
                     MIR_reg_t undef_lex = jm_new_reg(mt, "global_lex_undef", MIR_T_I64);
                     jm_emit_reg_op(mt, MIR_MOV, undef_lex, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
@@ -4921,14 +4906,12 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
                     MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
-                    MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    MIR_reg_t bridged_reg = jm_callr_1(mt, "js_eval_env_has_binding", MIR_T_I64, key_reg);
                     MIR_label_t use_undef = jm_new_label(mt);
                     MIR_label_t init_done = jm_new_label(mt);
                     init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
                     jm_emit_branch(mt, MIR_BF, use_undef, bridged_reg);
-                    MIR_reg_t bridged_val = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    MIR_reg_t bridged_val = jm_callr_1(mt, "js_get_global_property", MIR_T_I64, key_reg);
                     jm_emit_mov(mt, init_val, bridged_val);
                     jm_emit_jmp(mt, init_done);
                     jm_emit_label(mt, use_undef);
@@ -5011,8 +4994,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
             MIR_label_t skip_preinit = jm_new_label(mt);
             if (mt->is_eval_direct) {
-                MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                MIR_reg_t bridged_reg = jm_callr_1(mt, "js_eval_env_has_binding", MIR_T_I64, key_reg);
                 jm_emit_branch(mt, MIR_BT, skip_preinit, bridged_reg);
             }
             MIR_reg_t undef_reg = jm_new_reg(mt, "annexb_undef", MIR_T_I64);
@@ -5022,13 +5004,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_label_t global_preinit = jm_new_label(mt);
                 MIR_label_t preinit_done = jm_new_label(mt);
                 jm_emit_branch(mt, MIR_BF, global_preinit, eval_env_active);
-                jm_call_void_2(mt, "js_eval_local_export_var",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                jm_callr_void_2(mt, "js_eval_local_export_var", key_reg, undef_reg);
                 jm_emit_jmp(mt, preinit_done);
                 jm_emit_label(mt, global_preinit);
-                jm_call_void_1(mt, "js_eval_env_track_global_binding",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                jm_callr_void_1(mt, "js_eval_env_track_global_binding", key_reg);
                 jm_call_void_3(mt, "js_define_global_property_v",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
@@ -5177,8 +5156,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (p7d_has_tla && p7d_post_await_label) {
         MIR_reg_t p7d_spec = jm_box_string_literal(mt, mt->filename,
             (int)strlen(mt->filename));
-        MIR_reg_t p7d_state = jm_call_1(mt, "js_module_get_body_state", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec));
+        MIR_reg_t p7d_state = jm_callr_1(mt, "js_module_get_body_state", MIR_T_I64, p7d_spec);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNES,
             MIR_new_label_op(mt->ctx, p7d_post_await_label),
             MIR_new_reg_op(mt->ctx, p7d_state),
@@ -5375,9 +5353,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     {
                         MIR_reg_t proto_obj = class_proto_obj;
                         bool heritage_is_null = false;
-                        jm_call_void_2(mt, "js_set_default_constructor_property",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                        jm_callr_void_2(mt, "js_set_default_constructor_property", proto_obj, cls_obj);
                         ctor_super_val = jm_emit_class_prototype_chain(mt, ce, cls_obj, heritage,
                             static_superclass, proto_obj, 0, &heritage_is_null);
                         jm_emit_class_instance_setup_tail(mt, cls_obj, ce, proto_obj,
@@ -5393,10 +5369,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         if (current_export && current_export->is_default && mt->is_module) {
             MIR_reg_t val = jm_transpile_box_item(mt, actual_stmt);
             MIR_reg_t key = jm_box_property_name_literal(mt, "default", 7);
-            jm_call_3(mt, "js_set_key_default", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            jm_callr_3(mt, "js_set_key_default", MIR_T_I64, mt->namespace_reg, key, val);
             stmt = stmt->next;
             continue;
         }
@@ -5422,9 +5395,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     (int)strlen(mt->filename));
                 // Pass through P5 publish so pending-Promise awaits chain as
                 // before (settled/non-Promise values fall through to js_await_sync).
-                MIR_reg_t p7d_await_result = jm_call_2(mt, "js_p5_module_await", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec_split),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val));
+                MIR_reg_t p7d_await_result = jm_callr_2(mt, "js_p5_module_await", MIR_T_I64, p7d_spec_split, arg_val);
                 (void)p7d_await_result;
                 // A rejected settled promise becomes an ERROR lane at the
                 // synchronous await boundary; route it before the split marks
@@ -5435,13 +5406,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_call_void_2(mt, "js_module_set_body_state",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec_split),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
-                jm_call_void_1(mt, "js_module_mark_post_await_pending",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec_split));
+                jm_callr_void_1(mt, "js_module_mark_post_await_pending", p7d_spec_split);
                 // Assign this module an AEO slot (idempotent — only set on
                 // first call). Importers register with us as a parent before
                 // we hit the drain, so AEO needs to be defined first.
-                jm_call_1(mt, "js_module_assign_async_eval_order", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec_split));
+                jm_callr_1(mt, "js_module_assign_async_eval_order", MIR_T_I64, p7d_spec_split);
                 // Return the namespace immediately; post-await statements run
                 // on re-entry via the dispatch label.
                 jm_emit_ret(mt, mt->namespace_reg);
@@ -5555,9 +5524,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_label_t global_export = jm_new_label(mt);
             MIR_label_t export_done = jm_new_label(mt);
             jm_emit_branch(mt, MIR_BF, global_export, eval_env_active);
-            jm_call_void_2(mt, "js_eval_local_export_var",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+            jm_callr_void_2(mt, "js_eval_local_export_var", key_reg, val_reg);
             MIR_reg_t evalscript_local_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
             MIR_label_t skip_evalscript_global = jm_new_label(mt);
             jm_emit_branch(mt, MIR_BF, skip_evalscript_global, evalscript_local_active);
@@ -5587,9 +5554,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg),
             MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
             jm_emit_label(mt, global_define_done);
-            jm_call_void_2(mt, "js_eval_local_export_var",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+            jm_callr_void_2(mt, "js_eval_local_export_var", key_reg, val_reg);
             jm_emit_label(mt, export_done);
             log_debug("js-mir: eval export var '%s' to globalThis", js_name);
         }
@@ -5611,8 +5576,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (mt->is_module && mt->in_main && mt->filename) {
         MIR_reg_t p7d_complete_spec = jm_box_string_literal(mt, mt->filename,
             (int)strlen(mt->filename));
-        jm_call_void_1(mt, "js_module_complete_tla_body",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_complete_spec));
+        jm_callr_void_1(mt, "js_module_complete_tla_body", p7d_complete_spec);
     }
 
     // Module mode: return namespace instead of result

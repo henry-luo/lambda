@@ -2676,12 +2676,10 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
             // Convert any iterable to array first
-            MIR_reg_t src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, src_raw));
+            MIR_reg_t src = jm_callr_1(mt, "js_iterable_to_array", MIR_T_I64, src_raw);
             jm_emit_error_lane_propagate_check(mt);
             // Get length
-            MIR_reg_t src_len = jm_call_1(mt, "js_array_length", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
+            MIR_reg_t src_len = jm_callr_1(mt, "js_array_length", MIR_T_I64, src);
             jm_emit_error_lane_propagate_check(mt);
             // Loop: push each element
             MIR_reg_t i_reg = jm_new_reg(mt, "spai", MIR_T_I64);
@@ -2695,13 +2693,9 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             // Box through the funnel: an int Item is not a tagged payload, so
             // OR-ing the tag onto a raw index no longer produces that index.
             MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
-            MIR_reg_t elem = jm_call_2(mt, "js_elements_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+            MIR_reg_t elem = jm_callr_2(mt, "js_elements_get", MIR_T_I64, src, idx_boxed);
             jm_emit_error_lane_propagate_check(mt);
-            jm_call_2(mt, "js_array_push", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, elem));
+            jm_callr_2(mt, "js_array_push", MIR_T_I64, array, elem);
             jm_emit_error_lane_propagate_check(mt);
             jm_emit_reg_binary_op(mt, MIR_ADD, i_reg, i_reg, MIR_new_int_op(mt->ctx, 1));
             jm_emit_jmp(mt, l_check);
@@ -2713,9 +2707,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             if (arr_spill_slot >= 0 && jm_has_yield(arg)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
-            jm_call_2(mt, "js_array_push", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            jm_callr_2(mt, "js_array_push", MIR_T_I64, array, val);
             jm_emit_error_lane_propagate_check(mt);
         }
         arg = arg->next;
