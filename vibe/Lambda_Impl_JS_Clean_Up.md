@@ -175,18 +175,18 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C1.3 DOM dead code (formdata shim, 2 zero-caller fns)
 - [x] C1.4 globals orphan decls + duplicate includes
 - [x] C1.5 `jm_strict_put`
-- [ ] C2.1 name-key helpers (runtime → globals → DOM batches)
-- [ ] C2.2 `JS_ROOTS` (runtime → globals batches)
-- [ ] C2.3 `jm_callr_N` (per MIR file)
+- [x] C2.1 name-key helpers (runtime → globals → DOM batches)
+- [x] C2.2 `JS_ROOTS` (runtime → globals batches)
+- [x] C2.3 `jm_callr_N` (per MIR file)
 - [x] C2.4 `jm_emit_branch/jmp/ret`
-- [ ] C2.5 `jm_find_module_const` + `jm_var_name`
-- [ ] C2.6 `js_throw_*_errorf` + `js_throw_delete_rejected`
-- [ ] C2.7 `js_node_common.hpp` micro-clones
-- [ ] C2.8 `js_node_uv.cpp` write + error factory
-- [ ] C2.9 `js_map_own_or/_string`
-- [ ] C2.10 `js_species_constructor`
-- [ ] C2.11 join/toLocaleString kernel
-- [ ] C3.1 `JS_AST_CHILDREN` visitor (6 file migrations)
+- [x] C2.5 `jm_find_module_const` + `jm_var_name`
+- [x] C2.6 `js_throw_*_errorf` + `js_throw_delete_rejected`
+- [x] C2.7 `js_node_common.hpp` micro-clones
+- [x] C2.8 `js_node_uv.cpp` write + error factory
+- [x] C2.9 `js_map_own_or/_string`
+- [x] C2.10 `js_species_constructor`
+- [x] C2.11 join/toLocaleString kernel
+- [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 1 of ~40 walkers migrated
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
@@ -246,3 +246,41 @@ asserts `err.path`. The live `node_fs` error factory reaches the host through
 `err.path` today. Adding it means widening that versioned host ABI
 (`JUBE_HOST_API_VERSION`) and threading a path through ~23 `node_fs_sync_error`
 call sites. Deferred pending approval.
+
+---
+
+## 13. Status at end of the first implementation pass
+
+Landed and gated (18 commits, `test-lambda-baseline` 3870/3870 and the
+`test/node` set delta-free at every commit):
+
+- **C0** — all five bug fixes, four with committed regression tests.
+- **C1** — all five items.
+- **C2** — all eleven items (C2.4 landed before C2.1–C2.3).
+- **C3.1** — the shared child table (`lambda/js/js_ast_children.cpp`),
+  `js_ast_visit_children` / `js_ast_any_child`, and the first walker migration
+  (`jm_collect_enclosing_lexicals_for_target`, 146 → 34 lines).
+
+Net so far: **−1,400 lines** across `lambda/`.
+
+### Revised expectation for the rest of C3.1
+
+The 1,500-line estimate assumed the walkers are *complete* traversals whose
+`default:` can simply delegate. Many are not: `jm_node_has_direct_eval_call`,
+for example, returns false for for/while/try/switch/object/array and every
+other unlisted kind, so delegating would newly descend into them. Under the
+correctness rule those kinds must become explicit skip cases, which costs back
+most of what the table saves.
+
+The split to expect:
+
+- **Complete walkers** (the one migrated is representative): ~75% reduction.
+- **Deliberately partial walkers**: little or no reduction; they should keep
+  their allow-list shape, and the table is not the right tool for them.
+
+Before migrating each remaining walker, classify it first. A useful signal is
+whether its `default:` recurses generically or returns/breaks.
+
+### Not started
+
+C3.2–C3.8, C4, C5, C6.
