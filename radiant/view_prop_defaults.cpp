@@ -32,7 +32,8 @@ static BlockProp make_block_prop_default() {
     value.given_width_percent = value.given_height_percent = NAN;
     value.contain_intrinsic_width = value.contain_intrinsic_height = -1.0f;
     value.contain_intrinsic_width_auto = value.contain_intrinsic_height_auto = false;
-    value.contain_size = value.contain_inline_size = value.content_visibility_hidden = false;
+    value.contain_size = value.contain_inline_size = value.contain_positioning =
+        value.content_visibility_hidden = false;
     value.given_min_width_percent = value.given_max_width_percent = NAN;
     value.given_min_height_percent = value.given_max_height_percent = NAN;
     value.text_indent_percent = NAN;

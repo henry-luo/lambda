@@ -19,6 +19,8 @@ extern __thread EvalContext* context;
 void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
+void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
+                      int value_count);
 Item typeditem_to_item(TypedItem *titem);
 RetItem fn_input1(Item url);
 
@@ -2138,6 +2140,19 @@ Map* map_fill(Map* map, ...) {
     va_start(args, map);
     set_fields(map_type, map->data, args);
     va_end(args);
+    return map;
+}
+
+// Array-taking sibling of map_fill for callers that hold their values in a
+// rooted Item span rather than in varargs (the T0 walker). Same shape walk,
+// same per-field store.
+Map* map_fill_items(Map* map, const Item* values, int value_count) {
+    if (!map) return NULL;
+    TypeMap *map_type = (TypeMap*)map->type;
+    if (!map->data) {
+        map->data = heap_data_calloc(map_type->byte_size);
+    }
+    set_fields_items(map_type, map->data, values, value_count);
     return map;
 }
 

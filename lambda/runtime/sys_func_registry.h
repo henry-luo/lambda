@@ -217,6 +217,53 @@ typedef struct JitImport {
     JitImportMetadata metadata;
 } JitImport;
 
+// The C-level result type of a sys func's registered entry point. `return_type`
+// in SysFuncInfo is the Lambda-level semantic type, NOT the C type: functions
+// with the same Lambda return can return String* in C while others return Item,
+// so the SysFunc enum is the discriminator. Shared by MIR lowering and the T0
+// interpreter so both box a given entry's result identically.
+static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
+    if (!info) return LMD_TYPE_ANY;
+    switch (info->fn) {
+    // len() stays a raw machine count. Search/ordinal calls return Item so
+    // their public null result cannot be mistaken for an integer sentinel.
+    case SYSFUNC_LEN:
+        return LMD_TYPE_INT;
+    // These keep an int64_t C result. `int64()` because its Lambda type IS
+    // int64; the bitwise/shift family because bit reinterpretation is a
+    // machine operation on machine words, not number math — its result is
+    // converted into the int lane at the boundary below.
+    case SYSFUNC_INT64:
+    case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
+    case SYSFUNC_BNOT: case SYSFUNC_SHL: case SYSFUNC_SHR:
+        return LMD_TYPE_INT64;
+    // C functions returning Bool (uint8_t)
+    case SYSFUNC_CONTAINS: case SYSFUNC_STARTS_WITH: case SYSFUNC_ENDS_WITH:
+    case SYSFUNC_EXISTS:
+        return LMD_TYPE_BOOL;
+    // C functions returning String*
+    case SYSFUNC_STRING: case SYSFUNC_FORMAT1: case SYSFUNC_FORMAT2:
+        return LMD_TYPE_STRING;
+    // C functions returning Symbol*
+    case SYSFUNC_NAME: case SYSFUNC_SYMBOL:
+        return LMD_TYPE_SYMBOL;
+    // C functions returning Type*
+    case SYSFUNC_TYPE:
+        return LMD_TYPE_TYPE;
+    // C functions returning DateTime (uint64_t)
+    case SYSFUNC_DATETIME: case SYSFUNC_DATETIME0:
+    case SYSFUNC_DATE: case SYSFUNC_DATE0: case SYSFUNC_DATE3:
+    case SYSFUNC_TIME: case SYSFUNC_TIME0: case SYSFUNC_TIME3:
+    case SYSFUNC_JUSTNOW:
+        return LMD_TYPE_DTIME;
+    // C functions returning double
+    case SYSPROC_CLOCK:
+        return LMD_TYPE_FLOAT;
+    default:
+        return LMD_TYPE_ANY;  // returns Item, no boxing needed
+    }
+}
+
 // System function definitions (AST metadata + JIT pointers)
 extern SysFuncInfo sys_func_defs[];
 extern const int sys_func_def_count;

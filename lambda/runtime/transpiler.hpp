@@ -192,6 +192,10 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                    uint64_t* out_mir_function_count = nullptr,
                                    uint64_t* out_mir_instruction_count = nullptr);
 
+// Transfers the Script-sized prefix of a finished Transpiler onto its Script.
+// Shared by the MIR Direct handoff and the T0 plan-only load path.
+void script_adopt_transpiler(Script* script, Transpiler* tp);
+
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import = false);

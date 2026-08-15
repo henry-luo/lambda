@@ -3671,14 +3671,27 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     float scroll_flow_height = flow_height;
     float scroll_min_x = 0.0f;
     float scroll_min_y = 0.0f;
-    if (block->scroller && block->is_element()) {
+    float content_min_x = 0.0f;
+    float content_max_x = 0.0f;
+    float content_min_y = 0.0f;
+    float content_max_y = 0.0f;
+    bool is_root_element = block->tag_id == MARKUP_NAME_HTML;
+    if (is_root_element) {
+        // root's used inline size is its own border box; descendant overflow is
+        // measured separately so body margins contribute to the root edge once.
+        float root_content_width = layout_content_size_from_border_box(block, block->width, true);
+        block->content_width = root_content_width + block_box.padding.right;
+        lycon->block.max_width = root_content_width;
+        flow_width = block->content_width + block_box.border.right;
+        scroll_flow_width = flow_width;
+        scroll_flow_height = flow_height;
+    }
+    if ((block->scroller || is_root_element) && block->is_element()) {
         ViewElement* element = lam::view_require_element(block);
-        bool can_scroll_x = block->scroll()->overflow_x != CSS_VALUE_CLIP;
-        bool can_scroll_y = block->scroll()->overflow_y != CSS_VALUE_CLIP;
+        bool can_scroll_x = is_root_element || block->scroll()->overflow_x != CSS_VALUE_CLIP;
+        bool can_scroll_y = is_root_element || block->scroll()->overflow_y != CSS_VALUE_CLIP;
         // scroll ranges include visible descendants without changing an auto-height ancestor.
         if (can_scroll_x) {
-            float content_min_x = 0.0f;
-            float content_max_x = 0.0f;
             layout_in_flow_content_bounds(
                 element, LAYOUT_AXIS_X, true, &content_min_x, &content_max_x);
             scroll_flow_width = max(scroll_flow_width,
@@ -3686,8 +3699,6 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             scroll_min_x = min(content_min_x, 0.0f);
         }
         if (can_scroll_y) {
-            float content_min_y = 0.0f;
-            float content_max_y = 0.0f;
             layout_in_flow_content_bounds(
                 element, LAYOUT_AXIS_Y, true, &content_min_y, &content_max_y);
             scroll_flow_height = max(scroll_flow_height,
@@ -3983,7 +3994,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->width = layout_apply_min_max_axis(block, flow_width, true, true);
         block->content_width = max(block->width - block_box.pad_border_h, 0.0f);
     }
-    layout_update_axis_overflow(lycon, block, LAYOUT_AXIS_X, flow_width, display);
+    float overflow_flow_width = max(flow_width, scroll_flow_width);
+    float overflow_flow_height = max(flow_height, scroll_flow_height);
+    layout_update_axis_overflow(lycon, block, LAYOUT_AXIS_X, overflow_flow_width, display);
     float block_given_height = layout_axis_has_given_size(block, false)
         ? layout_axis_given_size(block->block(), LAYOUT_AXIS_Y) : -1.0f;
     bool ratio_auto_height = block->blk && block->block()->aspect_ratio_auto_height;
@@ -3992,7 +4005,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             block->height = block_given_height;
         }
         block->height = layout_apply_min_max_axis(block, block->height, false, true);
-        layout_update_axis_overflow(lycon, block, LAYOUT_AXIS_Y, flow_height, display);
+        layout_update_axis_overflow(lycon, block, LAYOUT_AXIS_Y, overflow_flow_height, display);
     }
     else {
         bool has_embed = block->embed != nullptr;
@@ -6291,9 +6304,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     apply_canvas_last_remembered_size(lycon, block);
     apply_canvas_object_view_box_auto_size(lycon, block);
     // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
-    if (elmt_name == MARKUP_NAME_IFRAME) {
+    bool is_open_popover_object = elmt_name == MARKUP_NAME_OBJECT &&
+        block->is_element() && block->as_element()->is_popover_open() &&
+        !block->get_attribute(MARKUP_NAME_DATA);
+    if (elmt_name == MARKUP_NAME_IFRAME || is_open_popover_object) {
         // Table-internal display resolution can skip BlockProp creation, but an
-        // iframe's intrinsic fallback must persist on the box's used-size slots.
+        // element's intrinsic fallback must persist on the box's used-size slots.
         block->ensure_block(lycon);
         LayoutAxisPair<float> defaults = {300.0f, 150.0f};
         LayoutAxisPair<float> parent_sizes = {
@@ -6307,8 +6323,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             bool has_percent = props.given_percent && !isnan(*props.given_percent);
             if (context.given && *context.given >= 0.0f &&
                 props.given && *props.given < 0.0f && !has_percent) {
-                // The intrinsic fallback was selected before this table-internal
-                // box allocated BlockProp; retain it for iframe finalization.
+                // The fallback was selected before sizing allocated BlockProp;
+                // retain it when CSS fit-content would otherwise collapse it.
                 layout_store_given_axis(lycon, block, *context.given, horizontal, false);
                 layout_clear_auto_axis_type(block, horizontal);
             }

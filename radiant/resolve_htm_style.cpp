@@ -790,8 +790,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     NameId elmt_name = elmt->tag();
     if (elmt->is_element()) {
         DomElement* dom_elem = elmt->as_element();
-        if (dom_elem->has_attribute("popover") && dom_elem->is_popover_open()) {
-            // open popovers use the HTML UA rule: fixed, inset:0, fit-content, and centered auto margins.
+        bool popover_has_display_override = dom_elem->specified_style &&
+            style_tree_get_declaration(dom_elem->specified_style, CSS_PROPERTY_DISPLAY);
+        if (dom_elem->has_attribute("popover") &&
+            (dom_elem->is_popover_open() || popover_has_display_override)) {
+            // popover UA styling supplies the fit-content box even when author display keeps it in flow
             block->ensure_position(lycon);
             block->position->position = CSS_VALUE_FIXED;
             block->position->top = block->position->right =
@@ -808,6 +811,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
             block->ensure_scroll(lycon);
             block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+            if (dom_elem->is_popover_open() && dom_elem->tag_id == MARKUP_NAME_OBJECT &&
+                !dom_elem->get_attribute(MARKUP_NAME_DATA)) {
+                // an open object fallback keeps the replaced default size while fit-content includes popup chrome
+                apply_html_replaced_default(lycon, elmt, block, true, true, true, false, true);
+            }
         }
     }
     if (apply_html_inline_text_default(lycon, span, elmt_name)) return;
@@ -1586,6 +1594,24 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!elmt->has_attribute("open")) {
             block->display.outer = CSS_VALUE_NONE;
             block->display.inner = CSS_VALUE_NONE;
+        } else if (elmt->is_element() && elmt->as_element()->is_dialog_modal()) {
+            // modal dialogs use the fixed, centered fit-content UA box before authored insets apply
+            block->ensure_position(lycon);
+            block->position->position = CSS_VALUE_FIXED;
+            block->position->top = block->position->right =
+                block->position->bottom = block->position->left = 0.0f;
+            block->position->has_top = block->position->has_right =
+                block->position->has_bottom = block->position->has_left = true;
+            block->ensure_boundary(lycon);
+            radiant_margin_set_type_all(&block->boundary_mut()->margin, CSS_VALUE_AUTO);
+            radiant_spacing_set_all(&block->boundary_mut()->padding,
+                                    lycon->font.style->font_size);
+            apply_html_uniform_border(lycon, block, 3.0f, CSS_VALUE_SOLID, nullptr, true);
+            block->ensure_block(lycon);
+            block->blk->given_width = block->blk->given_height = -1.0f;
+            block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
+            block->ensure_scroll(lycon);
+            block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
         }
         break;
     }

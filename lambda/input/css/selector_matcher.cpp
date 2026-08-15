@@ -579,6 +579,8 @@ static PseudoElementType get_pseudo_element_from_compound(CssCompoundSelector* c
                 return PSEUDO_ELEMENT_FIRST_LETTER;
             case CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION:
                 return PSEUDO_ELEMENT_SELECTION;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP:
+                return PSEUDO_ELEMENT_BACKDROP;
             case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
                 return PSEUDO_ELEMENT_MARKER;
             case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:

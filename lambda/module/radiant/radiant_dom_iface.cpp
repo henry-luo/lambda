@@ -164,7 +164,9 @@ const char radiant_dom_interface_decl[] =
     "    get_bounding_client_rect: fn() any, get_client_rects: fn() any,\n"
     "    scroll_into_view: fn(a0: any) any, scroll: fn(a0: any, a1: any) any,\n"
     "    scroll_to: fn(a0: any, a1: any) any, scroll_by: fn(a0: any, a1: any) any,\n"
-    "    focus: fn() any, blur: fn() any, click: fn() any, reset: fn() any,\n"
+    "    focus: fn() any, blur: fn() any, click: fn() any,\n"
+    "    show_popover: fn() any, hide_popover: fn() any, show_modal: fn() any,\n"
+    "    reset: fn() any,\n"
     "    submit: fn() any, request_submit: fn(a0: any) any, check_validity: fn() any,\n"
     "    report_validity: fn() any, set_custom_validity: fn(a0: any) any,\n"
     "    set_selection_range: fn(a0: any, a1: any, a2: any) any,\n"
@@ -929,6 +931,9 @@ extern "C" int radiant_dom_m4d_scroll_by(Item r, Item* args, int argc, Item* out
 extern "C" int radiant_dom_m4d_focus(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_blur(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_click(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_show_popover(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_hide_popover(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_show_modal(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_reset(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_submit(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_request_submit(Item r, Item* args, int argc, Item* out);
@@ -1241,6 +1246,9 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL("focus", radiant_dom_m4d_focus),
     BIND_CALL("blur", radiant_dom_m4d_blur),
     BIND_CALL("click", radiant_dom_m4d_click),
+    BIND_CALL_JS("show_popover", "showPopover", radiant_dom_m4d_show_popover),
+    BIND_CALL_JS("hide_popover", "hidePopover", radiant_dom_m4d_hide_popover),
+    BIND_CALL_JS("show_modal", "showModal", radiant_dom_m4d_show_modal),
     BIND_CALL("reset", radiant_dom_m4d_reset),
     BIND_CALL("submit", radiant_dom_m4d_submit),
     BIND_CALL_JS("request_submit", "requestSubmit", radiant_dom_m4d_request_submit),
