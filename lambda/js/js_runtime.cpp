@@ -1270,12 +1270,8 @@ static Item js_proxy_revoke_call_body(Item callee, Item this_value,
 static Item js_proxy_validate_nonconfigurable_descriptor(Item target_desc,
         Item trap_value, bool is_get) {
     if (get_type_id(target_desc) != LMD_TYPE_MAP) return ItemNull;
-    bool conf_found = false;
-    Item conf = js_map_shape_lookup(target_desc.map, "configurable", 12, &conf_found);
-    if (conf_found && !it2b(js_to_boolean(conf))) {
-        bool value_found = false;
-        Item writable = js_map_shape_lookup(target_desc.map, "writable", 8, &value_found);
-        if (value_found && !it2b(js_to_boolean(writable))) {
+    if (!js_map_own_flag(target_desc.map, "configurable", 12, true)) {
+        if (!js_map_own_flag(target_desc.map, "writable", 8, true)) {
             bool property_value_found = false;
             Item property_value = js_map_shape_lookup(target_desc.map, "value", 5,
                 &property_value_found);
@@ -1445,9 +1441,7 @@ extern "C" Item js_proxy_trap_has(Item proxy, Item key) {
         JS_ASSIGN_OR_RETURN(target_desc, js_object_get_own_property_descriptor(target, key));
         if (get_type_id(target_desc) == LMD_TYPE_MAP) {
             // target has own property — check if non-configurable
-            bool conf_found = false;
-            Item conf = js_map_shape_lookup(target_desc.map, "configurable", 12, &conf_found);
-            bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+            bool configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
             if (!configurable) {
                 return js_throw_type_error("'has' on proxy: trap returned falsish for property which exists as non-configurable on the target");
             }
@@ -1488,9 +1482,7 @@ extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
         JS_ASSIGN_OR_RETURN(target_desc, js_object_get_own_property_descriptor(target, key));
         descriptor_root.set(target_desc);
         if (get_type_id(target_desc) == LMD_TYPE_MAP) {
-            bool conf_found = false;
-            Item conf = js_map_shape_lookup(target_desc.map, "configurable", 12, &conf_found);
-            bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+            bool configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
             if (!configurable) {
                 return js_throw_type_error("'deleteProperty' on proxy: trap returned truish for property which is non-configurable on the target");
             }
@@ -1784,9 +1776,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
             Item tk = js_elements_get_int(target_keys, i);
             Item td = js_object_get_own_property_descriptor(target, tk);
             if (get_type_id(td) == LMD_TYPE_MAP) {
-                bool conf_found = false;
-                Item conf = js_map_shape_lookup(td.map, "configurable", 12, &conf_found);
-                if (conf_found && !it2b(js_to_boolean(conf))) {
+                if (!js_map_own_flag(td.map, "configurable", 12, true)) {
                     // non-configurable — must be in trap result
                     bool found = false;
                     for (int j = 0; j < len; j++) {
@@ -1826,9 +1816,7 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
     if (trap_result.item == ItemNull.item || get_type_id(trap_result) == LMD_TYPE_UNDEFINED) {
         if (get_type_id(target_desc) == LMD_TYPE_MAP) {
             // target has this property
-            bool conf_found = false;
-            Item conf = js_map_shape_lookup(target_desc.map, "configurable", 12, &conf_found);
-            bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+            bool configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
             if (!configurable) {
                 return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned undefined for property which is non-configurable on the target");
             }
@@ -1847,33 +1835,23 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
     // Check that the returned descriptor is valid
     // If target property is non-configurable, result must also be non-configurable
     if (get_type_id(target_desc) == LMD_TYPE_MAP) {
-        bool td_conf_found = false;
-        Item td_conf = js_map_shape_lookup(target_desc.map, "configurable", 12, &td_conf_found);
-        bool target_configurable = td_conf_found ? it2b(js_to_boolean(td_conf)) : true;
+        bool target_configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
 
-        bool r_conf_found = false;
-        Item r_conf = js_map_shape_lookup(trap_result.map, "configurable", 12, &r_conf_found);
-        bool result_configurable = r_conf_found ? it2b(js_to_boolean(r_conf)) : true;
+        bool result_configurable = js_map_own_flag(trap_result.map, "configurable", 12, true);
 
         if (!target_configurable) {
             if (result_configurable) {
                 return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned configurable descriptor for non-configurable property on target");
             }
             // non-configurable non-writable: result must also be non-writable
-            bool td_wr_found = false;
-            Item td_wr = js_map_shape_lookup(target_desc.map, "writable", 8, &td_wr_found);
-            if (td_wr_found && !it2b(js_to_boolean(td_wr))) {
-                bool r_wr_found = false;
-                Item r_wr = js_map_shape_lookup(trap_result.map, "writable", 8, &r_wr_found);
-                if (r_wr_found && it2b(js_to_boolean(r_wr))) {
+            if (!js_map_own_flag(target_desc.map, "writable", 8, true)) {
+                if (js_map_own_flag(trap_result.map, "writable", 8, false)) {
                     return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned writable descriptor for non-configurable non-writable property on target");
                 }
             }
             // non-configurable + writable target: result must not be non-writable
-            if (td_wr_found && it2b(js_to_boolean(td_wr))) {
-                bool r_wr_found = false;
-                Item r_wr = js_map_shape_lookup(trap_result.map, "writable", 8, &r_wr_found);
-                if (r_wr_found && !it2b(js_to_boolean(r_wr))) {
+            if (js_map_own_flag(target_desc.map, "writable", 8, false)) {
+                if (!js_map_own_flag(trap_result.map, "writable", 8, true)) {
                     return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-writable descriptor for non-configurable writable property on target");
                 }
             }
@@ -1887,9 +1865,7 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
         if (!js_is_extensible(target)) {
             return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned a descriptor for property on a non-extensible target that does not exist on target");
         }
-        bool r_conf_found = false;
-        Item r_conf = js_map_shape_lookup(trap_result.map, "configurable", 12, &r_conf_found);
-        bool result_configurable = r_conf_found ? it2b(js_to_boolean(r_conf)) : true;
+        bool result_configurable = js_map_own_flag(trap_result.map, "configurable", 12, true);
         if (!result_configurable) {
             return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-configurable descriptor for property that does not exist on target");
         }
@@ -1936,9 +1912,7 @@ extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
         }
         // ES2020 §9.5.6 step 19b: if settingConfigFalse is true, throw TypeError
         if (get_type_id(desc) == LMD_TYPE_MAP) {
-            bool d_conf_found = false;
-            Item d_conf = js_map_shape_lookup(desc.map, "configurable", 12, &d_conf_found);
-            if (d_conf_found && !it2b(js_to_boolean(d_conf))) {
+            if (!js_map_own_flag(desc.map, "configurable", 12, true)) {
                 return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining non-configurable property on a target that does not have it");
             }
         }
@@ -1946,16 +1920,12 @@ extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
         // target has this property — check compatibility
         // If target desc is non-configurable, the new desc must be compatible
         if (get_type_id(target_desc) == LMD_TYPE_MAP) {
-            bool td_conf_found = false;
-            Item td_configurable = js_map_shape_lookup(target_desc.map, "configurable", 12, &td_conf_found);
-            bool target_configurable = td_conf_found ? it2b(js_to_boolean(td_configurable)) : true;
+            bool target_configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
 
             if (!target_configurable) {
                 // Desc must not change configurable to true
                 if (get_type_id(desc) == LMD_TYPE_MAP) {
-                    bool d_conf_found = false;
-                    Item d_configurable = js_map_shape_lookup(desc.map, "configurable", 12, &d_conf_found);
-                    if (d_conf_found && it2b(js_to_boolean(d_configurable))) {
+                    if (js_map_own_flag(desc.map, "configurable", 12, false)) {
                         return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining non-configurable property which is already non-configurable on the target");
                     }
                 }
@@ -1963,17 +1933,13 @@ extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
             // ES2020 §9.5.6 step 20b: settingConfigFalse + target configurable → throw
             if (target_configurable) {
                 if (get_type_id(desc) == LMD_TYPE_MAP) {
-                    bool d_conf_found = false;
-                    Item d_conf = js_map_shape_lookup(desc.map, "configurable", 12, &d_conf_found);
-                    if (d_conf_found && !it2b(js_to_boolean(d_conf))) {
+                    if (!js_map_own_flag(desc.map, "configurable", 12, true)) {
                         return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining non-configurable property but target property is configurable");
                     }
                 }
             }
             if (!target_configurable) {
-                bool td_writable_found = false;
-                Item td_writable = js_map_shape_lookup(target_desc.map, "writable", 8, &td_writable_found);
-                bool target_writable = td_writable_found ? it2b(js_to_boolean(td_writable)) : true;
+                bool target_writable = js_map_own_flag(target_desc.map, "writable", 8, true);
 
                 if (get_type_id(desc) == LMD_TYPE_MAP) {
                     // Check if trying to change value of non-configurable non-writable property
@@ -1989,17 +1955,13 @@ extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
                                 }
                             }
                         }
-                        bool d_wr_found = false;
-                        Item d_writable = js_map_shape_lookup(desc.map, "writable", 8, &d_wr_found);
-                        if (d_wr_found && it2b(js_to_boolean(d_writable))) {
+                        if (js_map_own_flag(desc.map, "writable", 8, false)) {
                             return js_throw_type_error("'defineProperty' on proxy: trap returned truish for property which is non-configurable and non-writable on the target");
                         }
                     }
                     // ES2020 §9.5.6 step 20c: non-configurable + writable → desc.writable false throws
                     if (target_writable) {
-                        bool d_wr_found = false;
-                        Item d_writable = js_map_shape_lookup(desc.map, "writable", 8, &d_wr_found);
-                        if (d_wr_found && !it2b(js_to_boolean(d_writable))) {
+                        if (!js_map_own_flag(desc.map, "writable", 8, true)) {
                             return js_throw_type_error("'defineProperty' on proxy: trap returned truish for making non-configurable writable property non-writable");
                         }
                     }
@@ -3671,6 +3633,21 @@ static Item js_typed_array_default_species_from_buffer(Item exemplar, int defaul
 static Item js_typed_array_default_species_from_length(Item exemplar, int default_type, int length) {
     Item result = js_typed_array_new(default_type, length);
     return js_typed_array_apply_species_prototype(exemplar, result);
+}
+
+// Get C[@@species], normalising "absent", null and undefined to ItemNull.
+// The four SpeciesConstructor call sites agree on this step and diverge only
+// in their fallback and in the spec-visible TypeError text, which stays at
+// the call site.
+static Item js_species_of(Item constructor) {
+    Item species = js_get_key_default(constructor, js_well_known_symbol_key(6));
+    if (item_is_error(species)) return species;
+    TypeId type = get_type_id(species);
+    if (species.item == ItemNull.item || type == LMD_TYPE_UNDEFINED ||
+            type == LMD_TYPE_NULL) {
+        return ItemNull;
+    }
+    return species;
 }
 
 static bool js_typed_array_read_own_species(Item constructor, Item species_key, Item* out) {
@@ -6792,9 +6769,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
     }
     // v16: Enforce Object.freeze — frozen objects reject all property writes
     {
-        bool frozen_found = false;
-        Item frozen_val = js_map_shape_lookup(m, "__frozen__", 10, &frozen_found);
-        if (frozen_found && js_is_truthy(frozen_val)) {
+        if (js_map_own_flag(m, "__frozen__", 10, false)) {
             // skip writes to internal properties (needed for freeze itself)
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* sk = it2s(key);
@@ -7040,17 +7015,13 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
             bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
                 !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
             if (!internal_non_symbol) {
-                bool ne_found = false;
-                Item ne_val = js_map_shape_lookup(m, "__non_extensible__", 17, &ne_found);
-                if (ne_found && js_is_truthy(ne_val)) {
+                if (js_map_own_flag(m, "__non_extensible__", 17, false)) {
                     JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                         "add property", sk->chars, (int)sk->len));
                     return value; // silently reject — object is not extensible
                 }
                 // also check sealed and frozen (they imply non-extensible)
-                bool sl_found = false;
-                Item sl_val = js_map_shape_lookup(m, "__sealed__", 10, &sl_found);
-                if (sl_found && js_is_truthy(sl_val)) {
+                if (js_map_own_flag(m, "__sealed__", 10, false)) {
                     JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                         "add property", sk->chars, (int)sk->len));
                     return value;
@@ -8653,9 +8624,7 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
     Item companion = {.map = js_array_props(arguments.array)};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
-    bool marker_found = false;
-    Item marker = js_map_shape_lookup_ext(companion.map, marker_key, (int)strlen(marker_key), &marker_found);
-    if (marker_found && js_is_truthy(marker)) {
+    if (js_map_own_flag(companion.map, marker_key, (int)strlen(marker_key), false)) {
         char written_key[64];
         snprintf(written_key, sizeof(written_key), "__arg_param_written_%lld", (long long)index);
         bool written_found = false;
@@ -8663,9 +8632,8 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
         if (written_found && js_is_truthy(written)) return current_value;
         char value_key[64];
         snprintf(value_key, sizeof(value_key), "__arg_value_%lld", (long long)index);
-        bool value_found = false;
-        Item value = js_map_shape_lookup_ext(companion.map, value_key, (int)strlen(value_key), &value_found);
-        if (value_found) return value;
+        Item value = js_map_own_or(companion.map, value_key, (int)strlen(value_key), ItemNull);
+        if (value.item != ItemNull.item) return value;
         return current_value;
     }
     return js_get_key_default(arguments, (Item){.item = i2it(index)});
@@ -8678,9 +8646,7 @@ extern "C" Item js_arguments_mapped_param_writeback(Item arguments, int64_t inde
     Item companion = {.map = js_array_props(arguments.array)};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
-    bool marker_found = false;
-    Item marker = js_map_shape_lookup_ext(companion.map, marker_key, (int)strlen(marker_key), &marker_found);
-    if (marker_found && js_is_truthy(marker)) {
+    if (js_map_own_flag(companion.map, marker_key, (int)strlen(marker_key), false)) {
         char written_key[64];
         snprintf(written_key, sizeof(written_key), "__arg_param_written_%lld", (long long)index);
         js_set_key_default(companion, js_name_item(written_key, strlen(written_key)),
@@ -11294,9 +11260,8 @@ static Item js_intrinsic_object_lookup_accessor(Item this_value, Item* args,
         if (desc.item != ItemNull.item &&
             get_type_id(desc) != LMD_TYPE_UNDEFINED) {
             if (get_type_id(desc) == LMD_TYPE_MAP) {
-                bool found = false;
-                Item value = js_map_shape_lookup(desc.map, field, 3, &found);
-                if (found) return value;
+                Item value = js_map_own_or(desc.map, field, 3, ItemNull);
+                if (value.item != ItemNull.item) return value;
             }
             return make_js_undefined();
         }
@@ -13023,10 +12988,8 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
                     }
                     return js_throw_type_error("Species constructor is not an object");
                 }
-                Item species_key = js_well_known_symbol_key(6);
-                JS_ASSIGN_OR_RETURN(species_val, js_get_key_default(ctor_val, species_key));
-                if (species_val.item != ItemNull.item && get_type_id(species_val) != LMD_TYPE_NULL
-                    && get_type_id(species_val) != LMD_TYPE_UNDEFINED) {
+                JS_ASSIGN_OR_RETURN(species_val, js_species_of(ctor_val));
+                if (species_val.item != ItemNull.item) {
                     if (!js_is_constructor_internal(species_val)) {
                         return js_throw_type_error("Species constructor is not a constructor");
                     }
@@ -19125,9 +19088,8 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         }
         // Get C[@@species] (Phase 3 Stage C: js_get_key_default fast-path
         // handles IS_ACCESSOR dispatch for FUNC and MAP receivers).
-        Item species_key = js_well_known_symbol_key(6);
-        JS_ASSIGN_OR_RETURN(S, js_get_key_default(C, species_key));
-        if (S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED || get_type_id(S) == LMD_TYPE_NULL) {
+        JS_ASSIGN_OR_RETURN(S, js_species_of(C));
+        if (S.item == ItemNull.item) {
             C = default_regexp;
         } else {
             if (!js_is_constructor_internal(S)) {
@@ -19631,9 +19593,7 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
     // Enforce Object.freeze on Map/Set: mutation methods throw TypeError
     if (method_id == 0 || method_id == 3 || method_id == 4) { // set/add, delete, clear
         if (get_type_id(obj) == LMD_TYPE_MAP) {
-            bool frozen_found = false;
-            Item frozen_val = js_map_shape_lookup(obj.map, "__frozen__", 10, &frozen_found);
-            if (frozen_found && js_is_truthy(frozen_val)) {
+            if (js_map_own_flag(obj.map, "__frozen__", 10, false)) {
                 const char* method_name = (method_id == 0) ? (cd->type == JS_COLLECTION_SET ? "add" : "set") :
                                           (method_id == 3) ? "delete" : "clear";
                 return js_throw_type_errorf(
@@ -19898,23 +19858,14 @@ static Item js_typed_array_callback_algorithm(Item obj, Item* args, int argc,
     return return_index ? (Item){.item = i2it(-1)} : make_js_undefined();
 }
 
-static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array) {
-    // ES Join snapshots the length before separator coercion; a separator
-    // valueOf/toString may resize the receiver, but cannot change iteration.
+// Join and toLocaleString differ only in the separator and in how each
+// element is stringified; the walk, the error lane and the null/undefined
+// skip are identical.
+static Item js_array_like_join_kernel(Item obj, bool typed_array,
+        const char* separator, int separator_len, bool locale) {
     int length = typed_array ? js_typed_array_length(obj) : obj.array->length;
-    const char* separator = ",";
-    int separator_len = 1;
-    if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED &&
-            args[0].item != ITEM_JS_UNDEFINED) {
-        JS_ASSIGN_OR_RETURN(separator_item, js_to_string(args[0]));
-        String* separator_string = it2s(separator_item);
-        if (separator_string) {
-            separator = separator_string->chars;
-            separator_len = (int)separator_string->len;
-        }
-    }
-
     StrBuf* buffer = strbuf_new();
+    Item locale_key = locale ? js_name_item("toLocaleString", 14) : ItemNull;
     for (int i = 0; i < length; i++) {
         if (i > 0) strbuf_append_str_n(buffer, separator, separator_len);
         Item element = typed_array
@@ -19928,8 +19879,29 @@ static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array)
         if (element_type == LMD_TYPE_NULL ||
                 element_type == LMD_TYPE_UNDEFINED ||
                 element.item == ITEM_JS_UNDEFINED) continue;
-        JS_ASSIGN_OR_RETURN(element_string, js_to_string(element));
-        String* string = it2s(element_string);
+        Item source = element;
+        if (locale) {
+            Item locale_fn = js_get_key_default(element, locale_key);
+            if (item_is_error(locale_fn)) {
+                strbuf_free(buffer);
+                return locale_fn;
+            }
+            if (!js_is_callable(locale_fn)) {
+                strbuf_free(buffer);
+                return js_throw_not_callable("toLocaleString");
+            }
+            source = js_call_function(locale_fn, element, NULL, 0);
+            if (item_is_error(source)) {
+                strbuf_free(buffer);
+                return source;
+            }
+        }
+        Item text = js_to_string(source);
+        if (item_is_error(text)) {
+            strbuf_free(buffer);
+            return text;
+        }
+        String* string = it2s(text);
         if (string && string->len > 0) {
             strbuf_append_str_n(buffer, string->chars, string->len);
         }
@@ -19939,47 +19911,27 @@ static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array)
     return (Item){.item = s2it(result)};
 }
 
+static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array) {
+    // ES Join snapshots the length before separator coercion; a separator
+    // valueOf/toString may resize the receiver, but cannot change iteration.
+    const char* separator = ",";
+    int separator_len = 1;
+    if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED &&
+            args[0].item != ITEM_JS_UNDEFINED) {
+        JS_ASSIGN_OR_RETURN(separator_item, js_to_string(args[0]));
+        String* separator_string = it2s(separator_item);
+        if (separator_string) {
+            separator = separator_string->chars;
+            separator_len = (int)separator_string->len;
+        }
+    }
+    return js_array_like_join_kernel(obj, typed_array, separator, separator_len, false);
+}
+
 static Item js_array_like_to_locale_string(Item obj, bool typed_array) {
     int length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     if (length <= 0) return js_name_item("", 0);
-    StrBuf* buffer = strbuf_new();
-    Item locale_key = js_name_item("toLocaleString", 14);
-    for (int i = 0; i < length; i++) {
-        if (i > 0) strbuf_append_str_n(buffer, ",", 1);
-        Item element = typed_array
-            ? js_typed_array_get(obj, (Item){.item = i2it(i)})
-            : js_get_key_default(obj, js_array_index_key(i));
-        if (item_is_error(element)) {
-            strbuf_free(buffer);
-            return element;
-        }
-        TypeId element_type = get_type_id(element);
-        if (element_type == LMD_TYPE_NULL ||
-                element_type == LMD_TYPE_UNDEFINED ||
-                element.item == ITEM_JS_UNDEFINED) continue;
-        Item locale_fn = js_get_key_default(element, locale_key);
-        if (item_is_error(locale_fn)) {
-            strbuf_free(buffer);
-            return locale_fn;
-        }
-        if (!js_is_callable(locale_fn)) {
-            strbuf_free(buffer);
-            return js_throw_not_callable("toLocaleString");
-        }
-        Item locale_result = js_call_function(locale_fn, element, NULL, 0);
-        if (item_is_error(locale_result)) {
-            strbuf_free(buffer);
-            return locale_result;
-        }
-        JS_ASSIGN_OR_RETURN(locale_string, js_to_string(locale_result));
-        String* string = it2s(locale_string);
-        if (string && string->len > 0) {
-            strbuf_append_str_n(buffer, string->chars, (int)string->len);
-        }
-    }
-    String* result = heap_create_name(buffer->str, buffer->length);
-    strbuf_free(buffer);
-    return (Item){.item = s2it(result)};
+    return js_array_like_join_kernel(obj, typed_array, ",", 1, true);
 }
 
 static Item js_indexed_intrinsic_algorithm(Item obj,
@@ -21816,9 +21768,8 @@ static Item js_string_matchall_get_flags(Item rx) {
                         return js_call_accessor_getter(getter, rx);
                     }
                 }
-                bool value_found = false;
-                Item value = js_map_shape_lookup(desc.map, "value", 5, &value_found);
-                if (value_found) return value;
+                Item value = js_map_own_or(desc.map, "value", 5, ItemNull);
+                if (value.item != ItemNull.item) return value;
             }
         }
     }
@@ -23261,13 +23212,11 @@ static Item js_array_species_create(Item original_array, int64_t length) {
         {
             // Phase 3 Stage C: js_get_key_default fast-path handles IS_ACCESSOR
             // dispatch for FUNC, MAP and ARRAY receivers.
-            Item species_key = js_well_known_symbol_key(6);
-            JS_ASSIGN_OR_RETURN_INTO(S, js_get_key_default(C, species_key));
+            JS_ASSIGN_OR_RETURN_INTO(S, js_species_of(C));
         }
         // step 7b: if species is null, set C to undefined (→ use default Array)
         // step 8: if C is undefined, return ArrayCreate(length)
-        if (S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED
-            || get_type_id(S) == LMD_TYPE_NULL) {
+        if (S.item == ItemNull.item) {
             if (length < 0 || length > 4294967295LL) {
                 return js_throw_range_error("Invalid array length");
             }
@@ -30192,11 +30141,8 @@ static Item js_promise_species_constructor(Item promise) {
         return js_throw_type_error("Promise species constructor is not an object");
     }
 
-    Item species_key = js_well_known_symbol_key(6);
-    JS_ASSIGN_OR_RETURN(species, js_get_key_default(constructor, species_key));
-    TypeId species_type = get_type_id(species);
-    if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL ||
-        species.item == ItemNull.item) {
+    JS_ASSIGN_OR_RETURN(species, js_species_of(constructor));
+    if (species.item == ItemNull.item) {
         return default_constructor;
     }
     if (!js_is_constructor_internal(species)) {

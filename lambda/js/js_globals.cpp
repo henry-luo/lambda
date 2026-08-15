@@ -6708,10 +6708,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             return (Item){.item = b2it(true)};
         }
         // Data descriptor: check writable.
-        bool has_w = false;
-        Item wv = js_map_shape_lookup_ext(ownDesc.map,
-            it2s(writable_key)->chars, (int)it2s(writable_key)->len, &has_w);
-        bool writable = has_w ? it2b(js_to_boolean(wv)) : true;
+        bool writable = js_map_own_flag(ownDesc.map,
+            it2s(writable_key)->chars, (int)it2s(writable_key)->len, true);
         if (!writable) return (Item){.item = b2it(false)};
         // Receiver must be an Object.
         TypeId rt = get_type_id(receiver);
@@ -8439,10 +8437,8 @@ static Item js_filter_enumerable_own_keys(Item object, Item all_keys) {
             object_root.get(), key);
         if (item_is_error(descriptor)) return descriptor;
         if (get_type_id(descriptor) != LMD_TYPE_MAP) continue;
-        bool found = false;
-        Item enumerable = js_map_shape_lookup_ext(
-            descriptor.map, "enumerable", 10, &found);
-        if (found && js_is_truthy(enumerable)) {
+        if (js_map_own_flag(
+            descriptor.map, "enumerable", 10, false)) {
             js_array_push(result_root.get(), key);
         }
     }
@@ -10182,9 +10178,7 @@ extern "C" Item js_decimal_to_percent_hex_string(Item n_item) {
 static Item js_object_assign_rejects_own_data_write(Item target, Item key) {
     JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(target, key));
     if (get_type_id(desc) != LMD_TYPE_MAP) return ItemNull;
-    bool writable_found = false;
-    Item writable = js_map_shape_lookup_ext(desc.map, "writable", 8, &writable_found);
-    if (writable_found && !it2b(js_to_boolean(writable))) {
+    if (!js_map_own_flag(desc.map, "writable", 8, true)) {
         return js_throw_type_error("Cannot assign to read only property");
     }
     return ItemNull;
@@ -10583,16 +10577,12 @@ static Item js_object_test_proxy_integrity(Item obj, bool frozen) {
         if (desc.item == ItemNull.item || desc_type == LMD_TYPE_UNDEFINED) continue;
         if (desc_type != LMD_TYPE_MAP) continue;
 
-        bool configurable_found = false;
-        Item configurable = js_map_shape_lookup_ext(desc.map, "configurable", 12, &configurable_found);
-        if (configurable_found && js_is_truthy(configurable)) {
+        if (js_map_own_flag(desc.map, "configurable", 12, false)) {
             return (Item){.item = b2it(false)};
         }
 
         if (frozen) {
-            bool writable_found = false;
-            Item writable = js_map_shape_lookup_ext(desc.map, "writable", 8, &writable_found);
-            if (writable_found && js_is_truthy(writable)) {
+            if (js_map_own_flag(desc.map, "writable", 8, false)) {
                 return (Item){.item = b2it(false)};
             }
         }
@@ -12062,9 +12052,7 @@ static Item js_delete_map_property(Item obj, Item key, bool strict) {
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;
-        bool frozen_found = false;
-        Item frozen_val = js_map_shape_lookup_ext(m, "__frozen__", 10, &frozen_found);
-        if (frozen_found && js_is_truthy(frozen_val)) {
+        if (js_map_own_flag(m, "__frozen__", 10, false)) {
             if (strict) return js_throw_delete_rejected(key, "a frozen object");
             return (Item){.item = b2it(false)};
         }
@@ -16787,10 +16775,8 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
     }
     if (!invalidated && get_type_id(object) == LMD_TYPE_MAP &&
         js_class_id(object) == JS_CLASS_ARRAY) {
-        bool marker_found = false;
-        Item marker = js_map_shape_lookup_ext(
-            object.map, "__is_proto__", 12, &marker_found);
-        if (marker_found && js_is_truthy(marker)) {
+        if (js_map_own_flag(
+            object.map, "__is_proto__", 12, false)) {
             js_intrinsic_invalidate_class((int)JS_CLASS_ARRAY, key);
         }
     }
