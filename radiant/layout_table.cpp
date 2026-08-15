@@ -1439,6 +1439,21 @@ static float find_cell_content_top_for_vertical_align(LayoutContext* lycon, View
     return content_top;
 }
 
+static float table_cell_hypothetical_child_y(View* child) {
+    if (!child) return 0.0f;
+    ViewBlock* block = lam::view_as_block(child);
+    if (!block || !block->position ||
+        block->positionp()->position != CSS_VALUE_RELATIVE) {
+        return child->y;
+    }
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+    layout_relative_position_offset(block, &offset_x, &offset_y);
+    // CSS 2.1 §9.4.3: relative offsets are visual only and must not change
+    // the hypothetical position used by table-cell vertical alignment.
+    return child->y - offset_y;
+}
+
 static void shift_table_cell_vertical_align_children(ViewTableCell* tcell,
                                                       float y_adjustment) {
     if (!tcell || y_adjustment == 0.0f) return;
@@ -1464,12 +1479,13 @@ static TableCellContentExtent table_cell_vertical_bounds(ViewTableCell* tcell,
     if (!tcell) return bounds;
     for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (!child->view_type) return;
-        float child_top = child->y;
-        if (include_margins && (child->view_type == RDT_VIEW_BLOCK ||
+            ViewBlock* child_block = lam::view_as_block(child);
+            float child_top = table_cell_hypothetical_child_y(child);
+            if (include_margins && (child->view_type == RDT_VIEW_BLOCK ||
                                 child->view_type == RDT_VIEW_LIST_ITEM ||
                                 child->view_type == RDT_VIEW_INLINE_BLOCK ||
                                 child->view_type == RDT_VIEW_TABLE)) {
-            ViewBlock* block = lam::view_require_block(child);
+            ViewBlock* block = child_block;
             // table margin boxes participate in cell vertical alignment too.
             if (block->bound) child_top -= block->boundary()->margin.top;
         }
@@ -4592,7 +4608,8 @@ static void table_publish_vertical_cell_content(LayoutContext* lycon,
         cell->block()->dominant_baseline == CSS_VALUE_AUTO ||
             cell->block()->dominant_baseline == CSS_VALUE_CENTRAL,
         reverse_inline);
-    layout_publish_vertical_children(cell, mode, false);
+    layout_publish_vertical_children(cell, mode, false,
+        lycon->block.line_height, lycon->block.first_line_max_descender);
     layout_normalize_vertical_breaks(cell);
 }
 

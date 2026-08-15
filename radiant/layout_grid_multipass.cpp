@@ -432,7 +432,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         LayoutContentBox grid_content = layout_content_box(grid_container);
         grid_container->content_width = grid_content.width;
         grid_container->content_height = grid_content.height;
-        layout_publish_vertical_children(grid_container, grid_writing_mode, true);
+        layout_publish_vertical_children(grid_container, grid_writing_mode, true,
+            lycon->block.line_height, lycon->block.first_line_max_descender);
     }
 
     grid_store_inline_baselines(lycon, lycon->grid_container, grid_container);
@@ -683,6 +684,11 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     if (grid_item->font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, grid_item->font);
     }
+    // CSS Grid: final item content establishes its own block formatting context;
+    // stale parent strut metrics otherwise shift text while breaks stay anchored.
+    setup_line_height(lycon, grid_item);
+    layout_setup_block_font_metrics(lycon);
+    lycon->block.block_container_font = lycon->font.style;
     // Calculate content area dimensions accounting for box model
     LayoutContentBox content = layout_content_box(grid_item);
     float content_width = content.width;

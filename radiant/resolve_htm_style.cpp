@@ -814,8 +814,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     switch (elmt_name) {
     case MARKUP_NAME_BODY: {
         block->ensure_boundary(lycon);
-        // margin: 8px (CSS logical pixels)
-        radiant_spacing_set_all(&block->boundary_mut()->margin, 8);
+        // the UA margin is a CSS length and must follow the ancestor zoom;
+        // leaving this literal unscaled shortens auto-height roots under zoom.
+        float body_margin = 8.0f * layout_effective_zoom(static_cast<View*>(block));
+        radiant_spacing_set_all(&block->boundary_mut()->margin, body_margin);
         // Handle HTML bgcolor attribute (e.g., <body bgcolor="#fff">)
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {

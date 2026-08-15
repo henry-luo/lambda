@@ -774,6 +774,17 @@ typedef struct TypeBinary : Type {
     int type_index;  // index of the type in the type list
 } TypeBinary;
 
+// Is this Type a `T1 | T2` union? Callers that key representation or ABI
+// decisions on `type_id` see LMD_TYPE_TYPE for every structured type, so a
+// union in expression position must be treated like ANY (boxed, dynamic) —
+// never like its payload. This predicate is the shared spelling of that test
+// (15 call sites previously open-coded the kind check).
+static inline bool lambda_type_is_union(const Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE &&
+        type->kind == TYPE_KIND_BINARY &&
+        ((const TypeBinary*)type)->op == OPERATOR_UNION;
+}
+
 typedef struct TypeUnary : Type {
     Type* operand;
     Operator op;  // operator

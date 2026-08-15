@@ -7285,13 +7285,16 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
         case CSS_PROPERTY_APPEARANCE: {
-            if (!block || !block->form || !value ||
+            // role-tagged property storage is shared by tables and form controls;
+            // reading the raw union would let table appearance write past TableProp.
+            FormControlProp* form = block ? block->form_control() : nullptr;
+            if (!form || !value ||
                 value->type != CSS_VALUE_TYPE_KEYWORD) {
                 break;
             }
             CssEnum appearance = value->data.keyword;
-            block->form->appearance_none = appearance == CSS_VALUE_NONE;
-            block->form->appearance_base_select = appearance == CSS_VALUE_BASE_SELECT;
+            form->appearance_none = appearance == CSS_VALUE_NONE;
+            form->appearance_base_select = appearance == CSS_VALUE_BASE_SELECT;
             break;
         }
         case CSS_PROPERTY_VISIBILITY:

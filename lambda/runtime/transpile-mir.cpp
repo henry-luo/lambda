@@ -16479,7 +16479,17 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // int53, saturating to the infinity sentinel (havlak's CFG node
             // ids all became `inf`).
             mt->last_call_record_node = (AstNode*)call_node;
-            mt->last_call_returned_boxed_item = routed_to_inferred_slow_body &&
+            // A can-raise merge (call_error_lane) is the same carrier lie as a
+            // slow-body route: the register holds a boxed value-or-error JOIN
+            // while the call's declared type names the success scalar. Publish
+            // it, or a generic consumer re-boxes the join through the scalar
+            // lane — it2d on the ERROR arm turns a raised error into NaN.
+            // Propagate (`f(...)^`) is excluded like every reopen witness: it
+            // consumes the error at the call site and the continuing value is
+            // genuinely native, so the declared scalar type is truthful there.
+            mt->last_call_returned_boxed_item =
+                (routed_to_inferred_slow_body ||
+                 (call_error_lane && !call_node->propagate)) &&
                 mir_is_native_scalar_value_type(
                     get_effective_type(mt, (AstNode*)call_node));
             if (native_consumer_tid != LMD_TYPE_ANY &&
@@ -17982,6 +17992,16 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // the val is a dummy register and any further boxing would be dead code.
     // Skip boxing to avoid type mismatches (e.g. trying to box an I64 dummy as FLOAT).
     if (mt->block_returned) return val;
+
+    // A can-raise (or slow-routed) call already produced a boxed Item — the
+    // value-or-error join — even though its declared type is a native scalar.
+    // It is exactly what `^err`/`or` consumers split on; normalizing it
+    // through the scalar lane would send the ERROR arm through it2d/it2l and
+    // silently destroy the error.
+    if (mt->last_call_returned_boxed_item &&
+            mt->last_call_record_node == mir_unwrap_primary(node)) {
+        return val;
+    }
 
     if (tid == LMD_TYPE_DTIME && node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* dtime_call = (AstCallNode*)node;
@@ -21173,8 +21193,37 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Require the same expression proof used by the native emitter for int
     // returns; retain the historical type-only admission for other scalar
     // carriers whose representation is not affected by this lane split.
+    // A union body type (now produced by raise-arm ifs: `T | error`) is not
+    // concrete evidence of a raw carrier — the error component travels as a
+    // boxed Item, so admission must fall through to the expression proof,
+    // which correctly fails on the raise arm. Without this, `LMD_TYPE_TYPE !=
+    // LMD_TYPE_ANY` would read the union as a proof and admit a native return
+    // whose consumers still expect the boxed join (silent error loss).
+    Type* body_decl = mir_unwrap_decl_type(body->type);
     if (body->type && mir_decl_type_id(body->type) != LMD_TYPE_ANY &&
+            !lambda_type_is_union(body_decl) &&
             return_tid != LMD_TYPE_INT) return false;
+    // Raise-arm admission (the can_raise un-deopt, RV9): a `^E` fn whose body
+    // types as exactly `float | error` returns natively after all — the raise
+    // arms exit on the ERROR lane (emit_function_error_return) and contribute
+    // nothing to the value lane, whose type the union records precisely. This
+    // mirrors how a tail-raise proc is admitted, and reuses the same caller
+    // merge that reconstructs the Item join for `^`/`^err` consumers.
+    //
+    // FLOAT only, deliberately: the D return lane has the universal it2d
+    // fixup for a boxed value arm (the if-merge is boxed, since the union's
+    // type_id is LMD_TYPE_TYPE), while native INT-family lanes have no
+    // boxed-to-lane conversion at the return boundary — a boxed Item would
+    // flow onto the i64 lane as tag bits and saturate to the inf sentinel.
+    if (signature && signature->can_raise && return_tid == LMD_TYPE_FLOAT &&
+            lambda_type_is_union(body_decl)) {
+        TypeBinary* join = (TypeBinary*)body_decl;
+        Type* value_side =
+            join->left && join->left->type_id == LMD_TYPE_ERROR ? join->right
+            : join->right && join->right->type_id == LMD_TYPE_ERROR ? join->left
+            : NULL;
+        if (value_side && value_side->type_id == LMD_TYPE_FLOAT) return false;
+    }
     return !mir_expr_proves_native_return_lane(mt, body, return_tid);
 }
 
@@ -21268,6 +21317,12 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
     if (return_type == LMD_TYPE_ANY && fn_node->body) {
         return_type = get_effective_type(mt, fn_node->body);
     }
+    // A structured type (union, constrained, ...) surfaces as LMD_TYPE_TYPE.
+    // Its value is a boxed Item that may be wide (`float | error` carries a
+    // frame-backed double on the success arm), so the return mode must be
+    // DYNAMIC — mapping it through the scalar table would yield NONE and skip
+    // the adoption that keeps the payload alive past the watermark restore.
+    if (return_type == LMD_TYPE_TYPE) return_type = LMD_TYPE_ANY;
     return em_scalar_return_mode_for_type(return_type);
 }
 

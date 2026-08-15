@@ -64,7 +64,9 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
             float v_ratio = min(view_height * 100 / content_height, 100.0f);
             float v_handle_height_phys = (v_ratio * bar_height) / 100;
             v_handle_height_phys = max(sc.MIN_HANDLE_SIZE, v_handle_height_phys);
-            float scroll_ratio = (v_max > 0) ? (v_scroll / v_max) : 0;
+            float v_range = v_max - sp->v_min_scroll;
+            float scroll_ratio = (v_range > 0)
+                ? ((v_scroll - sp->v_min_scroll) / v_range) : 0;
             float v_handle_y_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - v_handle_height_phys);
             sp->v_handle_height = v_handle_height_phys / scale;
             sp->v_handle_y = v_handle_y_phys / scale;
@@ -92,7 +94,9 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
             float h_ratio = min(view_width * 100 / content_width, 100.0f);
             float h_handle_width_phys = (h_ratio * bar_width) / 100;
             h_handle_width_phys = max(sc.MIN_HANDLE_SIZE, h_handle_width_phys);
-            float scroll_ratio = (h_max > 0) ? (h_scroll / h_max) : 0;
+            float h_range = h_max - sp->h_min_scroll;
+            float scroll_ratio = (h_range > 0)
+                ? ((h_scroll - sp->h_min_scroll) / h_range) : 0;
             float h_handle_x_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - h_handle_width_phys);
             sp->h_handle_width = h_handle_width_phys / scale;
             sp->h_handle_x = h_handle_x_phys / scale;
@@ -356,7 +360,8 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float border_css = sc.SCROLL_BORDER_MAIN / pixel_ratio;
         float scroll_track = block->height - scrollbar_css - border_css * 2;
         float scroll_range = scroll_track - handle_h;
-        float scroll_per_pixel = scroll_range > 0 ? v_max / scroll_range : 0;
+        float v_extent = v_max - sp->v_min_scroll;
+        float scroll_per_pixel = scroll_range > 0 ? v_extent / scroll_range : 0;
         float v_scroll_position = interaction.v_drag_start_scroll + (delta_y * scroll_per_pixel);
         if (v_scroll_position != v) {
             scroll_state_set_position_for_view(state, (View*)block, sp, h, v_scroll_position, false);
@@ -374,7 +379,8 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float border_css2 = sc.SCROLL_BORDER_MAIN / pixel_ratio2;
         float scroll_track_h = block->width - scrollbar_css2 - border_css2 * 2;
         float scroll_range = scroll_track_h - handle_w;
-        float scroll_per_pixel = scroll_range > 0 ? h_max / scroll_range : 0;
+        float h_extent = h_max - sp->h_min_scroll;
+        float scroll_per_pixel = scroll_range > 0 ? h_extent / scroll_range : 0;
         float h_scroll_position = interaction.h_drag_start_scroll + (delta_x * scroll_per_pixel);
         if (h_scroll_position != h) {
             scroll_state_set_position_for_view(state, (View*)block, sp, h_scroll_position, v, false);

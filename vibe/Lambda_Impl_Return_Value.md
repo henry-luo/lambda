@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-14  **Status**: **P0 / P1.1 / P1.2 / P1.3 / P1.5 / P1.6
 LANDED** behind `LAMBDA_RETURN_V3` (default 0); P1.4 partial, P1.7 partial.
-Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV16 + addenda
+Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV17 + addenda
 RV3a / RV10a / RV14a; formal spec D5.2.1v2 / **D5.2.2v2** / **D5.2.3** /
 D2.7.2v2 / D8.4.2v2, **v1.22.0**). Open design residue: RVO8 (GVN multi-out),
 RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide temporaries across a loop
@@ -678,6 +678,243 @@ if it recurs in another guise the upstream conversation should cite this
 analysis. The Lambda-side rule above is sufficient and principled — the
 dead lane has no business carrying a meaningful constant anyway.
 
+### 2026-08-15 — P2 residue measured: the `can_raise` deopt is a *raise-arm* deopt
+
+P2's third item ("un-deopt `can_raise`: `^E`-annotated typed functions stop
+forcing boxed-ANY returns") turns out to be **half already delivered and half
+mis-stated**. Measured on emitted signatures, `LAMBDA_RETURN_V3=1`:
+
+| body | emitted | native? |
+|---|---|---|
+| `fn a2(x: float) float^ { x * 2.0 }` | `func d, i64, …` | **yes** — native value lane + error lane |
+| `fn b2(x: float) float^ { if (x<0.0) { 1.0 } else { x*2.0 } }` | `func d, i64, …` | **yes** |
+| `fn b1(x: float) float^ { if (x<0.0) { raise error("n") } else { x*2.0 } }` | `func i64, i64, …` | **no** — boxed |
+| `fn a3(x: float) float { … }` (control, no `^E`) | `func d, …` | yes |
+
+So **the `^E` annotation alone does not deopt anything** — `a2`/`b2` already
+return a native `d` with the error on lane 2. What deopts is a **`raise` in
+the body**: `b1` and `b2` are the same control shape and differ only in one
+arm, and only `b1` goes boxed. `generate_native` never consults `can_raise` at
+all; the rejection happens upstream of the MIR proof, because a raising branch
+widens the expression's inferred type to ANY, after which
+`function_return_may_defer` cannot prove a native lane
+(`mir_proc_return_values_prove` has the matching explicit
+`case AST_NODE_RAISE_STAM: return false`).
+
+Under shape 4 that conservatism is now provably unnecessary: a raise arm exits
+through **lane 2** and contributes nothing to the value lane, and the
+admission is self-consistent — if `can_raise` holds and a native return is
+admitted, `return_lane_kind` becomes `RETURN_LANE_ERROR`, so the error lane
+that makes it safe is exactly the one that exists. (A raising body without
+`^E` is rejected earlier by the type checker, so the case cannot arise.)
+
+**AST-level fix attempted 2026-08-15 — implemented, tested, REVERTED. The
+conservatism protects a second thing, and the code already said so.**
+
+The narrowing itself is easy and works: `build_if_expr` joins branch types,
+and a `raise` arm's type is the *raised value's* type, so a raising branch
+makes `then_type_id != else_type_id` and the join falls to `TYPE_ANY`. Adding
+an `ast_branch_diverges()` test (raise directly, through `PRIMARY`, or as the
+last item of a `LIST`/`CONTENT` block) and taking the surviving arm's type
+removed the deopt exactly as predicted — `b1` went from `func i64, i64, …`
+to `func d, …` under v2 and `func d, i64, …` under v3, alongside `b2`/`b3`.
+
+**But it silently loses errors.** With `fn b1(x: float) float^ { if (x<0.0)
+{ raise error("n") } else { x*2.0 } }`, `let r^e = b1(-1.0)` returned
+`[nan, null]` instead of `[null, error]` — and `nan` is the tell, because
+`it2d()` maps an ERROR Item to `NaN`. Verified against a pre-change control on
+the same binary, and it fails **identically under v2 and v3**, so it is not a
+transport problem.
+
+The callee is correct in both conventions: the raise arm emits
+`dmov %r5, 0.0; mov %r6, <error>; jmp L2` — `emit_function_error_return`
+setting the error lane and branching to the return label — and the `_b`
+wrapper's merge (`bne L26, %r3a, ItemNull`) reads it properly. What breaks is
+the **consumer**: `let r^err = …` expects the Item-valued success/failure join
+that a boxed return provides. Give it a native value lane plus a separate
+error lane and it takes the value lane and converts, so the error becomes
+`NaN` and `^err` sees nothing.
+
+That is precisely the invariant already written at the top of
+`mir_expr_proves_native_return_lane`:
+
+> *"A can-raise call is an Item-valued merge at every expression boundary:
+> success and failure share one register until `^`/`^err` consumes it. Its
+> declared payload type must not by itself certify a raw return lane."*
+
+**So the un-deopt is not an AST-only change.** It needs both halves,
+sequenced:
+
+1. teach `^` / `^err` consumption (and any other error-join boundary) to read
+   a two-lane native result — value from lane 1, error from lane 2 — instead
+   of destructuring a boxed join; *then*
+2. narrow the type join so the admission proof stops seeing ANY.
+
+Doing (2) without (1) is a correctness regression, which is what this attempt
+demonstrated. The `ast_branch_diverges` helper and the narrowing are ~35 lines
+and can be re-applied verbatim once (1) exists; the revert is clean.
+
+**Second attempt 2026-08-15 — (1) tried, ALSO reverted; the consumer surface
+is wider than the two obvious guards.**
+
+The infrastructure for (1) looked already present. `transpile-mir.cpp` has a
+matched pair of witnesses — `mir_direct_native_scalar_can_unbox` (non-raising:
+consume the lane directly) and `mir_direct_native_scalar_item_can_unbox`
+(can-raising: *"publishes a boxed join … only the ordinary non-propagating
+scalar consumer may consume that join as an Item and reopen the successful
+lane"*). The second already excludes `call->propagate` and
+`mt->in_handler_operand`, so `^err` looked like a missing third exclusion.
+
+Implemented exactly that: an `in_error_destructure` flag on `MirTranspiler`
+beside `in_handler_operand`, scoped across both RHS arms of
+`transpile_error_destructure`, and added to that witness plus the native-unbox
+site in the call emitter. With the narrowing re-applied on top, results got
+**worse, not better**:
+
+| case | expected | got |
+|---|---|---|
+| `b1(1.0)` success | `[2, null]` | `[2, null]` ✓ |
+| `b1(-1.0)` raises | `[null, error]` | `[nan, null]` |
+| `i1(5)` success, `int^` | `[10, null]` | `[inf, null]` |
+
+The `int^` **success** path breaking is the decisive signal: `inf` is the
+int-lane saturation sentinel, i.e. a raw i64 lane read as an Item (or the
+reverse). So the failure is not confined to the error join at all — narrowing
+the type changes how the *value* is carried at consumer boundaries that the
+two guards never see.
+
+Why the guards did not bite: the destructure reads the RHS's **AST node type**,
+which the narrowing already rewrote at build time. A transpile-time flag can
+gate the unbox *witnesses*, but it cannot retract a type the consumer has
+already been handed. Any real (1) has to make the *call expression's* type at
+non-`^`/`^err` boundaries remain the value-or-error join — which is a typing
+change, not a guard — or thread a two-lane value through the consumers rather
+than a single register.
+
+### 2026-08-15 — USER RULING: the if-join types as `T | error`, LANDED
+
+The user ruled the structural answer to both failed attempts: `build_if_expr`
+must not collapse differing arms to ANY — the join is the **union of the
+branch contributions**, and for a raise arm that is **`T | error`**. This
+keeps the error-ness signal that ANY carried implicitly (whose loss broke
+attempt 1) while recording the value lane's exact type (which ANY erased) —
+the type-level foundation the eventual two-lane consumer work keys on.
+
+**Implementation.**
+
+- `lambda_type_is_union()` — shared predicate in `lambda-data.hpp` beside
+  `TypeBinary` (15 sites previously open-coded the kind check; rule 13).
+- `build_if_expr`: each arm CONTRIBUTES a type; a diverging (raise) arm
+  contributes `&TYPE_ERROR` — detected structurally via `ast_branch_diverges`
+  (raise directly, through PRIMARY, or as a block's last item), not via the
+  raise node's own type, which is the raised *value's* type and can be
+  non-error. Substitution happens BEFORE the numeric join, so `raise 1.0` can
+  never numeric-join into a bare float. When contributions differ and one is
+  the error contribution, the join is a `TypeBinary` UNION of the two; ANY
+  still absorbs.
+- Two admission sites hardened so the union is treated like ANY, not like a
+  concrete carrier (`mir_decl_type_id(union)` is `LMD_TYPE_TYPE ≠ ANY`, which
+  would otherwise *accidentally admit* a native return — attempt 1's failure
+  reachable by a new road):
+  - `function_return_may_defer`'s early-exit skips union body types, falling
+    through to the expression proof (which correctly fails on the raise arm);
+  - `infer_boxed_return_mode` maps `LMD_TYPE_TYPE` → ANY → DYNAMIC, because a
+    `float | error` boxed return can carry a frame-backed double — mode NONE
+    would skip the adoption and leak a dangling payload past the watermark
+    restore.
+
+Doctrinal support found in-tree: the shape-storage code already rules
+*"unions retain their runtime Item tag"* (structured kinds → `LMD_TYPE_ANY`
+lane), so union-in-expression-position = boxed is established practice, not a
+new convention.
+
+**The general `T1 | T2` join was implemented, measured, and narrowed.** With
+unions for ALL differing arms, the corpus failed **95 tests** — not for
+representation reasons, but because the **E208 containment checker** could
+suddenly see error-capable branches that ANY had hidden
+(`function 'child_width' may return error from call to 'float'; contain it
+with 'or'…` — `graph_layout` et al.). That is the union being *more correct*:
+those programs genuinely let a `float()` error escape uncontained, and ANY was
+concealing it. But which programs compile is a language-surface decision, so
+the join now unions **only when a diverging arm is present**; plain differing
+arms keep ANY, with the evidence recorded in a comment at the join. Widening
+to the general union join is a ready follow-up ruling whenever the stricter
+E208 surface is wanted — the mechanism is in place and one condition gates it.
+
+**Gates: 3720/3720 in BOTH flag states.** The motivating cases verified:
+`float^`/`int^`/`i64^` raise-arm functions — success and error paths all
+correct, and the raising bodies deliberately STILL boxed (the deopt remains by
+design until the consumer work lands; what changed is that the type now says
+`float | error` instead of ANY, so that work has an honest signal to key on).
+
+### 2026-08-15 — RV9 un-deopt LANDED on the float lane
+
+With the union in place the un-deopt became tractable, and it is now done for
+`float^`: a `^E` fn whose body types as `float | error` **returns natively**.
+Under v3 those functions are exactly **shape 4** — `func d, i64` — the first
+`NATIVE_ERROR` bodies produced from ordinary user source rather than from the
+convention's own tests. Under v2 the same functions return `d` with a scalar
+home. The gate golden is byte-identical in both states.
+
+**Admission** (`function_return_may_defer`): a can-raise signature whose body
+is a `T | error` union with `T = float` returns false — i.e. is admitted. The
+raise arms exit through `emit_function_error_return` on the error lane and
+contribute nothing to the value lane, whose type the union records precisely.
+This is the same reasoning that already admits a tail-raise proc.
+
+**FLOAT only, deliberately.** The `d` return lane has a universal `it2d` fixup
+for a boxed value arm (the if-merge is boxed — the union's `type_id` is
+`LMD_TYPE_TYPE`), so a boxed success arm still lands correctly on the lane.
+The INT-family native lanes have **no** boxed-to-lane conversion at the return
+boundary: a boxed Item would flow onto the i64 lane as tag bits and saturate
+to the inf sentinel — the exact havlak failure mode. Extending to int/i64
+requires that conversion first; `twice(x: int) int^` stays boxed and the
+regression test pins that as intended, not as an oversight.
+
+**The consumer bug this exposed — the join carrier lie.** Admission alone
+produced `nan` on every error path. Cause: `call_error_lane` merges the value
+and error arms into one **boxed** register, but the call's declared type still
+names the success scalar (`float`), so generic consumers re-boxed the join
+through the scalar lane and sent the ERROR arm through `it2d` — NaN. This is
+the same class of carrier lie that `routed_to_inferred_slow_body` already
+publishes via `last_call_returned_boxed_item`, so the fix extends that
+existing publication rather than adding a parallel mechanism: an error-lane
+merge publishes too, and `transpile_box_item` passes a published join through
+untouched. `f(...)^` is excluded — propagate consumes the error at the call
+site, so the declared scalar type is truthful there — mirroring how every
+other reopen witness excludes explicit propagation.
+
+Regression test: `test/lambda/raise_arm_native_return.ls` — both arm orders,
+destructure / `or` / arithmetic-on-recovered consumers, plus the int case that
+must stay boxed. A regression shows up as `nan`, not as a crash, which is why
+the test asserts values rather than merely running.
+
+**Gates: both flag states green.** What remains of the original deopt is the
+INT-family lane, blocked on the return-boundary conversion above — that part
+of the earlier "not a small change" conclusion still stands. It touches AST typing, the native-admission proof, and
+every consumer boundary that reopens a scalar lane, and its acceptance gate is
+typed-AWFY timing with the `pnpoly` canary. Both reverts are clean and the
+tree is green; the two attempt records above are the value delivered — they
+convert "un-deopt `can_raise`" from a one-line-sounding plan item into a
+scoped piece of work with its blast radius mapped.
+
+**Deliberately not implemented in this session.** The remaining change lives in the
+native-admission proof, which is precisely where R26's per-call check taxes
+came from, and the plan gates it on typed-AWFY timing with `pnpoly` as the
+named canary plus a fresh `make release` (test runs clobber `lambda.exe` with
+a debug build). Starting a proof change at the end of a long session and
+leaving it unmeasured is the wrong trade; the measurement above is the
+expensive part and is now done. **Correction to the earlier "two candidate shapes" note above:** (a) and (b)
+are not alternatives — both are downstream of the consumer change. Either way
+of narrowing the admission is a regression until `^`/`^err` can read two
+lanes. See the attempt record for the evidence.
+
+**Also still open (both explicitly follow-ups in the plan):** the RV9 debug
+assert (lane-2 payload ∈ {`ItemNull`, ERROR-tagged}) — note the emitter must
+keep MIR build-identical, so this cannot be debug-only *emission*; and the
+scoped `INT64_ERROR` retirement, which the plan already records as tracked
+against v5 §5.8 rather than as a P2 gate.
+
 **Verified:** `i64^` and `float^`, success and error paths, all four correct;
 the six error-path tests that caught the original regression pass; both
 configurations gate at **3720/3720** (flag-on with shape 4 live, and the
@@ -921,8 +1158,10 @@ rather than the deletion removing it.
       overflow exit's `ret` + `make_one_ret` merge homes); fixed by returning
       a dead 0 on the value lane there. Root-cause chain + the new
       `LAMBDA_MIR_GEN_DEBUG` observation layer in the 2026-08-15 log.
-      Remaining P2 items: `can_raise` un-deopt measurement, RV9 debug assert,
-      INT64_ERROR retirement (scoped follow-up).
+      Remaining P2 items, all measured/scoped but NOT implemented: the
+      `can_raise` deopt is really a **raise-arm** deopt (`^E` alone already
+      returns natively — see the 2026-08-15 measurement table); RV9 debug
+      assert; INT64_ERROR retirement (plan tracks it against v5 §5.8).
 - [ ] P2.5 LambdaJS migration (node/js262 gates)
 - [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
       2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).

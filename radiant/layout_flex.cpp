@@ -534,6 +534,12 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->writing_mode = layout_block_writing_mode(container);
         flex->text_direction = TD_LTR;
     }
+    if (container->blk) {
+        // CSS Flexbox: row main-start follows the container's inline-start;
+        // the inherited direction therefore reverses row placement in RTL.
+        flex->text_direction = container->block()->direction == CSS_VALUE_RTL
+            ? TD_RTL : TD_LTR;
+    }
     // CRITICAL: For containers with explicit height (like body with height: 100%), use given_height
     // since container->height may not be set yet at this point in the layout flow.
     float content_width = container->width;
@@ -3344,7 +3350,11 @@ void set_main_axis_position(ViewElement* item, float position, FlexContainerLayo
         flex_layout->direction == CSS_VALUE_COLUMN_REVERSE;
     bool vertical_rl_block_axis = flex_layout->writing_mode == WM_VERTICAL_RL &&
         axis == LAYOUT_AXIS_X;
+    bool row_rtl = (flex_layout->direction == CSS_VALUE_ROW ||
+                    flex_layout->direction == CSS_VALUE_ROW_REVERSE) &&
+        flex_layout->text_direction == TD_RTL;
     bool reverse = direction_reverse != vertical_rl_block_axis;
+    if (row_rtl) reverse = !reverse;
     flex_set_axis_position(item, position, axis, reverse,
                            flex_layout->main_axis_size,
                            flex_main_axis_size(item, flex_layout));
