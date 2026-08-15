@@ -53,10 +53,6 @@ extern "C" Item js_dom_check_validity_bridge(Item elem_item);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
-static inline Item event_make_double(double v) {
-    return js_make_number(v);
-}
-
 static char* js_dom_build_submit_query(Item entries) {
     if (get_type_id(entries) != LMD_TYPE_ARRAY) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
@@ -154,8 +150,7 @@ static void event_apply_new_target_prototype(Item event) {
         return;
     }
 
-    Item proto = js_get_key_default(new_target,
-        (Item){.item = s2it(heap_create_name("prototype"))});
+    Item proto = js_get_key_cstr(new_target, "prototype");
     TypeId proto_type = get_type_id(proto);
     if (proto_type == LMD_TYPE_MAP || proto_type == LMD_TYPE_FUNC ||
         proto_type == LMD_TYPE_ARRAY || proto_type == LMD_TYPE_ELEMENT) {
@@ -323,10 +318,8 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
     }
 
     Item submit_event = js_create_event("submit", true, true);
-    js_set_key_default(submit_event, (Item){.item = s2it(heap_create_name("isTrusted"))},
-                    (Item){.item = ITEM_TRUE});
-    js_set_key_default(submit_event, (Item){.item = s2it(heap_create_name("submitter"))},
-                    submitter ? js_dom_wrap_element(submitter) : ItemNull);
+    js_set_key_cstr(submit_event, "isTrusted", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(submit_event, "submitter", submitter ? js_dom_wrap_element(submitter) : ItemNull);
     Item submit_ok = js_dom_dispatch_event(form_item, submit_event);
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
 
@@ -869,8 +862,7 @@ static bool signal_is_aborted(Item signal_item) {
     if (signal_item.item == 0) return false;
     TypeId t = get_type_id(signal_item);
     if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT) return false;
-    Item ab = js_get_key_default(signal_item,
-        (Item){.item = s2it(heap_create_name("aborted"))});
+    Item ab = js_get_key_cstr(signal_item, "aborted");
     return js_is_truthy(ab);
 }
 
@@ -1066,38 +1058,24 @@ static void nl_compact(NodeListeners* nl) {
 // Event Object Creation
 // ============================================================================
 
-// helper: set a string property on an event object
-static void event_set_str(Item event, const char* key, const char* value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    Item v = value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
-    js_set_key_default(event, k, v);
-}
-
-// helper: set a bool property on an event object
-static void event_set_bool(Item event, const char* key, bool value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    Item v = (Item){.item = b2it(value ? 1 : 0)};
-    js_set_key_default(event, k, v);
-}
-
-// helper: set an int property on an event object
-static void event_set_int(Item event, const char* key, int value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    Item v = (Item){.item = i2it(value)};
-    js_set_key_default(event, k, v);
-}
-
-// helper: set a double property
-static void event_set_double(Item event, const char* key, double value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    js_set_key_default(event, k, event_make_double(value));
-}
-
-// helper: set an arbitrary item
-static void event_set_item(Item event, const char* key, Item value) {
+// all event field writers share one key materialization path; only the value
+// representation varies, so keeping conversion outside this helper avoids
+// five copies of the same property write and its allocation ordering.
+static void event_set_value(Item event, const char* key, Item value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
     js_set_key_default(event, k, value);
 }
+
+#define EVENT_SET_VALUE(name, type, expression) \
+    static void name(Item event, const char* key, type value) { \
+        event_set_value(event, key, expression); \
+    }
+EVENT_SET_VALUE(event_set_str, const char*, value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull)
+EVENT_SET_VALUE(event_set_bool, bool, (Item){.item = b2it(value ? 1 : 0)})
+EVENT_SET_VALUE(event_set_int, int, (Item){.item = i2it(value)})
+EVENT_SET_VALUE(event_set_double, double, js_make_number(value))
+EVENT_SET_VALUE(event_set_item, Item, value)
+#undef EVENT_SET_VALUE
 
 static void event_mark_non_writable(Item event, const char* key) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
@@ -1122,7 +1100,7 @@ extern "C" Item js_event_prevent_default() {
         // Spec: silently no-op if the event is in a passive listener.
         if (event_flag_get(ev, "__in_passive")) return make_js_undefined();
         // Spec: silently no-op if event is not cancelable.
-        Item cancelable = js_get_key_default(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
+        Item cancelable = js_get_key_cstr(ev, "cancelable");
         if (!js_is_truthy(cancelable)) return make_js_undefined();
         event_set_bool(ev, "__default_prevented", true);
     }
@@ -1163,7 +1141,7 @@ extern "C" Item js_event_returnvalue_set(Item value) {
     if (get_type_id(ev) != LMD_TYPE_MAP) return make_js_undefined();
     bool truthy = js_is_truthy(value);
     if (!truthy) {
-        Item cancelable = js_get_key_default(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
+        Item cancelable = js_get_key_cstr(ev, "cancelable");
         if (js_is_truthy(cancelable) && !event_flag_get(ev, "__in_passive")) {
             event_set_bool(ev, "__default_prevented", true);
         }
@@ -1193,8 +1171,7 @@ extern "C" Item js_event_composed_path() {
     Item ev = js_get_this();
     Item out = js_array_new(0);
     if (get_type_id(ev) != LMD_TYPE_MAP) return out;
-    Item path = js_get_key_default(ev,
-        (Item){.item = s2it(heap_create_name("__dispatch_path"))});
+    Item path = js_get_key_cstr(ev, "__dispatch_path");
     if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array) return out;
     // The dispatch path is fixed before listeners run. Copying it prevents a
     // caller from mutating what later listeners observe.
@@ -1211,16 +1188,12 @@ static void js_event_install_accessor(Item event, const char* name,
     Rooted<Item> getter_root(roots, js_new_native_function(getter));
     Rooted<Item> setter_root(roots, setter
         ? js_new_native_function(setter) : ItemNull);
-    js_set_key_default(descriptor_root.get(), make_string_item("get"),
-        getter_root.get());
+    js_set_key_cstr(descriptor_root.get(), "get", getter_root.get());
     if (setter) {
-        js_set_key_default(descriptor_root.get(), make_string_item("set"),
-            setter_root.get());
+        js_set_key_cstr(descriptor_root.get(), "set", setter_root.get());
     }
-    js_set_key_default(descriptor_root.get(), make_string_item("configurable"),
-        (Item){.item = ITEM_TRUE});
-    js_set_key_default(descriptor_root.get(), make_string_item("enumerable"),
-        (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(descriptor_root.get(), "configurable", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(descriptor_root.get(), "enumerable", (Item){.item = ITEM_TRUE});
     js_object_define_property(event, make_string_item(name),
         descriptor_root.get());
 }
@@ -1355,17 +1328,15 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     event_set_item(event, "currentTarget", ItemNull);
 
     // methods — create proper JS function wrappers for native C callbacks.
-    Item pd_key = (Item){.item = s2it(heap_create_name("preventDefault"))};
-    Item sp_key = (Item){.item = s2it(heap_create_name("stopPropagation"))};
-    Item si_key = (Item){.item = s2it(heap_create_name("stopImmediatePropagation"))};
-    Item cp_key = (Item){.item = s2it(heap_create_name("composedPath"))};
-    Item ie_key = (Item){.item = s2it(heap_create_name("initEvent"))};
-
-    js_set_key_default(event, pd_key, js_new_native_function(js_event_prevent_default));
-    js_set_key_default(event, sp_key, js_new_native_function(js_event_stop_propagation));
-    js_set_key_default(event, si_key, js_new_native_function(js_event_stop_immediate_propagation));
-    js_set_key_default(event, cp_key, js_new_native_function(js_event_composed_path));
-    js_set_key_default(event, ie_key, js_new_native_function(js_event_init_event));
+#define JS_EVENT_METHODS(M) \
+    M("preventDefault", js_event_prevent_default) M("stopPropagation", js_event_stop_propagation) \
+    M("stopImmediatePropagation", js_event_stop_immediate_propagation) \
+    M("composedPath", js_event_composed_path) M("initEvent", js_event_init_event)
+#define JS_EVENT_INSTALL_METHOD(name, target) \
+    js_set_key_default(event, make_string_item(name), js_new_native_function(target));
+    JS_EVENT_METHODS(JS_EVENT_INSTALL_METHOD)
+#undef JS_EVENT_INSTALL_METHOD
+#undef JS_EVENT_METHODS
 
     // Install accessor properties for legacy spec'd setters/getters.
     js_event_install_accessor(event, "returnValue",
@@ -1442,12 +1413,14 @@ extern "C" Item js_eventtarget_dispatch(Item event_item) {
 
 Item js_create_event_target(void) {
     Item et = js_new_object_with_class(JS_CLASS_EVENT_TARGET);
-    Item ael = (Item){.item = s2it(heap_create_name("addEventListener"))};
-    Item rel = (Item){.item = s2it(heap_create_name("removeEventListener"))};
-    Item dis = (Item){.item = s2it(heap_create_name("dispatchEvent"))};
-    js_set_key_default(et, ael, js_new_native_function(js_eventtarget_add_listener));
-    js_set_key_default(et, rel, js_new_native_function(js_eventtarget_remove_listener));
-    js_set_key_default(et, dis, js_new_native_function(js_eventtarget_dispatch));
+#define JS_EVENT_TARGET_METHODS(M) \
+    M("addEventListener", js_eventtarget_add_listener) \
+    M("removeEventListener", js_eventtarget_remove_listener) M("dispatchEvent", js_eventtarget_dispatch)
+#define JS_EVENT_TARGET_INSTALL_METHOD(name, target) \
+    js_set_key_default(et, make_string_item(name), js_new_native_function(target));
+    JS_EVENT_TARGET_METHODS(JS_EVENT_TARGET_INSTALL_METHOD)
+#undef JS_EVENT_TARGET_INSTALL_METHOD
+#undef JS_EVENT_TARGET_METHODS
     return et;
 }
 
@@ -2211,8 +2184,7 @@ static void fire_idl_handler(Item target, const char* type, Item event) {
         return;
     }
     if (get_type_id(result) == LMD_TYPE_BOOL && !it2b(result)) {
-        Item cancelable = js_get_key_default(
-            event, (Item){.item = s2it(heap_create_name("cancelable"))});
+        Item cancelable = js_get_key_cstr(event, "cancelable");
         if (js_is_truthy(cancelable) && !event_flag_get(event, "__in_passive")) {
             event_set_bool(event, "__default_prevented", true);
             event_set_bool(event, "defaultPrevented", true);
@@ -2666,7 +2638,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // dispatchEvent returns false only when the event is cancelable AND
     // preventDefault was called.
-    Item cancelable = js_get_key_default(event_item, (Item){.item = s2it(heap_create_name("cancelable"))});
+    Item cancelable = js_get_key_cstr(event_item, "cancelable");
     bool ret_false = prevented && js_is_truthy(cancelable);
     return (Item){.item = ret_false ? ITEM_FALSE : ITEM_TRUE};
 }

@@ -149,7 +149,7 @@ static Item readline_decode_input_text(Item rl, Item data_item) {
         }
     }
 
-    Item length_item = js_get_key_default(data_item, make_string_item("length"));
+    Item length_item = js_get_key_cstr(data_item, "length");
     int64_t len = get_type_id(length_item) == LMD_TYPE_INT ? it2i(length_item) : js_array_length(data_item);
     for (int64_t i = 0; i < len && pos < (int)sizeof(buf); i++) {
         Item byte_item = js_elements_get_int(data_item, i);
@@ -1158,7 +1158,7 @@ extern "C" Item js_readline_close(void) {
     Item self = js_get_current_this();
     readline_set(self, "closed", (Item){.item = ITEM_TRUE});
     // emit 'close' event
-    Item on_close = js_get_key_default(self, make_string_item("__on_close__"));
+    Item on_close = js_get_key_cstr(self, "__on_close__");
     if (js_is_callable(on_close)) {
         js_call_function(on_close, ItemNull, NULL, 0);
     }
@@ -1548,15 +1548,15 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     // extract prompt from options if available
     Item prompt_val = make_string_item("> ");
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        Item p = js_get_key_default(options_item, make_string_item("prompt"));
+        Item p = js_get_key_cstr(options_item, "prompt");
         if (get_type_id(p) == LMD_TYPE_STRING) prompt_val = p;
-        Item input = js_get_key_default(options_item, make_string_item("input"));
+        Item input = js_get_key_cstr(options_item, "input");
         if (input.item != ITEM_NULL) readline_set(rl, "input", input);
-        Item output = js_get_key_default(options_item, make_string_item("output"));
+        Item output = js_get_key_cstr(options_item, "output");
         if (output.item != ITEM_NULL) readline_set(rl, "output", output);
-        Item terminal = js_get_key_default(options_item, make_string_item("terminal"));
+        Item terminal = js_get_key_cstr(options_item, "terminal");
         if (terminal.item != ITEM_NULL) readline_set(rl, "terminal", terminal);
-        Item completer = js_get_key_default(options_item, make_string_item("completer"));
+        Item completer = js_get_key_cstr(options_item, "completer");
         if (readline_has_own(options_item, "completer") && get_type_id(completer) != LMD_TYPE_UNDEFINED) {
             if (!js_is_callable(completer)) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
@@ -1564,7 +1564,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             }
             readline_set(rl, "completer", completer);
         }
-        Item history = js_get_key_default(options_item, make_string_item("history"));
+        Item history = js_get_key_cstr(options_item, "history");
         if (readline_has_own(options_item, "history") && get_type_id(history) != LMD_TYPE_UNDEFINED &&
             get_type_id(history) != LMD_TYPE_ARRAY) {
             return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
@@ -1573,11 +1573,11 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         if (get_type_id(history) == LMD_TYPE_ARRAY) {
             readline_set(rl, "history", history);
         }
-        Item remove_history_duplicates = js_get_key_default(options_item, make_string_item("removeHistoryDuplicates"));
+        Item remove_history_duplicates = js_get_key_cstr(options_item, "removeHistoryDuplicates");
         if (get_type_id(remove_history_duplicates) == LMD_TYPE_BOOL) {
             readline_set(rl, "removeHistoryDuplicates", remove_history_duplicates);
         }
-        Item history_size = js_get_key_default(options_item, make_string_item("historySize"));
+        Item history_size = js_get_key_cstr(options_item, "historySize");
         if (readline_has_own(options_item, "historySize") && get_type_id(history_size) != LMD_TYPE_UNDEFINED) {
             TypeId history_size_type = get_type_id(history_size);
             if (js_key_is_symbol_c(history_size)) {
@@ -1602,7 +1602,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
                 readline_set(rl, "historySize", history_size);
             }
         }
-        Item tab_size = js_get_key_default(options_item, make_string_item("tabSize"));
+        Item tab_size = js_get_key_cstr(options_item, "tabSize");
         if (readline_has_own(options_item, "tabSize") && get_type_id(tab_size) != LMD_TYPE_UNDEFINED) {
             TypeId tab_size_type = get_type_id(tab_size);
             if (tab_size_type == LMD_TYPE_INT) {
@@ -1619,17 +1619,17 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             }
             readline_set(rl, "tabSize", tab_size);
         }
-        Item signal = js_get_key_default(options_item, make_string_item("signal"));
+        Item signal = js_get_key_cstr(options_item, "signal");
         if (readline_has_own(options_item, "signal") && get_type_id(signal) != LMD_TYPE_UNDEFINED) {
-            Item aborted = js_get_key_default(signal, make_string_item("aborted"));
-            Item add_event_listener = js_get_key_default(signal, make_string_item("addEventListener"));
+            Item aborted = js_get_key_cstr(signal, "aborted");
+            Item add_event_listener = js_get_key_cstr(signal, "addEventListener");
             if (get_type_id(aborted) == LMD_TYPE_UNDEFINED ||
                 !js_is_callable(add_event_listener)) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                     "The \"signal\" argument must be an instance of AbortSignal");
             }
         }
-        Item crlf_delay = js_get_key_default(options_item, make_string_item("crlfDelay"));
+        Item crlf_delay = js_get_key_cstr(options_item, "crlfDelay");
         Item delay_item = (Item){.item = i2it(100)};
         if (get_type_id(crlf_delay) == LMD_TYPE_INT) {
             int v = it2i(crlf_delay);
@@ -1644,7 +1644,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         }
         readline_set(rl, "crlfDelay", delay_item);
     }
-    js_set_key_default(rl, make_string_item("__prompt__"), prompt_val);
+    js_set_key_cstr(rl, "__prompt__", prompt_val);
     readline_set_line(rl, "", 0);
     readline_set(rl, "__tab_count__", (Item){.item = i2it(0)});
     if (get_type_id(readline_get(rl, "history")) != LMD_TYPE_ARRAY) {
@@ -1670,14 +1670,16 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     // methods
     Item question_fn = js_new_native_function(js_readline_question);
     js_set_native_key(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")), js_readline_question_promisified);
-    js_set_key_default(rl, make_string_item("question"), question_fn);
-    js_set_native_key(rl, make_string_item("close"), js_readline_close);
-    js_set_native_key(rl, make_string_item("on"), js_readline_on);
-    js_set_native_key(rl, make_string_item("write"), js_readline_write);
-    js_set_native_key(rl, make_string_item("getCursorPos"), js_readline_getCursorPos);
-    js_set_native_key(rl, make_string_item("setPrompt"), js_readline_setPrompt);
-    js_set_native_key(rl, make_string_item("getPrompt"), js_readline_getPrompt);
-    js_set_native_key(rl, make_string_item("prompt"), js_readline_prompt);
+    js_set_key_cstr(rl, "question", question_fn);
+#define JS_READLINE_METHODS(M) \
+    M("close", js_readline_close) M("on", js_readline_on) M("write", js_readline_write) \
+    M("getCursorPos", js_readline_getCursorPos) M("setPrompt", js_readline_setPrompt) \
+    M("getPrompt", js_readline_getPrompt) M("prompt", js_readline_prompt)
+#define JS_READLINE_INSTALL_METHOD(name, target) \
+    js_set_native_key(rl, make_string_item(name), target);
+    JS_READLINE_METHODS(JS_READLINE_INSTALL_METHOD)
+#undef JS_READLINE_INSTALL_METHOD
+#undef JS_READLINE_METHODS
 
     Item input = readline_get(rl, "input");
     if (input.item != ITEM_NULL && get_type_id(input) != LMD_TYPE_UNDEFINED) {
@@ -1771,8 +1773,7 @@ static Item js_get_readline_namespace_impl(Item* namespace_slot,
 
     Item key = make_string_item("createInterface");
     js_set_native_key(ns, key, create_target);
-    js_set_key_default(ns, make_string_item("Interface"),
-                    js_new_native_constructor(interface_target));
+    js_set_key_cstr(ns, "Interface", js_new_native_constructor(interface_target));
 
     Item default_key = make_string_item("default");
     js_set_key_default(ns, default_key, ns);

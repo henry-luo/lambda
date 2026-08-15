@@ -169,10 +169,9 @@ Item js_node_tcp_server_address(uv_tcp_t* handle) {
         return ItemNull;
     }
     Item result = js_new_object();
-    js_set_key_default(result, make_string_item("address"), make_string_item(address));
-    js_set_key_default(result, make_string_item("family"),
-        make_string_item(family == 6 ? "IPv6" : "IPv4"));
-    js_set_key_default(result, make_string_item("port"), (Item){.item = i2it(port)});
+    js_set_key_cstr(result, "address", make_string_item(address));
+    js_set_key_cstr(result, "family", make_string_item(family == 6 ? "IPv6" : "IPv4"));
+    js_set_key_cstr(result, "port", (Item){.item = i2it(port)});
     return result;
 }
 

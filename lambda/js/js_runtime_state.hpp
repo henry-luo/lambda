@@ -120,10 +120,20 @@ struct JsRootRange {
     bool reset_registered = false;
 };
 
+// All context-owned caches expose the same precise root owner; keeping that
+// invariant in one base state prevents realm subsystems from drifting into
+// ad-hoc GC registration fields (D5.3).
+struct JsRootedState {
+    JsRootRange roots = {};
+};
+
+struct JsNamespaceState : JsRootedState {
+    Item namespace_object = {};
+};
+
 // Use this only for actual single-Item LIFO storage.  Clients with replacement,
 // replay, or multi-field records retain those semantic operations themselves.
-struct JsItemStack {
-    JsRootRange roots = {};
+struct JsItemStack : JsRootedState {
     int depth = 0;
 };
 
@@ -164,71 +174,54 @@ struct JsDnsState {
     uint64_t roots_epoch = 0;
 };
 
-struct JsBuiltinCacheState {
+struct JsBuiltinCacheState : JsRootedState {
     Item entries[JS_INTRINSIC_BINDING_COUNT] = {};
-    JsRootRange roots = {};
     bool initialized = false;
 };
 
-struct JsReadlineState {
-    Item namespace_object = {};
+struct JsReadlineState : JsNamespaceState {
     Item promises_namespace = {};
     Item completion_interface = {};
     Item inputs[JS_READLINE_INPUT_MAP_MAX] = {};
     Item interfaces[JS_READLINE_INPUT_MAP_MAX] = {};
     int input_count = 0;
     bool create_promises_mode = false;
-    JsRootRange roots = {};
 };
 
-struct JsBufferState {
-    Item namespace_object = {};
+struct JsBufferState : JsNamespaceState {
     Item prototype = {};
-    JsRootRange roots = {};
 };
 
-struct JsHttpsState {
+struct JsHttpsState : JsNamespaceState {
     Item agent_prototype = {};
-    Item namespace_object = {};
-    JsRootRange roots = {};
 };
 
-struct JsUtilState {
-    Item namespace_object = {};
-    JsRootRange roots = {};
+struct JsUtilState : JsNamespaceState {
 };
 
-struct JsCryptoState {
-    Item namespace_object = {};
+struct JsCryptoState : JsNamespaceState {
     // Native hash/cipher/sign records are allocated only by crypto users.
     // Their source-private table is lazy to keep non-crypto contexts compact.
     void* native_state = NULL;
-    JsRootRange roots = {};
 };
 
-struct JsChildProcessState {
-    Item namespace_object = {};
-    JsRootRange roots = {};
+struct JsChildProcessState : JsNamespaceState {
 };
 
-struct JsZlibState {
+struct JsZlibState : JsNamespaceState {
     Item constructor_prototypes[8] = {};
-    Item namespace_object = {};
-    JsRootRange roots = {};
 };
 
-struct JsTlsState {
-    Item namespace_object = {};
+struct JsTlsState : JsNamespaceState {
     Item ca_bundled = {};
     Item ca_extra = {};
     Item ca_system = {};
     Item ca_default = {};
     void* client_ticket_states = NULL;
     void* secure_context_owners = NULL;
-    JsRootRange roots = {};
 };
 
-struct JsStreamState {
+struct JsStreamState : JsNamespaceState {
     Item key_on = {}; Item key_emit = {}; Item key_push = {}; Item key_write = {};
     Item key_end = {}; Item key_pipe = {}; Item key_read = {}; Item key_destroy = {};
     Item key_readable = {}; Item key_writable = {}; Item key_flowing = {}; Item key_ended = {};
@@ -242,20 +235,17 @@ struct JsStreamState {
     Item readable_prototype = {}; Item writable_prototype = {}; Item duplex_prototype = {};
     Item transform_prototype = {}; Item passthrough_prototype = {}; Item internal_state_namespace = {};
     Item internal_end_of_stream_namespace = {}; Item iterator_namespace = {}; Item web_namespace = {};
-    Item namespace_object = {}; Item promises_namespace = {};
+    Item promises_namespace = {};
     bool keys_initialized = false;
     int64_t default_byte_hwm = 16 * 1024;
     int64_t default_object_hwm = 16;
-    JsRootRange roots = {};
 };
 
-struct JsHttpState {
+struct JsHttpState : JsNamespaceState {
     Item server_prototype = {};
     Item incoming_message_prototype = {};
     Item server_response_prototype = {};
     Item outgoing_message_prototype = {};
-    Item namespace_object = {};
-    JsRootRange roots = {};
 };
 
 struct JsAssertMockSlot {
@@ -296,16 +286,14 @@ struct JsAssertState {
     int mock_slot_count = 0;
 };
 
-struct JsNetState {
+struct JsNetState : JsNamespaceState {
     Item socket_prototype = {};
     Item server_prototype = {};
     Item socket_connect_function = {};
     Item stream_socket_constructor = {};
-    Item namespace_object = {};
     // Native network defaults and BlockList objects are realm-local. The
     // capsule stays lazy so contexts that never load net pay no allocation.
     void* native_state = NULL;
-    JsRootRange roots = {};
 };
 
 // Optional Node-leaf callbacks are semantic to one realm. Keep their function
@@ -321,11 +309,10 @@ struct JsHostHooksState {
 // fs owns several lazily assembled namespace and prototype objects. They are
 // all realm values, so one exact context range replaces the old per-slot
 // process-global registrations.
-struct JsFsState {
+struct JsFsState : JsNamespaceState {
     Item internal_binding_namespace = {};
     Item internal_default_fstat = {};
     Item stats_prototype = {};
-    Item namespace_object = {};
     Item filehandle_constructor = {};
     Item filehandle_prototype = {};
     Item internal_promises_namespace = {};
@@ -333,12 +320,11 @@ struct JsFsState {
     // registered their precise roots; teardown detaches this list before the
     // heap disappears.
     void* pending_requests = NULL;
-    JsRootRange roots = {};
 };
 
 // Clipboard wrappers and the active synthetic drag session are realm state;
 // the platform clipboard store itself remains an external service boundary.
-struct JsClipboardState {
+struct JsClipboardState : JsRootedState {
     Item blob_prototype = {};
     Item file_prototype = {};
     Item clipboard_item_prototype = {};
@@ -347,12 +333,11 @@ struct JsClipboardState {
     Item file_list_prototype = {};
     Item drag_data_transfer = {};
     int64_t generation = 1;
-    JsRootRange roots = {};
 };
 
 // DOM singleton wrappers are per browsing context. The native document itself
 // is owned by Radiant; this range owns only JS heap values that reference it.
-struct JsDomState {
+struct JsDomState : JsRootedState {
     Item implementation = {};
     Item document_proxy = {};
     Item default_view = {};
@@ -367,7 +352,6 @@ struct JsDomState {
     char* prompt_queue[JS_DOM_PROMPT_QUEUE_CAP] = {};
     int prompt_head = 0;
     int prompt_tail = 0;
-    JsRootRange roots = {};
 };
 
 struct JsDomStorageEntry {
@@ -397,42 +381,38 @@ struct JsDomPlatformState {
 
 // String-concatenation fast tables are read on a hot path. They are plain
 // owner-thread fields: no lock, atomic, or per-call context lookup is needed.
-struct JsStringConcatState {
+struct JsStringConcatState : JsRootedState {
     Item last_four_byte_escape = {};
     Item percent_prefixes[16] = {};
     Item percent_bytes[256] = {};
     uint32_t last_four_byte_cp = 0;
     uint64_t last_four_byte_epoch = 0;
-    JsRootRange roots = {};
 };
 
 // Optimized global-var module slots are execution semantics. The fixed table
 // is context-local so ordinary property writes never serialize across realms.
-struct JsGlobalVarModuleBindingState {
+struct JsGlobalVarModuleBindingState : JsRootedState {
     Item global = {};
     Item keys[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
     int indices[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
     uint32_t module_state_ids[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
     int count = 0;
     uint64_t epoch = 0;
-    JsRootRange roots = {};
 };
 
-struct JsRuntimeCoreCacheState {
+struct JsRuntimeCoreCacheState : JsRootedState {
     Item proto_key = {};
-    JsRootRange roots = {};
 };
 
-struct JsFunctionPrototypeState {
+struct JsFunctionPrototypeState : JsRootedState {
     Item generator_function = {};
     Item async_generator_function = {};
     Item async_function = {};
-    JsRootRange roots = {};
 };
 
 // URI and one-byte-string fast caches are hit inside primitive operations.
 // Keep them context-local so those operations remain direct loads/stores.
-struct JsGlobalStringCacheState {
+struct JsGlobalStringCacheState : JsRootedState {
     Item uri_last_four_byte_string = {};
     Item last_from_char_code_string = {};
     Item decode_uri_component_error = {};
@@ -445,12 +425,11 @@ struct JsGlobalStringCacheState {
     uint64_t ascii_chars_epoch = ~0ULL;
     uint64_t decode_uri_component_error_epoch = 0;
     uint64_t decode_uri_error_epoch = 0;
-    JsRootRange roots = {};
 };
 
 // Global-object and lexical-environment caches are realm semantics. Item
 // storage is grouped before scalar metadata for one exact, one-time root range.
-struct JsGlobalBindingState {
+struct JsGlobalBindingState : JsRootedState {
     Item global_this = {};
     Item var_defined_keys[64] = {};
     Item var_defined_global = {};
@@ -464,14 +443,13 @@ struct JsGlobalBindingState {
     int lexical_count = 0;
     uint64_t lexical_epoch = 0;
     bool lexical_immutable[JS_GLOBAL_LEX_BIND_MAX] = {};
-    JsRootRange roots = {};
 };
 
 #define JS_TYPED_ARRAY_CACHE_TYPE_COUNT 12
 
 // Constructor identity is observable (`Array === globalThis.Array`), so these
 // caches must be private to a realm even though construction is infrequent.
-struct JsConstructorCacheState {
+struct JsConstructorCacheState : JsRootedState {
     Item global_builtin_functions[JS_BUILTIN_GLOBAL_MAX] = {};
     Item constructors[JS_CTOR_MAX] = {};
     Item typed_array_base = {};
@@ -479,10 +457,9 @@ struct JsConstructorCacheState {
     Item typed_array_prototypes[JS_TYPED_ARRAY_CACHE_TYPE_COUNT] = {};
     bool global_builtin_initialized = false;
     bool constructors_initialized = false;
-    JsRootRange roots = {};
 };
 
-struct JsRuntimeNamespaceState {
+struct JsRuntimeNamespaceState : JsRootedState {
     Item math = {};
     Item json = {};
     Item css = {};
@@ -491,7 +468,6 @@ struct JsRuntimeNamespaceState {
     Item test262 = {};
     Item reflect = {};
     Item atomics = {};
-    JsRootRange roots = {};
 };
 
 struct JsVmRuntimeState {
@@ -500,7 +476,7 @@ struct JsVmRuntimeState {
     int source_text_identifier_counter = 0;
 };
 
-struct JsTest262AgentState {
+struct JsTest262AgentState : JsRootedState {
     Item object = {};
     Item callbacks[JS_TEST262_AGENT_MAX] = {};
     Item reports[JS_TEST262_AGENT_REPORT_MAX] = {};
@@ -513,12 +489,11 @@ struct JsTest262AgentState {
     // Atomics waiter records are allocated only when the Atomics namespace is
     // materialized. They belong to this realm's Test262 agent simulation.
     void* atomics_waiter_state = NULL;
-    JsRootRange roots = {};
 };
 
 // Node process state is realm-local apart from the operating-system process.
 // The fixed listener and pending-message tables are exactly rooted once.
-struct JsProcessState {
+struct JsProcessState : JsRootedState {
     Item argv = {};
     Item exec_argv = {};
     Item object = {};
@@ -545,10 +520,9 @@ struct JsProcessState {
     char* ipc_buffer = NULL;
     size_t ipc_length = 0;
     size_t ipc_capacity = 0;
-    JsRootRange roots = {};
 };
 
-struct JsIteratorState {
+struct JsIteratorState : JsRootedState {
     Item generator_return_marker = {};
     Item generator_throw_marker = {};
     Item iterator_prototype = {};
@@ -562,7 +536,6 @@ struct JsIteratorState {
     Item generator_proto_depth2 = {};
     Item async_generator_proto_depth2 = {};
     Item async_iterator_prototype = {};
-    JsRootRange roots = {};
 };
 
 // Console counters/timers are observable per JS realm, not process-wide logs.
@@ -620,7 +593,7 @@ struct JsWellKnownRefs {
     NameId symbol_dispose = NAME_ID_NONE;
 };
 
-struct JsDiagnosticsChannelState {
+struct JsDiagnosticsChannelState : JsRootedState {
     Item channel_names[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
     Item channels[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
     Item channel_prototype = {};
@@ -632,10 +605,9 @@ struct JsDiagnosticsChannelState {
     Item deferred_errors[JS_DIAGNOSTICS_DEFERRED_ERROR_MAX] = {};
     int channel_count = 0;
     int deferred_error_count = 0;
-    JsRootRange roots = {};
 };
 
-struct JsAsyncHooksState {
+struct JsAsyncHooksState : JsRootedState {
     Item root_resource = {};
     Item current_resource = {};
     Item hooks[JS_ASYNC_HOOK_STATE_MAX] = {};
@@ -644,7 +616,6 @@ struct JsAsyncHooksState {
     int64_t next_id = 2;
     int hook_count = 0;
     int pending_destroy_count = 0;
-    JsRootRange roots = {};
 };
 
 enum JsPromiseState {
@@ -671,7 +642,7 @@ struct JsPromise : VMap {
     int64_t unhandled_epoch = 0;
 };
 
-struct JsPromiseRuntimeState {
+struct JsPromiseRuntimeState : JsRootedState {
     RuntimeAsyncDeque unhandled_deque = {};
     // Keep the three GC-visible owner slots contiguous; the deque control
     // record is native metadata and must never be scanned as an Item range.
@@ -685,7 +656,6 @@ struct JsPromiseRuntimeState {
     int64_t unhandled_epoch = 0;
     bool unhandled_strict = false;
     JsItemStack domain_stack = {};
-    JsRootRange roots = {};
 };
 
 // Module records are context-owned because namespace identity, TLA ordering,
@@ -727,10 +697,9 @@ struct JsClusterState {
     int64_t next_worker_id = 1;
 };
 
-struct JsAsyncLocalStorageState {
+struct JsAsyncLocalStorageState : JsRootedState {
     Item instances[JS_MAX_ALS_INSTANCES] = {};
     int instance_count = 0;
-    JsRootRange roots = {};
 };
 
 struct JsPerformanceState {

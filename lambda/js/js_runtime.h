@@ -152,6 +152,7 @@ Item js_to_object(Item value);
 bool js_is_truthy(Item value);
 // true for both physical representations of an ordinary JavaScript Array.
 bool js_is_js_array(Item value);
+bool js_is_object_value(Item value);
 // Item-status helpers use the same merged lane as ordinary JS calls: a
 // boolean true is success and an ERROR-tagged Item is the complete failure.
 Item js_status_ok(void);
@@ -194,6 +195,7 @@ Item js_status_ok(void);
 #define JS_FORWARD_LOCAL_RETURN(type, name, args, target, call_args) \
     type name args { return target call_args; }
 int64_t js_is_nullish(Item value);
+bool js_get_constructor_name(Item value, char* out, int out_size);
 
 // =============================================================================
 // Arithmetic Operators
@@ -271,6 +273,7 @@ Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
 const char* js_property_index_chars(int64_t index, int* out_len);
 Item js_get_key_default(Item object, Item key);
+Item js_get_key_cstr(Item object, const char* key);
 // Receiver-explicit property Get used by prototype, accessor, and Proxy paths.
 Item js_get_key_core(Item object, Item key, Item receiver);
 Item js_set_key_default(Item object, Item key, Item value);
@@ -417,7 +420,6 @@ Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, uint64_t* result_home);
 Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, Item h, uint64_t* result_home);
-void js_array_stats_dump(void);
 void js_set_call_stack_limit(int64_t limit);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_function_into(Item func_item, Item this_val, Item args_array,
@@ -613,7 +615,6 @@ Item js_new_number_wrapper(Item arg);
 Item js_new_number_checked(Item arg);
 Item js_new_boolean_wrapper(Item arg);
 Item js_new_string_wrapper(Item arg);
-void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
 Item js_get_prototype_from_constructor_default(Item new_target,
@@ -796,7 +797,6 @@ uint32_t js_active_module_name_count(void);
 uint32_t js_active_module_ic_count(void);
 bool js_link_module_ic_table(uint32_t module_state_id, uint32_t count);
 bool js_append_module_ic_table(uint32_t module_state_id, uint32_t count);
-void* js_active_module_ic(uint32_t index);
 uint32_t js_get_batch_preamble_var_count(void);
 bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
                                      uint32_t destination_module_state_id,
@@ -811,7 +811,6 @@ void js_register_global_var_module_bindings_bulk(const Item* keys, const int* in
  */
 void js_batch_reset(void);
 void js_intrinsic_state_teardown(void);
-int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
 void js_prepare_compiled_preamble_vars(int declaration_count);
 extern int js_batch_execution_mode;
@@ -970,10 +969,6 @@ void js_eval_env_push_frame(void);
 void js_eval_global_lexical_push_frame(void);
 int64_t js_eval_local_push_frame(void);
 void js_eval_local_pop_frame(void);
-void js_eval_private_push_frame(void);
-void js_eval_private_pop_frame(void);
-void js_eval_private_bind(Item unscoped_key, Item scoped_key);
-Item js_eval_private_resolve(Item unscoped_key);
 Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 void js_eval_local_export_var(Item key, Item value);
 void js_eval_local_note_lexical_binding(Item key);
@@ -1312,8 +1307,6 @@ Item js_evalscript_check_global_function_decl(Item key);
 void js_set_private_class_index(Item class_item, int index);
 Item js_object_group_by(Item items, Item callback);
 Item js_map_group_by(Item items, Item callback);
-void js_set_formal_length(Item fn_item, int length);
-void* js_function_get_ptr(Item fn_item);
 Item js_object_set_prototype_of(Item obj, Item proto);
 void js_set_class_name(Item cls_item, Item name_item);
 void js_set_default_constructor_property(Item proto_item, Item cls_item);
@@ -1347,172 +1340,58 @@ void js_private_field_init_end(void);
 
 Item make_string_item(const char* str, int len);
 Item make_string_item(const char* str);
-Item js_new_native_function(JsNativeP0 target);
-Item js_new_native_function(JsNativeP1 target);
-Item js_new_native_function(JsNativeP2 target);
-Item js_new_native_function(JsNativeP3 target);
-Item js_new_native_function(JsNativeP4 target);
-Item js_new_native_function(JsNativeP5 target);
-Item js_new_native_function(JsNativeP6 target);
-Item js_new_native_function(JsNativeP7 target);
-Item js_new_native_function(JsNativeP8 target);
-Item js_new_native_function(JsNativeP0 target, int adapter_arity);
-Item js_new_native_function(JsNativeP1 target, int adapter_arity);
-Item js_new_native_function(JsNativeP2 target, int adapter_arity);
-Item js_new_native_function(JsNativeP3 target, int adapter_arity);
-Item js_new_native_function(JsNativeP4 target, int adapter_arity);
-Item js_new_native_function(JsNativeP5 target, int adapter_arity);
-Item js_new_native_function(JsNativeP6 target, int adapter_arity);
-Item js_new_native_function(JsNativeP7 target, int adapter_arity);
-Item js_new_native_function(JsNativeP8 target, int adapter_arity);
-
-// Shared compatibility-surface publication keeps direct native functions
-// cached exactly as the legacy Set-property spelling did. Overloads keep this
-// header usable before the C++ Item definition in lambda.hpp is visible.
-void js_set_native_method(Item object, const char* name, JsNativeP0 target);
-void js_set_native_method(Item object, const char* name, JsNativeP1 target);
-void js_set_native_method(Item object, const char* name, JsNativeP2 target);
-void js_set_native_method(Item object, const char* name, JsNativeP3 target);
-void js_set_native_method(Item object, const char* name, JsNativeP4 target);
-void js_set_native_method(Item object, const char* name, JsNativeP5 target);
-void js_set_native_method(Item object, const char* name, JsNativeP6 target);
-void js_set_native_method(Item object, const char* name, JsNativeP7 target);
-void js_set_native_method(Item object, const char* name, JsNativeP8 target);
-void js_set_native_key(Item object, Item key, JsNativeP0 target);
-void js_set_native_key(Item object, Item key, JsNativeP1 target);
-void js_set_native_key(Item object, Item key, JsNativeP2 target);
-void js_set_native_key(Item object, Item key, JsNativeP3 target);
-void js_set_native_key(Item object, Item key, JsNativeP4 target);
-void js_set_native_key(Item object, Item key, JsNativeP5 target);
-void js_set_native_key(Item object, Item key, JsNativeP6 target);
-void js_set_native_key(Item object, Item key, JsNativeP7 target);
-void js_set_native_key(Item object, Item key, JsNativeP8 target);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP0 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP1 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP2 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP3 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP4 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP5 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP6 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP7 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name,
-                              JsNativeP8 target, int adapter_arity);
-Item js_install_native_method(Item object, const char* name, JsNativeP0 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP1 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP2 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP3 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP4 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP5 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP6 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP7 target);
-Item js_install_native_method(Item object, const char* name, JsNativeP8 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP0 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP1 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP2 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP3 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP4 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP5 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP6 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP7 target);
-Item js_install_native_constructor(Item object, const char* name, JsNativeP8 target);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP0 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP1 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP2 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP3 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP4 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP5 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP6 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP7 target, int adapter_arity);
-Item js_install_native_constructor(Item object, const char* name,
-                                   JsNativeP8 target, int adapter_arity);
+bool js_store_typed_value(void* field_ptr, TypeId value_type, Item value);
+// Native adapters are one overload family; keep declarations in lockstep with
+// the arity-generated implementations in js_runtime_function.cpp.
+#define JS_NATIVE_FIXED_ARITIES(M) \
+    M(0) M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8)
+#define JS_NATIVE_REST_ARITIES(M) \
+    M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8)
+#define JS_NATIVE_CLOSURE_ARITIES(M) M(1) M(2) M(3) M(4) M(5)
+#define JS_DECLARE_NATIVE_FACTORY(arity) \
+    Item js_new_native_function(JsNativeP##arity target); \
+    Item js_new_native_constructor(JsNativeP##arity target); \
+    Item js_new_distinct_native_function(JsNativeP##arity target); \
+    Item js_new_distinct_native_constructor(JsNativeP##arity target);
+JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_FACTORY)
+#undef JS_DECLARE_NATIVE_FACTORY
+#define JS_DECLARE_NATIVE_ADAPTED(arity) \
+    Item js_new_native_function(JsNativeP##arity target, int adapter_arity); \
+    Item js_new_native_constructor(JsNativeP##arity target, int adapter_arity);
+JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_ADAPTED)
+#undef JS_DECLARE_NATIVE_ADAPTED
+#define JS_DECLARE_NATIVE_PUBLISHER(arity) \
+    void js_set_native_method(Item object, const char* name, JsNativeP##arity target); \
+    void js_set_native_key(Item object, Item key, JsNativeP##arity target);
+JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_PUBLISHER)
+#undef JS_DECLARE_NATIVE_PUBLISHER
+#define JS_DECLARE_NATIVE_INSTALLER(arity) \
+    Item js_install_native_method(Item object, const char* name, JsNativeP##arity target); \
+    Item js_install_native_method(Item object, const char* name, JsNativeP##arity target, int adapter_arity); \
+    Item js_install_native_constructor(Item object, const char* name, JsNativeP##arity target); \
+    Item js_install_native_constructor(Item object, const char* name, JsNativeP##arity target, int adapter_arity);
+JS_NATIVE_FIXED_ARITIES(JS_DECLARE_NATIVE_INSTALLER)
+#undef JS_DECLARE_NATIVE_INSTALLER
+#define JS_DECLARE_NATIVE_REST(arity) \
+    Item js_new_native_rest_function(JsNativeP##arity target); \
+    Item js_new_native_rest_constructor(JsNativeP##arity target);
+JS_NATIVE_REST_ARITIES(JS_DECLARE_NATIVE_REST)
+#undef JS_DECLARE_NATIVE_REST
 Item js_initialize_native_constructor_prototype(Item constructor,
                                                 Item prototype);
-Item js_new_native_rest_function(JsNativeP1 target);
-Item js_new_native_rest_function(JsNativeP2 target);
-Item js_new_native_rest_function(JsNativeP3 target);
-Item js_new_native_rest_function(JsNativeP4 target);
-Item js_new_native_rest_function(JsNativeP5 target);
-Item js_new_native_rest_function(JsNativeP6 target);
-Item js_new_native_rest_function(JsNativeP7 target);
-Item js_new_native_rest_function(JsNativeP8 target);
 Item js_new_native_span_function(JsNativeSpan target);
 Item js_new_native_this_span_function(JsNativeThisSpan target);
 Item js_new_native_body_constructor(JsNativeCallBody call_body,
                                      JsNativeConstructBody construct_body,
                                      int formal_length);
 Item js_new_native_payload_function(JsNativeCallBody call_body,
-                                    uint64_t payload,
-                                    int formal_length);
-Item js_new_native_constructor(JsNativeP0 target);
-Item js_new_distinct_native_constructor(JsNativeP0 target);
-Item js_new_native_constructor(JsNativeP1 target);
-Item js_new_native_constructor(JsNativeP2 target);
-Item js_new_native_constructor(JsNativeP3 target);
-Item js_new_native_constructor(JsNativeP4 target);
-Item js_new_native_constructor(JsNativeP5 target);
-Item js_new_native_constructor(JsNativeP6 target);
-Item js_new_native_constructor(JsNativeP7 target);
-Item js_new_native_constructor(JsNativeP8 target);
-Item js_new_native_constructor(JsNativeP0 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP1 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP2 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP3 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP4 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP5 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP6 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP7 target, int adapter_arity);
-Item js_new_native_constructor(JsNativeP8 target, int adapter_arity);
-Item js_new_native_rest_constructor(JsNativeP1 target);
-Item js_new_native_rest_constructor(JsNativeP2 target);
-Item js_new_native_rest_constructor(JsNativeP3 target);
-Item js_new_native_rest_constructor(JsNativeP4 target);
-Item js_new_native_rest_constructor(JsNativeP5 target);
-Item js_new_native_rest_constructor(JsNativeP6 target);
-Item js_new_native_rest_constructor(JsNativeP7 target);
-Item js_new_native_rest_constructor(JsNativeP8 target);
-Item js_new_distinct_native_function(JsNativeP0 target);
-Item js_new_distinct_native_function(JsNativeP1 target);
-Item js_new_distinct_native_function(JsNativeP2 target);
-Item js_new_distinct_native_function(JsNativeP3 target);
-Item js_new_distinct_native_function(JsNativeP4 target);
-Item js_new_distinct_native_function(JsNativeP5 target);
-Item js_new_distinct_native_function(JsNativeP6 target);
-Item js_new_distinct_native_function(JsNativeP7 target);
-Item js_new_distinct_native_function(JsNativeP8 target);
-Item js_new_distinct_native_constructor(JsNativeP0 target);
-Item js_new_distinct_native_constructor(JsNativeP1 target);
-Item js_new_distinct_native_constructor(JsNativeP2 target);
-Item js_new_distinct_native_constructor(JsNativeP3 target);
-Item js_new_distinct_native_constructor(JsNativeP4 target);
-Item js_new_distinct_native_constructor(JsNativeP5 target);
-Item js_new_distinct_native_constructor(JsNativeP6 target);
-Item js_new_distinct_native_constructor(JsNativeP7 target);
-Item js_new_distinct_native_constructor(JsNativeP8 target);
-Item js_new_native_closure(JsNativeP1 target, int adapter_arity,
-                           Item* env, int env_size);
-Item js_new_native_closure(JsNativeP2 target, int adapter_arity,
-                           Item* env, int env_size);
-Item js_new_native_closure(JsNativeP3 target, int adapter_arity,
-                           Item* env, int env_size);
-Item js_new_native_closure(JsNativeP4 target, int adapter_arity,
-                           Item* env, int env_size);
-Item js_new_native_closure(JsNativeP5 target, int adapter_arity,
-                           Item* env, int env_size);
-
+                                    uint64_t payload, int formal_length);
+#define JS_DECLARE_NATIVE_CLOSURE(arity) \
+    Item js_new_native_closure(JsNativeP##arity target, int adapter_arity, \
+                               Item* env, int env_size);
+JS_NATIVE_CLOSURE_ARITIES(JS_DECLARE_NATIVE_CLOSURE)
+#undef JS_DECLARE_NATIVE_CLOSURE
+#undef JS_NATIVE_CLOSURE_ARITIES
+#undef JS_NATIVE_REST_ARITIES
+#undef JS_NATIVE_FIXED_ARITIES
 #endif

@@ -551,25 +551,32 @@ static bool observer_attribute_filter_matches(JsObserverTarget* registration,
     return false;
 }
 
+static void observer_set_record_fields(Item record, Item type, Item target,
+                                       Item added, Item removed, Item attribute,
+                                       Item old_value) {
+    js_set_key_default(record, observer_key("type"), type);
+    js_set_key_default(record, observer_key("target"), target);
+    js_set_key_default(record, observer_key("addedNodes"), added);
+    js_set_key_default(record, observer_key("removedNodes"), removed);
+    js_set_key_default(record, observer_key("previousSibling"), ItemNull);
+    js_set_key_default(record, observer_key("nextSibling"), ItemNull);
+    js_set_key_default(record, observer_key("attributeName"), attribute);
+    js_set_key_default(record, observer_key("attributeNamespace"), ItemNull);
+    js_set_key_default(record, observer_key("oldValue"), old_value);
+}
+
 static void observer_queue_child_record(JsObserverState* observer,
                                         JsObserverTarget* registration,
                                         DomNode* parent,
                                         DomNode* added,
                                         DomNode* removed) {
     Item record = js_new_object();
-    js_set_key_default(record, observer_key("type"), js_make_string("childList"));
-    js_set_key_default(record, observer_key("target"), js_dom_wrap_element(parent));
     Item added_nodes = js_array_new(0);
     Item removed_nodes = js_array_new(0);
     if (added) js_array_push(added_nodes, js_dom_wrap_element(added));
     if (removed) js_array_push(removed_nodes, js_dom_wrap_element(removed));
-    js_set_key_default(record, observer_key("addedNodes"), added_nodes);
-    js_set_key_default(record, observer_key("removedNodes"), removed_nodes);
-    js_set_key_default(record, observer_key("previousSibling"), ItemNull);
-    js_set_key_default(record, observer_key("nextSibling"), ItemNull);
-    js_set_key_default(record, observer_key("attributeName"), ItemNull);
-    js_set_key_default(record, observer_key("attributeNamespace"), ItemNull);
-    js_set_key_default(record, observer_key("oldValue"), ItemNull);
+    observer_set_record_fields(record, js_make_string("childList"),
+        js_dom_wrap_element(parent), added_nodes, removed_nodes, ItemNull, ItemNull);
     observer_queue_record(observer, record);
 
     // A removed subtree remains observed through the microtask checkpoint,
@@ -618,21 +625,14 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
                 break;
             }
             Item record = js_new_object();
-            js_set_key_default(record, observer_key("type"),
-                js_make_string(child ? "childList" : attribute ? "attributes" : "characterData"));
-            js_set_key_default(record, observer_key("target"), js_dom_wrap_element(observed_node));
             Item added = js_array_new(0);
             Item removed = js_array_new(0);
-            js_set_key_default(record, observer_key("addedNodes"), added);
-            js_set_key_default(record, observer_key("removedNodes"), removed);
-            js_set_key_default(record, observer_key("previousSibling"), ItemNull);
-            js_set_key_default(record, observer_key("nextSibling"), ItemNull);
-            js_set_key_default(record, observer_key("attributeName"),
-                attribute_name ? js_make_string(attribute_name) : ItemNull);
-            js_set_key_default(record, observer_key("attributeNamespace"), ItemNull);
             bool include_old = (attribute && registration->attribute_old_value) ||
                                (character && registration->character_data_old_value);
-            js_set_key_default(record, observer_key("oldValue"),
+            observer_set_record_fields(record,
+                js_make_string(child ? "childList" : attribute ? "attributes" : "characterData"),
+                js_dom_wrap_element(observed_node), added, removed,
+                attribute_name ? js_make_string(attribute_name) : ItemNull,
                 include_old && old_value ? js_make_string(old_value) : ItemNull);
             observer_queue_record(observer, record);
             break;

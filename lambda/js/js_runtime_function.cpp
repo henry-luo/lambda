@@ -155,7 +155,6 @@ void js_function_finalize_capabilities(JsFunction* fn) {
     if (!fn) return;
     js_function_register_pool_pointer_roots(fn);
     JsConstructEntry inherited_construct = fn->construct;
-    fn->call_lane_kind = JS_CALL_LANE_GENERIC;
     // D6.2.2v2 requires one writer for published executable capabilities;
     // metadata mutation must re-finalize before the value is republished.
     fn->invoke = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
@@ -176,21 +175,6 @@ void js_function_finalize_capabilities(JsFunction* fn) {
         fn->construct = js_construct_entry_ordinary;
     }
     js_function_ensure_metadata_properties(fn);
-    // A stale fast classification is wrongness, not merely slowness. New or
-    // dynamically-created wrappers stay generic until finalization supplies
-    // every fact the ordinary lane relies on.
-    if (!(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || fn->native_call ||
-        (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
-            JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
-            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
-        fn->with_env_depth > 0 || (fn->flags & JS_FUNC_FLAG_USES_WITH) ||
-        fn->eval_initializer_context || fn->vm_stack_filename ||
-        fn->vm_stack_source) {
-        return;
-    }
-    fn->call_lane_kind = fn->home_class.item != 0
-        ? JS_CALL_LANE_METHOD_HOME : JS_CALL_LANE_ORDINARY;
-    fn->invoke = js_function_select_call_entry(fn);
 }
 
 extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
@@ -505,59 +489,45 @@ static Item js_new_native_function_impl(JsNativeTarget target,
 }
 
 #define JS_DEFINE_NATIVE_FACTORIES(arity, type, member) \
-    Item js_new_native_function(type target) { \
+    static Item js_new_native_fixed_##arity(type target, bool constructor, \
+            bool distinct) { \
         JsNativeTarget stored = {}; stored.member = target; \
         return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED), arity, JS_NATIVE_CALL_FIXED, \
-            false, false); \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED, constructor), \
+            arity, JS_NATIVE_CALL_FIXED, constructor, distinct); \
+    } \
+    Item js_new_native_function(type target) { \
+        return js_new_native_fixed_##arity(target, false, false); \
     } \
     Item js_new_native_constructor(type target) { \
-        JsNativeTarget stored = {}; stored.member = target; \
-        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED, true), arity, JS_NATIVE_CALL_FIXED, \
-            true, false); \
+        return js_new_native_fixed_##arity(target, true, false); \
     } \
     Item js_new_distinct_native_function(type target) { \
-        JsNativeTarget stored = {}; stored.member = target; \
-        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED), arity, JS_NATIVE_CALL_FIXED, \
-            false, true); \
+        return js_new_native_fixed_##arity(target, false, true); \
     } \
     Item js_new_distinct_native_constructor(type target) { \
-        JsNativeTarget stored = {}; stored.member = target; \
-        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED, true), arity, JS_NATIVE_CALL_FIXED, \
-            true, true); \
+        return js_new_native_fixed_##arity(target, true, true); \
     }
 
-JS_DEFINE_NATIVE_FACTORIES(0, JsNativeP0, p0)
-JS_DEFINE_NATIVE_FACTORIES(1, JsNativeP1, p1)
-JS_DEFINE_NATIVE_FACTORIES(2, JsNativeP2, p2)
-JS_DEFINE_NATIVE_FACTORIES(3, JsNativeP3, p3)
-JS_DEFINE_NATIVE_FACTORIES(4, JsNativeP4, p4)
-JS_DEFINE_NATIVE_FACTORIES(5, JsNativeP5, p5)
-JS_DEFINE_NATIVE_FACTORIES(6, JsNativeP6, p6)
-JS_DEFINE_NATIVE_FACTORIES(7, JsNativeP7, p7)
-JS_DEFINE_NATIVE_FACTORIES(8, JsNativeP8, p8)
+#define JS_NATIVE_FIXED_ARITIES(M) \
+    M(0) M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8)
+#define JS_NATIVE_REST_ARITIES(M) \
+    M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8)
+#define JS_NATIVE_CLOSURE_ARITIES(M) \
+    M(0, JsNativeP1, p1) M(1, JsNativeP2, p2) M(2, JsNativeP3, p3) \
+    M(3, JsNativeP4, p4) M(4, JsNativeP5, p5)
+#define JS_DEFINE_NATIVE_FIXED(arity) \
+    JS_DEFINE_NATIVE_FACTORIES(arity, JsNativeP##arity, p##arity)
+
+JS_NATIVE_FIXED_ARITIES(JS_DEFINE_NATIVE_FIXED)
 
 #undef JS_DEFINE_NATIVE_FACTORIES
 
-static Item js_new_distinct_native_rest_function(JsNativeP1 target);
-static Item js_new_distinct_native_rest_function(JsNativeP2 target);
-static Item js_new_distinct_native_rest_function(JsNativeP3 target);
-static Item js_new_distinct_native_rest_function(JsNativeP4 target);
-static Item js_new_distinct_native_rest_function(JsNativeP5 target);
-static Item js_new_distinct_native_rest_function(JsNativeP6 target);
-static Item js_new_distinct_native_rest_function(JsNativeP7 target);
-static Item js_new_distinct_native_rest_function(JsNativeP8 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP1 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP2 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP3 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP4 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP5 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP6 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP7 target);
-static Item js_new_distinct_native_rest_constructor(JsNativeP8 target);
+#define JS_DECLARE_DISTINCT_NATIVE_REST(arity) \
+    static Item js_new_distinct_native_rest_function(JsNativeP##arity target); \
+    static Item js_new_distinct_native_rest_constructor(JsNativeP##arity target);
+JS_NATIVE_REST_ARITIES(JS_DECLARE_DISTINCT_NATIVE_REST)
+#undef JS_DECLARE_DISTINCT_NATIVE_REST
 
 // Publication helpers need binding identity, not target identity.  These
 // private overloads preserve the adapter contract while forcing one function
@@ -609,14 +579,10 @@ JS_FORWARD_LOCAL_RETURN(Item, js_new_native_constructor,
     (target, adapter_arity, true, false))
 JS_FORWARD_STATIC_ITEM(js_new_distinct_native_constructor, (JsNativeP0 target, int adapter_arity), js_new_native_adapter, (target, adapter_arity, true, true))
 
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(1, JsNativeP1)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(2, JsNativeP2)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(3, JsNativeP3)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(4, JsNativeP4)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(5, JsNativeP5)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(6, JsNativeP6)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(7, JsNativeP7)
-JS_DEFINE_NATIVE_ADAPTER_FACTORY(8, JsNativeP8)
+#define JS_DEFINE_NATIVE_ADAPTER(arity) \
+    JS_DEFINE_NATIVE_ADAPTER_FACTORY(arity, JsNativeP##arity)
+JS_NATIVE_REST_ARITIES(JS_DEFINE_NATIVE_ADAPTER)
+#undef JS_DEFINE_NATIVE_ADAPTER
 
 #undef JS_DEFINE_NATIVE_ADAPTER_FACTORY
 
@@ -652,25 +618,14 @@ JS_DEFINE_NATIVE_ADAPTER_FACTORY(8, JsNativeP8)
 
 // D5.2/D6.2.2v2: all native-method publication uses one exact-rooted shape;
 // argument evaluation order must never decide whether the key survives GC.
-JS_DEFINE_NATIVE_METHOD_INSTALLER(0, JsNativeP0)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(1, JsNativeP1)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(2, JsNativeP2)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(3, JsNativeP3)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(4, JsNativeP4)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(5, JsNativeP5)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(6, JsNativeP6)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(7, JsNativeP7)
-JS_DEFINE_NATIVE_METHOD_INSTALLER(8, JsNativeP8)
-
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(0, JsNativeP0)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(1, JsNativeP1)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(2, JsNativeP2)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(3, JsNativeP3)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(4, JsNativeP4)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(5, JsNativeP5)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(6, JsNativeP6)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(7, JsNativeP7)
-JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(8, JsNativeP8)
+#define JS_DEFINE_NATIVE_METHOD(arity) \
+    JS_DEFINE_NATIVE_METHOD_INSTALLER(arity, JsNativeP##arity)
+#define JS_DEFINE_NATIVE_CONSTRUCTOR(arity) \
+    JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(arity, JsNativeP##arity)
+JS_NATIVE_FIXED_ARITIES(JS_DEFINE_NATIVE_METHOD)
+JS_NATIVE_FIXED_ARITIES(JS_DEFINE_NATIVE_CONSTRUCTOR)
+#undef JS_DEFINE_NATIVE_METHOD
+#undef JS_DEFINE_NATIVE_CONSTRUCTOR
 
 #undef JS_DEFINE_NATIVE_METHOD_INSTALLER
 #undef JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER
@@ -704,39 +659,30 @@ Item js_initialize_native_constructor_prototype(Item constructor,
 }
 
 #define JS_DEFINE_NATIVE_REST_FACTORY(arity, type, member) \
-    Item js_new_native_rest_function(type target) { \
+    static Item js_new_native_rest_##arity(type target, bool constructor, \
+            bool distinct) { \
         JsNativeTarget stored = {}; stored.member = target; \
         return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST), arity, JS_NATIVE_CALL_REST, \
-            false, false); \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST, constructor), \
+            arity, JS_NATIVE_CALL_REST, constructor, distinct); \
+    } \
+    Item js_new_native_rest_function(type target) { \
+        return js_new_native_rest_##arity(target, false, false); \
     } \
     Item js_new_native_rest_constructor(type target) { \
-        JsNativeTarget stored = {}; stored.member = target; \
-        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST, true), arity, \
-            JS_NATIVE_CALL_REST, true, false); \
+        return js_new_native_rest_##arity(target, true, false); \
     } \
     static Item js_new_distinct_native_rest_function(type target) { \
-        JsNativeTarget stored = {}; stored.member = target; \
-        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST), arity, \
-            JS_NATIVE_CALL_REST, false, true); \
+        return js_new_native_rest_##arity(target, false, true); \
     } \
     static Item js_new_distinct_native_rest_constructor(type target) { \
-        JsNativeTarget stored = {}; stored.member = target; \
-        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
-            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST, true), arity, \
-            JS_NATIVE_CALL_REST, true, true); \
+        return js_new_native_rest_##arity(target, true, true); \
     }
 
-JS_DEFINE_NATIVE_REST_FACTORY(1, JsNativeP1, p1)
-JS_DEFINE_NATIVE_REST_FACTORY(2, JsNativeP2, p2)
-JS_DEFINE_NATIVE_REST_FACTORY(3, JsNativeP3, p3)
-JS_DEFINE_NATIVE_REST_FACTORY(4, JsNativeP4, p4)
-JS_DEFINE_NATIVE_REST_FACTORY(5, JsNativeP5, p5)
-JS_DEFINE_NATIVE_REST_FACTORY(6, JsNativeP6, p6)
-JS_DEFINE_NATIVE_REST_FACTORY(7, JsNativeP7, p7)
-JS_DEFINE_NATIVE_REST_FACTORY(8, JsNativeP8, p8)
+#define JS_DEFINE_NATIVE_REST(arity) \
+    JS_DEFINE_NATIVE_REST_FACTORY(arity, JsNativeP##arity, p##arity)
+JS_NATIVE_REST_ARITIES(JS_DEFINE_NATIVE_REST)
+#undef JS_DEFINE_NATIVE_REST
 
 #undef JS_DEFINE_NATIVE_REST_FACTORY
 
@@ -857,13 +803,12 @@ static Item js_new_native_closure_impl(JsNativeTarget target,
             policy, env, env_size); \
     }
 
-JS_DEFINE_NATIVE_CLOSURE_FACTORY(0, JsNativeP1, p1)
-JS_DEFINE_NATIVE_CLOSURE_FACTORY(1, JsNativeP2, p2)
-JS_DEFINE_NATIVE_CLOSURE_FACTORY(2, JsNativeP3, p3)
-JS_DEFINE_NATIVE_CLOSURE_FACTORY(3, JsNativeP4, p4)
-JS_DEFINE_NATIVE_CLOSURE_FACTORY(4, JsNativeP5, p5)
+JS_NATIVE_CLOSURE_ARITIES(JS_DEFINE_NATIVE_CLOSURE_FACTORY)
 
 #undef JS_DEFINE_NATIVE_CLOSURE_FACTORY
+#undef JS_NATIVE_CLOSURE_ARITIES
+#undef JS_NATIVE_REST_ARITIES
+#undef JS_NATIVE_FIXED_ARITIES
 JS_FORWARD_ITEM(js_new_function_mir, (void* func_ptr, int param_count), js_new_function_impl, (func_ptr, param_count, true))
 
 extern "C" Item js_new_distinct_function_mir(void* func_ptr, int param_count) {

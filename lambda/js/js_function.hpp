@@ -62,7 +62,6 @@ struct JsFunction {
     int catalog_id;
     Item properties_map;
     uint16_t flags;
-    uint8_t call_lane_kind;
     uint8_t intrinsic_class;
     int16_t formal_length;
     // Concrete TypedArray constructors carry their element policy directly;
@@ -136,9 +135,3 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
 
 #define JS_FUNC_POOL_POINTER_ROOTS_REGISTERED 1
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
-
-enum JsFunctionCallLaneKind : uint8_t {
-    JS_CALL_LANE_GENERIC = 0,
-    JS_CALL_LANE_ORDINARY = 1,
-    JS_CALL_LANE_METHOD_HOME = 2,
-};

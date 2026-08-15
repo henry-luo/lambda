@@ -352,7 +352,7 @@ static bool jm_assignment_targets_name(JsAstNode* left, const char* bare_name, i
     }
 }
 
-static bool jm_scope_env_name_matches_binding_in_statement(const char* scope_name,
+bool jm_scope_env_name_matches_binding(const char* scope_name,
         const char* name, JsAstNode* binding_node) {
     if (!scope_name || !name) return false;
     if (strcmp(scope_name, name) == 0) return true;
@@ -407,6 +407,30 @@ static void jm_scope_env_mark_pattern_bindings(JsMirTranspiler* mt, JsAstNode* p
     default:
         return;
     }
+}
+
+void jm_writeback_scope_env_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pattern) {
+    if (!mt || !pattern || mt->scope_env_reg == 0 || !mt->current_fc ||
+            !mt->current_fc->has_scope_env) return;
+    JsFuncCollected* se_fc = mt->current_fc;
+    struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_pattern_names(pattern, se_names);
+    size_t si = 0; void* sitem;
+    while (hashmap_iter(se_names, &si, &sitem)) {
+        JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
+        for (int se_s = 0; se_s < se_fc->scope_env_count; se_s++) {
+            if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
+                JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                if (ve) {
+                    jm_emit_store_i64(mt, se_s * (int)sizeof(uint64_t),
+                        mt->scope_env_reg, ve->reg);
+                }
+                break;
+            }
+        }
+    }
+    hashmap_free(se_names);
 }
 
 static bool jm_mutable_native_var_needs_boxing_walk(JsMirTranspiler* mt,
@@ -610,26 +634,7 @@ static void jm_writeback_pattern_bindings(JsMirTranspiler* mt,
                                           JsVariableDeclarationNode* var,
                                           JsAstNode* pattern) {
     jm_scope_env_mark_pattern_bindings(mt, pattern);
-    if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
-        JsFuncCollected* se_fc = mt->current_fc;
-        struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-            jm_name_hash, jm_name_cmp, NULL, NULL);
-        jm_collect_pattern_names(pattern, se_names);
-        size_t si = 0; void* sitem;
-        while (hashmap_iter(se_names, &si, &sitem)) {
-            JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
-            for (int se_s = 0; se_s < se_fc->scope_env_count; se_s++) {
-                if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
-                    JsMirVarEntry* ve = jm_find_var(mt, ne->name);
-                    if (ve) {
-                        jm_emit_store_i64(mt, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, ve->reg);
-                    }
-                    break;
-                }
-            }
-        }
-        hashmap_free(se_names);
-    }
+    jm_writeback_scope_env_pattern_bindings(mt, pattern);
 
     bool pattern_at_top_for_writeback = (mt->scope_depth <= 1) ||
         (var->kind == JS_VAR_VAR && mt->var_hoist_depth <= 1);
@@ -986,7 +991,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         JsFuncCollected* fc = mt->current_fc;
                         if (fc && fc->has_scope_env && fc->scope_env_names) {
                             for (int s = 0; s < fc->scope_env_count; s++) {
-                                if (jm_scope_env_name_matches_binding_in_statement(
+                                if (jm_scope_env_name_matches_binding(
                                         fc->scope_env_names[s], vname, d->id)) {
                                     log_debug("v24: widening scope-env var '%s' from %d to ANY", vname, init_type);
                                     init_type = LMD_TYPE_ANY;
@@ -2165,6 +2170,28 @@ void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     mt->current_class = saved_current_class;
 }
 
+bool jm_emit_class_static_source_order(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+        JsClassEntry* ce) {
+    if (!mt || !ce || !ce->node || !ce->node->body ||
+            ce->node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return false;
+    JsBlockNode* body = (JsBlockNode*)ce->node->body;
+    int static_field_index = 0;
+    int static_block_index = 0;
+    for (JsAstNode* elem = body->statements; elem; elem = elem->next) {
+        if (elem->node_type == JS_AST_NODE_FIELD_DEFINITION) {
+            JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)elem;
+            if (!fd->is_static || static_field_index >= ce->static_field_count) continue;
+            jm_emit_class_static_field(mt, cls_obj, ce,
+                &ce->static_fields[static_field_index++]);
+        } else if (elem->node_type == JS_AST_NODE_STATIC_BLOCK) {
+            if (static_block_index >= ce->static_block_count) continue;
+            jm_emit_class_static_block(mt, cls_obj, ce,
+                ce->static_blocks[static_block_index++]);
+        }
+    }
+    return true;
+}
+
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
     MIR_reg_t ctor_super_val) {
     // static initializers temporarily run with the class as this and restore the ambient binding afterward.
@@ -2182,25 +2209,8 @@ void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, J
     JsMirLexicalThisRebind static_this_rebind;
     jm_emit_begin_lexical_this_rebind(mt, cls_obj, &static_this_rebind, true);
     jm_call_void_0(mt, "js_private_field_init_begin");
-    bool emitted_ordered_static_elements = false;
-    if (ce->node && ce->node->body && ce->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        JsBlockNode* body = (JsBlockNode*)ce->node->body;
-        int static_field_index = 0;
-        int static_block_index = 0;
-        for (JsAstNode* elem = body->statements; elem; elem = elem->next) {
-            if (elem->node_type == JS_AST_NODE_FIELD_DEFINITION) {
-                JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)elem;
-                if (!fd->is_static) continue;
-                if (static_field_index >= ce->static_field_count) continue;
-                jm_emit_class_static_field(mt, cls_obj, ce, &ce->static_fields[static_field_index++]);
-            } else if (elem->node_type == JS_AST_NODE_STATIC_BLOCK) {
-                if (static_block_index >= ce->static_block_count) continue;
-                jm_emit_class_static_block(mt, cls_obj, ce,
-                    ce->static_blocks[static_block_index++]);
-            }
-        }
-        emitted_ordered_static_elements = true;
-    }
+    bool emitted_ordered_static_elements =
+        jm_emit_class_static_source_order(mt, cls_obj, ce);
     if (!emitted_ordered_static_elements) {
         for (int fi = 0; fi < ce->static_field_count; fi++) {
             jm_emit_class_static_field(mt, cls_obj, ce, &ce->static_fields[fi]);

@@ -7,6 +7,30 @@ extern "C" void js_dynfunc_cache_reset(void);
 static bool jm_module_phase_progress_is_enabled(void);
 static void jm_log_module_phase_progress(const char* filename, const char* phase);
 
+static JsModuleConstEntry* jm_register_module_var(JsMirTranspiler* mt,
+        const char* name, int var_kind, TypeId modvar_type,
+        bool is_nested_func_hoist, const char* log_kind) {
+    if (!mt || !mt->module_consts || !name ||
+            mt->module_var_count >= JS_MAX_MODULE_VARS) return NULL;
+    JsModuleConstEntry lookup;
+    memset(&lookup, 0, sizeof(lookup));
+    lookup.name = jm_persist_name(name);
+    if (hashmap_get(mt->module_consts, &lookup)) return NULL;
+
+    JsModuleConstEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.name = lookup.name;
+    entry.const_type = MCONST_MODVAR;
+    entry.int_val = mt->module_var_count++;
+    entry.var_kind = var_kind;
+    entry.modvar_type = modvar_type;
+    entry.is_nested_func_hoist = is_nested_func_hoist;
+    hashmap_set(mt->module_consts, &entry);
+    log_debug("js-mir: %s '%s' → module_var[%d]", log_kind ? log_kind : "module var",
+        entry.name, (int)entry.int_val);
+    return (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+}
+
 static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
         JsFunctionNode* fn, MIR_reg_t var_reg, const char* vname) {
     // Function declarations share module persistence and sloppy-eval export rules regardless of closure shape.
@@ -1433,20 +1457,6 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
     default:
         return false;
     }
-}
-
-static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
-    if (!pat || !names) return;
-    struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_pattern_names(pat, tmp);
-    size_t iter = 0;
-    void* item = NULL;
-    while (hashmap_iter(tmp, &iter, &item)) {
-        JsNameSetEntry* e = (JsNameSetEntry*)item;
-        jm_name_set_add_kind(names, e->name, var_kind);
-    }
-    hashmap_free(tmp);
 }
 
 static void jm_collect_var_decl_names_kind(JsVariableDeclarationNode* var, struct hashmap* names) {
@@ -3284,32 +3294,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             const char* vname = jm_format_name("_js_%.*s",
                                 (int)vid->name->len, vid->name->chars);
-                            JsModuleConstEntry lookup;
-                            lookup.name = jm_persist_name(vname);
-                            if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                                JsModuleConstEntry mce;
-                                memset(&mce, 0, sizeof(mce));
-                                mce.name = jm_persist_name(vname);
-                                mce.const_type = MCONST_MODVAR;
-                                mce.int_val = mt->module_var_count++;
-                                mce.var_kind = (int)v->kind;  // v20 TDZ: track let/const/var
-                                // Track initial type for module-var inference. JS Number
-                                // literals are boxed binary64 values even when integer-looking.
-                                mce.modvar_type = 0;  // default: unknown (0 = LMD_TYPE_RAW_POINTER = not tracked)
-                                if (vd->init && vd->init->node_type == JS_AST_NODE_LITERAL) {
-                                    JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
-                                    if (mlit->literal_type == JS_LITERAL_NUMBER) {
-                                        if (mlit->is_bigint) {
-                                            mce.modvar_type = LMD_TYPE_DECIMAL;
-                                        } else {
-                                            mce.modvar_type = LMD_TYPE_FLOAT;
-                                        }
-                                    }
+                            TypeId modvar_type = (TypeId)0;
+                            if (vd->init && vd->init->node_type == JS_AST_NODE_LITERAL) {
+                                JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
+                                if (mlit->literal_type == JS_LITERAL_NUMBER) {
+                                    modvar_type = mlit->is_bigint
+                                        ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
                                 }
-                                hashmap_set(mt->module_consts, &mce);
-                                log_debug("js-mir: module var '%s' index=%d modvar_type=%d",
-                                    mce.name, (int)mce.int_val, mce.modvar_type);
                             }
+                            jm_register_module_var(mt, vname, (int)v->kind,
+                                modvar_type, false, "module var");
                         } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                                                vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
                             // destructured binding: collect all names from the pattern
@@ -3319,20 +3313,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             size_t piter = 0; void* pitem;
                             while (hashmap_iter(pat_names, &piter, &pitem)) {
                                 JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
-                                JsModuleConstEntry lookup;
-                                lookup.name = jm_persist_name(ne->name);
-                                if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                                    JsModuleConstEntry mce;
-                                    memset(&mce, 0, sizeof(mce));
-                                    mce.name = jm_persist_name(ne->name);
-                                    mce.const_type = MCONST_MODVAR;
-                                    mce.int_val = mt->module_var_count++;
-                                    mce.var_kind = (int)v->kind;
-                                    mce.modvar_type = 0;
-                                    hashmap_set(mt->module_consts, &mce);
-                                    log_debug("js-mir: module var (destructured) '%s' index=%d",
-                                        mce.name, (int)mce.int_val);
-                                }
+                                jm_register_module_var(mt, ne->name, (int)v->kind,
+                                    (TypeId)0, false, "module var (destructured)");
                             }
                             hashmap_free(pat_names);
                         }
@@ -3395,20 +3377,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     continue;
                 }
             }
-            JsModuleConstEntry lookup;
-            lookup.name = jm_persist_name(e->name);
-            if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                JsModuleConstEntry mce;
-                memset(&mce, 0, sizeof(mce));
-                mce.name = jm_persist_name(e->name);
-                mce.const_type = MCONST_MODVAR;
-                mce.int_val = mt->module_var_count++;
-                mce.modvar_type = 0;
-                mce.is_nested_func_hoist = e->from_func_decl;
-                hashmap_set(mt->module_consts, &mce);
-                log_debug("js-mir: hoisted var '%s' → module_var[%d]%s", mce.name, (int)mce.int_val,
-                    e->from_func_decl ? " (nested func decl)" : "");
-            }
+            jm_register_module_var(mt, e->name, 0, (TypeId)0,
+                e->from_func_decl, "hoisted var");
         }
         if (eval_lex_collisions) hashmap_free(eval_lex_collisions);
         hashmap_free(hoisted_vars);
@@ -3442,22 +3412,12 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     bool is_self_import = (mt->filename != NULL && resolved_pp[0] != '\0' &&
                         strcmp(resolved_pp, mt->filename) == 0);
-                    JsModuleConstEntry lookup;
-                    lookup.name = jm_persist_name(vname);
-                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                        JsModuleConstEntry mce;
-                        memset(&mce, 0, sizeof(mce));
-                        mce.name = jm_persist_name(vname);
-                        mce.const_type = MCONST_MODVAR;
-                        mce.int_val = mt->module_var_count++;
-                        if (is_self_import) {
-                            mce.is_live_default_binding = true;
-                            mce.live_binding_specifier = name_pool_create_len(
-                                mt->tp->name_pool, resolved_pp, (int)strlen(resolved_pp))->chars;
-                        }
-                        hashmap_set(mt->module_consts, &mce);
-                        log_debug("js-mir: import default '%s' → module_var[%d] live=%d",
-                            vname, (int)mce.int_val, is_self_import);
+                    JsModuleConstEntry* mce = jm_register_module_var(mt, vname,
+                        0, (TypeId)0, false, "import default");
+                    if (mce && is_self_import) {
+                        mce->is_live_default_binding = true;
+                        mce->live_binding_specifier = name_pool_create_len(
+                            mt->tp->name_pool, resolved_pp, (int)strlen(resolved_pp))->chars;
                     }
                 }
 
@@ -3465,17 +3425,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (imp->namespace_name) {
                     const char* vname = jm_format_name("_js_%.*s",
                         (int)imp->namespace_name->len, imp->namespace_name->chars);
-                    JsModuleConstEntry lookup;
-                    lookup.name = jm_persist_name(vname);
-                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                        JsModuleConstEntry mce;
-                        memset(&mce, 0, sizeof(mce));
-                        mce.name = jm_persist_name(vname);
-                        mce.const_type = MCONST_MODVAR;
-                        mce.int_val = mt->module_var_count++;
-                        hashmap_set(mt->module_consts, &mce);
-                        log_debug("js-mir: import namespace '%s' → module_var[%d]", vname, (int)mce.int_val);
-                    }
+                    jm_register_module_var(mt, vname, 0, (TypeId)0, false,
+                        "import namespace");
                 }
 
                 // Named imports: import { a, b as c } from 'module'
@@ -3485,17 +3436,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
                         const char* vname = jm_format_name("_js_%.*s",
                             (int)isp->local_name->len, isp->local_name->chars);
-                        JsModuleConstEntry lookup;
-                        lookup.name = jm_persist_name(vname);
-                        if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                            JsModuleConstEntry mce;
-                            memset(&mce, 0, sizeof(mce));
-                            mce.name = jm_persist_name(vname);
-                            mce.const_type = MCONST_MODVAR;
-                            mce.int_val = mt->module_var_count++;
-                            hashmap_set(mt->module_consts, &mce);
-                            log_debug("js-mir: import named '%s' → module_var[%d]", vname, (int)mce.int_val);
-                        }
+                        jm_register_module_var(mt, vname, 0, (TypeId)0, false,
+                            "import named");
                     }
                     spec = spec->next;
                 }
@@ -3972,19 +3914,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         d = d->next;
                                         continue;
                                     }
-                                    JsModuleConstEntry lookup;
-                                    lookup.name = jm_persist_name(vname);
-                                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                                        JsModuleConstEntry mce;
-                                        memset(&mce, 0, sizeof(mce));
-                                        mce.name = jm_persist_name(vname);
-                                        mce.const_type = MCONST_MODVAR;
-                                        mce.is_iife_var = true;
-                                        mce.int_val = mt->module_var_count++;
-                                        mce.var_kind = (int)vd->kind;
-                                        hashmap_set(mt->module_consts, &mce);
-                                        log_debug("js-mir: iife var '%s' → module_var[%d]", vname, (int)mce.int_val);
-                                    }
+                                    JsModuleConstEntry* mce = jm_register_module_var(mt,
+                                        vname, (int)vd->kind, (TypeId)0, false,
+                                        "iife var");
+                                    if (mce) mce->is_iife_var = true;
                                 }
                             }
                             d = d->next;
@@ -4008,20 +3941,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (top_level_declares_name(e->name, stmt)) continue;
                     if (jm_name_set_has(iife_lex_collisions, e->name)) continue;
                     if (!iife_binding_is_unique(e->name)) continue;
-                    JsModuleConstEntry lookup;
-                    lookup.name = jm_persist_name(e->name);
-                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
-                        JsModuleConstEntry mce;
-                        memset(&mce, 0, sizeof(mce));
-                        mce.name = jm_persist_name(e->name);
-                        mce.const_type = MCONST_MODVAR;
-                        mce.int_val = mt->module_var_count++;
-                        mce.is_nested_func_hoist = true;
-                        mce.is_iife_var = true;
-                        hashmap_set(mt->module_consts, &mce);
-                        log_debug("js-mir: nested iife func '%s' → module_var[%d]",
-                            mce.name, (int)mce.int_val);
-                    }
+                    JsModuleConstEntry* mce = jm_register_module_var(mt,
+                        e->name, 0, (TypeId)0, true, "nested iife func");
+                    if (mce) mce->is_iife_var = true;
                 }
                 hashmap_free(iife_lex_collisions);
                 hashmap_free(iife_func_hoists);

@@ -142,7 +142,7 @@ static bool tls_validate_material_item(Item value, bool allow_pem_object,
         return true;
     }
     if (allow_pem_object && tls_is_object_like(value) && tls_property_exists(value, "pem")) {
-        Item pem = js_get_key_default(value, make_string_item("pem"));
+        Item pem = js_get_key_cstr(value, "pem");
         if (tls_validate_material_item(pem, false, allow_zero, bad_value)) return true;
     }
     if (bad_value) *bad_value = value;
@@ -703,7 +703,7 @@ static void tls_destroy_tracked_secure_contexts(void) {
 }
 
 static JsTlsSocket* tls_socket_from_object(Item obj) {
-    Item handle_item = js_get_key_default(obj, make_string_item("__handle__"));
+    Item handle_item = js_get_key_cstr(obj, "__handle__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsTlsSocket*)(uintptr_t)it2i(handle_item);
 }
@@ -731,8 +731,8 @@ static void tls_socket_emit(Item obj, const char* event, Item* args, int argc);
 static void tls_socket_clear_client_hello_probe(JsTlsSocket* sock);
 
 static void tls_socket_detach_js_object(Item obj) {
-    js_set_key_default(obj, make_string_item("__handle__"), ItemNull);
-    js_set_key_default(obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(obj, "__handle__", ItemNull);
+    js_set_key_cstr(obj, "destroyed", (Item){.item = ITEM_TRUE});
 }
 
 static void tls_socket_finalize_closed(JsTlsSocket* sock, bool had_error) {
@@ -760,9 +760,9 @@ static void tls_socket_finalize_closed(JsTlsSocket* sock, bool had_error) {
 
 static void tls_socket_destroy_pending_borrowed_socket(JsTlsSocket* sock) {
     if (!sock || !sock->has_borrowed_socket || sock->tcp_initialized) return;
-    Item destroy_fn = js_get_key_default(sock->borrowed_socket, make_string_item("resetAndDestroy"));
+    Item destroy_fn = js_get_key_cstr(sock->borrowed_socket, "resetAndDestroy");
     if (!is_callable(destroy_fn)) {
-        destroy_fn = js_get_key_default(sock->borrowed_socket, make_string_item("destroy"));
+        destroy_fn = js_get_key_cstr(sock->borrowed_socket, "destroy");
     }
     if (is_callable(destroy_fn)) {
         // A pre-adoption TLSSocket destroy must abort the borrowed connect
@@ -965,7 +965,7 @@ static void tls_server_emit_session_events(JsTlsSocket* sock) {
 }
 
 static void tls_socket_pipe(Item obj, Item value, bool end) {
-    Item dest = js_get_key_default(obj, make_string_item("__pipe_dest__"));
+    Item dest = js_get_key_cstr(obj, "__pipe_dest__");
     if (dest.item == 0 || get_type_id(dest) == LMD_TYPE_UNDEFINED ||
         get_type_id(dest) == LMD_TYPE_NULL) {
         return;
@@ -989,28 +989,28 @@ static void tls_socket_emit_session_now(JsTlsSocket* sock) {
 
 static Item make_tls_econnreset_error(JsTlsSocket* sock) {
     Item err = js_new_error(make_string_item("Client network socket disconnected before secure TLS connection was established"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ECONNRESET"));
+    js_set_key_cstr(err, "code", make_string_item("ECONNRESET"));
     if (sock && sock->has_host) {
-        js_set_key_default(err, make_string_item("host"), make_string_item(sock->connect_host));
+        js_set_key_cstr(err, "host", make_string_item(sock->connect_host));
     }
     if (sock && sock->has_port) {
-        js_set_key_default(err, make_string_item("port"), (Item){.item = i2it(sock->connect_port)});
+        js_set_key_cstr(err, "port", (Item){.item = i2it(sock->connect_port)});
     }
     if (sock && sock->has_local_address) {
-        js_set_key_default(err, make_string_item("localAddress"), make_string_item(sock->local_address));
+        js_set_key_cstr(err, "localAddress", make_string_item(sock->local_address));
     }
     return err;
 }
 
 static Item make_tls_socket_hang_up_error(void) {
     Item err = js_new_error(make_string_item("socket hang up"));
-    js_set_key_default(err, make_string_item("code"), make_string_item("ECONNRESET"));
+    js_set_key_cstr(err, "code", make_string_item("ECONNRESET"));
     return err;
 }
 
 static Item make_tls_error_with_code(const char* code, const char* message) {
     Item err = js_new_error(make_string_item(message));
-    js_set_key_default(err, make_string_item("code"), make_string_item(code));
+    js_set_key_cstr(err, "code", make_string_item(code));
     return err;
 }
 JS_FORWARD_STATIC_ITEM(make_tls_write_canceled_error, (void), make_tls_error_with_code, ("ECANCELED", "operation canceled"))
@@ -1018,15 +1018,15 @@ JS_FORWARD_STATIC_ITEM(make_tls_write_canceled_error, (void), make_tls_error_wit
 static Item make_tls_record_error(bool from_server_socket) {
     if (from_server_socket) {
         Item err = make_tls_error_with_code("ERR_SSL_WRONG_VERSION_NUMBER", "wrong version number");
-        js_set_key_default(err, make_string_item("library"), make_string_item("SSL routines"));
-        js_set_key_default(err, make_string_item("function"), make_string_item("ssl3_get_record"));
-        js_set_key_default(err, make_string_item("reason"), make_string_item("wrong version number"));
+        js_set_key_cstr(err, "library", make_string_item("SSL routines"));
+        js_set_key_cstr(err, "function", make_string_item("ssl3_get_record"));
+        js_set_key_cstr(err, "reason", make_string_item("wrong version number"));
         return err;
     }
     Item err = make_tls_error_with_code("ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION", "tlsv1 alert protocol version");
-    js_set_key_default(err, make_string_item("library"), make_string_item("SSL routines"));
-    js_set_key_default(err, make_string_item("function"), make_string_item("ssl3_read_bytes"));
-    js_set_key_default(err, make_string_item("reason"), make_string_item("tlsv1 alert protocol version"));
+    js_set_key_cstr(err, "library", make_string_item("SSL routines"));
+    js_set_key_cstr(err, "function", make_string_item("ssl3_read_bytes"));
+    js_set_key_cstr(err, "reason", make_string_item("tlsv1 alert protocol version"));
     return err;
 }
 
@@ -1061,14 +1061,14 @@ extern "C" Item js_tls_socket_resume(void) {
     if (sock && sock->tcp_initialized && !sock->destroyed) {
         // TLS sockets are already in flowing mode; resume() must still exist
         // because official fixtures use it to drain and reach the close path.
-        js_set_key_default(self, make_string_item("readableFlowing"), (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(self, "readableFlowing", (Item){.item = ITEM_TRUE});
     }
     return self;
 }
 
 extern "C" Item js_tls_socket_pause(void) {
     Item self = js_get_this();
-    js_set_key_default(self, make_string_item("readableFlowing"), (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(self, "readableFlowing", (Item){.item = ITEM_FALSE});
     return self;
 }
 
@@ -1269,10 +1269,10 @@ static int tls_collect_pfx_identities(Item pfx_item, const char* default_passphr
     char pass_buf[256] = {0};
     const char* passphrase = default_passphrase;
     if (tls_is_object_like(pfx_item)) {
-        Item child_pass = js_get_key_default(pfx_item, make_string_item("passphrase"));
+        Item child_pass = js_get_key_cstr(pfx_item, "passphrase");
         passphrase = tls_item_to_optional_cstr(child_pass, pass_buf, sizeof(pass_buf), default_passphrase);
-        Item buf_item = js_get_key_default(pfx_item, make_string_item("buf"));
-        if (tls_is_missing(buf_item)) buf_item = js_get_key_default(pfx_item, make_string_item("pfx"));
+        Item buf_item = js_get_key_cstr(pfx_item, "buf");
+        if (tls_is_missing(buf_item)) buf_item = js_get_key_cstr(pfx_item, "pfx");
         source = buf_item;
     }
 
@@ -1719,7 +1719,7 @@ extern "C" Item js_tls_socket_pipe(Item dest) {
         // self-pipe fixtures still need the TLSSocket to remember its target.
         self = dest;
     }
-    js_set_key_default(self, make_string_item("__pipe_dest__"), dest);
+    js_set_key_cstr(self, "__pipe_dest__", dest);
     return dest;
 }
 
@@ -1732,16 +1732,16 @@ extern "C" Item js_tls_socket_getPeerCert(void) {
     Item cert = js_new_object();
     char* subject = tls_get_peer_subject(sock->tls_conn);
     if (subject) {
-        js_set_key_default(cert, make_string_item("subject"), make_string_item(subject));
+        js_set_key_cstr(cert, "subject", make_string_item(subject));
         mem_free(subject);
     }
     const char* cipher = tls_get_cipher_name(sock->tls_conn);
     if (cipher) {
-        js_set_key_default(cert, make_string_item("cipher"), make_string_item(cipher));
+        js_set_key_cstr(cert, "cipher", make_string_item(cipher));
     }
     const char* proto = tls_get_protocol_version(sock->tls_conn);
     if (proto) {
-        js_set_key_default(cert, make_string_item("protocol"), make_string_item(proto));
+        js_set_key_cstr(cert, "protocol", make_string_item(proto));
     }
     return cert;
 }
@@ -1761,11 +1761,9 @@ extern "C" Item js_tls_socket_getCipher(void) {
     Item info = js_new_object();
     // mbedTLS reports IANA names while Node exposes OpenSSL names plus the
     // standard alias; mapping both keeps ciphers-selected handshakes observable.
-    js_set_key_default(info, make_string_item("name"),
-                    make_string_item(entry ? entry->node_name : cipher));
-    js_set_key_default(info, make_string_item("standardName"),
-                    make_string_item(entry ? entry->standard_name : cipher));
-    js_set_key_default(info, make_string_item("version"), make_string_item("TLSv1.2"));
+    js_set_key_cstr(info, "name", make_string_item(entry ? entry->node_name : cipher));
+    js_set_key_cstr(info, "standardName", make_string_item(entry ? entry->standard_name : cipher));
+    js_set_key_cstr(info, "version", make_string_item("TLSv1.2"));
     return info;
 }
 
@@ -1779,7 +1777,7 @@ extern "C" Item js_tls_socket_getEphemeralKeyInfo(void) {
 }
 
 extern "C" Item js_tls_socket_getProtocol(void) {
-    Item default_max = js_get_key_default(tls_namespace, make_string_item("DEFAULT_MAX_VERSION"));
+    Item default_max = js_get_key_cstr(tls_namespace, "DEFAULT_MAX_VERSION");
     if (get_type_id(default_max) == LMD_TYPE_STRING) {
         return default_max;
     }
@@ -1816,37 +1814,36 @@ extern "C" Item js_tls_socket_isSessionReused(void) {
 static Item make_tls_socket_object(JsTlsSocket* sock) {
     if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;
     Item obj = js_new_object_with_class(JS_CLASS_TLS_SOCKET);
-    js_set_key_default(obj, make_string_item("__handle__"),
-                    (Item){.item = i2it((int64_t)(uintptr_t)sock)});
-    tls_set_native(obj, "on", js_tls_socket_on);
-    tls_set_native(obj, "once", js_tls_socket_once);
-    tls_set_native(obj, "resume", js_tls_socket_resume);
-    tls_set_native(obj, "pause", js_tls_socket_pause);
-    tls_set_native(obj, "ref", js_tls_socket_ref);
-    tls_set_native(obj, "unref", js_tls_socket_unref);
-    js_set_key_default(obj, make_string_item("write"),
-                    js_new_native_rest_function(js_tls_socket_write));
-    js_set_key_default(obj, make_string_item("end"),
-                    js_new_native_rest_function(js_tls_socket_end));
-    tls_set_native(obj, "read", js_tls_socket_read);
-    tls_set_native(obj, "destroy", js_tls_socket_destroy);
-    tls_set_native(obj, "pipe", js_tls_socket_pipe);
-    tls_set_native(obj, "getPeerCertificate", js_tls_socket_getPeerCert);
-    tls_set_native(obj, "getCipher", js_tls_socket_getCipher);
-    tls_set_native(obj, "getEphemeralKeyInfo", js_tls_socket_getEphemeralKeyInfo);
-    tls_set_native(obj, "getProtocol", js_tls_socket_getProtocol);
-    tls_set_native(obj, "getSession", js_tls_socket_getSession);
-    tls_set_native(obj, "getTLSTicket", js_tls_socket_getTLSTicket);
-    tls_set_native(obj, "isSessionReused", js_tls_socket_isSessionReused);
-    js_set_key_default(obj, make_string_item("encrypted"), (Item){.item = b2it(true)});
-    js_set_key_default(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(obj, "__handle__", (Item){.item = i2it((int64_t)(uintptr_t)sock)});
+#define JS_TLS_SOCKET_EVENT_METHODS(M) \
+    M("on", js_tls_socket_on) M("once", js_tls_socket_once) \
+    M("resume", js_tls_socket_resume) M("pause", js_tls_socket_pause) \
+    M("ref", js_tls_socket_ref) M("unref", js_tls_socket_unref)
+#define JS_TLS_INSTALL_SOCKET_METHOD(name, target) tls_set_native(obj, name, target);
+    JS_TLS_SOCKET_EVENT_METHODS(JS_TLS_INSTALL_SOCKET_METHOD)
+#undef JS_TLS_INSTALL_SOCKET_METHOD
+    js_set_key_cstr(obj, "write", js_new_native_rest_function(js_tls_socket_write));
+    js_set_key_cstr(obj, "end", js_new_native_rest_function(js_tls_socket_end));
+#define JS_TLS_SOCKET_METHODS(M) \
+    M("read", js_tls_socket_read) M("destroy", js_tls_socket_destroy) \
+    M("pipe", js_tls_socket_pipe) M("getPeerCertificate", js_tls_socket_getPeerCert) \
+    M("getCipher", js_tls_socket_getCipher) M("getEphemeralKeyInfo", js_tls_socket_getEphemeralKeyInfo) \
+    M("getProtocol", js_tls_socket_getProtocol) M("getSession", js_tls_socket_getSession) \
+    M("getTLSTicket", js_tls_socket_getTLSTicket) M("isSessionReused", js_tls_socket_isSessionReused)
+#define JS_TLS_INSTALL_SOCKET_METHOD(name, target) tls_set_native(obj, name, target);
+    JS_TLS_SOCKET_METHODS(JS_TLS_INSTALL_SOCKET_METHOD)
+#undef JS_TLS_INSTALL_SOCKET_METHOD
+#undef JS_TLS_SOCKET_METHODS
+#undef JS_TLS_SOCKET_EVENT_METHODS
+    js_set_key_cstr(obj, "encrypted", (Item){.item = b2it(true)});
+    js_set_key_cstr(obj, "readable", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(obj, "writable", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(obj, "destroyed", (Item){.item = ITEM_FALSE});
     Item hwm = (Item){.item = i2it(sock->high_water_mark)};
     Item writable_state = js_new_object();
-    js_set_key_default(writable_state, make_string_item("highWaterMark"), hwm);
-    js_set_key_default(obj, make_string_item("_writableState"), writable_state);
-    js_set_key_default(obj, make_string_item("writableHighWaterMark"), hwm);
+    js_set_key_cstr(writable_state, "highWaterMark", hwm);
+    js_set_key_cstr(obj, "_writableState", writable_state);
+    js_set_key_cstr(obj, "writableHighWaterMark", hwm);
     sock->pending_read = make_js_undefined();
     sock->js_object = obj;
     return obj;
@@ -1867,9 +1864,9 @@ extern "C" Item js_tls_createSecureContext(Item options_item) {
 
     if (tls_is_object_like(options_item)) {
         // extract cert, key, ca from options
-        Item cert_item = js_get_key_default(options_item, make_string_item("cert"));
-        Item key_item = js_get_key_default(options_item, make_string_item("key"));
-        Item ca_item = js_get_key_default(options_item, make_string_item("ca"));
+        Item cert_item = js_get_key_cstr(options_item, "cert");
+        Item key_item = js_get_key_cstr(options_item, "key");
+        Item ca_item = js_get_key_cstr(options_item, "ca");
 
         if (tls_material_to_cstr(cert_item, cert_buf, sizeof(cert_buf))) {
             config.cert_file = cert_buf;
@@ -1892,8 +1889,7 @@ extern "C" Item js_tls_createSecureContext(Item options_item) {
     }
 
     Item result = js_new_object_with_class(JS_CLASS_SECURE_CONTEXT);
-    js_set_key_default(result, make_string_item("__ctx__"),
-                    (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
+    js_set_key_cstr(result, "__ctx__", (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     return result;
 }
 
@@ -1942,8 +1938,7 @@ static void tls_socket_finish_secure(JsTlsSocket* sock) {
 
     if (sock->is_server) {
         sock->authorized = true;
-        js_set_key_default(sock->js_object, make_string_item("authorized"),
-                        (Item){.item = b2it(true)});
+        js_set_key_cstr(sock->js_object, "authorized", (Item){.item = b2it(true)});
         tls_server_emit_session_events(sock);
         if (sock->owner_server && js_is_callable(sock->owner_server->connection_handler)) {
             Item client_obj = sock->js_object;
@@ -1962,11 +1957,10 @@ static void tls_socket_finish_secure(JsTlsSocket* sock) {
         // mbedTLS optional verification preserves Node's secureConnect timing
         // while still giving authorized the real certificate trust result.
         sock->authorized = sock->verify_peer && verify_result == 0;
-        js_set_key_default(sock->js_object, make_string_item("authorized"),
-                        (Item){.item = b2it(sock->authorized)});
+        js_set_key_cstr(sock->js_object, "authorized", (Item){.item = b2it(sock->authorized)});
         if (sock->reject_unauthorized && !sock->authorized) {
             Item err = js_new_error(make_string_item("self-signed certificate"));
-            js_set_key_default(err, make_string_item("code"), make_string_item("DEPTH_ZERO_SELF_SIGNED_CERT"));
+            js_set_key_cstr(err, "code", make_string_item("DEPTH_ZERO_SELF_SIGNED_CERT"));
             tls_socket_emit(sock->js_object, "error", &err, 1);
             tls_socket_close_after_error(sock);
             return;
@@ -2119,7 +2113,7 @@ static Item tls_attach_existing_socket_now(Item env_item) {
     JsTlsSocket* sock = tls_socket_from_object(tls_obj);
     if (!sock || sock->destroyed || sock->tls_conn) return make_js_undefined();
 
-    Item pause_fn = js_get_key_default(socket_obj, make_string_item("pause"));
+    Item pause_fn = js_get_key_cstr(socket_obj, "pause");
     if (is_callable(pause_fn)) {
         js_call_function(pause_fn, socket_obj, NULL, 0);
         js_microtask_flush();
@@ -2159,13 +2153,13 @@ static void schedule_tls_attach_existing_socket(Item tls_obj, Item socket_obj) {
     env[1] = socket_obj;
     Item attach = js_new_native_closure(tls_attach_existing_socket_now, 0, env, 2);
 
-    Item on_fn = js_get_key_default(socket_obj, make_string_item("on"));
+    Item on_fn = js_get_key_cstr(socket_obj, "on");
     if (is_callable(on_fn)) {
         Item args[2] = { make_string_item("connect"), attach };
         js_call_function(on_fn, socket_obj, args, 2);
         js_microtask_flush();
     }
-    Item ready_state = js_get_key_default(socket_obj, make_string_item("readyState"));
+    Item ready_state = js_get_key_cstr(socket_obj, "readyState");
     if (tls_string_equals_lit(ready_state, "open")) {
         js_next_tick_enqueue(attach);
     }
@@ -2208,10 +2202,10 @@ extern "C" Item js_tls_TLSSocket(Item socket_item, Item options_item) {
     JsTlsSocket* sock = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
     sock->is_server = false;
     if (tls_is_object_like(options_item)) {
-        Item is_server = js_get_key_default(options_item, make_string_item("isServer"));
+        Item is_server = js_get_key_cstr(options_item, "isServer");
         sock->is_server = get_type_id(is_server) == LMD_TYPE_BOOL && it2b(is_server);
-        Item secure_context = js_get_key_default(options_item, make_string_item("secureContext"));
-        Item ctx_item = js_get_key_default(secure_context, make_string_item("__ctx__"));
+        Item secure_context = js_get_key_cstr(options_item, "secureContext");
+        Item ctx_item = js_get_key_cstr(secure_context, "__ctx__");
         if (get_type_id(ctx_item) == LMD_TYPE_INT) {
             sock->tls_ctx = (TlsContext*)(uintptr_t)it2i(ctx_item);
             sock->owns_context = false;
@@ -2225,13 +2219,13 @@ extern "C" Item js_tls_TLSSocket(Item socket_item, Item options_item) {
         sock->owns_context = true;
     }
     Item obj = make_tls_socket_object(sock);
-    js_set_key_default(obj, make_string_item("authorized"), (Item){.item = b2it(false)});
-    js_set_key_default(obj, make_string_item("alpnProtocol"), make_string_item("http/1.1"));
+    js_set_key_cstr(obj, "authorized", (Item){.item = b2it(false)});
+    js_set_key_cstr(obj, "alpnProtocol", make_string_item("http/1.1"));
     if (get_type_id(socket_item) == LMD_TYPE_MAP || get_type_id(socket_item) == LMD_TYPE_OBJECT ||
         get_type_id(socket_item) == LMD_TYPE_VMAP) {
         sock->borrowed_socket = socket_item;
         sock->has_borrowed_socket = true;
-        js_set_key_default(obj, make_string_item("__underlying_socket__"), socket_item);
+        js_set_key_cstr(obj, "__underlying_socket__", socket_item);
         schedule_tls_attach_existing_socket(obj, socket_item);
     } else if (sock->is_server) {
         schedule_tls_secure_event(obj);
@@ -2265,49 +2259,49 @@ extern "C" Item js_tls_connect(Item options_item) {
 
     // extract port, host from options
     if (tls_is_object_like(options_item)) {
-        Item socket_item = js_get_key_default(options_item, make_string_item("socket"));
+        Item socket_item = js_get_key_cstr(options_item, "socket");
         if (get_type_id(socket_item) == LMD_TYPE_MAP || get_type_id(socket_item) == LMD_TYPE_OBJECT ||
             get_type_id(socket_item) == LMD_TYPE_VMAP) {
             use_existing_socket = true;
             existing_socket_item = socket_item;
         }
-        Item port_item = js_get_key_default(options_item, make_string_item("port"));
+        Item port_item = js_get_key_cstr(options_item, "port");
         if (get_type_id(port_item) == LMD_TYPE_INT) {
             port = (int)it2i(port_item);
             has_port = true;
         }
-        Item host_item = js_get_key_default(options_item, make_string_item("host"));
+        Item host_item = js_get_key_cstr(options_item, "host");
         if (get_type_id(host_item) == LMD_TYPE_STRING) {
             item_to_cstr(host_item, host_buf, sizeof(host_buf));
             has_host = true;
         }
-        Item local_item = js_get_key_default(options_item, make_string_item("localAddress"));
+        Item local_item = js_get_key_cstr(options_item, "localAddress");
         if (get_type_id(local_item) == LMD_TYPE_STRING) {
             item_to_cstr(local_item, local_address, sizeof(local_address));
             has_local_address = true;
         }
-        Item reject_item = js_get_key_default(options_item, make_string_item("rejectUnauthorized"));
+        Item reject_item = js_get_key_cstr(options_item, "rejectUnauthorized");
         if (get_type_id(reject_item) == LMD_TYPE_BOOL && !it2b(reject_item)) {
             reject_unauthorized = false;
         }
-        Item ca_item = js_get_key_default(options_item, make_string_item("ca"));
+        Item ca_item = js_get_key_cstr(options_item, "ca");
         if (tls_material_list_to_cstr(ca_item, ca_buf, sizeof(ca_buf))) {
             has_ca = true;
         }
-        Item session_item = js_get_key_default(options_item, make_string_item("session"));
+        Item session_item = js_get_key_cstr(options_item, "session");
         if (js_is_typed_array(session_item) || get_type_id(session_item) == LMD_TYPE_STRING) {
             has_session = true;
         }
-        Item ciphers_item = js_get_key_default(options_item, make_string_item("ciphers"));
+        Item ciphers_item = js_get_key_cstr(options_item, "ciphers");
         tls_copy_cipher_option(ciphers_item, requested_cipher, sizeof(requested_cipher),
                                NULL, 0);
-        Item lookup = js_get_key_default(options_item, make_string_item("lookup"));
+        Item lookup = js_get_key_cstr(options_item, "lookup");
         if (js_is_callable(lookup)) {
             Item lookup_options = js_new_object();
-            js_set_key_default(lookup_options, make_string_item("family"), make_js_undefined());
-            Item hints = js_get_key_default(options_item, make_string_item("hints"));
-            js_set_key_default(lookup_options, make_string_item("hints"), hints);
-            js_set_key_default(lookup_options, make_string_item("all"), (Item){.item = b2it(true)});
+            js_set_key_cstr(lookup_options, "family", make_js_undefined());
+            Item hints = js_get_key_cstr(options_item, "hints");
+            js_set_key_cstr(lookup_options, "hints", hints);
+            js_set_key_cstr(lookup_options, "all", (Item){.item = b2it(true)});
             Item lookup_args[2] = { make_string_item(host_buf), lookup_options };
             js_call_function(lookup, ItemNull, lookup_args, 2);
             js_microtask_flush();
@@ -2327,24 +2321,24 @@ extern "C" Item js_tls_connect(Item options_item) {
                 item_to_cstr(second, host_buf, sizeof(host_buf));
                 has_host = true;
             } else if (tls_is_object_like(second)) {
-                Item host_item = js_get_key_default(second, make_string_item("host"));
+                Item host_item = js_get_key_cstr(second, "host");
                 if (get_type_id(host_item) == LMD_TYPE_STRING) {
                     item_to_cstr(host_item, host_buf, sizeof(host_buf));
                     has_host = true;
                 }
-                Item reject_item = js_get_key_default(second, make_string_item("rejectUnauthorized"));
+                Item reject_item = js_get_key_cstr(second, "rejectUnauthorized");
                 if (get_type_id(reject_item) == LMD_TYPE_BOOL && !it2b(reject_item)) {
                     reject_unauthorized = false;
                 }
-                Item ca_item = js_get_key_default(second, make_string_item("ca"));
+                Item ca_item = js_get_key_cstr(second, "ca");
                 if (tls_material_list_to_cstr(ca_item, ca_buf, sizeof(ca_buf))) {
                     has_ca = true;
                 }
-                Item session_item = js_get_key_default(second, make_string_item("session"));
+                Item session_item = js_get_key_cstr(second, "session");
                 if (js_is_typed_array(session_item) || get_type_id(session_item) == LMD_TYPE_STRING) {
                     has_session = true;
                 }
-                Item ciphers_item = js_get_key_default(second, make_string_item("ciphers"));
+                Item ciphers_item = js_get_key_cstr(second, "ciphers");
                 tls_copy_cipher_option(ciphers_item, requested_cipher, sizeof(requested_cipher),
                                        NULL, 0);
             }
@@ -2393,13 +2387,13 @@ extern "C" Item js_tls_connect(Item options_item) {
 
     Item obj = make_tls_socket_object(sock);
     if (js_is_callable(callback)) {
-        js_set_key_default(obj, make_string_item("__on_secureConnect__"), callback);
+        js_set_key_cstr(obj, "__on_secureConnect__", callback);
     }
 
     if (use_existing_socket) {
         sock->borrowed_socket = existing_socket_item;
         sock->has_borrowed_socket = true;
-        js_set_key_default(obj, make_string_item("__underlying_socket__"), existing_socket_item);
+        js_set_key_cstr(obj, "__underlying_socket__", existing_socket_item);
         schedule_tls_attach_existing_socket(obj, existing_socket_item);
         return obj;
     }
@@ -2517,7 +2511,7 @@ static Item js_tls_server_listening_tick(Item env_item) {
     if (!env) return make_js_undefined();
     Item self = env[0];
     Item callback = env[1];
-    Item on_listening = js_get_key_default(self, make_string_item("__on_listening__"));
+    Item on_listening = js_get_key_cstr(self, "__on_listening__");
     if (js_is_callable(on_listening)) {
         js_call_function(on_listening, self, NULL, 0);
     }
@@ -2531,7 +2525,7 @@ static Item js_tls_server_listening_tick(Item env_item) {
 // server.listen(port, [host], [callback])
 extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callback) {
     Item self = js_get_this();
-    Item handle_item = js_get_key_default(self, make_string_item("__server__"));
+    Item handle_item = js_get_key_cstr(self, "__server__");
     if (handle_item.item == 0) return self;
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
@@ -2557,7 +2551,7 @@ extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callba
         return self;
     }
 
-    js_set_key_default(self, make_string_item("__listening__"), (Item){.item = b2it(true)});
+    js_set_key_cstr(self, "__listening__", (Item){.item = b2it(true)});
     // Node emits listening after listen() returns; synchronous TLS callbacks
     // keep `const server = createServer().listen(...)` in its TDZ.
     Item* env = js_alloc_env(2);
@@ -2571,7 +2565,7 @@ extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callba
 // server.address() — returns {address, family, port} for the listening socket
 static Item js_tls_server_address(void) {
     Item self = js_get_this();
-    Item handle_item = js_get_key_default(self, make_string_item("__server__"));
+    Item handle_item = js_get_key_cstr(self, "__server__");
     if (handle_item.item == 0 || handle_item.item == ITEM_NULL) return ItemNull;
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return ItemNull;
@@ -2582,7 +2576,7 @@ static Item js_tls_server_address(void) {
 static JsTlsServer* tls_server_from_object(Item self) {
     TypeId type = get_type_id(self);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
-    Item handle_item = js_get_key_default(self, make_string_item("__server__"));
+    Item handle_item = js_get_key_cstr(self, "__server__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsTlsServer*)(uintptr_t)it2i(handle_item);
 }
@@ -2611,7 +2605,7 @@ static Item js_tls_server_getConnections(Item callback) {
 // server.close([callback])
 extern "C" Item js_tls_server_close(Item callback) {
     Item self = js_get_this();
-    Item handle_item = js_get_key_default(self, make_string_item("__server__"));
+    Item handle_item = js_get_key_cstr(self, "__server__");
     if (handle_item.item == 0) return self;
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
@@ -2630,7 +2624,7 @@ extern "C" Item js_tls_server_close(Item callback) {
                     js_call_function(s->close_callback, s->js_object, NULL, 0);
                     js_microtask_flush();
                 }
-                js_set_key_default(s->js_object, make_string_item("__server__"), ItemNull);
+                js_set_key_cstr(s->js_object, "__server__", ItemNull);
                 tls_server_maybe_destroy(s);
             }
         });
@@ -2650,7 +2644,7 @@ extern "C" Item js_tls_server_on(Item event_item, Item callback) {
     snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
     js_set_key_default(self, make_string_item(key), callback);
     if (ev->len == 9 && memcmp(ev->chars, "listening", 9) == 0) {
-        Item listening = js_get_key_default(self, make_string_item("__listening__"));
+        Item listening = js_get_key_cstr(self, "__listening__");
         if (get_type_id(listening) == LMD_TYPE_BOOL && it2b(listening) && is_callable(callback)) {
             js_call_function(callback, self, NULL, 0);
             js_microtask_flush();
@@ -2705,9 +2699,9 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     memset(pfx_key_bufs, 0, sizeof(pfx_key_bufs));
 
     if (tls_is_object_like(options_item)) {
-        Item cert_item = js_get_key_default(options_item, make_string_item("cert"));
-        Item key_item = js_get_key_default(options_item, make_string_item("key"));
-        Item passphrase_item = js_get_key_default(options_item, make_string_item("passphrase"));
+        Item cert_item = js_get_key_cstr(options_item, "cert");
+        Item key_item = js_get_key_cstr(options_item, "key");
+        Item passphrase_item = js_get_key_cstr(options_item, "passphrase");
         const char* default_passphrase = tls_item_to_optional_cstr(passphrase_item,
             passphrase_buf, sizeof(passphrase_buf), "");
         if (tls_material_to_cstr(cert_item, cert_buf, sizeof(cert_buf))) {
@@ -2716,10 +2710,10 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
         if (tls_material_to_cstr(key_item, key_buf, sizeof(key_buf))) {
             config.key_file = key_buf;
         }
-        Item pfx_item = js_get_key_default(options_item, make_string_item("pfx"));
+        Item pfx_item = js_get_key_cstr(options_item, "pfx");
         pfx_count = tls_collect_pfx_identities(pfx_item, default_passphrase,
             pfx_cert_bufs, pfx_key_bufs, TLS_MAX_PFX_IDENTITIES);
-        Item ticket_item = js_get_key_default(options_item, make_string_item("ticketKeys"));
+        Item ticket_item = js_get_key_cstr(options_item, "ticketKeys");
         const char* ticket_data = NULL;
         size_t ticket_len = 0;
         if (tls_get_write_bytes(ticket_item, &ticket_data, &ticket_len) && ticket_data) {
@@ -2750,19 +2744,18 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     }
 
     Item obj = js_new_object_with_class(JS_CLASS_TLS_SERVER);
-    js_set_key_default(obj, make_string_item("__server__"),
-                    (Item){.item = i2it((int64_t)(uintptr_t)srv)});
-    tls_set_native(obj, "listen", js_tls_server_listen);
-    tls_set_native(obj, "close", js_tls_server_close);
-    tls_set_native(obj, "on", js_tls_server_on);
-    tls_set_native(obj, "once", js_tls_server_once);
-    tls_set_native(obj, "emit", js_tls_server_emit);
-    tls_set_native(obj, "getTicketKeys", js_tls_server_getTicketKeys);
-    tls_set_native(obj, "setTicketKeys", js_tls_server_setTicketKeys);
-    tls_set_native(obj, "address", js_tls_server_address);
-    tls_set_native(obj, "ref", js_tls_server_ref);
-    tls_set_native(obj, "unref", js_tls_server_unref);
-    tls_set_native(obj, "getConnections", js_tls_server_getConnections);
+    js_set_key_cstr(obj, "__server__", (Item){.item = i2it((int64_t)(uintptr_t)srv)});
+#define JS_TLS_SERVER_METHODS(M) \
+    M("listen", js_tls_server_listen) M("close", js_tls_server_close) \
+    M("on", js_tls_server_on) M("once", js_tls_server_once) \
+    M("emit", js_tls_server_emit) M("getTicketKeys", js_tls_server_getTicketKeys) \
+    M("setTicketKeys", js_tls_server_setTicketKeys) M("address", js_tls_server_address) \
+    M("ref", js_tls_server_ref) M("unref", js_tls_server_unref) \
+    M("getConnections", js_tls_server_getConnections)
+#define JS_TLS_INSTALL_SERVER_METHOD(name, target) tls_set_native(obj, name, target);
+    JS_TLS_SERVER_METHODS(JS_TLS_INSTALL_SERVER_METHOD)
+#undef JS_TLS_INSTALL_SERVER_METHOD
+#undef JS_TLS_SERVER_METHODS
 
     srv->js_object = obj;
     return obj;
@@ -2798,7 +2791,7 @@ static int64_t tls_alpn_protocols_length(Item protocols_item) {
     if (get_type_id(protocols_item) == LMD_TYPE_ARRAY) {
         return js_array_length(protocols_item);
     }
-    Item length_item = js_get_key_default(protocols_item, make_string_item("length"));
+    Item length_item = js_get_key_cstr(protocols_item, "length");
     if (get_type_id(length_item) != LMD_TYPE_INT) return -1;
     int64_t len = it2i(length_item);
     return len >= 0 ? len : -1;
@@ -2845,8 +2838,7 @@ extern "C" Item js_tls_convertALPNProtocols(Item protocols_item, Item out_item) 
         }
     }
 
-    js_set_key_default(out_item, make_string_item("ALPNProtocols"),
-                    js_buffer_from_bytes(encoded, total));
+    js_set_key_cstr(out_item, "ALPNProtocols", js_buffer_from_bytes(encoded, total));
     return make_js_undefined();
 }
 
@@ -2864,7 +2856,7 @@ static Item tls_constructor_prototype(Item ctor, JsClass cls) {
         proto = js_new_object_with_class(cls);
         js_set_key_default(ctor, proto_key, proto);
     }
-    js_set_key_default(proto, make_string_item("constructor"), ctor);
+    js_set_key_cstr(proto, "constructor", ctor);
     js_mark_non_enumerable(proto, make_string_item("constructor"));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
         js_function_set_prototype(ctor, proto);
@@ -2893,8 +2885,8 @@ extern "C" Item js_get_tls_namespace(void) {
 
     Item tls_socket_proto = tls_constructor_prototype(tls_socket_fn, JS_CLASS_TLS_SOCKET);
     Item net_ns = js_get_net_namespace();
-    Item net_socket_fn = js_get_key_default(net_ns, make_string_item("Socket"));
-    Item net_socket_proto = js_get_key_default(net_socket_fn, make_string_item("prototype"));
+    Item net_socket_fn = js_get_key_cstr(net_ns, "Socket");
+    Item net_socket_proto = js_get_key_cstr(net_socket_fn, "prototype");
     if (get_type_id(net_socket_fn) == LMD_TYPE_FUNC) {
         js_set_prototype(tls_socket_fn, net_socket_fn);
     }
@@ -2903,8 +2895,8 @@ extern "C" Item js_get_tls_namespace(void) {
     }
 
     Item server_proto = tls_constructor_prototype(server_fn, JS_CLASS_SERVER);
-    Item net_server_fn = js_get_key_default(net_ns, make_string_item("Server"));
-    Item net_server_proto = js_get_key_default(net_server_fn, make_string_item("prototype"));
+    Item net_server_fn = js_get_key_cstr(net_ns, "Server");
+    Item net_server_proto = js_get_key_cstr(net_server_fn, "prototype");
     if (get_type_id(net_server_fn) == LMD_TYPE_FUNC) {
         js_set_prototype(server_fn, net_server_fn);
     }
@@ -2913,16 +2905,12 @@ extern "C" Item js_get_tls_namespace(void) {
     }
 
     // TLS constants
-    js_set_key_default(tls_namespace, make_string_item("DEFAULT_MIN_VERSION"),
-                    make_string_item("TLSv1.2"));
-    js_set_key_default(tls_namespace, make_string_item("DEFAULT_MAX_VERSION"),
-                    make_string_item("TLSv1.3"));
+    js_set_key_cstr(tls_namespace, "DEFAULT_MIN_VERSION", make_string_item("TLSv1.2"));
+    js_set_key_cstr(tls_namespace, "DEFAULT_MAX_VERSION", make_string_item("TLSv1.3"));
 
     // Cipher suite defaults
-    js_set_key_default(tls_namespace, make_string_item("DEFAULT_CIPHERS"),
-        make_string_item("TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"));
-    js_set_key_default(tls_namespace, make_string_item("DEFAULT_ECDH_CURVE"),
-        make_string_item("auto"));
+    js_set_key_cstr(tls_namespace, "DEFAULT_CIPHERS", make_string_item("TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"));
+    js_set_key_cstr(tls_namespace, "DEFAULT_ECDH_CURVE", make_string_item("auto"));
 
     Item root_key = make_string_item("rootCertificates");
     js_set_key_default(tls_namespace, root_key, tls_get_bundled_certificates());

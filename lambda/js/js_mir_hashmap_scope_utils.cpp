@@ -9,11 +9,6 @@ void jm_set_name_pool_override(NamePool* pool) {
     g_js_mir_name_pool_override = pool;
 }
 
-static bool jm_lookup_import_metadata(const char* name,
-        JitImportMetadata* metadata) {
-    return jit_import_get_metadata(name, metadata);
-}
-
 static NamePool* jm_active_name_pool(void) {
     if (g_js_mir_name_pool_override) return g_js_mir_name_pool_override;
     JsMirTranspiler* mt = g_active_mir_transpiler;
@@ -203,7 +198,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.root_call_value = js_call_root_value;
     mt->em.note_call_exception = jm_note_call_error_lane;
     mt->em.convert_rep = jm_convert_rep;
-    mt->em.lookup_import_metadata = jm_lookup_import_metadata;
+    mt->em.lookup_import_metadata = jit_import_get_metadata;
     mt->is_module = is_module;
     mt->filename = filename;
     mt->cascade_debug_site_counter = 100;
@@ -255,10 +250,6 @@ MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type) {
 MIR_label_t jm_new_label(JsMirTranspiler* mt) {
     MIR_label_t label = em_new_label(&mt->em);
     return label;
-}
-
-static void jm_emit_raw(JsMirTranspiler* mt, MIR_insn_t insn) {
-    em_emit_insn(&mt->em, insn);
 }
 
 static void jm_clear_boxed_float_const_cache(JsMirTranspiler* mt) {
@@ -377,7 +368,7 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
     // unified epilogue. Preserve the environment pointer in a dedicated SSA-like
     // register so scalar rehoming never receives a later raw state value.
     MIR_reg_t stable_reg = jm_new_reg(mt, "js_owned_env", MIR_T_I64);
-    jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+    em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, stable_reg), MIR_new_reg_op(mt->ctx, reg)));
     JsMirEnvBinding* binding = &mt->em.frame.env_bindings[mt->em.frame.env_binding_count++];
     binding->source_reg = reg;
@@ -395,14 +386,14 @@ void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt) {
     // would both violate context ownership and add avoidable work per loop.
     MIR_reg_t runtime = mt->em.frame.runtime;
     MIR_reg_t top = jm_new_reg(mt, "js_root_top_backedge", MIR_T_I64);
-    jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+    em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, top),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
             runtime, 0, 1)));
     MIR_insn_t reload = MIR_new_insn(mt->ctx, MIR_SUB,
         MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
         MIR_new_reg_op(mt->ctx, top), MIR_new_int_op(mt->ctx, 0));
-    jm_emit_raw(mt, reload);
+    em_emit_insn(&mt->em, reload);
     if (mt->em.frame.root_backedge_reload_count >= mt->em.frame.root_backedge_reload_capacity) {
         int next_capacity = mt->em.frame.root_backedge_reload_capacity
             ? mt->em.frame.root_backedge_reload_capacity * 2 : 8;
@@ -547,12 +538,7 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
         : mt->em.frame.item_return
             ? MIR_new_uint_op(mt->ctx, ITEM_NULL_VAL)
             : MIR_new_int_op(mt->ctx, 0);
-    jm_emit_raw(mt, MIR_new_ret_insn(mt->ctx, 1, failure));
-}
-
-static void jm_epilogue_call_void(JsMirTranspiler* mt, const char* name,
-        int nargs, MIR_type_t* arg_types, MIR_op_t* arg_ops) {
-    em_call_void_with_args(&mt->em, name, nargs, arg_types, arg_ops, true);
+    em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 1, failure));
 }
 
 static void jm_finalize_write_back_roots(JsMirTranspiler* mt) {
@@ -575,7 +561,8 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     for (int i = 0; i < mt->em.frame.env_binding_count; i++) {
         MIR_type_t arg_type = MIR_T_P;
         MIR_op_t arg = MIR_new_reg_op(mt->ctx, mt->em.frame.env_bindings[i].reg);
-        jm_epilogue_call_void(mt, "js_env_rehome_scalars", 1, &arg_type, &arg);
+        em_call_void_with_args(&mt->em, "js_env_rehome_scalars", 1,
+            &arg_type, &arg, true);
     }
     if (mt->em.frame.item_return) {
         MIR_reg_t rehomed = mt->em.frame.return_reg;
@@ -596,7 +583,7 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
             }
         }
         if (rehomed != mt->em.frame.return_reg) {
-            jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg),
                 MIR_new_reg_op(mt->ctx, rehomed)));
         }
@@ -608,7 +595,7 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_root_top), mt->em.frame.root_base);
     }
-    jm_emit_raw(mt, MIR_new_ret_insn(mt->ctx, 1,
+    em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 1,
         MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg)));
     jm_finalize_write_back_roots(mt);
     em_finalize_scalar_homes(&mt->em);
@@ -646,19 +633,19 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
     if (mt->em.frame.active && insn->code == MIR_RET) {
         if (insn->nops != 1) {
             log_error("js-mir frame: expected one return operand, got %u", insn->nops);
-            jm_emit_raw(mt, insn);
+            em_emit_insn(&mt->em, insn);
             return;
         }
         MIR_insn_code_t move = mt->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
-        jm_emit_raw(mt, MIR_new_insn(mt->ctx, move,
+        em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, move,
             MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), insn->ops[0]));
-        jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
         jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
         _MIR_free_insn(mt->ctx, insn);
         return;
     }
-    jm_emit_raw(mt, insn);
+    em_emit_insn(&mt->em, insn);
     if (!insn) return;
     if (insn->code == MIR_JMP || insn->code == MIR_RET)
         jm_clear_boxed_float_const_cache(mt);

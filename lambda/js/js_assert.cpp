@@ -34,7 +34,6 @@ static void js_assert_append_inspected_value(StrBuf* sb, Item value);
 static void js_assert_append_error_label(StrBuf* sb, Item value);
 static int js_assert_append_value_type(char* buf, int buf_size, Item value);
 static bool js_assert_is_real_regexp(Item value);
-static bool js_assert_constructor_name(Item value, char* out, int out_size);
 static bool js_assert_is_buffer_value(Item value);
 static void js_assert_append_item_text(StrBuf* sb, Item value);
 static bool js_assert_has_own_property_key(Item object, Item key);
@@ -127,7 +126,7 @@ static bool js_assert_has_date_prototype(Item value) {
     if (get_type_id(proto) != LMD_TYPE_MAP) return false;
     Item date_ctor = js_get_constructor(assert_make_string("Date"));
     if (get_type_id(date_ctor) == LMD_TYPE_FUNC) {
-        Item date_proto = js_get_key_default(date_ctor, assert_make_string("prototype"));
+        Item date_proto = js_get_key_cstr(date_ctor, "prototype");
         if (proto.item == date_proto.item) return true;
     }
     Item tag = js_get_key_default(proto, js_well_known_symbol_key(4));
@@ -175,9 +174,9 @@ static Item js_assert_date_checktag_message(Item actual, Item expected) {
 
 static void js_assert_attach_assertion_error_prototype(Item error) {
     if (assert_namespace.item == 0) return;
-    Item ae_fn = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
+    Item ae_fn = js_get_key_cstr(assert_namespace, "AssertionError");
     if (get_type_id(ae_fn) != LMD_TYPE_FUNC) return;
-    Item ae_proto = js_get_key_default(ae_fn, assert_make_string("prototype"));
+    Item ae_proto = js_get_key_cstr(ae_fn, "prototype");
     if (get_type_id(ae_proto) == LMD_TYPE_MAP) {
         js_set_prototype(error, ae_proto);
     }
@@ -243,7 +242,7 @@ static void js_assert_mark_instance_error(Item error) {
 
 static bool js_assert_options_strict(Item options) {
     if (get_type_id(options) != LMD_TYPE_MAP) return true;
-    Item strict = js_get_key_default(options, assert_make_string("strict"));
+    Item strict = js_get_key_cstr(options, "strict");
     if (strict.item == ITEM_FALSE || (get_type_id(strict) == LMD_TYPE_BOOL && !it2b(strict))) {
         return false;
     }
@@ -257,7 +256,7 @@ static bool js_assert_current_skip_prototype(void) {
     }
     Item options = js_get_key_default(this_val, js_assert_options_key());
     if (get_type_id(options) != LMD_TYPE_MAP) return false;
-    Item skip = js_get_key_default(options, assert_make_string("skipPrototype"));
+    Item skip = js_get_key_cstr(options, "skipPrototype");
     return skip.item == ITEM_TRUE || (get_type_id(skip) == LMD_TYPE_BOOL && it2b(skip));
 }
 
@@ -325,7 +324,7 @@ static void js_internal_errors_append_item(StrBuf* sb, Item value) {
 
 static Item js_internal_errors_make_range_error(Item message) {
     Item error = js_new_error_with_name(assert_make_string("RangeError"), message);
-    js_set_key_default(error, assert_make_string("code"), assert_make_string(JS_ERR_OUT_OF_RANGE));
+    js_set_key_cstr(error, "code", assert_make_string(JS_ERR_OUT_OF_RANGE));
     return error;
 }
 
@@ -350,10 +349,10 @@ static void js_internal_errors_set_code(Item codes, const char* name,
     Item fn = js_new_native_constructor(target);
 
     Item range_ctor = js_get_constructor(assert_make_string("RangeError"));
-    Item range_proto = js_get_key_default(range_ctor, assert_make_string("prototype"));
+    Item range_proto = js_get_key_cstr(range_ctor, "prototype");
     Item proto = js_object_create(range_proto);
-    js_set_key_default(proto, assert_make_string("constructor"), fn);
-    js_set_key_default(fn, assert_make_string("prototype"), proto);
+    js_set_key_cstr(proto, "constructor", fn);
+    js_set_key_cstr(fn, "prototype", proto);
 
     js_set_key_default(codes, assert_make_string(name), fn);
 }
@@ -367,12 +366,12 @@ extern "C" Item js_get_internal_errors_namespace(void) {
     Item codes = js_new_object();
     js_internal_errors_set_code(codes, JS_ERR_OUT_OF_RANGE,
         js_internal_errors_ERR_OUT_OF_RANGE_ctor);
-    js_set_key_default(internal_errors_namespace, assert_make_string("codes"), codes);
+    js_set_key_cstr(internal_errors_namespace, "codes", codes);
 
     js_assert_set_native(internal_errors_namespace, "hideStackFrames", js_internal_errors_identity);
     js_assert_set_native(internal_errors_namespace, "hideInternalStackFrames", js_internal_errors_identity);
     js_assert_set_native(internal_errors_namespace, "isErrorStackTraceLimitWritable", js_internal_errors_true);
-    js_set_key_default(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
+    js_set_key_cstr(internal_errors_namespace, "default", internal_errors_namespace);
     return internal_errors_namespace;
 }
 
@@ -455,9 +454,8 @@ extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item)
         if (i > 0) strbuf_append_char(sb, '\n');
     }
     Item result = js_new_object();
-    js_set_key_default(result, assert_make_string("message"),
-        assert_make_string_n(sb->str, sb->length));
-    js_set_key_default(result, assert_make_string("skipped"), (Item){.item = b2it(false)});
+    js_set_key_cstr(result, "message", assert_make_string_n(sb->str, sb->length));
+    js_set_key_cstr(result, "skipped", (Item){.item = b2it(false)});
     strbuf_free(sb);
     return result;
 }
@@ -470,8 +468,7 @@ extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"), js_internal_assert_myersDiff);
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"), js_internal_assert_printMyersDiff);
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"), js_internal_assert_printSimpleMyersDiff);
-    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("default"),
-        internal_assert_myers_diff_namespace);
+    js_set_key_cstr(internal_assert_myers_diff_namespace, "default", internal_assert_myers_diff_namespace);
     return internal_assert_myers_diff_namespace;
 }
 
@@ -490,16 +487,16 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
     strbuf_free(init_stack);
     Item error = js_new_error_with_name_stack(type_name, msg_item, init_stack_item);
     // Node.js AssertionError properties
-    js_set_key_default(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-    js_set_key_default(error, assert_make_string("name"), assert_make_string("AssertionError"));
-    js_set_key_default(error, assert_make_string("actual"), actual);
-    js_set_key_default(error, assert_make_string("expected"), expected);
-    if (op_str) js_set_key_default(error, assert_make_string("operator"), assert_make_string(op_str));
-    js_set_key_default(error, assert_make_string("diff"), assert_make_string(js_assert_current_diff()));
+    js_set_key_cstr(error, "code", assert_make_string("ERR_ASSERTION"));
+    js_set_key_cstr(error, "name", assert_make_string("AssertionError"));
+    js_set_key_cstr(error, "actual", actual);
+    js_set_key_cstr(error, "expected", expected);
+    if (op_str) js_set_key_cstr(error, "operator", assert_make_string(op_str));
+    js_set_key_cstr(error, "diff", assert_make_string(js_assert_current_diff()));
     js_assert_mark_instance_error(error);
-    js_set_key_default(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
+    js_set_key_cstr(error, "generatedMessage", (Item){.item = b2it(generated)});
     if (op_str) {
-        Item stack_val = js_get_key_default(error, assert_make_string("stack"));
+        Item stack_val = js_get_key_cstr(error, "stack");
         String* stack = get_type_id(stack_val) == LMD_TYPE_STRING ? it2s(stack_val) : NULL;
         StrBuf* sb = strbuf_new();
         if (stack && stack->len > 0) {
@@ -515,7 +512,7 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
         strbuf_append_str(sb, "\n    at ");
         strbuf_append_str(sb, op_str);
         strbuf_append_str(sb, " (node:assert)");
-        js_set_key_default(error, assert_make_string("stack"), assert_make_string_n(sb->str, sb->length));
+        js_set_key_cstr(error, "stack", assert_make_string_n(sb->str, sb->length));
         strbuf_free(sb);
     }
     js_assert_attach_assertion_error_prototype(error);
@@ -1196,7 +1193,7 @@ static void js_assert_append_multiline_object_key(StrBuf* sb, Item key) {
 static bool js_assert_property_is_getter(Item owner, Item key) {
     Item desc = js_object_get_own_property_descriptor(owner, key);
     if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    Item getter = js_get_key_default(desc, assert_make_string("get"));
+    Item getter = js_get_key_cstr(desc, "get");
     return js_is_callable(getter);
 }
 
@@ -2045,7 +2042,7 @@ static bool js_assert_is_date_value(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     if (js_class_id(value) == JS_CLASS_DATE) return true;
     char ctor_name[64];
-    if (!js_assert_constructor_name(value, ctor_name, sizeof(ctor_name))) return false;
+    if (!js_get_constructor_name(value, ctor_name, sizeof(ctor_name))) return false;
     size_t len = strlen(ctor_name);
     return len >= 4 && memcmp(ctor_name + len - 4, "Date", 4) == 0;
 }
@@ -2105,7 +2102,7 @@ static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
     strbuf_append_str(sb, sign);
     char ctor_name[64];
     const char* default_name = regexp ? "RegExp" : "Date";
-    bool has_ctor = js_assert_constructor_name(value, ctor_name, sizeof(ctor_name));
+    bool has_ctor = js_get_constructor_name(value, ctor_name, sizeof(ctor_name));
     bool custom_ctor = has_ctor && strcmp(ctor_name, default_name) != 0;
     if (custom_ctor) {
         strbuf_append_str(sb, ctor_name);
@@ -2276,9 +2273,9 @@ static Item js_assert_deep_strict_url_message(Item actual, Item expected) {
     strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
     strbuf_append_str(sb, "+ actual - expected\n\n");
     strbuf_append_str(sb, "+ ");
-    js_assert_append_inspected_value(sb, js_get_key_default(actual, assert_make_string("href")));
+    js_assert_append_inspected_value(sb, js_get_key_cstr(actual, "href"));
     strbuf_append_str(sb, "\n- ");
-    js_assert_append_inspected_value(sb, js_get_key_default(expected, assert_make_string("href")));
+    js_assert_append_inspected_value(sb, js_get_key_cstr(expected, "href"));
     strbuf_append_char(sb, '\n');
     // URL wrappers compare by canonical href; the fallback text hid the
     // differing URL and broke object-pattern message checks.
@@ -2337,7 +2334,7 @@ static void js_assert_append_error_label(StrBuf* sb, Item value) {
     if (get_type_id(value) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(value))) {
         const char* name = js_class_to_name(js_class_id(value));
         if (!name) name = "Error";
-        Item msg = js_get_key_default(value, assert_make_string("message"));
+        Item msg = js_get_key_cstr(value, "message");
         String* ms = get_type_id(msg) == LMD_TYPE_STRING ? it2s(msg) : NULL;
         strbuf_append_char(sb, '[');
         strbuf_append_str(sb, name);
@@ -2854,12 +2851,12 @@ extern "C" Item js_assert_fail(Item message) {
 
 static bool js_assert_function_is_constructor_expectation(Item fn) {
     if (!js_assert_is_function_like_value(fn)) return false;
-    Item proto = js_get_key_default(fn, assert_make_string("prototype"));
+    Item proto = js_get_key_cstr(fn, "prototype");
     if (get_type_id(proto) != LMD_TYPE_MAP && get_type_id(proto) != LMD_TYPE_ELEMENT) {
         return false;
     }
     if (assert_namespace.item != 0) {
-        Item assertion_error = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
+        Item assertion_error = js_get_key_cstr(assert_namespace, "AssertionError");
         if (fn.item == assertion_error.item) return true;
     }
     const char* known[] = {
@@ -2872,11 +2869,11 @@ static bool js_assert_function_is_constructor_expectation(Item fn) {
         if (fn.item == ctor.item) return true;
     }
     Item error_ctor = js_get_constructor(assert_make_string("Error"));
-    Item error_proto = js_get_key_default(error_ctor, assert_make_string("prototype"));
+    Item error_proto = js_get_key_cstr(error_ctor, "prototype");
     Item super_class = js_get_class_superclass(fn);
     for (int i = 0; i < 64 && js_assert_is_function_like_value(super_class); i++) {
         if (super_class.item == error_ctor.item) return true;
-        if (js_get_key_default(super_class, assert_make_string("prototype")).item == error_proto.item) return true;
+        if (js_get_key_cstr(super_class, "prototype").item == error_proto.item) return true;
         // Source-class heritage is carried by the function constructor record;
         // checking it keeps Error subclasses from being misused as validators.
         super_class = js_get_class_superclass(super_class);
@@ -2899,16 +2896,16 @@ static Item js_assert_throw_throws_assertion(Item message, Item actual, Item exp
     Item error = make_assertion_error_full_item(message, actual, expected, NULL, generated);
     // assert.throws owns the operator property, but its internal frame must not
     // be appended to user-visible stacks.
-    js_set_key_default(error, assert_make_string("operator"), assert_make_string("throws"));
+    js_set_key_cstr(error, "operator", assert_make_string("throws"));
     return js_throw_value(error);
 }
 
 static bool js_assert_expected_constructor_label(Item expected, StrBuf* sb) {
     if (!js_assert_is_function_like_value(expected)) return false;
-    Item name = js_get_key_default(expected, assert_make_string("name"));
+    Item name = js_get_key_cstr(expected, "name");
     String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
     if ((!ns || ns->len == 0) && assert_namespace.item != 0) {
-        Item assertion_error = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
+        Item assertion_error = js_get_key_cstr(assert_namespace, "AssertionError");
         if (expected.item == assertion_error.item) {
             ns = it2s(assert_make_string("AssertionError"));
         }
@@ -2964,17 +2961,17 @@ static Item js_assert_throw_invalid_throws_expected(Item error_expected) {
 
 static bool js_assert_is_vm_context_error(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item marker = js_get_key_default(value, assert_make_string("__vm_context_error__"));
+    Item marker = js_get_key_cstr(value, "__vm_context_error__");
     return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
            (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
 }
 
 static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor) {
-    Item expected_name = js_get_key_default(expected_ctor, assert_make_string("name"));
+    Item expected_name = js_get_key_cstr(expected_ctor, "name");
     if (get_type_id(expected_name) != LMD_TYPE_STRING ||
             (it2s(expected_name) && it2s(expected_name)->len == 0)) {
         if (assert_namespace.item != 0) {
-            Item assertion_error = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
+            Item assertion_error = js_get_key_cstr(assert_namespace, "AssertionError");
             if (expected_ctor.item == assertion_error.item) {
                 expected_name = assert_make_string("AssertionError");
             }
@@ -2983,19 +2980,19 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
     Item actual_ctor = ItemNull;
     if (actual_ctor.item == 0 || actual_ctor.item == ItemNull.item ||
             get_type_id(actual_ctor) == LMD_TYPE_UNDEFINED) {
-        actual_ctor = js_get_key_default(thrown, assert_make_string("constructor"));
+        actual_ctor = js_get_key_cstr(thrown, "constructor");
     }
-    Item public_name = js_get_key_default(actual_ctor, assert_make_string("name"));
+    Item public_name = js_get_key_cstr(actual_ctor, "name");
     if (js_assert_string_equals(public_name, "Error")) {
         Item thrown_proto = js_get_prototype_of(thrown);
-        Item proto_ctor = js_get_key_default(thrown_proto, assert_make_string("constructor"));
-        Item proto_name = js_get_key_default(proto_ctor, assert_make_string("name"));
+        Item proto_ctor = js_get_key_cstr(thrown_proto, "constructor");
+        Item proto_name = js_get_key_cstr(proto_ctor, "name");
         if (get_type_id(proto_name) == LMD_TYPE_STRING &&
                 !js_assert_string_equals(proto_name, "Error")) {
             actual_ctor = proto_ctor;
         }
     }
-    Item actual_name = js_get_key_default(actual_ctor, assert_make_string("name"));
+    Item actual_name = js_get_key_cstr(actual_ctor, "name");
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "The error is expected to be an instance of \"");
     js_assert_append_item_text(sb, expected_name);
@@ -3022,7 +3019,7 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
         }
         strbuf_append_char(sb, '"');
     }
-    Item thrown_msg = js_get_key_default(thrown, assert_make_string("message"));
+    Item thrown_msg = js_get_key_cstr(thrown, "message");
     if (get_type_id(thrown_msg) == LMD_TYPE_STRING) {
         String* ms = it2s(thrown_msg);
         if (ms && ms->len > 0) {
@@ -3066,7 +3063,7 @@ static bool js_assert_thrown_matches_string_message(Item thrown, Item message) {
     if (get_type_id(message) != LMD_TYPE_STRING) return false;
     Item candidate = thrown;
     if (get_type_id(thrown) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(thrown))) {
-        candidate = js_get_key_default(thrown, assert_make_string("message"));
+        candidate = js_get_key_cstr(thrown, "message");
     }
     if (get_type_id(candidate) != LMD_TYPE_STRING) return false;
     String* cs = it2s(candidate);
@@ -3088,7 +3085,7 @@ static bool js_assert_expected_property_matches(Item actual_val, Item expected_v
 }
 
 static Item js_assert_error_name_value(Item value) {
-    Item name = js_get_key_default(value, assert_make_string("name"));
+    Item name = js_get_key_cstr(value, "name");
     if (get_type_id(name) == LMD_TYPE_STRING) return name;
     if (get_type_id(value) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(value))) {
         const char* class_name = js_class_to_name(js_class_id(value));
@@ -3346,7 +3343,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
     bool expected_constructor = js_assert_function_is_constructor_expectation(error_expected);
     bool expected_callable = js_is_callable(error_expected);
     if (expected_callable || expected_constructor) {
-        Item proto = js_get_key_default(error_expected, assert_make_string("prototype"));
+        Item proto = js_get_key_cstr(error_expected, "prototype");
         if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT ||
                 expected_constructor) {
             Item result = js_instanceof(thrown, error_expected);
@@ -3482,7 +3479,7 @@ static bool js_assert_expected_error_matches(Item thrown, Item error_expected) {
 
 
     if (js_is_callable(error_expected)) {
-        Item proto = js_get_key_default(error_expected, assert_make_string("prototype"));
+        Item proto = js_get_key_cstr(error_expected, "prototype");
         if (get_type_id(proto) == LMD_TYPE_MAP) {
             Item result = js_instanceof(thrown, error_expected);
             return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
@@ -3528,7 +3525,7 @@ static Item js_assert_throw_unwanted_exception(Item thrown, Item expected, Item 
     strbuf_append_str(sb, "Got unwanted exception");
     js_assert_append_does_not_throw_user_message(sb, message);
 
-    Item thrown_msg = js_get_key_default(thrown, assert_make_string("message"));
+    Item thrown_msg = js_get_key_cstr(thrown, "message");
     if (get_type_id(thrown_msg) != LMD_TYPE_STRING &&
             !js_class_is_error_like(get_type_id(thrown) == LMD_TYPE_MAP ? js_class_id(thrown) : JS_CLASS_NONE)) {
         // Non-Error thrown values do not have .message, but Node still reports
@@ -3543,7 +3540,7 @@ static Item js_assert_throw_unwanted_exception(Item thrown, Item expected, Item 
     }
 
     Item error = make_assertion_error_full(sb->str, thrown, expected, NULL, false);
-    js_set_key_default(error, assert_make_string("operator"), assert_make_string("doesNotThrow"));
+    js_set_key_cstr(error, "operator", assert_make_string("doesNotThrow"));
     strbuf_free(sb);
     return js_throw_value(error);
 }
@@ -3591,7 +3588,7 @@ static Item js_assert_ifError_message_detail(Item value) {
 
     if (type == LMD_TYPE_MAP) {
         bool is_error = js_class_is_error_like(js_class_id(value));
-        Item msg_val = js_get_key_default(value, assert_make_string("message"));
+        Item msg_val = js_get_key_cstr(value, "message");
         if (get_type_id(msg_val) == LMD_TYPE_STRING) {
             String* msg = it2s(msg_val);
             if (!is_error || (msg && msg->len > 0)) return msg_val;
@@ -3625,14 +3622,14 @@ extern "C" Item js_assert_ifError(Item value) {
         Item type_name = assert_make_string("AssertionError");
         Item msg_item = js_assert_ifError_message(value);
         Item error = js_new_error_with_name(type_name, msg_item);
-        js_set_key_default(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-        js_set_key_default(error, assert_make_string("name"), assert_make_string("AssertionError"));
-        js_set_key_default(error, assert_make_string("actual"), value);
-        js_set_key_default(error, assert_make_string("expected"), ItemNull);
-        js_set_key_default(error, assert_make_string("operator"), assert_make_string("ifError"));
-        js_set_key_default(error, assert_make_string("diff"), assert_make_string(js_assert_current_diff()));
+        js_set_key_cstr(error, "code", assert_make_string("ERR_ASSERTION"));
+        js_set_key_cstr(error, "name", assert_make_string("AssertionError"));
+        js_set_key_cstr(error, "actual", value);
+        js_set_key_cstr(error, "expected", ItemNull);
+        js_set_key_cstr(error, "operator", assert_make_string("ifError"));
+        js_set_key_cstr(error, "diff", assert_make_string(js_assert_current_diff()));
         js_assert_mark_instance_error(error);
-        js_set_key_default(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+        js_set_key_cstr(error, "generatedMessage", (Item){.item = b2it(false)});
         js_assert_attach_assertion_error_prototype(error);
         return js_throw_value(error);
     }
@@ -3661,7 +3658,7 @@ static Item js_assert_throw_ambiguous_assert_message(Item message) {
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "The \"message\" argument is ambiguous. Received ");
     if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
-        Item msg = js_get_key_default(message, assert_make_string("message"));
+        Item msg = js_get_key_cstr(message, "message");
         String* ms = get_type_id(msg) == LMD_TYPE_STRING ? it2s(msg) : NULL;
         if (ms) strbuf_append_str_n(sb, ms->chars, ms->len);
     } else {
@@ -3927,7 +3924,7 @@ static bool js_assert_has_constructor_prototype(Item value, const char* ctor_nam
     if (get_type_id(proto) != LMD_TYPE_MAP) return false;
     Item ctor = js_get_constructor(assert_make_string(ctor_name));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        Item ctor_proto = js_get_key_default(ctor, assert_make_string("prototype"));
+        Item ctor_proto = js_get_key_cstr(ctor, "prototype");
         if (proto.item == ctor_proto.item) return true;
     }
     Item tag = js_get_key_default(proto, js_well_known_symbol_key(4));
@@ -4033,11 +4030,11 @@ static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth
     // Borrowed RegExp prototypes/tags lack native RegExp slots; partial
     // matching them by enumerable keys makes fake object types pass.
     if (!js_assert_deep_strict_equal_bool(
-            js_get_key_default(actual, assert_make_string("source")),
-            js_get_key_default(expected, assert_make_string("source"))) ||
+            js_get_key_cstr(actual, "source"),
+            js_get_key_cstr(expected, "source")) ||
             !js_assert_deep_strict_equal_bool(
-            js_get_key_default(actual, assert_make_string("flags")),
-            js_get_key_default(expected, assert_make_string("flags")))) {
+            js_get_key_cstr(actual, "flags"),
+            js_get_key_cstr(expected, "flags"))) {
         return false;
     }
     return js_assert_partial_enumerable_properties(actual, expected,
@@ -4107,8 +4104,8 @@ static bool js_assert_is_url_like(Item value) {
     // Some URL construction paths stamp after materializing fields; when the
     // class byte is lost, the URL-owned href/searchParams shape still needs
     // the URL comparator to avoid per-instance wrapper mismatches.
-    Item search_params = js_get_key_default(value, assert_make_string("searchParams"));
-    return get_type_id(js_get_key_default(value, assert_make_string("href"))) == LMD_TYPE_STRING &&
+    Item search_params = js_get_key_cstr(value, "searchParams");
+    return get_type_id(js_get_key_cstr(value, "href")) == LMD_TYPE_STRING &&
            js_assert_is_partial_object_like(search_params);
 }
 
@@ -4476,7 +4473,7 @@ static void js_assert_append_inspected_value(StrBuf* sb, Item value) {
     Item options = js_new_object();
     // Assert diffs need deeper cycle rendering than util.inspect's default
     // depth=2; otherwise nested circular structures collapse to [Object].
-    js_set_key_default(options, assert_make_string("depth"), ItemNull);
+    js_set_key_cstr(options, "depth", ItemNull);
     Item inspected = js_util_inspect(value, options);
     String* is = get_type_id(inspected) == LMD_TYPE_STRING ? it2s(inspected) : NULL;
     if (is) strbuf_append_str_n(sb, is->chars, is->len);
@@ -4582,7 +4579,7 @@ extern "C" Item js_assert_partialDeepStrictEqual(Item actual, Item expected, Ite
 
 static Item make_type_error_with_code(const char* code, const char* message) {
     Item error = js_new_error_with_name(assert_make_string("TypeError"), assert_make_string(message));
-    js_set_key_default(error, assert_make_string("code"), assert_make_string(code));
+    js_set_key_cstr(error, "code", assert_make_string(code));
     return error;
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_is_native_promise, (Item value), (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_PROMISE))
@@ -4593,9 +4590,9 @@ static bool js_assert_is_valid_thenable(Item value) {
         type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) {
         return false;
     }
-    Item then_fn = js_get_key_default(value, assert_make_string("then"));
+    Item then_fn = js_get_key_cstr(value, "then");
     if (!js_is_callable(then_fn)) return false;
-    Item catch_fn = js_get_key_default(value, assert_make_string("catch"));
+    Item catch_fn = js_get_key_cstr(value, "catch");
     return js_is_callable(catch_fn);
 }
 
@@ -4613,27 +4610,6 @@ static const char* js_assert_class_instance_name(Item value) {
         case JS_CLASS_DATA_VIEW: return "DataView";
         default: return "Object";
     }
-}
-
-static bool js_assert_constructor_name(Item value, char* out, int out_size) {
-    if (out_size <= 0) return false;
-    out[0] = '\0';
-    if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item ctor = js_get_key_default(value, assert_make_string("constructor"));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
-        Item proto = js_get_prototype_of(value);
-        if (get_type_id(proto) == LMD_TYPE_MAP) {
-            ctor = js_get_key_default(proto, assert_make_string("constructor"));
-        }
-    }
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
-    Item name = js_get_key_default(ctor, assert_make_string("name"));
-    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
-    if (!ns || ns->len == 0) return false;
-    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
-    memcpy(out, ns->chars, len);
-    out[len] = '\0';
-    return true;
 }
 
 static int js_assert_append_value_type(char* buf, int buf_size, Item value) {
@@ -4664,7 +4640,7 @@ static int js_assert_append_value_type(char* buf, int buf_size, Item value) {
         type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
         char ctor_name[64];
         const char* class_name = js_assert_class_instance_name(value);
-        if (strcmp(class_name, "Object") == 0 && js_assert_constructor_name(value, ctor_name, sizeof(ctor_name))) {
+        if (strcmp(class_name, "Object") == 0 && js_get_constructor_name(value, ctor_name, sizeof(ctor_name))) {
             class_name = ctor_name;
         }
         return snprintf(buf, buf_size, "an instance of %s", class_name);
@@ -4698,7 +4674,7 @@ static Item js_assert_missing_rejection_error(Item error_expected) {
     const char* suffix = "";
     char name_buf[128];
     if (js_is_callable(error_expected)) {
-        Item name = js_get_key_default(error_expected, assert_make_string("name"));
+        Item name = js_get_key_cstr(error_expected, "name");
         String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
         if (ns && ns->len > 0) {
             int len = (int)(ns->len < (int)sizeof(name_buf) - 1 ? ns->len : (int)sizeof(name_buf) - 1);
@@ -4714,7 +4690,7 @@ static Item js_assert_missing_rejection_error(Item error_expected) {
 }
 
 static Item js_assert_unwanted_rejection_error(Item reason, Item error_expected) {
-    Item msg_val = js_get_key_default(reason, assert_make_string("message"));
+    Item msg_val = js_get_key_cstr(reason, "message");
     String* msg_str = get_type_id(msg_val) == LMD_TYPE_STRING ? it2s(msg_val) : NULL;
     char msg[512];
     if (msg_str && msg_str->len > 0) {
@@ -4757,7 +4733,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         // Callable Proxy validators have the same host-algorithm status as
         // ordinary functions; representation tags cannot reject them (D6.2.2v2).
         // Error class: check instanceof only for constructor-like functions.
-        Item proto = js_get_key_default(error_expected, assert_make_string("prototype"));
+        Item proto = js_get_key_cstr(error_expected, "prototype");
         if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT) {
             Item result = js_instanceof(thrown, error_expected);
             if (!item_is_error(result) && get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
@@ -4794,12 +4770,12 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
             Item thrown_str = js_to_string_val(thrown);
             Item test_result = js_regex_test(error_expected, thrown_str);
             if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
-            Item code = js_get_key_default(thrown, assert_make_string("code"));
+            Item code = js_get_key_cstr(thrown, "code");
             if (get_type_id(code) == LMD_TYPE_STRING) {
                 test_result = js_regex_test(error_expected, code);
                 if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
             }
-            Item name = js_get_key_default(thrown, assert_make_string("name"));
+            Item name = js_get_key_cstr(thrown, "name");
             if (get_type_id(name) == LMD_TYPE_STRING) {
                 test_result = js_regex_test(error_expected, name);
                 if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
@@ -4981,6 +4957,25 @@ static Item assert_set_fresh_method(Item ns, const char* name, Target target,
 }
 JS_FORWARD_STATIC_VOID( assert_set_method_item, (Item ns, const char* name, Item fn), js_set_key_default, (ns, assert_make_string(name), fn))
 
+#define JS_ASSERT_METHODS(M) \
+    M("ok", js_assert_ok, 2) M("equal", js_assert_equal, 3) \
+    M("notEqual", js_assert_notEqual, 3) M("strictEqual", js_assert_strictEqual, 3) \
+    M("notStrictEqual", js_assert_notStrictEqual, 3) \
+    M("deepStrictEqual", js_assert_deepStrictEqual, 3) \
+    M("notDeepStrictEqual", js_assert_notDeepStrictEqual, 3) \
+    M("deepEqual", js_assert_deepEqual, 3) M("notDeepEqual", js_assert_notDeepEqual, 3) \
+    M("fail", js_assert_fail, 1) M("throws", js_assert_module_throws, 3) \
+    M("doesNotThrow", js_assert_module_doesNotThrow, 3) M("ifError", js_assert_ifError, 1) \
+    M("match", js_assert_match, 3) M("doesNotMatch", js_assert_doesNotMatch, 3) \
+    M("rejects", js_assert_rejects, 3) M("doesNotReject", js_assert_doesNotReject, 3) \
+    M("partialDeepStrictEqual", js_assert_partialDeepStrictEqual, 3)
+#define JS_ASSERT_INSTANCE_METHODS(M) \
+    M("fail", js_assert_fail, 1) M("throws", js_assert_module_throws, 3) \
+    M("doesNotThrow", js_assert_module_doesNotThrow, 3) M("ifError", js_assert_ifError, 1) \
+    M("match", js_assert_match, 3) M("doesNotMatch", js_assert_doesNotMatch, 3) \
+    M("rejects", js_assert_rejects, 3) M("doesNotReject", js_assert_doesNotReject, 3) \
+    M("partialDeepStrictEqual", js_assert_partialDeepStrictEqual, 3)
+
 static Item js_assert_constructor_default_message(Item actual, Item expected, Item op_item) {
     if (js_assert_string_equals(op_item, "strictEqual")) {
         return js_assert_strict_equal_message(actual, expected);
@@ -5023,31 +5018,31 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     Item expected = make_js_undefined();
     const char* diff_str = "simple";
     bool generated = true;
-    Item m = js_get_key_default(options, assert_make_string("message"));
+    Item m = js_get_key_cstr(options, "message");
     if (get_type_id(m) == LMD_TYPE_STRING) {
         msg_item = m;
         generated = false;
     }
-    actual = js_get_key_default(options, assert_make_string("actual"));
-    expected = js_get_key_default(options, assert_make_string("expected"));
-    op_item = js_get_key_default(options, assert_make_string("operator"));
+    actual = js_get_key_cstr(options, "actual");
+    expected = js_get_key_cstr(options, "expected");
+    op_item = js_get_key_cstr(options, "operator");
     diff_str = js_assert_normalized_diff(js_get_key_default(options, js_assert_diff_key()));
     if (get_type_id(msg_item) != LMD_TYPE_STRING) {
         msg_item = js_assert_constructor_default_message(actual, expected, op_item);
     }
     Item type_name = assert_make_string("AssertionError");
     Item error = js_new_error_with_name(type_name, msg_item);
-    js_set_key_default(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-    js_set_key_default(error, assert_make_string("name"), assert_make_string("AssertionError"));
-    js_set_key_default(error, assert_make_string("actual"), actual);
-    js_set_key_default(error, assert_make_string("expected"), expected);
-    if (get_type_id(op_item) == LMD_TYPE_STRING) js_set_key_default(error, assert_make_string("operator"), op_item);
-    js_set_key_default(error, assert_make_string("diff"), assert_make_string(diff_str));
-    js_set_key_default(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
+    js_set_key_cstr(error, "code", assert_make_string("ERR_ASSERTION"));
+    js_set_key_cstr(error, "name", assert_make_string("AssertionError"));
+    js_set_key_cstr(error, "actual", actual);
+    js_set_key_cstr(error, "expected", expected);
+    if (get_type_id(op_item) == LMD_TYPE_STRING) js_set_key_cstr(error, "operator", op_item);
+    js_set_key_cstr(error, "diff", assert_make_string(diff_str));
+    js_set_key_cstr(error, "generatedMessage", (Item){.item = b2it(generated)});
     js_assert_attach_assertion_error_prototype(error);
-    Item stack_start = js_get_key_default(options, assert_make_string("stackStartFn"));
+    Item stack_start = js_get_key_cstr(options, "stackStartFn");
     if (get_type_id(stack_start) != LMD_TYPE_FUNC) {
-        stack_start = js_get_key_default(options, assert_make_string("stackStartFunction"));
+        stack_start = js_get_key_cstr(options, "stackStartFunction");
     }
     if (get_type_id(stack_start) == LMD_TYPE_FUNC) {
         // Node AssertionError options provide the public trim function; without
@@ -5088,19 +5083,14 @@ static Item js_assert_create_instance(Item options) {
         assert_set_fresh_method(instance_root.get(), "deepEqual",   js_assert_deepEqual, 3);
         assert_set_fresh_method(instance_root.get(), "notDeepEqual", js_assert_notDeepEqual, 3);
     }
-    assert_set_fresh_method(instance_root.get(), "fail",                js_assert_fail, 1);
-    assert_set_fresh_method(instance_root.get(), "throws",              js_assert_module_throws, 3);
-    assert_set_fresh_method(instance_root.get(), "doesNotThrow",        js_assert_module_doesNotThrow, 3);
-    assert_set_fresh_method(instance_root.get(), "ifError",             js_assert_ifError, 1);
-    assert_set_fresh_method(instance_root.get(), "match",               js_assert_match, 3);
-    assert_set_fresh_method(instance_root.get(), "doesNotMatch",        js_assert_doesNotMatch, 3);
-    assert_set_fresh_method(instance_root.get(), "rejects",             js_assert_rejects, 3);
-    assert_set_fresh_method(instance_root.get(), "doesNotReject",       js_assert_doesNotReject, 3);
-    assert_set_fresh_method(instance_root.get(), "partialDeepStrictEqual", js_assert_partialDeepStrictEqual, 3);
+#define JS_ASSERT_INSTALL_INSTANCE(name, target, arity) \
+    assert_set_fresh_method(instance_root.get(), name, target, arity);
+    JS_ASSERT_INSTANCE_METHODS(JS_ASSERT_INSTALL_INSTANCE)
+#undef JS_ASSERT_INSTALL_INSTANCE
     Rooted<Item> assertion_error_root(roots, assert_namespace.item != 0 ?
-        js_get_key_default(assert_namespace, assert_make_string("AssertionError")) :
+        js_get_key_cstr(assert_namespace, "AssertionError") :
         js_new_native_constructor(js_assert_AssertionError_ctor));
-    js_set_key_default(instance_root.get(), assert_make_string("AssertionError"), assertion_error_root.get());
+    js_set_key_cstr(instance_root.get(), "AssertionError", assertion_error_root.get());
 
     // store options
     if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
@@ -5132,24 +5122,10 @@ extern "C" Item js_get_assert_namespace(void) {
     assert_namespace = js_new_native_function(js_assert_ok);
     heap_register_gc_root(&assert_namespace.item);
 
-    assert_set_method(assert_namespace, "ok",                  js_assert_ok, 2);
-    assert_set_method(assert_namespace, "equal",               js_assert_equal, 3);
-    assert_set_method(assert_namespace, "notEqual",            js_assert_notEqual, 3);
-    assert_set_method(assert_namespace, "strictEqual",         js_assert_strictEqual, 3);
-    assert_set_method(assert_namespace, "notStrictEqual",      js_assert_notStrictEqual, 3);
-    assert_set_method(assert_namespace, "deepStrictEqual",     js_assert_deepStrictEqual, 3);
-    assert_set_method(assert_namespace, "notDeepStrictEqual",  js_assert_notDeepStrictEqual, 3);
-    assert_set_method(assert_namespace, "deepEqual",           js_assert_deepEqual, 3);
-    assert_set_method(assert_namespace, "notDeepEqual",        js_assert_notDeepEqual, 3);
-    assert_set_method(assert_namespace, "fail",                js_assert_fail, 1);
-    assert_set_method(assert_namespace, "throws",              js_assert_module_throws, 3);
-    assert_set_method(assert_namespace, "doesNotThrow",        js_assert_module_doesNotThrow, 3);
-    assert_set_method(assert_namespace, "ifError",             js_assert_ifError, 1);
-    assert_set_method(assert_namespace, "match",               js_assert_match, 3);
-    assert_set_method(assert_namespace, "doesNotMatch",        js_assert_doesNotMatch, 3);
-    assert_set_method(assert_namespace, "rejects",             js_assert_rejects, 3);
-    assert_set_method(assert_namespace, "doesNotReject",       js_assert_doesNotReject, 3);
-    assert_set_method(assert_namespace, "partialDeepStrictEqual", js_assert_partialDeepStrictEqual, 3);
+#define JS_ASSERT_INSTALL(name, target, arity) \
+    assert_set_method(assert_namespace, name, target, arity);
+    JS_ASSERT_METHODS(JS_ASSERT_INSTALL)
+#undef JS_ASSERT_INSTALL
 
     // AssertionError constructor
     js_install_native_constructor(assert_namespace, "AssertionError",
@@ -5158,15 +5134,15 @@ extern "C" Item js_get_assert_namespace(void) {
     // Set up AssertionError.prototype to inherit from Error.prototype
     // so that (new assert.AssertionError({})) instanceof Error === true
     {
-        Item ae_fn = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
+        Item ae_fn = js_get_key_cstr(assert_namespace, "AssertionError");
         // Get Error constructor and its prototype
         Item error_ctor = js_get_constructor(assert_make_string("Error"));
         Item error_proto_key = assert_make_string("prototype");
         Item error_proto = js_get_key_default(error_ctor, error_proto_key);
         // Create AssertionError.prototype that inherits from Error.prototype
         Item ae_proto = js_object_create(error_proto);
-        js_set_key_default(ae_proto, assert_make_string("name"), assert_make_string("AssertionError"));
-        js_set_key_default(ae_proto, assert_make_string("constructor"), ae_fn);
+        js_set_key_cstr(ae_proto, "name", assert_make_string("AssertionError"));
+        js_set_key_cstr(ae_proto, "constructor", ae_fn);
         // Set AssertionError.prototype
         js_set_key_default(ae_fn, error_proto_key, ae_proto);
     }
@@ -5179,17 +5155,19 @@ extern "C" Item js_get_assert_namespace(void) {
     // aliases to their strict variants; aliasing the loose module lets
     // strict.equal/deepEqual silently pass loose comparisons.
     Item strict_instance = js_assert_create_instance(make_js_undefined());
-    js_set_key_default(strict_instance, assert_make_string("Assert"),
-        js_get_key_default(assert_namespace, assert_make_string("Assert")));
-    js_set_key_default(strict_instance, assert_make_string("strict"), strict_instance);
-    js_set_key_default(strict_instance, assert_make_string("default"), strict_instance);
-    js_set_key_default(assert_namespace, assert_make_string("strict"), strict_instance);
+    js_set_key_cstr(strict_instance, "Assert", js_get_key_cstr(assert_namespace, "Assert"));
+    js_set_key_cstr(strict_instance, "strict", strict_instance);
+    js_set_key_cstr(strict_instance, "default", strict_instance);
+    js_set_key_cstr(assert_namespace, "strict", strict_instance);
 
     // default export
-    js_set_key_default(assert_namespace, assert_make_string("default"), assert_namespace);
+    js_set_key_cstr(assert_namespace, "default", assert_namespace);
 
     return assert_namespace;
 }
+
+#undef JS_ASSERT_INSTANCE_METHODS
+#undef JS_ASSERT_METHODS
 
 extern "C" void js_assert_reset(void) {
     assert_namespace = (Item){0};
@@ -5281,14 +5259,14 @@ static Item js_mock_wrapper_##SLOT_IDX(Item a0, Item a1, Item a2) { \
     js_array_push(args_array, a0); \
     js_array_push(args_array, a1); \
     js_array_push(args_array, a2); \
-    js_set_key_default(call_record, assert_make_string("arguments"), args_array); \
-    js_set_key_default(call_record, assert_make_string("this"), make_js_undefined()); \
+    js_set_key_cstr(call_record, "arguments", args_array); \
+    js_set_key_cstr(call_record, "this", make_js_undefined()); \
     Item result = make_js_undefined(); \
     if (js_is_callable(g_mock_slots[idx].original)) { \
         Item call_args[3] = {a0, a1, a2}; \
         result = js_call_function(g_mock_slots[idx].original, make_js_undefined(), call_args, 3); \
     } \
-    js_set_key_default(call_record, assert_make_string("result"), result); \
+    js_set_key_cstr(call_record, "result", result); \
     js_array_push(g_mock_slots[idx].calls, call_record); \
     g_mock_slots[idx].call_count++; \
     return result; \
@@ -5338,16 +5316,16 @@ static Item js_mock_fn_impl(Item original_fn) {
 
     // create .mock property pointing to the live calls array
     Item mock_prop = js_new_object();
-    js_set_key_default(mock_prop, assert_make_string("calls"), g_mock_slots[slot].calls);
+    js_set_key_cstr(mock_prop, "calls", g_mock_slots[slot].calls);
     js_assert_set_native(mock_prop, "callCount", js_mock_call_count_impl);
-    js_set_key_default(mock_prop, assert_make_string("_slot"), (Item){.item = i2it(slot)});
+    js_set_key_cstr(mock_prop, "_slot", (Item){.item = i2it(slot)});
 
     // mock.restore() — no-op for fn mocks
     js_assert_set_native(mock_prop, "restore", js_mock_reset_impl);
     // mock.resetCalls()
     js_assert_set_native(mock_prop, "resetCalls", js_mock_reset_impl);
 
-    js_set_key_default(wrapper, assert_make_string("mock"), mock_prop);
+    js_set_key_cstr(wrapper, "mock", mock_prop);
     return wrapper;
 }
 
@@ -5362,10 +5340,10 @@ static Item js_mock_method_impl(Item object, Item method_name, Item implementati
     Item wrapper = js_mock_fn_impl(mock_original);
 
     // store info for restore
-    Item mock_prop = js_get_key_default(wrapper, assert_make_string("mock"));
-    js_set_key_default(mock_prop, assert_make_string("_owner"), object);
-    js_set_key_default(mock_prop, assert_make_string("_methodName"), method_name);
-    js_set_key_default(mock_prop, assert_make_string("_originalMethod"), original);
+    Item mock_prop = js_get_key_cstr(wrapper, "mock");
+    js_set_key_cstr(mock_prop, "_owner", object);
+    js_set_key_cstr(mock_prop, "_methodName", method_name);
+    js_set_key_cstr(mock_prop, "_originalMethod", original);
 
     // replace the method
     js_set_key_default(object, method_name, wrapper);
@@ -5376,7 +5354,7 @@ JS_FORWARD_STATIC_ITEM(js_mock_restore_all_impl, (void), make_js_undefined, ())
 
 static Item js_mock_call_count_impl(void) {
     Item self = js_get_this();
-    Item slot_item = js_get_key_default(self, assert_make_string("_slot"));
+    Item slot_item = js_get_key_cstr(self, "_slot");
     if (get_type_id(slot_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
     int slot = (int)it2i(slot_item);
     if (slot < 0 || slot >= MAX_MOCK_SLOTS || !g_mock_slots[slot].in_use) {
@@ -5427,7 +5405,7 @@ static Item js_mock_create_context(void) {
     js_assert_set_native(timers_obj, "enable", js_mock_timers_enable_impl);
     js_assert_set_native(timers_obj, "reset", js_mock_timers_reset_impl);
     js_assert_set_native(timers_obj, "tick", js_mock_timers_tick_impl);
-    js_set_key_default(mock_obj, assert_make_string("timers"), timers_obj);
+    js_set_key_cstr(mock_obj, "timers", timers_obj);
     return mock_obj;
 }
 
@@ -5455,10 +5433,8 @@ static void node_test_ensure_hook_stores(void) {
         g_node_after_each_store = js_array_new(0);
     }
     if (node_test_namespace.item != 0) {
-        js_set_key_default(node_test_namespace, assert_make_string("__beforeEachHooks__"),
-                        g_node_before_each_store);
-        js_set_key_default(node_test_namespace, assert_make_string("__afterEachHooks__"),
-                        g_node_after_each_store);
+        js_set_key_cstr(node_test_namespace, "__beforeEachHooks__", g_node_before_each_store);
+        js_set_key_cstr(node_test_namespace, "__afterEachHooks__", g_node_after_each_store);
     }
 }
 
@@ -5481,7 +5457,7 @@ static Item node_test_run_hooks(Item* hooks, int count) {
 
 static bool node_test_is_promise_like(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item then = js_get_key_default(value, assert_make_string("then"));
+    Item then = js_get_key_cstr(value, "then");
     return js_is_callable(then);
 }
 
@@ -5503,14 +5479,13 @@ static void node_test_emit_event(const char* type, Item name, int64_t test_id, I
     if (!node_test_event_queue_active()) return;
     Item event = js_new_object();
     Item data = js_new_object();
-    js_set_key_default(event, assert_make_string("type"), assert_make_string(type));
-    js_set_key_default(data, assert_make_string("name"),
-        get_type_id(name) == LMD_TYPE_STRING ? name : assert_make_string(""));
-    js_set_key_default(data, assert_make_string("testId"), (Item){.item = i2it((int)test_id)});
+    js_set_key_cstr(event, "type", assert_make_string(type));
+    js_set_key_cstr(data, "name", get_type_id(name) == LMD_TYPE_STRING ? name : assert_make_string(""));
+    js_set_key_cstr(data, "testId", (Item){.item = i2it((int)test_id)});
     if (get_type_id(error) != LMD_TYPE_UNDEFINED) {
-        js_set_key_default(data, assert_make_string("error"), error);
+        js_set_key_cstr(data, "error", error);
     }
-    js_set_key_default(event, assert_make_string("data"), data);
+    js_set_key_cstr(event, "data", data);
     js_array_push(g_node_test_event_queue, event);
 }
 JS_FORWARD_STATIC_ITEM(node_test_event_stream_identity, (void), js_get_this, ())
@@ -5518,27 +5493,27 @@ JS_FORWARD_STATIC_ITEM(node_test_event_stream_identity, (void), js_get_this, ())
 static Item node_test_event_stream_next(void) {
 
     Item self = js_get_this();
-    Item events = js_get_key_default(self, assert_make_string("__events__"));
-    Item index_item = js_get_key_default(self, assert_make_string("__index__"));
+    Item events = js_get_key_cstr(self, "__events__");
+    Item index_item = js_get_key_cstr(self, "__index__");
     int64_t index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : 0;
     int64_t len = get_type_id(events) == LMD_TYPE_ARRAY ? js_array_length(events) : 0;
 
     Item result = js_new_object();
     if (index < len) {
-        js_set_key_default(result, assert_make_string("value"), js_elements_get_int(events, index));
-        js_set_key_default(result, assert_make_string("done"), (Item){.item = b2it(false)});
-        js_set_key_default(self, assert_make_string("__index__"), (Item){.item = i2it(index + 1)});
+        js_set_key_cstr(result, "value", js_elements_get_int(events, index));
+        js_set_key_cstr(result, "done", (Item){.item = b2it(false)});
+        js_set_key_cstr(self, "__index__", (Item){.item = i2it(index + 1)});
     } else {
-        js_set_key_default(result, assert_make_string("value"), make_js_undefined());
-        js_set_key_default(result, assert_make_string("done"), (Item){.item = b2it(true)});
+        js_set_key_cstr(result, "value", make_js_undefined());
+        js_set_key_cstr(result, "done", (Item){.item = b2it(true)});
     }
     return js_promise_resolve(result);
 }
 
 static Item node_test_make_event_stream(Item events) {
     Item stream = js_new_object();
-    js_set_key_default(stream, assert_make_string("__events__"), events);
-    js_set_key_default(stream, assert_make_string("__index__"), (Item){.item = i2it(0)});
+    js_set_key_cstr(stream, "__events__", events);
+    js_set_key_cstr(stream, "__index__", (Item){.item = i2it(0)});
     js_set_native_key(stream, assert_make_string("next"), node_test_event_stream_next);
     Item identity = js_new_native_function(node_test_event_stream_identity);
     Item async_key = js_well_known_symbol_key(5);
@@ -5589,21 +5564,16 @@ extern "C" void js_diagnostics_channel_publish_named(const char* name, Item mess
 static Item node_test_diagnostics_message(Item name, const char* type) {
     Item message = js_new_object();
     if (get_type_id(name) == LMD_TYPE_STRING) {
-        js_set_key_default(message, assert_make_string("name"), name);
+        js_set_key_cstr(message, "name", name);
     } else {
-        js_set_key_default(message, assert_make_string("name"), assert_make_string(""));
+        js_set_key_cstr(message, "name", assert_make_string(""));
     }
-    js_set_key_default(message, assert_make_string("type"), assert_make_string(type ? type : "test"));
+    js_set_key_cstr(message, "type", assert_make_string(type ? type : "test"));
     return message;
 }
 
-static Item node_test_diagnostics_start(Item message) {
-    // node:test diagnostics_channel bindStore installs ALS state before callbacks run.
-    return js_diagnostics_channel_apply_store_context("tracing:node.test:start", message);
-}
-
 static void node_test_diagnostics_error(Item message, Item error) {
-    js_set_key_default(message, assert_make_string("error"), error);
+    js_set_key_cstr(message, "error", error);
     js_diagnostics_channel_publish_named("tracing:node.test:error", message);
 }
 
@@ -5618,7 +5588,7 @@ static Item js_build_test_context(void) {
 
     // t.mock — per-test mock context
     Item mock = js_mock_create_context();
-    js_set_key_default(t, assert_make_string("mock"), mock);
+    js_set_key_cstr(t, "mock", mock);
 
     // t.assert — the assert module + snapshot stubs
     extern Item js_get_assert_namespace(void);
@@ -5626,7 +5596,7 @@ static Item js_build_test_context(void) {
     // add snapshot and fileSnapshot as no-op stubs for test runner context
     js_assert_set_native(t_assert, "snapshot", js_test_context_skip);
     js_assert_set_native(t_assert, "fileSnapshot", js_test_context_skip);
-    js_set_key_default(t, assert_make_string("assert"), t_assert);
+    js_set_key_cstr(t, "assert", t_assert);
 
     // t.skip(), t.todo(), t.diagnostic(), t.plan()
     js_assert_set_native(t, "skip", js_test_context_skip);
@@ -5638,17 +5608,16 @@ static Item js_build_test_context(void) {
     js_assert_set_native(t, "test", js_test_context_subtest);
 
     // t.name — filled in later
-    js_set_key_default(t, assert_make_string("name"), make_js_undefined());
+    js_set_key_cstr(t, "name", make_js_undefined());
 
     // t.workerId — mirrors NODE_TEST_WORKER_ID for process-isolated test files.
-    js_set_key_default(t, assert_make_string("workerId"),
-                    (Item){.item = i2it(node_test_current_worker_id())});
+    js_set_key_cstr(t, "workerId", (Item){.item = i2it(node_test_current_worker_id())});
 
     // t.signal — an AbortSignal stub
-    js_set_key_default(t, assert_make_string("signal"), make_js_undefined());
+    js_set_key_cstr(t, "signal", make_js_undefined());
 
     // t.fullName
-    js_set_key_default(t, assert_make_string("fullName"), assert_make_string(""));
+    js_set_key_cstr(t, "fullName", assert_make_string(""));
 
     return t;
 }
@@ -5675,11 +5644,11 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
     // If options has skip: true or skip is a string, skip the test
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item skip_val = js_get_key_default(options, assert_make_string("skip"));
+        Item skip_val = js_get_key_cstr(options, "skip");
         if (js_is_truthy(skip_val)) {
             return make_js_undefined(); // skip this test
         }
-        Item todo_val = js_get_key_default(options, assert_make_string("todo"));
+        Item todo_val = js_get_key_cstr(options, "todo");
         if (js_is_truthy(todo_val)) {
             return make_js_undefined(); // todo tests are skipped
         }
@@ -5697,8 +5666,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
     // set t.name
     if (get_type_id(name) == LMD_TYPE_STRING) {
-        js_set_key_default(t, assert_make_string("name"), name);
-        js_set_key_default(t, assert_make_string("fullName"), name);
+        js_set_key_cstr(t, "name", name);
+        js_set_key_cstr(t, "fullName", name);
     }
 
     // node:test run() consumers need instance IDs, not source-location IDs:
@@ -5708,7 +5677,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     node_test_emit_event("test:start", name, test_id, make_js_undefined());
 
     Item diagnostics_message = node_test_diagnostics_message(name, "test");
-    Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
+    Item diagnostics_previous = js_diagnostics_channel_apply_store_context(
+        "tracing:node.test:start", diagnostics_message);
 
     Item before_hooks_result = node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
     if (item_is_error(before_hooks_result)) {
@@ -5774,7 +5744,7 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     js_node_test_resolve_options(options_or_fn, fn, &options, &callback);
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item skip_val = js_get_key_default(options, assert_make_string("skip"));
+        Item skip_val = js_get_key_cstr(options, "skip");
         if (js_is_truthy(skip_val)) return make_js_undefined();
     }
     if (!js_is_callable(callback)) return make_js_undefined();
@@ -5782,7 +5752,8 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     int before_each_mark = g_node_before_each_count;
     int after_each_mark = g_node_after_each_count;
     Item diagnostics_message = node_test_diagnostics_message(name, "suite");
-    Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
+    Item diagnostics_previous = js_diagnostics_channel_apply_store_context(
+        "tracing:node.test:start", diagnostics_message);
     Item callback_result = js_call_function(callback, make_js_undefined(), NULL, 0);
     js_microtask_flush();
     g_node_before_each_count = before_each_mark;
@@ -5836,7 +5807,7 @@ static Item js_node_test_run_files(Item options) {
     g_node_test_next_id = 1;
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item files = js_get_key_default(options, assert_make_string("files"));
+        Item files = js_get_key_cstr(options, "files");
         if (get_type_id(files) == LMD_TYPE_ARRAY) {
             int64_t len = js_array_length(files);
             for (int64_t i = 0; i < len; i++) {
@@ -5873,27 +5844,27 @@ extern "C" Item js_get_node_test_namespace(void) {
     node_test_ensure_hook_stores();
 
     // test is both the default export and a named export
-    js_set_key_default(node_test_namespace, assert_make_string("test"), test_fn);
-    js_set_key_default(node_test_namespace, assert_make_string("default"), test_fn);
+    js_set_key_cstr(node_test_namespace, "test", test_fn);
+    js_set_key_cstr(node_test_namespace, "default", test_fn);
 
     Item describe_fn = js_new_native_function(js_node_test_describe);
-    js_set_key_default(node_test_namespace, assert_make_string("describe"), describe_fn);
-    js_set_key_default(node_test_namespace, assert_make_string("suite"), describe_fn);
-    js_set_key_default(node_test_namespace, assert_make_string("it"), test_fn);
+    js_set_key_cstr(node_test_namespace, "describe", describe_fn);
+    js_set_key_cstr(node_test_namespace, "suite", describe_fn);
+    js_set_key_cstr(node_test_namespace, "it", test_fn);
     Item hook_fn = js_new_native_function(js_node_test_hook);
     Item before_each_fn = js_new_native_function(js_node_test_before_each);
     Item after_each_fn = js_new_native_function(js_node_test_after_each);
-    js_set_key_default(node_test_namespace, assert_make_string("before"), hook_fn);
-    js_set_key_default(node_test_namespace, assert_make_string("after"), hook_fn);
-    js_set_key_default(node_test_namespace, assert_make_string("beforeEach"), before_each_fn);
-    js_set_key_default(node_test_namespace, assert_make_string("afterEach"), after_each_fn);
+    js_set_key_cstr(node_test_namespace, "before", hook_fn);
+    js_set_key_cstr(node_test_namespace, "after", hook_fn);
+    js_set_key_cstr(node_test_namespace, "beforeEach", before_each_fn);
+    js_set_key_cstr(node_test_namespace, "afterEach", after_each_fn);
 
     // mock — global mock object
     Item mock_obj = js_mock_create_context();
-    js_set_key_default(node_test_namespace, assert_make_string("mock"), mock_obj);
+    js_set_key_cstr(node_test_namespace, "mock", mock_obj);
 
     // MockTracker class — same as mock
-    js_set_key_default(node_test_namespace, assert_make_string("MockTracker"), mock_obj);
+    js_set_key_cstr(node_test_namespace, "MockTracker", mock_obj);
 
     // run — in-process file runner that returns a test event iterable
     js_set_native_key(node_test_namespace, assert_make_string("run"), js_node_test_run_files);

@@ -11,6 +11,7 @@ struct JsRegexRange {
     int last;
 };
 
+bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp);
 int js_regex_generated_property_lookup_kind(const char* name, int name_len);
 int js_regex_generated_property_canonicalize_kind(int kind);
 bool js_regex_generated_property_kind_contains(int kind, int cp);
