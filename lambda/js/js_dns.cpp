@@ -189,9 +189,7 @@ static Item throw_invalid_local_address_value(Item address_item) {
         memcpy(value, s->chars, (size_t)len);
         value[len] = '\0';
     }
-    char msg[192];
-    snprintf(msg, sizeof(msg), "Invalid IP address: %s", value);
-    return js_throw_type_error_code("ERR_INVALID_IP_ADDRESS", msg);
+    return js_throw_type_error_codef("ERR_INVALID_IP_ADDRESS", "Invalid IP address: %s", value);
 }
 
 typedef struct DnsLookupOptions {
@@ -495,11 +493,8 @@ static Item validate_family_value(Item value, bool object_form, int* out_family)
     if (family != 0 && family != 4 && family != 6) {
         if (object_form) return js_throw_value(make_invalid_family_error(value));
         else {
-            char msg[128];
-            snprintf(msg, sizeof(msg),
-                "The argument 'family' must be one of: 0, 4, 6. Received %lld",
-                (long long)family);
-            return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE, msg);
+            return js_throw_type_error_codef(JS_ERR_INVALID_ARG_VALUE, 
+                "The argument 'family' must be one of: 0, 4, 6. Received %lld", (long long)family);
         }
     }
     *out_family = (int)family;

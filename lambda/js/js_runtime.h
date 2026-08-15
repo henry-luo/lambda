@@ -674,6 +674,13 @@ Item js_throw_named_error(int64_t kind, Item message);
 /** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
 Item js_throw_type_error_code(const char* code, const char* message);
 Item js_throw_range_error_code(const char* code, const char* message);
+// printf-style variants: format into a bounded buffer and throw. They replace
+// the `char msg[N]; snprintf(...); throw(msg)` stanza at the call sites.
+Item js_throw_type_errorf(const char* format, ...);
+Item js_throw_range_errorf(const char* format, ...);
+Item js_throw_type_error_codef(const char* code, const char* format, ...);
+Item js_throw_range_error_codef(const char* code, const char* format, ...);
+Item js_throw_named_error_textf(const char* type_name, const char* format, ...);
 Item js_throw_error_with_code(const char* code, const char* message);
 
 /**

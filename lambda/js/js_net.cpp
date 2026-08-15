@@ -2244,9 +2244,7 @@ static Item throw_invalid_ip_address(Item address) {
         memcpy(value, s->chars, (size_t)len);
         value[len] = '\0';
     }
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Invalid IP address: %s", value);
-    return js_throw_type_error_code("ERR_INVALID_IP_ADDRESS", msg);
+    return js_throw_type_error_codef("ERR_INVALID_IP_ADDRESS", "Invalid IP address: %s", value);
 }
 
 static Item make_invalid_address_family_error(int family, const char* host, int port) {
@@ -2349,10 +2347,8 @@ static bool string_item_has_nul(Item value) {
 
 static Item validate_host_string(Item value, const char* name) {
     if (string_item_has_nul(value)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg),
-                 "The property '%s' must be a string without null bytes.", name);
-        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+        return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+            "The property '%s' must be a string without null bytes.", name);
     }
     return js_status_ok();
 }

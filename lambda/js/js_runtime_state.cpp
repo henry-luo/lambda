@@ -950,9 +950,7 @@ extern "C" Item js_require_object_coercible(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Cannot destructure '%s' as it is %s.", type_str, type_str);
-        return js_throw_type_error(msg);
+        return js_throw_type_errorf("Cannot destructure '%s' as it is %s.", type_str, type_str);
     }
     return value;
 }

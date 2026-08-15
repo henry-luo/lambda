@@ -11914,6 +11914,17 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     return finish(true);
 }
 
+// Strict-mode delete rejection: same TypeError shape for a frozen object, a
+// non-configurable own property, and a nullish base.
+static Item js_throw_delete_rejected(Item key, const char* owner) {
+    String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
+    char msg[256];
+    snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of %s",
+             sk ? (int)sk->len : 0, sk ? sk->chars : "", owner);
+    return js_throw_value(js_new_error_with_name(js_name_item("TypeError"),
+        js_name_item(msg)));
+}
+
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     // Process space parameter
     // ES spec §24.5.3 step 5: unwrap Number/String wrapper objects
@@ -12054,15 +12065,7 @@ static Item js_delete_map_property(Item obj, Item key, bool strict) {
         bool frozen_found = false;
         Item frozen_val = js_map_shape_lookup_ext(m, "__frozen__", 10, &frozen_found);
         if (frozen_found && js_is_truthy(frozen_val)) {
-            if (strict) {
-                String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
-                char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of a frozen object",
-                         sk ? (int)sk->len : 0, sk ? sk->chars : "");
-                Item tn = js_name_item("TypeError");
-                Item em = js_name_item(msg);
-                return js_throw_value(js_new_error_with_name(tn, em));
-            }
+            if (strict) return js_throw_delete_rejected(key, "a frozen object");
             return (Item){.item = b2it(false)};
         }
     }
@@ -12090,14 +12093,7 @@ static Item js_delete_map_property(Item obj, Item key, bool strict) {
                 is_nc = true;
             }
             if (is_nc) {
-                if (strict) {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of #<Object>",
-                             (int)str_key->len, str_key->chars);
-                    Item tn = js_name_item("TypeError");
-                    Item em = js_name_item(msg);
-                    return js_throw_value(js_new_error_with_name(tn, em));
-                }
+                if (strict) return js_throw_delete_rejected(key, "#<Object>");
                 return (Item){.item = b2it(false)};
             }
         }
@@ -12379,14 +12375,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
     // TypeError if base is null or undefined (non-object-coercible)
     // But only when the preceding operation did not return an ERROR Item.
     if (obj.item == ITEM_NULL || obj.item == ITEM_JS_UNDEFINED) {
-        String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
-        const char* base = (obj.item == ITEM_NULL) ? "null" : "undefined";
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of %s",
-                 sk ? (int)sk->len : 0, sk ? sk->chars : "", base);
-        Item tn = js_name_item("TypeError");
-        Item em = js_name_item(msg, strlen(msg));
-        return js_throw_value(js_new_error_with_name(tn, em));
+        return js_throw_delete_rejected(key,
+            (obj.item == ITEM_NULL) ? "null" : "undefined");
     }
     if (js_is_resting_error(obj)) {
         JS_ASSIGN_OR_RETURN(property_key, js_to_property_key(key));

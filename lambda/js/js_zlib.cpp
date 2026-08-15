@@ -357,21 +357,15 @@ static Item zlib_throw_property_type_error(const char* name, const char* expecte
 static Item zlib_throw_property_range_error(const char* name, const char* range, Item actual) {
     char actual_buf[64];
     zlib_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"%s\" is out of range. It must be %s. Received %s",
-        name, range, actual_buf);
-    return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+    return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+        "The value of \"%s\" is out of range. It must be %s. Received %s", name, range, actual_buf);
 }
 
 static Item zlib_throw_uint32_range_error(const char* range, Item actual) {
     char actual_buf[64];
     zlib_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"value\" is out of range. It must be %s. Received %s",
-        range, actual_buf);
-    return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+    return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+        "The value of \"value\" is out of range. It must be %s. Received %s", range, actual_buf);
 }
 
 static Item zlib_crc32_seed_value(Item value, uint32_t* out_value) {

@@ -1419,16 +1419,14 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
         const char* received = (ctor_item.item == ITEM_NULL) ? "null" :
                                (ctor_item.item == ITEM_JS_UNDEFINED) ? "undefined" :
                                ctor_type_str ? ctor_type_str->chars : "unknown";
-        char msg[256];
-        snprintf(msg, sizeof(msg), "The \"ctor\" argument must be of type function. Received %s", received);
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+        return js_throw_type_error_codef("ERR_INVALID_ARG_TYPE", 
+            "The \"ctor\" argument must be of type function. Received %s", received);
     }
     // validate superCtor — reject null, undefined, and non-object primitives
     if (super_item.item == ITEM_NULL || super_item.item == ITEM_JS_UNDEFINED) {
         const char* received = (super_item.item == ITEM_NULL) ? "null" : "undefined";
-        char msg[256];
-        snprintf(msg, sizeof(msg), "The \"superCtor\" argument must be of type function. Received %s", received);
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+        return js_throw_type_error_codef("ERR_INVALID_ARG_TYPE", 
+            "The \"superCtor\" argument must be of type function. Received %s", received);
     }
     // validate superCtor.prototype
     Item super_proto = js_get_key_cstr(super_item, "prototype");

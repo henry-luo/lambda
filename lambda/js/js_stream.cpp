@@ -5792,10 +5792,8 @@ static bool js_stream_item_is_nan_number(Item item) {
 
 static Item js_stream_validate_hwm_option(const char* name, Item value) {
     if (!js_stream_item_is_nan_number(value)) return js_status_ok();
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-             "The property 'options.%s' is invalid. Received NaN", name);
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The property 'options.%s' is invalid. Received NaN", name);
 }
 JS_FORWARD_STATIC_VOID( js_stream_define_bool, (Item obj, const char* name, bool value), js_create_data_property, (obj, make_string_item(name), js_bool_item(value)))
 

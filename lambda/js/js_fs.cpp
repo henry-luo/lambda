@@ -127,11 +127,8 @@ static Item fs_validate_encoding_item(Item encoding_item) {
     if (type != LMD_TYPE_STRING) return js_status_ok();
     String* s = it2s(encoding_item);
     if (fs_is_valid_encoding(s)) return js_status_ok();
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-             "The argument 'encoding' is invalid encoding. Received '%.*s'",
-             (int)s->len, s->chars);
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The argument 'encoding' is invalid encoding. Received '%.*s'", (int)s->len, s->chars);
 }
 
 static Item fs_permission_callback_error(Item callback, const char* permission, const char* path, const char* message) {
@@ -430,11 +427,8 @@ static JsTypedArray* fs_get_typed_array(Item buffer_item) {
 }
 
 static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-             "The argument 'buffer' is empty and cannot be written. Received %s(0) []",
-             fs_typed_array_name(ta));
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The argument 'buffer' is empty and cannot be written. Received %s(0) []", fs_typed_array_name(ta));
 }
 
 // =============================================================================

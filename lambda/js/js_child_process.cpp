@@ -2099,9 +2099,8 @@ static Item validate_uid_gid_option(Item options, const char* name) {
         return js_throw_invalid_arg_type(name, "number", value);
     }
     if (number < 0 || number > 2147483647.0) {
-        char msg[256];
-        snprintf(msg, sizeof(msg), "The value of \"%s\" is out of range", name);
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+            "The value of \"%s\" is out of range", name);
     }
     return js_status_ok();
 }

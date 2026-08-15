@@ -22,6 +22,35 @@
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/utf.h"
+#include <stdarg.h>
+
+// Shared formatting buffer for the throw-with-format helpers. JS error
+// messages are bounded by construction; truncation is preferable to a heap
+// allocation on a path that is already unwinding.
+#define JS_THROW_FORMATF(call) \
+    char message[512]; \
+    va_list args; \
+    va_start(args, format); \
+    vsnprintf(message, sizeof(message), format, args); \
+    va_end(args); \
+    return call
+
+Item js_throw_type_errorf(const char* format, ...) {
+    JS_THROW_FORMATF(js_throw_type_error(message));
+}
+Item js_throw_range_errorf(const char* format, ...) {
+    JS_THROW_FORMATF(js_throw_range_error(message));
+}
+Item js_throw_type_error_codef(const char* code, const char* format, ...) {
+    JS_THROW_FORMATF(js_throw_type_error_code(code, message));
+}
+Item js_throw_range_error_codef(const char* code, const char* format, ...) {
+    JS_THROW_FORMATF(js_throw_range_error_code(code, message));
+}
+Item js_throw_named_error_textf(const char* type_name, const char* format, ...) {
+    JS_THROW_FORMATF(js_throw_named_error_text(type_name, message));
+}
+#undef JS_THROW_FORMATF
 
 Item js_name_item(const char* name, int len) {
     return (Item){.item = s2it(heap_create_name(name, len))};
@@ -1169,10 +1198,8 @@ static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_l
     if (!js_is_callable(trap)) {
         // GetMethod observes an exotic [[Call]] capability; the handler may
         // provide a callable Proxy trap (D6.2.2v2).
-        char msg[96];
-        snprintf(msg, sizeof(msg), "'%.*s' returned for property '%.*s' of object '#<Object>' is not a function",
-                 trap_len, trap_name, trap_len, trap_name);
-        return js_throw_type_error(msg);
+        return js_throw_type_errorf(
+            "'%.*s' returned for property '%.*s' of object '#<Object>' is not a function", trap_len, trap_name, trap_len, trap_name);
     }
     return trap;
 }
@@ -6896,10 +6923,8 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                 if (st.status == JS_SET_NO_SETTER) {
                     if (property_key_requires_identity(str_key) &&
                         property_key_kind(str_key) == NAME_KEY_PRIVATE) {
-                        char msg[256];
-                        snprintf(msg, sizeof(msg), "'%.*s' was defined without a setter",
-                            (int)str_key->len, str_key->chars);
-                        return js_throw_type_error(msg);
+                        return js_throw_type_errorf(
+                            "'%.*s' was defined without a setter", (int)str_key->len, str_key->chars);
                     }
                     // Accessor with no callable setter: strict TypeError, sloppy no-op.
                     JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
@@ -6924,10 +6949,8 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                 js_proto_chain_has_nonwritable_data(object, str_key)) {
                 if (property_key_requires_identity(str_key) &&
                     property_key_kind(str_key) == NAME_KEY_PRIVATE) {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot assign to private method '%.*s'",
-                        (int)str_key->len, str_key->chars);
-                    return js_throw_type_error(msg);
+                    return js_throw_type_errorf(
+                        "Cannot assign to private method '%.*s'", (int)str_key->len, str_key->chars);
                 }
                 JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                     "assign to read only", str_key->chars, (int)str_key->len));
@@ -19612,10 +19635,8 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
             if (frozen_found && js_is_truthy(frozen_val)) {
                 const char* method_name = (method_id == 0) ? (cd->type == JS_COLLECTION_SET ? "add" : "set") :
                                           (method_id == 3) ? "delete" : "clear";
-                char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot %s on a frozen %s", method_name,
-                         cd->type == JS_COLLECTION_SET ? "Set" : "Map");
-                return js_throw_type_error(msg);
+                return js_throw_type_errorf(
+                    "Cannot %s on a frozen %s", method_name, cd->type == JS_COLLECTION_SET ? "Set" : "Map");
             }
         }
     }
@@ -23016,10 +23037,8 @@ JS_FORWARD_ITEM(js_throw_invalid_arg_type,
 
 // Node.js-style error: The "name" argument reason. Received actual
 extern "C" Item js_throw_invalid_arg_value(const char* name, const char* reason, Item actual) {
-    char msg[512];
-    snprintf(msg, sizeof(msg),
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
         "The \"%s\" argument %s", name, reason);
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
 }
 
 // Node.js-style error: The value of "name" is out of range. It must be range. Received value
@@ -28471,10 +28490,8 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
 
     // null and undefined are never iterable — throw TypeError immediately
     if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "%s is not iterable",
-                 tid == LMD_TYPE_NULL ? "null" : "undefined");
-        return js_throw_type_error(msg);
+        return js_throw_type_errorf(
+            "%s is not iterable", tid == LMD_TYPE_NULL ? "null" : "undefined");
     }
 
     // Arrays: wrap in lightweight array iterator (v28: MAP_KIND_ITERATOR)

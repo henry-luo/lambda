@@ -341,9 +341,8 @@ static Item buffer_from_to_index(Item item, int undefined_default, int nan_defau
     } else if (num_type == LMD_TYPE_INT64) {
         value = (double)it2l(num);
     } else {
-        char msg[160];
-        snprintf(msg, sizeof(msg), "The \"%s\" argument must be of type number.", name ? name : "offset");
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+        return js_throw_type_error_codef("ERR_INVALID_ARG_TYPE", 
+            "The \"%s\" argument must be of type number.", name ? name : "offset");
     }
 
     if (value != value) {
@@ -352,9 +351,8 @@ static Item buffer_from_to_index(Item item, int undefined_default, int nan_defau
     }
 
     if (value < 0.0 || value > 2147483647.0) {
-        char msg[160];
-        snprintf(msg, sizeof(msg), "\"%s\" is outside of buffer bounds", name ? name : "offset");
-        return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS", msg);
+        return js_throw_range_error_codef("ERR_BUFFER_OUT_OF_BOUNDS", 
+            "\"%s\" is outside of buffer bounds", name ? name : "offset");
     }
 
     *out_index = (int)value;
@@ -766,18 +764,12 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
         }
         int64_t requested_int = (int64_t)requested;
         if (requested != requested || (double)requested_int != requested) {
-            char msg[160];
-            snprintf(msg, sizeof(msg),
-                "The value of \"length\" is out of range. It must be an integer. Received %g",
-                requested);
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+            return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+                "The value of \"length\" is out of range. It must be an integer. Received %g", requested);
         }
         if (requested < 0.0 || requested > (double)JS_BUFFER_MAX_LENGTH) {
-            char msg[192];
-            snprintf(msg, sizeof(msg),
-                "The value of \"length\" is out of range. It must be >= 0 && <= %lld. Received %g",
-                (long long)JS_BUFFER_MAX_LENGTH, requested);
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+            return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+                "The value of \"length\" is out of range. It must be >= 0 && <= %lld. Received %g", (long long)JS_BUFFER_MAX_LENGTH, requested);
         }
         total = requested_int;
     } else if (total_length_item.item == ITEM_NULL) {
@@ -1200,9 +1192,8 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
         enc_buf[elen] = '\0';
         if (!is_known_encoding(enc_buf) &&
             strcmp(enc_buf, "utf8") != 0 && strcmp(enc_buf, "utf-8") != 0) {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "Unknown encoding: %.*s", (int)enc->len, enc->chars);
-            return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+            return js_throw_type_error_codef("ERR_UNKNOWN_ENCODING", 
+                "Unknown encoding: %.*s", (int)enc->len, enc->chars);
         }
     } else if (enc_tid != LMD_TYPE_UNDEFINED) {
         // non-string, non-undefined encoding → throw ERR_UNKNOWN_ENCODING
@@ -1328,10 +1319,8 @@ extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item, Item 
     if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
     else if (get_type_id(offset_item) == LMD_TYPE_FLOAT) offset = (int)it2d(offset_item);
     if (offset < 0 || offset > blen) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
+        return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
             "The value of \"offset\" is out of range. It must be >= 0 and <= %d. Received %d", blen, offset);
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
     }
     if (offset >= blen) return (Item){.item = i2it(0)};
 
@@ -1342,9 +1331,7 @@ extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item, Item 
     if (length > blen - offset) length = blen - offset;
 
     if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+        return js_throw_type_error_codef("ERR_UNKNOWN_ENCODING", "Unknown encoding: %s", enc);
     }
 
     int write_len = encode_string_bytes(s->chars, (int)s->len, enc, data + offset, length);
@@ -1382,25 +1369,19 @@ extern "C" Item js_buffer_copy(Item src_buf, Item dst_buf, Item target_start_ite
 
     int target_start = coerce_copy_offset(target_start_item, 0);
     if (target_start < 0) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
+        return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
             "The value of \"targetStart\" is out of range. It must be >= 0. Received %d", target_start);
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
     }
     if (target_start >= dst_len) return (Item){.item = i2it(0)};
 
     int source_start = coerce_copy_offset(source_start_item, 0);
     if (source_start < 0) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
+        return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
             "The value of \"sourceStart\" is out of range. It must be >= 0. Received %d", source_start);
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
     }
     if (source_start > src_len) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
+        return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
             "The value of \"sourceStart\" is out of range. It must be >= 0 && <= %d. Received %d", src_len, source_start);
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
     }
 
     int source_end = src_len;
@@ -1408,10 +1389,8 @@ extern "C" Item js_buffer_copy(Item src_buf, Item dst_buf, Item target_start_ite
     if (se_tid != LMD_TYPE_NULL && se_tid != LMD_TYPE_UNDEFINED) {
         source_end = coerce_copy_offset(source_end_item, src_len);
         if (source_end < 0) {
-            char msg[256];
-            snprintf(msg, sizeof(msg),
+            return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
                 "The value of \"sourceEnd\" is out of range. It must be >= 0. Received %d", source_end);
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
         }
     }
     if (source_end > src_len) source_end = src_len;
@@ -1814,11 +1793,8 @@ static Item validate_write_value(Item value_item, int64_t* out_val, int64_t min_
     else if (tid == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
     *out_val = v;
     if (v < min_val || v > max_val) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
-            "The value of \"value\" is out of range. It must be >= %lld and <= %lld. Received %lld",
-            (long long)min_val, (long long)max_val, (long long)v);
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+            "The value of \"value\" is out of range. It must be >= %lld and <= %lld. Received %lld", (long long)min_val, (long long)max_val, (long long)v);
     }
     return js_status_ok();
 }

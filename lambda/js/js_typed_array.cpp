@@ -1769,10 +1769,7 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
         TypeId ctor_type = get_type_id(ctor);
         if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
                 ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
-            char message[96];
-            snprintf(message, sizeof(message),
-                "%s species constructor must be an object", type_name);
-            return js_throw_type_error(message);
+            return js_throw_type_errorf("%s species constructor must be an object", type_name);
         }
         Item species_key = js_well_known_symbol_key(6);
         JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
@@ -1797,23 +1794,16 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
     bool correct_type = shared ? js_is_sharedarraybuffer(result_item)
         : js_is_arraybuffer(result_item) && !js_is_sharedarraybuffer(result_item);
     if (!correct_type) {
-        char message[128];
-        snprintf(message, sizeof(message),
+        return js_throw_type_errorf(
             "%s species constructor did not return a %s", type_name, type_name);
-        return js_throw_type_error(message);
     }
     if (result_item.item == source.item) {
-        char message[128];
-        snprintf(message, sizeof(message),
-            "%s species constructor returned the same buffer", type_name);
-        return js_throw_type_error(message);
+        return js_throw_type_errorf("%s species constructor returned the same buffer", type_name);
     }
     JsArrayBuffer* result_buffer = js_get_arraybuffer_ptr(result_item.map);
     if (!result_buffer || js_arraybuffer_length(result_buffer) < new_len) {
-        char message[128];
-        snprintf(message, sizeof(message),
+        return js_throw_type_errorf(
             "%s species constructor returned a buffer that is too small", type_name);
-        return js_throw_type_error(message);
     }
     if (new_len > 0) {
         memcpy(js_arraybuffer_prepare_write(result_buffer),
