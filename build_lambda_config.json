@@ -3745,7 +3745,8 @@
             "additional_sources": [
               "lib/test_utils.c",
               "lib/test_utils_runtime.cpp",
-              "lambda/runtime/runtime-state.cpp"
+              "lambda/runtime/runtime-state.cpp",
+              "lambda/runtime/side_stack.c"
             ],
             "binary": "test_dir_gtest.exe",
             "icon": "📁"
