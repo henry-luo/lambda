@@ -186,7 +186,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.9 `js_map_own_or/_string`
 - [x] C2.10 `js_species_constructor`
 - [x] C2.11 join/toLocaleString kernel
-- [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 1 of ~40 walkers migrated
+- [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 2 of ~40 walkers migrated
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
@@ -258,10 +258,11 @@ Landed and gated (18 commits, `test-lambda-baseline` 3870/3870 and the
 - **C1** — all five items.
 - **C2** — all eleven items (C2.4 landed before C2.1–C2.3).
 - **C3.1** — the shared child table (`lambda/js/js_ast_children.cpp`),
-  `js_ast_visit_children` / `js_ast_any_child`, and the first walker migration
-  (`jm_collect_enclosing_lexicals_for_target`, 146 → 34 lines).
+  `js_ast_visit_children` / `js_ast_any_child`, and two walker migrations:
+  `jm_collect_enclosing_lexicals_for_target` (146 → 34) and
+  `jm_count_suspensions` (157 → 31).
 
-Net so far: **−1,400 lines** across `lambda/`.
+Net so far: **−1,530 lines** across `lambda/`.
 
 ### Revised expectation for the rest of C3.1
 
