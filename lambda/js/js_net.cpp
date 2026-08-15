@@ -1954,11 +1954,11 @@ static Item make_socket_handle_object(JsSocket* sock) {
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     if (sock->high_water_mark < 0) sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
-    RootFrame roots(4);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_SOCKET));
-    Rooted<Item> hwm_root(roots, ItemNull);
-    Rooted<Item> readable_state_root(roots, ItemNull);
-    Rooted<Item> writable_state_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        obj_root, js_new_object_with_class(JS_CLASS_SOCKET),
+        hwm_root, ItemNull,
+        readable_state_root, ItemNull,
+        writable_state_root, ItemNull);
     if (get_type_id(net_socket_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(obj_root.get(), net_socket_prototype);
     }
@@ -5406,14 +5406,14 @@ extern "C" Item js_get_net_namespace(void) {
     net_namespace = js_new_object();
     // The namespace is process-cached; register its root before any exported
     // constructor allocation so forced collection cannot reclaim the cache.
-    RootFrame roots(7);
-    Rooted<Item> namespace_root(roots, net_namespace);
-    Rooted<Item> create_server_root(roots, ItemNull);
-    Rooted<Item> socket_root(roots, ItemNull);
-    Rooted<Item> block_list_root(roots, ItemNull);
-    Rooted<Item> bound_socket_root(roots, ItemNull);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> server_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        namespace_root, net_namespace,
+        create_server_root, ItemNull,
+        socket_root, ItemNull,
+        block_list_root, ItemNull,
+        bound_socket_root, ItemNull,
+        stream_root, ItemNull,
+        server_root, ItemNull);
 
     create_server_root.set(net_set_method(namespace_root.get(), "createServer", js_net_createServer, -1));
     net_set_method(namespace_root.get(), "createConnection", js_net_createConnection, -1);

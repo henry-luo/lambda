@@ -719,11 +719,11 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> name_root(roots, name);
-    Rooted<Item> desc_root(roots, ItemNull);
-    Rooted<Item> enum_key_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, object,
+        name_root, name,
+        desc_root, ItemNull,
+        enum_key_root, ItemNull);
     // The descriptor is fresh and property construction allocates; keep every
     // borrowed argument exact until defineProperty has consumed the object.
     desc_root.set(js_new_object());
@@ -1216,11 +1216,11 @@ JS_FORWARD_ITEM(js_throw_named_error_text, (const char* type_name, const char* m
 
 // AggregateError(errors, message): Error subclass with .errors array
 extern "C" Item js_new_aggregate_error(Item errors, Item message) {
-    RootFrame roots(4);
-    Rooted<Item> errors_root(roots, errors);
-    Rooted<Item> message_root(roots, message);
-    Rooted<Item> err_root(roots, ItemNull);
-    Rooted<Item> errors_array_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        errors_root, errors,
+        message_root, message,
+        err_root, ItemNull,
+        errors_array_root, ItemNull);
     Item err_name = js_name_item("AggregateError", 14);
     if (get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED &&
             message_root.get().item != ITEM_JS_UNDEFINED) {
@@ -1791,17 +1791,17 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
 
 
 extern "C" Item js_build_arguments_object() {
-    RootFrame roots(10);
-    Rooted<Item> arr_root(roots, ItemNull);
-    Rooted<Item> companion_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> descriptor_root(roots, ItemNull);
-    Rooted<Item> tag_key_root(roots, ItemNull);
-    Rooted<Item> iterator_key_root(roots, ItemNull);
-    Rooted<Item> iterator_root(roots, ItemNull);
-    Rooted<Item> thrower_root(roots, ItemNull);
-    Rooted<Item> callee_key_root(roots, ItemNull);
-    Rooted<Item> callee_root(roots, js_pending_args_callee);
+    JS_ROOTS(roots,
+        arr_root, ItemNull,
+        companion_root, ItemNull,
+        key_root, ItemNull,
+        descriptor_root, ItemNull,
+        tag_key_root, ItemNull,
+        iterator_key_root, ItemNull,
+        iterator_root, ItemNull,
+        thrower_root, ItemNull,
+        callee_key_root, ItemNull,
+        callee_root, js_pending_args_callee);
     int argc = js_pending_call_argc;
     Item* args = js_pending_call_args;
     int is_strict = js_pending_args_is_strict;

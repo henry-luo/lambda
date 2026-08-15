@@ -3036,11 +3036,11 @@ static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
 template <typename Method>
 static void js_dom_install_native_constructor_global(const char* ctor_name,
         JsNativeP0 ctor_target, const char* method_name, Method method_target) {
-    RootFrame roots(4);
-    Rooted<Item> global_root(roots, js_get_global_this());
-    Rooted<Item> ctor_root(roots, js_new_native_constructor(ctor_target));
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> method_root(roots, js_new_native_function(method_target));
+    JS_ROOTS(roots,
+        global_root, js_get_global_this(),
+        ctor_root, js_new_native_constructor(ctor_target),
+        proto_root, js_new_object(),
+        method_root, js_new_native_function(method_target));
     js_set_function_name(ctor_root.get(), js_name_item(ctor_name));
     js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_set_key_default(proto_root.get(), js_string_key(method_name),
@@ -3568,11 +3568,11 @@ static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     Item cache_key = js_name_item("__classListWrapper");
     Item wrapper = exp_map.item != ITEM_NULL ? js_get_key_default(exp_map, cache_key) : ItemNull;
-    RootFrame roots(4);
-    Rooted<Item> elem_root(roots, elem_item);
-    Rooted<Item> expando_root(roots, exp_map);
-    Rooted<Item> wrapper_root(roots, wrapper);
-    Rooted<Item> method_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        elem_root, elem_item,
+        expando_root, exp_map,
+        wrapper_root, wrapper,
+        method_root, ItemNull);
     if (get_type_id(wrapper_root.get()) != LMD_TYPE_MAP &&
             get_type_id(wrapper_root.get()) != LMD_TYPE_VMAP) {
         wrapper_root.set(js_new_object());
@@ -4486,11 +4486,11 @@ static bool js_dom_data_attr_to_dataset_key(const char* attr, char* out, size_t 
 extern "C" Item js_dom_dataset_property(Item elem_item) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
-    RootFrame roots(4);
-    Rooted<Item> elem_root(roots, elem_item);
-    Rooted<Item> dataset_root(roots, js_new_object());
-    Rooted<Item> key_root(roots, js_string_key("__lambda_dataset_element"));
-    Rooted<Item> value_root(roots, elem_item);
+    JS_ROOTS(roots,
+        elem_root, elem_item,
+        dataset_root, js_new_object(),
+        key_root, js_string_key("__lambda_dataset_element"),
+        value_root, elem_item);
     // Dataset construction allocates keys and shapes; root the unfinished view
     // and owner so a collection cannot leave an asynchronously retained wrapper stale.
     js_define_own_key_storage(dataset_root.get(), key_root.get(), elem_root.get());
@@ -5491,10 +5491,10 @@ static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
 
 extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
                                                       Item value_item) {
-    RootFrame roots(3);
-    Rooted<Item> command_root(roots, command_item);
-    Rooted<Item> value_root(roots, value_item);
-    Rooted<Item> string_root(roots, js_to_string(value_root.get()));
+    JS_ROOTS(roots,
+        command_root, command_item,
+        value_root, value_item,
+        string_root, js_to_string(value_root.get()));
     const char* command = fn_to_cstr(command_root.get());
     const char* value = fn_to_cstr(string_root.get());
     if (!command || !value || strcasecmp(command, "insertHTML") != 0) {
@@ -5650,10 +5650,7 @@ static DomNode* js_dom_tree_walker_next_matching(DomNode* root,
 }
 
 static Item js_dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
-    RootFrame roots(3);
-    Rooted<Item> walker_root(roots, walker_item);
-    Rooted<Item> node_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots, walker_root, walker_item, node_root, ItemNull, result_root, ItemNull);
     Item root_item = js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT));
     Item current_item = js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT));
     DomNode* root = (DomNode*)js_dom_unwrap_element(root_item);
@@ -14797,11 +14794,7 @@ extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item val
 
 extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
                                                        Item value) {
-    RootFrame roots(4);
-    Rooted<Item> dataset_root(roots, dataset);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> owner_root(roots, ItemNull);
+    JS_ROOTS(roots, dataset_root, dataset, key_root, key, value_root, value, owner_root, ItemNull);
     if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return false;
     String* key_string = it2s(key_root.get());
     if (!key_string ||
@@ -15153,10 +15146,10 @@ static Item _document_fragment_ctor(void) {
 template <typename Target>
 static void js_dom_install_value_constructor(Item global, const char* name,
         Target target, bool set_string_tag) {
-    RootFrame roots(3);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> ctor_root(roots, js_new_distinct_native_constructor(target));
-    Rooted<Item> proto_root(roots, js_new_object());
+    JS_ROOTS(roots,
+        global_root, global,
+        ctor_root, js_new_distinct_native_constructor(target),
+        proto_root, js_new_object());
     Item name_key = js_string_key(name);
     js_set_function_name(ctor_root.get(), name_key);
     if (set_string_tag) _set_iface_to_string_tag(proto_root.get(), name);

@@ -633,10 +633,10 @@ JS_NATIVE_FIXED_ARITIES(JS_DEFINE_NATIVE_CONSTRUCTOR)
 
 Item js_initialize_native_constructor_prototype(Item constructor,
         Item prototype) {
-    RootFrame roots(3);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> prototype_root(roots, prototype);
-    Rooted<Item> key_root(roots, make_string_item("prototype"));
+    JS_ROOTS(roots,
+        constructor_root, constructor,
+        prototype_root, prototype,
+        key_root, make_string_item("prototype"));
     if (get_type_id(constructor_root.get()) != LMD_TYPE_FUNC ||
             !js_function_has_own_prototype(constructor_root.get())) {
         return js_throw_type_error(

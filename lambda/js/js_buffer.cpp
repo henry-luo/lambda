@@ -2383,12 +2383,12 @@ extern "C" Item js_get_buffer_namespace(void) {
 
     // Buffer is both a callable function (deprecated Buffer(arg, enc)) and a namespace
     buffer_namespace = js_new_native_function(js_buffer_construct);
-    RootFrame namespace_roots(5);
-    Rooted<Item> namespace_root(namespace_roots, buffer_namespace);
-    Rooted<Item> prototype_root(namespace_roots, ItemNull);
-    Rooted<Item> has_instance_root(namespace_roots, ItemNull);
-    Rooted<Item> blob_ctor_root(namespace_roots, ItemNull);
-    Rooted<Item> constants_root(namespace_roots, ItemNull);
+    JS_ROOTS(namespace_roots,
+        namespace_root, buffer_namespace,
+        prototype_root, ItemNull,
+        has_instance_root, ItemNull,
+        blob_ctor_root, ItemNull,
+        constants_root, ItemNull);
 
     // static methods (Buffer.alloc, Buffer.from, etc.)
 #define JS_BUFFER_STATIC_METHODS(M) \

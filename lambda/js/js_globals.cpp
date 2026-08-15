@@ -128,10 +128,7 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
             get_type_id(key) != LMD_TYPE_STRING) {
         return false;
     }
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, ItemNull);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, ItemNull);
     String* name = it2s(key_root.get());
     if (!name) return false;
     for (size_t i = 0;
@@ -1737,10 +1734,7 @@ extern "C" Item js_date_now(void) {
 // but js_date_new() is needed if the Date object is stored in a variable first.
 
 static void js_date_set_instance_prototype(Item obj) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> constructor_root(roots, ItemNull);
-    Rooted<Item> prototype_root(roots, ItemNull);
+    JS_ROOTS(roots, object_root, obj, constructor_root, ItemNull, prototype_root, ItemNull);
     Item date_key = js_name_item("Date", 4);
     constructor_root.set(js_get_global_property(date_key));
     if (get_type_id(constructor_root.get()) == LMD_TYPE_FUNC) {
@@ -1777,10 +1771,10 @@ extern "C" Item js_date_now_string(void) {
 
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
 extern "C" Item js_date_new_from(Item value) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_DATE));
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> key_root(roots, js_name_item("__time__"));
+    JS_ROOTS(roots,
+        object_root, js_new_object_with_class(JS_CLASS_DATE),
+        value_root, value,
+        key_root, js_name_item("__time__"));
     TypeId tid = get_type_id(value_root.get());
 
     // helper: store ms with TimeClip validation (|v| > 8.64e15 → NaN)
@@ -3637,9 +3631,7 @@ extern "C" Item js_get_process_object_value(void) {
 
         // config — minimal process.config for Node.js compat
         {
-            RootFrame roots(2);
-            Rooted<Item> config_root(roots, js_new_object());
-            Rooted<Item> variables_root(roots, js_new_object());
+            JS_ROOTS(roots, config_root, js_new_object(), variables_root, js_new_object());
             js_set_key_cstr(variables_root.get(), "v8_enable_i18n_support", (Item){.item = i2it(0)});
             js_set_key_cstr(variables_root.get(), "node_shared", (Item){.item = ITEM_FALSE});
             js_set_key_cstr(variables_root.get(), "node_use_ffi", (Item){.item = ITEM_FALSE});
@@ -6304,11 +6296,11 @@ static Item js_error_own_property_names(Item object, bool include_symbols) {
 
 // Reflect.ownKeys(obj) — returns array of all own property keys (strings + symbols)
 extern "C" Item js_reflect_own_keys(Item obj) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> names_root(roots, ItemNull);
-    Rooted<Item> symbols_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, obj,
+        names_root, ItemNull,
+        symbols_root, ItemNull,
+        result_root, ItemNull);
     // ES §28.1.13 Reflect.ownKeys: target must be an Object.
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "ownKeys"));
     if (js_is_resting_error(obj)) {
@@ -6377,9 +6369,7 @@ extern "C" Item js_reflect_own_keys(Item obj) {
 }
 
 static Item js_make_reflect_set_value_desc(Item value, bool include_create_attrs) {
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> desc_root(roots, js_new_object());
+    JS_ROOTS(roots, value_root, value, desc_root, js_new_object());
     // Descriptor assembly allocates several shape transitions; keep both the
     // descriptor and its caller-provided value live through the whole build.
     // Descriptor construction is DefineOwn storage, not another ordinary Set:
@@ -6435,14 +6425,14 @@ static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
 
 extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
                                              Item receiver) {
-    RootFrame roots(7);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> receiver_root(roots, receiver);
-    Rooted<Item> descriptor_root(roots, ItemNull);
-    Rooted<Item> current_root(roots, ItemNull);
-    Rooted<Item> receiver_descriptor_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        target_root, target,
+        key_root, key,
+        value_root, value,
+        receiver_root, receiver,
+        descriptor_root, ItemNull,
+        current_root, ItemNull,
+        receiver_descriptor_root, ItemNull);
     TypeId target_type = get_type_id(target_root.get());
     bool primitive_target = target_type == LMD_TYPE_BOOL ||
         target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
@@ -6767,10 +6757,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
 
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> descriptor_root(roots, desc);
+    JS_ROOTS(roots, object_root, obj, key_root, key, descriptor_root, desc);
     // ES §28.1.3 Reflect.defineProperty: target must be an Object.
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "defineProperty"));
     // step 2: Let key be ? ToPropertyKey(propertyKey).
@@ -6806,11 +6793,7 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
 // Reflect.set owns target validation and ToPropertyKey conversion; the
 // completion algorithm is shared with the lane-based Set shell above.
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver) {
-    RootFrame roots(4);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> receiver_root(roots, receiver);
+    JS_ROOTS(roots, target_root, target, key_root, key, value_root, value, receiver_root, receiver);
     JS_RETURN_IF_ERROR(js_require_object_type(target, "set"));
     key_root.set(js_to_property_key(key_root.get()));
     if (item_is_error(key_root.get())) return key_root.get();
@@ -6821,9 +6804,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
 
 // Reflect.deleteProperty(obj, key) — returns boolean
 extern "C" Item js_reflect_delete_property(Item obj, Item key) {
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> key_root(roots, key);
+    JS_ROOTS(roots, object_root, obj, key_root, key);
     // ES §28.1.4 Reflect.deleteProperty: target must be an Object.
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "deleteProperty"));
     // step 2: Let key be ? ToPropertyKey(propertyKey).
@@ -6992,9 +6973,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
 
 static Item js_make_data_descriptor(Item value, bool writable, bool enumerable,
                                     bool configurable) {
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> desc_root(roots, js_new_object());
+    JS_ROOTS(roots, value_root, value, desc_root, js_new_object());
     // Descriptor construction changes object shapes; root the result and value
     // so a GC during any property transition cannot invalidate either handle.
     // Descriptor construction is DefineOwn storage, not another ordinary Set:
@@ -7015,10 +6994,7 @@ static Item js_make_data_descriptor(Item value, bool writable, bool enumerable,
 
 static Item js_make_accessor_descriptor(Item getter, Item setter, bool enumerable,
                                         bool configurable) {
-    RootFrame roots(3);
-    Rooted<Item> getter_root(roots, getter);
-    Rooted<Item> setter_root(roots, setter);
-    Rooted<Item> desc_root(roots, js_new_object());
+    JS_ROOTS(roots, getter_root, getter, setter_root, setter, desc_root, js_new_object());
     // Accessor values can be heap objects too, so keep both callbacks rooted
     // while descriptor shape transitions allocate.
     // Accessor descriptor fields are installed directly to avoid invoking an
@@ -7591,9 +7567,7 @@ static bool js_array_own_dense_index(Item object, int64_t index,
 
 static void js_array_append_companion_keys(Item object, Item result,
         int64_t dense_lim, bool enumerable_only, bool include_length) {
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> result_root(roots, result);
+    JS_ROOTS(roots, object_root, object, result_root, result);
     Map* props = js_array_props_map(object_root.get().array);
     if (!props || !props->type) {
         // Array length is an own property even before the companion map exists.
@@ -7703,11 +7677,11 @@ static bool js_string_exotic_index_in_range(Item obj, String* key) {
 }
 
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> name_root(roots, name);
-    Rooted<Item> descriptor_root(roots, descriptor);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, obj,
+        name_root, name,
+        descriptor_root, descriptor,
+        result_root, ItemNull);
     obj = object_root.get();
     name = name_root.get();
     descriptor = descriptor_root.get();
@@ -7961,12 +7935,12 @@ static void js_define_properties_cleanup(Item* desc_keys, Item* desc_objs) {
 }
 
 extern "C" Item js_object_define_properties(Item obj, Item props) {
-    RootFrame roots(5);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> properties_root(roots, props);
-    Rooted<Item> properties_object_root(roots, props);
-    Rooted<Item> keys_root(roots, ItemNull);
-    Rooted<Item> descriptor_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, obj,
+        properties_root, props,
+        properties_object_root, props,
+        keys_root, ItemNull,
+        descriptor_root, ItemNull);
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "defineProperties"));
     // ES spec §19.1.2.3 step 1: Let props be ? ToObject(Properties).
     // ToObject throws TypeError on null/undefined.
@@ -8116,10 +8090,7 @@ static void js_append_string_wrapper_indices(Item result, String* primitive) {
 }
 
 extern "C" Item js_object_get_own_property_names(Item object) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> names_root(roots, ItemNull);
+    JS_ROOTS(roots, object_root, object, result_root, ItemNull, names_root, ItemNull);
 
     Item exotic_result = ItemNull;
     if (js_dispatch_property_op(JS_EXOTIC_OWN_KEYS, object, 0, ItemNull,
@@ -8320,9 +8291,7 @@ static bool js_shape_name_seen_before(ShapeEntry* first, ShapeEntry* current, co
 }
 
 static Item js_map_own_string_keys(Item object, bool enumerable_only) {
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> result_root(roots, js_array_new(0));
+    JS_ROOTS(roots, object_root, object, result_root, js_array_new(0));
     Map* map = object_root.get().map;
     if (!map || !map->type) return result_root.get();
     TypeMap* type_map = (TypeMap*)map->type;
@@ -8461,10 +8430,7 @@ static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
 }
 
 static Item js_filter_enumerable_own_keys(Item object, Item all_keys) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> keys_root(roots, all_keys);
-    Rooted<Item> result_root(roots, js_array_new(0));
+    JS_ROOTS(roots, object_root, object, keys_root, all_keys, result_root, js_array_new(0));
     if (get_type_id(keys_root.get()) != LMD_TYPE_ARRAY) return keys_root.get();
     for (int64_t i = 0; i < js_array_length(keys_root.get()); i++) {
         Item key = js_elements_get_int(keys_root.get(), i);
@@ -8554,9 +8520,7 @@ extern "C" Item js_object_keys(Item object) {
         // D5.3/D5.4.3: array-key collection appends while allocation may
         // collect, so neither the source array nor the result snapshot may
         // live only in native locals during enumeration.
-        RootFrame roots(2);
-        Rooted<Item> object_root(roots, object);
-        Rooted<Item> result_root(roots, js_array_new(0));
+        JS_ROOTS(roots, object_root, object, result_root, js_array_new(0));
         int64_t len = object_root.get().array->length;
         // Limit iteration to logical dense storage; sparse entries are picked
         // up by the companion-map walk below and the owned tail is excluded.
@@ -8712,10 +8676,10 @@ extern "C" Item js_for_in_keys(Item object) {
 
     // for functions: enumerate own enumerable properties, then inherited enumerable strings
     if (type == LMD_TYPE_FUNC) {
-        RootFrame roots(3);
-        Rooted<Item> object_root(roots, object);
-        Rooted<Item> result_root(roots, js_object_keys(object_root.get()));
-        Rooted<Item> current_root(roots, ItemNull);
+        JS_ROOTS(roots,
+            object_root, object,
+            result_root, js_object_keys(object_root.get()),
+            current_root, ItemNull);
         HashMap* seen = hashmap_new(sizeof(JsForInSeenEntry), 64, 0, 0,
             js_for_in_seen_hash, js_for_in_seen_compare, NULL, NULL);
         if (get_type_id(result_root.get()) == LMD_TYPE_ARRAY) {
@@ -10228,13 +10192,13 @@ static Item js_object_assign_rejects_own_data_write(Item target, Item key) {
 
 static Item js_object_copy_enumerable_own(Item target, Item source,
         bool assign_mode) {
-    RootFrame roots(6);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> source_root(roots, source);
-    Rooted<Item> keys_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> descriptor_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        target_root, target,
+        source_root, source,
+        keys_root, ItemNull,
+        key_root, ItemNull,
+        descriptor_root, ItemNull,
+        value_root, ItemNull);
     keys_root.set(js_reflect_own_keys(source_root.get()));
     if (item_is_error(keys_root.get())) return keys_root.get();
     if (get_type_id(keys_root.get()) != LMD_TYPE_ARRAY) return target_root.get();
@@ -10266,10 +10230,7 @@ static Item js_object_copy_enumerable_own(Item target, Item source,
 }
 
 extern "C" Item js_object_assign(Item target, Item* sources, int count) {
-    RootFrame roots(3);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> source_root(roots, ItemNull);
-    Rooted<Item> from_root(roots, ItemNull);
+    JS_ROOTS(roots, target_root, target, source_root, ItemNull, from_root, ItemNull);
     TypeId tid = get_type_id(target);
     if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
         (target.item == 0 && tid != LMD_TYPE_INT)) {
@@ -10539,10 +10500,7 @@ extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key) {
 // =============================================================================
 
 static bool js_object_apply_integrity_descriptor(Item obj, Item key, bool frozen) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> descriptor_root(roots, ItemNull);
+    JS_ROOTS(roots, object_root, obj, key_root, key, descriptor_root, ItemNull);
 
     Item current_desc = js_object_get_own_property_descriptor(
         object_root.get(), key_root.get());
@@ -10927,10 +10885,7 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
 // Returns true if `iterable` exposes a callable Symbol.iterator.
 static Item js_has_sym_iterator(Item iterable, bool* out_has_iterator) {
     if (out_has_iterator) *out_has_iterator = false;
-    RootFrame roots(3);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> factory_root(roots, ItemNull);
+    JS_ROOTS(roots, iterable_root, iterable, key_root, ItemNull, factory_root, ItemNull);
     TypeId tid = get_type_id(iterable_root.get());
     if (tid == LMD_TYPE_NULL || iterable_root.get().item == ITEM_JS_UNDEFINED) return js_status_ok();
     key_root.set(js_well_known_symbol_key(1));
@@ -10950,11 +10905,11 @@ static Item js_has_sym_iterator(Item iterable, bool* out_has_iterator) {
 }
 
 static Item js_array_from_define_index_or_throw(Item object, int64_t index, Item value) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> desc_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, object,
+        value_root, value,
+        key_root, ItemNull,
+        desc_root, ItemNull);
     key_root.set(js_property_index_key(index));
     desc_root.set(js_new_object());
     js_set_key_cstr(desc_root.get(), "value", value_root.get());
@@ -10965,20 +10920,18 @@ static Item js_array_from_define_index_or_throw(Item object, int64_t index, Item
 }
 
 static Item js_array_from_close_preserve_exception(Item iterator, Item original) {
-    RootFrame roots(2);
-    Rooted<Item> iterator_root(roots, iterator);
-    Rooted<Item> original_root(roots, original);
+    JS_ROOTS(roots, iterator_root, iterator, original_root, original);
     Item close_result = js_iterator_close(iterator_root.get());
     (void)close_result;
     return js_throw_value(original_root.get());
 }
 
 static Item js_array_from_array_like_length(Item object, int64_t* out_length) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
-    Rooted<Item> number_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, object,
+        key_root, ItemNull,
+        value_root, ItemNull,
+        number_root, ItemNull);
     key_root.set(js_name_item("length", 6));
     value_root.set(js_get_key_default(object_root.get(), key_root.get()));
     if (item_is_error(value_root.get())) return value_root.get();
@@ -11029,15 +10982,15 @@ static Item js_array_from_array_like_into(Item result, Item iterable, int64_t le
 }
 
 extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping) {
-    RootFrame roots(8);
-    Rooted<Item> ctor_root(roots, ctor);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> map_fn_root(roots, mapFn);
-    Rooted<Item> this_arg_root(roots, this_arg);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> iterator_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
-    Rooted<Item> mapped_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        ctor_root, ctor,
+        iterable_root, iterable,
+        map_fn_root, mapFn,
+        this_arg_root, this_arg,
+        result_root, ItemNull,
+        iterator_root, ItemNull,
+        value_root, ItemNull,
+        mapped_root, ItemNull);
     LAMBDA_SCALAR_HOME(mapped_result_home);
     // constructor, iterator, and destination all survive user callbacks here.
     if (mapping && !js_is_callable(map_fn_root.get())) {
@@ -11095,11 +11048,11 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
 }
 
 extern "C" Item js_array_from(Item iterable) {
-    RootFrame roots(4);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> converted_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        iterable_root, iterable,
+        converted_root, ItemNull,
+        result_root, ItemNull,
+        value_root, ItemNull);
     TypeId tid = get_type_id(iterable_root.get());
     // spec: TypeError if items is null or undefined
     if (tid == LMD_TYPE_NULL || iterable_root.get().item == ITEM_JS_UNDEFINED) {
@@ -11198,12 +11151,12 @@ extern "C" Item js_array_from(Item iterable) {
 }
 
 static Item js_array_from_with_mapper_impl(Item iterable, Item mapFn, Item this_arg) {
-    RootFrame roots(5);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> map_fn_root(roots, mapFn);
-    Rooted<Item> this_arg_root(roots, this_arg);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        iterable_root, iterable,
+        map_fn_root, mapFn,
+        this_arg_root, this_arg,
+        result_root, ItemNull,
+        value_root, ItemNull);
     LAMBDA_SCALAR_HOME(mapped_result_home);
     // mapper callbacks may collect and mutate the source, so root both arrays
     // and re-read the source length through the rooted owner every iteration.
@@ -17119,9 +17072,7 @@ static void js_populate_symbol_ctor(Item fn_item) {
 }
 
 extern "C" Item js_symbol_create(Item description) {
-    RootFrame roots(2);
-    Rooted<Item> description_root(roots, description);
-    Rooted<Item> string_root(roots, ItemNull);
+    JS_ROOTS(roots, description_root, description, string_root, ItemNull);
     if (description_root.get().item != ITEM_NULL &&
             description_root.get().item != ITEM_JS_UNDEFINED) {
         string_root.set(js_to_string(description_root.get()));
@@ -17166,9 +17117,7 @@ extern "C" Item js_symbol_create(Item description) {
 }
 
 extern "C" Item js_symbol_for(Item key) {
-    RootFrame roots(2);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> string_root(roots, js_to_string(key_root.get()));
+    JS_ROOTS(roots, key_root, key, string_root, js_to_string(key_root.get()));
     if (item_is_error(string_root.get())) return string_root.get();
     js_symbol_init_registry();
     String* s = it2s(string_root.get());

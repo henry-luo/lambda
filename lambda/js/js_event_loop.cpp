@@ -83,11 +83,11 @@ static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
     if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
-    RootFrame roots(4);
-    Rooted<Item> callback_root(roots, cb);
-    Rooted<Item> resource_root(roots, js_async_hooks_get_current_resource());
-    Rooted<Item> als_root(roots, js_als_capture_context());
-    Rooted<Item> domain_root(roots, js_domain_capture_async_stack());
+    JS_ROOTS(roots,
+        callback_root, cb,
+        resource_root, js_async_hooks_get_current_resource(),
+        als_root, js_als_capture_context(),
+        domain_root, js_domain_capture_async_stack());
     Item record[4] = {callback_root.get(), resource_root.get(),
         als_root.get(), domain_root.get()};
     return runtime_async_deque_push(queue, record);
@@ -536,10 +536,10 @@ static void timer_fire_cb(uv_timer_t *handle) {
     // D5.3/D5.4.3: the timer callback may collect before the saved async
     // context is restored, so callback results and prior context snapshots
     // must remain exact roots across the callback boundary.
-    RootFrame roots(3);
-    Rooted<Item> callback_result_root(roots, ItemNull);
-    Rooted<Item> previous_resource_root(roots, ItemNull);
-    Rooted<Item> previous_domain_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        callback_result_root, ItemNull,
+        previous_resource_root, ItemNull,
+        previous_domain_root, ItemNull);
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         previous_resource_root.set(js_async_hooks_enter_resource(th->async_resource));

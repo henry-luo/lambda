@@ -773,12 +773,12 @@ static Item js_fs_readstream_close(Item callback_item) {
 }
 
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
-    RootFrame roots(5);
-    Rooted<Item> path_root(roots, path_item);
-    Rooted<Item> options_root(roots, options_item);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> chunk_root(roots, ItemNull);
-    Rooted<Item> error_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        path_root, path_item,
+        options_root, options_item,
+        stream_root, ItemNull,
+        chunk_root, ItemNull,
+        error_root, ItemNull);
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_root.get()));
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_root.get(), "path", path_buf, sizeof(path_buf));
@@ -1081,13 +1081,13 @@ static Item js_fs_writestream_on(Item event_item, Item callback_item) {
 }
 
 extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
-    RootFrame roots(6);
-    Rooted<Item> path_root(roots, path_item);
-    Rooted<Item> options_root(roots, options_item);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> flags_root(roots, ItemNull);
-    Rooted<Item> mode_root(roots, make_js_undefined());
-    Rooted<Item> fd_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        path_root, path_item,
+        options_root, options_item,
+        stream_root, ItemNull,
+        flags_root, ItemNull,
+        mode_root, make_js_undefined(),
+        fd_root, ItemNull);
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_root.get()));
     stream_root.set(js_new_object());
     // A write stream receives many own properties before it escapes. Keep the
@@ -2352,9 +2352,7 @@ static Item fs_get_filehandle_constructor(void) {
 }
 
 static Item fs_create_filehandle(Item fd) {
-    RootFrame roots(2);
-    Rooted<Item> fd_root(roots, fd);
-    Rooted<Item> handle_root(roots, js_new_object());
+    JS_ROOTS(roots, fd_root, fd, handle_root, js_new_object());
     js_set_prototype(handle_root.get(), fs_get_filehandle_prototype());
     js_set_key_cstr(handle_root.get(), "__fd", fd_root.get());
     return handle_root.get();
@@ -2837,10 +2835,7 @@ template <typename Target>
 JS_FORWARD_STATIC_ITEM(js_fs_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
-    RootFrame roots(3);
-    Rooted<Item> fn_root(roots, fn);
-    Rooted<Item> names_root(roots, js_array_new(0));
-    Rooted<Item> symbol_root(roots, ItemNull);
+    JS_ROOTS(roots, fn_root, fn, names_root, js_array_new(0), symbol_root, ItemNull);
     js_array_push(names_root.get(), make_string_item(name1));
     if (name2) js_array_push(names_root.get(), make_string_item(name2));
     symbol_root.set(js_util_custom_promisify_args_symbol());
@@ -3318,10 +3313,7 @@ extern "C" Item js_get_fs_namespace(void) {
 
     fs_namespace = js_new_object();
 
-    RootFrame roots(3);
-    Rooted<Item> constants_root(roots, ItemNull);
-    Rooted<Item> promises_root(roots, ItemNull);
-    Rooted<Item> default_key_root(roots, ItemNull);
+    JS_ROOTS(roots, constants_root, ItemNull, promises_root, ItemNull, default_key_root, ItemNull);
 
 #define JS_FS_INSTALL_METHOD(name, target, arity) \
     js_fs_set_method(fs_namespace, name, target, arity);

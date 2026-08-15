@@ -559,10 +559,10 @@ static Item js_stream_listener_context(Item value) {
 }
 
 static Item js_stream_make_listener_record(Item listener) {
-    RootFrame roots(3);
-    Rooted<Item> record_root(roots, js_new_object());
-    Rooted<Item> listener_root(roots, listener);
-    Rooted<Item> context_root(roots, js_als_capture_context());
+    JS_ROOTS(roots,
+        record_root, js_new_object(),
+        listener_root, listener,
+        context_root, js_als_capture_context());
     js_set_key_default(record_root.get(), key_listener_fn, listener_root.get());
     js_set_key_default(record_root.get(), key_listener_context, context_root.get());
     return record_root.get();
@@ -636,10 +636,7 @@ static bool js_state_get_bool(Item state, const char* name) {
 static Item js_writable_state_getBuffer(void);
 
 static Item js_create_readable_state(void) {
-    RootFrame roots(3);
-    Rooted<Item> state_root(roots, js_new_object());
-    Rooted<Item> pipes_root(roots, ItemNull);
-    Rooted<Item> encoding_root(roots, ItemNull);
+    JS_ROOTS(roots, state_root, js_new_object(), pipes_root, ItemNull, encoding_root, ItemNull);
     // property allocation can collect while the state is only partially built;
     // retain its map and compound fields until construction is complete.
     js_state_set_bool(state_root.get(), "ended", false);
@@ -1874,12 +1871,12 @@ static void js_stream_coalesce_readable_buffer_for_encoding(Item self, Item enco
 }
 
 static void js_stream_flush_buffered_data(Item self) {
-    RootFrame roots(5);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> buffer_root(roots, ItemNull);
-    Rooted<Item> chunk_root(roots, ItemNull);
-    Rooted<Item> next_buffer_root(roots, ItemNull);
-    Rooted<Item> emitted_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        self_root, self,
+        buffer_root, ItemNull,
+        chunk_root, ItemNull,
+        next_buffer_root, ItemNull,
+        emitted_root, ItemNull);
     self = self_root.get();
     for (;;) {
         buffer_root.set(js_get_key_default(self, key_buffer));
@@ -1950,10 +1947,10 @@ static Item js_stream_flush_data_tick(Item self) {
 JS_STREAM_ENV_UNARY_CLOSURE(js_stream_flush_data_tick_closure, js_stream_flush_data_tick)
 
 static void js_stream_schedule_data_flush(Item self) {
-    RootFrame roots(3);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> state_root(roots, js_get_key_default(self_root.get(), key_readable_state));
-    Rooted<Item> tick_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        self_root, self,
+        state_root, js_get_key_default(self_root.get(), key_readable_state),
+        tick_root, ItemNull);
     if (js_state_get_bool(state_root.get(), "resumeScheduled")) return;
     js_state_set_bool(state_root.get(), "resumeScheduled", true);
     Item* env = js_alloc_env(1);
@@ -2002,10 +1999,7 @@ extern "C" void js_stream_flush_data_if_flowing(Item self) {
 
 // on(event, listener)
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
-    RootFrame roots(3);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> event_root(roots, event_item);
-    Rooted<Item> listener_root(roots, listener);
+    JS_ROOTS(roots, self_root, self, event_root, event_item, listener_root, listener);
     self = self_root.get();
     event_item = event_root.get();
     listener = listener_root.get();
@@ -2233,10 +2227,7 @@ extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1) {
 
 // push(chunk[, encoding]) — add data to readable stream
 static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
-    RootFrame roots(3);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> chunk_root(roots, chunk);
-    Rooted<Item> encoding_root(roots, encoding);
+    JS_ROOTS(roots, self_root, self, chunk_root, chunk, encoding_root, encoding);
     self = self_root.get();
     chunk = chunk_root.get();
     encoding = encoding_root.get();
@@ -6076,11 +6067,11 @@ JS_STREAM_THIS2(js_readable_inst_compose, js_readable_compose)
 JS_STREAM_THIS0(js_stream_inst_asyncIterator, js_stream_async_iterator)
 
 static void js_stream_install_async_iterator(Item obj) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> iterator_root(roots, js_new_native_function(js_stream_inst_asyncIterator));
-    Rooted<Item> async_key_root(roots, js_well_known_symbol_key(5));
-    Rooted<Item> iter_key_root(roots, js_well_known_symbol_key(1));
+    JS_ROOTS(roots,
+        object_root, obj,
+        iterator_root, js_new_native_function(js_stream_inst_asyncIterator),
+        async_key_root, js_well_known_symbol_key(5),
+        iter_key_root, js_well_known_symbol_key(1));
     js_set_key_default(object_root.get(), async_key_root.get(), iterator_root.get());
     js_set_key_default(object_root.get(), iter_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(object_root.get(), async_key_root.get());
@@ -6140,10 +6131,7 @@ static void js_stream_set_named_method(Item object, const char* name,
 
 // Readable constructor
 static Item js_readable_new_internal(Item opts, JsClass class_id) {
-    RootFrame roots(3);
-    Rooted<Item> options_root(roots, opts);
-    Rooted<Item> readable_root(roots, ItemNull);
-    Rooted<Item> listeners_root(roots, ItemNull);
+    JS_ROOTS(roots, options_root, opts, readable_root, ItemNull, listeners_root, ItemNull);
     ensure_keys();
     readable_root.set(js_stream_create_instance(stream_readable_prototype,
         class_id));
@@ -6514,9 +6502,7 @@ extern "C" Item js_writable_uncork(Item self) {
 }
 
 static void js_stream_install_event_methods(Item obj) {
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> off_root(roots, js_new_native_function(js_stream_inst_off));
+    JS_ROOTS(roots, object_root, obj, off_root, js_new_native_function(js_stream_inst_off));
 #define JS_STREAM_EVENT_METHODS(M) \
     M("removeAllListeners", js_stream_inst_removeAllListeners) M("emit", js_stream_inst_emit) \
     M("eventNames", js_stream_inst_eventNames) M("listeners", js_stream_inst_listeners) \

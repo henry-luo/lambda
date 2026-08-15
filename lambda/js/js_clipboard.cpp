@@ -1671,9 +1671,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     Rooted<Item> global_root(global_roots, global_this);
     // ---- Blob -------------------------------------------------------------
     {
-        RootFrame roots(2);
-        Rooted<Item> ctor_root(roots, js_new_native_constructor(js_blob_new));
-        Rooted<Item> proto_root(roots, ItemNull);
+        JS_ROOTS(roots, ctor_root, js_new_native_constructor(js_blob_new), proto_root, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("Blob"));
         proto_root.set(js_new_object());
         js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
@@ -1685,9 +1683,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
 
     // ---- File -------------------------------------------------------------
     {
-        RootFrame roots(2);
-        Rooted<Item> ctor_root(roots, js_new_native_constructor(js_file_new));
-        Rooted<Item> proto_root(roots, ItemNull);
+        JS_ROOTS(roots, ctor_root, js_new_native_constructor(js_file_new), proto_root, ItemNull);
         js_set_function_name(ctor_root.get(), make_str("File"));
         proto_root.set(js_new_object());
         js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());

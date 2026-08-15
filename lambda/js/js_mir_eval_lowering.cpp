@@ -1909,9 +1909,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemError;
         }
 
-        RootFrame eval_this_roots(2);
-        Rooted<Item> previous_this(eval_this_roots, js_get_this());
-        Rooted<Item> global_this(eval_this_roots, js_get_global_this());
+        JS_ROOTS(eval_this_roots, previous_this, js_get_this(), global_this, js_get_global_this());
         if (!is_direct_eval) {
             // An indirect eval executes as global script code even when its
             // source has a strict directive. Leaving the intrinsic call's

@@ -501,9 +501,7 @@ static bool js_array_numeric_grow(Item array_item, int64_t required_length) {
 static bool js_array_numeric_store(Item array_item, int64_t index, Item value) {
     if (!js_is_ordinary_numeric_array(array_item) || index < 0 ||
             index >= INT64_MAX || !js_array_value_is_numeric(value)) return false;
-    RootFrame roots(2);
-    Rooted<Item> array_root(roots, array_item);
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, array_root, array_item, value_root, value);
     ArrayNum* arr = array_root.get().array_num;
     if (index > arr->length) return false;
     if (!js_array_numeric_grow(array_root.get(), index + 1)) return false;
@@ -1280,10 +1278,7 @@ static Item js_proxy_validate_nonconfigurable_descriptor(Item target_desc,
 
 // Proxy.revocable(target, handler) → { proxy, revoke }
 extern "C" Item js_proxy_revocable(Item target, Item handler) {
-    RootFrame roots(3);
-    Rooted<Item> proxy_root(roots, ItemNull);
-    Rooted<Item> revoke_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots, proxy_root, ItemNull, revoke_root, ItemNull, result_root, ItemNull);
     Item proxy = js_proxy_new(target, handler);
     if (item_is_error(proxy)) return proxy;
     proxy_root.set(proxy);
@@ -1359,13 +1354,13 @@ static Item js_proxy_trap_set_failure(Item key) {
 
 // Proxy [[Set]](key, value, receiver)
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver) {
-    RootFrame roots(6);
-    Rooted<Item> proxy_root(roots, proxy);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> receiver_root(roots, receiver);
-    Rooted<Item> trap_root(roots, ItemNull);
-    Rooted<Item> descriptor_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        proxy_root, proxy,
+        key_root, key,
+        value_root, value,
+        receiver_root, receiver,
+        trap_root, ItemNull,
+        descriptor_root, ItemNull);
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return (Item){.item = b2it(false)};
     if (!js_key_is_symbol(key)) key = js_to_property_key(key);
@@ -1877,12 +1872,12 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
 
 // Proxy [[DefineOwnProperty]](key, desc)
 extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
-    RootFrame roots(5);
-    Rooted<Item> proxy_root(roots, proxy);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> input_descriptor_root(roots, desc);
-    Rooted<Item> trap_root(roots, ItemNull);
-    Rooted<Item> target_descriptor_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        proxy_root, proxy,
+        key_root, key,
+        input_descriptor_root, desc,
+        trap_root, ItemNull,
+        target_descriptor_root, ItemNull);
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return (Item){.item = b2it(false)};
     if (!js_key_is_symbol(key)) key = js_to_property_key(key);
@@ -2837,9 +2832,7 @@ static int js_intrinsic_construct_default_class(
 
 extern "C" Item js_get_prototype_from_constructor_default(Item new_target,
         int default_class, int typed_array_type) {
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, new_target);
-    Rooted<Item> prototype_root(roots, ItemNull);
+    JS_ROOTS(roots, target_root, new_target, prototype_root, ItemNull);
     NameId prototype_name_id = js_runtime_state.well_known.prototype;
     JsPropertyDescriptor descriptor = {};
     bool own_data_prototype = get_type_id(target_root.get()) == LMD_TYPE_FUNC &&
@@ -2877,9 +2870,7 @@ static Item js_apply_resolved_constructed_prototype(Item result,
         Item prototype) {
     if (!js_is_object_value(result) ||
             !js_is_object_value(prototype)) return result;
-    RootFrame roots(2);
-    Rooted<Item> result_root(roots, result);
-    Rooted<Item> prototype_root(roots, prototype);
+    JS_ROOTS(roots, result_root, result, prototype_root, prototype);
     if (get_type_id(result_root.get()) != LMD_TYPE_ARRAY) {
         js_set_prototype(result_root.get(), prototype_root.get());
         return result_root.get();
@@ -3057,11 +3048,11 @@ static Item js_intrinsic_construct_allocate(JsIntrinsicConstructPolicy policy,
 static Item js_intrinsic_construct_with_policy(
         JsIntrinsicConstructPolicy policy, Item callee, Item* args, int argc,
         Item new_target) {
-    RootFrame roots(4);
-    Rooted<Item> callee_root(roots, callee);
-    Rooted<Item> target_root(roots, new_target);
-    Rooted<Item> prototype_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        callee_root, callee,
+        target_root, new_target,
+        prototype_root, ItemNull,
+        result_root, ItemNull);
     if (policy == JS_INTRINSIC_CONSTRUCT_PROMISE) {
         Item executor = argc > 0 && args ? args[0] : make_js_undefined();
         // Promise validates IsCallable before OrdinaryCreateFromConstructor;
@@ -3601,9 +3592,7 @@ extern "C" Item js_get_class_superclass(Item class_function) {
 
 extern "C" Item js_construct_value_defer_own_fields(Item callee,
         Item* args, int argc, Item new_target) {
-    RootFrame roots(2);
-    Rooted<Item> callee_root(roots, callee);
-    Rooted<Item> saved_target_root(roots, js_deferred_instance_field_class);
+    JS_ROOTS(roots, callee_root, callee, saved_target_root, js_deferred_instance_field_class);
     // The ordinary runtime construct path must still perform inherited
     // [[Construct]], but a compiler-known derived class owns expression field
     // initialization. Keep that target rooted while runtime dispatch runs.
@@ -4603,10 +4592,7 @@ bool js_error_delete_own_property(Item obj, const char* name, int len) {
 
 static Item js_materialize_function_prototype_property(
         Item function, Item key, Item prototype) {
-    RootFrame roots(3);
-    Rooted<Item> function_root(roots, function);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, prototype);
+    JS_ROOTS(roots, function_root, function, key_root, key, value_root, prototype);
     js_func_init_property(function_root.get(), key_root.get(), value_root.get());
     js_mark_non_enumerable(function_root.get(), key_root.get());
     js_mark_non_configurable(function_root.get(), key_root.get());
@@ -5740,9 +5726,7 @@ JS_FORWARD_ITEM(js_get_key_default, (Item object, Item key), js_get_key_core, (o
 
 extern "C" Item js_get_key_cstr(Item object, const char* key) {
     if (!key) return make_js_undefined();
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, make_string_item(key, (int)strlen(key)));
+    JS_ROOTS(roots, object_root, object, key_root, make_string_item(key, (int)strlen(key)));
     return js_get_key_default(object_root.get(), key_root.get());
 }
 
@@ -5810,10 +5794,7 @@ extern "C" Item js_set_primitive_completion(Item object, Item key, Item value) {
     // Primitive assignment is a successful completion only when a prototype
     // setter/proxy handled it; ordinary primitives stay a false completion so
     // the caller's strictness policy can decide whether to throw (S#7.4).
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     return js_set_on_primitive_base(object_root.get(), key_root.get(),
         value_root.get(), false, true);
 }
@@ -7106,10 +7087,7 @@ static Item js_set_function_core(Item object, Item key, Item value,
         return value;
     }
     if (str_key && str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
-        RootFrame prototype_roots(3);
-        Rooted<Item> function_root(prototype_roots, object);
-        Rooted<Item> key_root(prototype_roots, key);
-        Rooted<Item> value_root(prototype_roots, value);
+        JS_ROOTS(prototype_roots, function_root, object, key_root, key, value_root, value);
         fn = (JsFunction*)function_root.get().function;
         if (js_function_has_own_prototype(function_root.get())) {
             // Materialization makes descriptor flags authoritative before Set;
@@ -7261,11 +7239,7 @@ static Item js_set_storage_mode(Item object, Item key,
     // This is the low-level storage tier used after Set completion has selected
     // a target slot; its bypass/strict parameters remain only for array and
     // function sub-objects that still apply local descriptor policy.
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> receiver_root(roots, receiver);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value, receiver_root, receiver);
     // Property storage can allocate a shape or descriptor. The native ABI
     // passes Items in registers, which are not scanned by precise GC.
     object = object_root.get();
@@ -7446,10 +7420,7 @@ static Item js_set_storage_mode(Item object, Item key,
 
 extern "C" Item js_set_error_property_completion(Item object, Item key,
                                                    Item value) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     LambdaError* error = js_error_from_value(object_root.get());
     if (!error) return (Item){.item = b2it(false)};
     String* property = get_type_id(key_root.get()) == LMD_TYPE_STRING
@@ -7487,11 +7458,7 @@ extern "C" Item js_set_key_core(Item object, Item key,
     // this value-returning ABI is only the legacy caller adapter.
     // MIR can pass transient String Items here; root every operand before the
     // completion kernel crosses an allocating property boundary (D5.4.3).
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> receiver_root(roots, receiver);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value, receiver_root, receiver);
     Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
         value_root.get(), receiver_root.get());
     return item_is_error(result) ? result : value_root.get();
@@ -7501,10 +7468,7 @@ JS_FORWARD_ITEM(js_define_own_key_storage, (Item object, Item key, Item value), 
 extern "C" Item js_set_key_default(Item object, Item key, Item value) {
     // The adapter is an allocating ABI boundary; retain the incoming key and
     // value until OrdinarySet has completed (D5.4.3).
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
         value_root.get(), object_root.get());
     return item_is_error(result) ? result : value_root.get();
@@ -7512,10 +7476,7 @@ extern "C" Item js_set_key_default(Item object, Item key, Item value) {
 
 extern "C" Item js_set_key_cstr(Item object, const char* key, Item value) {
     if (!key) return value;
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> key_root(roots, ItemNull);
+    JS_ROOTS(roots, object_root, object, value_root, value, key_root, ItemNull);
     // A native caller cannot root a GC key until this call starts. Create it
     // after rooting the object/value so an allocating property write cannot
     // collect either argument before js_set_key_default() sees them.
@@ -7578,10 +7539,7 @@ extern "C" Item js_delete_reference_result(Item key, Item delete_result,
 extern "C" Item js_set_key_strict_policy(Item object, Item key, Item value) {
     // Strict assignment inspects the original key after Set returns; keep it
     // rooted across both the completion and policy phases (D5.4.3).
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
         value_root.get(), object_root.get());
     return js_assignment_set_result(value_root.get(), key_root.get(), result,
@@ -8549,9 +8507,7 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (arr->length + arr->extra + 2 > arr->capacity) {
         // Growth can compact the Array object as well as its item buffer, so
         // reload both exact roots before the post-growth length/store access.
-        RootFrame roots(2);
-        Rooted<Item> rooted_array(roots, (Item){.array = arr});
-        Rooted<Item> rooted_value(roots, value);
+        JS_ROOTS(roots, rooted_array, (Item){.array = arr}, rooted_value, value);
         int64_t old_capacity = rooted_array.get().array->capacity;
         expand_list((List*)rooted_array.get().array);
         arr = rooted_array.get().array;
@@ -9411,9 +9367,7 @@ extern "C" Item js_array_push(Item array, Item value) {
         return (Item){.item = i2it(0)};
     }
 
-    RootFrame roots(2);
-    Rooted<Item> array_root(roots, array);
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, array_root, array, value_root, value);
     js_array_push_item_direct(array_root.get().array, value_root.get());
     return (Item){.item = i2it(array_root.get().array->length)};
 }
@@ -11519,10 +11473,10 @@ static Item js_intrinsic_object_static_primitive(JsObjectStaticOp op,
 
 static Item js_intrinsic_object_static(JsObjectStaticOp op, Item* args,
         int argc) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, js_intrinsic_arg(args, argc, 0));
-    Rooted<Item> first_root(roots, js_intrinsic_arg(args, argc, 1));
-    Rooted<Item> second_root(roots, js_intrinsic_arg(args, argc, 2));
+    JS_ROOTS(roots,
+        object_root, js_intrinsic_arg(args, argc, 0),
+        first_root, js_intrinsic_arg(args, argc, 1),
+        second_root, js_intrinsic_arg(args, argc, 2));
     Item object = object_root.get();
     Item first = first_root.get();
     Item second = second_root.get();
@@ -13841,9 +13795,7 @@ Item js_construct_entry_native(Item func_item, Item* args, int arg_count,
         "js-construct-native");
     if (!owned_args.valid) return ItemError;
     args = owned_args.items;
-    RootFrame roots(2);
-    Rooted<Item> callee_root(roots, func_item);
-    Rooted<Item> target_root(roots, new_target.item ? new_target : func_item);
+    JS_ROOTS(roots, callee_root, func_item, target_root, new_target.item ? new_target : func_item);
     JsFunction* fn = get_type_id(callee_root.get()) == LMD_TYPE_FUNC
         ? (JsFunction*)callee_root.get().function : NULL;
     if (!fn || !fn->native_construct) {
@@ -13957,9 +13909,7 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
         for (int i = 0; i < arg_count; i++) args[i] = source ? source[i] : ItemNull;
         args_prerooted = true;
     }
-    RootFrame roots(2);
-    Rooted<Item> callee_root(roots, callee);
-    Rooted<Item> target_root(roots, new_target.item ? new_target : callee);
+    JS_ROOTS(roots, callee_root, callee, target_root, new_target.item ? new_target : callee);
     TypeId type = get_type_id(callee_root.get());
     if (type == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)callee_root.get().function;
@@ -17875,9 +17825,7 @@ JS_FORWARD_ITEM(js_create_regex_literal,
         js_regex_copy_stable_span(flags, flags_len), flags_len, true))
 
 extern "C" Item js_create_regex_literal_items(Item pattern_item, Item flags_item) {
-    RootFrame regex_roots(2);
-    Rooted<Item> pattern_root(regex_roots, pattern_item);
-    Rooted<Item> flags_root(regex_roots, flags_item);
+    JS_ROOTS(regex_roots, pattern_root, pattern_item, flags_root, flags_item);
     String* pattern = get_type_id(pattern_root.get()) == LMD_TYPE_STRING
         ? it2s(pattern_root.get()) : NULL;
     String* flags = get_type_id(flags_root.get()) == LMD_TYPE_STRING
@@ -17930,11 +17878,11 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
 
 // new RegExp(pattern, flags) — construct regex from string arguments at runtime
 extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
-    RootFrame regex_roots(4);
-    Rooted<Item> pattern_arg_root(regex_roots, pattern_item);
-    Rooted<Item> flags_arg_root(regex_roots, flags_item);
-    Rooted<Item> pattern_text_root(regex_roots, make_js_undefined());
-    Rooted<Item> flags_text_root(regex_roots, make_js_undefined());
+    JS_ROOTS(regex_roots,
+        pattern_arg_root, pattern_item,
+        flags_arg_root, flags_item,
+        pattern_text_root, make_js_undefined(),
+        flags_text_root, make_js_undefined());
     pattern_item = pattern_arg_root.get();
     flags_item = flags_arg_root.get();
     const char* pattern = "";
@@ -19439,10 +19387,7 @@ static void js_collection_link_prototype(Item obj, const char* ctor_name, int ct
     // this point, and heap_create_name/js_get_key_default below can collect. With
     // with exact roots, an unrooted obj is freed mid-link and the prototype
     // is written into dead memory, which later reads back as a missing "add".
-    RootFrame roots(3);
-    Rooted<Item> rooted_obj(roots, obj);
-    Rooted<Item> rooted_ctor(roots, ItemNull);
-    Rooted<Item> rooted_proto(roots, ItemNull);
+    JS_ROOTS(roots, rooted_obj, obj, rooted_ctor, ItemNull, rooted_proto, ItemNull);
 
     Item ctor_name_item = js_name_item(ctor_name, ctor_len);
     rooted_ctor.set(js_get_constructor(ctor_name_item));
@@ -24839,15 +24784,15 @@ static Item js_array_generic_with(Item object, Item* args, int argc) {
 }
 
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind) {
-    RootFrame roots(8);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> callback_object_root(roots, callback_object);
-    Rooted<Item> callback_root(roots, argc > 0 ? args[0] : ItemNull);
-    Rooted<Item> this_arg_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> element_root(roots, ItemNull);
-    Rooted<Item> selected_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, object,
+        callback_object_root, callback_object,
+        callback_root, argc > 0 ? args[0] : ItemNull,
+        this_arg_root, ItemNull,
+        result_root, ItemNull,
+        element_root, ItemNull,
+        selected_root, ItemNull,
+        key_root, ItemNull);
     // Array callbacks allocate recursively. Root the source, callback, result,
     // and current values for the entire loop rather than trusting C locals.
     key_root.set(js_name_item("length", 6));
@@ -26128,9 +26073,7 @@ static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
     (void)result_home;
     Item locale = argc > 0 && args ? args[0] : make_js_undefined();
     Item options = argc > 1 && args ? args[1] : make_js_undefined();
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, new_target);
-    Rooted<Item> result_root(roots, js_intl_segmenter_new(locale, options));
+    JS_ROOTS(roots, target_root, new_target, result_root, js_intl_segmenter_new(locale, options));
     return js_apply_constructed_default_prototype(result_root.get(),
         target_root.get(), JS_CLASS_OBJECT);
 }
@@ -26972,10 +26915,10 @@ static void js_wrapper_set_proto(Item obj, const char* ctor_name, int ctor_len) 
 
 static Item js_new_primitive_wrapper_value(Item value, JsClass class_id,
         const char* ctor_name, int ctor_len) {
-    RootFrame roots(3);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(class_id));
-    Rooted<Item> value_key_root(roots, js_name_item("__primitiveValue__", 18));
+    JS_ROOTS(roots,
+        value_root, value,
+        obj_root, js_new_object_with_class(class_id),
+        value_key_root, js_name_item("__primitiveValue__", 18));
     js_set_key_default(obj_root.get(), value_key_root.get(), value_root.get());
     js_wrapper_set_proto(obj_root.get(), ctor_name, ctor_len);
     return obj_root.get();
@@ -26983,9 +26926,7 @@ static Item js_new_primitive_wrapper_value(Item value, JsClass class_id,
 
 // Create a Number wrapper object with [[NumberData]] in __primitiveValue__.
 extern "C" Item js_new_number_wrapper(Item arg) {
-    RootFrame roots(2);
-    Rooted<Item> arg_root(roots, arg);
-    Rooted<Item> number_root(roots, js_to_number(arg_root.get()));
+    JS_ROOTS(roots, arg_root, arg, number_root, js_to_number(arg_root.get()));
     if (item_is_error(number_root.get())) return number_root.get();
     return js_new_primitive_wrapper_value(number_root.get(), JS_CLASS_NUMBER,
         "Number", 6);
@@ -27463,9 +27404,7 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
 
 // Helper: create {value, done} iterator result object
 static Item js_make_iter_result(Item value, bool done) {
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> result_root(roots, js_new_object());
+    JS_ROOTS(roots, value_root, value, result_root, js_new_object());
     String* val_key = heap_create_name("value", 5);
     String* done_key = heap_create_name("done", 4);
     // Property insertion may collect; retain both the fresh result map and a
@@ -27491,9 +27430,7 @@ extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
     // D5.3/D5.4.3: building the state-result array can collect before its
     // payload store, so keep the yielded scalar and fresh result container
     // rooted across that allocation boundary.
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> result_root(roots, js_array_new(2));
+    JS_ROOTS(roots, value_root, value, result_root, js_array_new(2));
     js_array_store_owned(result_root.get().array, 0, value_root.get());
     result_root.get().array->items[1] = (Item){.item = i2it(next_state)};
     return result_root.get();
@@ -27501,9 +27438,7 @@ extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
 
 // yield* delegation: create 3-element array [iterable, resume_state, 1(flag)]
 extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state) {
-    RootFrame roots(2);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> result_root(roots, js_array_new(3));
+    JS_ROOTS(roots, iterable_root, iterable, result_root, js_array_new(3));
     js_array_store_owned(result_root.get().array, 0, iterable_root.get());
     result_root.get().array->items[1] = (Item){.item = i2it(resume_state)};
     result_root.get().array->items[2] = (Item){.item = i2it(1)};  // delegation flag
@@ -27511,9 +27446,7 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
 }
 
 extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> result_root(roots, js_array_new(3));
+    JS_ROOTS(roots, value_root, value, result_root, js_array_new(3));
     js_array_store_owned(result_root.get().array, 0, value_root.get());
     result_root.get().array->items[1] = (Item){.item = i2it(next_state)};
     result_root.get().array->items[2] = (Item){.item = i2it(2)};  // async-generator await flag
@@ -27538,10 +27471,7 @@ static Item js_get_async_iterator_proto() {
         get_type_id(js_async_iterator_proto_cache) == LMD_TYPE_MAP) {
         return js_async_iterator_proto_cache;
     }
-    RootFrame roots(3);
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> obj_proto_root(roots, ItemNull);
-    Rooted<Item> si_fn_root(roots, ItemNull);
+    JS_ROOTS(roots, proto_root, js_new_object(), obj_proto_root, ItemNull, si_fn_root, ItemNull);
     // D5.4.3: the realm cache cannot own this prototype until initialization
     // completes, and each constructor/property lookup below may collect.
     {
@@ -27568,11 +27498,11 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
     if (!js_iterator_state_ensure_roots()) return ItemNull;
     Item* cache = is_async ? &js_async_generator_proto_depth2_cache : &js_generator_proto_depth2_cache;
     if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
-    RootFrame roots(4);
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> parent_root(roots, ItemNull);
-    Rooted<Item> fn_root(roots, ItemNull);
-    Rooted<Item> tag_val_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        proto_root, js_new_object(),
+        parent_root, ItemNull,
+        fn_root, ItemNull,
+        tag_val_root, ItemNull);
     // D5.4.3: forced collection can run while intrinsic callables are created;
     // keep the unpublished shared prototype owned until its realm cache store.
     parent_root.set(is_async ? js_get_async_iterator_proto() : js_get_iterator_proto());
@@ -27613,11 +27543,11 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     // Generator construction performs several allocating property/prototype
     // operations after creating the owning map. Keep that fresh map in an
     // exact native home so its GC tracer continuously owns the raw env.
-    RootFrame roots(4);
-    Rooted<Item> obj_root(roots, ItemNull);
-    Rooted<Item> proto_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> private_home_root(roots, js_current_private_home_class);
+    JS_ROOTS(roots,
+        obj_root, ItemNull,
+        proto_root, ItemNull,
+        result_root, ItemNull,
+        private_home_root, js_current_private_home_class);
 
     // Allocate a new generator slot; the carrier stores this identity outside
     // the observable property shape, so completed objects cannot alias a key.
@@ -27899,13 +27829,13 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     }
     if (!js_mir_owner_is_current(gen->runtime_context,
             "js-generator-next")) return ItemError;
-    RootFrame roots(6);
-    Rooted<Item> generator_root(roots, generator);
-    Rooted<Item> input_root(roots, input);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
-    Rooted<Item> saved_private_home_root(roots, js_current_private_home_class);
-    Rooted<Item> generator_private_home_root(roots, gen->private_home_class);
+    JS_ROOTS(roots,
+        generator_root, generator,
+        input_root, input,
+        result_root, ItemNull,
+        value_root, ItemNull,
+        saved_private_home_root, js_current_private_home_class,
+        generator_private_home_root, gen->private_home_class);
 
     bool is_async = gen->is_async;
 
@@ -28317,10 +28247,7 @@ static Item js_make_iterator_proto(Item* cache, JsBuiltinOwner next_owner,
         *cache = (Item){0};
     }
 
-    RootFrame roots(3);
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> next_fn_root(roots, ItemNull);
-    Rooted<Item> tag_val_root(roots, ItemNull);
+    JS_ROOTS(roots, proto_root, js_new_object(), next_fn_root, ItemNull, tag_val_root, ItemNull);
     // The persistent cache is not published until initialization completes;
     // own the prototype and its unpublished values across allocating setters.
     if (next_owner != JS_BUILTIN_OWNER_NONE) {
@@ -28345,9 +28272,7 @@ static Item js_get_iterator_proto() {
         get_type_id(js_iterator_proto_cache) == LMD_TYPE_MAP) {
         return js_iterator_proto_cache;
     }
-    RootFrame roots(2);
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> si_fn_root(roots, ItemNull);
+    JS_ROOTS(roots, proto_root, js_new_object(), si_fn_root, ItemNull);
     // The cache becomes the persistent owner only after the prototype is
     // complete, so construction needs exact temporary ownership.
     Item si_key = js_well_known_symbol_key(1);
@@ -28442,9 +28367,7 @@ typedef struct JsIteratorMapCarrier {
 static Item js_create_fixed_iterator(Item source, JsClass class_id, int64_t length);
 
 static Item js_create_array_iterator_object(Item source, int kind) {
-    RootFrame roots(2);
-    Rooted<Item> source_root(roots, source);
-    Rooted<Item> iter_root(roots, js_new_object());
+    JS_ROOTS(roots, source_root, source, iter_root, js_new_object());
     // The iterator is unpublished while its prototype and private fields are
     // allocated, so native-stack visibility cannot be its precise GC owner.
     js_set_prototype(iter_root.get(), js_get_array_iterator_proto());
@@ -28504,9 +28427,7 @@ Item js_check_array_sym_iterator() {
 
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
 static Item js_iterator_cache_next_method(Item iterator) {
-    RootFrame roots(2);
-    Rooted<Item> iterator_root(roots, iterator);
-    Rooted<Item> next_root(roots, ItemNull);
+    JS_ROOTS(roots, iterator_root, iterator, next_root, ItemNull);
     // A freshly returned iterator may have no published owner yet; keep it
     // exact while property lookup and cache publication can trigger GC.
     iterator = iterator_root.get();
@@ -28862,10 +28783,7 @@ extern "C" Item js_iterator_step(Item iterator) {
 
 // IteratorClose: call iterator.return() if it exists (ES spec §7.4.6)
 extern "C" Item js_iterator_close(Item iterator) {
-    RootFrame roots(3);
-    Rooted<Item> iterator_root(roots, iterator);
-    Rooted<Item> return_fn_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots, iterator_root, iterator, return_fn_root, ItemNull, result_root, ItemNull);
     // A custom .return() may collect before its result is validated.
     // Generators: call js_generator_return
     if (js_is_generator(iterator_root.get())) {
@@ -28909,10 +28827,7 @@ extern "C" Item js_iterator_close(Item iterator) {
 
 // collect remaining iterator values into a new array (for rest elements in destructuring)
 extern "C" Item js_iterator_collect_rest(Item iterator) {
-    RootFrame roots(3);
-    Rooted<Item> iterator_root(roots, iterator);
-    Rooted<Item> array_root(roots, js_array_new(0));
-    Rooted<Item> value_root(roots, ItemNull);
+    JS_ROOTS(roots, iterator_root, iterator, array_root, js_array_new(0), value_root, ItemNull);
     // The loop allocates while stepping and appending, so neither owner may
     // rely on the native stack between iterations.
     while (true) {
@@ -29384,9 +29299,7 @@ static void js_domain_apply_stack(Item stack) {
 }
 
 extern "C" Item js_domain_set_stack(Item stack) {
-    RootFrame roots(2);
-    Rooted<Item> stack_root(roots, stack);
-    Rooted<Item> previous_root(roots, js_domain_capture_stack());
+    JS_ROOTS(roots, stack_root, stack, previous_root, js_domain_capture_stack());
     js_domain_apply_stack(stack_root.get());
     return previous_root.get();
 }
@@ -29599,9 +29512,7 @@ static Item js_promise_make_type_error(const char* message, int len) {
 }
 
 static Item js_promise_make_resolving_state(JsPromise* p) {
-    RootFrame roots(2);
-    Rooted<Item> state(roots, js_new_object());
-    Rooted<Item> promise_root(roots, js_promise_to_item(p));
+    JS_ROOTS(roots, state, js_new_object(), promise_root, js_promise_to_item(p));
     // The state is fresh and otherwise unreachable while its two properties
     // allocate names/storage; publish it until the bound functions take ownership.
     js_set_key_cstr(state.get(), "promise", promise_root.get());
@@ -29709,15 +29620,15 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
 // PromiseResolveThenableJob: invoke the captured then method asynchronously.
 // Bound args: promise_item, thenable, then_fn.
 static Item js_promise_thenable_job(Item promise_item, Item thenable, Item then_fn) {
-    RootFrame roots(8);
-    Rooted<Item> promise_root(roots, promise_item);
-    Rooted<Item> thenable_root(roots, thenable);
-    Rooted<Item> then_fn_root(roots, then_fn);
-    Rooted<Item> resolving_state_root(roots, ItemNull);
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_fn_root(roots, ItemNull);
-    Rooted<Item> reject_fn_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        promise_root, promise_item,
+        thenable_root, thenable,
+        then_fn_root, then_fn,
+        resolving_state_root, ItemNull,
+        resolve_base_root, ItemNull,
+        reject_base_root, ItemNull,
+        resolve_fn_root, ItemNull,
+        reject_fn_root, ItemNull);
     JsPromise* p = js_get_promise(promise_root.get());
     if (!p || p->state != JS_PROMISE_PENDING) return ItemNull;
 
@@ -29743,12 +29654,12 @@ static Item js_promise_thenable_job(Item promise_item, Item thenable, Item then_
 }
 
 static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item then_fn) {
-    RootFrame roots(5);
-    Rooted<Item> promise_root(roots, js_promise_to_item(p));
-    Rooted<Item> thenable_root(roots, thenable);
-    Rooted<Item> then_fn_root(roots, then_fn);
-    Rooted<Item> runner_root(roots, ItemNull);
-    Rooted<Item> thunk_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        promise_root, js_promise_to_item(p),
+        thenable_root, thenable,
+        then_fn_root, then_fn,
+        runner_root, ItemNull,
+        thunk_root, ItemNull);
     runner_root.set(js_new_native_function(js_promise_thenable_job));
     Item bound_args[3] = {promise_root.get(), thenable_root.get(), then_fn_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
@@ -29756,9 +29667,7 @@ static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item th
 }
 
 static void js_promise_resolve_with_value(JsPromise* p, Item value) {
-    RootFrame roots(2);
-    Rooted<Item> promise_root(roots, js_promise_to_item(p));
-    Rooted<Item> value_root(roots, value);
+    JS_ROOTS(roots, promise_root, js_promise_to_item(p), value_root, value);
     p = js_get_promise(promise_root.get());
     if (!p || p->state != JS_PROMISE_PENDING) return;
 
@@ -29790,11 +29699,11 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value) {
 // Called with 3 bound args: handler, result, next_promise_item.
 // Calls handler(result), then settles next_promise with the return value.
 static Item js_promise_microtask_run(Item handler, Item result, Item next_promise_item) {
-    RootFrame roots(4);
-    Rooted<Item> handler_root(roots, handler);
-    Rooted<Item> result_root(roots, result);
-    Rooted<Item> next_root(roots, next_promise_item);
-    Rooted<Item> handler_result_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        handler_root, handler,
+        result_root, result,
+        next_root, next_promise_item,
+        handler_result_root, ItemNull);
     Item args[1] = {result_root.get()};
     handler_result_root.set(js_call_function(handler_root.get(), ItemNull, args, 1));
 
@@ -29999,12 +29908,12 @@ static void js_promise_enqueue_wrapped_job(Item thunk, Item resource, Item domai
 // Enqueue a promise handler as a microtask with proper chaining.
 // Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
-    RootFrame roots(5);
-    Rooted<Item> handler_root(roots, handler);
-    Rooted<Item> result_root(roots, result);
-    Rooted<Item> next_root(roots, next_promise_item);
-    Rooted<Item> thunk_root(roots, ItemNull);
-    Rooted<Item> runner_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        handler_root, handler,
+        result_root, result,
+        next_root, next_promise_item,
+        thunk_root, ItemNull,
+        runner_root, ItemNull);
     runner_root.set(js_new_native_function(js_promise_microtask_run));
     Item bound_args[3] = {handler_root.get(), result_root.get(), next_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
@@ -30014,13 +29923,13 @@ static void js_promise_enqueue_handler(Item handler, Item result, Item next_prom
 }
 
 static void js_promise_enqueue_handler_domain(Item handler, Item result, Item next_promise_item, Item domain) {
-    RootFrame roots(6);
-    Rooted<Item> handler_root(roots, handler);
-    Rooted<Item> result_root(roots, result);
-    Rooted<Item> next_root(roots, next_promise_item);
-    Rooted<Item> domain_root(roots, domain);
-    Rooted<Item> thunk_root(roots, ItemNull);
-    Rooted<Item> runner_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        handler_root, handler,
+        result_root, result,
+        next_root, next_promise_item,
+        domain_root, domain,
+        thunk_root, ItemNull,
+        runner_root, ItemNull);
     runner_root.set(js_new_native_function(js_promise_microtask_run));
     Item bound_args[3] = {handler_root.get(), result_root.get(), next_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
@@ -30032,12 +29941,12 @@ static void js_promise_enqueue_handler_domain(Item handler, Item result, Item ne
 }
 
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain) {
-    RootFrame roots(5);
-    Rooted<Item> next_root(roots, next_promise_item);
-    Rooted<Item> result_root(roots, result);
-    Rooted<Item> domain_root(roots, domain);
-    Rooted<Item> thunk_root(roots, ItemNull);
-    Rooted<Item> runner_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        next_root, next_promise_item,
+        result_root, result,
+        domain_root, domain,
+        thunk_root, ItemNull,
+        runner_root, ItemNull);
     runner_root.set(js_new_native_function(js_promise_passthrough_run));
     Item bound_args[3] = {next_root.get(), (Item){.item = i2it((int64_t)state)}, result_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
@@ -30128,14 +30037,14 @@ extern "C" Item js_promise_create(Item executor) {
     if (!js_is_callable(executor)) {
         return js_throw_type_error("Promise resolver is not a function");
     }
-    RootFrame roots(7);
-    Rooted<Item> executor_root(roots, executor);
-    Rooted<Item> promise_root(roots, ItemNull);
-    Rooted<Item> resolving_state_root(roots, ItemNull);
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        executor_root, executor,
+        promise_root, ItemNull,
+        resolving_state_root, ItemNull,
+        resolve_base_root, ItemNull,
+        reject_base_root, ItemNull,
+        resolve_root, ItemNull,
+        reject_root, ItemNull);
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
     // async_hooks observes Promise creation before executor-side resolution.
@@ -30169,9 +30078,7 @@ extern "C" Item js_promise_create(Item executor) {
 }
 
 static Item js_promise_make_settled(Item value, JsPromiseState state) {
-    RootFrame roots(2);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> promise_root(roots, ItemNull);
+    JS_ROOTS(roots, value_root, value, promise_root, ItemNull);
     if (state == JS_PROMISE_FULFILLED) {
         // PromiseResolve preserves identity for an existing promise; reject
         // always allocates its own carrier before settling.
@@ -30281,12 +30188,12 @@ static Item js_promise_species_constructor(Item promise) {
 }
 
 static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_rejected) {
-    RootFrame roots(5);
-    Rooted<Item> promise_root(roots, promise);
-    Rooted<Item> fulfilled_root(roots, on_fulfilled);
-    Rooted<Item> rejected_root(roots, on_rejected);
-    Rooted<Item> base_root(roots, ItemNull);
-    Rooted<Item> then_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        promise_root, promise,
+        fulfilled_root, on_fulfilled,
+        rejected_root, on_rejected,
+        base_root, ItemNull,
+        then_root, ItemNull);
     TypeId promise_type = get_type_id(promise_root.get());
     if (promise_type == LMD_TYPE_NULL || promise_type == LMD_TYPE_UNDEFINED ||
         promise_root.get().item == ItemNull.item) {
@@ -30327,13 +30234,13 @@ static Item js_promise_make_finally_continuation(JsNativeP2 target,
 
 static Item js_promise_finally_common(JsNativeP2 thunk, Item on_finally,
         Item constructor, Item captured) {
-    RootFrame roots(6);
-    Rooted<Item> on_finally_root(roots, on_finally);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> captured_root(roots, captured);
-    Rooted<Item> finally_result_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> thunk_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        on_finally_root, on_finally,
+        constructor_root, constructor,
+        captured_root, captured,
+        finally_result_root, ItemNull,
+        result_root, ItemNull,
+        thunk_root, ItemNull);
     finally_result_root.set(js_call_function(on_finally_root.get(), make_js_undefined(), NULL, 0));
     if (item_is_error(finally_result_root.get())) return finally_result_root.get();
     result_root.set(js_promise_resolve_with_constructor(constructor_root.get(), finally_result_root.get()));
@@ -30351,11 +30258,11 @@ JS_FORWARD_STATIC_ITEM(js_promise_catch_finally,
 
 static Item js_promise_make_finally_wrapper(JsNativeP3 target,
         Item on_finally, Item constructor) {
-    RootFrame roots(4);
-    Rooted<Item> on_finally_root(roots, on_finally);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> base_root(roots, ItemNull);
-    Rooted<Item> bound_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        on_finally_root, on_finally,
+        constructor_root, constructor,
+        base_root, ItemNull,
+        bound_root, ItemNull);
     base_root.set(js_new_native_function(target));
     js_promise_mark_anonymous_builtin(base_root.get());
     Item bound_args[2] = {on_finally_root.get(), constructor_root.get()};
@@ -30374,10 +30281,10 @@ JS_FORWARD_STATIC_EXPRESSION(Item, js_promise_capability_normalize_arg, (Item va
 
 // NewPromiseCapability executor. Bound arg: holder object.
 static Item js_promise_capability_executor(Item holder, Item resolve, Item reject) {
-    RootFrame roots(3);
-    Rooted<Item> holder_root(roots, holder);
-    Rooted<Item> resolve_root(roots, js_promise_capability_normalize_arg(resolve));
-    Rooted<Item> reject_root(roots, js_promise_capability_normalize_arg(reject));
+    JS_ROOTS(roots,
+        holder_root, holder,
+        resolve_root, js_promise_capability_normalize_arg(resolve),
+        reject_root, js_promise_capability_normalize_arg(reject));
     Item resolve_key = js_name_item("resolve", 7);
     Item reject_key = js_name_item("reject", 6);
     Item existing_resolve = js_get_key_default(holder_root.get(), resolve_key);
@@ -30394,14 +30301,14 @@ static Item js_promise_capability_executor(Item holder, Item resolve, Item rejec
 }
 
 static Item js_promise_new_capability(Item constructor, Item* out_resolve, Item* out_reject) {
-    RootFrame roots(7);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> holder_root(roots, ItemNull);
-    Rooted<Item> capture_base_root(roots, ItemNull);
-    Rooted<Item> executor_root(roots, ItemNull);
-    Rooted<Item> promise_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        constructor_root, constructor,
+        holder_root, ItemNull,
+        capture_base_root, ItemNull,
+        executor_root, ItemNull,
+        promise_root, ItemNull,
+        resolve_root, ItemNull,
+        reject_root, ItemNull);
     holder_root.set(js_new_object());
     js_set_key_cstr(holder_root.get(), "resolve", make_js_undefined());
     js_set_key_cstr(holder_root.get(), "reject", make_js_undefined());
@@ -30485,14 +30392,14 @@ static Item js_promise_call_capability_reject(Item reject, Item reason) {
 }
 
 static void js_promise_forward_native_to_capability(Item native_promise, Item resolve, Item reject) {
-    RootFrame roots(7);
-    Rooted<Item> native_root(roots, native_promise);
-    Rooted<Item> resolve_root(roots, resolve);
-    Rooted<Item> reject_root(roots, reject);
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> resolve_fn_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> reject_fn_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        native_root, native_promise,
+        resolve_root, resolve,
+        reject_root, reject,
+        resolve_base_root, ItemNull,
+        resolve_fn_root, ItemNull,
+        reject_base_root, ItemNull,
+        reject_fn_root, ItemNull);
     resolve_base_root.set(js_new_native_function(js_promise_call_capability_resolve));
     Item resolve_args[2] = {resolve_root.get(), reject_root.get()};
     resolve_fn_root.set(js_bind_function(resolve_base_root.get(), ItemNull, resolve_args, 2));
@@ -30506,9 +30413,7 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
 
 static Item js_promise_combinator_iterable_with_constructor(
     Item constructor, Item iterable, int kind, Item promise, Item resolve, Item reject) {
-    RootFrame roots(2);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> internal_result_root(roots, ItemNull);
+    JS_ROOTS(roots, iterable_root, iterable, internal_result_root, ItemNull);
     const bool custom_constructor = !js_promise_is_builtin_promise_constructor(constructor);
     const bool array_input = get_type_id(iterable_root.get()) == LMD_TYPE_ARRAY;
     const bool use_internal_result = kind != 3 && (custom_constructor || array_input);
@@ -30692,12 +30597,12 @@ static Item js_promise_combinator_iterable_with_constructor(
 }
 
 static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind) {
-    RootFrame roots(5);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
-    Rooted<Item> promise_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        constructor_root, constructor,
+        iterable_root, iterable,
+        resolve_root, ItemNull,
+        reject_root, ItemNull,
+        promise_root, ItemNull);
     Item resolve = ItemNull;
     Item reject = ItemNull;
     promise_root.set(js_promise_new_capability(constructor_root.get(), &resolve, &reject));
@@ -30713,12 +30618,12 @@ static Item js_promise_combinator_with_constructor(Item constructor, Item iterab
 }
 
 static Item js_promise_with_resolvers_for_constructor(Item constructor) {
-    RootFrame roots(5);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> promise_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        constructor_root, constructor,
+        promise_root, ItemNull,
+        resolve_root, ItemNull,
+        reject_root, ItemNull,
+        result_root, ItemNull);
     if (!js_is_object_value(constructor_root.get())) {
         return js_throw_type_error("Promise.withResolvers requires an object constructor");
     }
@@ -30931,12 +30836,12 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (ctx->module_state_id != UINT32_MAX) {
         js_set_active_module_state_id(ctx->module_state_id);
     }
-    RootFrame roots(5);
-    Rooted<Item> input_root(roots, input);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
-    Rooted<Item> resume_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        input_root, input,
+        result_root, ItemNull,
+        value_root, ItemNull,
+        resume_root, ItemNull,
+        reject_root, ItemNull);
     Item prev_this = js_current_this;
     uint32_t prev_module_state_id = js_get_active_module_state_id();
     bool switched_module_state = ctx->module_state_id != UINT32_MAX &&
@@ -31094,16 +30999,16 @@ extern "C" Item js_async_get_promise(Item ctx_idx_item) {
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
-    RootFrame roots(9);
-    Rooted<Item> promise_root(roots, promise);
-    Rooted<Item> fulfilled_root(roots, on_fulfilled);
-    Rooted<Item> rejected_root(roots, on_rejected);
-    Rooted<Item> reaction_domain_root(roots, ItemNull);
-    Rooted<Item> return_promise_root(roots, ItemNull);
-    Rooted<Item> capability_resolve_root(roots, ItemNull);
-    Rooted<Item> capability_reject_root(roots, ItemNull);
-    Rooted<Item> capability_constructor_root(roots, ItemNull);
-    Rooted<Item> next_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        promise_root, promise,
+        fulfilled_root, on_fulfilled,
+        rejected_root, on_rejected,
+        reaction_domain_root, ItemNull,
+        return_promise_root, ItemNull,
+        capability_resolve_root, ItemNull,
+        capability_reject_root, ItemNull,
+        capability_constructor_root, ItemNull,
+        next_root, ItemNull);
     JsPromise* p = js_get_promise(promise_root.get());
     if (!p) return ItemNull;
     bool has_rejection_handler = js_is_callable(rejected_root.get());
@@ -31180,12 +31085,12 @@ extern "C" Item js_promise_catch(Item promise, Item on_rejected) {
 }
 
 extern "C" Item js_promise_finally(Item promise, Item on_finally) {
-    RootFrame roots(5);
-    Rooted<Item> promise_root(roots, promise);
-    Rooted<Item> on_finally_root(roots, on_finally);
-    Rooted<Item> constructor_root(roots, ItemNull);
-    Rooted<Item> then_finally_root(roots, ItemNull);
-    Rooted<Item> catch_finally_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        promise_root, promise,
+        on_finally_root, on_finally,
+        constructor_root, ItemNull,
+        then_finally_root, ItemNull,
+        catch_finally_root, ItemNull);
     if (!js_is_object_value(promise_root.get())) {
         return js_throw_type_error("Promise.prototype.finally called on non-object");
     }
@@ -31382,11 +31287,11 @@ JS_PROMISE_ELEMENT_CALLBACK(js_settled_reject_element, reason, JS_PROMISE_ELEMEN
 // Per ES spec, Promise.all/race/any/allSettled must call Invoke(nextPromise, "then", ...)
 // so that user-overridden .then methods are respected.
 static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, Item* out_error) {
-    RootFrame roots(4);
-    Rooted<Item> elem_root(roots, elem);
-    Rooted<Item> resolve_root(roots, resolve_fn);
-    Rooted<Item> reject_root(roots, reject_fn);
-    Rooted<Item> then_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        elem_root, elem,
+        resolve_root, resolve_fn,
+        reject_root, reject_fn,
+        then_root, ItemNull);
     then_root.set(js_get_name_key(elem_root.get(), "then", 4));
     if (item_is_error(then_root.get())) {
         if (out_error) *out_error = js_error_lane_payload(then_root.get());
@@ -31412,10 +31317,7 @@ static Item js_promise_make_combinator_counter(int remaining,
                                                int values_length,
                                                Item* values_out,
                                                Item* called_out) {
-    RootFrame roots(3);
-    Rooted<Item> counter_root(roots, js_new_object());
-    Rooted<Item> values_root(roots, ItemNull);
-    Rooted<Item> called_root(roots, ItemNull);
+    JS_ROOTS(roots, counter_root, js_new_object(), values_root, ItemNull, called_root, ItemNull);
     js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining)});
     values_root.set(js_array_new(values_length));
     Item values = values_root.get();
@@ -31436,11 +31338,11 @@ static Item js_promise_make_combinator_counter(int remaining,
 
 static Item js_promise_make_bound_element_handler(JsNativeP4 handler, Item counter,
                                                    int index, Item result_item) {
-    RootFrame roots(4);
-    Rooted<Item> counter_root(roots, counter);
-    Rooted<Item> result_root(roots, result_item);
-    Rooted<Item> base_root(roots, ItemNull);
-    Rooted<Item> bound_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        counter_root, counter,
+        result_root, result_item,
+        base_root, ItemNull,
+        bound_root, ItemNull);
     base_root.set(js_new_native_function(handler));
     Item args[3] = {counter_root.get(), (Item){.item = i2it(index)}, result_root.get()};
     bound_root.set(js_bind_function(base_root.get(), ItemNull, args, 3));
@@ -36603,10 +36505,10 @@ extern "C" Item js_get_node_module_namespace(void) {
         module_epoch = js_heap_epoch;
         module_ns = js_new_object();
         heap_register_gc_root(&module_ns.item);
-        RootFrame roots(3);
-        Rooted<Item> builtin_modules_root(roots, ItemNull);
-        Rooted<Item> constants_root(roots, ItemNull);
-        Rooted<Item> status_root(roots, ItemNull);
+        JS_ROOTS(roots,
+            builtin_modules_root, ItemNull,
+            constants_root, ItemNull,
+            status_root, ItemNull);
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
@@ -36891,10 +36793,10 @@ extern "C" Item js_module_create_require(Item filename) {
 extern "C" Item js_text_encoder_new(void) {
     // exact-root the object across the allocating property-set and class-stamp
     // (typemap clone) — an unrooted obj is freed by a mid-construction GC.
-    RootFrame roots(3);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_TEXT_ENCODER));
-    Rooted<Item> k_root(roots, js_name_item("encoding"));
-    Rooted<Item> v_root(roots, js_name_item("utf-8"));
+    JS_ROOTS(roots,
+        obj_root, js_new_object_with_class(JS_CLASS_TEXT_ENCODER),
+        k_root, js_name_item("encoding"),
+        v_root, js_name_item("utf-8"));
     js_set_key_default(obj_root.get(), k_root.get(), v_root.get());
     // Native construct bodies that return their own object must attach the
     // constructor's real prototype; the common kernel cannot replace an

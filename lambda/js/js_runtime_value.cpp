@@ -1367,11 +1367,11 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
 JS_FORWARD_ITEM(js_string_concat, (Item left, Item right), js_concat_strings_fast, (it2s(left), it2s(right)))
 
 extern "C" Item js_add(Item left, Item right) {
-    RootFrame roots(4);
-    Rooted<Item> left_root(roots, left);
-    Rooted<Item> right_root(roots, right);
-    Rooted<Item> left_string_root(roots, ItemNull);
-    Rooted<Item> right_string_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        left_root, left,
+        right_root, right,
+        left_string_root, ItemNull,
+        right_string_root, ItemNull);
     TypeId left_type = get_type_id(left_root.get());
     TypeId right_type = get_type_id(right_root.get());
 

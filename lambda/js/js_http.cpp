@@ -811,11 +811,11 @@ static bool http_listener_invoke(Item listeners, Item this_val, Item* args, int 
 }
 
 static void http_listener_add(Item obj, Item key_item, Item callback) {
-    RootFrame roots(4);
-    Rooted<Item> obj_root(roots, obj);
-    Rooted<Item> key_root(roots, key_item);
-    Rooted<Item> callback_root(roots, callback);
-    Rooted<Item> existing_root(roots, js_get_key_default(obj, key_item));
+    JS_ROOTS(roots,
+        obj_root, obj,
+        key_root, key_item,
+        callback_root, callback,
+        existing_root, js_get_key_default(obj, key_item));
     if (js_is_callable(existing_root.get())) {
         RootFrame arr_roots(1);
         Rooted<Item> arr_root(arr_roots, js_array_new(0));
@@ -5742,17 +5742,17 @@ static void js_http_agent_assign_socket(Item request, Item socket) {
 // Agent.addRequest(req, options[, port[, localAddress]])
 extern "C" Item js_http_agent_addRequest(Item request, Item options,
                                            Item port, Item local_address) {
-    RootFrame roots(10);
-    Rooted<Item> agent_root(roots, js_get_this());
-    Rooted<Item> request_root(roots, request);
-    Rooted<Item> options_root(roots, options);
-    Rooted<Item> port_root(roots, port);
-    Rooted<Item> local_address_root(roots, local_address);
-    Rooted<Item> normalized_root(roots, js_new_object());
-    Rooted<Item> name_root(roots, ItemNull);
-    Rooted<Item> sockets_root(roots, ItemNull);
-    Rooted<Item> socket_root(roots, ItemNull);
-    Rooted<Item> agent_options_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        agent_root, js_get_this(),
+        request_root, request,
+        options_root, options,
+        port_root, port,
+        local_address_root, local_address,
+        normalized_root, js_new_object(),
+        name_root, ItemNull,
+        sockets_root, ItemNull,
+        socket_root, ItemNull,
+        agent_options_root, ItemNull);
 
     if (get_type_id(options_root.get()) == LMD_TYPE_STRING) {
         js_set_key_cstr(normalized_root.get(), "host", options_root.get());

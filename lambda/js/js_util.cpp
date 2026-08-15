@@ -1071,12 +1071,12 @@ static Item js_util_promisify_callback(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
-    RootFrame roots(5);
-    Rooted<Item> resolve_root(roots, env[0]);
-    Rooted<Item> reject_root(roots, env[1]);
-    Rooted<Item> custom_args_root(roots, env[2]);
-    Rooted<Item> rest_args_root(roots, rest_args);
-    Rooted<Item> value_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        resolve_root, env[0],
+        reject_root, env[1],
+        custom_args_root, env[2],
+        rest_args_root, rest_args,
+        value_root, ItemNull);
     int64_t argc = js_array_length(rest_args_root.get());
     Item err = (argc > 0) ? js_elements_get_int(rest_args_root.get(), 0) : make_js_undefined();
 
@@ -1138,13 +1138,13 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_reject(make_string_item("promisified function missing target"));
 
-    RootFrame roots(6);
-    Rooted<Item> original_root(roots, env[0]);
-    Rooted<Item> custom_args_root(roots, env[1]);
-    Rooted<Item> this_root(roots, js_get_this());
-    Rooted<Item> rest_args_root(roots, rest_args);
-    Rooted<Item> call_args_root(roots, ItemNull);
-    Rooted<Item> executor_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        original_root, env[0],
+        custom_args_root, env[1],
+        this_root, js_get_this(),
+        rest_args_root, rest_args,
+        call_args_root, ItemNull,
+        executor_root, ItemNull);
     call_args_root.set(js_array_new(0));
     int64_t argc = js_array_length(rest_args_root.get());
     for (int64_t i = 0; i < argc; i++) {
@@ -2629,16 +2629,16 @@ extern "C" Item js_get_util_namespace(void) {
     // cache until construction completes, so its stable cache slot owns it.
     util_namespace = js_new_object();
 
-    RootFrame roots(9);
-    Rooted<Item> inspect_root(roots, ItemNull);
-    Rooted<Item> custom_symbol_root(roots, ItemNull);
-    Rooted<Item> default_options_root(roots, ItemNull);
-    Rooted<Item> promisify_root(roots, ItemNull);
-    Rooted<Item> types_root(roots, ItemNull);
-    Rooted<Item> text_encoder_root(roots, ItemNull);
-    Rooted<Item> text_decoder_root(roots, ItemNull);
-    Rooted<Item> default_key_root(roots, ItemNull);
-    Rooted<Item> temporary_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        inspect_root, ItemNull,
+        custom_symbol_root, ItemNull,
+        default_options_root, ItemNull,
+        promisify_root, ItemNull,
+        types_root, ItemNull,
+        text_encoder_root, ItemNull,
+        text_decoder_root, ItemNull,
+        default_key_root, ItemNull,
+        temporary_root, ItemNull);
 
     js_util_set_method(util_namespace, "format",              js_util_format, -1);
     js_util_set_method(util_namespace, "inspect",             js_util_inspect, 2);

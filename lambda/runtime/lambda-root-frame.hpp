@@ -204,6 +204,39 @@ public:
     AutoDeferGC& operator=(const AutoDeferGC&) = delete;
 };
 
+// JS_ROOTS(frame, name_a, value_a, name_b, value_b, ...) declares a RootFrame
+// whose slot count is derived from the argument count, then one Rooted<Item>
+// per (name, value) pair in order. Deriving the size removes the hand-counted
+// `RootFrame roots(N)` mismatch class; the expansion is exactly the
+// RootFrame/Rooted structure it replaces, so rooting behaviour is unchanged.
+//
+// A value expression must not contain a top-level comma (parenthesise it if
+// it does) — the preprocessor splits arguments on those.
+#define JS_PP_ARG_N( \
+    _1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16, \
+    _17,_18,_19,_20,_21,_22,_23,_24,N,...) N
+#define JS_PP_NARG_(...) JS_PP_ARG_N(__VA_ARGS__)
+#define JS_PP_NARG(...) JS_PP_NARG_(__VA_ARGS__, \
+    24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+
+#define JS_ROOTS_2(f, a, va) Rooted<Item> a(f, va);
+#define JS_ROOTS_4(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_2(f, __VA_ARGS__)
+#define JS_ROOTS_6(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_4(f, __VA_ARGS__)
+#define JS_ROOTS_8(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_6(f, __VA_ARGS__)
+#define JS_ROOTS_10(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_8(f, __VA_ARGS__)
+#define JS_ROOTS_12(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_10(f, __VA_ARGS__)
+#define JS_ROOTS_14(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_12(f, __VA_ARGS__)
+#define JS_ROOTS_16(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_14(f, __VA_ARGS__)
+#define JS_ROOTS_18(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_16(f, __VA_ARGS__)
+#define JS_ROOTS_20(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_18(f, __VA_ARGS__)
+#define JS_ROOTS_22(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_20(f, __VA_ARGS__)
+#define JS_ROOTS_24(f, a, va, ...) Rooted<Item> a(f, va); JS_ROOTS_22(f, __VA_ARGS__)
+#define JS_ROOTS_PICK_(N, f, ...) JS_ROOTS_##N(f, __VA_ARGS__)
+#define JS_ROOTS_PICK(N, f, ...) JS_ROOTS_PICK_(N, f, __VA_ARGS__)
+#define JS_ROOTS(f, ...) \
+    RootFrame f(JS_PP_NARG(__VA_ARGS__) / 2); \
+    JS_ROOTS_PICK(JS_PP_NARG(__VA_ARGS__), f, __VA_ARGS__)
+
 #ifdef __cplusplus
 }
 #endif

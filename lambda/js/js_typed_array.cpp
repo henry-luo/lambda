@@ -1545,9 +1545,7 @@ static Item js_arraybuffer_allocate_constructed(
 
 static Item js_construct_arraybuffer_from_options(Item length_arg, Item options_arg,
         bool shared) {
-    RootFrame roots(2);
-    Rooted<Item> length_root(roots, length_arg);
-    Rooted<Item> options_root(roots, options_arg);
+    JS_ROOTS(roots, length_root, length_arg, options_root, options_arg);
     JsArrayBufferConstructOptions options = {0, 0, false};
     JS_ASSIGN_OR_RETURN(validation, js_arraybuffer_parse_construct_options(
         length_root.get(), options_root.get(), "Invalid array buffer length",
@@ -1561,11 +1559,11 @@ JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options, (Item length_arg, I
 
 static Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
         Item new_target, bool shared) {
-    RootFrame roots(4);
-    Rooted<Item> length_root(roots, length_arg);
-    Rooted<Item> options_root(roots, options_arg);
-    Rooted<Item> target_root(roots, new_target);
-    Rooted<Item> prototype_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        length_root, length_arg,
+        options_root, options_arg,
+        target_root, new_target,
+        prototype_root, ItemNull);
     JsArrayBufferConstructOptions options = {0, 0, false};
     // ToIndex precedes AllocateArrayBuffer, but its object creation precedes
     // the fallible backing-store allocation. Keep those two phases separate.
@@ -2175,9 +2173,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
 // Create a typed array from another array (copy)
 extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
-    RootFrame roots(2);
-    Rooted<Item> source_root(roots, source);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots, source_root, source, result_root, ItemNull);
     source = source_root.get();
     TypeId src_type = get_type_id(source);
 
@@ -2906,11 +2902,11 @@ extern "C" JsDataView* js_get_dataview_ptr(Item val) {
 
 static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
         Item new_target) {
-    RootFrame roots(4);
-    Rooted<Item> buffer_root(roots, buffer);
-    Rooted<Item> new_target_root(roots, new_target);
-    Rooted<Item> prototype_root(roots, ItemNull);
-    Rooted<Item> view_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        buffer_root, buffer,
+        new_target_root, new_target,
+        prototype_root, ItemNull,
+        view_root, ItemNull);
     buffer = buffer_root.get();
     if (!js_is_arraybuffer(buffer)) {
         return js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");

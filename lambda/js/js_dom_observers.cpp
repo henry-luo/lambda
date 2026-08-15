@@ -172,9 +172,7 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
         return js_status_ok();
     }
     observer_register_roots();
-    RootFrame roots(2);
-    Rooted<Item> callback_root(roots, callback);
-    Rooted<Item> object_root(roots, ItemNull);
+    JS_ROOTS(roots, callback_root, callback, object_root, ItemNull);
     JsObserverState* observer = &observers[observer_count++];
     memset(observer, 0, sizeof(*observer));
     observer->kind = kind;

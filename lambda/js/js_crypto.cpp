@@ -7827,10 +7827,10 @@ JS_SUBTLE_CIPHER_WRAPPER(js_subtle_decrypt, false)
 template <typename Target>
 static void crypto_set_method(Item ns, const char* name, Target target,
         int adapter_arity, bool hidden = false) {
-    RootFrame roots(3);
-    Rooted<Item> ns_root(roots, ns);
-    Rooted<Item> key_root(roots, make_string_item_crypto(name));
-    Rooted<Item> fn_root(roots, js_new_native_function(target, adapter_arity));
+    JS_ROOTS(roots,
+        ns_root, ns,
+        key_root, make_string_item_crypto(name),
+        fn_root, js_new_native_function(target, adapter_arity));
     js_set_key_default(ns_root.get(), key_root.get(), fn_root.get());
     if (hidden) js_mark_non_enumerable(ns_root.get(), key_root.get());
 }
@@ -7844,14 +7844,14 @@ extern "C" Item js_get_crypto_namespace(void) {
     heap_register_gc_root(&crypto_namespace.item);
     crypto_namespace = js_new_object();
 
-    RootFrame roots(7);
-    Rooted<Item> subtle_root(roots, ItemNull);
-    Rooted<Item> constants_root(roots, ItemNull);
-    Rooted<Item> ecdh_ctor_root(roots, ItemNull);
-    Rooted<Item> keyobject_ctor_root(roots, ItemNull);
-    Rooted<Item> keyobject_proto_root(roots, ItemNull);
-    Rooted<Item> default_key_root(roots, ItemNull);
-    Rooted<Item> temporary_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        subtle_root, ItemNull,
+        constants_root, ItemNull,
+        ecdh_ctor_root, ItemNull,
+        keyobject_ctor_root, ItemNull,
+        keyobject_proto_root, ItemNull,
+        default_key_root, ItemNull,
+        temporary_root, ItemNull);
 
 #define JS_CRYPTO_METHODS(M) \
     M("createHash", js_crypto_createHash, 2, false) M("hash", js_crypto_hash, 3, false) \

@@ -1040,11 +1040,11 @@ static Item make_tls_record_error(bool from_server_socket) {
 // drop `entry` from a "__on_<event>__" slot holding either a bare callable
 // (server layout) or an array of callables (socket layout).
 static void tls_remove_listener_entry(Item obj, Item key_item, Item entry) {
-    RootFrame roots(4);
-    Rooted<Item> obj_root(roots, obj);
-    Rooted<Item> key_root(roots, key_item);
-    Rooted<Item> entry_root(roots, entry);
-    Rooted<Item> stored_root(roots, js_get_key_default(obj, key_item));
+    JS_ROOTS(roots,
+        obj_root, obj,
+        key_root, key_item,
+        entry_root, entry,
+        stored_root, js_get_key_default(obj, key_item));
     if (get_type_id(stored_root.get()) == LMD_TYPE_ARRAY) {
         // rebuild rather than splice in place: an emit already iterating the
         // old array keeps its snapshot, which is Node's copy-then-dispatch
@@ -1073,10 +1073,10 @@ static const char* const TLS_ONCE_EVENT_KEY = "__once_key__";
 static Item tls_once_shim_call(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
     (void)result_home;
-    RootFrame roots(3);
-    Rooted<Item> target_root(roots, this_value);
-    Rooted<Item> inner_root(roots, js_get_key_cstr(callee, TLS_ONCE_LISTENER_KEY));
-    Rooted<Item> key_root(roots, js_get_key_cstr(callee, TLS_ONCE_EVENT_KEY));
+    JS_ROOTS(roots,
+        target_root, this_value,
+        inner_root, js_get_key_cstr(callee, TLS_ONCE_LISTENER_KEY),
+        key_root, js_get_key_cstr(callee, TLS_ONCE_EVENT_KEY));
     if (tls_is_object_like(target_root.get()) &&
             get_type_id(key_root.get()) == LMD_TYPE_STRING) {
         tls_remove_listener_entry(target_root.get(), key_root.get(), callee);
@@ -1101,11 +1101,11 @@ static Item tls_make_once_shim(Item key_item, Item callback) {
 extern "C" Item js_tls_socket_on(Item event_item, Item callback) {
     Item self = js_get_this();
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    RootFrame roots(4);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> callback_root(roots, callback);
-    Rooted<Item> key_root(roots, tls_listener_key(event_item));
-    Rooted<Item> existing_root(roots, js_get_key_default(self, key_root.get()));
+    JS_ROOTS(roots,
+        self_root, self,
+        callback_root, callback,
+        key_root, tls_listener_key(event_item),
+        existing_root, js_get_key_default(self, key_root.get()));
     if (js_is_callable(existing_root.get())) {
         RootFrame arr_roots(1);
         Rooted<Item> arr_root(arr_roots, js_array_new(0));
@@ -1124,9 +1124,7 @@ extern "C" Item js_tls_socket_on(Item event_item, Item callback) {
 extern "C" Item js_tls_socket_once(Item event_item, Item callback) {
     Item self = js_get_this();
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    RootFrame roots(2);
-    Rooted<Item> event_root(roots, event_item);
-    Rooted<Item> shim_root(roots, ItemNull);
+    JS_ROOTS(roots, event_root, event_item, shim_root, ItemNull);
     shim_root.set(tls_make_once_shim(tls_listener_key(event_item), callback));
     return js_tls_socket_on(event_root.get(), shim_root.get());
 }
@@ -2726,9 +2724,7 @@ extern "C" Item js_tls_server_on(Item event_item, Item callback) {
 extern "C" Item js_tls_server_once(Item event_item, Item callback) {
     Item self = js_get_this();
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    RootFrame roots(2);
-    Rooted<Item> event_root(roots, event_item);
-    Rooted<Item> shim_root(roots, ItemNull);
+    JS_ROOTS(roots, event_root, event_item, shim_root, ItemNull);
     shim_root.set(tls_make_once_shim(tls_listener_key(event_item), callback));
     return js_tls_server_on(event_root.get(), shim_root.get());
 }

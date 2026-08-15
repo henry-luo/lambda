@@ -898,13 +898,13 @@ extern "C" Item js_get_zlib_namespace(void) {
     if (zlib_namespace.item != 0) return zlib_namespace;
 
     zlib_namespace = js_new_object();
-    RootFrame roots(6);
-    Rooted<Item> ns_root(roots, zlib_namespace);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> transform_ctor_root(roots, ItemNull);
-    Rooted<Item> transform_proto_root(roots, ItemNull);
-    Rooted<Item> constants_root(roots, ItemNull);
-    Rooted<Item> codes_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        ns_root, zlib_namespace,
+        stream_root, ItemNull,
+        transform_ctor_root, ItemNull,
+        transform_proto_root, ItemNull,
+        constants_root, ItemNull,
+        codes_root, ItemNull);
     // The namespace is persistent, while stream-derived prototypes and the
     // two frozen tables remain unpublished during allocating initialization.
 

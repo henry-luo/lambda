@@ -278,10 +278,7 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item k
 
 extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
         Item Receiver, Item* out_value, bool* out_borrowed) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> key_root(roots, key);
-    Rooted<Item> receiver_root(roots, Receiver);
+    JS_ROOTS(roots, object_root, object, key_root, key, receiver_root, Receiver);
     object = object_root.get();
     key = key_root.get();
     Receiver = receiver_root.get();
