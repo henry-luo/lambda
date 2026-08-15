@@ -167,9 +167,15 @@ Defects 2–4 were invisible to the ordinary differential and appeared only unde
 
 Each slice lands independently behind `LAMBDA_TIER=interp`, extends the frame-plan cost table for its kinds, adds/extends `.ls` tests **with goldens** (rule 8), and moves its scripts from fallback to supported.
 
+### 3.0.1 Why a mixed-tier import cone is refused
+
+Both tiers keep module globals in the per-context slab (`EvalContext::module_states`), but they *number* it independently: the JIT assigns slots in `prepass_create_global_vars` during lowering, the frame-plan pass assigns its own. A module compiled by one tier and read by the other would therefore resolve the right slab and the wrong slot — a silent wrong-value read, not a crash. The pre-scan closes this by refusing an import whose target is not itself `interp_supported`, so a cone is interpretable whole or not at all.
+
+This is visible in the corpus: `test/lambda/import.ls` falls back because its dependency `func.ls` needs `AST_NODE_TYPE` (P1.2). Of the 163 remaining `IMPORT` fallbacks, most are this transitive gate rather than anything missing in the module machinery itself — they should clear as P1.2/P1.3 land.
+
 ### 3.0 P1 progress — **partially landed 2026-08-15**
 
-Two slices are in, verified over the **full 651-script baseline corpus** (every directory `test_lambda_gtest` discovers, functional and procedural): **105 interpreted end to end with byte-identical output, 546 counted fallbacks, 0 divergences**. GC stress over all 105 clean, `test_interp_gtest` 118/118, default tier 718/718.
+Three slices are in, verified over the **full 651-script baseline corpus** (every directory `test_lambda_gtest` discovers, functional and procedural): **113 interpreted end to end with byte-identical output, 538 counted fallbacks, 0 divergences**. GC stress over all 113 clean, `test_interp_gtest` 126/126, default tier 718/718.
 
 > **Correction to the P0 gate record.** G0.1 and the first P1 verification were measured over `test/lambda` only (279 scripts), not the full baseline. Worse, every harness — the gtest subset, the GC-stress loop, and the sweep — invoked `lambda.exe <script>` directly, so **`run` mode was untested by construction** through all of P0 and most of P1. Widening the sweep to the whole corpus immediately found a `run`-mode defect (below). The subset list now records each script's invocation mode and the gtest honours it, plus a dedicated `ProceduralMainIsInvokedUnderRunMode` case so the path stays covered even if the subset's only procedural script ever leaves it.
 
@@ -177,7 +183,8 @@ Two slices are in, verified over the **full 651-script baseline corpus** (every 
 |---|---|---|
 | P1.4 procedural + errors | **partial** | `EvalSignal` plumbing on `InterpFrame` (payload in the reserved slot); `VAR_STAM`, `ASSIGN_STAM` to a named binding, `WHILE_STAM`/`DO_WHILE_STAM`, `BREAK`/`CONTINUE`, explicit `RETURN`; `RAISE_STAM`/`RAISE_EXPR`; `AstCallNode::propagate` (`f(...)^`); `INDEX_ASSIGN_STAM`/`MEMBER_ASSIGN_STAM` through `array_set_cow`/`map_set_cow` for a plain-binding root; `run`-mode `pn main()` invocation. **Not yet:** nested COW paths (`a.b.c = v`), declaration-boundary skip (S7.7.2), `HANDLER_EXPR`/`HANDLER_STAM`, `CURRENT_ERROR`, self-tail-call iteration |
 | P1.1 comprehensions | **partial** | `FOR_EXPR`/`FOR_STAM` core: nested `AstLoopNode` chains, key/value and index binding, `key_filter`, `key_only`, the `let` clause, `where`, and the spreadable output stream. **Not yet:** `group`/`order`/`limit`/`offset` clauses and equi-joins (rejected by the pre-scan), `PIPE`, implicit contexts (`~`, `~#`, `last`) |
-| P1.2 / P1.3 / P1.5 | not started | match & types; elements, paths & queries; modules |
+| P1.5 modules | **landed** | `IMPORT`/`PUB_STAM`; the import cone recorded on the T0 load path; post-order module init, each under its own `TRANSACTION_BARRIER` with `lambda_module_state_reset()` on abandonment (D7.2.2/S7.7.6); per-module slabs through `EvalContext::module_states`; cross-module resolution against the *declaring* Script via `NameEntry::import_owner`. **Deliberately excluded:** mixed-tier cones and cross-language (Jube) imports |
+| P1.2 / P1.3 | not started | match & types; elements, paths & queries |
 
 Five defects the differential caught while landing these, all fixed:
 
@@ -185,7 +192,8 @@ Five defects the differential caught while landing these, all fixed:
 2. **A braced `for` body's scope was unreachable from the AST.** `build_for_expr` created a per-iteration `NameScope` and dropped the reference; `AstListNode::vars` exists for exactly this and `build_content` never filled it, so the frame plan could not see the body's bindings. Fixed at the source in `build_ast.cpp` — lowering resolves those names through its own hashmaps and reads that field nowhere, so the write is inert for the JIT.
 3. **`lambda.exe run` never invoked the user's `pn main()`.** `interp_run_script` set `Context::run_main` but had no equivalent of the generated module entry's scan for a top-level `pn main` and its zero-argument call, so *every* `run`-mode script silently produced empty output. Only the full-corpus sweep could see this — the 279-script sweep never used `run`.
 4. **A bare top-level definition was never bound.** A script whose top level is a single statement carries it directly under `AST_SCRIPT` rather than inside a content list, so `pn main(){…}` alone reached `eval_expr`, which built an anonymous closure and left the name unbound. Adding any second top-level item masked it. The top-level walk now hoists and binds definitions the way `build_content`'s pass 1 does.
-5. **Content-block value classification diverged in two places.** A `for` reached as an expression always yields its stream (the discard decision belongs to the enclosing block, as `transpile_expr` defers it to `transpile_content`), and the block-expression shortcut must exclude a lone `for` so its spreadable result flattens through `list_push_spread` instead of nesting. `is_proc_flow_side_effect_node` was promoted to `ast.hpp` so both tiers make the call from one predicate.
+5. **The import cone was invisible to T0.** `direct_imports` is populated inside `compile_script_as_mir_direct` — the function the interpreter skips — so the cone that drives module init order was always empty. The T0 load path now records it from the AST's import children before publishing the tier decision.
+6. **Content-block value classification diverged in two places.** A `for` reached as an expression always yields its stream (the discard decision belongs to the enclosing block, as `transpile_expr` defers it to `transpile_content`), and the block-expression shortcut must exclude a lone `for` so its spreadable result flattens through `list_push_spread` instead of nesting. `is_proc_flow_side_effect_node` was promoted to `ast.hpp` so both tiers make the call from one predicate.
 
 ### P1.1 Comprehensions, pipes, implicit contexts
 

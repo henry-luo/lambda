@@ -285,6 +285,12 @@ struct NameEntry {
     int32_t slot;
     BindingStorage binding_storage;
     bool storage_assigned;
+    // When this name was hung into the scope by an import, the module that
+    // actually declares it. `slot` is then an index into *that* module's slab,
+    // not this one's — the two modules' plan passes number their globals
+    // independently (§4.1: const/type/slab lookups go against the declaring
+    // Script, not the current one).
+    Script* import_owner;
 };
 
 // Static activation shape for one interpreted function (or module top level).

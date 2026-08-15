@@ -268,6 +268,9 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
     case AST_NODE_LOOP:
+    // --- P1.5: modules ---
+    case AST_NODE_IMPORT:
+    case AST_NODE_PUB_STAM:
         return true;
     default:
         return false;
@@ -395,6 +398,19 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
+    // The whole import cone must be interpretable or none of it is: a
+    // JIT-compiled module numbers its slab slots in its own lowering pass,
+    // which does not agree with this pass's numbering, so a mixed cone would
+    // read the wrong globals. Cross-language imports keep their lowering-time
+    // symbol registration and stay on the JIT entirely.
+    if (node->node_type == AST_NODE_IMPORT) {
+        AstImportNode* imp = (AstImportNode*)node;
+        if (imp->is_cross_lang || !imp->script || !imp->script->interp_supported) {
+            sc->ok = false;
+            sc->reject = node->node_type;
+            return;
+        }
+    }
     // Comprehension clauses with their own lowering shapes — grouping tables,
     // sort keys, and equi-join tuple streams. The core iterate/where/emit path
     // is implemented; these clauses stay on the JIT until their slices land.
@@ -471,8 +487,22 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // family) or more arguments than the P0 dispatch table covers.
     if (node->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)node)->fn_info;
+        // A variadic sys func (arg_count -1) has bespoke per-call lowering —
+        // `print` for instance emits one pn_print per argument with separators —
+        // so there is no generic dispatch to mirror yet.
+        // C_ARG_NATIVE (the bitwise/shift family) is still rejected: the call
+        // itself marshals correctly through `_barg`, but lowering boxes the raw
+        // i64 result by the *call node's* effective type — `int`, `i64`, `u32`,
+        // … — and reproducing that lane choice is type-inference work, not
+        // dispatch work. Interpreting it would report `int64` where the JIT
+        // reports `u32` (test/lambda/sized_numeric_bitwise_go), so the script
+        // falls back until the lane is modelled.
         if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
-                info->arg_count < 0 || info->arg_count > 5) {
+                info->arg_count < 0 || info->arg_count > 4) {
+            log_debug("interp: sys func '%s' unsupported (arity=%d conv=%d ptr=%p)",
+                info && info->name ? info->name : "<null>",
+                info ? info->arg_count : -99, info ? (int)info->c_arg_conv : -1,
+                info ? (void*)info->func_ptr : NULL);
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -549,10 +579,36 @@ static void plan_backlink_entry(PlanCtx* pc, NameEntry* entry) {
     }
 }
 
+// An imported name is a view onto another module's binding: resolve it to the
+// declaring module's slot instead of giving it one here. The declaring Script
+// has already been loaded (and planned) by the time its importer builds, so
+// this is a build-time resolution, not a runtime lookup.
+static bool plan_resolve_import(NameEntry* entry) {
+    if (!entry->import || !entry->import->script || !entry->node) return false;
+    Script* owner = entry->import->script;
+    AstScript* owner_root = (AstScript*)owner->ast_root;
+    if (!owner_root) return false;
+    for (NameEntry* d = owner_root->global_vars ? owner_root->global_vars->first : NULL;
+            d; d = d->next) {
+        if (d->node != entry->node || !d->storage_assigned) continue;
+        entry->slot = d->slot;
+        entry->binding_storage = d->binding_storage;
+        entry->import_owner = owner;
+        entry->storage_assigned = true;
+        return true;
+    }
+    return false;
+}
+
 // Captured names read through the closure env, not through a frame slot.
 static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
     if (!scope) return;
     for (NameEntry* e = scope->first; e; e = e->next) {
+        if (e->import) {
+            // Imported names consume no slot in this module's slab.
+            plan_resolve_import(e);
+            continue;
+        }
         plan_assign_entry(pc, e);
         plan_backlink_entry(pc, e);
     }

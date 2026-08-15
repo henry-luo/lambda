@@ -175,6 +175,36 @@ static inline Item interp_ptr_item(void* ptr) {
 // Bindings
 // ---------------------------------------------------------------------------
 
+// Post-order import cone excluding the root — the same shape run_script_mir
+// collects, rebuilt here because that helper is static to the MIR translation
+// unit and its cone is only populated on the lowering path.
+static void interp_cone_postorder(Script* script, ArrayList* cone, ArrayList* seen) {
+    if (!script) return;
+    for (int i = 0; i < seen->length; i++) if (seen->data[i] == script) return;
+    arraylist_append(seen, script);
+    if (script->direct_imports) {
+        for (int i = 0; i < script->direct_imports->length; i++) {
+            interp_cone_postorder((Script*)script->direct_imports->data[i], cone, seen);
+        }
+    }
+    arraylist_append(cone, script);
+}
+
+static ArrayList* interp_collect_import_cone(Script* main_script) {
+    if (!main_script || !main_script->direct_imports ||
+            main_script->direct_imports->length == 0) return NULL;
+    ArrayList* with_main = arraylist_new(8);
+    ArrayList* seen = arraylist_new(8);
+    interp_cone_postorder(main_script, with_main, seen);
+    arraylist_free(seen);
+    ArrayList* cone = arraylist_new(with_main->length);
+    for (int i = 0; i < with_main->length; i++) {
+        if (with_main->data[i] != main_script) arraylist_append(cone, with_main->data[i]);
+    }
+    arraylist_free(with_main);
+    return cone;
+}
+
 static LambdaModuleState* interp_module_state(Script* module) {
     EvalContext* owner = context;
     if (!owner || !module) return NULL;
@@ -220,9 +250,11 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
         return ItemError;
     }
     if (entry->binding_storage == BINDING_STORAGE_MODULE) {
-        // Cross-module reads resolve against the *declaring* Script (§4.1);
-        // P0 is single-module, so the frame's module is the declaring one.
-        return interp_read_module_slot(f->module, entry->slot);
+        // Cross-module reads resolve against the *declaring* Script (§4.1):
+        // the two modules number their slabs independently, so an imported
+        // name's slot indexes its owner's slab, not this frame's.
+        Script* owner = entry->import_owner ? entry->import_owner : f->module;
+        return interp_read_module_slot(owner, entry->slot);
     }
     int cap = interp_capture_index(f->fn, entry);
     if (cap >= 0) {
@@ -244,7 +276,9 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
 static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
     if (!entry || !entry->storage_assigned) return;
     if (entry->binding_storage == BINDING_STORAGE_MODULE) {
-        interp_write_module_slot(f->module, entry->slot, value);
+        // An imported binding is read-only here: its owner initializes it.
+        Script* owner = entry->import_owner ? entry->import_owner : f->module;
+        interp_write_module_slot(owner, entry->slot, value);
         return;
     }
     if ((uint32_t)entry->slot < f->scratch_base) f->slots[entry->slot] = value.item;
@@ -435,15 +469,38 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
             info && info->name ? info->name : "<null>");
         return ItemError;
     }
-    if (info->c_arg_conv != C_ARG_ITEM) {
-        // Bitwise/shift entries take native int64 words; P0 routes them to the
-        // whole-module fallback rather than guessing a marshalling rule.
-        log_error("interp: system function '%s' uses a native argument convention",
-            info->name ? info->name : "<null>");
-        return ItemError;
-    }
     void* fp = (void*)info->func_ptr;
     TypeId c_ret = sysfunc_c_ret_type_id(info);
+
+    if (info->c_arg_conv == C_ARG_NATIVE) {
+        // The bitwise/shift family takes machine words, not Items. `_barg` is
+        // the same safe unbox emit_bitwise_i64_arg routes non-integer operands
+        // through, so both tiers narrow identically.
+        int64_t raw[4];
+        for (int i = 0; i < argc && i < 4; i++) raw[i] = _barg(args[i]);
+        int64_t out =
+            argc == 1 ? ((int64_t(*)(int64_t))fp)(raw[0]) :
+            argc == 2 ? ((int64_t(*)(int64_t, int64_t))fp)(raw[0], raw[1]) :
+            argc == 3 ? ((int64_t(*)(int64_t, int64_t, int64_t))fp)(raw[0], raw[1], raw[2]) :
+                        ((int64_t(*)(int64_t, int64_t, int64_t, int64_t))fp)(
+                            raw[0], raw[1], raw[2], raw[3]);
+        return c_ret == LMD_TYPE_INT ? (Item){.item = i2it(out)} : box_int64_value(out);
+    }
+
+    if (info->c_ret_type == C_RET_RETITEM) {
+        // These entries return the 16-byte RetItem, not an Item. Calling one
+        // through an Item-returning prototype is undefined and drops `.err`
+        // silently; the registry stores the raw function, and lowering reaches
+        // it through an `_mir` wrapper that does exactly this mapping.
+        RetItem ri =
+            argc == 0 ? ((RetItem(*)())fp)() :
+            argc == 1 ? ((RetItem(*)(Item))fp)(args[0]) :
+            argc == 2 ? ((RetItem(*)(Item, Item))fp)(args[0], args[1]) :
+            argc == 3 ? ((RetItem(*)(Item, Item, Item))fp)(args[0], args[1], args[2]) :
+                        ((RetItem(*)(Item, Item, Item, Item))fp)(
+                            args[0], args[1], args[2], args[3]);
+        return ri.err ? ItemError : ri.value;
+    }
 
 #define SYS_DISPATCH(RetT) \
     (argc == 0 ? ((RetT(*)())fp)() : \
@@ -454,7 +511,7 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
                  ((RetT(*)(Item, Item, Item, Item, Item))fp)(args[0], args[1], args[2], args[3], args[4]))
 
     if (argc > 5) {
-        log_error("interp: system function '%s' arity %d exceeds the P0 dispatch table",
+        log_error("interp: system function '%s' arity %d exceeds the dispatch table",
             info->name ? info->name : "<null>", argc);
         return ItemError;
     }
@@ -1330,9 +1387,13 @@ static uint32_t interp_depth_budget(void) {
     return (uint32_t)value;
 }
 
-static Item interp_execute(Runner* runner, InterpState* st) {
-    Script* script = runner->script;
+// Runs one module's top level in its own frame. Used for every module in the
+// import cone and for the main script, so an initializer sees exactly the same
+// environment either way.
+static Item interp_execute_module(Runner* runner, InterpState* st, Script* script,
+                                  bool run_main) {
     AstScript* root = (AstScript*)script->ast_root;
+    if (!root) return ItemNull;
 
 
     if (!lambda_module_state_prepare(script->module_state_id,
@@ -1383,7 +1444,7 @@ static Item interp_execute(Runner* runner, InterpState* st) {
     // `lambda.exe run` invokes a user-defined `pn main()` after module init and
     // makes its result the script result — the same scan and zero-arg call the
     // generated module entry emits under Context::run_main.
-    if (runner->context->run_main) {
+    if (run_main) {
         for (AstNode* item = root->child; item; item = item->next) {
             AstNode* stmt = item;
             if (stmt->node_type == AST_NODE_CONTENT) stmt = ((AstListNode*)stmt)->item;
@@ -1411,6 +1472,63 @@ static Item interp_execute(Runner* runner, InterpState* st) {
 
     result = scalar_storage_read(tail.get(), false);
     return result;
+}
+
+// Module initialization is transactional (D7.2.2/S7.7.6): a fault inside an
+// initializer lands on its own barrier, resets the partial module slab, then
+// forwards to the still-armed execution boundary, so a half-initialized module
+// is never visible to a local handler.
+static bool interp_run_module_init(Runner* runner, InterpState* st, Script* module) {
+    LambdaRecoveryFrame* barrier = lambda_recovery_frame_begin_for(
+        (Context*)runner->context, LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER);
+    if (!barrier) {
+        log_error("interp: failed to allocate a module transaction frame");
+        lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
+        return false;
+    }
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(barrier)) {
+        LambdaFaultReason reason = LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT;
+        LambdaErrorCode prior = ERR_OK;
+        if (lambda_recovery_frame_restore_landing(barrier)) {
+            reason = barrier->fault.reason;
+            prior = barrier->fault.prior_error_code;
+        } else {
+            log_error("interp: module transaction landing invariant failed");
+        }
+        lambda_recovery_frame_end(barrier);
+        lambda_module_state_reset();
+        st->top = NULL;   // frames above the landing are abandoned wholesale
+        lambda_recovery_frame_raise_fault(reason, prior);
+        return false;
+    }
+    if (!lambda_recovery_frame_arm(barrier)) {
+        log_error("interp: failed to arm a module transaction frame");
+        lambda_recovery_frame_end(barrier);
+        return false;
+    }
+    log_info("interp: running imported module init index=%d", module->index);
+    interp_execute_module(runner, st, module, false);
+    lambda_recovery_frame_end(barrier);
+    return true;
+}
+
+// Post-order over the import cone, then the main script — the order
+// run_script_mir walks, so each initializer observes its dependencies.
+static Item interp_execute(Runner* runner, InterpState* st) {
+    ArrayList* cone = interp_collect_import_cone(runner->script);
+    if (cone) {
+        for (int i = 0; i < cone->length; i++) {
+            Script* module = (Script*)cone->data[i];
+            if (!module || !module->ast_root) continue;
+            if (!interp_run_module_init(runner, st, module)) {
+                arraylist_free(cone);
+                return ItemError;
+            }
+        }
+        arraylist_free(cone);
+    }
+    return interp_execute_module(runner, st, runner->script,
+        runner->context->run_main);
 }
 
 Item interp_run_script(Runner* runner, bool run_main) {

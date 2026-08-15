@@ -38,6 +38,11 @@ test/lambda/forward_ref.ls	direct
 test/lambda/func_inferred_nullable_native_call.ls	direct
 test/lambda/hostobj_demo_jube_import.ls	direct
 test/lambda/if_expr_types.ls	direct
+test/lambda/import_chain.ls	direct
+test/lambda/import_compute.ls	direct
+test/lambda/import_multi.ls	direct
+test/lambda/import_types.ls	direct
+test/lambda/import_vars.ls	direct
 test/lambda/input_csv.ls	direct
 test/lambda/input_dir.ls	direct
 test/lambda/input_integer_tiers.ls	direct
@@ -97,6 +102,7 @@ test/lambda/transpile_idiv_mod.ls	direct
 test/lambda/transpile_typed_closure.ls	direct
 test/lambda/trim.ls	direct
 test/lambda/type_contract_metadata.ls	direct
+test/lambda/type_contract_metadata_import.ls	direct
 test/lambda/type_contract_metadata_module.ls	direct
 test/lambda/type_enforce_dynamic_abi.ls	direct
 test/lambda/type_enforcement_union_map_storage.ls	direct
@@ -114,4 +120,6 @@ test/lambda/unboxed_sys_func.ls	direct
 test/lambda/vector_basic.ls	direct
 test/lambda/vector_performance.ls	direct
 test/lambda/vector_sys_func.ls	direct
+test/lambda/math/test_math_spacing.ls	direct
+test/lambda/math/test_math_symbols.ls	direct
 test/lambda/proc/proc_main_return.ls	run

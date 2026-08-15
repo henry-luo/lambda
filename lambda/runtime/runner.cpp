@@ -791,6 +791,19 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (lambda_tier_selected() == LAMBDA_TIER_INTERP) {
         profile_time_t plan0, plan1;
         if (profiling || compiler_timing) profile_get_time(&plan0);
+        // `direct_imports` is normally filled inside compile_script_as_mir_direct,
+        // which T0 skips — but the cone drives module init order, so record it
+        // here before the tier decision is published.
+        AstScript* interp_root = (AstScript*)tp->ast_root;
+        if (tp->direct_imports) { arraylist_free(tp->direct_imports); tp->direct_imports = NULL; }
+        for (AstNode* child = interp_root ? interp_root->child : NULL; child;
+                child = child->next) {
+            if (child->node_type != AST_NODE_IMPORT) continue;
+            AstImportNode* imp = (AstImportNode*)child;
+            if (imp->is_cross_lang || !imp->script) continue;
+            if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
+            arraylist_append(tp->direct_imports, imp->script);
+        }
         AstNodeType reject = AST_NODE_NULL;
         bool supported = interp_scan_supported(tp, &reject) && interp_plan_script(tp);
         if (profiling || compiler_timing) profile_get_time(&plan1);
