@@ -2610,6 +2610,8 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
             mem_free(req);
         });
     if (r != 0) {
+        // single-owner rule: libuv never runs the callback for a submission it
+        // rejected, so these frees are the only ones for this request.
         if (copy) mem_free(copy);
         mem_free(write_req);
         mem_free(req);
@@ -4508,7 +4510,16 @@ static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int
     write_req->creq = creq;
     write_req->callback = callback;
     wreq->data = write_req;
-    uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb);
+    // C0.4 single-owner rule: libuv only runs the write callback for a request
+    // it accepted, so a synchronous failure leaves this side the sole owner of
+    // the wrapper and the copied bytes. Freeing here is the only free, and the
+    // caller's write callback still has to settle or req.write(data, cb) hangs.
+    if (uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb) != 0) {
+        mem_free(copy);
+        mem_free(write_req);
+        mem_free(wreq);
+        http_call_write_callback(callback);
+    }
 }
 
 static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk, Item callback) {
@@ -4723,7 +4734,24 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
         wreq->data = write_req;
         creq->send_buf = NULL; // ownership transferred
         creq->sent = true;
-        uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb);
+        // C0.4 single-owner rule: a rejected submission never reaches
+        // http_client_write_cb, so this side owns the wrapper and the send
+        // buffer it just took over. Surface it as a request error instead of
+        // leaving a connected request that never completes.
+        if (uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb) != 0) {
+            mem_free(write_req->data);
+            mem_free(write_req);
+            mem_free(wreq);
+            creq->sent = false;
+            Item err = js_new_error(make_string_item("write EPIPE"));
+            js_set_key_cstr(err, "code", make_string_item("EPIPE"));
+            Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
+            http_listener_invoke(on_err, creq->js_object, &err, 1);
+            creq->destroyed = true;
+            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+            js_http_close_client_req(creq);
+            return;
+        }
     }
 
     // start reading response
