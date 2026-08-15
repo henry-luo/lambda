@@ -8236,6 +8236,34 @@ static bool _is_string_reflected(DomElement* elem, const char* prop,
     return false;
 }
 
+// C0.5: the setter applied the _idl_to_attr_name() mapping on any element, so
+// e.g. `div.htmlFor = 'x'` wrote a `for` content attribute that the getter —
+// which gates every one of these pairs by tag — then refused to read back, and
+// `div.readOnly = true` wrote `readonly=""` instead of storing an expando.
+// This gate lists the same element/property pairs the getter accepts, for the
+// mapped names that the bool/int predicates above do not already cover.
+static bool _is_mapped_attr_reflected(DomElement* elem, const char* prop) {
+    if (!elem || !elem->tag_name || !prop) return false;
+    // global attributes: reflected by every HTML element
+    if (strcmp(prop, "tabIndex") == 0 || strcmp(prop, "inputMode") == 0 ||
+        strcmp(prop, "enterKeyHint") == 0 || strcmp(prop, "contentEditable") == 0) {
+        return true;
+    }
+    if (strcmp(prop, "acceptCharset") == 0) return _is_tag(elem, "form");
+    if (strcmp(prop, "htmlFor") == 0) {
+        return _is_tag(elem, "label") || _is_tag(elem, "output");
+    }
+    if (strcmp(prop, "formAction") == 0 || strcmp(prop, "formMethod") == 0 ||
+        strcmp(prop, "formEnctype") == 0 || strcmp(prop, "formEncoding") == 0 ||
+        strcmp(prop, "formTarget") == 0 || strcmp(prop, "formNoValidate") == 0) {
+        return _is_tag(elem, "input") || _is_tag(elem, "button");
+    }
+    // readOnly, noValidate, maxLength, minLength, defaultChecked and
+    // defaultSelected are handled by the bool/int predicates; reaching here
+    // means this element does not support them.
+    return false;
+}
+
 // Returns the lowercased input `formmethod` value or "get" default.
 static const char* _normalise_method(const char* v) {
     if (v) {
@@ -10210,7 +10238,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         // String reflection with IDL→HTML name mapping (readOnly → readonly,
         // formAction → formaction, htmlFor → for, etc.).
         const char* mapped_attr = _idl_to_attr_name(prop);
-        if (mapped_attr) {
+        if (mapped_attr && _is_mapped_attr_reflected(elem, prop)) {
             const char* s = fn_to_cstr(value);
             if (s) {
                 elem->set_attribute(mapped_attr, s);
