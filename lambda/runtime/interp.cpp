@@ -547,6 +547,25 @@ static AstNode* interp_unwrap_primary(AstNode* node) {
 static Item eval_call(InterpFrame* f, AstCallNode* node) {
     int argc = 0;
     for (AstNode* a = node->argument; a; a = a->next) argc++;
+
+    if (node->interp_self_tail_call && f->fn && f->plan) {
+        // Every argument is evaluated *before* any parameter is rebound: an
+        // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
+        // the slots as we go would feed the new n into acc.
+        uint16_t params = f->plan->param_count;
+        RootSpan next_args((size_t)(argc > 0 ? argc : 1));
+        uint64_t* words = next_args.words();
+        int i = 0;
+        for (AstNode* a = node->argument; a; a = a->next, i++) {
+            words[i] = eval_expr(f, a).item;
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+        for (int p = 0; p < (int)params; p++) {
+            f->slots[p] = p < argc ? words[p] : ITEM_NULL;
+        }
+        f->signal = EvalSignal::TAIL_CALL;
+        return ItemNull;
+    }
     if (argc > LAMBDA_MAX_FUNCTION_ARGS) {
         log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
         return ItemError;
@@ -1042,6 +1061,12 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
 
 static void exec_declaration(InterpFrame* f, AstNode* node) {
     switch (node->node_type) {
+    case AST_NODE_TYPE_STAM:
+        // `type T = …` binds a compile-time name. The Type* graph is already
+        // built and every use site resolves through it, so there is nothing to
+        // evaluate or store at run time — the same reason lowering emits no
+        // value for a type declaration.
+        break;
     case AST_NODE_LET_STAM:
     case AST_NODE_PUB_STAM:
     case AST_NODE_VAR_STAM: {
@@ -1092,8 +1117,24 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (pri->expr) return eval_expr(f, pri->expr);
         return eval_literal(f, node);
     }
-    case AST_NODE_IDENT:
-        return interp_read_binding(f, ((AstIdentNode*)node)->entry);
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        NameEntry* entry = ident->entry;
+        // A name bound by `type T = …` is a compile-time binding: it denotes
+        // the Type* its declaration built, not a slab slot (which a type
+        // declaration never writes). Lowering makes the same distinction in
+        // mir_is_type_value_node's IDENT arm.
+        AstNode* decl = entry ? entry->node : NULL;
+        if (decl && decl->node_type == AST_NODE_ASSIGN &&
+                ((AstNamedNode*)decl)->is_type_definition) {
+            Type* declared = decl->type;
+            TypeId tid = LMD_TYPE_ANY;
+            TypeType* singleton = lambda_type_node_singleton(declared, &tid);
+            if (singleton) return interp_ptr_item(singleton);
+            return interp_ptr_item(declared ? declared : base_type(tid));
+        }
+        return interp_read_binding(f, entry);
+    }
     case AST_NODE_UNARY:
         return eval_unary(f, (AstUnaryNode*)node);
     case AST_NODE_BINARY:
@@ -1175,6 +1216,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_LET_STAM:
     case AST_NODE_PUB_STAM:
     case AST_NODE_VAR_STAM:
+    case AST_NODE_TYPE_STAM:
         exec_declaration(f, node);
         return ItemNull;
 
@@ -1295,6 +1337,25 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         interp_signal(f, EvalSignal::RETURNED, value);
         return value;
     }
+    // A type expression evaluates to its build-time Type* as a direct-pointer
+    // Item — the same carrier fn_is/fn_query expect. The Type* graph is built
+    // by the frontend; T0 constructs no types of its own (§P1.2).
+    case AST_NODE_TYPE: {
+        TypeId tid = LMD_TYPE_ANY;
+        TypeType* singleton = lambda_type_node_singleton(node->type, &tid);
+        return interp_ptr_item(singleton ? (Type*)singleton : base_type(tid));
+    }
+    case AST_NODE_BINARY_TYPE:
+    case AST_NODE_UNARY_TYPE:
+    case AST_NODE_CONTENT_TYPE:
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE:
+    case AST_NODE_MAP_TYPE:
+    case AST_NODE_ELMT_TYPE:
+    case AST_NODE_FUNC_TYPE:
+        // Composite type expressions already carry their resolved Type* on the
+        // node; lowering emits that pointer, so the walker publishes it too.
+        return interp_ptr_item(node->type);
     case AST_NODE_SYS_FUNC:
         // A bare system-function reference outside a call is not a first-class
         // value in T0; the pre-scan lets it through only as a call callee.
@@ -1359,7 +1420,22 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
             frame->slots[index] = value.item;
         }
 
-        result = eval_expr(frame, fn_node->body);
+        uint64_t iterations = 0;
+        for (;;) {
+            result = eval_expr(frame, fn_node->body);
+            if (frame->signal != EvalSignal::TAIL_CALL) break;
+            frame->signal = EvalSignal::NORMAL;
+            // The parameter slots already hold the next iteration's arguments,
+            // and scratch is released with each body evaluation, so the frame
+            // is reused rather than re-opened — that is what keeps deep tail
+            // recursion off the native stack.
+            frame->scratch_top = frame->scratch_base;
+            if (++iterations > LAMBDA_INTERP_TCO_MAX_ITERATIONS) {
+                lambda_stack_overflow_error(fn->name ? fn->name : "<anonymous>");
+                result = ItemError;
+                break;
+            }
+        }
         // An explicit `return` unwinds to exactly this boundary and its payload
         // is the call's value; the signal never escapes the activation.
         if (frame->signal == EvalSignal::RETURNED) result = interp_signal_payload(frame);

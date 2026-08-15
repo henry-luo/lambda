@@ -39,6 +39,15 @@ struct RunResult {
     int exit_code = 0;
 };
 
+// The project's own harness (test_lambda_helpers.hpp) trims trailing whitespace
+// on both sides before comparing, and several goldens are stored without a
+// final newline. Compare on the same footing or every such script fails on
+// both tiers for a reason that has nothing to do with the interpreter.
+std::string trim_trailing(const std::string& text) {
+    size_t end = text.find_last_not_of(" \t\r\n");
+    return end == std::string::npos ? std::string() : text.substr(0, end + 1);
+}
+
 std::string read_file(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return std::string();
@@ -122,7 +131,8 @@ void expect_tiers_agree(const std::string& name, const std::string& source) {
     RunResult interp = run_script(path, "interp");
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0)
         << name << ": expected the walker to execute this source, not fall back";
-    EXPECT_EQ(jit.stdout_text, interp.stdout_text) << name << ": tier outputs diverge";
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text))
+        << name << ": tier outputs diverge";
     EXPECT_EQ(jit.exit_code, interp.exit_code) << name << ": tier exit codes diverge";
 }
 
@@ -142,7 +152,8 @@ TEST_P(InterpSubsetTest, MatchesGoldenWithoutFallback) {
     RunResult interp = run_script(script, "interp", entry.procedural());
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0)
         << script << " fell back to the JIT; it must leave the subset list";
-    EXPECT_EQ(golden, interp.stdout_text) << script << " diverges from its golden";
+    EXPECT_EQ(trim_trailing(golden), trim_trailing(interp.stdout_text))
+        << script << " diverges from its golden";
 }
 
 std::vector<ListEntry> subset_scripts() {
