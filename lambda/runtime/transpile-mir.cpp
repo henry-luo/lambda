@@ -5686,6 +5686,38 @@ static inline bool mir_native_math_always_float(SysFunc fn) {
     }
 }
 
+// Type-preserving unary math: the result type follows the ARGUMENT's, which is
+// why these are excluded from mir_native_math_always_float. But once the
+// argument type is known the result type is fixed too, and the boxed helper
+// becomes pure overhead — `fn_numeric_rounding` literally does `return item;`
+// for the int family (sentinels included) and `push_d(<C fn>(get_double()))`
+// for a float, so the native call is the SAME computation without the Item
+// round trip, and `fn_abs`'s float arm is `push_d(fabs(v))` likewise.
+//
+// `*int_is_identity` distinguishes the two: flooring, ceiling, rounding or
+// truncating an integer returns it unchanged, but |x| does not — abs keeps the
+// boxed helper for integer arguments, where the int lane's sentinels need real
+// handling.
+//
+// TRUNC alone had this as a hand-written special case; generalizing it beats a
+// fourth near-identical copy (rule 13).
+static inline bool mir_native_math_type_preserving(SysFunc fn,
+        bool* int_is_identity) {
+    bool identity = false;
+    bool matched = true;
+    switch (fn) {
+    case SYSFUNC_TRUNC: case SYSFUNC_FLOOR:
+    case SYSFUNC_CEIL:  case SYSFUNC_ROUND:
+        identity = true; break;
+    case SYSFUNC_ABS:
+        identity = false; break;
+    default:
+        matched = false; break;
+    }
+    if (int_is_identity) *int_is_identity = identity;
+    return matched;
+}
+
 static TypeId mir_type_preserving_sysfunc_result(MirTranspiler* mt,
         SysFuncInfo* info, AstCallNode* call);
 
@@ -14974,10 +15006,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                         transpile_native_int_expr(mt, arg), arg_tid));
             }
         }
-        if (arg_count == 1 && info->fn == SYSFUNC_TRUNC) {
+        bool math_int_is_identity = false;
+        if (arg_count == 1 && mir_native_math_type_preserving(info->fn,
+                &math_int_is_identity)) {
             arg = call_node->argument;
             TypeId arg_tid = get_effective_type(mt, arg);
-            if (arg_tid == LMD_TYPE_INT) return transpile_native_int_expr(mt, arg);
+            if (math_int_is_identity && arg_tid == LMD_TYPE_INT) {
+                return transpile_native_int_expr(mt, arg);
+            }
             if (arg_tid == LMD_TYPE_FLOAT && info->native_c_name &&
                     info->native_func_ptr) {
                 MIR_reg_t value = transpile_expr(mt, arg);
