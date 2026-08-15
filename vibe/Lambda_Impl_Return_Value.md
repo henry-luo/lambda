@@ -1484,3 +1484,46 @@ across 8 probes (`test/mir/mir_budgets.json`), after which the ratchet reports
 zero remaining slack. `js_tune6`'s `linux-debug` and `default` profiles are
 left alone — they are separate platform measurements and this host cannot take
 them; the file's own convention is that each platform re-baselines its own.
+
+### 2026-08-15 — RVO12 CLOSED: shape 4 on ALL lanes (int/i64 join float)
+
+*(Later same day; supersedes the "int stays boxed" scope notes in the RV17/
+RV18 sections above.)*
+
+The `or`-containment failure that forced the int-widening revert is diagnosed
+and fixed at the root. The caller merge was correct; the abort came from
+`transpile_binary_out`'s native-arithmetic block, which is entered on operand
+types alone (`both_int || both_float || int_float`) with **no operator
+check**. The now-native `int^` call made the operand witness say INT, so `or`
+entered the block; the eager native operand fetch ran
+`emit_return_if_item_error` on the merged join — propagating the error `or`
+existed to contain — converted both operands to doubles, found no
+`OPERATOR_OR` case in the switch, and fell through (`default: break`) to the
+boxed `or`, re-evaluating both operands.
+
+Fix: gate the block on the operator set it implements (ADD/SUB/MUL/DIV/POW +
+the six comparisons). This also repairs a **latent master bug**: `f() or 9`
+with an ordinary non-raising native-int `f` evaluated `f()` twice — side
+effects duplicated, unnoticed because the duplicated work was usually pure
+and its results dead.
+
+Diagnosis correction worth recording: the first trace reading called the
+fatal tag test a *null* check (`eq tag, 27`, assumed `LMD_TYPE_NULL`). 27 is
+`LMD_TYPE_ERROR`; NULL is 1. One enum lookup rewrote the narrative from
+"missing error case in a null path" to "error propagation emitted by the
+operand fetch". Check tag constants against `EnumTypeId` before narrating a
+dump.
+
+With the gate in place the INT/INT64 admission is re-applied and holds:
+`func d, i64` / `func i64, i64` under v3 on all three lanes; destructure,
+`or` containment, and arithmetic-on-recovered all correct;
+`raise_arm_native_return.ls` extended to pin the int/i64 `or` cases the
+original test missed. Full chain that closed RVO12: **RV17** (union names the
+value component) → **RV18** (producer publishes the carrier) → **operator
+gate** (non-arith ops never enter the native-arith block) — each necessary,
+only all three sufficient.
+
+Gates: **both flag states green** — 3718/3721 and 3717/3721+lib_alpine-flake,
+where the 3 persistent failures are forced-GC divergences a **clean tree
+reproduces exactly** (verified by stashing the whole working set), and
+`lib_alpine` passes standalone (known parallel-load flake).

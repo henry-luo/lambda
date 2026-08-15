@@ -7,12 +7,13 @@
 > **[measured 2026-08-14]** below were revised from proposal fidelity to
 > observed behaviour once shape 2 was emitting; §1.4 corrects §1.2's site
 > split, §8 is re-costed against it, and RVO10 is new.
-> Ledger **RV1–RV17** (+ addenda RV3a, RV10a, RV14a, RV17a) + open issues
+> Ledger **RV1–RV18** (+ addenda RV3a, RV10a, RV14a, RV17a) + open issues
 > **RVO1–RVO12**. **RV17/RV17a** (ruled 2026-08-15, §2.1) are what make
 > **shape 4 reachable from ordinary source**: an `if` whose arms differ joins
 > to `T | error` — the union — instead of widening to ANY, so a `T^E` body
 > finally names its value component and can be admitted to the native lane.
-> Landed for `T = float` (impl log §5). **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
+> Landed for `T = float` (impl log §5). **RV18** (same day) makes the body
+> producer publish its carrier so the boundary stops inferring one. **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
 > boundary: a C helper or sys func returns a wide scalar by pushing it on the
 > number stack and returning an ordinary Item, because it owns no watermark
 > to tear down; the eager per-call restore that made that unsafe is retired
@@ -25,7 +26,7 @@
 > proposal fidelity until then. The 2026-08-14 rulings on Windows lowering,
 > LambdaJS scope, DTIME, and the error-lane encoding are folded into
 > **RV12**, **RV13**, **RV8**, and **RV9** (RVO1/RVO2/RVO5/RVO6/RVO7
-> retired); RVO3, RVO4, RVO8, RVO9, and RVO12 remain open.
+> retired); RVO3, RVO4, RVO8, and RVO9 remain open; RVO12 opened and CLOSED 2026-08-15 (§10).
 > This design **revives SF14's original two-lane return** (implemented
 > 2026-07-15, superseded 2026-07-16) with new measured evidence and a new
 > pending-Item encoding that removes the defect that killed the first
@@ -320,10 +321,11 @@ language-surface decision, not a typing cleanup, and is deliberately not taken
 here. Native admission is likewise **float-only** today: the `d` lane has a
 universal `it2d` fixup for a boxed value arm, while the INT-family lanes have
 no way to *tell* a boxed Item from a native `int64` at the return boundary —
-both are `MIR_T_I64`, and the fixup's trigger is a register-class test — so a
-boxed Item lands as tag bits and saturates to the inf sentinel. `int^`/`i64^`
-bodies stay boxed until that discriminator exists (**RVO12**) — a *lane*
-limitation, not a typing one; RV17 has already done its work for them.
+both are `MIR_T_I64`, and the fixup's trigger was a register-class test.
+**RV18** supplied the missing discriminator (the producer publishes its
+carrier) and the RVO12 closure removed the last consumer defect, so
+`int^`/`i64^` raise-arm bodies now return natively as well — all three lanes
+emit shape 4 from ordinary source.
 
 **RV17a — A can-raise call's result register is a boxed join, whatever its
 declared type says; consumers must be told.** *(corollary, ruled with RV17)*
@@ -348,6 +350,38 @@ The general rule, stated once: **a lane merge changes the carrier, so it must
 publish the carrier.** Shape 4 is the first construct where an ordinary typed
 call produces one, which is why the lie surfaced only when RV17 made shape 4
 reachable.
+
+**RV18 — The body producer publishes its carrier; the return boundary
+consumes that fact instead of inferring one.** *(ruled 2026-08-15, user —
+"option (a) for the fn tail return"; IMPLEMENTED same day)*
+
+Implemented for the `fn` tail return:
+
+- `MirTranspiler.body_tail_rep` (a `ValueRep`) generalizes the one-bit
+  `native_body_result_is_raw` that already existed for two int paths — same
+  idea, now saying *which* carrier rather than only "raw".
+- `transpile_content_tail_value` publishes `VALUE_REP_ITEM` on its
+  remaining path, which is a fact rather than an inspection: that path
+  returns through `transpile_box_item`, the boxing funnel. This is the
+  canonical braced-`fn` body, i.e. exactly what the syntactic INT proxy was
+  approximating.
+- `transpile_if` had the **carrier bug at its source**: `need_boxing`
+  compares `type_to_mir` register classes, and since that collapses every
+  non-float type to I64, `int | error` compared I64 == I64 and concluded
+  "no boxing" — while both arms do store Items. A structured result
+  (`if_tid == LMD_TYPE_TYPE`) now forces boxing, so the merge register's
+  carrier matches what the arms actually write.
+- The boundary consumes `VALUE_REP_ITEM` with **one** rule — unbox to the
+  declared return lane, whatever that lane is — replacing all three proxies
+  for published producers. `VALUE_REP_NONE` (not published) keeps the legacy
+  cascade, so adoption is incremental and **cannot regress** a producer that
+  has not opted in.
+
+Gates identical in both flag states — 3718/3721, where the 3 failures are
+`test_mir_gc_stress_gtest` JS forced-GC divergences that a **clean tree
+reproduces exactly** (verified by stashing the whole working set and
+rebuilding); they are instances of the known unrooted-native-locals issue,
+not of this change. The float shape-4 path is unchanged.
 
 ---
 
@@ -1048,21 +1082,101 @@ numbering stays traceable.)*
   the int path is where the rule bites. Adding an `it2l` arm here would not
   help: it would need the same discriminator the branch lacks.
 
-  Two candidate resolutions, not yet chosen: **(a)** carry the boxedness in
-  `ValueRep` so the return boundary can discriminate without asking MIR, then
-  apply `it2l`/`it2d` from that fact — this is the Compiling-Lane doctrine
-  applied to return values, and it fixes the float path's rule violation as
-  a side effect, but it adds a branch to every native int return a union body
-  can reach; or
-  **(b)** have the branch join emit an *unboxed* value arm when the union's
-  value component is a native carrier, so the fixup is unnecessary on either
-  lane — the better shape, since it removes the `it2d` on the float path and
-  the need to discriminate at all, but it means teaching the if-merge itself
-  about lanes rather than only the return boundary. **(b)** is the one that
-  composes with RV17's direction (the type already states the split; the
-  merge should honour it), so it is the presumptive answer absent evidence
-  against it — with **(a)** as the fallback if some merge site turns out to
-  be unable to produce an unboxed arm.
+  **The boundary uses three proxies, not one** *(surveyed 2026-08-15)*. The
+  `fn` tail cascade discriminates by a different approximation per lane:
+
+  | declared lane | proxy | kind |
+  |---|---|---|
+  | INT | body is a block \|\| body is BINARY → assume boxed | syntactic |
+  | FLOAT | `MIR_reg_type(body) != MIR_T_D` → boxed | register class |
+  | fallback | `body_tid == ANY \|\| NULL` → boxed | semantic type |
+
+  with `emit_function_return`'s `it2d` as the net behind them. Float's proxy
+  is exact; **int has two proxies and both are approximations** — the
+  cascade's own comment states the semantic tail type "is not evidence that
+  body_result is a raw lane", which is why the syntactic heuristic exists.
+  The control case is the `pn` explicit-`return` path, which uses the
+  semantic proxy *alone* and supports INT/FLOAT/BOOL — which is exactly why
+  `infer_proc_native_return_lane` admits int for procs today while `fn`
+  bodies cannot. The difference is not the int lane; it is that the pn
+  producer does not box behind the type's back.
+
+  **(a) — carry the carrier.** Put `ValueRep` on expression results so each
+  producer *states* Item-vs-lane. Retires all three proxies at once. The
+  syntactic one is a live correctness hazard independent of shape 4 (any int
+  body that boxes but is neither a block nor a binary is already
+  mis-classified — a bug class, not a limitation), and this also repairs the
+  float path's latent Compiling-Lane violation rather than leaving it
+  correct-by-luck. Cost is real: `ValueRep` is presently mostly a JS-side
+  citizen (18 mentions in `transpile-mir.cpp` vs heavy `js_mir_*` use), so
+  Lambda-side adoption is new ground. But this is the Compiling-Lane design's
+  own agenda — RVO12 pulls it forward, it does not invent it.
+
+  **(b) — remove the need to know.** Have the branch join hand the boundary a
+  native lane when the union's value component is native, so no
+  discrimination is needed on either lane and the `it2d` leaves the float
+  path too. It composes with RV17 in principle: the union already declares
+  lane 1 = `T`, lane 2 = `error`; the merge would honour what the type says.
+
+  **(b) is NOT independently safe, and this reverses an earlier draft's
+  recommendation.** For the canonical `fn twice(x: int) int^ { if … }` the
+  body wrapper is a block, so `native_body_is_block` holds and the INT branch
+  fires an unconditional `emit_unbox_contract_lane`. If the merge began
+  producing a native lane, that unbox would run **on a value that is already
+  a lane**, and it cannot detect the difference — native int and Item are
+  both `MIR_T_I64`. That is the current bug's mirror image. So (b) requires a
+  carrier fact at the same boundary to suppress the proxy: a miniature (a).
+  (b) also fixes only **one producer**; generic-path calls and `match`
+  results — the cases `emit_function_return`'s comment names — keep theirs.
+
+  **Sequencing: (a) scoped to the `fn` tail return first, then (b) on top.**
+  The increment between "(b) plus the carrier fact it needs" and "(a) for
+  this boundary" is small, and only (a) makes int shape 4 work for *all* body
+  forms rather than the if-tail alone. With a truthful carrier in place, a
+  lane-producing merge becomes a strict improvement instead of a new hazard.
+
+  Scope note: (b) concerns the **callee-internal** merge. The caller-side
+  merge governed by RV17a still builds a boxed join for `^err` and is
+  unaffected — different merge points, no conflict between the rulings.
+
+  ~~**RVO12 remains open.**~~ **CLOSED 2026-08-15 — but the final blocker was
+  a THIRD defect, not the carrier.** With RV18 in place the INT/INT64
+  admission was widened and one consumer still failed: `or` containment of a
+  native `int^` error aborted the script (`maybe_value(0 - 1) or 9` — the
+  error escaped to top level) while `^err` destructuring worked on every
+  lane. The instruction trace pinned it: `transpile_binary_out`'s
+  native-arithmetic block was gated on **operand types only**
+  (`both_int || both_float || int_float`), never on the operator. A can-raise
+  call whose operand witness now said INT walked `or` into the block, where
+  the eager native operand fetch consumed the error lane with
+  `emit_return_if_item_error` — **propagating the error `or` was about to
+  contain** — converted both operands to doubles, found no `OPERATOR_OR`
+  case in the switch, and fell through to the boxed `or`, which evaluated
+  both operands a **second** time.
+
+  The fix gates the block on the operator set it implements
+  (ADD/SUB/MUL/DIV/POW and the six comparisons). That also fixes a latent
+  master bug the trace exposed: any unsupported operator with native
+  operands — e.g. `f() or 9` with an ordinary non-raising `fn f() int` —
+  evaluated its operands TWICE, duplicating side effects; it went unnoticed
+  because the duplicated work was usually pure and the results dead.
+
+  **Post-mortem of the diagnosis:** the first reading of the trace
+  mis-attributed the L41 tag test as a null check — `eq tag, 27` — because
+  27 was assumed to be `LMD_TYPE_NULL`. It is `LMD_TYPE_ERROR` (NULL is 1).
+  One enum lookup corrected the whole narrative from "missing error case in
+  a null-containment path" to "error propagation emitted by the operand
+  fetch", which is what the fix addresses. Verify tag constants against the
+  enum before reasoning from a dump.
+
+  Ledger of what RVO12 actually took, in order: **RV17** (the union names
+  the value component) → **RV18** (the producer publishes the carrier; the
+  if-merge boxes structured results) → **the operator gate** (non-arithmetic
+  operators never enter the native-arith block). Each was necessary; only
+  the three together were sufficient. Shape 4 now emits from ordinary source
+  on all three lanes — `func d, i64` / `func i64, i64` — and
+  `test/lambda/raise_arm_native_return.ls` pins destructure, `or`
+  containment, and arithmetic-on-recovered for float, int, and i64.
 
   Interaction with **§5.8** of [`Lambda_Semantics_Int_Type.md`]: the int lane
   reaches this only after the `INT64_ERROR`/`INT_LANE_INF` collision is

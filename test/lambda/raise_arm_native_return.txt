@@ -5,7 +5,12 @@
 [null, error]
 [42, type.null]
 [null, error]
+[123456789012345, type.null]
+[null, error]
 "or-recovery"
 [3, 99]
+[6, 99]
+[123456789012345, 7]
 "arithmetic on a recovered value"
 6
+11
