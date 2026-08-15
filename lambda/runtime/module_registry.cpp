@@ -21,6 +21,7 @@
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern "C" uint64_t js_get_heap_epoch(void);
 
 extern "C" Item js_get_key_default(Item object, Item key);
 extern "C" Item js_new_object();
@@ -38,6 +39,8 @@ bool is_sys_func_name(const char* name, int name_len);
 struct ModuleRegistry {
     Runtime* runtime;
     struct hashmap* map;
+    ModuleDescriptor* first;
+    ModuleDescriptor* last;
 };
 
 // hashmap entry for module descriptors
@@ -72,6 +75,17 @@ static ModuleRegistry* module_registry_ensure(Runtime* runtime) {
     }
     owner->module_registry = registry;
     return registry;
+}
+
+static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
+    if (!desc || !context || !context->heap || !context->heap->gc) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (desc->roots_epoch == epoch) return;
+    heap_register_gc_root(&desc->namespace_obj.item);
+    heap_register_gc_root(&desc->specifier_item.item);
+    heap_register_gc_root(&desc->awaited_target.item);
+    heap_register_gc_root(&desc->evaluation_error.item);
+    desc->roots_epoch = epoch;
 }
 
 // Canonical module keys collapse aliases before a descriptor is inserted or
@@ -127,7 +141,13 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
         if (entry->desc) {
             // Descriptors are native allocations, so unregister their exact
             // namespace roots before the owning heap is retired.
-            heap_unregister_gc_root(&entry->desc->namespace_obj.item);
+            if (entry->desc->roots_epoch == js_get_heap_epoch()) {
+                heap_unregister_gc_root(&entry->desc->namespace_obj.item);
+                heap_unregister_gc_root(&entry->desc->specifier_item.item);
+                heap_unregister_gc_root(&entry->desc->awaited_target.item);
+                heap_unregister_gc_root(&entry->desc->evaluation_error.item);
+            }
+            mem_free(entry->desc->async_parents);
             mem_free((void*)entry->desc->path);
             mem_free(entry->desc);
         }
@@ -135,6 +155,15 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
     hashmap_free(registry->map);
     owner->module_registry = NULL;
     mem_free(registry);
+}
+
+ModuleDescriptor* module_registry_first_for_runtime(Runtime* runtime) {
+    ModuleRegistry* registry = module_registry_for_runtime(runtime);
+    return registry ? registry->first : NULL;
+}
+
+ModuleDescriptor* module_registry_next(ModuleDescriptor* module) {
+    return module ? module->next : NULL;
 }
 
 void module_registry_init(void) {
@@ -179,6 +208,7 @@ void module_register_with_namespace_ops_for_runtime(
         existing->desc->profile = lang_profile_for_name(lang);
         existing->desc->initialized = true;
         existing->desc->loading = false;
+        module_descriptor_ensure_roots(existing->desc);
         log_debug("module_registry: updated module '%s' (lang=%s)", key_path, lang);
         mem_free(key_path);
         return;
@@ -186,19 +216,25 @@ void module_register_with_namespace_ops_for_runtime(
 
     ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
     desc->path = key_path;
+    desc->next = NULL;
     desc->source_lang = lang;  // static string, not owned
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_obj;
     // Module descriptors live outside the GC heap. Keep their namespace slot
     // rooted so exact collection cannot reclaim exports between module loads.
-    heap_register_gc_root(&desc->namespace_obj.item);
     desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
     desc->mir_ctx = mir_ctx;
     desc->initialized = true;
     desc->loading = false;
+    desc->async_eval_order = -1;
+    desc->saved_module_state_id = UINT32_MAX;
+    module_descriptor_ensure_roots(desc);
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
     hashmap_set(registry->map, &entry);
+    if (registry->last) registry->last->next = desc;
+    else registry->first = desc;
+    registry->last = desc;
     log_info("module_registry: registered '%s' (lang=%s)", desc->path, lang);
 }
 
@@ -260,26 +296,33 @@ ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
         existing->desc->source_lang = lang;
         existing->desc->profile = lang_profile_for_name(lang);
         existing->desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
+        module_descriptor_ensure_roots(existing->desc);
         mem_free(key_path);
         return existing->desc;
     }
 
     ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
     desc->path = key_path;
+    desc->next = NULL;
     desc->source_lang = lang;
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_ops && namespace_ops->create
         ? namespace_ops->create() : js_new_object();
     // A loading namespace can be observed by cyclic imports before it is
     // initialized, so its native descriptor must own an exact GC root now.
-    heap_register_gc_root(&desc->namespace_obj.item);
     desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
     desc->mir_ctx = NULL;
     desc->initialized = false;
     desc->loading = true;
+    desc->async_eval_order = -1;
+    desc->saved_module_state_id = UINT32_MAX;
+    module_descriptor_ensure_roots(desc);
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
     hashmap_set(registry->map, &entry);
+    if (registry->last) registry->last->next = desc;
+    else registry->first = desc;
+    registry->last = desc;
     log_info("module_registry: marked '%s' as loading (lang=%s)", desc->path, lang);
     return desc;
 }

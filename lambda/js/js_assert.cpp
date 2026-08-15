@@ -255,16 +255,11 @@ static bool js_assert_current_skip_prototype(void) {
     return skip.item == ITEM_TRUE || (get_type_id(skip) == LMD_TYPE_BOOL && it2b(skip));
 }
 
-static bool js_assert_is_prototype_checked_value(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-           type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
-           type == LMD_TYPE_VMAP;
-}
+static bool js_assert_is_partial_object_like(Item value);
 
 static bool js_assert_prototypes_differ(Item actual, Item expected) {
-    if (!js_assert_is_prototype_checked_value(actual) ||
-            !js_assert_is_prototype_checked_value(expected)) {
+    if (!js_assert_is_partial_object_like(actual) ||
+            !js_assert_is_partial_object_like(expected)) {
         return false;
     }
     // Buffer uses Uint8Array storage/prototype internally; strict deep equality

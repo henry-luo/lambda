@@ -1158,13 +1158,15 @@ class PremakeGenerator:
         if (c_files or has_c_pattern) and (cpp_files or has_cpp_pattern) and not lib.get('single_project', False):
             # Create C++ project - include ALL C files for proper linking
             all_files = cpp_files + c_files
-            self._create_language_project(lib, all_files, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
+            self._create_language_project(lib, all_files, source_patterns, dependencies,
+                                          "C++", f"{lib_name}-cpp")
             # Create main project that links to the cpp project
             self._create_wrapper_project(lib_name, [f"{lib_name}-cpp"], lib)
         else:
             # Single language project
             language = "C++" if cpp_files or any('*.cpp' in pattern for pattern in source_patterns) else "C"
-            self._create_language_project(lib, source_files, source_patterns, dependencies, language, lib_name)
+            self._create_language_project(lib, source_files, source_patterns, dependencies,
+                                          language, lib_name)
 
     def _create_language_project(self, lib: Dict[str, Any], source_files: List[str],
                                source_patterns: List[str], dependencies: List[str],
@@ -1272,6 +1274,7 @@ class PremakeGenerator:
                 '    }',
                 '    '
             ])
+
 
         # Add include directories
         all_includes = []
@@ -2772,6 +2775,30 @@ class PremakeGenerator:
                     '    }',
                     '    '
                 ])
+
+            if self.use_macos_config and internal_project_links:
+                # Apple ld scans archives once; make explicitly declared
+                # conditional providers visible without loading host-only code.
+                required_symbols = []
+                for project_name in internal_project_links:
+                    target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
+                    target = configured_targets.get(target_name, {})
+                    if target.get('link') == 'dynamic':
+                        continue
+                    required_symbols.extend(target.get('required_symbols_macos', []))
+                if required_symbols:
+                    self.premake_content.extend([
+                        '    filter "configurations:debug"',
+                        '    linkoptions {',
+                    ])
+                    for symbol in required_symbols:
+                        self.premake_content.append(
+                            f'        "-Wl,-u,{symbol}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    filter {}',
+                        '    '
+                    ])
 
             # Add framework linkoptions for dynamic libraries with -framework prefix
             framework_flags = []
