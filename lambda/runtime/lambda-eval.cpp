@@ -8714,7 +8714,8 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         *map_type_slot = transition;
         if (type_slot) *type_slot = transition;
         ShapeEntry* refreshed = key_ref && property_key_id(key_ref) != NAME_ID_NONE
-            ? typemap_hash_lookup_name_id(transition, property_key_id(key_ref))
+            ? typemap_hash_lookup_by_name_id(transition,
+                property_key_id(key_ref), property_key_hash(key_ref))
             : map_find_shape_entry(transition, key_cstr, key_len);
         if (refreshed) return refreshed;
     }
@@ -8723,7 +8724,8 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     *map_type_slot = clone;
     if (type_slot) *type_slot = clone;
     ShapeEntry* refreshed = key_ref && property_key_id(key_ref) != NAME_ID_NONE
-        ? typemap_hash_lookup_name_id(clone, property_key_id(key_ref))
+        ? typemap_hash_lookup_by_name_id(clone,
+            property_key_id(key_ref), property_key_hash(key_ref))
         : map_find_shape_entry(clone, key_cstr, key_len);
     // Ordinary Input and runtime strings use the id-less byte seam; identity
     // keys recover the cloned slot by NameId.

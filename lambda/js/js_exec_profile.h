@@ -8,7 +8,7 @@ extern "C" {
 
 // Stable optimization decisions consumed by focused JS contract tests. The
 // broad execution profiler below remains the source for elapsed-time and
-// aggregate IC reports.
+// aggregate optimization reports.
 typedef enum JsOptEvent {
     JS_OPT_SCOPE_LOOKUP_CACHE_HIT = 0,
     JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
@@ -36,6 +36,9 @@ typedef enum JsOptEvent {
     JS_OPT_TLA_DRAIN,
     JS_OPT_URI_ERROR_CACHE_HIT,
     JS_OPT_URI_ERROR_CACHE_MISS,
+    JS_OPT_NAMED_FAST_PROBE,
+    JS_OPT_NAMED_FAST_HIT,
+    JS_OPT_NAMED_FAST_MISS,
     JS_OPT_EVENT_COUNT
 } JsOptEvent;
 
@@ -48,6 +51,15 @@ typedef enum JsOptReason {
     JS_OPT_REASON_CAPTURE_BEARING_SHORT_REGEX,
     JS_OPT_REASON_KEYLESS_CACHE_ENTRY,
     JS_OPT_REASON_SHAPE_CHANGED,
+    JS_OPT_REASON_NAMED_FAST_NO_KEY,
+    JS_OPT_REASON_NAMED_FAST_HOST_DYNAMIC,
+    JS_OPT_REASON_NAMED_FAST_NO_RECEIVER,
+    JS_OPT_REASON_NAMED_FAST_NO_ENTRY,
+    JS_OPT_REASON_NAMED_FAST_ATTRIBUTES,
+    JS_OPT_REASON_NAMED_FAST_BOUNDS,
+    JS_OPT_REASON_NAMED_FAST_RESERVED,
+    JS_OPT_REASON_NAMED_FAST_DELETED,
+    JS_OPT_REASON_NAMED_FAST_VALUE_TYPE,
     JS_OPT_REASON_COUNT
 } JsOptReason;
 

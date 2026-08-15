@@ -35,13 +35,17 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "mir_discard_elision", "mir_branch_direct", "mir_generic_fallback",
     "mir_box_value", "mir_unbox_value", "mir_root_store",
     "module_cache_hit", "module_cache_miss", "tla_deferred_body",
-    "tla_drain", "uri_error_cache_hit", "uri_error_cache_miss"
+    "tla_drain", "uri_error_cache_hit", "uri_error_cache_miss",
+    "named_fast_probe", "named_fast_hit", "named_fast_miss"
 };
 
 static const char* g_js_opt_reason_names[JS_OPT_REASON_COUNT] = {
     "none", "hole_or_sparse", "prototype_accessor", "not_extensible",
     "length_not_writable", "capture_bearing_short_regex",
-    "keyless_cache_entry", "shape_changed"
+    "keyless_cache_entry", "shape_changed", "named_fast_no_key",
+    "named_fast_host_dynamic", "named_fast_no_receiver", "named_fast_no_entry",
+    "named_fast_attributes", "named_fast_bounds", "named_fast_reserved",
+    "named_fast_deleted", "named_fast_value_type"
 };
 
 static int js_exec_profile_truthy(const char* value) {
@@ -69,6 +73,7 @@ void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
     if (!js_opt_trace_is_enabled() || event < 0 ||
             event >= JS_OPT_EVENT_COUNT) return;
     JsOptTraceCounter* counter = &g_js_opt_trace_events[event];
+    counter->attempts++;
     switch (outcome) {
     case JS_OPT_OUTCOME_TAKEN: counter->taken++; break;
     case JS_OPT_OUTCOME_FALLBACK: counter->fallback++; break;
