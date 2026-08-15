@@ -226,6 +226,18 @@ static inline void jm_emit_reg_op_binary(JsMirTranspiler* mt, MIR_insn_code_t op
     jm_emit(mt, MIR_new_insn(mt->ctx, opcode,
         MIR_new_reg_op(mt->ctx, target), left, MIR_new_reg_op(mt->ctx, right)));
 }
+// conditional branch to `label` on a single register operand (MIR_BT/MIR_BF)
+static inline void jm_emit_branch(JsMirTranspiler* mt, MIR_insn_code_t code,
+        MIR_label_t label, MIR_reg_t reg) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, code,
+        MIR_new_label_op(mt->ctx, label), MIR_new_reg_op(mt->ctx, reg)));
+}
+static inline void jm_emit_jmp(JsMirTranspiler* mt, MIR_label_t label) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, label)));
+}
+static inline void jm_emit_ret(JsMirTranspiler* mt, MIR_reg_t reg) {
+    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, reg)));
+}
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLaneTrack state);
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,

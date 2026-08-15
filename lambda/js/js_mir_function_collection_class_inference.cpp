@@ -2691,8 +2691,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             jm_emit_label(mt, l_check);
             MIR_reg_t cmp = jm_new_reg(mt, "spacmp", MIR_T_I64);
             jm_emit_reg_binary(mt, MIR_LTS, cmp, i_reg, src_len);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-                MIR_new_reg_op(mt->ctx, cmp)));
+            jm_emit_branch(mt, MIR_BF, l_end, cmp);
             // Box through the funnel: an int Item is not a tagged payload, so
             // OR-ing the tag onto a raw index no longer produces that index.
             MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
@@ -2705,7 +2704,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, elem));
             jm_emit_error_lane_propagate_check(mt);
             jm_emit_reg_binary_op(mt, MIR_ADD, i_reg, i_reg, MIR_new_int_op(mt->ctx, 1));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_check)));
+            jm_emit_jmp(mt, l_check);
             jm_emit_label(mt, l_end);
         } else {
             MIR_reg_t val = jm_transpile_box_item(mt, arg);

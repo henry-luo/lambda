@@ -323,26 +323,22 @@ MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     MIR_label_t l_cold = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, l_in_band),
-        MIR_new_reg_op(mt->ctx, in_band)));
+    jm_emit_branch(mt, MIR_BT, l_in_band, in_band);
 
     MIR_reg_t is_zero = jm_new_reg(mt, "jfzero", MIR_T_I64);
     jm_emit_reg_binary_op(mt, MIR_DEQ, is_zero, d_reg, MIR_new_double_op(mt->ctx, 0.0));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, l_zero),
-        MIR_new_reg_op(mt->ctx, is_zero)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cold)));
+    jm_emit_branch(mt, MIR_BT, l_zero, is_zero);
+    jm_emit_jmp(mt, l_cold);
 
     jm_emit_label(mt, l_in_band);
     jm_emit_mov(mt, result, bits);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_jmp(mt, l_end);
 
     jm_emit_label(mt, l_zero);
     MIR_reg_t sign = jm_new_reg(mt, "jfsign", MIR_T_I64);
     jm_emit_reg_binary_op(mt, MIR_URSH, sign, bits, MIR_new_int_op(mt->ctx, 63));
     jm_emit_reg_op_binary(mt, MIR_OR, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0), sign);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_jmp(mt, l_end);
 
     jm_emit_label(mt, l_cold);
     MIR_reg_t boxed = jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
@@ -383,10 +379,9 @@ MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
     MIR_reg_t result = jm_new_reg(mt, "boxs", MIR_T_I64);
     MIR_label_t l_nn = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
-        MIR_new_reg_op(mt->ctx, ptr_reg)));
+    jm_emit_branch(mt, MIR_BT, l_nn, ptr_reg);
     jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_jmp(mt, l_end);
     jm_emit_label(mt, l_nn);
     jm_emit_reg_op_binary(mt, MIR_OR, result, MIR_new_int_op(mt->ctx, (int64_t)STR_TAG), ptr_reg);
     jm_emit_label(mt, l_end);
@@ -906,13 +901,11 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     MIR_reg_t result = jm_new_reg(mt, "junboxf", MIR_T_D);
     MIR_label_t l_inline = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, l_inline),
-        MIR_new_reg_op(mt->ctx, in_band)));
+    jm_emit_branch(mt, MIR_BT, l_inline, in_band);
     MIR_reg_t cold = jm_call_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, item));
     jm_emit_dmov(mt, result, cold);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_jmp(mt, l_end);
     jm_emit_label(mt, l_inline);
     MIR_reg_t inline_d = jm_emit_bits_double(mt, item);
     jm_emit_dmov(mt, result, inline_d);

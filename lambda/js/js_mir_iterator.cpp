@@ -46,26 +46,20 @@ void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t
     MIR_label_t rethrow_only = jm_new_label(mt);
     MIR_label_t after_close = jm_new_label(mt);
 
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, no_exc),
-        MIR_new_reg_op(mt->ctx, exc)));
+    jm_emit_branch(mt, MIR_BF, no_exc, exc);
 
     MIR_reg_t saved_exc = jm_emit_error_lane_return(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, rethrow_only),
-        MIR_new_reg_op(mt->ctx, iter_done)));
+    jm_emit_branch(mt, MIR_BT, rethrow_only, iter_done);
     jm_emit_iterator_close(mt, iterator);
     // iterator close may set a second error; the saved result remains the
     // abrupt completion that must be rethrown after cleanup.
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, after_close)));
+    jm_emit_jmp(mt, after_close);
 
     jm_emit_label(mt, rethrow_only);
     jm_emit_label(mt, after_close);
     jm_call_1(mt, "js_throw_value", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, target)));
+    jm_emit_jmp(mt, target);
     jm_emit_label(mt, no_exc);
     // the fallthrough edge is the normal completion path; leaving the
     // compile-time state as SET makes a later cleanup helper rethrow its
