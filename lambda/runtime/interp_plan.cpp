@@ -262,6 +262,8 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_RETURN_STAM:
     case AST_NODE_RAISE_STAM:
     case AST_NODE_RAISE_EXPR:
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
     // --- P1.1: comprehensions ---
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
@@ -375,6 +377,22 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
                 sc->reject = node->node_type;
                 return;
             }
+        }
+    }
+    // A compound assignment through a nested path (`a.b.c = v`) has its own
+    // COW path-set lowering; only a plain binding root is covered here.
+    if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+        AstNode* target = ((AstCompoundAssignNode*)node)->object;
+        while (target && target->node_type == AST_NODE_PRIMARY &&
+                ((AstPrimaryNode*)target)->expr) {
+            target = ((AstPrimaryNode*)target)->expr;
+        }
+        if (!target || target->node_type != AST_NODE_IDENT ||
+                !((AstIdentNode*)target)->entry) {
+            sc->ok = false;
+            sc->reject = node->node_type;
+            return;
         }
     }
     // Comprehension clauses with their own lowering shapes — grouping tables,
