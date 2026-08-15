@@ -781,7 +781,7 @@ static Item node_fs_readdir_sync(Item path_item, Item options) {
     free(path);
     if (!success) {
         node_fs_host->node->roots->root_frame_end(&frame);
-        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "readdir",
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "scandir",
                                   operation.error_number ? operation.error_number : EIO);
     }
     for (size_t index = 0; index < operation.entry_count; ++index) {
@@ -806,7 +806,7 @@ static Item node_fs_realpath_sync(Item path_item, Item options) {
     bool success = filesystem && filesystem->string_operation &&
         filesystem->string_operation_release && filesystem->string_operation(&operation);
     free(path);
-    if (!success) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "realpath",
+    if (!success) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "lstat",
                                             operation.error_number ? operation.error_number : EIO);
     Item result = node_fs_host->value->string_from_utf8_n(operation.output, operation.output_length);
     filesystem->string_operation_release(&operation);

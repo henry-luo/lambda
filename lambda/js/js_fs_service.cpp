@@ -342,7 +342,8 @@ bool js_node_fs_string_operation(JubeNodeFilesystemStringOperation* operation) {
 #else
         operation->output = realpath(operation->path, NULL);
 #endif
-        operation->error_syscall = "realpath";
+        // Node reports the failing stat, not the API name, for realpath()
+        operation->error_syscall = "lstat";
         if (operation->output) operation->output_length = strlen(operation->output);
         break;
     case JUBE_NODE_FILESYSTEM_STRING_MKDTEMP: {
@@ -461,7 +462,8 @@ bool js_node_fs_directory_read(JubeNodeFilesystemDirectoryOperation* operation) 
     operation->entries = NULL;
     operation->entry_count = 0;
     operation->error_number = 0;
-    operation->error_syscall = "readdir";
+    // Node reports the underlying scandir(), not the API name, for readdir()
+    operation->error_syscall = "scandir";
 #if defined(_WIN32)
     size_t path_length = strlen(operation->path);
     char* pattern = (char*)malloc(path_length + 3);

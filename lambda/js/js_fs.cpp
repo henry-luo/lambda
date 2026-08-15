@@ -1751,7 +1751,7 @@ JS_FORWARD_ITEM(js_fs_lstatSync, (Item path_item, Item options_item), js_fs_stat
 // Asynchronous File Operations (callback-style)
 // =============================================================================
 
-static Item make_fs_error(int uv_err, const char* path);
+static Item make_fs_error(int uv_err, const char* syscall, const char* path);
 
 typedef struct JsFsReq {
     uv_fs_t req;
@@ -1910,7 +1910,7 @@ static void fs_read_file_complete(void* user, int status) {
     JsFsReq* fsreq = (JsFsReq*)user;
     if (!fsreq) return;
     if (status < 0 || fsreq->fd < 0) {
-        Item err = make_fs_error(status < 0 ? status : fsreq->fd, fsreq->path);
+        Item err = make_fs_error(status < 0 ? status : fsreq->fd, "open", fsreq->path);
         Item args[2] = {err, ItemNull};
         fs_req_call_callback(fsreq, args, 2);
         return;
@@ -1993,7 +1993,7 @@ static void fs_write_file_complete(void* user, int status) {
     JsFsReq* fsreq = (JsFsReq*)user;
     if (!fsreq) return;
     if (status < 0 || fsreq->fd < 0) {
-        Item err = make_fs_error(status < 0 ? status : fsreq->fd, fsreq->path);
+        Item err = make_fs_error(status < 0 ? status : fsreq->fd, "open", fsreq->path);
         Item args[1] = {err};
         fs_req_call_callback(fsreq, args, 1);
         return;
@@ -2576,7 +2576,9 @@ extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item) {
 // =============================================================================
 
 // helper: create an error object with code property
-static Item make_fs_error(int uv_err, const char* path) {
+// C0.3: the syscall name used to be hardcoded to "access" for every caller,
+// so an fs error never identified the operation that actually failed.
+static Item make_fs_error(int uv_err, const char* syscall, const char* path) {
     const char* msg = uv_strerror(uv_err);
     Item err = js_new_error(make_string_item(msg));
     const char* code = "ERR_FS";
@@ -2592,7 +2594,7 @@ static Item make_fs_error(int uv_err, const char* path) {
         js_set_key_cstr(err, "path", make_string_item(path));
     }
     js_set_key_cstr(err, "errno", (Item){.item = i2it(uv_err)});
-    js_set_key_cstr(err, "syscall", make_string_item("access"));
+    js_set_key_cstr(err, "syscall", make_string_item(syscall ? syscall : "fs"));
     return err;
 }
 
@@ -2629,7 +2631,7 @@ static Item js_fs_access_async(Item path_item, Item mode_or_cb, Item callback_it
     int r = uv_fs_access(NULL, &req, path, mode, NULL);
     uv_fs_req_cleanup(&req);
     if (r < 0) {
-        Item err = make_fs_error(r, path);
+        Item err = make_fs_error(r, "access", path);
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
     } else {
@@ -2664,7 +2666,7 @@ static Item js_fs_stat_like_async(Item path_item, Item opts_or_cb, Item callback
         : uv_fs_stat(NULL, &req, path, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&req);
-        Item err = make_fs_error(r, path);
+        Item err = make_fs_error(r, use_lstat ? "lstat" : "stat", path);
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
         return make_js_undefined();
@@ -2677,10 +2679,10 @@ static Item js_fs_stat_like_async(Item path_item, Item opts_or_cb, Item callback
 }
 
 static void js_fs_async_value_callback(Item callback, Item result,
-        int error_code, const char* path) {
+        int error_code, const char* syscall, const char* path) {
     if (!js_is_callable(callback)) return;
     if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
-        Item err = make_fs_error(error_code, path);
+        Item err = make_fs_error(error_code, syscall, path);
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
     } else {
@@ -2723,7 +2725,7 @@ static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, I
     JS_ASSIGN_OR_RETURN(fd, js_fs_openSync(path_item, flags_item, mode_item));
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    js_fs_async_value_callback(callback, fd, UV_ENOENT, path);
+    js_fs_async_value_callback(callback, fd, UV_ENOENT, "open", path);
     return make_js_undefined();
 }
 
@@ -2758,7 +2760,7 @@ static Item js_fs_unlink_async(Item path_item, Item callback) {
     uv_fs_req_cleanup(&req);
     if (js_is_callable(callback)) {
         if (r < 0) {
-            Item err = make_fs_error(r, path);
+            Item err = make_fs_error(r, "unlink", path);
             Item args[1] = {err};
             js_call_function(callback, ItemNull, args, 1);
         } else {
@@ -2810,7 +2812,7 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
     JS_ASSIGN_OR_RETURN(result, js_fs_readdirSync(path_item, opts_or_cb));
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    js_fs_async_value_callback(callback, result, UV_ENOENT, path);
+    js_fs_async_value_callback(callback, result, UV_ENOENT, "scandir", path);
     return make_js_undefined();
 }
 
@@ -2823,7 +2825,7 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
         options = make_js_undefined();
     }
     Item result = js_fs_fstatSync(fd_item, options);
-    js_fs_async_value_callback(callback, result, UV_EBADF, NULL);
+    js_fs_async_value_callback(callback, result, UV_EBADF, "fstat", NULL);
     return make_js_undefined();
 }
 
@@ -3065,7 +3067,7 @@ static Item js_fs_rmdir_async(Item path_item, Item callback) {
     int r = uv_fs_rmdir(NULL, &req, path, NULL);
     uv_fs_req_cleanup(&req);
     if (js_is_callable(callback)) {
-        Item args[1] = { r < 0 ? make_fs_error(r, path) : ItemNull };
+        Item args[1] = { r < 0 ? make_fs_error(r, "rmdir", path) : ItemNull };
         js_call_function(callback, ItemNull, args, 1);
     }
     return make_js_undefined();
@@ -3087,13 +3089,13 @@ static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb
 }
 
 static void js_fs_callback_string_result(Item cb, Item result, int error_code,
-        Item this_arg) {
+        const char* syscall, Item this_arg) {
     if (!js_is_callable(cb)) return;
     if (get_type_id(result) == LMD_TYPE_STRING) {
         Item args[2] = {ItemNull, result};
         js_call_function(cb, this_arg, args, 2);
     } else {
-        Item err = make_fs_error(error_code, NULL);
+        Item err = make_fs_error(error_code, syscall, NULL);
         Item args[1] = {err};
         js_call_function(cb, this_arg, args, 1);
     }
@@ -3124,20 +3126,20 @@ static Item js_fs_async_success_3(JsFsSync3 sync_fn, Item first, Item second,
     return make_js_undefined();
 }
 
-#define JS_FS_ASYNC_STRING_RESULT(name, sync_fn, error_code, this_arg) \
+#define JS_FS_ASYNC_STRING_RESULT(name, sync_fn, error_code, syscall, this_arg) \
 static Item name(Item path_item, Item opts_or_cb, Item callback) { \
     Item cb = js_is_callable(opts_or_cb) ? opts_or_cb : callback; \
     Item result = sync_fn(path_item, opts_or_cb); \
     if (fs_callback_failed(result)) return result; \
-    js_fs_callback_string_result(cb, result, error_code, this_arg); \
+    js_fs_callback_string_result(cb, result, error_code, syscall, this_arg); \
     return make_js_undefined(); \
 }
 JS_FS_ASYNC_STRING_RESULT(js_fs_realpath_async, js_fs_realpathSync,
-    UV_ENOENT, make_js_undefined())
+    UV_ENOENT, "lstat", make_js_undefined())
 JS_FS_ASYNC_STRING_RESULT(js_fs_mkdtemp_async, js_fs_mkdtempSync,
-    UV_EINVAL, ItemNull)
+    UV_EINVAL, "mkdtemp", ItemNull)
 JS_FS_ASYNC_STRING_RESULT(js_fs_readlink_async, js_fs_readlinkSync,
-    UV_EINVAL, ItemNull)
+    UV_EINVAL, "readlink", ItemNull)
 #undef JS_FS_ASYNC_STRING_RESULT
 
 static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_cb, Item callback) {
