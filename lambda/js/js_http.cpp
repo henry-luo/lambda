@@ -10,6 +10,7 @@
  * Registered as built-in module 'http' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
@@ -60,13 +61,8 @@ JS_FORWARD_STATIC_EXPRESSION(bool, http_ensure_roots, (void), (js_active_runtime
 
 #define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
-static bool js_http_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
-}
-
 static bool js_http_object_has_key(Item obj, const char* key) {
-    if (!js_http_is_object_like(obj) || !key) return false;
+    if (!js_node_is_plain_object(obj) || !key) return false;
     Item keys = js_object_keys(obj);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return false;
     int64_t len = js_array_length(keys);
@@ -698,7 +694,6 @@ static void http_conn_maybe_close_for_server_close(JsHttpConn* conn);
 static Item http_conn_socket_object(JsHttpConn* conn);
 static void http_response_close_request(Item res);
 static bool http_response_flush_partial(Item self);
-static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 
 static void http_conn_update_socket_counters(JsHttpConn* conn) {
@@ -725,7 +720,7 @@ static void http_conn_resume_read_after_backpressure(JsHttpConn* conn) {
     uv_stream_t* stream = http_conn_stream(conn);
     if (!stream || uv_is_closing((uv_handle_t*)stream)) return;
     conn->read_paused_for_backpressure = false;
-    uv_read_start(stream, http_server_alloc_cb, http_server_read_cb);
+    uv_read_start(stream, js_node_alloc_cb, http_server_read_cb);
 }
 
 static bool http_conn_note_write_queued(JsHttpConn* conn, int len) {
@@ -3102,11 +3097,6 @@ static void http_server_process_parsed_request(JsHttpConn* conn,
         expect_continue, response_at_eof, has_buffered_request);
 }
 
-static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
-}
-
 static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsHttpConn* conn = (JsHttpConn*)stream->data;
     if (!conn) {
@@ -3268,7 +3258,7 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
         srv->connection_count++;
         http_server_link_conn(srv, conn);
         if (srv->timeout_msecs > 0) http_conn_start_timeout(conn, srv->timeout_msecs);
-        uv_read_start(http_conn_stream(conn), http_server_alloc_cb, http_server_read_cb);
+        uv_read_start(http_conn_stream(conn), js_node_alloc_cb, http_server_read_cb);
     } else {
         mem_free(conn->recv_buf);
         uv_close((uv_handle_t*)http_conn_stream(conn), [](uv_handle_t* h) {
@@ -3334,7 +3324,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         host_buf[len] = '\0';
     }
 
-    if (js_http_is_object_like(port_item) && js_http_object_has_key(port_item, "fd")) {
+    if (js_node_is_plain_object(port_item) && js_http_object_has_key(port_item, "fd")) {
         Item fd_item = js_get_key_cstr(port_item, "fd");
         bool valid_fd_number = false;
         int64_t fd_value = 0;
@@ -3809,11 +3799,6 @@ static void http_client_mark_socket_idle(JsHttpClientReq* creq) {
     // the old handle id dead until a fresh async resource is assigned.
     js_async_hooks_emit_destroy_resource(creq->async_resource);
     http_client_stamp_socket_async_ids(socket, -1, -1);
-}
-
-static void http_client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
 }
 
 // parse HTTP response status line + headers from raw bytes
@@ -4755,7 +4740,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
     }
 
     // start reading response
-    uv_read_start(http_client_stream(creq), http_client_alloc_cb, http_client_read_cb);
+    uv_read_start(http_client_stream(creq), js_node_alloc_cb, http_client_read_cb);
 }
 
 static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {

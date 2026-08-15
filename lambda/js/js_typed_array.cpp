@@ -2568,6 +2568,30 @@ extern "C" bool js_item_bytes(Item item, const char** data, int* len) {
         *len = byte_len;
         return true;
     }
+    // ArrayBuffer / DataView sources: Node accepts these anywhere a chunk is
+    // expected. A detached buffer yields an empty, successful read rather than
+    // a type failure, matching child_process's sync input handling.
+    if (js_is_arraybuffer(item)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(item);
+        if (!ab || js_arraybuffer_detached(ab)) return true;
+        *data = (const char*)js_arraybuffer_data_const(ab);
+        *len = js_arraybuffer_length(ab) > 0 ? js_arraybuffer_length(ab) : 0;
+        return true;
+    }
+    if (js_is_dataview(item)) {
+        JsDataView* dv = js_get_dataview_ptr(item);
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return true;
+        int buffer_length = js_arraybuffer_length(dv->buffer);
+        int byte_len = dv->length_tracking ? buffer_length - dv->byte_offset : dv->byte_length;
+        if (byte_len < 0 || dv->byte_offset < 0 ||
+                dv->byte_offset > buffer_length ||
+                dv->byte_offset + byte_len > buffer_length) {
+            return true;
+        }
+        *data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
+        *len = byte_len > 0 ? byte_len : 0;
+        return true;
+    }
     return false;
 }
 

@@ -45,7 +45,6 @@ extern "C" Item bigint_from_string(const char* str, int len);
 extern Item js_make_number(double d);
 extern __thread EvalContext* context;
 
-#define item_to_cstr js_item_to_cstr
 
 static bool fs_string_has_nul(String* s) {
     if (!s) return false;
@@ -106,7 +105,7 @@ static FsPathResult fs_path_to_cstr(Item value, const char* name, char* buf, int
             }
         }
     }
-    return {item_to_cstr(value, buf, buf_size), js_status_ok()};
+    return {js_item_to_cstr(value, buf, buf_size), js_status_ok()};
 }
 
 #define FS_PATH_OR_RETURN(var, value, name, buf, size) \
@@ -1211,7 +1210,7 @@ extern "C" Item js_fs_existsSync(Item path_item) {
         return (Item){.item = b2it(false)};
     }
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    const char* path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return (Item){.item = b2it(false)};
 
     uv_fs_t req;
@@ -2716,7 +2715,7 @@ static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, I
     }
     JS_ASSIGN_OR_RETURN(fd, js_fs_openSync(path_item, flags_item, mode_item));
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    const char* path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
     js_fs_async_value_callback(callback, fd, UV_ENOENT, "open", path);
     return make_js_undefined();
 }
@@ -2769,7 +2768,7 @@ static Item js_fs_exists_async(Item path_item, Item callback) {
     char path_buf[1024];
     const char* path = NULL;
     if (!(get_type_id(path_item) == LMD_TYPE_STRING && fs_string_has_nul(it2s(path_item)))) {
-        path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+        path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
     }
     bool exists = false;
     if (path) {
@@ -2803,7 +2802,7 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
     }
     JS_ASSIGN_OR_RETURN(result, js_fs_readdirSync(path_item, opts_or_cb));
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    const char* path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
     js_fs_async_value_callback(callback, result, UV_ENOENT, "scandir", path);
     return make_js_undefined();
 }

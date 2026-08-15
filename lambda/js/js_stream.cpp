@@ -15,6 +15,7 @@
  * - pipeline(src, ...transforms, dst, cb) — pipe chain with error handling
  */
 #include "js_runtime.h"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "js_property_attrs.h"
@@ -5797,27 +5798,21 @@ static Item js_stream_validate_hwm_option(const char* name, Item value) {
 }
 JS_FORWARD_STATIC_VOID( js_stream_define_bool, (Item obj, const char* name, bool value), js_create_data_property, (obj, make_string_item(name), js_bool_item(value)))
 
-static bool js_stream_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-           type == LMD_TYPE_ELEMENT || type == LMD_TYPE_FUNC;
-}
-
 static bool js_stream_called_as_constructor(void) {
     Item new_target = js_get_new_target();
     TypeId type = get_type_id(new_target);
     return new_target.item != 0 && new_target.item != ItemNull.item &&
-           type != LMD_TYPE_UNDEFINED && js_stream_is_object_like(new_target);
+           type != LMD_TYPE_UNDEFINED && js_node_is_property_carrier(new_target);
 }
 
 static Item js_stream_create_instance(Item prototype, JsClass class_id) {
     Item self = js_get_this();
-    if (js_stream_called_as_constructor() && js_stream_is_object_like(self)) {
+    if (js_stream_called_as_constructor() && js_node_is_property_carrier(self)) {
         return self;
     }
 
     Item obj = js_new_object_with_class(class_id);
-    if (js_stream_is_object_like(prototype)) {
+    if (js_node_is_property_carrier(prototype)) {
         js_set_prototype(obj, prototype);
     }
     return obj;
@@ -7251,7 +7246,7 @@ extern "C" Item js_passthrough_transform(Item chunk, Item encoding, Item callbac
 
 extern "C" Item js_passthrough_new(Item opts) {
     Item obj = js_transform_new_internal(opts, JS_CLASS_PASS_THROUGH);
-    if (!js_stream_called_as_constructor() && js_stream_is_object_like(stream_passthrough_prototype)) {
+    if (!js_stream_called_as_constructor() && js_node_is_property_carrier(stream_passthrough_prototype)) {
         js_set_prototype(obj, stream_passthrough_prototype);
     }
     // set default _transform for pass-through behavior
@@ -9191,10 +9186,10 @@ extern "C" Item js_get_stream_namespace(void) {
     Item stream_base = js_new_native_constructor(js_stream_base_constructor);
     Item stream_base_proto = js_new_object();
     Item events_proto = js_get_key_cstr(events_ctor, "prototype");
-    if (js_stream_is_object_like(events_proto)) {
+    if (js_node_is_property_carrier(events_proto)) {
         js_set_prototype(stream_base_proto, events_proto);
     }
-    if (js_stream_is_object_like(events_ctor)) {
+    if (js_node_is_property_carrier(events_ctor)) {
         js_set_prototype(stream_base, events_ctor);
     }
     js_set_native_key(stream_base_proto, key_pipe, js_readable_inst_pipe);

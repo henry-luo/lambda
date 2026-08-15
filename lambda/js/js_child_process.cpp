@@ -5,6 +5,7 @@
  * Registered as built-in module 'child_process' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_common.hpp"
 #include "js_host_hooks.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
@@ -55,7 +56,6 @@ static void js_child_process_emit_or_queue_cluster_online(Item obj);
 // Helpers
 // =============================================================================
 
-#define item_to_cstr js_item_to_cstr
 JS_FORWARD_STATIC_EXPRESSION(bool, is_undefined_item, (Item item), (item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED))
 
 static bool is_object_item(Item item) {
@@ -237,11 +237,6 @@ typedef struct JsChildProcess {
 // =============================================================================
 // Allocation callback for uv_read_start
 // =============================================================================
-
-static void child_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
-}
 
 // =============================================================================
 // Handle close callback — frees struct after all handles fully closed
@@ -458,7 +453,7 @@ static void child_remove_abort_signal(JsChildProcess* cp) {
 static Item js_cp_exec_with_options(Item command_item, Item options_item,
                                     Item callback_item, size_t max_buffer) {
     char cmd_buf[4096];
-    const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
+    const char* cmd = js_item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
         return js_throw_invalid_arg_type("command", "string", command_item);
     }
@@ -525,8 +520,8 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
     }
 
     // start reading stdout/stderr
-    uv_read_start((uv_stream_t*)&cp->stdout_pipe, child_alloc_cb, child_stdout_read_cb);
-    uv_read_start((uv_stream_t*)&cp->stderr_pipe, child_alloc_cb, child_stderr_read_cb);
+    uv_read_start((uv_stream_t*)&cp->stdout_pipe, js_node_alloc_cb, child_stdout_read_cb);
+    uv_read_start((uv_stream_t*)&cp->stderr_pipe, js_node_alloc_cb, child_stderr_read_cb);
     child_install_abort_signal(cp, options_item);
 
     return make_js_undefined();
@@ -581,7 +576,7 @@ extern "C" Item js_cp_exec(Item rest_args) {
 
 extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
     char cmd_buf[4096];
-    const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
+    const char* cmd = js_item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
         return js_throw_invalid_arg_type("command", "string", command_item);
     }
@@ -1049,11 +1044,6 @@ static void schedule_spawn_send_callback(Item callback, Item err) {
     env[1] = err;
     Item tick = js_new_native_closure(spawn_send_callback_later, 0, env, 2);
     js_next_tick_enqueue(tick);
-}
-
-static void spawn_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
 }
 
 static void spawn_clear_env(Item* env) {
@@ -1835,10 +1825,10 @@ static void spawn_resume_stdio_stream(Item stream_obj) {
     int kind = (int)it2i(kind_item);
     if (!owner) return;
     if (kind == 1 && owner->stdout_pipe_active && !owner->stdout_pipe_reading) {
-        int r = uv_read_start((uv_stream_t*)&owner->stdout_pipe, spawn_alloc_cb, spawn_stdout_read_cb);
+        int r = uv_read_start((uv_stream_t*)&owner->stdout_pipe, js_node_alloc_cb, spawn_stdout_read_cb);
         if (r == 0) owner->stdout_pipe_reading = true;
     } else if (kind == 2 && owner->stderr_pipe_active && !owner->stderr_pipe_reading) {
-        int r = uv_read_start((uv_stream_t*)&owner->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb);
+        int r = uv_read_start((uv_stream_t*)&owner->stderr_pipe, js_node_alloc_cb, spawn_stderr_read_cb);
         if (r == 0) owner->stderr_pipe_reading = true;
     }
 }
@@ -2630,17 +2620,17 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     schedule_spawn_event(obj);
 
     if (sp->stdout_pipe_active) {
-        if (uv_read_start((uv_stream_t*)&sp->stdout_pipe, spawn_alloc_cb, spawn_stdout_read_cb) == 0) {
+        if (uv_read_start((uv_stream_t*)&sp->stdout_pipe, js_node_alloc_cb, spawn_stdout_read_cb) == 0) {
             sp->stdout_pipe_reading = true;
         }
     }
     if (sp->stderr_pipe_active) {
-        if (uv_read_start((uv_stream_t*)&sp->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb) == 0) {
+        if (uv_read_start((uv_stream_t*)&sp->stderr_pipe, js_node_alloc_cb, spawn_stderr_read_cb) == 0) {
             sp->stderr_pipe_reading = true;
         }
     }
     if (sp->ipc_pipe_active) {
-        uv_read_start((uv_stream_t*)&sp->ipc_pipe, spawn_alloc_cb, spawn_ipc_read_cb);
+        uv_read_start((uv_stream_t*)&sp->ipc_pipe, js_node_alloc_cb, spawn_ipc_read_cb);
     }
 
     return obj;
@@ -2763,7 +2753,7 @@ extern "C" Item js_cp_execFile(Item rest_args) {
     }
 
     char file_buf[4096];
-    const char* file = item_to_cstr(file_item, file_buf, sizeof(file_buf));
+    const char* file = js_item_to_cstr(file_item, file_buf, sizeof(file_buf));
     if (!file) return js_throw_invalid_arg_type("file", "string", file_item);
 
     char cmd[8192];
@@ -2924,7 +2914,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
 static bool cp_get_string_prop(Item obj, const char* name, char* out, int out_size) {
     if (!is_object_item(obj) || !name || !out || out_size <= 0) return false;
     Item value = js_get_key_default(obj, make_string_item(name));
-    const char* s = item_to_cstr(value, out, out_size);
+    const char* s = js_item_to_cstr(value, out, out_size);
     return s != NULL;
 }
 
@@ -2956,20 +2946,20 @@ static bool cp_snapshot_args(Item args_item, char* blob_path, int blob_path_size
         String* s = it2s(arg);
         if (s->len == 15 && memcmp(s->chars, "--snapshot-blob", 15) == 0) {
             if (i + 1 >= len) return false;
-            if (!item_to_cstr(js_elements_get_int(args_item, i + 1), blob_path, blob_path_size)) return false;
+            if (!js_item_to_cstr(js_elements_get_int(args_item, i + 1), blob_path, blob_path_size)) return false;
             i++;
             continue;
         }
         if (s->len == 16 && memcmp(s->chars, "--build-snapshot", 16) == 0) {
             *build_snapshot = true;
             if (i + 1 < len) {
-                item_to_cstr(js_elements_get_int(args_item, i + 1), entry_path, entry_path_size);
+                js_item_to_cstr(js_elements_get_int(args_item, i + 1), entry_path, entry_path_size);
                 i++;
             }
             continue;
         }
         if (s->len > 0 && s->chars[0] != '-') {
-            item_to_cstr(arg, entry_path, entry_path_size);
+            js_item_to_cstr(arg, entry_path, entry_path_size);
         }
     }
     return blob_path[0] != '\0';
@@ -3180,46 +3170,6 @@ static Item cp_sync_make_output_item(const char* data, size_t len, bool as_strin
     return js_buffer_from_bytes(data ? data : "", item_len);
 }
 
-static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
-    if (!data || !len) return false;
-    *data = NULL;
-    *len = 0;
-    TypeId type = get_type_id(input);
-    if (type == LMD_TYPE_STRING) {
-        String* s = it2s(input);
-        *data = s->chars;
-        *len = s->len;
-        return true;
-    }
-    if (js_is_typed_array(input)) {
-        *data = (const char*)js_typed_array_current_data_ptr(input);
-        int byte_len = js_typed_array_byte_length(input);
-        *len = byte_len > 0 ? (size_t)byte_len : 0;
-        return true;
-    }
-    if (js_is_arraybuffer(input)) {
-        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
-        if (!ab || js_arraybuffer_detached(ab)) return true;
-        *data = (const char*)js_arraybuffer_data_const(ab);
-        *len = js_arraybuffer_length(ab) > 0 ? (size_t)js_arraybuffer_length(ab) : 0;
-        return true;
-    }
-    if (js_is_dataview(input)) {
-        JsDataView* dv = js_get_dataview_ptr(input);
-        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return true;
-        int buffer_length = js_arraybuffer_length(dv->buffer);
-        int byte_len = dv->length_tracking ? buffer_length - dv->byte_offset : dv->byte_length;
-        if (byte_len < 0 || dv->byte_offset < 0 ||
-                dv->byte_offset > buffer_length ||
-                dv->byte_offset + byte_len > buffer_length) {
-            return true;
-        }
-        *data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
-        *len = byte_len > 0 ? (size_t)byte_len : 0;
-        return true;
-    }
-    return false;
-}
 
 static Item cp_sync_write_input_file(Item options_item, const char* input_path) {
     if (!is_object_item(options_item) || !input_path) return js_status_ok();
@@ -3227,7 +3177,7 @@ static Item cp_sync_write_input_file(Item options_item, const char* input_path) 
     if (is_nullish_item(input)) return js_status_ok();
     const char* data = NULL;
     size_t len = 0;
-    if (!cp_sync_input_bytes(input, &data, &len)) {
+    if (!js_item_bytes(input, &data, &len)) {
         return js_throw_invalid_arg_type("options.input", "string, Buffer, TypedArray, DataView, or ArrayBuffer", input);
     }
     FILE* fp = fopen(input_path, "wb");
@@ -3430,7 +3380,7 @@ static Item cp_make_spawn_sync_timeout_error(const char* cmd, Item args_item) {
 extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_item) {
     // build full command line for popen
     char cmd_buf[4096];
-    const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
+    const char* cmd = js_item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
         log_error("child_process: spawnSync: invalid command");
         return ItemNull;

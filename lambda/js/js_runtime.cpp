@@ -5,6 +5,7 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "js_runtime_internal.hpp"
+#include "js_node_common.hpp"
 #include "js_object_meta.h"
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
@@ -33963,12 +33964,6 @@ static bool js_repl_contains(const char* s, int len, const char* needle) {
     return false;
 }
 
-static bool js_repl_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT ||
-           type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
-}
-
 static Item js_repl_eval_callback(Item repl, Item err, Item result);
 static Item js_repl_close_repl(Item repl);
 
@@ -34070,8 +34065,8 @@ static void js_repl_editor_finish(Item repl, Item event) {
     Item buf_item = js_get_key_default(repl, js_repl_key("__editor_buffer__"));
     int len = 0;
     js_repl_cstr(buf_item, &len);
-    bool ctrl_c = js_repl_is_object_like(event) && len == 0, ctrl_d = false;
-    if (js_repl_is_object_like(event)) {
+    bool ctrl_c = js_node_is_object_like(event) && len == 0, ctrl_d = false;
+    if (js_node_is_object_like(event)) {
         Item name = js_get_key_default(event, js_repl_key("name"));
         if (get_type_id(name) == LMD_TYPE_STRING) {
             String* ns = it2s(name);
@@ -34097,7 +34092,7 @@ static void js_repl_editor_finish(Item repl, Item event) {
 static Item js_repl_close(void);
 
 static bool js_repl_event_is_ctrl_key(Item event, char key_char) {
-    if (!js_repl_is_object_like(event)) return false;
+    if (!js_node_is_object_like(event)) return false;
     if (js_get_key_default(event, js_repl_key("ctrl")).item != ITEM_TRUE) return false;
     Item name = js_get_key_default(event, js_repl_key("name"));
     if (get_type_id(name) != LMD_TYPE_STRING) return false;
@@ -34287,15 +34282,15 @@ static Item js_repl_create_context(Item opts, bool old_signature) {
 
 static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     Item this_item = js_get_this();
-    Item this_start = js_repl_is_object_like(this_item) ?
+    Item this_start = js_node_is_object_like(this_item) ?
         js_get_key_default(this_item, js_repl_key("start")) : ItemNull;
     Item global = js_get_global_this();
     // destructured repl.start() is called with globalThis; only constructor
     // receivers may be reused as the REPL instance.
     Item repl = (this_item.item != global.item &&
-        js_repl_is_object_like(this_item) && !js_is_callable(this_start)) ?
+        js_node_is_object_like(this_item) && !js_is_callable(this_start)) ?
         this_item : js_new_object();
-    bool old_signature = !js_repl_is_object_like(opts);
+    bool old_signature = !js_node_is_object_like(opts);
     Item input = old_signature ? old_stream : js_get_key_default(opts, js_repl_key("input"));
     Item output = old_signature ? old_stream : js_get_key_default(opts, js_repl_key("output"));
     Item prompt = old_signature ? opts : js_get_key_default(opts, js_repl_key("prompt"));
@@ -34326,7 +34321,7 @@ static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     js_runtime_set_native_key(repl, js_repl_key("close"), js_repl_close);
     js_runtime_set_native_key(repl, js_repl_key("once"), js_repl_once);
     js_runtime_set_native_key(repl, js_repl_key("on"), js_repl_once);
-    if (js_repl_is_object_like(input)) {
+    if (js_node_is_object_like(input)) {
         Item on_fn = js_get_key_default(input, js_repl_key("on"));
         if (js_is_callable(on_fn)) {
             Item data_args[2] = { repl, js_name_item("data", 4) };
