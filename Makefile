@@ -62,6 +62,7 @@ RADIANT_DOM2_WPT_RUNNERS := input_events
 # preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_gtest \
+	test_interp_gtest \
 	test_mir_gc_stress_gtest \
 	test_mir_ratchet_gtest \
 	test_mir_emission_gtest \
