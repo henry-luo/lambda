@@ -282,6 +282,8 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_MAP_TYPE:
     case AST_NODE_ELMT_TYPE:
     case AST_NODE_FUNC_TYPE:
+    // --- P1.3: documents ---
+    case AST_NODE_ELEMENT:
         return true;
     default:
         return false;
@@ -499,6 +501,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // dispatch work. Interpreting it would report `int64` where the JIT
         // reports `u32` (test/lambda/sized_numeric_bitwise_go), so the script
         // falls back until the lane is modelled.
+        // `print` is the one Lambda-variadic entry the walker implements
+        // directly (one pn_print per argument, as lowering emits); the other
+        // variadic rows still have no generic dispatch to mirror.
+        if (info && info->fn == SYSPROC_PRINT && info->func_ptr) {
+            interp_visit_children(node, interp_scan_visit, ctx);
+            return;
+        }
         if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
                 info->arg_count < 0 || info->arg_count > 4) {
             log_debug("interp: sys func '%s' unsupported (arity=%d conv=%d ptr=%p)",

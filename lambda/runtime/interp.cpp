@@ -572,6 +572,32 @@ static Item eval_call(InterpFrame* f, AstCallNode* node) {
     }
 
     AstNode* callee = interp_unwrap_primary(node->function);
+
+    // `print` is Lambda-variadic but not C-variadic: lowering emits one
+    // pn_print per argument with an explicit " " separator between them, and
+    // the whole call yields null. Mirror that shape rather than inventing a
+    // marshalling rule for a function that has none.
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
+            ((AstSysFuncNode*)callee)->fn_info &&
+            ((AstSysFuncNode*)callee)->fn_info->fn == SYSPROC_PRINT) {
+        bool first = true;
+        for (AstNode* a = node->argument; a; a = a->next) {
+            if (!first) {
+                // Keep the separator explicit, as lowering does, so a future
+                // config change has one place to land in either tier.
+                Item sep = (Item){.item = s2it(heap_strcpy(" ", 1))};
+                pn_print(sep);
+            }
+            Item value = eval_expr(f, a);
+            if (interp_frame_pending(f)) return ItemNull;
+            Scratch arg_slot(f);
+            arg_slot.set(value);
+            pn_print(arg_slot.get());
+            first = false;
+        }
+        return ItemNull;
+    }
+
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         // Arguments must all be rooted before the C entry runs: the entry may
         // allocate, and an earlier argument would otherwise be unreachable.
@@ -932,6 +958,53 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
     return result;
 }
 
+// Mirrors transpile_element: allocate the element, fill its attributes from a
+// rooted span (same order as the map literal — values first, container after),
+// then push content through list_push_spread and finalize with list_end. The
+// element pointer itself is the value; list_end only closes its content frame.
+static Item eval_element(InterpFrame* f, AstElementNode* node) {
+    TypeElmt* type = (TypeElmt*)node->type;
+    if (!type) return ItemError;
+
+    int attr_count = 0;
+    for (AstNode* a = node->item; a; a = a->next) attr_count++;
+
+    RootSpan attrs((size_t)(attr_count > 0 ? attr_count : 1));
+    uint64_t* attr_words = attrs.words();
+    int ai = 0;
+    for (AstNode* a = node->item; a; a = a->next) {
+        AstNode* value_node = a->node_type == AST_NODE_KEY_EXPR
+            ? ((AstNamedNode*)a)->as : a;
+        attr_words[ai++] = value_node ? eval_expr(f, value_node).item : ItemNull.item;
+        if (interp_frame_pending(f)) return ItemNull;
+    }
+
+    Element* fresh = elmt_with_tl(type->type_index, f->module->type_list);
+    if (!fresh) return ItemError;
+    Scratch acc(f);
+    acc.set(interp_ptr_item(fresh));
+    if (attr_count > 0) {
+        elmt_fill_items((Element*)(uintptr_t)acc.get().item,
+            (const Item*)(void*)attr_words, ai);
+    }
+
+    if (node->content) {
+        for (AstNode* c = node->content; c; c = c->next) {
+            Item value = eval_expr(f, c);
+            if (interp_frame_pending(f)) return acc.get();
+            // Re-read the element: content evaluation is a safepoint.
+            Element* owner = (Element*)(uintptr_t)acc.get().item;
+            if (!owner) return ItemError;
+            list_push_spread((List*)owner, value);
+        }
+        list_end((List*)(uintptr_t)acc.get().item);
+    } else if (node->item) {
+        // Attributes but no content still closes the element's content frame.
+        list_end((List*)(uintptr_t)acc.get().item);
+    }
+    return acc.get();
+}
+
 // ---------------------------------------------------------------------------
 // Content blocks
 // ---------------------------------------------------------------------------
@@ -940,18 +1013,58 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
 // run for effect, and the value expressions form the block's result — one
 // value passes through, several accumulate into a list.
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
+    // Procedural context, exactly as transpile_content decides it: inside a `pn`
+    // body, or any block declaring a `var`. It matters because a proc block's
+    // value is its LAST value expression only — every earlier one is a
+    // statement. Without this, `pn main() { print(a) … "done" }` accumulates
+    // each intermediate result into the block's list instead of discarding it.
+    bool is_proc = false;
+    if (f->fn) {
+        TypeFunc* signature = (TypeFunc*)((AstNode*)f->fn)->type;
+        is_proc = ((AstNode*)f->fn)->node_type == AST_NODE_PROC ||
+            (signature && signature->type_id == LMD_TYPE_FUNC && signature->is_proc);
+    }
+    if (!is_proc) {
+        for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+            if (scan->node_type == AST_NODE_VAR_STAM) { is_proc = true; break; }
+        }
+    }
+
     int value_count = 0, decl_count = 0, stam_count = 0;
     AstNode* last_value = NULL;
-    for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type)) { decl_count++; continue; }
-        if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
-        value_count++;
-        last_value = item;
+    if (is_proc) {
+        AstNode* last_executable = NULL;
+        for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+            if (!is_declaration_node(scan->node_type)) last_executable = scan;
+        }
+        for (AstNode* item = list_node->item; item; item = item->next) {
+            if (is_declaration_node(item->node_type)) { decl_count++; continue; }
+            if (is_side_effect_stam(item->node_type) ||
+                    is_proc_flow_side_effect_node(item, last_executable) ||
+                    item->node_type == AST_NODE_WHILE_STAM ||
+                    item->node_type == AST_NODE_FOR_STAM) {
+                stam_count++;
+                continue;
+            }
+            value_count++;
+            last_value = item;
+        }
+    } else {
+        for (AstNode* item = list_node->item; item; item = item->next) {
+            if (is_declaration_node(item->node_type)) { decl_count++; continue; }
+            if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
+            value_count++;
+            last_value = item;
+        }
     }
+
+    // In a proc block with several values, only the last is the block's value;
+    // the rest run for effect. That collapses to the single-value shape below.
+    if (is_proc && value_count > 1) value_count = 1;
     // transpile_content's block-expression shortcut deliberately excludes a
     // lone `for`: its result is spreadable and must go through list_push_spread
     // so the stream flattens into the block instead of nesting one level.
-    bool direct_value = value_count == 1 &&
+    bool direct_value = value_count == 1 && last_value &&
         ((decl_count == 0 && stam_count == 0) ||
          (last_value->node_type != AST_NODE_FOR_EXPR &&
           last_value->node_type != AST_NODE_FOR_STAM));
@@ -977,14 +1090,12 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                 if (!already_hoisted) exec_declaration(f, item);
             } else if (is_side_effect_stam(item->node_type)) {
                 eval_expr(f, item);
-            } else if (is_proc_flow_side_effect_node(item, last_value)) {
-                if (item->node_type == AST_NODE_FOR_STAM) {
-                    eval_for(f, (AstForNode*)item, false);
-                } else {
-                    eval_expr(f, item);
-                }
             } else if (item == last_value) {
                 result = eval_expr(f, item);
+            } else if (item->node_type == AST_NODE_FOR_STAM) {
+                eval_for(f, (AstForNode*)item, false);   // statement: stream discarded
+            } else {
+                eval_expr(f, item);                      // side effect only
             }
             // break / continue / return / error-skip abandon the rest of the
             // block; the enclosing loop or call frame consumes the signal.
@@ -1194,6 +1305,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_array(f, (AstArrayNode*)node);
     case AST_NODE_MAP:
         return eval_map(f, (AstMapNode*)node);
+    case AST_NODE_ELEMENT:
+        return eval_element(f, (AstElementNode*)node);
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
         // Reached as an expression, a `for` always yields its stream — the

@@ -2536,6 +2536,23 @@ Element* elmt_fill(Element* elmt, ...) {
     return elmt;
 }
 
+// Array-taking sibling of elmt_fill, for callers holding their attribute values
+// in a rooted Item span rather than in varargs (the T0 walker). Same shape walk,
+// same per-field store.
+Element* elmt_fill_items(Element* elmt, const Item* values, int value_count) {
+    if (!elmt) return NULL;
+    TypeElmt *elmt_type = (TypeElmt*)elmt->type;
+    if (!elmt->data && elmt_type->byte_size) {
+        if (context->ui_mode && context->arena) {
+            elmt->data = arena_calloc(context->arena, elmt_type->byte_size);
+        } else {
+            elmt->data = heap_data_calloc(elmt_type->byte_size);
+        }
+    }
+    set_fields_items((TypeMap*)elmt_type, elmt->data, values, value_count);
+    return elmt;
+}
+
 // get element attribute by key
 Item elmt_get(Element* elmt, Item key) {
     if (!elmt || !key.item) { return ItemNull;}
