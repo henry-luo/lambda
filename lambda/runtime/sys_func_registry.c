@@ -1329,6 +1329,26 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
 
+    // fn_fill's every return path is a container or an error Item — Array
+    // (n == 0, and the spreadable non-numeric case) or ArrayNum (ELEM_INT /
+    // UINT64 / FLOAT / BOOL), plus its two `ItemError`s and the argument error
+    // that GUARD_ERROR2 propagates. None is a number-home-backed wide scalar,
+    // so the caller's classify-and-rehome cluster is pure waste — 8 of the 17
+    // adopt sites left across AWFY under v3, the largest single source.
+    //
+    // The type-driven rule (mir.c) cannot reach this: `fill` is declared
+    // `&TYPE_ANY`, which IS wide-capable, so it correctly declines to narrow.
+    // The proof is in the body, hence an explicit row. It allocates
+    // (heap_calloc / array_int_new / array_num_new) so MAY_GC, and it calls no
+    // user code so no re-entry. NUMBER_STACK_PRESERVES is deliberately NOT
+    // claimed: it pushes nothing today, but that is a stronger promise than
+    // this fix needs, and RESULT_SCALAR_STABLE alone already elides the adopt.
+    {"fn_fill", FPTR(fn_fill),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+
     // int2it_lane returns an inline Item; stable metadata keeps the live
     // result out of an activation scalar home.
     {"int2it_lane", FPTR(int2it_lane),

@@ -1948,3 +1948,108 @@ The order must be (1) give `int64()`-class sysfuncs a carrier that represents
 shape 4's error lane exists for, so the answer is to route them through it —
 then (2) delete the compares. Recorded here because §5.8 currently reads as if
 step 2 were a standalone grep.
+
+### 2026-08-15 — `fn_fill` removed from the helper-call adopts (17 → 9)
+
+The v3 adopt residue was 17 sites across 7 AWFY benchmarks, and attribution by
+defining call put **8 of them on `fn_fill` alone** — the largest single source.
+Reading every return path settles it: `fn_fill` returns an **Array** (the
+`n == 0` case, and the spreadable non-numeric case), an **ArrayNum**
+(`ELEM_INT`/`UINT64`/`FLOAT`/`BOOL`, chosen from the fill value's type), its two
+explicit `ItemError`s, or **the caller's own error Item propagated by
+`GUARD_ERROR2`** — that last one is easy to miss, since the returns live inside
+the macro. A container pointer or an error tag; never a number-home-backed wide
+scalar. Its adopts were pure waste.
+
+The type-driven rule in `mir.c` cannot reach this: `fill` is declared
+`&TYPE_ANY`, which *is* wide-capable, so it correctly declines to narrow. The
+proof is in the body, so it takes an explicit `jit_runtime_imports` row — the
+mechanism the 2026-08-15 census entry declined to use because it means
+hand-writing effect bits. For `fn_fill` those are answerable from the body:
+allocates (`heap_calloc`/`array_int_new`/`array_num_new`) so **MAY_GC**, calls
+no user code so **no re-entry**, both args are Items.
+
+`NUMBER_STACK_PRESERVES` is deliberately **not** claimed. `fn_fill` pushes
+nothing today (verified: no `box_int64_value`/`push_*`/`lambda_side_number_alloc`
+in its body, and `lambda_item_to_int64_exact` is pure), but that is a stronger
+promise than this fix needs — `RESULT_SCALAR_STABLE` alone sets
+`scalar_class = SCALAR_RETURN_NONE`, which skips the whole adopt block.
+
+| | before | after |
+|---|---|---|
+| adopt sites (7 benches) | 17 | **9** |
+| richards / sieve / storage | 1 / 1 / 4 | **0 / 0 / 0** |
+| havlak | 0.7% | **0.5%** |
+
+Three benchmarks now emit **zero** adopts. Remaining: `pn_push` ×4,
+`pn_splice` ×2, `fn_slice3` ×2, `fn_floor` ×1 — of which push/splice/slice3
+were already read and are likewise container-only, so the same row treatment
+applies; `fn_floor` genuinely can return a wide double.
+
+**Value-neutrality was A/B tested, not assumed**: `fill` exercised across every
+return path (int, float, bool, string, empty, negative-count error, indexed
+reads) gives byte-identical output with and without the row. Gate **3869/3869**.
+
+*Found while testing, unrelated and NOT fixed:* an `int64` literal past int53
+in an array literal reads back as garbage — `[9007199254740993i64, 1i64]` then
+`[0]` gives `432345568797327376`, while the bare literal prints correctly.
+`fill(3, <same value>)` gives `inf` (a defined lane sentinel) on the same input,
+so the two numeric-array paths disagree. Own repro; separate from this change.
+
+### 2026-08-15 — `trunc`'s native lowering generalized to abs/floor/ceil/round
+
+The numeric sys funcs split two ways, and the second family was
+under-implemented.
+
+**Always-float** (`mir_native_math_always_float`): sqrt, cbrt, hypot, log*,
+exp*, trig, hyperbolic. Lowered to a direct C call returning a raw double —
+no Item, so **no adopt is possible**. This is why they never appeared in the
+adopt census.
+
+**Type-preserving**: floor, ceil, round, trunc, abs, sign. Excluded from that
+whitelist for a real reason — their result type follows the *argument's*, and
+lowering to C `fabs`/`floor` (which return `double`) would turn `abs(-3)` into
+`3.0`. But that reason evaporates once the argument type is known, and
+**`trunc` already exploited it** via a hand-written special case sitting among
+unrelated one-offs (`SYSFUNC_FLOAT`, a u32 conversion, bitwise inlining). Its
+four siblings never got the same treatment.
+
+*Correcting an earlier statement in this log:* I described the split as
+principled and put `floor` "on the correct side" of it. The whitelist is
+principled; the implementation was not — `trunc` disproved the semantic
+objection for the whole family.
+
+**Generalized** rather than copied a fourth time (rule 13):
+`mir_native_math_type_preserving(fn, &int_is_identity)` names the family and
+carries the one bit that differs. `fn_numeric_rounding` literally does
+`return item;` for the int family (sentinels included), so floor/ceil/round/
+trunc are the identity on integers; `abs` is not, and keeps the boxed helper
+for integer arguments where the int lane's sentinels need real handling.
+`sign` has no `native_c_name` at all — it would need inline emission
+(compare + select), not a call — so it stays boxed everywhere.
+
+The result-type fact was already there: `mir_type_preserving_sysfunc_result`
+covers all five. Only the lowering was missing.
+
+| arg | before | after |
+|---|---|---|
+| `float` — abs/floor/ceil/round | boxed helper, **3 adopts each** | `fabs`/`floor`/`ceil`/`round`, **0 adopts** |
+| `int` — floor/ceil/round | boxed helper, 3 adopts | **no call at all** (identity) |
+| `int` — abs | boxed | boxed *(correct: |x| ≠ identity)* |
+| `sign` | boxed | boxed *(no native C function)* |
+
+**Value-neutrality A/B tested**, not assumed: restricting the predicate back to
+TRUNC alone and re-running gives byte-identical output. Semantics verified
+against hand-computed expectations — half-away-from-zero survives
+(`round(2.5)` = 3, `round(-2.5)` = -3), and type preservation holds
+(`floor(int)` → int, `floor(float)` → float, `abs(-5)` → 5 while its siblings
+stay -5). Gate **3869/3869**.
+
+Test: `test/lambda/proc/native_math_type_preserving.ls` pins the semantics the
+boxed path existed to protect — result-type-follows-argument and the rounding
+mode — plus `sign` still working on the boxed path.
+
+This also retires `fn_floor`'s adopt, the last one flagged as "genuinely
+wide-capable" in the census, as a *consequence* rather than by special-casing
+it. Remaining adopt sources are `pn_push` ×4, `pn_splice` ×2, `fn_slice3` ×2 —
+all container-only, so all candidates for the `fn_fill` row treatment.
