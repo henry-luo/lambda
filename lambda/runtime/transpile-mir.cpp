@@ -1343,7 +1343,10 @@ enum FunctionReturnLaneKind {
 // (non-zero) rather than comparing; both are one instruction, so the two
 // encodings coexist per transport rather than being unified for its own sake.
 static inline MIR_op_t mir_error_lane_no_error_op(MirTranspiler* mt) {
-    return em_returns_result_pair(mt->em.frame.plan.companion)
+    // RV9: one definition of the no-error spelling, shared with the consumer
+    // (em_error_lane_in_register). Deriving it separately on each side is the
+    // mismatch this ruling exists to prevent.
+    return em_error_lane_in_register(mt->em.frame.plan.companion)
         ? MIR_new_uint_op(mt->ctx, ITEM_NULL)
         : MIR_new_int_op(mt->ctx, 0);
 }
@@ -15215,6 +15218,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         #define POST_PROCESS_BOOL(result) \
             if (c_ret_tid == LMD_TYPE_BOOL) { result = emit_uext8(mt, result); }
 
+
         // Helper: when a sys func returns a boxed Item (c_ret_tid=ANY) but the
         // call expression has a specific native type, unbox to native format.
         // This ensures consistency with local/dynamic calls which also unbox
@@ -16459,6 +16463,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // v3 shape 4 hands the error back in a register; v1 leaves it in
             // the context lane for the caller to load.
             bool error_lane_in_register = call_error_lane && direct_error_reg;
+            // RV9: the call site infers the transport from "did em_call_direct
+            // hand me an error register?"; the callee wrote its lane from its
+            // own descriptor. Cross-check those two derivations here.
+            if (call_error_lane && local_entry) {
+                em_assert_error_lane_agreement(direct_call_name,
+                    local_entry->variant, error_lane_in_register);
+            }
             if (call_error_lane) {
                 second_result = error_lane_in_register ? direct_error_reg
                     : new_reg(mt, "call_error", MIR_T_I64);
