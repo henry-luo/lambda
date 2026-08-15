@@ -31552,9 +31552,11 @@ static ModuleDescriptor* js_module_find(Item specifier) {
     return spec ? module_get_for_runtime(context ? context->runtime : NULL, spec->chars) : NULL;
 }
 
+#ifndef NDEBUG
 static const char* js_module_path(const ModuleDescriptor* module) {
     return module && module->path ? module->path : "<module>";
 }
+#endif
 
 extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return;
