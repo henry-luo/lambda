@@ -72,9 +72,21 @@ struct InterpFrame {
     uint32_t            scratch_base;
     uint32_t            scratch_top; // debug-checked <= slot_count
     uint32_t            signal_index;
+    // The pending statement signal for this activation (AI14). Its payload —
+    // a RETURNED value or an ERROR_SKIP error — lives in slots[signal_index],
+    // never in a C++ local that a collection could invalidate. Keeping the
+    // signal on the frame rather than in every return type lets it propagate
+    // through `eval_expr` unchanged, since a content block is an expression.
+    EvalSignal          signal;
     InterpFrame*        caller;
     const AstNode*      cur;         // currently evaluating node (backtrace/step)
 };
+
+// True while a break/continue/return/error-skip is unwinding this activation:
+// every construct that sequences children must stop as soon as it is set.
+static inline bool interp_frame_pending(const InterpFrame* f) {
+    return f->signal != EvalSignal::NORMAL;
+}
 
 struct InterpState {
     EvalContext* ctx;

@@ -484,6 +484,16 @@ static inline bool is_side_effect_stam(int node_type) {
     }
 }
 
+// A control-flow node in a content block that is not the block's value
+// expression runs for its side effects only. Shared so both tiers decide
+// "does this `for` / `if` / `while` contribute a value here?" identically.
+static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
+    return node && node != last_value &&
+           (node->node_type == AST_NODE_IF_EXPR ||
+            node->node_type == AST_NODE_WHILE_STAM ||
+            node->node_type == AST_NODE_FOR_STAM);
+}
+
 typedef Item (*main_func_t)(Context*);
 typedef struct MIR_context *MIR_context_t;
 

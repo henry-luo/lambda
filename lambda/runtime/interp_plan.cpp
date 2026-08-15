@@ -251,6 +251,21 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_KEY_EXPR:
     case AST_NODE_CONTENT:
     case AST_NODE_SYS_FUNC:
+    // --- P1.4: procedural statements ---
+    case AST_NODE_PROC:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_ASSIGN_STAM:
+    case AST_NODE_WHILE_STAM:
+    case AST_NODE_DO_WHILE_STAM:
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+    case AST_NODE_RETURN_STAM:
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR:
+    // --- P1.1: comprehensions ---
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM:
+    case AST_NODE_LOOP:
         return true;
     default:
         return false;
@@ -336,10 +351,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    // Array literal shapes the P0 builder does not reproduce exactly: N-D
-    // numeric literals become one shaped ArrayNum, and in-literal lets are
-    // transparent bindings rather than elements. Building either the generic
-    // way would diverge silently, so the whole script falls back instead.
+    // N-D numeric literals become one shaped ArrayNum via array_num_new_ndim;
+    // building them the generic way would diverge silently, so the whole
+    // script falls back instead.
     if (node->node_type == AST_NODE_ARRAY) {
         TypeArray* arr_type = (TypeArray*)node->type;
         if (arr_type && arr_type->nested &&
@@ -356,9 +370,28 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
                 value = ((AstPrimaryNode*)value)->expr;
             }
             if (!value) continue;
-            if (value->node_type == AST_NODE_ARRAY || value->node_type == AST_NODE_ASSIGN) {
+            if (value->node_type == AST_NODE_ARRAY) {
                 sc->ok = false;
                 sc->reject = node->node_type;
+                return;
+            }
+        }
+    }
+    // Comprehension clauses with their own lowering shapes — grouping tables,
+    // sort keys, and equi-join tuple streams. The core iterate/where/emit path
+    // is implemented; these clauses stay on the JIT until their slices land.
+    if (node->node_type == AST_NODE_FOR_EXPR || node->node_type == AST_NODE_FOR_STAM) {
+        AstForNode* fr = (AstForNode*)node;
+        if (fr->group || fr->order || fr->limit || fr->offset) {
+            sc->ok = false;
+            sc->reject = node->node_type;
+            return;
+        }
+        for (AstNode* l = fr->loop; l; l = l->next) {
+            AstLoopNode* lp = (AstLoopNode*)l;
+            if (lp->on || lp->join_keys || lp->optional) {
+                sc->ok = false;
+                sc->reject = AST_NODE_LOOP;
                 return;
             }
         }
