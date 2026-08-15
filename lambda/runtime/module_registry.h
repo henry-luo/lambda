@@ -29,6 +29,7 @@ typedef struct ModuleNamespaceOps {
 
 // Module descriptor — one per loaded module
 typedef struct ModuleDescriptor {
+    struct ModuleDescriptor* next; // runtime-owned descriptor order
     const char* path;           // resolved absolute path (unique key, owned)
     const char* source_lang;    // "lambda", "js", "python", ... (static string, not owned)
     LangProfile* profile;       // resolved language profile for shared AST phases
@@ -37,6 +38,24 @@ typedef struct ModuleDescriptor {
     void* mir_ctx;              // compiled MIR context (opaque, for function lookup)
     bool initialized;           // true after module code has executed
     bool loading;               // true while module is being loaded (circular import detection)
+
+    // JS module evaluation state belongs to the same canonical descriptor as
+    // its namespace. Other languages leave these fields at their zero values.
+    Item specifier_item;
+    Item awaited_target;
+    Item evaluation_error;
+    int has_tla;
+    int pending_async_deps;
+    int async_parent_count;
+    int async_parent_capacity;
+    struct ModuleDescriptor** async_parents;
+    void* deferred_main_ptr;
+    int body_executed;
+    int post_await_pending;
+    int body_state;
+    int async_eval_order;
+    uint32_t saved_module_state_id;
+    uint64_t roots_epoch;
 } ModuleDescriptor;
 
 // Initialize the registry owned by one Runtime.  Module namespace Items are
@@ -50,6 +69,11 @@ void module_registry_cleanup_for_runtime(Runtime* runtime);
 // EvalContext.  New host code should use the explicit Runtime variants.
 void module_registry_init(void);
 void module_registry_cleanup(void);
+
+// Ordered descriptor traversal is used by JS top-level-await scheduling. The
+// registry owns the list, so language runtimes do not maintain a second cache.
+ModuleDescriptor* module_registry_first_for_runtime(Runtime* runtime);
+ModuleDescriptor* module_registry_next(ModuleDescriptor* module);
 
 // Register a compiled + executed module
 void module_register(const char* path, const char* lang, Item namespace_obj, void* mir_ctx);

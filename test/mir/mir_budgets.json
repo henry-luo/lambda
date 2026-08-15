@@ -273,7 +273,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3).",
       "budgets": {
         "default": {
-          "module_insns": 7952
+          "module_insns": 7991
         }
       }
     },

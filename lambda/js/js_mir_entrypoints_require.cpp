@@ -1866,6 +1866,19 @@ static void js_cjs_update_cached_default(Item filename, Item module) {
     js_set_key_default(ns, js_cjs_key("default", (int)strlen("default")), js_cjs_exports(module));
 }
 
+// all loader clients project the same cached namespace to its CJS default;
+// keeping that projection here prevents raw and canonical require probes from
+// drifting apart.
+static Item js_cjs_cached_value(Item specifier) {
+    Item namespace_item = js_module_get(specifier);
+    if (get_type_id(namespace_item) == LMD_TYPE_NULL) return ItemNull;
+    Item default_value = js_get_key_default(namespace_item,
+        js_cjs_key("default", (int)strlen("default")));
+    TypeId type = get_type_id(default_value);
+    return type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED
+        ? default_value : namespace_item;
+}
+
 extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
@@ -2020,17 +2033,8 @@ extern "C" Item js_require(Item specifier) {
     if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
 
     // Check if already loaded in module cache
-    Item existing = js_module_get(specifier);
+    Item existing = js_cjs_cached_value(specifier);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
-        // For CJS modules, the cached value is the namespace.
-        // Extract the default export (which is module.exports)
-        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_get_key_default(existing, def_key);
-        TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
-            if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, def_val);
-            return def_val;
-        }
         if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, existing);
         return existing;
     }
@@ -2054,17 +2058,10 @@ extern "C" Item js_require(Item specifier) {
     jm_track_active_js_transpile(NULL, NULL, source);
 
     Item resolved_spec = (Item){.item = s2it(heap_create_name(path_buf, strlen(path_buf)))};
-    existing = js_module_get(resolved_spec);
+    existing = js_cjs_cached_value(resolved_spec);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
-        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_get_key_default(existing, def_key);
-        TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
-            if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, def_val);
-            return def_val;
-        }
         if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, existing);
         return existing;
     }
@@ -2117,14 +2114,11 @@ extern "C" Item js_require(Item specifier) {
 
     // For CJS, extract the default export (module.exports)
     if (js_is_cjs_file(path_buf)) {
-        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_get_key_default(ns, def_key);
-        TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
-            js_cjs_note_child(resolved_spec, def_val);
-            return def_val;
+        Item result = js_cjs_cached_value(resolved_spec);
+        if (get_type_id(result) != LMD_TYPE_NULL) {
+            js_cjs_note_child(resolved_spec, result);
+            return result;
         }
-        js_cjs_note_child(resolved_spec, ns);
     }
 
     return ns;
