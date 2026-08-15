@@ -1590,8 +1590,7 @@ static bool js_util_strict_zero_sign_differs(Item a, Item b) {
 }
 
 static bool js_util_has_own_key(Item object, const char* key, int len) {
-    Item result = js_has_own_property(object,
-        (Item){.item = s2it(heap_create_name(key, len))});
+    Item result = js_has_own_property(object, js_name_item(key, len));
     return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
 }
 JS_FORWARD_STATIC_EXPRESSION(Item, js_util_deep_dispatch_value, (Item value), (js_is_proxy(value) ? js_proxy_get_target(value) : value))
@@ -2077,8 +2076,8 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
                 }
                 if (ha) {
                     Item r = js_util_isDeepEqual_impl(
-                        js_get_key_default(a, (Item){.item = s2it(heap_create_name(keys[i], lens[i]))}),
-                        js_get_key_default(b, (Item){.item = s2it(heap_create_name(keys[i], lens[i]))}),
+                        js_get_key_default(a, js_name_item(keys[i], lens[i])),
+                        js_get_key_default(b, js_name_item(keys[i], lens[i])),
                         ctx, strict);
                     if (!js_is_truthy(r)) {
                         js_util_deep_equal_leave(ctx);
@@ -2365,7 +2364,7 @@ extern "C" Item js_util_styleText(Item format_item, Item text_item) {
     memcpy(buf + open_len, txt->chars, txt_len);
     memcpy(buf + open_len + txt_len, close, close_len);
     buf[total] = '\0';
-    return (Item){.item = s2it(heap_create_name(buf, total))};
+    return js_name_item(buf, total);
 }
 
 // ─── util.getSystemErrorName(errno) — errno to name ─────────────────────────
@@ -2413,7 +2412,7 @@ extern "C" Item js_util_getSystemErrorName(Item err_item) {
         case 111: name = "ECONNREFUSED"; break;
         default: name = "UNKNOWN"; break;
     }
-    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+    return js_name_item(name, strlen(name));
 }
 
 // ─── util.debuglog(section) ─────────────────────────────────────────────────
@@ -2550,7 +2549,7 @@ static Item js_util_stripVTControlCharacters(Item str) {
         if (c == 0x9c) continue;
         buf[out++] = s->chars[i];
     }
-    return (Item){.item = s2it(heap_create_name(buf, out))};
+    return js_name_item(buf, out);
 }
 
 // util._extend(target, source) — deprecated Object.assign equivalent

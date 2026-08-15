@@ -1469,9 +1469,9 @@ extern "C" Item js_css_escape_operation(Item* args, int argc) {
     // CSS.escape(ident) — serialize a CSS identifier. The intrinsic target
     // selects this operation before invocation; spelling is metadata only
     // under D6.2.2v2.
-    if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+    if (argc < 1) return js_name_item("");
     String* ident = it2s(args[0]);
-    if (!ident) return (Item){.item = s2it(heap_create_name(""))};
+    if (!ident) return js_name_item("");
 
     // simple CSS serialization: escape special chars in ident
     // per CSSOM §2: https://drafts.csswg.org/cssom/#serialize-an-identifier
@@ -1502,7 +1502,7 @@ extern "C" Item js_css_escape_operation(Item* args, int argc) {
             buf[out++] = (char)ch;
         }
     }
-    return (Item){.item = s2it(heap_create_name(buf, (size_t)out))};
+    return js_name_item(buf, (size_t)out);
 }
 
 // CSS namespace object is managed in js_runtime.cpp (needs access to builtin enum)

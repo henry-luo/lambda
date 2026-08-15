@@ -140,11 +140,10 @@ static int64_t js_dataview_to_integer_value(double value) {
 }
 
 static void js_dataview_link_prototype(Item view) {
-    Item ctor_name = (Item){.item = s2it(heap_create_name("DataView"))};
+    Item ctor_name = js_name_item("DataView");
     Item ctor = js_get_constructor(ctor_name);
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
-    Item proto_key = (Item){.item = s2it(heap_create_name("prototype"))};
-    Item proto = js_get_key_default(ctor, proto_key);
+    Item proto = js_get_name_key(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
 }
 
@@ -892,8 +891,7 @@ JS_FORWARD_STATIC_EXPRESSION(Item, js_atomics_wait_result, (const char* value, i
 
 static bool js_atomics_host_can_suspend() {
     Item global = js_get_global_this();
-    Item key = (Item){.item = s2it(heap_create_name("__lambda_can_block"))};
-    Item flag = js_get_key_default(global, key);
+    Item flag = js_get_name_key(global, "__lambda_can_block");
     if (get_type_id(flag) == LMD_TYPE_BOOL) return it2b(flag);
     return true;
 }
@@ -1428,7 +1426,7 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     RootFrame roots(3);
     Rooted<Item> buffer_root(roots, buffer_item);
     Rooted<Item> ctor_root(roots, js_get_constructor(
-        (Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))}));
+        js_name_item(is_shared ? "SharedArrayBuffer" : "ArrayBuffer")));
     Rooted<Item> proto_root(roots, ItemNull);
     if (get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) return;
     proto_root.set(js_get_key_cstr(ctor_root.get(), "prototype"));
@@ -1493,8 +1491,7 @@ static Item js_arraybuffer_parse_construct_options(Item length_arg,
     out->max_byte_length = out->byte_length;
     out->resizable = false;
     if (get_type_id(options_arg) == LMD_TYPE_MAP) {
-        Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
-        JS_ASSIGN_OR_RETURN(max_item, js_get_key_default(options_arg, max_key));
+        JS_ASSIGN_OR_RETURN(max_item, js_get_name_key(options_arg, "maxByteLength"));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
             JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_i64(
                 max_item, &out->max_byte_length, max_error));
@@ -1767,8 +1764,7 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
         int begin, int new_len, bool shared) {
     const char* type_name = shared ? "SharedArrayBuffer" : "ArrayBuffer";
     Item result_item = ItemNull;
-    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-    JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(source, ctor_key));
+    JS_ASSIGN_OR_RETURN(ctor, js_get_name_key(source, "constructor"));
 
     bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
     if (!use_default_ctor) {
@@ -2341,8 +2337,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             return js_typed_array_new_from_array(type_id, values);
         }
 
-        Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-        JS_ASSIGN_OR_RETURN(length_value, js_get_key_default(arg_root.get(), length_key));
+        JS_ASSIGN_OR_RETURN(length_value, js_get_name_key(arg_root.get(), "length"));
         int len = 0;
         JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(length_value, &len));
         Item result = js_typed_array_new(type_id, len);
@@ -2744,8 +2739,7 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     }
     JS_ASSIGN_OR_RETURN(src_obj, js_to_object(source));
 
-    Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-    JS_ASSIGN_OR_RETURN(length_item, js_get_key_default(src_obj, length_key));
+    JS_ASSIGN_OR_RETURN(length_item, js_get_name_key(src_obj, "length"));
     JS_ASSIGN_OR_RETURN(length_num, js_to_number(length_item));
     double length_double = js_get_number(length_num);
     int64_t src_len = 0;

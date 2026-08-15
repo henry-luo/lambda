@@ -454,7 +454,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
         return true;
     }
 
-    Item name_item = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+    Item name_item = js_name_item(name, (size_t)name_len);
     Item slot_value = (Item){.item = ITEM_JS_UNDEFINED};
     bool slot_found = false;
     if (get_type_id(target) == LMD_TYPE_MAP) {

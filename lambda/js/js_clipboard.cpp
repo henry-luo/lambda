@@ -52,10 +52,10 @@ static inline Item make_str(const char* s) {
     if (!s) return ItemNull;
     // registration keys outlive the allocating property writes that publish them;
     // GC-managed strings can be reclaimed before ToPropertyKey finishes.
-    return (Item){.item = s2it(heap_create_name(s, strlen(s)))};
+    return js_name_item(s, strlen(s));
 }
 static inline Item make_str_n(const char* s, size_t n) {
-    return (Item){.item = s2it(heap_create_name(s, (int)n))};
+    return js_name_item(s, (int)n);
 }
 
 template <typename Target>

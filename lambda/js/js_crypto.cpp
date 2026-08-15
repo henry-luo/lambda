@@ -3902,12 +3902,12 @@ JS_FORWARD_STATIC_ITEM(crypto_throw_invalid_initialization_vector, (void), js_th
 
 static Item crypto_throw_openssl_cipher_error(const char* code, const char* message,
                                               const char* library, const char* reason) {
-    Item type_name = (Item){.item = s2it(heap_create_name("Error"))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item type_name = js_name_item("Error");
+    Item msg_item = js_name_item(message, strlen(message));
     Item error = js_new_error_with_name(type_name, msg_item);
-    js_set_key_cstr(error, "code", (Item){.item = s2it(heap_create_name(code, strlen(code)))});
-    js_set_key_cstr(error, "library", (Item){.item = s2it(heap_create_name(library, strlen(library)))});
-    js_set_key_cstr(error, "reason", (Item){.item = s2it(heap_create_name(reason, strlen(reason)))});
+    js_set_key_cstr(error, "code", js_name_item(code, strlen(code)));
+    js_set_key_cstr(error, "library", js_name_item(library, strlen(library)));
+    js_set_key_cstr(error, "reason", js_name_item(reason, strlen(reason)));
     return js_throw_value(error);
 }
 JS_FORWARD_STATIC_ITEM(crypto_throw_wrong_final_block_length, (void), crypto_throw_openssl_cipher_error, ("ERR_OSSL_EVP_WRONG_FINAL_BLOCK_LENGTH", "wrong final block length", "Cipher functions", "wrong final block length"))

@@ -24,10 +24,10 @@ static inline Item k_sym_to_primitive(void) {
     return js_well_known_symbol_key(2);
 }
 static inline Item k_value_of(void) {
-    return (Item){.item = s2it(heap_create_name("valueOf", 7))};
+    return js_name_item("valueOf", 7);
 }
 static inline Item k_to_string(void) {
-    return (Item){.item = s2it(heap_create_name("toString", 8))};
+    return js_name_item("toString", 8);
 }
 
 static inline bool is_object_value(Item value) {
@@ -84,7 +84,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         // Note: heap_create_name(hint_str) interns; cheap and safe to
         // re-allocate per call (same address as previous calls with the
         // same hint string).
-        Item hint_item = (Item){.item = s2it(heap_create_name(hint_str))};
+        Item hint_item = js_name_item(hint_str);
         Item args[1] = { hint_item };
         JS_ASSIGN_OR_RETURN(result, js_call_function(to_prim, value, args, 1));
         if (is_object_value(result)) {
@@ -139,7 +139,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     // default string conversion instead of throwing.
     if (vt == LMD_TYPE_MAP && value.map &&
         js_object_uses_default_object_to_primitive(value)) {
-        return (Item){.item = s2it(heap_create_name("[object Object]"))};
+        return js_name_item("[object Object]");
     }
     return js_throw_type_error("Cannot convert object to primitive value");
 }

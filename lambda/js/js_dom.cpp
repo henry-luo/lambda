@@ -80,7 +80,7 @@ static inline bool is_js_undefined(Item val) {
 }
 
 static inline Item js_string_key(const char* s) {
-    return (Item){.item = s2it(heap_create_name(s))};
+    return js_name_item(s);
 }
 
 static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
@@ -771,9 +771,9 @@ static int64_t js_dom_to_integer_or_zero(Item value) {
 }
 
 static Item js_dom_throw_index_size_error(const char* message) {
-    Item name = (Item){.item = s2it(heap_create_name("IndexSizeError"))};
-    Item msg = (Item){.item = s2it(heap_create_name(
-        message ? message : "The index is not in the allowed range."))};
+    Item name = js_name_item("IndexSizeError");
+    Item msg = js_name_item(
+        message ? message : "The index is not in the allowed range.");
     return js_throw_value(js_new_error_with_name(name, msg));
 }
 
@@ -1192,8 +1192,8 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
     if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
 
     Item args[2];
-    args[0] = (Item){.item = s2it(heap_create_name("event"))};
-    args[1] = (Item){.item = s2it(heap_create_name(attr_value))};
+    args[0] = js_name_item("event");
+    args[1] = js_name_item(attr_value);
     Item fn = js_new_function_from_string(args, 2);
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
         log_error("js_dom_event_attr: failed to compile %s handler", prop_name);
@@ -1202,7 +1202,7 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        js_set_key_default(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+        js_set_key_default(exp_map, js_name_item(prop_name), fn);
         // Inline handlers are compiled during wrapper construction; wrapping
         // the same node here recursively re-enters initialization until the
         // stack overflows, so register against its canonical native key.
@@ -1219,7 +1219,7 @@ static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_n
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        js_set_key_default(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, ItemNull);
+        js_set_key_default(exp_map, js_name_item(prop_name), ItemNull);
         js_dom_event_handler_property_set_for_node(elem, prop_name,
                                                    (int)strlen(prop_name), ItemNull);
     }
@@ -1237,7 +1237,7 @@ extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item == ITEM_NULL) return false;
 
-    js_set_key_default(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+    js_set_key_default(exp_map, js_name_item(prop_name), fn);
     js_dom_event_handler_property_set_for_node(elem, prop_name,
                                                (int)strlen(prop_name), fn);
     return true;
@@ -1323,8 +1323,7 @@ static bool _get_checkedness(DomElement* elem) {
 
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
-        Item key = (Item){.item = s2it(heap_create_name("__checked"))};
-        Item v = js_get_key_default(exp, key);
+        Item v = js_get_name_key(exp, "__checked");
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
     // not initialised yet — derive from content attribute.
@@ -1343,8 +1342,7 @@ static void _set_checkedness(DomElement* elem, bool v) {
 
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
-    Item key = (Item){.item = s2it(heap_create_name("__checked"))};
-    js_set_key_default(exp, key, (Item){.item = b2it(v)});
+    js_set_name_key(exp, "__checked", (Item){.item = b2it(v)});
 }
 
 // Exposed for js_dom_events.cpp pre/post-click activation.
@@ -1411,7 +1409,7 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
     if (elem->is_synthetic()) return;
 
     if (elem->id && elem->id[0] != '\0') {
-        Item key = (Item){.item = s2it(heap_create_name(elem->id))};
+        Item key = js_name_item(elem->id);
         // HTML named-property access on Window reflects the *current* element
         // with this id. Register when there is no own property yet, and also
         // refresh a stale auto-registered wrapper whose element was detached
@@ -2155,13 +2153,12 @@ static Item _options_collection_add(Item element_arg, Item before_arg) {
 
 static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !ctor_name) return;
-    Item named_key = (Item){.item = s2it(heap_create_name("namedItem"))};
+    Item named_key = js_name_item("namedItem");
     Item existing = js_get_key_default(collection, named_key);
     if (!js_is_callable(existing)) {
         js_set_native_key(collection, named_key, _collection_named_item);
     }
-    Item ctor = js_get_key_default(js_get_global_this(),
-        (Item){.item = s2it(heap_create_name(ctor_name))});
+    Item ctor = js_get_key_default(js_get_global_this(), js_name_item(ctor_name));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
         js_set_key_cstr(collection, "constructor", ctor);
     }
@@ -2171,7 +2168,7 @@ static void _decorate_options_collection(Item collection) {
     _decorate_dom_collection(collection, "HTMLOptionsCollection");
     if (get_type_id(collection) != LMD_TYPE_ARRAY) return;
 
-    Item add_key = (Item){.item = s2it(heap_create_name("add"))};
+    Item add_key = js_name_item("add");
     Item existing = js_get_key_default(collection, add_key);
     if (js_is_callable(existing)) return;
 
@@ -3044,8 +3041,7 @@ static void js_dom_install_native_constructor_global(const char* ctor_name,
     Rooted<Item> ctor_root(roots, js_new_native_constructor(ctor_target));
     Rooted<Item> proto_root(roots, js_new_object());
     Rooted<Item> method_root(roots, js_new_native_function(method_target));
-    js_set_function_name(ctor_root.get(),
-        (Item){.item = s2it(heap_create_name(ctor_name))});
+    js_set_function_name(ctor_root.get(), js_name_item(ctor_name));
     js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_set_key_default(proto_root.get(), js_string_key(method_name),
         method_root.get());
@@ -3173,7 +3169,7 @@ static Item js_window_prompt(Item message_item, Item default_item) {
     char* r = s_prompt_queue[s_prompt_head];
     s_prompt_head = (s_prompt_head + 1) % JS_DOM_PROMPT_QUEUE_CAP;
     if (!r) return ItemNull;  // seeded Cancel
-    Item out = (Item){.item = s2it(heap_create_name(r))};
+    Item out = js_name_item(r);
     mem_free(r);
     return out;
 }
@@ -3447,7 +3443,7 @@ static Item js_dom_impl_has_feature_method(Item feature, Item version) {
 template <typename Target>
 static void js_dom_set_implementation_method(Item implementation,
         const char* name, Target target, int adapter_arity) {
-    Item key = (Item){.item = s2it(heap_create_name(name))};
+    Item key = js_name_item(name);
     js_set_key_default(implementation, key,
         js_new_native_function(target, adapter_arity));
     js_mark_non_enumerable(implementation, key);
@@ -3507,8 +3503,7 @@ static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        Item key = (Item){.item = s2it(heap_create_name("__styleWrapper"))};
-        Item cached = js_get_key_default(exp_map, key);
+        Item cached = js_get_name_key(exp_map, "__styleWrapper");
         if (js_is_inline_style(cached)) return cached;
     }
 
@@ -3519,22 +3514,21 @@ static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
     wrapped.vmap->host_type = radiant_dom_inline_style_host_type();
     wrapped.vmap->host_data = elem;
     if (exp_map.item != ITEM_NULL) {
-        Item key = (Item){.item = s2it(heap_create_name("__styleWrapper"))};
-        js_set_key_default(exp_map, key, wrapped);
+        js_set_name_key(exp_map, "__styleWrapper", wrapped);
     }
     return wrapped;
 }
 
 static Item js_classlist_value_item(DomElement* elem) {
     if (!elem || elem->class_count == 0) {
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
     StrBuf* sb = strbuf_new_cap(64);
     for (int i = 0; i < elem->class_count; i++) {
         if (i > 0) strbuf_append_char(sb, ' ');
         strbuf_append_str(sb, elem->class_names[i]);
     }
-    Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};
+    Item result = js_name_item(sb->str ? sb->str : "");
     strbuf_free(sb);
     return result;
 }
@@ -3572,7 +3566,7 @@ static Item js_classlist_operation_body(Item callee, Item this_value,
 static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
-    Item cache_key = (Item){.item = s2it(heap_create_name("__classListWrapper"))};
+    Item cache_key = js_name_item("__classListWrapper");
     Item wrapper = exp_map.item != ITEM_NULL ? js_get_key_default(exp_map, cache_key) : ItemNull;
     RootFrame roots(4);
     Rooted<Item> elem_root(roots, elem_item);
@@ -3597,7 +3591,7 @@ static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
                 methods[i].formal_length));
             method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
             js_set_key_default(wrapper_root.get(),
-                (Item){.item = s2it(heap_create_name(methods[i].name))},
+                js_name_item(methods[i].name),
                 method_root.get());
         }
         method_root.set(js_new_native_payload_function(
@@ -4124,9 +4118,9 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
         pseudo_type = (int)wrapper->data_cap;
     }
 
-    if (!elem) return (Item){.item = s2it(heap_create_name(""))};
+    if (!elem) return js_name_item("");
     const char* js_prop = fn_to_cstr(prop_name);
-    if (!js_prop) return (Item){.item = s2it(heap_create_name(""))};
+    if (!js_prop) return js_name_item("");
 
     // handle getPropertyValue method separately
     if (strcmp(js_prop, "getPropertyValue") == 0) {
@@ -4141,9 +4135,9 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
     if (strcmp(css_prop, "content-visibility") == 0) {
         const char* hidden = elem->get_attribute("hidden");
         if (hidden && strcasecmp(hidden, "until-found") == 0) {
-            return (Item){.item = s2it(heap_create_name("hidden"))};
+            return js_name_item("hidden");
         }
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     // look up the CSS property ID
@@ -4156,7 +4150,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
             CssDeclaration* decl = js_match_custom_property(elem, css_prop);
             if (decl && (decl->value || decl->value_text)) {
                 Pool* pool = elem->doc ? elem->doc->document_pool : nullptr;
-                if (!pool) return (Item){.item = s2it(heap_create_name(""))};
+                if (!pool) return js_name_item("");
                 const char* val = css_serialize_declaration_value(decl, pool);
                 if (!val) val = "";
                 // trim leading/trailing whitespace per CSS spec
@@ -4172,21 +4166,21 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
                     if (resolved) val = resolved;
                 }
 
-                return (Item){.item = s2it(heap_create_name(val))};
+                return js_name_item(val);
             }
-            return (Item){.item = s2it(heap_create_name(""))};
+            return js_name_item("");
         }
         log_debug("js_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
                   css_prop, js_prop);
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     char computed[512];
     if (css_prop_serialize_computed(elem, prop_id, pseudo_type,
                                     computed, sizeof(computed))) {
-        return (Item){.item = s2it(heap_create_name(computed))};
+        return js_name_item(computed);
     }
-    return (Item){.item = s2it(heap_create_name(""))};
+    return js_name_item("");
 }
 
 // ============================================================================
@@ -4509,8 +4503,8 @@ extern "C" Item js_dom_dataset_property(Item elem_item) {
         char key_buf[128];
         if (!js_dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
         const char* value = elem->get_attribute(names[i]);
-        key_root.set((Item){.item = s2it(heap_create_name(key_buf))});
-        value_root.set((Item){.item = s2it(heap_create_name(value ? value : ""))});
+        key_root.set(js_name_item(key_buf));
+        value_root.set(js_name_item(value ? value : ""));
         js_define_own_key_storage(dataset_root.get(), key_root.get(), value_root.get());
     }
     return dataset_root.get();
@@ -4773,8 +4767,8 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
 }
 
 static Item js_dom_throw_syntax_error(const char* message) {
-    Item name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
-    Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
+    Item name = js_name_item("SyntaxError");
+    Item msg = js_name_item(message ? message : "SyntaxError");
     return js_throw_value(js_new_error_with_name(name, msg));
 }
 JS_FORWARD_ITEM(js_dom_throw_contenteditable_syntax_error, (void), js_dom_throw_syntax_error, ("Invalid contentEditable value"))
@@ -5826,7 +5820,7 @@ extern "C" Item js_dom_document_default_view_bridge(void* doc_ptr) {
     return ItemNull;
 }
 JS_FORWARD_ITEM(js_dom_document_implementation_bridge, (void), js_get_dom_implementation, ())
-JS_FORWARD_EXPRESSION(Item, js_dom_document_design_mode_bridge, (void), ((Item){.item = s2it(heap_create_name(js_document_design_mode ? "on" : "off"))}))
+JS_FORWARD_EXPRESSION(Item, js_dom_document_design_mode_bridge, (void), (js_name_item(js_document_design_mode ? "on" : "off")))
 
 extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
@@ -5926,7 +5920,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
             }
             child = child->next_sibling;
         }
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     // v12: URL — full document URL as string
@@ -5934,9 +5928,9 @@ extern "C" Item js_document_get_property(Item prop_name) {
         Url* url = doc->url;
         if (url) {
             const char* href = url_get_href(url);
-            if (href) return (Item){.item = s2it(heap_create_name(href))};
+            if (href) return js_name_item(href);
         }
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     // location-style URL access. We model document.location and bare
@@ -5946,46 +5940,46 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
     if (strcmp(prop, "href") == 0) {
         const char* href = (doc->url && url_get_href(doc->url)) ? url_get_href(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(href))};
+        return js_name_item(href);
     }
     if (strcmp(prop, "protocol") == 0) {
         const char* protocol = (doc->url && url_get_protocol(doc->url)) ? url_get_protocol(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(protocol))};
+        return js_name_item(protocol);
     }
     if (strcmp(prop, "hostname") == 0) {
         const char* hostname = (doc->url && url_get_hostname(doc->url)) ? url_get_hostname(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(hostname))};
+        return js_name_item(hostname);
     }
     if (strcmp(prop, "port") == 0) {
         const char* port = (doc->url && url_get_port(doc->url)) ? url_get_port(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(port))};
+        return js_name_item(port);
     }
     if (strcmp(prop, "pathname") == 0) {
         const char* pathname = (doc->url && url_get_pathname(doc->url)) ? url_get_pathname(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(pathname))};
+        return js_name_item(pathname);
     }
     if (strcmp(prop, "search") == 0) {
         const char* search = (doc->url && url_get_search(doc->url)) ? url_get_search(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(search))};
+        return js_name_item(search);
     }
     if (strcmp(prop, "hash") == 0) {
         const char* hash = (doc->url && url_get_hash(doc->url)) ? url_get_hash(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(hash))};
+        return js_name_item(hash);
     }
     if (strcmp(prop, "host") == 0) {
         const char* host = (doc->url && url_get_host(doc->url)) ? url_get_host(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(host))};
+        return js_name_item(host);
     }
     if (strcmp(prop, "origin") == 0) {
         const char* origin = (doc->url && url_get_origin(doc->url)) ? url_get_origin(doc->url) : "";
-        return (Item){.item = s2it(heap_create_name(origin))};
+        return js_name_item(origin);
     }
 
     // readyState — legacy defaults to "complete"; the Phase 4 post-DOM
     // script scheduler updates this during modeled lifecycle transitions.
     if (strcmp(prop, "readyState") == 0) {
         const char* ready_state = doc->js.ready_state ? doc->js.ready_state : "complete";
-        return (Item){.item = s2it(heap_create_name(ready_state))};
+        return js_name_item(ready_state);
     }
 
     if (strcmp(prop, "fonts") == 0) {
@@ -5994,7 +5988,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // compatMode
     if (strcmp(prop, "compatMode") == 0) {
-        return (Item){.item = s2it(heap_create_name("CSS1Compat"))};
+        return js_name_item("CSS1Compat");
     }
 
     // F-1: document.forms — array of all <form> elements in the document.
@@ -6005,12 +5999,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // characterSet / charset
     if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
-        return (Item){.item = s2it(heap_create_name("UTF-8"))};
+        return js_name_item("UTF-8");
     }
 
     // contentType
     if (strcmp(prop, "contentType") == 0) {
-        return (Item){.item = s2it(heap_create_name("text/html"))};
+        return js_name_item("text/html");
     }
 
     // nodeType — DOCUMENT_NODE = 9
@@ -6042,7 +6036,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // nodeName
     if (strcmp(prop, "nodeName") == 0) {
-        return (Item){.item = s2it(heap_create_name("#document"))};
+        return js_name_item("#document");
     }
 
     // styleSheets — collection of parsed CSSStyleSheet objects
@@ -6509,11 +6503,11 @@ static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg) {
         (Item){.item = i2it((int64_t)dom_text_utf16_length(text_node))},
         (Item){.item = i2it(0)}, data_arg);
 }
-JS_FORWARD_STATIC_ITEM(js_dom_text_delete_data_method, (DomText* text_node, Item offset_arg,                                            Item count_arg), js_dom_text_replace_data_method, (text_node, offset_arg, count_arg, (Item){.item = s2it(heap_create_name(""))}))
+JS_FORWARD_STATIC_ITEM(js_dom_text_delete_data_method, (DomText* text_node, Item offset_arg,                                            Item count_arg), js_dom_text_replace_data_method, (text_node, offset_arg, count_arg, js_name_item("")))
 
 static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg) {
-    if (!text_node) return (Item){.item = s2it(heap_create_name(""))};
+    if (!text_node) return js_name_item("");
     int64_t offset = js_dom_to_integer_or_zero(offset_arg);
     int64_t count = js_dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
@@ -6759,8 +6753,7 @@ static bool _get_selectedness(DomElement* opt) {
     if (opt->has_option_selectedness()) return dom_option_is_selected(opt);
     Item exp = expando_get_map((DomNode*)opt);
     if (exp.item != ITEM_NULL) {
-        Item key = (Item){.item = s2it(heap_create_name("__selected"))};
-        Item v = js_get_key_default(exp, key);
+        Item v = js_get_name_key(exp, "__selected");
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
     return dom_option_is_selected(opt);
@@ -6774,8 +6767,7 @@ static bool js_dom_expando_flag_is(DomElement* elem, const char* name) {
     if (!elem) return false;
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return false;
-    Item value = js_get_key_default(exp,
-        (Item){.item = s2it(heap_create_name(name))});
+    Item value = js_get_key_default(exp, js_name_item(name));
     return value.item != ITEM_NULL && !is_js_undefined(value) && js_is_truthy(value);
 }
 
@@ -6783,7 +6775,7 @@ static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item val
     if (!elem) return;
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
-    js_set_key_default(exp, (Item){.item = s2it(heap_create_name(name))}, value);
+    js_set_key_default(exp, js_name_item(name), value);
 }
 JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), js_dom_expando_flag_is, (sel, "__selDirty"))
 
@@ -6925,8 +6917,7 @@ static void _set_selectedness(DomElement* opt, bool v) {
     opt->set_option_selectedness(v);
     Item exp = expando_get_or_create_map((DomNode*)opt);
     if (exp.item == ITEM_NULL) return;
-    Item key = (Item){.item = s2it(heap_create_name("__selected"))};
-    js_set_key_default(exp, key, (Item){.item = b2it(v)});
+    js_set_name_key(exp, "__selected", (Item){.item = b2it(v)});
 }
 
 static int _select_index_from_item(Item value) {
@@ -7075,8 +7066,7 @@ static void _select_refresh_cached_selected_options(DomElement* sel) {
     if (!sel) return;
     Item exp = expando_get_map((DomNode*)sel);
     if (exp.item == ITEM_NULL) return;
-    Item cache_key = (Item){.item = s2it(heap_create_name("__selectedOptions"))};
-    Item out = js_get_key_default(exp, cache_key);
+    Item out = js_get_name_key(exp, "__selectedOptions");
     if (get_type_id(out) == LMD_TYPE_ARRAY) {
         _select_refresh_selected_options_collection(out, sel);
     }
@@ -7652,8 +7642,7 @@ static void _reset_form_control(DomElement* elem) {
         // Clear the dirty flag so default-reset rules apply again.
         Item exp = expando_get_map((DomNode*)elem);
         if (exp.item != ITEM_NULL) {
-            Item key = (Item){.item = s2it(heap_create_name("__selDirty"))};
-            js_set_key_default(exp, key, (Item){.item = ITEM_NULL});
+            js_set_name_key(exp, "__selDirty", (Item){.item = ITEM_NULL});
         }
         if (!elem->has_attribute("multiple")) {
             _select_ask_for_reset(elem);
@@ -7759,8 +7748,7 @@ static Item _build_validity_state(DomElement* elem) {
     Item vs = js_new_object();
     // Set Symbol.toStringTag = "ValidityState" so
     // Object.prototype.toString.call(validity) === "[object ValidityState]"
-    js_set_key_default(vs, js_well_known_symbol_key(4),
-        (Item){.item = s2it(heap_create_name("ValidityState"))});
+    js_set_key_default(vs, js_well_known_symbol_key(4), js_name_item("ValidityState"));
     bool value_missing   = false;
     bool type_mismatch   = false;
     bool pattern_mismatch = false;
@@ -7921,7 +7909,7 @@ static Item _build_validity_state(DomElement* elem) {
                     snprintf(full_pattern, plen + 8, "^(?:%s)$", pattern);
                     Item re = js_create_regex(full_pattern, (int)strlen(full_pattern), "", 0);
                     mem_free(full_pattern);
-                    Item val_item = (Item){.item = s2it(heap_create_name(val))};
+                    Item val_item = js_name_item(val);
                     Item result = js_regex_test(re, val_item);
                     // pattern mismatch if regex does NOT match
                     pattern_mismatch = !((result.item & 0xFF) != 0 && result.item != ITEM_NULL);
@@ -8003,7 +7991,7 @@ static bool js_dom_is_constraint_control(DomElement* elem) {
 
 static void js_dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
     Item ev_obj = js_new_object();
-    js_set_key_cstr(ev_obj, "type", (Item){.item = s2it(heap_create_name("invalid"))});
+    js_set_key_cstr(ev_obj, "type", js_name_item("invalid"));
     if (include_bubbles) {
         js_set_key_cstr(ev_obj, "bubbles", (Item){.item = ITEM_FALSE});
     }
@@ -8379,7 +8367,7 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
         bool is_text, Item* result) {
     if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 ||
             strcmp(prop, "textContent") == 0) {
-        *result = (Item){.item = s2it(heap_create_name(content ? content : ""))};
+        *result = js_name_item(content ? content : "");
         return true;
     }
     if (strcmp(prop, "length") == 0) {
@@ -8391,7 +8379,7 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "nodeName") == 0) {
-        *result = (Item){.item = s2it(heap_create_name(node_name))};
+        *result = js_name_item(node_name);
         return true;
     }
     if (strcmp(prop, "parentNode") == 0) {
@@ -8547,7 +8535,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // localName (lowercased per spec; tag names are stored lowercase already).
     if (strcmp(prop, "localName") == 0) {
         const char* tn = elem->tag_name ? elem->tag_name : "";
-        return (Item){.item = s2it(heap_create_name(tn))};
+        return js_name_item(tn);
     }
 
     // html requires template contents to be exposed through a detached
@@ -8563,12 +8551,12 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (strcmp(prop, "namespaceURI") == 0) {
         const char* ns = elem->get_attribute("__lambda_ns_uri");
         if (ns && ns[0] != '\0') {
-            return (Item){.item = s2it(heap_create_name(ns))};
+            return js_name_item(ns);
         }
         if (js_dom_element_is_svg(elem)) {
-            return (Item){.item = s2it(heap_create_name("http://www.w3.org/2000/svg"))};
+            return js_name_item("http://www.w3.org/2000/svg");
         }
-        return (Item){.item = s2it(heap_create_name("http://www.w3.org/1999/xhtml"))};
+        return js_name_item("http://www.w3.org/1999/xhtml");
     }
 
     if (strcmp(prop, "ownerSVGElement") == 0) {
@@ -8724,8 +8712,8 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             if (js_dom_is_internal_attr(name)) continue;
             const char* value = elem->get_attribute(name);
             Item pair = js_new_object();
-            Item name_item = (Item){.item = s2it(heap_create_name(name))};
-            Item value_item = (Item){.item = s2it(heap_create_name(value ? value : ""))};
+            Item name_item = js_name_item(name);
+            Item value_item = js_name_item(value ? value : "");
             // Attr exposes both legacy name/value and Node nodeName/nodeValue;
             // sanitizers iterate the latter aliases from element.attributes.
             js_set_key_cstr(pair, "nodeName", name_item);
@@ -8962,7 +8950,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 String* s = heap_strcpy((char*)text_node->text, text_node->length);
                 return (Item){.item = s2it(s)};
             }
-            return (Item){.item = s2it(heap_create_name(""))};
+            return js_name_item("");
         }
         return ItemNull;
     }
@@ -8971,7 +8959,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (strcmp(prop, "nodeName") == 0) {
         DomNode* node = (DomNode*)elem;
         if (node->is_text()) {
-            return (Item){.item = s2it(heap_create_name("#text"))};
+            return js_name_item("#text");
         }
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
     }
@@ -8999,7 +8987,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         if (strcmp(prop, "selectedOptions") == 0) {
             Item exp = expando_get_or_create_map((DomNode*)elem);
-            Item cache_key = (Item){.item = s2it(heap_create_name("__selectedOptions"))};
+            Item cache_key = js_name_item("__selectedOptions");
             Item out = (exp.item != ITEM_NULL) ? js_get_key_default(exp, cache_key) : ItemNull;
             if (get_type_id(out) != LMD_TYPE_ARRAY) {
                 out = js_array_new(0);
@@ -9042,7 +9030,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (strcmp(prop, "type") == 0) {
             const char* t = elem->has_attribute("multiple")
                 ? "select-multiple" : "select-one";
-            return (Item){.item = s2it(heap_create_name(t))};
+            return js_name_item(t);
         }
     }
 
@@ -9058,7 +9046,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             // label IDL: returns label attribute, falling back to text.
             if (strcmp(prop, "label") == 0) {
                 const char* lab = elem->get_attribute("label");
-                if (lab && *lab) return (Item){.item = s2it(heap_create_name(lab))};
+                if (lab && *lab) return js_name_item(lab);
             }
             char* t = _option_text(elem);
             String* s = heap_create_name(t ? t : "");
@@ -9129,7 +9117,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         const char* v = elem->get_attribute("value");
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
 
     // ------------------------------------------------------------------
@@ -9155,7 +9143,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 return (Item){.item = s2it(s)};
             }
             const char* v = elem->get_attribute("value");
-            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+            return js_name_item(v ? v : "");
         }
         if (strcmp(prop, "selectionStart") == 0) {
             tc_ensure_init(elem);
@@ -9179,7 +9167,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             form_control_get_selection(state, (View*)elem, NULL, NULL, &direction);
             if (direction == 1) d = "forward";
             else if (direction == 2) d = "backward";
-            return (Item){.item = s2it(heap_create_name(d))};
+            return js_name_item(d);
         }
         if (strcmp(prop, "textLength") == 0) {
             tc_ensure_init(elem);
@@ -9242,7 +9230,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
          _is_tag(elem, "textarea") || _is_tag(elem, "form") || _is_tag(elem, "fieldset") ||
          _is_tag(elem, "output") || _is_tag(elem, "object"))) {
         const char* v = elem->get_attribute("name");
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
     // type for button (default "submit"; only valid values: "submit","reset","button")
     if (strcmp(prop, "type") == 0 && _is_tag(elem, "button")) {
@@ -9250,34 +9238,34 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (v && (strcasecmp(v, "submit") == 0 || strcasecmp(v, "reset") == 0 || strcasecmp(v, "button") == 0)) {
             char buf[8];
             for (int i = 0; v[i] && i < 7; i++) buf[i] = (char)tolower((unsigned char)v[i]), buf[i+1] = '\0';
-            return (Item){.item = s2it(heap_create_name(buf))};
+            return js_name_item(buf);
         }
-        return (Item){.item = s2it(heap_create_name("submit"))};
+        return js_name_item("submit");
     }
     // placeholder (input, textarea)
     if (strcmp(prop, "placeholder") == 0 &&
         (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
         const char* v = elem->get_attribute("placeholder");
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
     // autocomplete (form, input, select, textarea)
     if (strcmp(prop, "autocomplete") == 0 &&
         (_is_tag(elem, "form") || _is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
         const char* v = elem->get_attribute("autocomplete");
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
     // pattern, min, max, step, accept (input only — simple string reflection)
     if (_is_tag(elem, "input") &&
         (strcmp(prop, "pattern") == 0 || strcmp(prop, "min") == 0 || strcmp(prop, "max") == 0 ||
          strcmp(prop, "step") == 0 || strcmp(prop, "accept") == 0)) {
         const char* v = elem->get_attribute(prop);
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
     // HTMLFormElement: action, method, enctype/encoding, acceptCharset, target
     if (_is_tag(elem, "form")) {
         if (strcmp(prop, "action") == 0) {
             const char* v = elem->get_attribute("action");
-            if (v && *v) return (Item){.item = s2it(heap_create_name(v))};
+            if (v && *v) return js_name_item(v);
             // Empty/missing action falls back to document URL per HTML spec.
             DomDocument* doc = elem->doc;
             const char* doc_url = "";
@@ -9285,30 +9273,30 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 const char* href = url_get_href(doc->url);
                 if (href) doc_url = href;
             }
-            return (Item){.item = s2it(heap_create_name(doc_url))};
+            return js_name_item(doc_url);
         }
         if (strcmp(prop, "target") == 0) {
             const char* v = elem->get_attribute(prop);
-            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+            return js_name_item(v ? v : "");
         }
         if (strcmp(prop, "method") == 0) {
             const char* v = elem->get_attribute("method");
-            return (Item){.item = s2it(heap_create_name(_normalise_method(v)))};
+            return js_name_item(_normalise_method(v));
         }
         if (strcmp(prop, "enctype") == 0 || strcmp(prop, "encoding") == 0) {
             const char* v = elem->get_attribute("enctype");
-            return (Item){.item = s2it(heap_create_name(_normalise_enctype(v)))};
+            return js_name_item(_normalise_enctype(v));
         }
         if (strcmp(prop, "acceptCharset") == 0) {
             const char* v = elem->get_attribute("accept-charset");
-            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+            return js_name_item(v ? v : "");
         }
     }
     // HTMLTextAreaElement: wrap (default "soft"), rows (default 2), cols (default 20)
     if (_is_tag(elem, "textarea")) {
         if (strcmp(prop, "wrap") == 0) {
             const char* v = elem->get_attribute("wrap");
-            return (Item){.item = s2it(heap_create_name(v ? v : "soft"))};
+            return js_name_item(v ? v : "soft");
         }
         if (strcmp(prop, "rows") == 0) {
             return (Item){.item = i2it(_reflect_int_attr("rows", 2))};
@@ -9354,7 +9342,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     const char* string_attr = nullptr;
     if (_is_string_reflected(elem, prop, &string_attr)) {
         const char* v = elem->get_attribute(string_attr);
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
 
     // HTMLInputElement.defaultChecked — reflects `checked` content attribute
@@ -9369,7 +9357,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (strcmp(prop, "htmlFor") == 0 &&
         (_is_tag(elem, "label") || _is_tag(elem, "output"))) {
         const char* v = elem->get_attribute("for");
-        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        return js_name_item(v ? v : "");
     }
     // HTMLOutputElement.defaultValue — descendant text content if no override
     // has been set. We do not yet track an explicit override (defaultValue
@@ -9407,7 +9395,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // the focus-time forwarding stub in update_focus_state() reads them.
     if (strcmp(prop, "inputMode") == 0) {
         const char* v = elem->get_attribute("inputmode");
-        if (!v) return (Item){.item = s2it(heap_create_name(""))};
+        if (!v) return js_name_item("");
         // Canonicalise to lowercase and validate against the spec keyword set.
         char buf[16]; size_t i = 0;
         for (; v[i] && i < sizeof(buf) - 1; i++)
@@ -9421,11 +9409,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         for (int k = 0; keywords[k]; k++) {
             if (strcmp(buf, keywords[k]) == 0) { out = keywords[k]; break; }
         }
-        return (Item){.item = s2it(heap_create_name(out))};
+        return js_name_item(out);
     }
     if (strcmp(prop, "enterKeyHint") == 0) {
         const char* v = elem->get_attribute("enterkeyhint");
-        if (!v) return (Item){.item = s2it(heap_create_name(""))};
+        if (!v) return js_name_item("");
         char buf[16]; size_t i = 0;
         for (; v[i] && i < sizeof(buf) - 1; i++)
             buf[i] = (char)tolower((unsigned char)v[i]);
@@ -9437,7 +9425,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         for (int k = 0; keywords[k]; k++) {
             if (strcmp(buf, keywords[k]) == 0) { out = keywords[k]; break; }
         }
-        return (Item){.item = s2it(heap_create_name(out))};
+        return js_name_item(out);
     }
     // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10):
     // contentEditable returns "true"/"false"/"plaintext-only"/"inherit".
@@ -9445,11 +9433,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // inheritance and ="false" islands.
     if (strcmp(prop, "contentEditable") == 0) {
         if (!elem->has_attribute("contenteditable")) {
-            return (Item){.item = s2it(heap_create_name("inherit"))};
+            return js_name_item("inherit");
         }
         const char* out = js_dom_normalize_contenteditable(
             elem->get_attribute("contenteditable"));
-        return (Item){.item = s2it(heap_create_name(out ? out : "inherit"))};
+        return js_name_item(out ? out : "inherit");
     }
     if (strcmp(prop, "isContentEditable") == 0) {
         // Walk ancestors. Editable iff the nearest ce-bearing ancestor has
@@ -9476,7 +9464,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(prop, "autocapitalize") == 0) {
-        return (Item){.item = s2it(heap_create_name(js_dom_get_autocapitalize(elem)))};
+        return js_name_item(js_dom_get_autocapitalize(elem));
     }
     if (strcmp(prop, "autocorrect") == 0) {
         return (Item){.item = b2it(js_dom_get_autocorrect(elem))};
@@ -9485,7 +9473,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = b2it(js_dom_get_spellcheck(elem))};
     }
     if (strcmp(prop, "writingSuggestions") == 0) {
-        return (Item){.item = s2it(heap_create_name(js_dom_get_writing_suggestions(elem)))};
+        return js_name_item(js_dom_get_writing_suggestions(elem));
     }
     if (strcmp(prop, "dataset") == 0) {
         return js_dom_dataset_property(elem_item);
@@ -9501,7 +9489,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "input") || _is_tag(elem, "button")) {
         if (strcmp(prop, "formAction") == 0) {
             const char* v = elem->get_attribute("formaction");
-            if (v && *v) return (Item){.item = s2it(heap_create_name(v))};
+            if (v && *v) return js_name_item(v);
             // fall back to document URL
             DomDocument* doc = elem->doc;
             const char* doc_url = "";
@@ -9509,19 +9497,19 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 const char* href = url_get_href(doc->url);
                 if (href) doc_url = href;
             }
-            return (Item){.item = s2it(heap_create_name(doc_url))};
+            return js_name_item(doc_url);
         }
         if (strcmp(prop, "formMethod") == 0) {
             const char* v = elem->get_attribute("formmethod");
-            return (Item){.item = s2it(heap_create_name(_normalise_method(v)))};
+            return js_name_item(_normalise_method(v));
         }
         if (strcmp(prop, "formEnctype") == 0) {
             const char* v = elem->get_attribute("formenctype");
-            return (Item){.item = s2it(heap_create_name(_normalise_enctype(v)))};
+            return js_name_item(_normalise_enctype(v));
         }
         if (strcmp(prop, "formTarget") == 0) {
             const char* v = elem->get_attribute("formtarget");
-            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+            return js_name_item(v ? v : "");
         }
         if (strcmp(prop, "formNoValidate") == 0) {
             return (Item){.item = b2it(elem->has_attribute("formnovalidate"))};
@@ -9554,13 +9542,13 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             strcasecmp(elem->tag_name, "textarea") == 0 ||
             strcasecmp(elem->tag_name, "button") == 0);
         if (!is_form_ctrl || _elem_is_barred(elem)) {
-            return (Item){.item = s2it(heap_create_name(""))};
+            return js_name_item("");
         }
         if (elem->form && elem->form->custom_validity_msg &&
             elem->form->custom_validity_msg[0] != '\0') {
-            return (Item){.item = s2it(heap_create_name(elem->form->custom_validity_msg))};
+            return js_name_item(elem->form->custom_validity_msg);
         }
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     // ------------------------------------------------------------------
@@ -9610,8 +9598,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (js_dom_event_attr_name(prop, event_prop_name, sizeof(event_prop_name))) {
         Item exp_map = expando_get_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
-            Item key = (Item){.item = s2it(heap_create_name(event_prop_name))};
-            Item val = js_get_key_default(exp_map, key);
+            Item val = js_get_name_key(exp_map, event_prop_name);
             if (val.item != ITEM_NULL && !is_js_undefined(val)) {
                 return val;
             }
@@ -9622,7 +9609,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (!elem->is_synthetic()) {
         const char* attr_val = elem->get_attribute(prop);
         if (attr_val) {
-            return (Item){.item = s2it(heap_create_name(attr_val))};
+            return js_name_item(attr_val);
         }
     }
 
@@ -9630,7 +9617,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     {
         Item exp_map = expando_get_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
-            Item key = (Item){.item = s2it(heap_create_name(prop))};
+            Item key = js_name_item(prop);
             if (expando_map_has_key(exp_map, key)) {
                 return js_get_key_default(exp_map, key);
             }
@@ -10296,8 +10283,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property set on obj.style
-        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
-        Item style_obj = js_get_key_default(elem_item, style_key);
+        Item style_obj = js_get_name_key(elem_item, "style");
         TypeId style_type = get_type_id(style_obj);
         if (style_obj.item != ITEM_NULL &&
             (style_type == LMD_TYPE_MAP || style_type == LMD_TYPE_VMAP)) {
@@ -10386,43 +10372,42 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         if (js_is_rule_style_decl(style_obj)) {
             return js_cssom_rule_decl_get_property(style_obj, prop_name);
         }
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property access on obj.style
-        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
-        Item style_obj = js_get_key_default(elem_item, style_key);
+        Item style_obj = js_get_name_key(elem_item, "style");
         TypeId style_type = get_type_id(style_obj);
         if (style_obj.item != ITEM_NULL &&
             (style_type == LMD_TYPE_MAP || style_type == LMD_TYPE_VMAP)) {
             return js_get_key_default(style_obj, prop_name);
         }
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     const char* js_prop = fn_to_cstr(prop_name);
-    if (!js_prop) return (Item){.item = s2it(heap_create_name(""))};
+    if (!js_prop) return js_name_item("");
 
     // convert camelCase JS property to CSS property
     char css_prop[128];
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
     if (!js_inline_style_cssom_property_exposed(css_prop)) {
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     // v12: cssText getter — return the raw inline style string
     if (strcmp(css_prop, "cssText") == 0) {
         const char* inline_style = dom_element_get_inline_style(elem);
-        return (Item){.item = s2it(heap_create_name(inline_style ? inline_style : ""))};
+        return js_name_item(inline_style ? inline_style : "");
     }
 
     // look up the CSS property ID
     CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     if (prop_id == CSS_PROPERTY_UNKNOWN) {
         log_debug("js_dom_get_style_property: unknown CSS property '%s'", css_prop);
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     // get the specified value for this property
@@ -10439,22 +10424,22 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
             }
         }
         if (!decl || (!decl->value && (!decl->value_text || decl->value_text_len == 0))) {
-            return (Item){.item = s2it(heap_create_name(""))};
+            return js_name_item("");
         }
     }
 
     // only return values that came from inline styles (element.style.X should
     // only reflect inline styles, not stylesheet rules)
     if (!decl->specificity.inline_style) {
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     Pool* pool = elem->doc ? elem->doc->document_pool : nullptr;
     if (!pool) {
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
     const char* serialized = css_serialize_declaration_value(decl, pool);
-    return (Item){.item = s2it(heap_create_name(serialized ? serialized : ""))};
+    return js_name_item(serialized ? serialized : "");
 }
 
 // open-name membership for style hosts: `in` answers from the CSS property
@@ -10478,8 +10463,7 @@ extern "C" Item js_style_css_has(Item style_item, Item prop_name) {
 
 static void js_dom_set_number_property(Item object, const char* name,
                                        float value) {
-    Item key = (Item){.item = s2it(heap_create_name(name))};
-    js_set_key_default(object, key, push_d((double)value));
+    js_set_name_key(object, name, push_d((double)value));
 }
 
 static Item js_dom_make_rect_object(float x, float y, float width,
@@ -10745,7 +10729,7 @@ static Item js_dom_svg_get_transform_list(DomElement* elem) {
 static Item js_dom_svg_class_name_get_base_val(void) {
     DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
     const char* class_name = elem ? elem->get_attribute("class") : nullptr;
-    return (Item){.item = s2it(heap_create_name(class_name ? class_name : ""))};
+    return js_name_item(class_name ? class_name : "");
 }
 
 static Item js_dom_svg_class_name_set_base_val(Item value) {
@@ -12724,21 +12708,21 @@ extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
 
     Item rect = js_new_object();
     Item k;
-    k = (Item){.item = s2it(heap_create_name("x"))};
+    k = js_name_item("x");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-    k = (Item){.item = s2it(heap_create_name("y"))};
+    k = js_name_item("y");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-    k = (Item){.item = s2it(heap_create_name("top"))};
+    k = js_name_item("top");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-    k = (Item){.item = s2it(heap_create_name("left"))};
+    k = js_name_item("left");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-    k = (Item){.item = s2it(heap_create_name("right"))};
+    k = js_name_item("right");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
-    k = (Item){.item = s2it(heap_create_name("bottom"))};
+    k = js_name_item("bottom");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
-    k = (Item){.item = s2it(heap_create_name("width"))};
+    k = js_name_item("width");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)w)});
-    k = (Item){.item = s2it(heap_create_name("height"))};
+    k = js_name_item("height");
     js_set_key_default(rect, k, (Item){.item = i2it((int64_t)h)});
 
     Item arr = js_array_new(0);
@@ -13930,7 +13914,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         Item root = js_dom_wrap_element(frag);
 
         js_set_key_cstr(root, "host", elem_item);
-        js_set_key_cstr(root, "mode", (Item){.item = s2it(heap_create_name(mode))});
+        js_set_key_cstr(root, "mode", js_name_item(mode));
         js_set_key_cstr(root, "delegatesFocus", (Item){.item = b2it(delegates_focus)});
 
         Item exp_map = expando_get_or_create_map((DomNode*)elem);
@@ -13949,9 +13933,9 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (!attr_name) return ItemNull;
         if (js_dom_is_internal_attr(attr_name)) return ItemNull;
         const char* val = elem->get_attribute(attr_name);
-        if (val) return (Item){.item = s2it(heap_create_name(val))};
+        if (val) return js_name_item(val);
         if (elem->has_attribute(attr_name))
-            return (Item){.item = s2it(heap_create_name(""))};
+            return js_name_item("");
         return ItemNull;
     }
 
@@ -14014,7 +13998,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
             lookup_name = xlink_name;
         }
         const char* value = elem->get_attribute(lookup_name);
-        return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
+        return value ? js_name_item(value) : ItemNull;
     }
 
     if (operation == JUBE_DOM_REMOVE_ATTRIBUTE_NS) {
@@ -14057,7 +14041,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         const char** attr_names = elem->attribute_names(&attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
             if (js_dom_is_internal_attr(attr_names[i])) continue;
-            js_array_push(arr_item, (Item){.item = s2it(heap_create_name(attr_names[i]))});
+            js_array_push(arr_item, js_name_item(attr_names[i]));
         }
         return arr_item;
     }
@@ -14534,10 +14518,10 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         // If new_opt is an ancestor of elem, must throw HierarchyRequestError.
         for (DomNode* p = (DomNode*)elem; p; p = p->parent) {
             if ((DomElement*)p == new_opt) {
-                Item n = (Item){.item = s2it(heap_create_name("HierarchyRequestError"))};
-                Item m = (Item){.item = s2it(heap_create_name(
+                Item n = js_name_item("HierarchyRequestError");
+                Item m = js_name_item(
                     "Failed to execute 'add' on 'HTMLSelectElement': "
-                    "The new child element contains the parent."))};
+                    "The new child element contains the parent.");
                 return js_throw_value(js_new_error_with_name(n, m));
             }
         }
@@ -14691,7 +14675,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
         if (argc < 1) return ItemNull;
         int64_t idx = it2i(args[0]);
         if (idx < 0 || idx >= elem->class_count) return ItemNull;
-        return (Item){.item = s2it(heap_create_name(elem->class_names[idx]))};
+        return js_name_item(elem->class_names[idx]);
     }
 
     // replace(oldClass, newClass) → boolean
@@ -14715,8 +14699,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     if (operation == JS_CLASSLIST_ITERATOR) {
         Item values = js_array_new(0);
         for (int i = 0; i < elem->class_count; i++) {
-            js_array_push(values,
-                (Item){.item = s2it(heap_create_name(elem->class_names[i]))});
+            js_array_push(values, js_name_item(elem->class_names[i]));
         }
         return js_get_iterator(values);
     }
@@ -14787,7 +14770,7 @@ extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
 
     const char* val = elem->get_attribute(attr_name);
     if (val) {
-        return (Item){.item = s2it(heap_create_name(val))};
+        return js_name_item(val);
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -14841,57 +14824,57 @@ extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
 extern "C" Item js_location_get_property(Item prop_name) {
     if (!_js_current_document) {
         log_debug("js_location_get_property: no document set");
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     const char* prop = fn_to_cstr(prop_name);
-    if (!prop) return (Item){.item = s2it(heap_create_name(""))};
+    if (!prop) return js_name_item("");
 
     Url* url = _js_current_document->url;
     if (!url) {
         log_debug("js_location_get_property: document has no URL");
-        return (Item){.item = s2it(heap_create_name(""))};
+        return js_name_item("");
     }
 
     if (strcmp(prop, "href") == 0) {
         const char* href = url_get_href(url);
-        return (Item){.item = s2it(heap_create_name(href ? href : ""))};
+        return js_name_item(href ? href : "");
     }
     if (strcmp(prop, "protocol") == 0) {
         const char* proto = url_get_protocol(url);
-        return (Item){.item = s2it(heap_create_name(proto ? proto : ""))};
+        return js_name_item(proto ? proto : "");
     }
     if (strcmp(prop, "hostname") == 0) {
         const char* hostname = url_get_hostname(url);
-        return (Item){.item = s2it(heap_create_name(hostname ? hostname : ""))};
+        return js_name_item(hostname ? hostname : "");
     }
     if (strcmp(prop, "port") == 0) {
         const char* port = url_get_port(url);
-        return (Item){.item = s2it(heap_create_name(port ? port : ""))};
+        return js_name_item(port ? port : "");
     }
     if (strcmp(prop, "pathname") == 0) {
         const char* pathname = url_get_pathname(url);
-        return (Item){.item = s2it(heap_create_name(pathname ? pathname : ""))};
+        return js_name_item(pathname ? pathname : "");
     }
     if (strcmp(prop, "search") == 0) {
         const char* search = url_get_search(url);
-        return (Item){.item = s2it(heap_create_name(search ? search : ""))};
+        return js_name_item(search ? search : "");
     }
     if (strcmp(prop, "hash") == 0) {
         const char* hash = url_get_hash(url);
-        return (Item){.item = s2it(heap_create_name(hash ? hash : ""))};
+        return js_name_item(hash ? hash : "");
     }
     if (strcmp(prop, "host") == 0) {
         const char* host = url_get_host(url);
-        return (Item){.item = s2it(heap_create_name(host ? host : ""))};
+        return js_name_item(host ? host : "");
     }
     if (strcmp(prop, "origin") == 0) {
         const char* origin = url_get_origin(url);
-        return (Item){.item = s2it(heap_create_name(origin ? origin : ""))};
+        return js_name_item(origin ? origin : "");
     }
 
     log_debug("js_location_get_property: unknown property '%s'", prop);
-    return (Item){.item = s2it(heap_create_name(""))};
+    return js_name_item("");
 }
 
 static Url* js_dom_make_fallback_url(const char* raw_url) {
@@ -15082,19 +15065,19 @@ JS_FORWARD_ITEM(js_dom_style_set_property_bridge,
     ((DomElement*)dom_elem, prop_arg, value_arg, priority_arg, has_priority))
 
 static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_arg) {
-    if (!elem) return (Item){.item = s2it(heap_create_name(""))};
+    if (!elem) return js_name_item("");
     const char* css_prop = fn_to_cstr(prop_arg);
-    if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
+    if (!css_prop) return js_name_item("");
 
     // get old value before removing
     CssPropertyCode prop_id = css_property_code_from_name(css_prop);
-    Item old_val = (Item){.item = s2it(heap_create_name(""))};
+    Item old_val = js_name_item("");
     if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
         CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
         if (decl && decl->specificity.inline_style) {
             // serialize old value via the getter
             Item owner_item = js_dom_wrap_element(elem);
-            Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
+            Item prop_item = js_name_item(css_prop);
             old_val = js_dom_get_style_property(owner_item, prop_item);
         }
         js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
@@ -15131,15 +15114,13 @@ static void _set_iface_to_string_tag(Item proto, const char* name) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
     // WebIDL interface prototypes carry @@toStringTag; selector/tooltip
     // libraries use this brand to distinguish a DOM Element from plain data.
-    js_set_key_default(proto, js_well_known_symbol_key(4),
-                    (Item){.item = s2it(heap_create_name(name))});
+    js_set_key_default(proto, js_well_known_symbol_key(4), js_name_item(name));
 }
 
 static void _install_iface(Item global, const char* name) {
     RootFrame roots(4);
     Rooted<Item> global_root(roots, global);
-    Rooted<Item> key_root(roots,
-        (Item){.item = s2it(heap_create_name(name))});
+    Rooted<Item> key_root(roots, js_name_item(name));
     Rooted<Item> ctor_root(roots,
         js_get_key_default(global_root.get(), key_root.get()));
     Rooted<Item> proto_root(roots, ItemNull);
@@ -15187,7 +15168,7 @@ static void js_dom_install_value_constructor(Item global, const char* name,
 JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), js_dom_install_value_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
 
 static Item _iface_proto(Item global, const char* name) {
-    Item ctor = js_get_key_default(global, (Item){.item = s2it(heap_create_name(name))});
+    Item ctor = js_get_key_default(global, js_name_item(name));
     if (!js_is_callable(ctor)) return ItemNull;
     Item proto = js_get_key_cstr(ctor, "prototype");
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
@@ -15215,7 +15196,7 @@ static void _link_iface_proto(Item global, const char* name, const char* base_na
 }
 
 static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
-    js_set_key_default(ctor, (Item){.item = s2it(heap_create_name(name))},
+    js_set_key_default(ctor, js_name_item(name),
         (Item){.item = i2it(value)});
 }
 
@@ -15323,8 +15304,7 @@ static void _install_node_iface(Item global) {
     Rooted<Item> ctor_root(roots,
         js_new_distinct_native_constructor(_coll_illegal_constructor));
     Rooted<Item> proto_root(roots, js_new_object());
-    js_set_function_name(ctor_root.get(),
-        (Item){.item = s2it(heap_create_name("Node"))});
+    js_set_function_name(ctor_root.get(), js_name_item("Node"));
     _set_iface_to_string_tag(proto_root.get(), "Node");
     js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
     js_initialize_native_constructor_prototype(ctor_root.get(),
@@ -15632,7 +15612,7 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
 extern "C" void js_dom_install_option_constructor(void) {
     Item global = js_get_global_this();
     Item ctor = js_new_native_constructor(_option_ctor);
-    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Option"))});
+    js_set_function_name(ctor, js_name_item("Option"));
     Item proto = js_new_object();
     js_set_key_cstr(proto, "constructor", ctor);
     js_set_key_cstr(ctor, "prototype", proto);

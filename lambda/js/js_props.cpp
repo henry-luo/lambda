@@ -452,7 +452,7 @@ extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int nam
     JS_PROPS_ASSERT_KEY(name, name_len);
     ShapeEntry* se = js_find_shape_entry(object, name, name_len);
     if (!se && create_if_missing) {
-        Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+        Item key = js_name_item(name, (size_t)name_len);
         {
             js_define_own_key_storage(object, key, js_props_undefined());
         }
@@ -662,7 +662,7 @@ extern "C" bool js_get_own_property_descriptor_name_id(Item object,
 // forward-declare here to avoid pulling the heavy transpiler header.
 
 static inline Item js_props_str(const char* s, int len) {
-    return (Item){.item = s2it(heap_create_name(s, (size_t)len))};
+    return js_name_item(s, (size_t)len);
 }
 
 static void js_props_fill_sparse_accessor_index(Item object,

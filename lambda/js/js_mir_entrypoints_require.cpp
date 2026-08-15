@@ -1716,13 +1716,12 @@ static char* js_require_read_package_main(char* path_buf, int path_buf_size,
     char* package_source = read_text_file(package_path);
     if (!package_source) return NULL;
 
-    Item package_text = (Item){.item = s2it(heap_create_name(package_source, strlen(package_source)))};
+    Item package_text = js_name_item(package_source, strlen(package_source));
     Item package_obj = js_json_parse(package_text);
     mem_free(package_source);
     if (item_is_error(package_obj)) return NULL;
 
-    Item main_key = (Item){.item = s2it(heap_create_name("main", 4))};
-    Item main_value = js_get_key_default(package_obj, main_key);
+    Item main_value = js_get_name_key(package_obj, "main", 4);
     if (item_is_error(main_value) || get_type_id(main_value) != LMD_TYPE_STRING) return NULL;
 
     String* main_str = it2s(main_value);
@@ -1801,7 +1800,7 @@ JS_FORWARD_STATIC_RETURN(char*, js_require_read_resolved_path,
     (path_buf, path_buf_size, true))
 
 static Item js_cjs_key(const char* name, int len) {
-    return (Item){.item = s2it(heap_create_name(name, len))};
+    return js_name_item(name, len);
 }
 
 #define js_cjs_module_stack_state (js_runtime_state.cjs.module_stack)
@@ -2057,7 +2056,7 @@ extern "C" Item js_require(Item specifier) {
     }
     jm_track_active_js_transpile(NULL, NULL, source);
 
-    Item resolved_spec = (Item){.item = s2it(heap_create_name(path_buf, strlen(path_buf)))};
+    Item resolved_spec = js_name_item(path_buf, strlen(path_buf));
     existing = js_cjs_cached_value(resolved_spec);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
         jm_clear_active_js_transpile(NULL, NULL, source);
@@ -2067,7 +2066,7 @@ extern "C" Item js_require(Item specifier) {
     }
 
     if (js_require_path_is_json(path_buf)) {
-        Item json_text = (Item){.item = s2it(heap_create_name(source, strlen(source)))};
+        Item json_text = js_name_item(source, strlen(source));
         Item parsed = js_json_parse(json_text);
         mem_free(source);
         if (item_is_error(parsed)) return parsed;
@@ -2125,8 +2124,8 @@ extern "C" Item js_require(Item specifier) {
 }
 
 static Item js_dynamic_import_reject_type_error(const char* message) {
-    Item error_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-    Item error_message = (Item){.item = s2it(heap_create_name(message, (int)strlen(message)))};
+    Item error_name = js_name_item("TypeError", 9);
+    Item error_message = js_name_item(message, (int)strlen(message));
     return js_promise_reject(js_new_error_with_name(error_name, error_message));
 }
 

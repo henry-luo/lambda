@@ -171,8 +171,7 @@ static double event_now_ms() {
 static Item event_exception_message(Item err) {
     Item msg = err;
     if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
-        Item m_key = (Item){.item = s2it(heap_create_name("message"))};
-        Item m = js_get_key_default(err, m_key);
+        Item m = js_get_name_key(err, "message");
         if (get_type_id(m) == LMD_TYPE_STRING) msg = m;
         else msg = js_to_string(err);
     } else if (get_type_id(err) != LMD_TYPE_STRING) {
@@ -180,7 +179,7 @@ static Item event_exception_message(Item err) {
     }
     if (item_is_error(msg)) {
         (void)js_error_lane_payload(msg);
-        msg = (Item){.item = s2it(heap_create_name("<error while formatting exception>"))};
+        msg = js_name_item("<error while formatting exception>");
     }
     return msg;
 }
@@ -206,8 +205,7 @@ static void log_event_exception_detail(const char* source, const char* type, Ite
 static void report_exception_to_window_onerror(Item err, const char* type) {
     Item global = js_get_global_this();
     if (global.item == 0) return;
-    Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
-    Item onerr = js_get_key_default(global, onerr_key);
+    Item onerr = js_get_name_key(global, "onerror");
     if (!js_is_callable(onerr)) return;
     Item msg = event_exception_message(err);
     Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
@@ -248,8 +246,8 @@ static bool js_dom_is_submit_button(DomElement* elem) {
 }
 
 static Item js_dom_throw_named_error(const char* name, const char* message) {
-    Item error_name = (Item){.item = s2it(heap_create_name(name ? name : "Error"))};
-    Item error_message = (Item){.item = s2it(heap_create_name(message ? message : ""))};
+    Item error_name = js_name_item(name ? name : "Error");
+    Item error_message = js_name_item(message ? message : "");
     return js_throw_value(js_new_error_with_name(error_name, error_message));
 }
 
@@ -821,10 +819,10 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
 
     // options object: {capture, once, passive, signal}
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT) {
-        Item cap_key = (Item){.item = s2it(heap_create_name("capture"))};
-        Item once_key = (Item){.item = s2it(heap_create_name("once"))};
-        Item passive_key = (Item){.item = s2it(heap_create_name("passive"))};
-        Item signal_key = (Item){.item = s2it(heap_create_name("signal"))};
+        Item cap_key = js_name_item("capture");
+        Item once_key = js_name_item("once");
+        Item passive_key = js_name_item("passive");
+        Item signal_key = js_name_item("signal");
 
         Item cap_val = js_get_key_default(opts, cap_key);
         Item once_val = js_get_key_default(opts, once_key);
@@ -843,10 +841,10 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
             TypeId st = get_type_id(signal_val);
             if (st == LMD_TYPE_NULL) {
                 // Per spec, signal must be an AbortSignal — null is a TypeError.
-                Item n = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item m = (Item){.item = s2it(heap_create_name(
+                Item n = js_name_item("TypeError");
+                Item m = js_name_item(
                     "Failed to execute 'addEventListener' on 'EventTarget': "
-                    "member signal is not of type 'AbortSignal'."))};
+                    "member signal is not of type 'AbortSignal'.");
                 return js_throw_value(js_new_error_with_name(n, m));
             }
             if (st == LMD_TYPE_MAP || st == LMD_TYPE_OBJECT) {
@@ -1010,8 +1008,7 @@ void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, 
     if (opts_item.item != 0) {
         TypeId opt_tid = get_type_id(opts_item);
         if (opt_tid == LMD_TYPE_MAP || opt_tid == LMD_TYPE_OBJECT) {
-            Item cap_key = (Item){.item = s2it(heap_create_name("capture"))};
-            Item cap_val = js_get_key_default(opts_item, cap_key);
+            Item cap_val = js_get_name_key(opts_item, "capture");
             if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
                 capture = js_is_truthy(cap_val);
         } else {
@@ -1062,15 +1059,14 @@ static void nl_compact(NodeListeners* nl) {
 // representation varies, so keeping conversion outside this helper avoids
 // five copies of the same property write and its allocation ordering.
 static void event_set_value(Item event, const char* key, Item value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    js_set_key_default(event, k, value);
+    js_set_name_key(event, key, value);
 }
 
 #define EVENT_SET_VALUE(name, type, expression) \
     static void name(Item event, const char* key, type value) { \
         event_set_value(event, key, expression); \
     }
-EVENT_SET_VALUE(event_set_str, const char*, value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull)
+EVENT_SET_VALUE(event_set_str, const char*, value ? js_name_item(value) : ItemNull)
 EVENT_SET_VALUE(event_set_bool, bool, (Item){.item = b2it(value ? 1 : 0)})
 EVENT_SET_VALUE(event_set_int, int, (Item){.item = i2it(value)})
 EVENT_SET_VALUE(event_set_double, double, js_make_number(value))
@@ -1078,14 +1074,14 @@ EVENT_SET_VALUE(event_set_item, Item, value)
 #undef EVENT_SET_VALUE
 
 static void event_mark_non_writable(Item event, const char* key) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
+    Item k = js_name_item(key);
     js_mark_non_writable(event, k);
 }
 
 // Get the current event flag values from per-event slots stored on the event
 // object itself (so nested dispatches don't trample each other).
 static bool event_flag_get(Item event, const char* key) {
-    Item v = js_get_key_default(event, (Item){.item = s2it(heap_create_name(key))});
+    Item v = js_get_key_default(event, js_name_item(key));
     return js_is_truthy(v);
 }
 
@@ -1203,10 +1199,10 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
     // Per spec, type is mandatory — throw TypeError if missing/undefined.
     TypeId tt = get_type_id(type_arg);
     if (type_arg.item == 0 || tt == LMD_TYPE_UNDEFINED) {
-        Item n = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item m = (Item){.item = s2it(heap_create_name(
+        Item n = js_name_item("TypeError");
+        Item m = js_name_item(
             "Failed to execute 'initEvent' on 'Event': "
-            "1 argument required, but only 0 present."))};
+            "1 argument required, but only 0 present.");
         return js_throw_value(js_new_error_with_name(n, m));
     }
     Item ev = js_get_this();
@@ -1368,7 +1364,7 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
     event_set_str(event_root.get(), "data", data ? data : "");
     event_set_int(event_root.get(), "inputMethod", 0);
     event_set_str(event_root.get(), "locale", "");
-    Item ite_key = (Item){.item = s2it(heap_create_name("initTextEvent"))};
+    Item ite_key = js_name_item("initTextEvent");
     js_set_key_default(event_root.get(), ite_key,
         js_new_native_function(js_event_init_text_event));
     return event_root.get();
@@ -1381,7 +1377,7 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
     Rooted<Item> event_root(roots, js_create_event_init_with_class(type, bubbles,
         cancelable, composed, JS_CLASS_CUSTOM_EVENT));
     event_set_item(event_root.get(), "detail", detail_root.get());
-    Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
+    Item ice_key = js_name_item("initCustomEvent");
     js_set_key_default(event_root.get(), ice_key,
         js_new_native_function(js_event_init_custom_event));
     return event_root.get();
@@ -1433,8 +1429,7 @@ static Item read_init(Item init, const char* key) {
     if (init.item == 0) return ItemNull;
     TypeId t = get_type_id(init);
     if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT && t != LMD_TYPE_VMAP) return ItemNull;
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    return js_get_key_default(init, k);
+    return js_get_name_key(init, key);
 }
 
 static bool init_present(Item v) {
@@ -1484,7 +1479,7 @@ static Item init_nullable_str_item(Item init, const char* key) {
     TypeId t = get_type_id(v);
     if (t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED) return ItemNull;
     const char* s = fn_to_cstr(v);
-    return s ? (Item){.item = s2it(heap_create_name(s))} : ItemNull;
+    return s ? js_name_item(s) : ItemNull;
 }
 
 static Item init_item(Item init, const char* key) {
@@ -1522,8 +1517,7 @@ extern "C" Item js_event_get_modifier_state(Item key_arg) {
     else if (strcmp(key, "Shift") == 0)   snprintf(buf, sizeof(buf), "shiftKey");
     else if (strcmp(key, "Meta") == 0)    snprintf(buf, sizeof(buf), "metaKey");
     else snprintf(buf, sizeof(buf), "modifier%s", key);
-    Item k = (Item){.item = s2it(heap_create_name(buf))};
-    Item v = js_get_key_default(ev, k);
+    Item v = js_get_name_key(ev, buf);
     return (Item){.item = (js_is_truthy(v)) ? ITEM_TRUE : ITEM_FALSE};
 }
 
@@ -1542,9 +1536,9 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
     if (init_present(view)) {
         TypeId vt = get_type_id(view);
         if (vt != LMD_TYPE_MAP && vt != LMD_TYPE_OBJECT && vt != LMD_TYPE_VMAP) {
-            Item n = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item m = (Item){.item = s2it(heap_create_name(
-                "Failed to construct event: view member is not of type Window."))};
+            Item n = js_name_item("TypeError");
+            Item m = js_name_item(
+                "Failed to construct event: view member is not of type Window.");
             return js_throw_value(js_new_error_with_name(n, m));
         }
         event_set_item(ev, "view", view);
@@ -1586,8 +1580,7 @@ static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
     event_set_int(ev, "button",  init_int(init_arg, "button", 0));
     event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
-    Item gms_key = (Item){.item = s2it(heap_create_name("getModifierState"))};
-    js_set_key_default(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
+    js_set_name_key(ev, "getModifierState", js_new_native_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1625,8 +1618,7 @@ extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
     event_set_int(ev, "DOM_KEY_LOCATION_LEFT", 1);
     event_set_int(ev, "DOM_KEY_LOCATION_RIGHT", 2);
     event_set_int(ev, "DOM_KEY_LOCATION_NUMPAD", 3);
-    Item gms_key = (Item){.item = s2it(heap_create_name("getModifierState"))};
-    js_set_key_default(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
+    js_set_name_key(ev, "getModifierState", js_new_native_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1648,7 +1640,7 @@ extern "C" Item js_create_native_composition_event(const char* type,
     event_set_bool(init, "cancelable", false);
     event_set_bool(init, "composed", true);
     event_set_str(init, "data", data ? data : "");
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : "compositionupdate"))};
+    Item type_str = js_name_item(type ? type : "compositionupdate");
     Item ev = js_ctor_composition_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
@@ -1805,7 +1797,7 @@ extern "C" Item js_create_click_mouse_event(void) {
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
     event_set_int(init, "detail", 1);
-    Item type_str = (Item){.item = s2it(heap_create_name("click"))};
+    Item type_str = js_name_item("click");
     return js_ctor_mouse_event_fn(type_str, init);
 }
 
@@ -1845,7 +1837,7 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     if (related_target.item != 0) {
         event_set_item(init, "relatedTarget", related_target);
     }
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item type_str = js_name_item(type ? type : "");
     Item ev = js_ctor_mouse_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
@@ -1877,7 +1869,7 @@ extern "C" Item js_create_native_pointer_event(const char* type,
     event_set_double(init, "pressure", buttons ? 0.5 : 0.0);
     event_set_str(init, "pointerType", pointer_type ? pointer_type : "mouse");
     event_set_bool(init, "isPrimary", is_primary);
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item type_str = js_name_item(type ? type : "");
     Item ev = js_ctor_pointer_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
@@ -1893,7 +1885,7 @@ extern "C" Item js_create_native_css_event(const char* type,
                   detail_value ? detail_value : "");
     event_set_double(init, "elapsedTime", elapsed_time);
     event_set_str(init, "pseudoElement", "");
-    Item type_item = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item type_item = js_name_item(type ? type : "");
     Item ev = detail_name && strcmp(detail_name, "animationName") == 0
         ? js_ctor_animation_event_fn(type_item, init)
         : js_ctor_transition_event_fn(type_item, init);
@@ -1934,7 +1926,7 @@ extern "C" Item js_create_native_keyboard_event(const char* type,
     event_set_int(init, "which", legacy_key_code);
     event_set_bool(init, "repeat", repeat);
     stamp_modifier_init(init, ctrl, shift, alt, meta);
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item type_str = js_name_item(type ? type : "");
     Item ev = js_ctor_keyboard_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
@@ -1950,7 +1942,7 @@ extern "C" Item js_create_native_focus_event(const char* type, Item related_targ
     if (related_target.item != 0) {
         event_set_item(init, "relatedTarget", related_target);
     }
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item type_str = js_name_item(type ? type : "");
     Item ev = js_ctor_focus_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
@@ -1965,8 +1957,7 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
     (void)args; (void)argc;
     Item ev = js_get_this();
     if (get_type_id(ev) != LMD_TYPE_MAP) return js_array_new(0);
-    Item key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
-    Item stashed = js_get_key_default(ev, key);
+    Item stashed = js_get_name_key(ev, "__target_ranges");
     Item ranges = js_array_new(0);
     if (get_type_id(stashed) != LMD_TYPE_ARRAY) return ranges;
 
@@ -1992,9 +1983,8 @@ static void js_input_event_install_target_ranges(Item ev, Item target_ranges) {
     if (get_type_id(ranges) != LMD_TYPE_ARRAY) {
         ranges = js_array_new(0);
     }
-    Item ranges_key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
-    js_set_key_default(ev, ranges_key, ranges);
-    Item gtr_key = (Item){.item = s2it(heap_create_name("getTargetRanges"))};
+    js_set_name_key(ev, "__target_ranges", ranges);
+    Item gtr_key = js_name_item("getTargetRanges");
     js_set_key_default(ev, gtr_key,
         js_new_native_span_function(js_input_event_get_target_ranges));
 }
@@ -2017,7 +2007,7 @@ extern "C" Item js_create_native_input_event(const char* type,
     if (data_transfer.item != 0) {
         event_set_item(init, "dataTransfer", data_transfer);
     }
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : "beforeinput"))};
+    Item type_str = js_name_item(type ? type : "beforeinput");
     Item ev = js_ctor_input_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     // Stash the StaticRange[] snapshot so getTargetRanges() can return it.
@@ -2047,7 +2037,7 @@ extern "C" Item js_create_native_wheel_event(const char* type,
     event_set_double(init, "deltaY", delta_y);
     event_set_int(init, "deltaMode", 0); // DOM_DELTA_PIXEL
     stamp_modifier_init(init, ctrl, shift, alt, meta);
-    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : "wheel"))};
+    Item type_str = js_name_item(type ? type : "wheel");
     Item ev = js_ctor_wheel_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
@@ -2068,7 +2058,7 @@ JS_FORWARD_EXPRESSION(bool, js_event_is_default_prevented, (Item event),
 // ============================================================================
 extern "C" Item js_set_window_event_for_legacy(Item event) {
     Item global = js_get_global_this();
-    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    Item event_key = js_name_item("event");
     Item prev = js_get_key_default(global, event_key);
     js_set_key_default(global, event_key, event);
     return prev;
@@ -2076,8 +2066,7 @@ extern "C" Item js_set_window_event_for_legacy(Item event) {
 
 extern "C" void js_restore_window_event_for_legacy(Item prev) {
     Item global = js_get_global_this();
-    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
-    js_set_key_default(global, event_key, prev);
+    js_set_name_key(global, "event", prev);
 }
 
 // ============================================================================
@@ -2163,8 +2152,7 @@ static Item event_target_get_idl_handler(Item target, const char* type) {
     char on_name[64];
     int written = snprintf(on_name, sizeof(on_name), "on%s", type);
     if (written < 3 || written >= (int)sizeof(on_name)) return ItemNull;
-    Item handler = js_get_key_default(
-        target, (Item){.item = s2it(heap_create_name(on_name))});
+    Item handler = js_get_key_default(target, js_name_item(on_name));
     return js_is_callable(handler) ? handler : ItemNull;
 }
 
@@ -2219,8 +2207,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     event_set_int(event, "eventPhase", reported_phase ? reported_phase : phase);
 
     // set currentTarget
-    Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
-    js_set_key_default(event, ct_key, wrap_path_key(key, key_is_dom));
+    js_set_name_key(event, "currentTarget", wrap_path_key(key, key_is_dom));
 
     // Check stop-immediate flag against per-event slot.
     #define _STOP_IMM event_flag_get(event, "__stop_imm")
@@ -2283,8 +2270,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         Item this_for_call = wrap_path_key(key, key_is_dom);
         if (!js_is_callable(callback)) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
-            Item he_key = (Item){.item = s2it(heap_create_name("handleEvent"))};
-            Item he = js_get_key_default(callback, he_key);
+            Item he = js_get_name_key(callback, "handleEvent");
             if (!js_is_callable(he)) continue;
             // per spec, `this` is the EventListener object itself
             this_for_call = callback;
@@ -2330,15 +2316,14 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     TypeId evt_tid = get_type_id(event_item);
     if (event_item.item == 0 || evt_tid == LMD_TYPE_NULL ||
         evt_tid == LMD_TYPE_UNDEFINED) {
-        Item n = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item m = (Item){.item = s2it(heap_create_name(
+        Item n = js_name_item("TypeError");
+        Item m = js_name_item(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
-            "parameter 1 is not of type 'Event'."))};
+            "parameter 1 is not of type 'Event'.");
         return js_throw_value(js_new_error_with_name(n, m));
     }
     // get event type
-    Item type_key = (Item){.item = s2it(heap_create_name("type"))};
-    Item type_val = js_get_key_default(event_item, type_key);
+    Item type_val = js_get_name_key(event_item, "type");
     const char* type = fn_to_cstr(type_val);
     if (!type) {
         log_error("js_dom_dispatch_event: event has no type");
@@ -2346,8 +2331,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     }
 
     // get bubbles flag
-    Item bubbles_key = (Item){.item = s2it(heap_create_name("bubbles"))};
-    Item bubbles_val = js_get_key_default(event_item, bubbles_key);
+    Item bubbles_val = js_get_name_key(event_item, "bubbles");
     bool bubbles = js_is_truthy(bubbles_val);
 
     // ------------------------------------------------------------------
@@ -2421,17 +2405,17 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // Spec: throw InvalidStateError DOMException if event is already being dispatched.
     if (event_flag_get(event_item, "__dispatch_flag")) {
-        Item n = (Item){.item = s2it(heap_create_name("InvalidStateError"))};
-        Item m = (Item){.item = s2it(heap_create_name(
+        Item n = js_name_item("InvalidStateError");
+        Item m = js_name_item(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
-            "The event is already being dispatched."))};
+            "The event is already being dispatched.");
         return js_throw_value(js_new_error_with_name(n, m));
     }
 
     // set target / srcElement (per DOM spec, dispatch sets target to the
     // current dispatch target — re-dispatch updates it).
-    Item target_key = (Item){.item = s2it(heap_create_name("target"))};
-    Item src_key = (Item){.item = s2it(heap_create_name("srcElement"))};
+    Item target_key = js_name_item("target");
+    Item src_key = js_name_item("srcElement");
     js_set_key_default(event_item, target_key, elem_item);
     js_set_key_default(event_item, src_key, elem_item);
 
@@ -2477,7 +2461,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // when called inside a Shadow Tree listener (we don't model Shadow
     // DOM headlessly, so we always set it).
     Item global = js_get_global_this();
-    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    Item event_key = js_name_item("event");
     Item prev_global_event = js_get_key_default(global, event_key);
     js_set_key_default(global, event_key, event_item);
 
@@ -2514,8 +2498,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_int(event_item, "eventPhase", 0);
 
     // currentTarget is reset to null after dispatch (per spec).
-    Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
-    js_set_key_default(event_item, ct_key, ItemNull);
+    js_set_name_key(event_item, "currentTarget", ItemNull);
 
     // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
     // propagation flag, stop immediate propagation flag, and dispatch flag.

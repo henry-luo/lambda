@@ -2004,7 +2004,7 @@ template <typename Target>
 JS_FORWARD_STATIC_VOID( buf_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 static Item buffer_iterator_key(const char* name, int len) {
-    return (Item){.item = s2it(heap_create_name(name, len))};
+    return js_name_item(name, len);
 }
 JS_FORWARD_ITEM(js_buffer_iterator_identity, (void), js_get_current_this, ())
 

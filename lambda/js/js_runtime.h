@@ -1256,6 +1256,16 @@ void js_private_field_init_end(void);
 
 Item make_string_item(const char* str, int len);
 Item make_string_item(const char* str);
+// Interned property keys. These go through the name pool, so they keep name
+// identity and need no RootFrame — unlike make_string_item / js_get_key_cstr,
+// which heap-copy. Interning is semantics here, not style: do not "simplify"
+// a converted site onto the copying forms.
+Item js_name_item(const char* name, int len);
+Item js_name_item(const char* name);
+Item js_get_name_key(Item object, const char* name, int len);
+Item js_get_name_key(Item object, const char* name);
+Item js_set_name_key(Item object, const char* name, int len, Item value);
+Item js_set_name_key(Item object, const char* name, Item value);
 bool js_store_typed_value(void* field_ptr, TypeId value_type, Item value);
 // Native adapters are one overload family; keep declarations in lockstep with
 // the arity-generated implementations in js_runtime_function.cpp.

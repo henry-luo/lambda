@@ -53,8 +53,7 @@ static void js_function_store_metadata_property(JsFunction* fn,
     Rooted<Item> function_root(roots,
         (Item){.function = (Function*)fn});
     Rooted<Item> value_root(roots, value);
-    Rooted<Item> key_root(roots,
-        (Item){.item = s2it(heap_create_name(name, name_length))});
+    Rooted<Item> key_root(roots, js_name_item(name, name_length));
     // Function metadata is initialized by [[DefineOwnProperty]], not ordinary
     // assignment: its non-writable descriptor must still accept a later
     // SetFunctionName/SetFunctionLength before publication (D6.2.2v2).
@@ -1085,7 +1084,7 @@ extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item
     } else {
         snprintf(display, sizeof(display), "%.*s", base_len, base);
     }
-    Item display_item = (Item){.item = s2it(heap_create_name(display, strlen(display)))};
+    Item display_item = js_name_item(display, strlen(display));
     if (prefix_kind == 1 || prefix_kind == 2) {
         js_set_function_name(fn_item, display_item);
     } else {
@@ -1098,8 +1097,7 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
         JsFunction* fn = (JsFunction*)cls_item.function;
         if (!fn || !(fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR) ||
                 get_type_id(name_item) != LMD_TYPE_STRING) return;
-        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-        Item current = js_get_key_default(cls_item, name_key);
+        Item current = js_get_name_key(cls_item, "name", 4);
         // A static `name` method is an own callable property; inferred class
         // naming must not replace it with the constructor's display string.
         if (get_type_id(current) != LMD_TYPE_STRING) return;
@@ -1115,8 +1113,7 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);
     if (existing && !jspd_is_deleted(existing)) {
-        Item key = (Item){.item = s2it(heap_create_name("name", 4))};
-        Item current = js_get_key_default(cls_item, key);
+        Item current = js_get_name_key(cls_item, "name", 4);
         if (get_type_id(current) == LMD_TYPE_STRING) {
             String* current_name = it2s(current);
             if (current_name && current_name->len == 0) {
@@ -1140,8 +1137,7 @@ extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_it
     if (get_type_id(proto_item) != LMD_TYPE_MAP) return;
     ShapeEntry* existing = js_find_shape_entry(proto_item, "constructor", 11);
     if (existing && !jspd_is_deleted(existing)) return;
-    Item key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-    js_set_key_default(proto_item, key, cls_item);
+    js_set_name_key(proto_item, "constructor", 11, cls_item);
     js_attr_set_enumerable(proto_item, "constructor", 11, false);
 }
 
