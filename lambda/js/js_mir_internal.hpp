@@ -176,6 +176,12 @@ bool jm_build_property_key_image(const PropertyKeySpec* inherited,
     uint32_t inherited_count, uint32_t inherited_bytes_size,
     const ArrayList* local_names, PropertyKeySpec** out_specs,
     uint32_t* out_count, uint32_t* out_bytes_size);
+// Strictness of the code currently being lowered: the top-level directive, an
+// ES module (always strict), or the enclosing function's own directive.
+static inline bool jm_strict_put(JsMirTranspiler* mt) {
+    return mt && (mt->is_global_strict || mt->is_module ||
+        (mt->current_fc && mt->current_fc->is_strict));
+}
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);

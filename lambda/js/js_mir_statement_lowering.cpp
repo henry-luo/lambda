@@ -3420,8 +3420,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             JsFunctionNode* enclosing_fn = mt->current_fc ? mt->current_fc->node : NULL;
             bool current_body_direct = enclosing_fn &&
                 jm_current_function_has_direct_body_function_binding(enclosing_fn, fn_vname);
-            bool effective_strict = mt->is_global_strict || mt->is_module ||
-                (mt->current_fc && mt->current_fc->is_strict) ||
+            bool effective_strict = jm_strict_put(mt) ||
                 (enclosing_fn && jm_has_use_strict_directive(enclosing_fn));
             if (effective_strict && !jm_function_decl_is_direct_binding(fn_decl, true) &&
                 !current_body_direct) {

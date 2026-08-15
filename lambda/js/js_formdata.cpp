@@ -748,84 +748,11 @@ static void fd_install_methods(Item fd_obj) {
     js_set_key_default(fd_obj, make_sym_iterator_key(), js_new_native_function(js_fd_entries));
 }
 
-// ============================================================================
-// Blob and File constructors
-// ============================================================================
-
-// Compute the byte-size of a Blob parts array (parts is an Array of strings/Blobs).
-// Strings count UTF-8 byte length; Blob/File parts use their .size property.
-static int64_t blob_compute_size(Item parts) {
-    if (get_type_id(parts) != LMD_TYPE_ARRAY) return 0;
-    int64_t total = 0;
-    int64_t plen = js_array_length(parts);
-    for (int64_t i = 0; i < plen; i++) {
-        Item p = js_elements_get_int(parts, i);
-        TypeId pt = get_type_id(p);
-        if (pt == LMD_TYPE_STRING) {
-            const char* s = fn_to_cstr(p);
-            if (s) total += (int64_t)strlen(s);
-        } else if (pt == LMD_TYPE_MAP) {
-            // nested Blob/File: add its size
-            Item sz = prop_get(p, "size");
-            if (get_type_id(sz) == LMD_TYPE_INT) total += it2i(sz);
-        } else {
-            // coerce to string and use its byte length
-            const char* s = fn_to_cstr(p);
-            if (s) total += (int64_t)strlen(s);
-        }
-    }
-    return total;
-}
-
-// Read options.type (a string) → returns owned string or "".
-static const char* blob_options_type(Item options) {
-    if (get_type_id(options) != LMD_TYPE_MAP) return "";
-    Item t = prop_get(options, "type");
-    if (get_type_id(t) != LMD_TYPE_STRING) return "";
-    const char* s = fn_to_cstr(t);
-    return s ? s : "";
-}
-
-// new Blob([parts], { type })
-static Item js_blob_construct(Item parts, Item options) {
-    Item obj = js_new_object_with_class(JS_CLASS_BLOB);
-    int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
-    prop_set(obj, "size", make_int_item(size));
-    prop_set(obj, "type", make_str(blob_options_type(options)));
-    Item ctor = prop_get(js_get_global_this(), "Blob");
-    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
-    return obj;
-}
-
 // Current epoch milliseconds.
 static int64_t now_epoch_ms() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
-// new File([parts], name, { type, lastModified })
-static Item js_file_construct(Item parts, Item name, Item options) {
-    Item obj = js_new_object_with_class(JS_CLASS_FILE);
-
-    int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
-    prop_set(obj, "size", make_int_item(size));
-    prop_set(obj, "type", make_str(blob_options_type(options)));
-
-    const char* name_cs = (get_type_id(name) == LMD_TYPE_UNDEFINED) ? "" : fn_to_cstr(name);
-    prop_set(obj, "name", make_str(name_cs ? name_cs : ""));
-
-    int64_t lm = now_epoch_ms();
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item lm_item = prop_get(options, "lastModified");
-        if (get_type_id(lm_item) == LMD_TYPE_INT) lm = it2i(lm_item);
-        else if (get_type_id(lm_item) == LMD_TYPE_FLOAT) lm = (int64_t)it2d(lm_item);
-    }
-    prop_set(obj, "lastModified", make_int_item(lm));
-
-    Item ctor = prop_get(js_get_global_this(), "File");
-    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
-    return obj;
 }
 
 // Convert a Blob value to a File when filename is provided to FormData.append/set.
@@ -995,19 +922,13 @@ extern "C" void js_formdata_install_globals(void) {
     Item ctor_fn = js_new_native_constructor(js_formdata_construct);
     prop_set(global, "FormData", ctor_fn);
 
+    // C1.3: the Blob/File fallback constructors that used to live here were
+    // unreachable. js_register_clipboard_globals() installs the full-spec
+    // Blob/File during global bootstrap, which always runs before this
+    // installer (js_dom_set_document -> js_formdata_install_globals), so the
+    // "not yet defined" guards never fired.
     Item blob_ctor_fn = prop_get(global, "Blob");
-    if (get_type_id(blob_ctor_fn) == LMD_TYPE_UNDEFINED ||
-        blob_ctor_fn.item == ITEM_JS_UNDEFINED || blob_ctor_fn.item == ItemNull.item) {
-        blob_ctor_fn = js_new_native_constructor(js_blob_construct);
-        prop_set(global, "Blob", blob_ctor_fn);
-    }
-
     Item file_ctor_fn = prop_get(global, "File");
-    if (get_type_id(file_ctor_fn) == LMD_TYPE_UNDEFINED ||
-        file_ctor_fn.item == ITEM_JS_UNDEFINED || file_ctor_fn.item == ItemNull.item) {
-        file_ctor_fn = js_new_native_constructor(js_file_construct);
-        prop_set(global, "File", file_ctor_fn);
-    }
 
     // Also install on window if it exists
     Item window = prop_get(global, "window");

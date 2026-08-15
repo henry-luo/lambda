@@ -2419,18 +2419,6 @@ JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
 // Document Proxy Object
 // ============================================================================
 
-extern "C" bool js_is_document_proxy(Item item) {
-    TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) {
-        return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
-             item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
-             item.vmap->host_type == radiant_dom_document_host_type() ||
-             item.vmap->host_type == radiant_dom_foreign_document_host_type());
-    }
-    return false;
-}
-
 static DomDocument* js_document_proxy_doc_from_item(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP && item.vmap) {

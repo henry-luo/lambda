@@ -29,7 +29,6 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "js_state_guards.h"
 #include "js_dom_platform.h"
 #include "js_dom_observers.h"
-#include "js_host_hooks.h"
 #include "js_test262_fast_paths.h"
 #include "../lambda-data.hpp"
 #include "../core/lambda-decimal.hpp"
@@ -45,10 +44,8 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/utf.h"
 #include <assert.h>
 
-extern "C" Item js_bound_function_target(Item func_item);
 extern "C" Item js_xhr_new(void);
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
-extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
@@ -187,10 +184,8 @@ bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
 #include "../format/format.h"
-#include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/url.h"
-#include "../../lib/base64.h"
 #include "../../lib/hex.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
@@ -310,7 +305,6 @@ static int js_get_parent_pid_win32(void) {
 #endif
 
 // forward declaration for JSON parser
-extern Item parse_json_to_item(Input* input, const char* json_string);
 extern Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
 
 extern "C" void js_defprop_set_internal_state(Item obj, Item key, Item value);
@@ -981,7 +975,6 @@ bool js_ta_define_own_numeric_index(Item obj, Item key, Item desc,
 #endif
 JS_FORWARD_STATIC_EXPRESSION(bool, js_regexp_virtual_prop_name, (const char* name, int len), ((len == 6 && (strncmp(name, "source", 6) == 0 || strncmp(name, "global", 6) == 0 || strncmp(name, "dotAll", 6) == 0 || strncmp(name, "sticky", 6) == 0)) || (len == 5 && strncmp(name, "flags", 5) == 0) || (len == 10 && strncmp(name, "ignoreCase", 10) == 0) || (len == 9 && strncmp(name, "multiline", 9) == 0) || (len == 7 && strncmp(name, "unicode", 7) == 0) || (len == 11 && strncmp(name, "unicodeSets", 11) == 0)))
 
-extern Item fn_array_set(Array* arr, int64_t index, Item value);
 extern "C" void js_mark_own_proto_property(Item object);
 Map* js_resolve_object_prototype();
 
@@ -2837,7 +2830,6 @@ extern "C" Item js_node_throw_system_error(const char* syscall, int error_number
 
 // POSIX: process.getuid/getgid/geteuid/getegid
 #ifndef _WIN32
-#include <unistd.h>
 #include <signal.h>
 #endif
 
@@ -6216,7 +6208,6 @@ extern "C" Item js_get_prototype_of(Item object) {
 // =============================================================================
 
 // js_array_push already declared above as extern "C" Item js_array_push(Item, Item)
-extern "C" bool js_can_be_held_weakly_pub(Item key);
 
 static Item js_reflect_create_list_from_array_like(Item array_like, Item** out_args, int* out_argc) {
     *out_args = NULL;
