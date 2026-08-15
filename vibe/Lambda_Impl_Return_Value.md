@@ -1616,9 +1616,247 @@ Gated by running the **same tree both ways**:
 **Identical counts and identical failure lists** — `result29_indexed_guards`,
 three `MirGcStressTest` forced-GC divergences, `dom_module_props`, and `tco`.
 All six were then reproduced on a **clean tree** (whole working set stashed,
-rebuilt), so none is attributable to v3 or to this session; three of them
-(`result29_indexed_guards`, `dom_module_props`, `tco`) arrived with the
-upstream "JS LOC reduction" merge and are worth their own investigation.
+rebuilt), so none was attributable to v3 or to this session.
+
+*Resolved 2026-08-15 by the `LAMBDA_JS_EXEC_PROFILE` / test-link fix
+(`81e5ecbb1`, `bf13385dd`): all six cleared. The post-fix gate at the v3
+default is **3833/3833 clean**, which retires the parity argument in favour
+of an absolute one.*
 
 v2 remains buildable via `-DLAMBDA_RETURN_V3=0` until P5 deletes its
 machinery; the `#ifndef` guard is unchanged, only the default moved.
+
+### 2026-08-15 — P2.7.1 (RV16) LANDED
+
+A wide-capable **mutable** binding now owns one number slot for its scope.
+
+**Mechanism.** The slot must be an *uncolored* fixed scratch slot
+(`em_binding_number_slot_new`, `MIR_FRAME_REF_FIXED_SCRATCH`), not a colored
+scalar home: coloring shares homes between values whose live ranges do not
+overlap, which is precisely wrong for a value written each iteration and read
+on the next. Fixed slots also sit below the loop-entry watermark, which is the
+soundness argument RV15's reclaim needs. Growing the count during body
+emission is safe because `em_finalize_scalar_homes` — which resolves slot
+offsets and the frame size — runs after the body and before the prologue.
+
+The store side re-homes at `transpile_assign_stam`'s **single exit** rather
+than in each arm of its type cascade (rule 13), reusing
+`em_adopt_scalar_item_value`, which passes packed values straight through and
+copies only a frame-backed payload.
+
+**The predicate is `declared` wide, not `may_be_wide` — and that distinction
+is the whole cost of the feature.** The first cut used
+`lambda_type_id_may_be_wide_scalar`, which is correct at a *return* boundary
+(any ANY may turn out wide) and far too broad for a binding, because it admits
+every ANY-carriered `var`:
+
+| bench | before | with broad predicate | delta |
+|---|---|---|---|
+| deltablue | 15,227 insns / 0.9% | 15,966 / **3.5%** | +739 |
+| richards | 7,544 / 0.3% | 7,973 / **3.6%** | +429 |
+| havlak | 16,276 / 0.7% | 17,105 / **3.2%** | +829 |
+| json | 9,129 / 0.7% | 9,705 / **3.7%** | +576 |
+
+~600–800 added instructions per benchmark to serve loop-carried `int64`
+accumulators those programs do not have — against RV15's ~142-instruction
+recovery in deltablue. Narrowing to declared `int64`/`uint64`/`float64` makes
+all four **byte-identical to before**, while still firing for the accumulator
+the rule exists for (`var total = 0i64` in a loop: `number_scratch=2`, one
+slot per declared-wide var, none for the `int` accumulator; value correct).
+
+**Gate: 3833/3833 clean** at the v3 default.
+
+**What this says about RV15.** RV16's cost scales with declared-wide mutable
+bindings; RV15's benefit is capped at the 11 adopt sites v3 leaves. On the
+AWFY corpus RV16 is now free and RV15 would recover ~142 instructions in
+deltablue. That is the real trade, and it is far narrower than the 757-site
+population RV14/RV15/RV16 were designed against.
+
+### 2026-08-15 — P2.7.2/P2.7.3 (RV15 + RVO11): NOT SHIPPED, and now we know why
+
+RV16 is in and free (previous entry). RV15 was then designed against the
+tree and the blocker is structural, not incidental.
+
+**The reclaim's soundness argument runs through RV16, and narrowing RV16 cut
+that link.** The design's chain is: RV16 gives a wide-capable mutable binding
+a slot allocated at its declaration, hence *below* the loop-entry watermark,
+hence unreachable by a reclaim — so the reclaim cannot invalidate anything a
+binding still needs. That argument requires RV16 to cover **every** mutable
+binding that can hold a wide payload. The narrowed RV16 covers only
+*declared* `int64`/`uint64`/`float64`. An ANY-typed `var` assigned a wide
+value — common — gets its payload allocated *during* the statement, above the
+snapshot, with nothing below to hold it. The reclaim would invalidate it.
+
+So the two are not independent knobs:
+
+| RV16 predicate | cost | makes RV15 sound? |
+|---|---|---|
+| declared wide (shipped) | **free** — byte-identical AWFY | **no** |
+| may-be-wide (measured) | **+600–800 insns/bench** | yes |
+
+RV15 recovers ~142 instructions in deltablue. So the sound configuration is
+**net ≈ +600 instructions per benchmark**, and the unsound one is free. That
+is the complete answer to "should RV14/RV15/RV16 ship": **the prerequisite
+that makes the reclaim sound costs more than the reclaim saves**, by roughly
+4×, under v3. RV14/RV15/RV16 stay *ruled* — they were correct against the
+757-site population they were written for — but they are now measurably the
+wrong trade at 11 sites.
+
+**RVO11 stays open and is now sharper.** The obligation is no longer the
+open-ended "where do loop-carried wide values live?", nor even "does any
+unnamed wide temporary cross a back edge?". With the statement-boundary form
+it is: *does this statement leave a wide payload above the snapshot that
+something outliving the statement still points at?* Two known sources, one
+settled and one not:
+
+- **Bindings** — settled: covered iff RV16 is broad (see table).
+- **Container stores** — NOT verified. Whether `arr[i] = <wide>` or
+  `push(arr, <wide>)` copies the payload into destination-owned storage
+  (D5.2.2) or retains a pointer into the caller's number extent decides
+  whether containers are a second hole. Today's eager per-call restore hides
+  the question; removing it exposes it. **Verify this before any reclaim
+  ships** — it is the one fact standing between the current analysis and a
+  complete RVO11 answer.
+
+What is left implemented: `em_binding_number_slot_new` and the
+`wide_number_slot`/`wide_number_addr` binding fields, both live and gated.
+Re-broadening the predicate is a one-line change if the trade ever inverts —
+e.g. if int64-heavy code becomes a target, where RV16's cost is paid anyway
+and RV15's saving is proportionally larger.
+
+### 2026-08-15 — the "int64 accumulator crash": TWO defects, one mine (fixed by removal), one pre-existing (root-caused, open)
+
+The RVO11 churn harness exposed a segfault. Investigation separated it into
+two independent defects that happened to share a repro shape.
+
+**Defect A — RV16's publish classified a raw lane as an Item. MINE; fixed by
+removing RV16's wiring.** `mir_publish_wide_number_slot` ran
+`em_adopt_scalar_item_value` on `var->reg` assuming a boxed Item, but the
+assignment cascade leaves a declared-`int64` binding's register holding a RAW
+lane (`it2l` result). The guard (`mir_type != MIR_T_I64`) is the degenerate
+register-class proxy — raw i64 and Item are both `MIR_T_I64` — i.e. I
+reintroduced the exact bug class RVO12's closure documents, hours later, in
+new code. Latent until the accumulated VALUE'S own high byte reached a
+scalar-pointer tag (`value ≥ 6·2^56` ⇒ byte 0x06 = `LMD_TYPE_INT64` ⇒ the
+adopter dereferenced the value's own bits — measured threshold n≈433 at
+step 999999999999999 matches 6·2^56 exactly). The 3833/3833 gate missed it
+because no baseline test accumulates an int64 past 4.3e17; my own behavioral
+check used small magnitudes. **Removal, not repair**, because the narrow-
+predicate RV16 has nothing to publish — every qualifying binding is
+raw-lane-carriered ("static type ⇒ representation"), so the wiring was
+dead-and-dangerous. `em_binding_number_slot_new` and the VarEntry fields went
+with it; the RV16/RV15 cost analysis in the previous entry stands unchanged.
+
+**Defect B — loop-carried representation widening; PRE-EXISTING. FIXED
+2026-08-15 (see the follow-up entry below).** Minimal repro (crashed at the
+SECOND iteration):
+
+```lambda
+pn churn(n: int) {
+  var s = 0
+  for (i in 1 to n) { s = s + 999999999999999i64 }
+  return s
+}
+```
+
+Mechanism, each step verified in the dump or by instrumentation:
+
+1. `int + int64` classifies into the semantic **INTEGER** domain on both
+   sides (static and runtime agree): `apply_decimal_numeric` returns a
+   **decimal**. The values are correct — an apparent "10× wrong result" was
+   twice misread from `print` output concatenating main's return value
+   without a newline; there is no value bug.
+2. The assignment's type-mismatch arm correctly boxes and **widens the
+   binding to ANY** — but the loop body was emitted in ONE pass, and the
+   read of `s` at the top of the body was emitted earlier, against the
+   declaration's INT-lane representation. The back edge re-enters that stale
+   code: `int2it_lane(decimal_pointer_bits)` → out-of-band → **inf**.
+3. Iteration 2 computes `inf + int64` (observed via fn_add instrumentation:
+   `a=0x7ff0000000000000`), and the eventual native-INT return converts the
+   corrupted accumulator via `lambda_item_to_int_lane_c` →
+   `decimal_to_int64_exact` dereferences junk (crash report:
+   KERN_INVALID_ADDRESS, the read value itself a recycled-slot bit pattern).
+
+The root cause is therefore: **an assignment inside a loop that widens a
+binding's representation cannot retroactively fix the loop's already-emitted
+reads.** Everything downstream (inf, the decimal deref) is consequence.
+Component ages: the INTEGER-domain classification landed 2026-08-02 ("int
+total impl"), the widening arm predates 2026-07-24 — both predate this
+session. (A direct pre-session binary comparison was attempted twice and
+failed for build-system reasons — worktree needs node_modules/premake state;
+partial checkout doesn't compile against current config — so attribution
+rests on component dating, stated as such.)
+
+Candidate fixes, unranked, all needing a prepass or two-pass shape: pre-scan
+a loop body for assignments whose RHS static type widens a read-before-
+written binding and widen the DECLARATION's carrier; or emit loop-top reads
+through the binding's FINAL type (requires the assignment cascade to stop
+mutating `var->type_id` mid-body); or reject the widening at compile time
+per TE-17-style enforcement. Each touches shared var/loop emission —
+substantial, and not attempted here.
+
+**Also verified this round (RVO11 container question, separate message):**
+`array_set` copies wide payloads into array-owned cells
+(`arr->items[capacity-extra-1]`, the `extra` counter) and re-tags — D5.2.2
+destination-owned storage implemented in the store itself; native-lane and
+map stores copy by construction. Verified empirically with runtime-computed
+values after producer-frame teardown plus 600-push extent churn (an earlier
+pass used wide LITERALS, which the const pool keeps alive — an invalid test,
+redone). RVO11's container hole does not exist; bindings remain the only
+population, covered iff RV16 is broad — the trade recorded above.
+
+### 2026-08-15 — Defect B FIXED: loop-carried representation widening
+
+Two independent blind spots, both "a scan that does not know Lambda's own AST
+shapes". Fixed together; gate **3834/3834**, AWFY emission byte-identical
+(deltablue 15,227 insns / 0.9%, richards 7,544 / 0.3% — unchanged), so the fix
+is free on code that does not widen.
+
+**B1 — the emitter's carrier (the SIGSEGV).** A loop body is emitted in one
+pass, so a read of a binding at the loop top is emitted against whatever
+carrier it has *at that moment*. An assignment later in the same body can
+widen the binding to a boxed ANY (the cascade's final arm), and the back edge
+then re-enters the already-emitted read, decoding a boxed Item through the old
+raw lane.
+
+Fix: `mir_prewiden_loop_bindings` walks the body **before** it is emitted and
+widens any binding the body will widen, so read and write agree for the whole
+loop. Called from `transpile_for` (before `push_scope` — the binding lives in
+the enclosing scope) and `transpile_while_core`.
+
+The widening predicate is the subtle part. `mir_is_native_scalar_value_type`
+is TRUE for decimal/string/symbol — they are *pointer-lane* scalars — so it
+cannot answer "does this value fit the binding's register?". The predicate
+tests **lane compatibility** instead, mirroring the cascade's non-widening
+arms: same integer family, float binding taking int/float, int binding taking
+float (C16). Anything else crosses lanes and widens. Using "is native" as the
+test made the pass silently do nothing on the exact case it was written for.
+
+**B2 — the return-lane proof (the wrong ANSWER).** With B1 fixed the loop body
+was exact, but sums past 2^53 still returned `int.inf`:
+`mir_nested_control_writes_name` handled `AST_NODE_FOR_STAM` — the **JS**-shaped
+`for(;;)` node — and had no case for `AST_NODE_FOR_EXPR`, which is Lambda's
+own `for (x in xs)`. Every assignment inside a Lambda for-loop was therefore
+invisible to it, so `mir_binding_has_reassignment` answered "never reassigned"
+and the return proof fell through to the DECLARATION's initializer as its lane
+witness: `var s = 0` published a native int return even after the loop had
+widened the binding to a boxed decimal, and the decimal saturated on that lane.
+
+*Method note:* the same blind spot bit twice. My first version of B1's walker
+used `ast_visit_core_children`, which likewise has no `AST_NODE_ASSIGN_STAM`
+or `AST_NODE_CONTENT` case — it is built for the JS node set — so the walk
+visited nothing and the "fix" changed no behaviour. **A shared AST visitor
+that silently visits nothing is worse than no visitor**; B1's walker now
+switches over the Lambda shapes explicitly.
+
+**Test:** `test/lambda/proc/int64_accumulator_widening.ls` — for-loop,
+while-loop, nested loops, and a guarded (`if`-armed) widening, all at
+magnitudes far past int53 so a lane saturation shows as a wrong value; plus
+two CONTROLS that must NOT widen (a plain `int` accumulator, and a declared
+`int64` one, which types as int64 throughout).
+
+*Parser limitation found in passing, unrelated and not fixed:* two consecutive
+assignments to outer bindings inside a `for` body fail to parse
+(`s = s + 1` then `last = s` → "Unexpected syntax near '= s'"), with or
+without semicolons; the working idiom in `for_expr_content_proc.ls` declares a
+`var` first. The test was reformulated around it.

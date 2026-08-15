@@ -1138,6 +1138,56 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         interp_write_binding(f, target, value);
         return ItemNull;
     }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        // `obj.field = v` / `arr[i] = v` where the target root is a plain
+        // binding. The *_cow helpers own S9.1.2: they hand back the owner to
+        // publish, which is a fresh private copy when the old one was shared,
+        // so COW stays unobservable without the walker reasoning about sharing.
+        // Nested paths (`a.b.c = v`) have their own path-set lowering and are
+        // rejected by the pre-scan until that slice lands.
+        AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        AstNode* target = interp_unwrap_primary(ca->object);
+        NameEntry* root = target && target->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)target)->entry : NULL;
+        if (!root) {
+            log_error("interp: compound assignment target is not a simple binding");
+            return ItemError;
+        }
+        Scratch owner(f);
+        owner.set(interp_read_binding(f, root));
+
+        Item key;
+        if (node->node_type == AST_NODE_MEMBER_ASSIGN_STAM &&
+                ca->key && ca->key->node_type == AST_NODE_IDENT) {
+            // A dotted field name is a static key, as on the read side.
+            AstIdentNode* name = (AstIdentNode*)ca->key;
+            key = (Item){.item = s2it(heap_create_name(name->name->chars,
+                name->name->len))};
+        } else {
+            key = eval_expr(f, ca->key);
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+        Scratch key_slot(f);
+        key_slot.set(key);
+
+        Item value = eval_expr(f, ca->value);
+        if (interp_frame_pending(f)) return ItemNull;
+        Scratch value_slot(f);
+        value_slot.set(value);
+
+        Item replacement;
+        if (node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            replacement = map_set_cow(owner.get(), key_slot.get(), value_slot.get());
+        } else {
+            replacement = array_set_cow(owner.get(), it2l(key_slot.get()),
+                value_slot.get());
+        }
+        if (item_is_error(replacement)) return replacement;
+        // Publish the (possibly new) owner back at its binding.
+        interp_write_binding(f, root, replacement);
+        return ItemNull;
+    }
     case AST_NODE_WHILE_STAM:
     case AST_NODE_DO_WHILE_STAM: {
         AstWhileNode* loop = (AstWhileNode*)node;
@@ -1301,9 +1351,23 @@ static Item interp_execute(Runner* runner, InterpState* st) {
     // way transpile_content does and keep the last value as the result.
     Item result = ItemNull;
     Scratch tail(frame);
+    // A script whose top level is a single statement carries it directly under
+    // AST_SCRIPT rather than inside a content list, so definitions have to be
+    // hoisted and bound here too — evaluating one as an expression would build
+    // an anonymous closure and leave its name unbound (build_content's pass 1).
+    for (AstNode* item = root->child; item; item = item->next) {
+        if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
+                item->node_type == AST_NODE_FUNC_EXPR) {
+            exec_declaration(frame, item);
+        }
+    }
     for (AstNode* item = root->child; item; item = item->next) {
         if (item->node_type == AST_NODE_CONTENT || item->node_type == AST_NODE_LIST) {
             tail.set(eval_content(frame, (AstListNode*)item, true));
+        } else if (is_declaration_node(item->node_type)) {
+            bool hoisted = item->node_type == AST_NODE_FUNC ||
+                item->node_type == AST_NODE_PROC || item->node_type == AST_NODE_FUNC_EXPR;
+            if (!hoisted) exec_declaration(frame, item);
         } else if (item->node_type != AST_NODE_IMPORT) {
             tail.set(eval_expr(frame, item));
         }
@@ -1331,7 +1395,9 @@ static Item interp_execute(Runner* runner, InterpState* st) {
                 NameEntry* entry = proc->analysis ? proc->analysis->decl_entry : NULL;
                 Item callee = entry ? interp_read_binding(frame, entry) : ItemNull;
                 if (get_type_id(callee) != LMD_TYPE_FUNC) {
-                    log_error("interp: run_main found no callable 'main'");
+                    log_error("interp: run_main found no callable 'main' "
+                        "(slot=%d, got type %d)", entry ? entry->slot : -1,
+                        (int)get_type_id(callee));
                     break;
                 }
                 uint64_t result_home = 0;

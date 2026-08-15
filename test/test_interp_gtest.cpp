@@ -48,12 +48,18 @@ std::string read_file(const std::string& path) {
 }
 
 // Runs a script with an explicit tier. `tier` may be null for the default path.
-RunResult run_script(const std::string& script, const char* tier) {
+// `procedural` selects `lambda.exe run <script>`, which is how a `pn main()`
+// script is executed at all — invoking one directly runs no main and produces
+// empty output, so a run-mode defect would compare equal on both tiers.
+RunResult run_script(const std::string& script, const char* tier,
+                     bool procedural = false) {
     RunResult result;
     std::string err_path = "temp/interp_gtest_stderr.txt";
     std::string command;
     if (tier) command += std::string("LAMBDA_TIER=") + tier + " ";
-    command += LAMBDA_EXE " " + script + " 2>" + err_path;
+    command += LAMBDA_EXE;
+    if (procedural) command += " run";
+    command += " " + script + " 2>" + err_path;
 
     FILE* pipe = popen(command.c_str(), "r");
     if (!pipe) { result.exit_code = -1; return result; }
@@ -76,14 +82,23 @@ long summary_field(const std::string& stderr_text, const char* key) {
     return strtol(stderr_text.c_str() + at + strlen(key), nullptr, 10);
 }
 
-std::vector<std::string> read_list(const std::string& path) {
-    std::vector<std::string> entries;
+// Each list line is `<script>` or `<script>\t<field>`; the subset list's field
+// is the invocation mode, the exclusion list's is the reject reason.
+struct ListEntry {
+    std::string script;
+    std::string field;
+    bool procedural() const { return field == "run"; }
+};
+
+std::vector<ListEntry> read_list(const std::string& path) {
+    std::vector<ListEntry> entries;
     std::ifstream in(path);
     std::string line;
     while (std::getline(in, line)) {
         if (line.empty() || line[0] == '#') continue;
         size_t tab = line.find('\t');
-        entries.push_back(tab == std::string::npos ? line : line.substr(0, tab));
+        if (tab == std::string::npos) entries.push_back({line, ""});
+        else entries.push_back({line.substr(0, tab), line.substr(tab + 1)});
     }
     return entries;
 }
@@ -115,30 +130,31 @@ void expect_tiers_agree(const std::string& name, const std::string& source) {
 // 1. Differential over the committed subset
 //==============================================================================
 
-class InterpSubsetTest : public ::testing::TestWithParam<std::string> {};
+class InterpSubsetTest : public ::testing::TestWithParam<ListEntry> {};
 
 TEST_P(InterpSubsetTest, MatchesGoldenWithoutFallback) {
-    const std::string& script = GetParam();
+    const ListEntry& entry = GetParam();
+    const std::string& script = entry.script;
     std::string golden_path = script.substr(0, script.size() - 3) + ".txt";
     std::string golden = read_file(golden_path);
     ASSERT_FALSE(golden.empty()) << "missing golden for " << script;
 
-    RunResult interp = run_script(script, "interp");
+    RunResult interp = run_script(script, "interp", entry.procedural());
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0)
         << script << " fell back to the JIT; it must leave the subset list";
     EXPECT_EQ(golden, interp.stdout_text) << script << " diverges from its golden";
 }
 
-std::vector<std::string> subset_scripts() {
-    std::vector<std::string> scripts = read_list("test/lambda/interp_p0_subset.txt");
-    if (scripts.empty()) scripts.push_back("");   // keep the suite instantiable
+std::vector<ListEntry> subset_scripts() {
+    std::vector<ListEntry> scripts = read_list("test/lambda/interp_p0_subset.txt");
+    if (scripts.empty()) scripts.push_back({"", ""});   // keep the suite instantiable
     return scripts;
 }
 
 INSTANTIATE_TEST_SUITE_P(P0Subset, InterpSubsetTest,
     ::testing::ValuesIn(subset_scripts()),
-    [](const ::testing::TestParamInfo<std::string>& info) {
-        std::string name = info.param;
+    [](const ::testing::TestParamInfo<ListEntry>& info) {
+        std::string name = info.param.script;
         size_t slash = name.find_last_of('/');
         if (slash != std::string::npos) name = name.substr(slash + 1);
         if (name.size() > 3) name = name.substr(0, name.size() - 3);
@@ -196,6 +212,21 @@ TEST(InterpWalker, OptionalParameterDefault) {
     expect_tiers_agree("defaults",
         "fn greet(name, greeting: string = \"hi\") { greeting }\n"
         "greet(\"a\")\ngreet(\"a\", \"yo\")\n");
+}
+
+TEST(InterpWalker, ProceduralMainIsInvokedUnderRunMode) {
+    // `lambda.exe run` calls a user-defined `pn main()` and makes its result the
+    // script result. A script whose only top-level item is that definition also
+    // has to bind it: it sits directly under AST_SCRIPT rather than inside a
+    // content list, and evaluating it as an expression would leave it unbound.
+    std::string path = "temp/interp_case_procmain.ls";
+    write_script(path, "pn main() {\n    let base = 40\n    base + 2\n}\n");
+    RunResult jit = run_script(path, "jit", /*procedural=*/true);
+    RunResult interp = run_script(path, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(jit.stdout_text, interp.stdout_text) << "run-mode tiers diverge";
+    EXPECT_NE(interp.stdout_text.find("42"), std::string::npos)
+        << "run mode produced no main() result: [" << interp.stdout_text << "]";
 }
 
 //==============================================================================
@@ -261,14 +292,15 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
 
 // Every excluded script must be counted, never silently half-interpreted (R4).
 TEST(InterpFallback, ExcludedScriptsAreCountedNotInterpreted) {
-    std::vector<std::string> excluded = read_list("test/lambda/interp_excluded.txt");
+    std::vector<ListEntry> excluded = read_list("test/lambda/interp_excluded.txt");
     ASSERT_FALSE(excluded.empty()) << "exclusion list is missing or empty";
     int checked = 0;
-    for (const std::string& script : excluded) {
+    for (const ListEntry& entry : excluded) {
         if (checked++ >= 12) break;   // a sample; the sweep covers the full list
-        RunResult interp = run_script(script, "interp");
+        RunResult interp = run_script(entry.script, "interp");
         long executed = summary_field(interp.stderr_text, "executed=");
-        EXPECT_EQ(executed, 0) << script << " is on the exclusion list but ran under T0";
+        EXPECT_EQ(executed, 0) << entry.script
+            << " is on the exclusion list but ran under T0";
     }
 }
 
