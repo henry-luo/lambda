@@ -1144,10 +1144,13 @@ rather than the deletion removing it.
 - [x] P1.2 callee pair returns; epilogue adopt deleted (flagged)
 - [x] P1.3 caller resolution protocol + patch helper *(EAGER form; RV6 lazy
       `maybe_pending` propagation is the remaining refinement)*
-- [~] P1.4 descriptor↔`nres` cross-check landed and wired into both call
-      paths (residue closed); pair-returning dynamic entries and `nres=2`
-      wrappers are BLOCKED on the RV12 slot transport — the dynamic path is
-      C-mediated end to end (see log)
+- [x] **P1.4 COMPLETE** *(2026-08-15)* — descriptor↔`nres` cross-check
+      (`em_assert_callee_result_count`, keyed on `em_variant_returns_pair` =
+      the descriptor's `result.companion`, i.e. shape-derived not home-mask
+      derived — which is item 3 of the plan); dynamic dispatch now donates no
+      home under v3. Item 2 (`nres=2` wrappers) is superseded by RV12: a
+      C-reachable `_b` wrapper returns ONE result plus the context slot, which
+      is the design that replaced it.
 - [x] P1.5 interp/ff bridges — **RVO3 closed by audit**, guard already
       enforced the invariant; comment added so it stays that way
 - [x] P1.6 async/yield audit + test — **RVO4 closed**; found and fixed a real

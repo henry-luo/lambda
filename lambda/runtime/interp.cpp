@@ -78,6 +78,8 @@ public:
         frame_.signal_index = named;
         frame_.scratch_base = named + 1;
         frame_.scratch_top = frame_.scratch_base;
+        frame_.slots[frame_.signal_index] = ITEM_NULL;   // zero before publish
+        frame_.signal = EvalSignal::NORMAL;
         frame_.caller = st->top;
         st->top = &frame_;
         ok_ = true;
@@ -140,7 +142,27 @@ public:
 static Item eval_expr(InterpFrame* f, AstNode* node);
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions);
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
+static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded);
 static void exec_declaration(InterpFrame* f, AstNode* node);
+
+// Raises a statement signal, parking its payload in the frame's reserved slot.
+static inline void interp_signal(InterpFrame* f, EvalSignal signal, Item payload) {
+    f->signal = signal;
+    f->slots[f->signal_index] = payload.item;
+}
+
+static inline Item interp_signal_payload(InterpFrame* f) {
+    return (Item){.item = f->slots[f->signal_index]};
+}
+
+// Consumes a loop-scoped signal. `break` and `continue` stop at the nearest
+// enclosing loop; `return` and `error-skip` keep unwinding past it.
+static inline void interp_clear_loop_signal(InterpFrame* f) {
+    if (f->signal == EvalSignal::BROKE || f->signal == EvalSignal::CONTINUED) {
+        f->signal = EvalSignal::NORMAL;
+        f->slots[f->signal_index] = ITEM_NULL;
+    }
+}
 
 // Direct-pointer Items: the object's own header byte already carries its
 // TypeId, so no high-byte tag is added (the canonical carrier fn_is/fn_query
@@ -336,17 +358,26 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
 static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     // `and`/`or` short-circuit before the right operand is evaluated (S10.2.3);
     // truthiness is by tag through the shipped helper (S3.1/S3.2).
-    if (node->op == OPERATOR_AND) {
-        Item left = eval_expr(f, node->left);
-        if (item_is_error(left)) return left;
-        if (!is_truthy(left)) return left;
-        return eval_expr(f, node->right);
-    }
-    if (node->op == OPERATOR_OR) {
-        Item left = eval_expr(f, node->left);
-        if (item_is_error(left)) return left;
-        if (is_truthy(left)) return left;
-        return eval_expr(f, node->right);
+    if (node->op == OPERATOR_AND || node->op == OPERATOR_OR) {
+        // Short-circuit, then let the helper decide (S10.2.3). The early exit
+        // is only taken where fn_and/fn_or would return the left operand
+        // anyway, so containment stays the helper's call: an error is *falsy*
+        // (is_truthy), which is what makes `int("x") or 7` yield 7 rather than
+        // propagating — checking for an error here would break that.
+        Item left_value = eval_expr(f, node->left);
+        if (interp_frame_pending(f)) return left_value;
+        Scratch lhs(f);
+        lhs.set(left_value);
+        Bool truth = is_truthy(lhs.get());
+        if (node->op == OPERATOR_AND ? truth == BOOL_FALSE : truth == BOOL_TRUE) {
+            return lhs.get();
+        }
+        Item right_value = eval_expr(f, node->right);
+        if (interp_frame_pending(f)) return right_value;
+        Scratch rhs(f);
+        rhs.set(right_value);
+        return node->op == OPERATOR_AND ? fn_and(lhs.get(), rhs.get())
+                                        : fn_or(lhs.get(), rhs.get());
     }
 
     // The slot is taken *after* the left operand is evaluated: holding it
@@ -572,10 +603,30 @@ typedef enum InterpArrayKind {
     INTERP_ARRAY_SIZED,
 } InterpArrayKind;
 
+// A child that produces a stream (for-expression, spread, pipe) makes every
+// element of the literal a spread candidate — the same all-or-nothing rule
+// transpile_array applies, and it also disables the compact-numeric paths.
+static bool interp_array_has_spread(AstArrayNode* node, bool* pipe_spread) {
+    bool spreadable = false;
+    if (pipe_spread) *pipe_spread = false;
+    for (AstNode* item = node->item; item; item = item->next) {
+        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD) {
+            spreadable = true;
+        } else if (item->node_type == AST_NODE_PIPE) {
+            if (pipe_spread) *pipe_spread = true;
+        }
+    }
+    return spreadable;
+}
+
 static InterpArrayKind interp_array_kind(AstArrayNode* node,
                                          ArrayNumElemType* sized_elem) {
     TypeArray* arr_type = (TypeArray*)node->type;
     if (!node->item || !arr_type || !arr_type->nested) return INTERP_ARRAY_GENERIC;
+    bool pipe_spread = false;
+    if (interp_array_has_spread(node, &pipe_spread) || pipe_spread) {
+        return INTERP_ARRAY_GENERIC;
+    }
     // A compact numeric array cannot faithfully carry an open value, null or an
     // error; keep those members in generic storage.
     for (AstNode* item = node->item; item; item = item->next) {
@@ -630,18 +681,41 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         return acc.get();
     }
 
+    bool pipe_spread = false;
+    bool has_spreadable = interp_array_has_spread(node, &pipe_spread);
+    bool any_spread = has_spreadable || pipe_spread;
+
     Scratch acc(f);
     acc.set(interp_ptr_item(array()));
     if (!node->item) return acc.get();   // array_end() on an empty array is spreadable-null
     for (AstNode* item = node->item; item; item = item->next) {
+        // `let` bindings inside an array literal are transparent: they bind but
+        // contribute no element.
+        if (item->node_type == AST_NODE_ASSIGN) {
+            AstNamedNode* named = (AstNamedNode*)item;
+            Item bound = eval_expr(f, named->as);
+            if (interp_frame_pending(f)) return acc.get();
+            interp_write_binding(f, named->entry, bound);
+            continue;
+        }
         Item value = eval_expr(f, item);
+        if (interp_frame_pending(f)) return acc.get();
         // Re-read the accumulator after every element: growth may collect.
         Array* arr = (Array*)(uintptr_t)acc.get().item;
         if (!arr) return ItemError;
-        if (item->node_type == AST_NODE_SPREAD) array_push_spread(arr, value);
-        else array_push(arr, value);
+        if (item->node_type == AST_NODE_PIPE) array_push_spread_all(arr, value);
+        else if (has_spreadable || item->node_type == AST_NODE_SPREAD) {
+            array_push_spread(arr, value);
+        } else {
+            array_push(arr, value);
+        }
     }
-    return array_end((Array*)(uintptr_t)acc.get().item);
+    Array* built = (Array*)(uintptr_t)acc.get().item;
+    Item result = array_end(built);
+    // An all-empty stream reports spreadable-null; a literal `[for ...]` is an
+    // empty array instead.
+    if (any_spread && result.item == ITEM_NULL_SPREADABLE) return interp_ptr_item(built);
+    return result;
 }
 
 // Same order as transpile_map's fallback path: every value is evaluated and
@@ -669,6 +743,119 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
     return interp_ptr_item(map_fill_items(built, (const Item*)(void*)words, vi));
 }
 
+
+// ---------------------------------------------------------------------------
+// For comprehensions
+// ---------------------------------------------------------------------------
+
+// AstLoopNode carries its variables as names, not NameEntry pointers: its
+// AstNamedNode alias overlaps a real field, so push_name deliberately leaves no
+// back-link (the same divergence FnAnalysis::decl_entry works around). The
+// owning `for` scope is small, so resolve by name at bind time.
+static NameEntry* interp_scope_lookup(NameScope* scope, String* name) {
+    if (!scope || !name) return NULL;
+    for (NameEntry* e = scope->first; e; e = e->next) {
+        if (e->name && e->name->len == name->len &&
+                memcmp(e->name->chars, name->chars, name->len) == 0) return e;
+    }
+    return NULL;
+}
+
+typedef struct ForCtx {
+    InterpFrame* f;
+    AstForNode*  node;
+    uint64_t*    output;    // rooted Array* accumulator slot, NULL when discarded
+} ForCtx;
+
+static bool interp_for_level(ForCtx* fc, AstLoopNode* loop);
+
+// Innermost level: run the let clause, apply `where`, then push the body value.
+static bool interp_for_emit(ForCtx* fc) {
+    InterpFrame* f = fc->f;
+    for (AstNode* decl = fc->node->let_clause; decl; decl = decl->next) {
+        if (decl->node_type != AST_NODE_ASSIGN) continue;
+        AstNamedNode* named = (AstNamedNode*)decl;
+        Item bound = eval_expr(f, named->as);
+        if (interp_frame_pending(f)) return false;
+        interp_write_binding(f, named->entry, bound);
+    }
+    if (fc->node->where) {
+        Item keep = eval_expr(f, fc->node->where);
+        if (interp_frame_pending(f)) return false;
+        if (!is_truthy(keep)) return true;    // filtered out, keep iterating
+    }
+    Item value = eval_expr(f, fc->node->then);
+    if (interp_frame_pending(f)) return false;
+    if (fc->output) {
+        // Re-read the accumulator: the body evaluation above is a safepoint.
+        Array* out = (Array*)(uintptr_t)*fc->output;
+        if (out) array_push_spread(out, value);
+    }
+    return true;
+}
+
+static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
+    InterpFrame* f = fc->f;
+    if (!loop) return interp_for_emit(fc);
+
+    Item collection = eval_expr(f, loop->as);
+    if (interp_frame_pending(f)) return false;
+    Scratch coll_slot(f);
+    coll_slot.set(collection);
+
+    // item_keys allocates; the collection must already be published.
+    SymbolKeyList* keys = item_keys(coll_slot.get());
+    int key_filter = (int)loop->key_filter;
+    int64_t length = iter_len(coll_slot.get(), keys, key_filter);
+
+    NameEntry* value_entry = interp_scope_lookup(fc->node->vars, loop->name);
+    NameEntry* index_entry = loop->index_name
+        ? interp_scope_lookup(fc->node->vars, loop->index_name) : NULL;
+
+    bool ok = true;
+    for (int64_t i = 0; i < length && ok; i++) {
+        Item current = loop->key_only
+            ? iter_key_at(coll_slot.get(), keys, i, key_filter)
+            : iter_val_at(coll_slot.get(), keys, i, key_filter);
+        interp_write_binding(f, value_entry, current);
+        if (index_entry) {
+            interp_write_binding(f, index_entry,
+                iter_key_at(coll_slot.get(), keys, i, key_filter));
+        }
+        ok = interp_for_level(fc, (AstLoopNode*)((AstNode*)loop)->next);
+        if (f->signal == EvalSignal::BROKE) { interp_clear_loop_signal(f); break; }
+        if (f->signal == EvalSignal::CONTINUED) { interp_clear_loop_signal(f); ok = true; }
+    }
+    if (keys) symbol_key_list_free(keys);
+    return ok && !interp_frame_pending(f);
+}
+
+static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded) {
+    AstLoopNode* loop = (AstLoopNode*)for_node->loop;
+    if (!loop) return ItemNull;
+
+    ForCtx fc = {};
+    fc.f = f;
+    fc.node = for_node;
+    // A procedural `for` statement still runs its body, but its comprehension
+    // stream is dead when the enclosing block discards it.
+    Scratch out_slot(f);
+    if (result_demanded) {
+        out_slot.set(interp_ptr_item(array_spreadable()));
+        fc.output = out_slot.home();
+    }
+
+    interp_for_level(&fc, loop);
+    if (!result_demanded) return ItemNull;
+
+    Array* out = (Array*)(uintptr_t)out_slot.get().item;
+    Item result = array_end(out);
+    // array_end reports an all-empty comprehension as spreadable-null; a
+    // top-level for-expression yields a real empty array instead.
+    if (result.item == ITEM_NULL_SPREADABLE) return interp_ptr_item(out);
+    return result;
+}
+
 // ---------------------------------------------------------------------------
 // Content blocks
 // ---------------------------------------------------------------------------
@@ -677,14 +864,21 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
 // run for effect, and the value expressions form the block's result — one
 // value passes through, several accumulate into a list.
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
-    int value_count = 0;
+    int value_count = 0, decl_count = 0, stam_count = 0;
     AstNode* last_value = NULL;
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type) ||
-                is_side_effect_stam(item->node_type)) continue;
+        if (is_declaration_node(item->node_type)) { decl_count++; continue; }
+        if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
         value_count++;
         last_value = item;
     }
+    // transpile_content's block-expression shortcut deliberately excludes a
+    // lone `for`: its result is spreadable and must go through list_push_spread
+    // so the stream flattens into the block instead of nesting one level.
+    bool direct_value = value_count == 1 &&
+        ((decl_count == 0 && stam_count == 0) ||
+         (last_value->node_type != AST_NODE_FOR_EXPR &&
+          last_value->node_type != AST_NODE_FOR_STAM));
 
     // build_content's pass 1 registers every top-level `fn`/`pn` before any
     // body is built, so a call may legally precede the textual definition.
@@ -697,7 +891,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
         }
     }
 
-    if (value_count <= 1) {
+    if (value_count == 0 || direct_value) {
         Item result = value_count == 0 ? list_end(list()) : ItemNull;
         for (AstNode* item = list_node->item; item; item = item->next) {
             if (is_declaration_node(item->node_type)) {
@@ -707,9 +901,18 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                 if (!already_hoisted) exec_declaration(f, item);
             } else if (is_side_effect_stam(item->node_type)) {
                 eval_expr(f, item);
+            } else if (is_proc_flow_side_effect_node(item, last_value)) {
+                if (item->node_type == AST_NODE_FOR_STAM) {
+                    eval_for(f, (AstForNode*)item, false);
+                } else {
+                    eval_expr(f, item);
+                }
             } else if (item == last_value) {
                 result = eval_expr(f, item);
             }
+            // break / continue / return / error-skip abandon the rest of the
+            // block; the enclosing loop or call frame consumes the signal.
+            if (interp_frame_pending(f)) return result;
         }
         return result;
     }
@@ -722,10 +925,16 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                 (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                  item->node_type == AST_NODE_FUNC_EXPR);
             if (!already_hoisted) exec_declaration(f, item);
+            if (interp_frame_pending(f)) return acc.get();
             continue;
         }
-        if (is_side_effect_stam(item->node_type)) { eval_expr(f, item); continue; }
+        if (is_side_effect_stam(item->node_type)) {
+            eval_expr(f, item);
+            if (interp_frame_pending(f)) return acc.get();
+            continue;
+        }
         Item value = eval_expr(f, item);
+        if (interp_frame_pending(f)) return acc.get();
         List* ls = (List*)(uintptr_t)acc.get().item;   // re-read: push may collect
         if (!ls) return ItemError;
         list_push_spread(ls, value);
@@ -741,7 +950,9 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     for (AstNode* decl = list_node->declare; decl; decl = decl->next) {
         if (decl->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* named = (AstNamedNode*)decl;
-            interp_write_binding(f, named->entry, eval_expr(f, named->as));
+            Item bound = eval_expr(f, named->as);
+            if (interp_frame_pending(f)) return bound;
+            interp_write_binding(f, named->entry, bound);
         }
     }
     int val_count = 0;
@@ -760,6 +971,7 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     for (AstNode* item = list_node->item; item; item = item->next) {
         if (is_declaration_node(item->node_type)) { exec_declaration(f, item); continue; }
         Item value = eval_expr(f, item);
+        if (interp_frame_pending(f)) return acc.get();
         List* ls = (List*)(uintptr_t)acc.get().item;   // re-read: push may collect
         if (!ls) return ItemError;
         list_push_spread(ls, value);
@@ -780,6 +992,7 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
             if (decl->node_type != AST_NODE_ASSIGN) continue;
             AstNamedNode* named = (AstNamedNode*)decl;
             Item value = eval_expr(f, named->as);
+            if (interp_frame_pending(f)) return;
             interp_write_binding(f, named->entry, value);
         }
         break;
@@ -836,8 +1049,17 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (branch->otherwise) return eval_expr(f, branch->otherwise);
         return ItemNull;
     }
-    case AST_NODE_CALL_EXPR:
-        return eval_call(f, (AstCallNode*)node);
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        Item result = eval_call(f, call);
+        if (call->propagate && !interp_frame_pending(f) && item_is_error(result)) {
+            // '^' propagation: the error leaves through the function boundary
+            // instead of flowing on as a value (the emit_return_if_item_error
+            // placement lowering uses for this node).
+            interp_signal(f, EvalSignal::RETURNED, result);
+        }
+        return result;
+    }
     case AST_NODE_MEMBER_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
         Item object_value = eval_expr(f, field->object);
@@ -874,6 +1096,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_array(f, (AstArrayNode*)node);
     case AST_NODE_MAP:
         return eval_map(f, (AstMapNode*)node);
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM:
+        // Reached as an expression, a `for` always yields its stream — the
+        // discard decision belongs to the enclosing content block, exactly as
+        // transpile_expr defers it to transpile_content.
+        return eval_for(f, (AstForNode*)node, true);
     case AST_NODE_CONTENT:
         return eval_content(f, (AstListNode*)node, false);
     case AST_NODE_LIST:
@@ -892,6 +1120,74 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_VAR_STAM:
         exec_declaration(f, node);
         return ItemNull;
+
+    // ---- procedural statements (S12.1.2): EvalSignal is the only non-local
+    // mechanism for language control flow (AI14); longjmp stays fault-only ----
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        Item value = eval_expr(f, assign->value);
+        if (interp_frame_pending(f)) return ItemNull;
+        NameEntry* target = assign->target_entry;
+        if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
+            target = ((AstIdentNode*)assign->left)->entry;
+        }
+        if (!target) {
+            log_error("interp: assignment target has no binding");
+            return ItemError;
+        }
+        interp_write_binding(f, target, value);
+        return ItemNull;
+    }
+    case AST_NODE_WHILE_STAM:
+    case AST_NODE_DO_WHILE_STAM: {
+        AstWhileNode* loop = (AstWhileNode*)node;
+        bool test_first = node->node_type == AST_NODE_WHILE_STAM;
+        for (;;) {
+            if (test_first) {
+                Item cond = eval_expr(f, loop->cond);
+                if (interp_frame_pending(f)) break;
+                if (item_is_error(cond)) return cond;
+                if (!is_truthy(cond)) break;
+            }
+            eval_expr(f, loop->body);
+            if (f->signal == EvalSignal::BROKE) { interp_clear_loop_signal(f); break; }
+            if (f->signal == EvalSignal::CONTINUED) interp_clear_loop_signal(f);
+            // RETURNED and ERROR_SKIP keep unwinding past this loop.
+            else if (interp_frame_pending(f)) break;
+            if (!test_first) {
+                Item cond = eval_expr(f, loop->cond);
+                if (interp_frame_pending(f)) break;
+                if (item_is_error(cond)) return cond;
+                if (!is_truthy(cond)) break;
+            }
+        }
+        return ItemNull;   // loops are statements; their value is never used
+    }
+    case AST_NODE_BREAK_STAM:
+        interp_signal(f, EvalSignal::BROKE, ItemNull);
+        return ItemNull;
+    case AST_NODE_CONTINUE_STAM:
+        interp_signal(f, EvalSignal::CONTINUED, ItemNull);
+        return ItemNull;
+    case AST_NODE_RETURN_STAM: {
+        AstReturnNode* ret = (AstReturnNode*)node;
+        Item value = ret->value ? eval_expr(f, ret->value) : ItemNull;
+        if (interp_frame_pending(f)) return value;
+        interp_signal(f, EvalSignal::RETURNED, value);
+        return value;
+    }
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR: {
+        // `raise` unwinds to the function boundary carrying its error value —
+        // the same shape lowering gives it via emit_function_error_return
+        // (S7.4.2). It travels as RETURNED so an enclosing loop cannot swallow
+        // it, exactly as break/continue are the only loop-scoped signals.
+        AstRaiseNode* raise_node = (AstRaiseNode*)node;
+        Item value = raise_node->value ? eval_expr(f, raise_node->value) : ItemError;
+        if (interp_frame_pending(f)) return value;
+        interp_signal(f, EvalSignal::RETURNED, value);
+        return value;
+    }
     case AST_NODE_SYS_FUNC:
         // A bare system-function reference outside a call is not a first-class
         // value in T0; the pre-scan lets it through only as a call callee.
@@ -957,6 +1253,9 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
         }
 
         result = eval_expr(frame, fn_node->body);
+        // An explicit `return` unwinds to exactly this boundary and its payload
+        // is the call's value; the signal never escapes the activation.
+        if (frame->signal == EvalSignal::RETURNED) result = interp_signal_payload(frame);
         // Re-home before the guard restores the callee's number watermark:
         // a wide scalar living in this frame's extent must move into the
         // caller's before its home dies.
@@ -1008,7 +1307,42 @@ static Item interp_execute(Runner* runner, InterpState* st) {
         } else if (item->node_type != AST_NODE_IMPORT) {
             tail.set(eval_expr(frame, item));
         }
+        if (interp_frame_pending(frame)) {
+            // A module-scope `raise` (or propagated error) ends the script with
+            // that value, the way an error return from `main` does.
+            if (frame->signal == EvalSignal::RETURNED) {
+                tail.set(interp_signal_payload(frame));
+            }
+            break;
+        }
     }
+    // `lambda.exe run` invokes a user-defined `pn main()` after module init and
+    // makes its result the script result — the same scan and zero-arg call the
+    // generated module entry emits under Context::run_main.
+    if (runner->context->run_main) {
+        for (AstNode* item = root->child; item; item = item->next) {
+            AstNode* stmt = item;
+            if (stmt->node_type == AST_NODE_CONTENT) stmt = ((AstListNode*)stmt)->item;
+            for (; stmt; stmt = stmt->next) {
+                if (stmt->node_type != AST_NODE_PROC) continue;
+                AstFuncNode* proc = (AstFuncNode*)stmt;
+                if (!proc->name || proc->name->len != 4 ||
+                        memcmp(proc->name->chars, "main", 4) != 0) continue;
+                NameEntry* entry = proc->analysis ? proc->analysis->decl_entry : NULL;
+                Item callee = entry ? interp_read_binding(frame, entry) : ItemNull;
+                if (get_type_id(callee) != LMD_TYPE_FUNC) {
+                    log_error("interp: run_main found no callable 'main'");
+                    break;
+                }
+                uint64_t result_home = 0;
+                tail.set(fn_call_into((Function*)(uintptr_t)callee.item, NULL,
+                    &result_home));
+                break;
+            }
+            if (interp_frame_pending(frame)) break;
+        }
+    }
+
     result = scalar_storage_read(tail.get(), false);
     return result;
 }

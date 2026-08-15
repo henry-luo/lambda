@@ -61,9 +61,19 @@ extern Item js_async_iterator_step_result(Item iterator);
 extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
 #ifdef LAMBDA_JS_EXEC_PROFILE
-extern Item js_profiled_push_d(double dval);
-extern double js_profiled_it2d(Item item);
-extern int64_t js_profiled_it2i(Item item);
+// keep profile aliases beside the registry imports: static archives scan
+// members once, so a later registry member must also provide these symbols.
+Item js_profiled_push_d(double dval) {
+    return push_d(dval);
+}
+
+double js_profiled_it2d(Item item) {
+    return it2d(item);
+}
+
+int64_t js_profiled_it2i(Item item) {
+    return it2i(item);
+}
 #endif
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee

@@ -664,9 +664,12 @@ class PremakeGenerator:
             '    ',
         ])
 
+        debug_platform = self.config.get('platforms', {}).get('debug', {})
+        debug_defines = ['DEBUG', *debug_platform.get('defines', [])]
+        debug_defines_lua = ', '.join(f'"{define}"' for define in debug_defines)
         self.premake_content.extend([
             '    filter "configurations:debug"',
-            '        defines { "DEBUG" }',
+            f'        defines {{ {debug_defines_lua} }}',
             '        symbols "On"',
             '        -- -Og keeps debugging practical while avoiding the O0 runtime penalty.',
             '        buildoptions { "-Og", "-fno-omit-frame-pointer" }',

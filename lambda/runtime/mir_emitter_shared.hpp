@@ -104,6 +104,12 @@ struct VarEntry {
     bool typed_array_cache_valid;
     bool is_live_default_binding;
     const char* live_binding_specifier;
+    // RV16: a wide-capable MUTABLE binding owns one number slot for its scope.
+    // Assignment copies the payload into this slot and retags, instead of
+    // pushing a fresh number-stack home per iteration. -1 = not applicable
+    // (immutable, non-wide-capable, or no number frame).
+    int wide_number_slot;
+    MIR_reg_t wide_number_addr;
 };
 
 typedef VarEntry MirVarEntry;
@@ -2734,6 +2740,23 @@ static inline MirFrameRef em_scalar_home_ref(MirEmitter* em,
 
 static inline MirFrameRef em_discard_scalar_home_ref(void) {
     return {MIR_FRAME_REF_DISCARD_SCRATCH, 0};
+}
+
+// RV16: allocate a number slot OWNED BY A BINDING for its whole scope.
+//
+// It must be a fixed scratch slot, not a colored scalar home: coloring shares
+// homes between values whose live ranges do not overlap, which is exactly the
+// wrong thing for a binding that is written once per iteration and read on the
+// next one. Fixed slots are also placed BELOW the loop-entry watermark (they
+// are allocated at the declaration, which precedes the loop), which is what
+// makes RV15's reclaim unable to reach them — the soundness argument for
+// retiring the eager per-call restore.
+//
+// Slot counts are resolved in `em_finalize_scalar_homes`, which runs after the
+// body is emitted, so growing the count during emission is safe.
+static inline int em_binding_number_slot_new(MirEmitter* em) {
+    if (!em || !em->frame.active || !em->frame.number_base) return -1;
+    return em->frame.plan.fixed_number_scratch_slots++;
 }
 
 static inline MirFrameRef em_fixed_number_scratch_ref(int slot) {

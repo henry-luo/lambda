@@ -8693,6 +8693,13 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
         body_scope->is_proc = tp->current_scope->is_proc;
         tp->current_scope = body_scope;
         ast_node->then = build_content(tp, then_node, true, false);
+        // Hang the scope off the content node it belongs to. Lowering resolves
+        // these names through its own per-scope hashmaps, so this was left
+        // unset and the scope became unreachable from the AST — which any
+        // later pass walking scopes (the T0 frame plan) needs it to be.
+        if (ast_node->then && ast_node->then->node_type == AST_NODE_CONTENT) {
+            ((AstListNode*)ast_node->then)->vars = body_scope;
+        }
         tp->current_scope = body_scope->parent;
     }
     else {

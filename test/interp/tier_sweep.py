@@ -9,14 +9,25 @@ import argparse, os, re, subprocess, sys
 FALLBACK_RE = re.compile(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)")
 
 
-def run(script, tier, timeout):
+# Mirrors test_lambda_gtest.cpp's discovery: functional scripts run directly,
+# procedural ones through `lambda.exe run`.
+FUNCTIONAL_DIRS = (
+    "test/lambda", "test/lambda/chart", "test/lambda/latex", "test/lambda/math",
+    "test/lambda/editor", "test/lambda/editing", "test/lambda/graph/mermaid",
+    "test/lambda/graph/graphviz", "test/lambda/graph/structurizr",
+)
+PROCEDURAL_DIRS = ("test/lambda/proc", "test/lambda/conc", "test/lambda/pdf")
+
+
+def run(script, tier, timeout, procedural=False):
     env = dict(os.environ)
     if tier:
         env["LAMBDA_TIER"] = tier
     else:
         env.pop("LAMBDA_TIER", None)
+    argv = ["./lambda.exe", "run", script] if procedural else ["./lambda.exe", script]
     try:
-        proc = subprocess.run(["./lambda.exe", script], env=env, timeout=timeout,
+        proc = subprocess.run(argv, env=env, timeout=timeout,
                               capture_output=True, text=True, errors="replace")
     except subprocess.TimeoutExpired:
         return None, None, "timeout"
@@ -29,21 +40,35 @@ def run(script, tier, timeout):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="test/lambda")
+    ap.add_argument("--dir", default=None,
+                    help="scan one directory instead of the whole baseline corpus")
     ap.add_argument("--timeout", type=int, default=20)
     ap.add_argument("--out", default="temp/interp_tier_sweep.tsv")
     args = ap.parse_args()
 
-    scripts = sorted(
-        os.path.join(args.dir, n) for n in os.listdir(args.dir)
-        if n.endswith(".ls") and os.path.exists(
-            os.path.join(args.dir, n[:-3] + ".txt")))
+    def discover(directory, procedural):
+        if not os.path.isdir(directory):
+            return []
+        return sorted(
+            (os.path.join(directory, n), procedural)
+            for n in os.listdir(directory)
+            if n.endswith(".ls") and os.path.exists(
+                os.path.join(directory, n[:-3] + ".txt")))
+
+    if args.dir:
+        scripts = discover(args.dir, args.dir in PROCEDURAL_DIRS)
+    else:
+        scripts = []
+        for directory in FUNCTIONAL_DIRS:
+            scripts += discover(directory, False)
+        for directory in PROCEDURAL_DIRS:
+            scripts += discover(directory, True)
 
     os.makedirs("temp", exist_ok=True)
     rows, supported, fell_back, mismatched = [], [], [], []
-    for script in scripts:
-        jit_out, _, jit_status = run(script, None, args.timeout)
-        int_out, stats, int_status = run(script, "interp", args.timeout)
+    for script, procedural in scripts:
+        jit_out, _, jit_status = run(script, None, args.timeout, procedural)
+        int_out, stats, int_status = run(script, "interp", args.timeout, procedural)
         executed, fallback = stats if stats else (0, 0)
         if fallback or not executed:
             verdict = "fallback"

@@ -1933,6 +1933,9 @@ static void mir_store_var_entry(MirTranspiler* mt, StrView name, MIR_reg_t reg,
     entry.var.elem_type = LMD_TYPE_ANY;
     entry.var.num_type = NUM_INT8;
     entry.var.env_offset = -1;  // not a captured variable by default
+    // RV16: no binding-owned number slot until a wide-capable mutable
+    // declaration asks for one. memset would make 0 look like slot 0.
+    entry.var.wide_number_slot = -1;
     entry.var.is_state_var = is_state_var;
     entry.var.state_name_ptr = state_name_ptr;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
@@ -1951,6 +1954,46 @@ static void set_var(MirTranspiler* mt, StrView name, MIR_reg_t reg,
 
 static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type_t mir_type, TypeId type_id) {
     set_var(mt, mir_semantic_name_cstr(mt, name), reg, mir_type, type_id);
+}
+
+// RV16: a wide-capable MUTABLE binding owns one number slot for its scope, so
+// a loop-carried accumulator writes the SAME slot each iteration instead of
+// pushing a fresh number-stack home per assignment. Only ANY-carriered
+// bindings qualify: a native lane (int/float/bool) never holds a frame-backed
+// payload, and an immutable binding is written once so it cannot accumulate.
+static void mir_bind_wide_number_slot(MirTranspiler* mt, MirVarEntry* var,
+        TypeId declared_tid) {
+    if (!var || var->wide_number_slot >= 0) return;
+    // DECLARED wide only, not merely wide-CAPABLE. `lambda_type_id_may_be_wide_scalar`
+    // is the right predicate for a return boundary, where any ANY may turn out
+    // wide, but it is far too broad here: it admits every ANY-carriered `var`,
+    // and measurement showed that costs ~600-800 emitted instructions per AWFY
+    // benchmark (home share 0.9% -> 3.5% on deltablue) to serve loop-carried
+    // int64 accumulators that those programs do not have. A binding that is
+    // not declared wide pays nothing and keeps the ordinary carrier.
+    if (declared_tid != LMD_TYPE_INT64 && declared_tid != LMD_TYPE_UINT64 &&
+            declared_tid != LMD_TYPE_FLOAT64) return;
+    if (!mt->em.frame.active || !mt->em.frame.number_base) return;
+    int slot = em_binding_number_slot_new(&mt->em);
+    if (slot < 0) return;
+    var->wide_number_slot = slot;
+    // Materialize once: the address is a frame offset patched at finalization,
+    // and the binding keeps it for its whole scope.
+    var->wide_number_addr = em_materialize_frame_ref(&mt->em,
+        em_fixed_number_scratch_ref(slot));
+    if (!var->wide_number_addr) var->wide_number_slot = -1;
+}
+
+// RV16 store side: publish an assigned value into the binding's own slot.
+// `em_adopt_scalar_item_value` passes packed values straight through and
+// copies only a frame-backed payload, so this is a no-op for the common case.
+static void mir_publish_wide_number_slot(MirTranspiler* mt, MirVarEntry* var) {
+    if (!var || var->wide_number_slot < 0 || !var->wide_number_addr) return;
+    if (var->mir_type != MIR_T_I64) return;
+    MIR_reg_t rehomed = em_adopt_scalar_item_value(&mt->em,
+        MIR_SCALAR_RETURN_DYNAMIC, var->reg, var->wide_number_addr);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, rehomed)));
 }
 
 static void mir_cache_typed_array_layout(MirTranspiler* mt, MirVarEntry* var) {
@@ -11172,6 +11215,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // bool? lane value 2 from ordinary false.
                     declared_var->full_type = asn->declared_type
                         ? asn->declared_type : declared_value_type;
+                    // RV16: only `var` accumulates — a `let` is written once,
+                    // so it cannot grow the number stack across iterations and
+                    // needs no slot of its own.
+                    if (let_node->node_type == AST_NODE_VAR_STAM) {
+                        mir_bind_wide_number_slot(mt, declared_var, var_tid);
+                    }
                 }
                 if (declared_var && typed_array_element_type) {
                     // A local ensure_typed_array establishes the representation;
@@ -11784,12 +11833,8 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
 // is_declaration_node / is_side_effect_stam live in ast.hpp — the T0
 // interpreter splits content blocks with the same two predicates.
 
-static bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
-    return node && node != last_value &&
-           (node->node_type == AST_NODE_IF_EXPR ||
-            node->node_type == AST_NODE_WHILE_STAM ||
-            node->node_type == AST_NODE_FOR_STAM);
-}
+// is_proc_flow_side_effect_node lives in ast.hpp — the T0 walker makes the
+// same value-or-side-effect call for content-block items.
 
 static bool side_effect_result_can_error(int node_type) {
     switch (node_type) {
@@ -16317,11 +16362,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     : MIR_new_import(mt->ctx, fn_mangled);
                 // Legacy Item-only fallback: no callee descriptor is available
                 // here, so this proto hard-codes a single result. Under v3 that
-                // is only sound because the reachable targets are cross-module
-                // `_b` wrappers, which keep the home transport (§1.4). Assert
-                // it rather than assume it — a pair-returning callee reached
-                // through this path would read lane 1 and drop lane 2, and a
-                // pending Item would then escape into ordinary code (RV10).
+                // is sound because the reachable targets are cross-module `_b`
+                // wrappers, and a `_b` wrapper is C-reachable, so RV12 puts its
+                // lane 2 in `Context::mir_companion_slot` and it returns ONE
+                // result. (It kept the trailing home before P3; the conclusion
+                // is unchanged, the reason is not.) Assert rather than assume —
+                // a pair-returning callee reached through this path would read
+                // lane 1 and drop lane 2, and a pending Item would then escape
+                // into ordinary code (RV10).
                 em_assert_callee_result_count(mt->ctx, fn_mangled, target, false);
                 MIR_op_t ops[19];
                 ops[0] = MIR_new_ref_op(mt->ctx, proto);
@@ -17680,6 +17728,9 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         log_error("mir: assignment to undefined variable '%s'", name_buf);
     }
 
+    // RV16: re-home into the binding's own slot at the ONE exit rather than in
+    // each arm of the type cascade above (rule 13).
+    mir_publish_wide_number_slot(mt, var);
     return val;
 }
 

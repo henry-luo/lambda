@@ -164,10 +164,37 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3).",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host.",
       "budgets": {
         "default": {
           "module_insns": 507,
+          "functions": {
+            "js_main": {
+              "insns": 76
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 2,
+              "root_stores": 7,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 12
+            },
+            {
+              "name": "_js_anon1_#",
+              "occurrence": 0,
+              "roots": 4,
+              "root_stores": 8,
+              "scalar_homes": 2,
+              "number_scratch": 0,
+              "safepoints": 12
+            }
+          ]
+        },
+        "darwin-debug-v3": {
+          "module_insns": 520,
           "functions": {
             "js_main": {
               "insns": 76
