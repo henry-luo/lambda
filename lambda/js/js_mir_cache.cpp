@@ -42,7 +42,6 @@ static uint64_t js_mir_cache_preamble_abi_hash(const JsPreambleState* preamble) 
     // spelling table in the cache key so a relink cannot reuse an old index
     // layout after the NameId transport changes.
     hash = js_mir_cache_mix(hash, 0x4e494431u);
-    hash = js_mir_cache_mix(hash, (uint64_t)preamble->ic_count);
     hash = js_mir_cache_mix(hash, (uint64_t)preamble->module_property_count);
     hash = js_mir_cache_mix(hash, (uint64_t)preamble->module_property_bytes_size);
     if (preamble->module_property_specs && preamble->module_property_bytes_size > 0) {

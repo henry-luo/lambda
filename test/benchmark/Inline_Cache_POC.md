@@ -5,25 +5,15 @@
 **Protocol:** 56 canonical benchmarks across R7RS, AWFY, BENG, KOSTYA,
 LARCENY, and JetStream; median of three execution-only runs; 120 s per run.
 
-## Build switch
+## Historical status
 
-`LAMBDA_INLINE_CACHE` is an environment-overridable LambdaJS compile
-definition with a default of `1`.
+This is a historical IC-on/IC-off comparison. The build switch and both
+per-callsite LambdaJS IC modes were removed by the D8.4.1v2 simplification;
+the archived binaries and measurements below are retained for historical
+comparison only.
 
-```sh
-make release                         # LambdaJS IC-on release
-LAMBDA_INLINE_CACHE=0 make release   # LambdaJS IC-off release
-```
-
-Use the clean `release` target when changing this definition: an incremental
-Premake build does not reliably invalidate objects when a generated define
-changes.
-
-This matrix predates the permanent removal of the Lambda MIR member inline
-cache. At capture time, `0` omitted both Lambda `fn_member_ic` and LambdaJS
-named load/store and constructor-shape caches. Lambda MIR now always emits the
-generic `fn_member` path; the flag affects LambdaJS cache lowering only.
-Type-specialized direct slot access that does not use a cache remains enabled.
+The current implementation always emits the shared runtime property path;
+there is no current IC build variant to compare.
 
 ## Binaries and raw data
 

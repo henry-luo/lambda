@@ -99,43 +99,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 5
 // this above those rows so they stay on the indexed binding path.
 #define JS_MAX_MODULE_VARS 16384
 
-#define JS_LOAD_IC_POLY_MAX 4
-#define JS_STORE_IC_POLY_MAX 4
-#define JS_LOAD_IC_EMPTY 0
-#define JS_LOAD_IC_MONO 1
-#define JS_LOAD_IC_POLY 2
-#define JS_LOAD_IC_MEGAMORPHIC 3
-#define JS_STORE_IC_EMPTY 0
-#define JS_STORE_IC_MONO 1
-#define JS_STORE_IC_POLY 2
-#define JS_STORE_IC_MEGAMORPHIC 3
-#define JS_NAMED_IC_RECEIVER_MAP 0
-#define JS_NAMED_IC_RECEIVER_ARRAY_PROPS 1
-
-typedef struct JsLoadICEntry {
-    void* shape;
-    void* entry;
-    int64_t byte_offset;
-    uint32_t name_id;
-    uint8_t receiver_kind;
-} JsLoadICEntry;
-
-typedef struct JsLoadIC {
-    uint8_t state;
-    uint8_t count;
-    uint16_t miss_count;
-    uint32_t name_id;
-    JsLoadICEntry entries[JS_LOAD_IC_POLY_MAX];
-} JsLoadIC;
-
-typedef struct JsStoreIC {
-    uint8_t state;
-    uint8_t count;
-    uint16_t miss_count;
-    uint32_t name_id;
-    JsLoadICEntry entries[JS_STORE_IC_POLY_MAX];
-} JsStoreIC;
-
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -306,10 +269,6 @@ Item js_create_data_property(Item object, Item key, Item value);
 Item js_get_reference(Item object, Item key);
 Item js_get_name_id(Item object, NameId name_id);
 Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
-Item js_get_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
-Item js_set_name_id_ic(Item object, NameId name_id, Item value,
-    int64_t strict, JsStoreIC* ic);
-void* js_active_module_ic(uint32_t index);
 
 // =============================================================================
 // Array Functions
@@ -796,9 +755,6 @@ bool js_module_state_is_available(uint32_t module_state_id);
 uint64_t js_active_module_name_id(uint32_t index);
 Item js_active_module_name_item(uint32_t module_name_index, NameId direct_name_id);
 uint32_t js_active_module_name_count(void);
-uint32_t js_active_module_ic_count(void);
-bool js_link_module_ic_table(uint32_t module_state_id, uint32_t count);
-bool js_append_module_ic_table(uint32_t module_state_id, uint32_t count);
 uint32_t js_get_batch_preamble_var_count(void);
 bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
                                      uint32_t destination_module_state_id,

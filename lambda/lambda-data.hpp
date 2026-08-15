@@ -88,13 +88,10 @@ typedef struct LambdaModuleState {
     Item* vars;
     uint64_t* var_payloads;
     NameId* property_keys;
-    void* ic_cells;
     void* consts;
     void* type_list;
     uint32_t var_count;
     uint32_t property_key_count;
-    uint32_t ic_count;
-    uint32_t ic_cell_size;
     uint32_t module_id;
     bool vars_registered;
 } LambdaModuleState;

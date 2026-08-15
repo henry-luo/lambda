@@ -357,7 +357,7 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints (D6.2.2v2, D5.4.3).",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3).",
       "budgets": {
         "linux-debug": {
           "module_insns": 6578,
@@ -393,11 +393,11 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 11,
-              "root_stores": 773,
+              "roots": 12,
+              "root_stores": 806,
               "scalar_homes": 15,
               "number_scratch": 0,
-              "safepoints": 2102
+              "safepoints": 2111
             }
           ]
         },

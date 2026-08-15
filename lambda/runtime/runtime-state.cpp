@@ -347,14 +347,6 @@ extern "C" uint64_t lambda_module_name_id_at(void* module_state,
     return (uint64_t)state->property_keys[index];
 }
 
-extern "C" void* lambda_module_ic_at(void* module_state, uint32_t index) {
-    LambdaModuleState* state = (LambdaModuleState*)module_state;
-    if (!state || !state->ic_cells || index >= state->ic_count ||
-            state->ic_cell_size == 0) return NULL;
-    return (void*)((uint8_t*)state->ic_cells +
-        (size_t)index * state->ic_cell_size);
-}
-
 extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
         uint32_t index) {
     EvalContext* owner = context;
@@ -408,10 +400,6 @@ extern "C" void lambda_module_state_reset(void) {
             memset(state->vars, 0, state->var_count * sizeof(Item));
             memset(state->var_payloads, 0, state->var_count * sizeof(uint64_t));
         }
-        if (state->ic_cells && state->ic_cell_size) {
-            memset(state->ic_cells, 0,
-                (size_t)state->ic_count * state->ic_cell_size);
-        }
     }
 }
 
@@ -428,7 +416,6 @@ extern "C" void lambda_module_state_destroy(void) {
         mem_free(state->vars);
         mem_free(state->var_payloads);
         mem_free(state->property_keys);
-        mem_free(state->ic_cells);
         mem_free(state);
     }
     mem_free(owner->module_states);

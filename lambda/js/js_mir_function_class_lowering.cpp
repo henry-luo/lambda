@@ -34,7 +34,6 @@ static void jm_init_resumable_env_entry(JsMirTranspiler* mt,
     entry->var.from_env = true;
     entry->var.env_slot = env_slot;
     entry->var.env_reg = mt->gen_env_reg;
-    entry->var.typed_array_type = -1;
 }
 
 static void jm_install_generator_env_var(JsMirTranspiler* mt, const char* name,
@@ -55,7 +54,6 @@ static void jm_install_scope_env_binding(JsMirTranspiler* mt, const char* name,
     entry.var.in_scope_env = true;
     entry.var.scope_env_slot = env_slot;
     entry.var.scope_env_reg = mt->scope_env_reg;
-    entry.var.typed_array_type = -1;
     jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
 }
 
@@ -256,7 +254,6 @@ static void jm_initialize_resumable_scope_env(JsMirTranspiler* mt,
     senv_entry.var.from_env = true;
     senv_entry.var.env_slot = scope_env_slot;
     senv_entry.var.env_reg = mt->gen_env_reg;
-    senv_entry.var.typed_array_type = -1;
     jm_install_fresh_var_entry(mt, mt->scope_depth, &senv_entry);
 
     int populate_limit = fc->scope_env_normal_count > 0
@@ -2243,7 +2240,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             entry.var.reg = local_reg;
             entry.var.mir_type = MIR_T_I64;
             entry.var.type_id = LMD_TYPE_ANY;
-            entry.var.typed_array_type = -1;
             jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
         }
         hashmap_free(dstr_param_names);
@@ -2333,7 +2329,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     cap_entry.var.from_env = true;
                     cap_entry.var.env_slot = src_slot;
                     cap_entry.var.env_reg = wrapper_env;
-                    cap_entry.var.typed_array_type = -1;
                     cap_entry.var.is_nfe_binding = fc->captures[ci].is_nfe_binding ||
                         (wrapper_self_capture_name && wrapper_self_capture_name[0] &&
                          strcmp(fc->captures[ci].name, wrapper_self_capture_name) == 0);
@@ -2566,7 +2561,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_slot = slot;
                     entry.var.env_reg = env_reg;
                 }
-                entry.var.typed_array_type = -1;  // not a typed array by default
                 entry.var.is_nfe_binding = fc->captures[i].is_nfe_binding ||
                     jm_capture_is_nfe_binding(mt, fc, fc->captures[i].name);
                 // v29 TDZ: Mark captured let/const variables so js_check_tdz is

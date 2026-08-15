@@ -1901,28 +1901,6 @@ JitImport jit_runtime_imports[] = {
     {"js_get_reference", FPTR(js_get_reference)},
     {"js_get_name_id", FPTR(js_get_name_id)},
     {"js_set_name_id", FPTR(js_set_name_id)},
-#if LAMBDA_INLINE_CACHE
-    {"js_get_name_id_ic", FPTR(js_get_name_id_ic),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER)}},
-    {"js_set_name_id_ic", FPTR(js_set_name_id_ic),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
-    // IC-cell lookup cannot create an exception. Treating its raw pointer as
-    // MAY_SET contaminated the following property load's D8.4.3 carrier.
-    {"js_active_module_ic", FPTR(js_active_module_ic),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED,
-      JIT_EXCEPTION_PRESERVES, 0}},
-#endif
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
@@ -2324,6 +2302,7 @@ JitImport jit_runtime_imports[] = {
     // shims
     // typed arrays
     {"js_typed_array_get", FPTR(js_typed_array_get)},
+    {"js_typed_array_set", FPTR(js_typed_array_set)},
     {"js_typed_array_length", FPTR(js_typed_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_typed_array_matches_type", FPTR(js_typed_array_matches_type),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -3309,7 +3288,6 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "owned_item_slot_store", "lambda_module_var_store",
         "lambda_module_name_id_at",
         "js_active_module_name_id", "js_active_module_name_item",
-        "js_active_module_ic",
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.

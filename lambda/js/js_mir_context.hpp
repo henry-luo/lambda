@@ -105,7 +105,6 @@ struct JsImportGraphNode {
     PropertyKeySpec* module_property_specs;
     uint32_t module_property_count;
     uint32_t module_property_bytes_size;
-    uint32_t ic_count;
     bool compiled;
 };
 
@@ -229,7 +228,6 @@ struct JsFuncCollected {
     bool ctor_shape_overflow;       // optimization disabled after exceeding shape metadata capacity
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
     int ctor_prop_lens[16];         // lengths of each property name
-    int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
     // immutable post-collection scope facts; cache AST walks shared by capture,
@@ -479,13 +477,6 @@ struct JsMirTranspiler {
     } module_name_id_cache[32];
     int module_name_id_cache_count;
     MIR_item_t module_name_id_cache_func;
-    struct {
-        uint32_t index;
-        MIR_reg_t reg;
-    } module_ic_cache[32];
-    int module_ic_cache_count;
-    MIR_item_t module_ic_cache_func;
-
     // TCO state
     JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)
     MIR_label_t tco_label;          // loop-back label for tail calls
@@ -506,8 +497,6 @@ struct JsMirTranspiler {
     // sealed, so generated MIR never embeds a compiler-owned String*.
     ArrayList* module_name_specs;
     uint32_t module_name_base;
-    uint32_t ic_count;
-    uint32_t module_ic_base;
 
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
