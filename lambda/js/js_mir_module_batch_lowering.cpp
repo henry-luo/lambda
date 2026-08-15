@@ -5838,7 +5838,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
-    // ES modules own a private zero-based property/IC image even when their
+    // ES modules own a private zero-based property-name image even when their
     // importer uses a test harness preamble. Sharing the preamble offset here
     // makes globalThis member names resolve against the wrong image (D3.4.4v2).
     mt->module_name_base = 0;

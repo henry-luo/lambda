@@ -1933,9 +1933,6 @@ static void mir_store_var_entry(MirTranspiler* mt, StrView name, MIR_reg_t reg,
     entry.var.elem_type = LMD_TYPE_ANY;
     entry.var.num_type = NUM_INT8;
     entry.var.env_offset = -1;  // not a captured variable by default
-    // RV16: no binding-owned number slot until a wide-capable mutable
-    // declaration asks for one. memset would make 0 look like slot 0.
-    entry.var.wide_number_slot = -1;
     entry.var.is_state_var = is_state_var;
     entry.var.state_name_ptr = state_name_ptr;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
@@ -1954,46 +1951,6 @@ static void set_var(MirTranspiler* mt, StrView name, MIR_reg_t reg,
 
 static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type_t mir_type, TypeId type_id) {
     set_var(mt, mir_semantic_name_cstr(mt, name), reg, mir_type, type_id);
-}
-
-// RV16: a wide-capable MUTABLE binding owns one number slot for its scope, so
-// a loop-carried accumulator writes the SAME slot each iteration instead of
-// pushing a fresh number-stack home per assignment. Only ANY-carriered
-// bindings qualify: a native lane (int/float/bool) never holds a frame-backed
-// payload, and an immutable binding is written once so it cannot accumulate.
-static void mir_bind_wide_number_slot(MirTranspiler* mt, MirVarEntry* var,
-        TypeId declared_tid) {
-    if (!var || var->wide_number_slot >= 0) return;
-    // DECLARED wide only, not merely wide-CAPABLE. `lambda_type_id_may_be_wide_scalar`
-    // is the right predicate for a return boundary, where any ANY may turn out
-    // wide, but it is far too broad here: it admits every ANY-carriered `var`,
-    // and measurement showed that costs ~600-800 emitted instructions per AWFY
-    // benchmark (home share 0.9% -> 3.5% on deltablue) to serve loop-carried
-    // int64 accumulators that those programs do not have. A binding that is
-    // not declared wide pays nothing and keeps the ordinary carrier.
-    if (declared_tid != LMD_TYPE_INT64 && declared_tid != LMD_TYPE_UINT64 &&
-            declared_tid != LMD_TYPE_FLOAT64) return;
-    if (!mt->em.frame.active || !mt->em.frame.number_base) return;
-    int slot = em_binding_number_slot_new(&mt->em);
-    if (slot < 0) return;
-    var->wide_number_slot = slot;
-    // Materialize once: the address is a frame offset patched at finalization,
-    // and the binding keeps it for its whole scope.
-    var->wide_number_addr = em_materialize_frame_ref(&mt->em,
-        em_fixed_number_scratch_ref(slot));
-    if (!var->wide_number_addr) var->wide_number_slot = -1;
-}
-
-// RV16 store side: publish an assigned value into the binding's own slot.
-// `em_adopt_scalar_item_value` passes packed values straight through and
-// copies only a frame-backed payload, so this is a no-op for the common case.
-static void mir_publish_wide_number_slot(MirTranspiler* mt, MirVarEntry* var) {
-    if (!var || var->wide_number_slot < 0 || !var->wide_number_addr) return;
-    if (var->mir_type != MIR_T_I64) return;
-    MIR_reg_t rehomed = em_adopt_scalar_item_value(&mt->em,
-        MIR_SCALAR_RETURN_DYNAMIC, var->reg, var->wide_number_addr);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, rehomed)));
 }
 
 static void mir_cache_typed_array_layout(MirTranspiler* mt, MirVarEntry* var) {
@@ -9137,8 +9094,117 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
         : emit_null_item_reg(mt);
 }
 
+// A loop body is emitted in ONE pass, so a read of a binding at the loop TOP is
+// emitted against whatever carrier that binding has when the read is reached.
+// If an assignment LATER in the same body widens the binding to a boxed ANY
+// (the cascade's final arm in transpile_assign_stam), the back edge re-enters
+// the already-emitted read and decodes a boxed Item through the old raw lane.
+// Observed as: `var s = 0` accumulating an `int64` (whose sum types as DECIMAL,
+// because int+int64 enters the exact INTEGER domain) produced `int2it_lane` on
+// a Decimal pointer -> out-of-band -> `inf`, then a native-int return converted
+// that through `decimal_to_int64_exact` and dereferenced junk.
+//
+// The fix is to make the carrier agree for the whole loop: widen BEFORE the
+// body is emitted, so the read and the write see one representation.
+static bool mir_assign_widens_native_binding(TypeId var_tid, TypeId val_tid) {
+    // An already-boxed binding cannot be widened further, so its reads and
+    // writes agree whatever the body does.
+    if (!mir_is_native_scalar_value_type(var_tid)) return false;
+    if (var_tid == val_tid) return false;
+    // A boxed value assigned to a native binding is UNBOXED into the lane
+    // (the cascade keeps the binding native), so this is not a widening.
+    if (val_tid == LMD_TYPE_ANY) return false;
+    // LANE compatibility, not "is native": `mir_is_native_scalar_value_type`
+    // is true for decimal/string/symbol too, because those are pointer-lane
+    // scalars — so it cannot answer "does this value fit the binding's
+    // register?". The cascade's non-widening arms are exactly these:
+    //   * same integer family (int/int64/uint64/num_sized) — one i64 lane
+    //   * float binding taking an int or float — one double lane
+    //   * int binding taking a float — declared int keeps its lane (C16)
+    if (is_integer_type_id(var_tid) && is_integer_type_id(val_tid)) return false;
+    if (var_tid == LMD_TYPE_FLOAT &&
+            (val_tid == LMD_TYPE_INT || is_float_type_id(val_tid))) return false;
+    if (var_tid == LMD_TYPE_INT && is_float_type_id(val_tid)) return false;
+    // What remains crosses lanes: a pointer-carried scalar (decimal is the
+    // motivating case — `int + int64` types as decimal), a container, null,
+    // or a type value. The cascade boxes it and switches the binding to ANY.
+    return true;
+}
+
+static void mir_widen_binding_to_any(MirTranspiler* mt, MirVarEntry* var) {
+    if (!var || var->type_id == LMD_TYPE_ANY) return;
+    MIR_reg_t boxed = emit_box(mt, var->reg, var->type_id);
+    MIR_reg_t any_reg = new_reg(mt, "loop_widened", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, any_reg), MIR_new_reg_op(mt->ctx, boxed)));
+    var->reg = any_reg;
+    var->type_id = LMD_TYPE_ANY;
+    var->mir_type = MIR_T_I64;
+    // The binding now carries an Item that may be a heap pointer (a decimal
+    // accumulator is the motivating case), so it needs its GC root from here on.
+    update_gc_root_slot(mt, var);
+}
+
+// Walk a loop body for assignments that would widen an OUTER binding, and widen
+// each one now. Bindings declared inside the body are not yet in scope, so
+// `find_var` misses them - which is correct: their reads are emitted after
+// their own declaration, so no stale read exists.
+//
+// This walks the Lambda statement shapes explicitly rather than through
+// `ast_visit_core_children`, which covers the JS node set and has no case for
+// `AST_NODE_ASSIGN_STAM` or `AST_NODE_CONTENT` - the two this pass exists to
+// find. A visitor that silently visits nothing is worse than no visitor.
+static void mir_prewiden_loop_bindings(MirTranspiler* mt, AstNode* node,
+        int depth) {
+    if (!node || depth > 64) return;
+    switch (node->node_type) {
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        if (assign->target && assign->value) {
+            char name_buf[128];
+            snprintf(name_buf, sizeof(name_buf), "%.*s",
+                (int)assign->target->len, assign->target->chars);
+            MirVarEntry* var = find_var(mt, name_buf);
+            // Captured and state bindings publish through their own storage;
+            // widening their local carrier would not match the write-back.
+            if (var && var->env_offset < 0 && !var->is_state_var) {
+                TypeId val_tid = get_effective_type(mt, assign->value);
+                if (mir_assign_widens_native_binding(var->type_id, val_tid)) {
+                    mir_widen_binding_to_any(mt, var);
+                }
+            }
+        }
+        break;
+    }
+    case AST_NODE_CONTENT: case AST_NODE_LIST: case AST_NODE_SEQ:
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            mir_prewiden_loop_bindings(mt, item, depth + 1);
+        }
+        break;
+    case AST_NODE_PRIMARY:
+        mir_prewiden_loop_bindings(mt, ((AstPrimaryNode*)node)->expr, depth + 1);
+        break;
+    case AST_NODE_IF_EXPR:
+        mir_prewiden_loop_bindings(mt, ((AstIfNode*)node)->then, depth + 1);
+        mir_prewiden_loop_bindings(mt, ((AstIfNode*)node)->otherwise, depth + 1);
+        break;
+    case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM:
+        // A nested loop's own body assigns to the same outer bindings.
+        mir_prewiden_loop_bindings(mt, ((AstForNode*)node)->then, depth + 1);
+        break;
+    case AST_NODE_WHILE_STAM:
+        mir_prewiden_loop_bindings(mt, ((AstWhileNode*)node)->body, depth + 1);
+        break;
+    default:
+        break;
+    }
+}
+
 static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
+    // Before push_scope: a binding this body widens is declared OUTSIDE the
+    // loop, so it must be widened in the enclosing scope where its reads live.
+    mir_prewiden_loop_bindings(mt, for_node->then, 0);
     push_scope(mt);
 
     AstLoopNode* loop = (AstLoopNode*)for_node->loop;
@@ -9722,6 +9788,17 @@ static bool mir_nested_control_writes_name(AstNode* node, const String* name) {
             mir_nested_control_writes_name(((AstForStmtNode*)node)->update, name) ||
             mir_nested_control_writes_name(((AstForStmtNode*)node)->body, name);
     }
+    // Lambda's own `for (x in xs) { ... }` is AST_NODE_FOR_EXPR, a different
+    // node from the JS-shaped AST_NODE_FOR_STAM handled above. Omitting it made
+    // every assignment inside a Lambda for-loop invisible to this scan, so
+    // `mir_binding_has_reassignment` reported "never reassigned" and the return
+    // proof used the DECLARATION's initializer as its lane witness: an
+    // accumulator declared `var s = 0` returned on the native int lane even
+    // after the loop widened it to a boxed decimal, saturating the result to
+    // `int.inf`.
+    if (node->node_type == AST_NODE_FOR_EXPR) {
+        return mir_nested_control_writes_name(((AstForNode*)node)->then, name);
+    }
     return false;
 }
 
@@ -10283,6 +10360,10 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     mt->compact_loop_sub_lhs = compact_lhs;
     mt->compact_loop_sub_rhs = compact_rhs;
     mt->compact_loop_add_lhs = compact_counter;
+    // Carrier agreement for the whole loop: widen any binding this body will
+    // widen BEFORE the first read of it is emitted (see
+    // mir_assign_widens_native_binding).
+    mir_prewiden_loop_bindings(mt, while_node->body, 0);
     MIR_label_t l_loop = new_label(mt);
     MIR_label_t l_end = new_label(mt);
 
@@ -11215,12 +11296,6 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // bool? lane value 2 from ordinary false.
                     declared_var->full_type = asn->declared_type
                         ? asn->declared_type : declared_value_type;
-                    // RV16: only `var` accumulates — a `let` is written once,
-                    // so it cannot grow the number stack across iterations and
-                    // needs no slot of its own.
-                    if (let_node->node_type == AST_NODE_VAR_STAM) {
-                        mir_bind_wide_number_slot(mt, declared_var, var_tid);
-                    }
                 }
                 if (declared_var && typed_array_element_type) {
                     // A local ensure_typed_array establishes the representation;
@@ -13272,7 +13347,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     boxed_obj = load_gc_root_slot(mt, obj_root, "member_obj");
     boxed_field = load_gc_root_slot(mt, field_root, "member_key");
     // Lambda MIR deliberately keeps member access on fn_member. LambdaJS owns
-    // the inline-cache optimization; this path preserves generic map, object,
+    // named-property specialization; this path preserves generic map, object,
     // and element member semantics without a second core lookup mechanism.
     MIR_reg_t result = emit_call_2(mt, "fn_member", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
@@ -17728,9 +17803,6 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         log_error("mir: assignment to undefined variable '%s'", name_buf);
     }
 
-    // RV16: re-home into the binding's own slot at the ONE exit rather than in
-    // each arm of the type cascade above (rule 13).
-    mir_publish_wide_number_slot(mt, var);
     return val;
 }
 

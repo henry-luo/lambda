@@ -322,6 +322,55 @@ TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
               &entries[TYPEMAP_HASH_CAPACITY]);
 }
 
+TEST(LambdaTypedItem, TypeMapHashLookupByNameIdUsesCachedHash) {
+    TypeMap tm = {};
+    ShapeEntry entries[4] = {};
+    StrView names[4] = {};
+    char key_storage[4][4] = {};
+
+    for (int i = 0; i < 4; i++) {
+        set_test_shape_name(key_storage[i], i + 10);
+        names[i].str = key_storage[i];
+        names[i].length = 3;
+        entries[i].name = &names[i];
+        entries[i].name_id = (NameId)(0x100 + i);
+        entries[i].name_hash = typemap_name_hash(key_storage[i], 3);
+        if (i > 0) entries[i - 1].next = &entries[i];
+        if (i == 0) tm.shape = &entries[i];
+        tm.last = &entries[i];
+        tm.length++;
+        typemap_hash_insert(&tm, &entries[i]);
+    }
+
+    EXPECT_EQ(typemap_hash_lookup_by_name_id(&tm, entries[2].name_id,
+        entries[2].name_hash), &entries[2]);
+}
+
+TEST(LambdaTypedItem, TypeMapHashLookupByNameIdFallsBackWhenTableIsFull) {
+    TypeMap tm = {};
+    ShapeEntry entries[TYPEMAP_HASH_CAPACITY + 1] = {};
+    StrView names[TYPEMAP_HASH_CAPACITY + 1] = {};
+    char key_storage[TYPEMAP_HASH_CAPACITY + 1][4] = {};
+
+    for (int i = 0; i <= TYPEMAP_HASH_CAPACITY; i++) {
+        set_test_shape_name(key_storage[i], i);
+        names[i].str = key_storage[i];
+        names[i].length = 3;
+        entries[i].name = &names[i];
+        entries[i].name_id = (NameId)(0x200 + i);
+        entries[i].name_hash = typemap_name_hash(key_storage[i], 3);
+        if (i > 0) entries[i - 1].next = &entries[i];
+        if (i == 0) tm.shape = &entries[i];
+        tm.last = &entries[i];
+        typemap_hash_insert(&tm, &entries[i]);
+    }
+
+    EXPECT_EQ(typemap_hash_lookup_by_name_id(&tm,
+        entries[TYPEMAP_HASH_CAPACITY].name_id,
+        entries[TYPEMAP_HASH_CAPACITY].name_hash),
+        &entries[TYPEMAP_HASH_CAPACITY]);
+}
+
 TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsPastInlineTable) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

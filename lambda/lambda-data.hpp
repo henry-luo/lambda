@@ -621,6 +621,29 @@ static inline ShapeEntry* typemap_shape_lookup_last_by_name_id(TypeMap* tm,
     return found;
 }
 
+// nameid is the definitive property identity. Probe the existing hash table
+// with the pooled spelling's cached hash so the common JS path never walks the
+// authoritative shape chain; the chain remains the correctness fallback when
+// a shape has no usable table or the table is saturated.
+static inline ShapeEntry* typemap_hash_lookup_by_name_id(TypeMap* tm,
+        NameId name_id, uint32_t key_hash) {
+    if (!tm || name_id == NAME_ID_NONE) return NULL;
+    ShapeEntry** slots = typemap_hash_slots(tm);
+    int capacity = typemap_hash_capacity(tm);
+    if (!slots || capacity <= 0 || tm->field_count == 0 ||
+            tm->field_count >= (uint16_t)capacity || key_hash == 0) {
+        return typemap_shape_lookup_last_by_name_id(tm, name_id);
+    }
+    uint32_t idx = key_hash & ((uint32_t)capacity - 1);
+    for (int probe = 0; probe < capacity; probe++) {
+        uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
+        ShapeEntry* entry = slots[slot];
+        if (!entry) return NULL;
+        if (entry->name_id == name_id) return entry;
+    }
+    return typemap_shape_lookup_last_by_name_id(tm, name_id);
+}
+
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
@@ -706,11 +729,6 @@ static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* k
 
 static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
     return typemap_hash_lookup_by_hash(tm, key, key_len, typemap_name_hash(key, key_len));
-}
-
-static inline ShapeEntry* typemap_hash_lookup_name_id(TypeMap* tm,
-        NameId name_id) {
-    return typemap_shape_lookup_last_by_name_id(tm, name_id);
 }
 
 static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,

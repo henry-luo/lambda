@@ -87,13 +87,14 @@ extern "C" ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_
 extern "C" ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id) {
     TypeMap* tm = js_obj_typemap(obj);
     if (!tm || name_id == NAME_ID_NONE) return nullptr;
-    ShapeEntry* entry = typemap_hash_lookup_name_id(tm, name_id);
+    NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    ShapeEntry* entry = typemap_hash_lookup_by_name_id(tm, name_id,
+        property_key_hash(name));
     if (entry) return entry;
     // An id-bearing lookup can still address an id-less Input field. The
     // resolved ordinary spelling is only a byte-seam fallback; it must not
     // select a different generated property that happens to share its text.
-    NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,
-        name_id);
     return name && property_key_kind(name) == NAME_KEY_STRING
         ? typemap_hash_lookup_idless(tm, name->chars, (int)name->len) : nullptr;
 }
@@ -266,7 +267,10 @@ static ShapeEntry* js_typemap_transition_entry(TypeMap* target,
         const ShapeEntry* source) {
     if (!target || !source || !source->name || !source->name->str) return NULL;
     if (source->name_id != NAME_ID_NONE) {
-        return typemap_hash_lookup_name_id(target, source->name_id);
+        NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,
+            source->name_id);
+        return typemap_hash_lookup_by_name_id(target, source->name_id,
+            property_key_hash(name));
     }
     return typemap_hash_lookup(target, source->name->str, (int)source->name->length);
 }

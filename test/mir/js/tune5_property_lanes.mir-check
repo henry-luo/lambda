@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D4.6.1v2/D4.6.2v2: eligible direct MIR property reads and writes enter the shared public Get and Set semantics.",
+  "description": "D4.6.1v2/D4.6.2v2: eligible direct MIR named reads and writes enter the shared public Get and Set semantics through the stateless NameId heads.",
   "checks": [
     {
       "in_func": "_js_lane_#_body",
       "expect_seq": [
-        { "pattern": "call\tjs_set_p_r6_n1_a5, js_set" },
-        { "pattern": "call\tjs_get_p_r6_n1_a4, js_get" }
+        { "pattern": "call\tjs_set_name_id_p_r6_n1_a4, js_set_name_id" },
+        { "pattern": "call\tjs_get_name_id_p_r6_n1_a2, js_get_name_id" }
       ],
       "forbid": [
         "js_property_access",
