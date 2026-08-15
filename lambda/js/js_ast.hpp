@@ -298,6 +298,24 @@ typedef AstImportDeclNode JsImportNode;
 
 typedef AstImportSpecifierNode JsImportSpecifierNode;
 
+// ---------------------------------------------------------------------------
+// Generic child traversal
+//
+// js_ast_children.cpp holds one description of every node kind's child edges,
+// in source order. A walker keeps only the cases it cares about and delegates
+// the rest here; a walker that deliberately skips a child must say so as an
+// explicit case rather than relying on the table.
+// ---------------------------------------------------------------------------
+typedef void (*JsAstChildVisit)(JsAstNode* child, void* ctx);
+typedef bool (*JsAstChildPredicate)(JsAstNode* child, void* ctx);
+
+// True when the table describes this node kind (a leaf kind has no row).
+bool js_ast_has_child_table(JsAstNode* node);
+// Visit every child in source order; list-valued edges walk their ->next chain.
+void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
+// Short-circuiting variant: stops at the first child the predicate accepts.
+bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx);
+
 typedef AstExportDeclNode JsExportNode;
 
 typedef AstExportSpecifierNode JsExportSpecifierNode;

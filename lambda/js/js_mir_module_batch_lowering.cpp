@@ -1464,6 +1464,19 @@ static void jm_collect_var_decl_names_kind(JsVariableDeclarationNode* var, struc
     }
 }
 
+typedef struct JmEnclosingLexicalsCtx {
+    JsAstNode* target;
+    struct hashmap* names;
+} JmEnclosingLexicalsCtx;
+
+static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
+        JsAstNode* target, struct hashmap* names);
+
+static void jm_collect_enclosing_lexicals_child(JsAstNode* child, void* ctx) {
+    JmEnclosingLexicalsCtx* state = (JmEnclosingLexicalsCtx*)ctx;
+    jm_collect_enclosing_lexicals_for_target(child, state->target, state->names);
+}
+
 static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
         JsAstNode* target, struct hashmap* names) {
     if (!node || !target || !names) return;
@@ -1471,12 +1484,9 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
     if (!jm_ast_node_contains_target(node, target)) return;
 
     switch (node->node_type) {
-    case JS_AST_NODE_PROGRAM: {
-        JsProgramNode* prog = (JsProgramNode*)node;
-        for (JsAstNode* s = prog->body; s; s = s->next)
-            jm_collect_enclosing_lexicals_for_target(s, target, names);
-        break;
-    }
+    // Cases that contribute bindings, or that visit a subset of their
+    // children, keep their own handling. Everything else recurses through the
+    // shared child table.
     case JS_AST_NODE_BLOCK_STATEMENT: {
         jm_collect_let_const_names(node, names);
         JsBlockNode* block = (JsBlockNode*)node;
@@ -1484,83 +1494,16 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
             jm_collect_enclosing_lexicals_for_target(s, target, names);
         break;
     }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)node;
-        for (JsAstNode* d = var->declarations; d; d = d->next)
-            jm_collect_enclosing_lexicals_for_target(d, target, names);
-        break;
-    }
     case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        // the declared pattern itself introduces no enclosing binding here
         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
         jm_collect_enclosing_lexicals_for_target(decl->init, target, names);
-        break;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* expr = (JsExpressionStatementNode*)node;
-        jm_collect_enclosing_lexicals_for_target(expr->expression, target, names);
-        break;
-    }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* ret = (JsReturnNode*)node;
-        jm_collect_enclosing_lexicals_for_target(ret->argument, target, names);
-        break;
-    }
-    case JS_AST_NODE_ARRAY_EXPRESSION:
-    case JS_AST_NODE_ARRAY_PATTERN: {
-        JsArrayNode* arr = (JsArrayNode*)node;
-        for (JsAstNode* e = arr->elements; e; e = e->next)
-            jm_collect_enclosing_lexicals_for_target(e, target, names);
-        break;
-    }
-    case JS_AST_NODE_OBJECT_EXPRESSION:
-    case JS_AST_NODE_OBJECT_PATTERN: {
-        JsObjectNode* obj = (JsObjectNode*)node;
-        for (JsAstNode* p = obj->properties; p; p = p->next)
-            jm_collect_enclosing_lexicals_for_target(p, target, names);
         break;
     }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* prop = (JsPropertyNode*)node;
         if (prop->computed) jm_collect_enclosing_lexicals_for_target(prop->key, target, names);
         jm_collect_enclosing_lexicals_for_target(prop->value, target, names);
-        break;
-    }
-    case JS_AST_NODE_SPREAD_ELEMENT:
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY: {
-        JsSpreadElementNode* spread = (JsSpreadElementNode*)node;
-        jm_collect_enclosing_lexicals_for_target(spread->argument, target, names);
-        break;
-    }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-        JsAssignmentPatternNode* pat = (JsAssignmentPatternNode*)node;
-        jm_collect_enclosing_lexicals_for_target(pat->left, target, names);
-        jm_collect_enclosing_lexicals_for_target(pat->right, target, names);
-        break;
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        jm_collect_enclosing_lexicals_for_target(bin->left, target, names);
-        jm_collect_enclosing_lexicals_for_target(bin->right, target, names);
-        break;
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        jm_collect_enclosing_lexicals_for_target(un->operand, target, names);
-        break;
-    }
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* assign = (JsAssignmentNode*)node;
-        jm_collect_enclosing_lexicals_for_target(assign->left, target, names);
-        jm_collect_enclosing_lexicals_for_target(assign->right, target, names);
-        break;
-    }
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        jm_collect_enclosing_lexicals_for_target(call->callee, target, names);
-        for (JsAstNode* arg = call->arguments; arg; arg = arg->next)
-            jm_collect_enclosing_lexicals_for_target(arg, target, names);
         break;
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
@@ -1570,46 +1513,10 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
             jm_collect_enclosing_lexicals_for_target(member->property, target, names);
         break;
     }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* cond = (JsConditionalNode*)node;
-        jm_collect_enclosing_lexicals_for_target(cond->test, target, names);
-        jm_collect_enclosing_lexicals_for_target(cond->consequent, target, names);
-        jm_collect_enclosing_lexicals_for_target(cond->alternate, target, names);
-        break;
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        for (JsAstNode* e = seq->expressions; e; e = e->next)
-            jm_collect_enclosing_lexicals_for_target(e, target, names);
-        break;
-    }
     case JS_AST_NODE_TEMPLATE_LITERAL: {
         JsTemplateLiteralNode* tmpl = (JsTemplateLiteralNode*)node;
         for (JsAstNode* e = tmpl->expressions; e; e = e->next)
             jm_collect_enclosing_lexicals_for_target(e, target, names);
-        break;
-    }
-    case JS_AST_NODE_TAGGED_TEMPLATE: {
-        JsTaggedTemplateNode* tag = (JsTaggedTemplateNode*)node;
-        jm_collect_enclosing_lexicals_for_target(tag->tag, target, names);
-        jm_collect_enclosing_lexicals_for_target((JsAstNode*)tag->quasi, target, names);
-        break;
-    }
-    case JS_AST_NODE_YIELD_EXPRESSION: {
-        JsYieldNode* yield_node = (JsYieldNode*)node;
-        jm_collect_enclosing_lexicals_for_target(yield_node->argument, target, names);
-        break;
-    }
-    case JS_AST_NODE_AWAIT_EXPRESSION: {
-        JsAwaitNode* await_node = (JsAwaitNode*)node;
-        jm_collect_enclosing_lexicals_for_target(await_node->argument, target, names);
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_collect_enclosing_lexicals_for_target(ifn->test, target, names);
-        jm_collect_enclosing_lexicals_for_target(ifn->consequent, target, names);
-        jm_collect_enclosing_lexicals_for_target(ifn->alternate, target, names);
         break;
     }
     case JS_AST_NODE_FOR_STATEMENT: {
@@ -1636,25 +1543,6 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
         jm_collect_enclosing_lexicals_for_target(for_node->body, target, names);
         break;
     }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* while_node = (JsWhileNode*)node;
-        jm_collect_enclosing_lexicals_for_target(while_node->test, target, names);
-        jm_collect_enclosing_lexicals_for_target(while_node->body, target, names);
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* do_node = (JsDoWhileNode*)node;
-        jm_collect_enclosing_lexicals_for_target(do_node->body, target, names);
-        jm_collect_enclosing_lexicals_for_target(do_node->test, target, names);
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* try_node = (JsTryNode*)node;
-        jm_collect_enclosing_lexicals_for_target(try_node->block, target, names);
-        jm_collect_enclosing_lexicals_for_target(try_node->handler, target, names);
-        jm_collect_enclosing_lexicals_for_target(try_node->finalizer, target, names);
-        break;
-    }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* catch_node = (JsCatchNode*)node;
         // catch creates a parameter environment before evaluating the catch
@@ -1678,26 +1566,26 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
             jm_collect_enclosing_lexicals_for_target(c, target, names);
         break;
     }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* switch_case = (JsSwitchCaseNode*)node;
-        jm_collect_enclosing_lexicals_for_target(switch_case->test, target, names);
-        for (JsAstNode* s = switch_case->consequent; s; s = s->next)
-            jm_collect_enclosing_lexicals_for_target(s, target, names);
+    // These introduce their own binding scope (or, for throw/import/export,
+    // were never walked). Not descending is deliberate, so it is stated here
+    // rather than left to the table.
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+    case JS_AST_NODE_FIELD_DEFINITION:
+    case JS_AST_NODE_METHOD_DEFINITION:
+    case JS_AST_NODE_STATIC_BLOCK:
+    case JS_AST_NODE_THROW_STATEMENT:
+    case JS_AST_NODE_IMPORT_DECLARATION:
+    case JS_AST_NODE_EXPORT_DECLARATION:
+        break;
+    default: {
+        JmEnclosingLexicalsCtx state = { target, names };
+        js_ast_visit_children(node, jm_collect_enclosing_lexicals_child, &state);
         break;
     }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)node;
-        jm_collect_enclosing_lexicals_for_target(labeled->body, target, names);
-        break;
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* with_node = (JsWithStatementNode*)node;
-        jm_collect_enclosing_lexicals_for_target(with_node->object, target, names);
-        jm_collect_enclosing_lexicals_for_target(with_node->body, target, names);
-        break;
-    }
-    default:
-        break;
     }
 }
 
