@@ -1055,6 +1055,23 @@ numbering stays traceable.)*
   sequencing matters: the coloring pass must outlive RV16 long enough to
   validate the reclaims, or the check needs its own liveness.
 
+- **RVO11 status 2026-08-15 — narrowed to ONE unverified fact.** RV16 shipped
+  (P2.7.1) and the reclaim was designed against the tree. The obligation is now
+  *"does this statement leave a wide payload above the snapshot that something
+  outliving the statement still points at?"* — with **bindings settled**
+  (covered iff RV16 uses the broad `may_be_wide` predicate; the shipped narrow
+  one does not cover them) and **container stores unverified**: whether a wide
+  Item stored into an array/map is copied into destination-owned storage
+  (D5.2.2) or retains a pointer into the caller's number extent. The eager
+  per-call restore hides that question today; removing it exposes it. Verify
+  before any reclaim ships.
+
+  **Measured consequence for RV14/RV15/RV16 (impl log, same date): the
+  prerequisite that makes the reclaim sound costs ~4× what the reclaim saves.**
+  Broad RV16 adds 600–800 instructions per AWFY benchmark; RV15 recovers ~142
+  in deltablue. The rulings stand for the 757-site population they were written
+  against; at v3's 11 sites they are the wrong trade.
+
 - **RVO12 — Shape 4 on the INT-family lanes.** *(opened 2026-08-15 with
   RV17)* RV17 gives an `int^`/`i64^` body the same `int | error` type that
   unlocked `float^`, but native admission is still float-only, so those
