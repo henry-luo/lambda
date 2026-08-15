@@ -4704,7 +4704,7 @@
           {
             "source": "test/test_js_opt_gtest.cpp",
             "name": "JavaScript Optimization Contract Tests",
-            "category": "extended",
+            "category": "baseline",
             "dependencies": [
               "lambda-lib"
             ],

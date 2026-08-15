@@ -75,6 +75,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \
+	test_js_opt_gtest \
 	test_js_test262_gtest \
 	test_compiler_pass_gtest \
 	test_js_bt_regex_gtest \
