@@ -279,7 +279,23 @@ struct NameEntry {
     bool is_const;
     bool tdz_active;
     bool is_exported;
+    // T0 frame-plan facts (AI5). NameEntry is pool-calloc'd, so zero-init must
+    // read as "no plan": slot 0 is a legal frame slot, hence the explicit flag
+    // rather than a sentinel index.
+    int32_t slot;
+    BindingStorage binding_storage;
+    bool storage_assigned;
 };
+
+// Static activation shape for one interpreted function (or module top level).
+// Slot layout: [ params | locals | signal | scratch ] — see interp.hpp.
+typedef struct FnFramePlan {
+    uint16_t param_count;
+    uint16_t local_count;
+    uint16_t scratch_depth;   // max Items live across a child eval / MAY_GC call
+    uint16_t total_slots;     // params + locals + 1 (signal) + scratch
+    bool planned;
+} FnFramePlan;
 
 // name_scope
 struct NameScope {
@@ -861,6 +877,14 @@ typedef struct FnAnalysis {
     const char* may_await_cause;
     FnVariantAnalysis variants[4];
     int variant_count;
+    // T0 activation shape, filled by the frame-plan pass (AI5). FnAnalysis is
+    // the designated carrier for per-function facts, so the plan lives here
+    // rather than on AstFuncNode.
+    FnFramePlan frame_plan;
+    // The binding a named `fn`/`pn` declaration installs. AstFuncNode cannot
+    // carry it: push_name deliberately writes no AstNamedNode-only field
+    // because that alias is `vars` on a function and the join pointer on a loop.
+    NameEntry* decl_entry;
 } FnAnalysis;
 
 static inline FnVariantAnalysis* fn_analysis_variant(

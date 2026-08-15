@@ -524,7 +524,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
     lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
@@ -1495,6 +1495,30 @@ test-all-baseline: build-test
 # Lambda baseline cases, including ABI checks, are listed in the build config
 # consumed by test_run.js so execution and final-summary accounting stay under
 # one runner.
+# ---------------------------------------------------------------------------
+# T0 AST interpreter (LAMBDA_TIER=interp) — vibe/Lambda_Impl_Ast_Interp.md
+# ---------------------------------------------------------------------------
+
+# Differential gate: every script in the committed P0 subset must match its
+# golden under the interpreter with zero fallbacks. Regenerate the subset with
+# `python3 test/interp/tier_sweep.py` after any walker change.
+test-lambda-interp:
+	@echo "Running T0 interpreter differential over the committed subset..."
+	@./test/test_interp_gtest.exe
+
+# Full-corpus sweep: reports match / fallback / mismatch per script. A mismatch
+# is a T0 bug by definition (SI3); a fallback is uncovered coverage.
+interp-sweep:
+	@python3 test/interp/tier_sweep.py
+
+# §6 turnaround + memory report. Release build only (CLAUDE rule 10).
+interp-bench:
+	@echo "Generating the synthetic scale corpus..."
+	@python3 test/interp/gen_bench.py
+	@echo "Measuring both tiers (median of 5, one warm-up)..."
+	@python3 test/interp/run_bench.py
+	@python3 test/interp/repl_bench.py
+
 test-lambda-baseline: TEST_BUILD_QUIET := 1
 test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."

@@ -1486,6 +1486,7 @@ typedef struct BlockProp {
     bool contain_intrinsic_height_auto;
     bool contain_size;
     bool contain_inline_size;
+    bool contain_positioning;
     bool content_visibility_hidden;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)

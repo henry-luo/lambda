@@ -13,44 +13,12 @@
 #include <cstdlib>
 #include "../../lib/mem.h"
 
-#ifdef _WIN32
-#include <direct.h>
-#include <fcntl.h>
-#include <io.h>
-#include <process.h>
-#include <sys/stat.h>
-#define JS_IDENT_STATS_MKDIR(path) _mkdir(path)
-#define JS_IDENT_STATS_OPEN(path) _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
-#define JS_IDENT_STATS_WRITE(fd, buf, len) _write(fd, buf, (unsigned int)(len))
-#define JS_IDENT_STATS_CLOSE(fd) _close(fd)
-#define JS_IDENT_STATS_PID() _getpid()
-#else
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#define JS_IDENT_STATS_MKDIR(path) mkdir(path, 0755)
-#define JS_IDENT_STATS_OPEN(path) open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644)
-#define JS_IDENT_STATS_WRITE(fd, buf, len) write(fd, buf, len)
-#define JS_IDENT_STATS_CLOSE(fd) close(fd)
-#define JS_IDENT_STATS_PID() getpid()
-#endif
-
 // TypeScript parser (unified: handles both JS and TS)
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
     const TSLanguage* tree_sitter_javascript(void);
 }
 
-// Tune6 diagnostics: scope-lookup counters (see js_runtime.h). Disabled by
-// default so normal transpiles pay only a single predictable not-taken branch
-// per scanned entry.
-static bool g_js_scope_counters_enabled = false;
-static JsScopeCounters g_js_scope_counters = {0, 0, 0, 0, 0};
-
-static bool g_js_identifier_counters_enabled = false;
-static bool g_js_identifier_counters_checked = false;
-static bool g_js_identifier_counters_registered = false;
-static JsIdentifierCounters g_js_identifier_counters = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 typedef struct JsScopeLookupCacheEntry {
     JsScope* scope;
     String* name;
@@ -74,9 +42,6 @@ static int js_scope_lookup_cache_compare(const void* a, const void* b, void* uda
     return lhs->scope == rhs->scope && lhs->name == rhs->name &&
         lhs->current_only == rhs->current_only ? 0 : 1;
 }
-static void js_identifier_counters_report(void);
-static void js_identifier_counters_write_line(int fd, const char* line);
-
 static void js_parse_error_reset(JsTranspiler* tp) {
     if (!tp) return;
     tp->parse_error_valid = false;
@@ -116,118 +81,6 @@ int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                  tp->parse_error_message);
     }
     return 1;
-}
-
-extern "C" void js_scope_counters_set_enabled(int enabled) {
-    g_js_scope_counters_enabled = (enabled != 0);
-}
-
-extern "C" void js_scope_counters_reset(void) {
-    g_js_scope_counters.lookup_calls = 0;
-    g_js_scope_counters.entries_scanned = 0;
-    g_js_scope_counters.scopes_walked = 0;
-    g_js_scope_counters.cache_hits = 0;
-    g_js_scope_counters.cache_misses = 0;
-}
-
-extern "C" void js_scope_counters_get(JsScopeCounters* out) {
-    if (out) *out = g_js_scope_counters;
-}
-
-extern "C" void js_identifier_counters_set_enabled(int enabled) {
-    g_js_identifier_counters_enabled = (enabled != 0);
-}
-JS_FORWARD_VOID( js_identifier_counters_reset, (void), memset, (&g_js_identifier_counters, 0, sizeof(g_js_identifier_counters)))
-
-extern "C" void js_identifier_counters_get(JsIdentifierCounters* out) {
-    if (out) *out = g_js_identifier_counters;
-}
-
-extern "C" int js_identifier_counters_is_enabled(void) {
-    if (!g_js_identifier_counters_checked) {
-        const char* flag = getenv("LAMBDA_JS_IDENTIFIER_STATS");
-        if (flag && flag[0] && strcmp(flag, "0") != 0) {
-            g_js_identifier_counters_enabled = true;
-        }
-        g_js_identifier_counters_checked = true;
-    }
-    if (g_js_identifier_counters_enabled && !g_js_identifier_counters_registered) {
-        atexit(js_identifier_counters_report);
-        g_js_identifier_counters_registered = true;
-    }
-    return g_js_identifier_counters_enabled ? 1 : 0;
-}
-
-extern "C" void js_identifier_counters_record_ast(int source_len, int decoded_len,
-        int has_escape, int has_non_ascii) {
-    if (!js_identifier_counters_is_enabled()) return;
-    g_js_identifier_counters.ast_identifiers++;
-    if (has_escape) g_js_identifier_counters.ast_escaped_identifiers++;
-    if (has_non_ascii) g_js_identifier_counters.ast_non_ascii_identifiers++;
-    if (source_len > 0) g_js_identifier_counters.ast_source_bytes += source_len;
-    if (decoded_len > 0) g_js_identifier_counters.ast_decoded_bytes += decoded_len;
-}
-
-extern "C" void js_identifier_counters_record_early_check(void) {
-    if (!js_identifier_counters_is_enabled()) return;
-    g_js_identifier_counters.early_identifier_checks++;
-}
-
-extern "C" void js_identifier_counters_record_early_escape(int normalized,
-        int reserved_hit, int contextual_hit) {
-    if (!js_identifier_counters_is_enabled()) return;
-    g_js_identifier_counters.early_escape_checks++;
-    if (normalized) g_js_identifier_counters.early_unicode_normalizations++;
-    if (reserved_hit) g_js_identifier_counters.early_reserved_hits++;
-    if (contextual_hit) g_js_identifier_counters.early_contextual_escape_hits++;
-}
-
-static void js_identifier_counters_report(void) {
-    if (!g_js_identifier_counters_enabled || g_js_identifier_counters.ast_identifiers == 0) return;
-    const char* dir = getenv("LAMBDA_JS_IDENTIFIER_STATS_DIR");
-    if (!dir || !dir[0]) dir = "./temp/js_identifier_stats";
-    JS_IDENT_STATS_MKDIR(dir);
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)JS_IDENT_STATS_PID());
-    int fd = JS_IDENT_STATS_OPEN(path);
-    if (fd < 0) return;
-    js_identifier_counters_write_line(fd,
-        "ast_identifiers\tast_escaped_identifiers\tast_non_ascii_identifiers\tast_source_bytes\tast_decoded_bytes\tearly_identifier_checks\tearly_escape_checks\tearly_unicode_normalizations\tearly_reserved_hits\tearly_contextual_escape_hits\n");
-    char line[512];
-    snprintf(line, sizeof(line), "%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
-        g_js_identifier_counters.ast_identifiers,
-        g_js_identifier_counters.ast_escaped_identifiers,
-        g_js_identifier_counters.ast_non_ascii_identifiers,
-        g_js_identifier_counters.ast_source_bytes,
-        g_js_identifier_counters.ast_decoded_bytes,
-        g_js_identifier_counters.early_identifier_checks,
-        g_js_identifier_counters.early_escape_checks,
-        g_js_identifier_counters.early_unicode_normalizations,
-        g_js_identifier_counters.early_reserved_hits,
-        g_js_identifier_counters.early_contextual_escape_hits);
-    js_identifier_counters_write_line(fd, line);
-    JS_IDENT_STATS_CLOSE(fd);
-    log_notice("js-ident-stats: ast=%ld escaped=%ld non_ascii=%ld early=%ld escape_checks=%ld normalized=%ld reserved_hits=%ld contextual_hits=%ld",
-        g_js_identifier_counters.ast_identifiers,
-        g_js_identifier_counters.ast_escaped_identifiers,
-        g_js_identifier_counters.ast_non_ascii_identifiers,
-        g_js_identifier_counters.early_identifier_checks,
-        g_js_identifier_counters.early_escape_checks,
-        g_js_identifier_counters.early_unicode_normalizations,
-        g_js_identifier_counters.early_reserved_hits,
-        g_js_identifier_counters.early_contextual_escape_hits);
-}
-
-static void js_identifier_counters_write_line(int fd, const char* line) {
-    if (fd < 0 || !line) return;
-    size_t len = strlen(line);
-    const char* cur = line;
-    while (len > 0) {
-        int wrote = (int)JS_IDENT_STATS_WRITE(fd, cur, len);
-        if (wrote <= 0) return;
-        cur += wrote;
-        len -= (size_t)wrote;
-    }
 }
 
 // Scope management functions
@@ -272,9 +125,7 @@ void js_scope_pop(JsTranspiler* tp) {
 
 static NameEntry* js_scope_find_entry(JsScope* scope, String* name) {
     if (!scope || !name) return NULL;
-    if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
     for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
         if (entry->name->len == name->len &&
             memcmp(entry->name->chars, name->chars, name->len) == 0) {
             return entry;
@@ -285,19 +136,16 @@ static NameEntry* js_scope_find_entry(JsScope* scope, String* name) {
 
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     JsScope* scope = tp->current_scope;
-    if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
 
     if (tp && tp->scope_lookup_cache && scope && name) {
         JsScopeLookupCacheEntry probe = {scope, name, NULL, false, false};
         const JsScopeLookupCacheEntry* cached = (const JsScopeLookupCacheEntry*)
             hashmap_get(tp->scope_lookup_cache, &probe);
         if (cached) {
-            if (g_js_scope_counters_enabled) g_js_scope_counters.cache_hits++;
             js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
                 JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             return cached->found ? cached->result : NULL;
         }
-        if (g_js_scope_counters_enabled) g_js_scope_counters.cache_misses++;
         js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
             JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
         NameEntry* result = NULL;
@@ -322,18 +170,15 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
 }
 
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
-    if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
     if (tp && tp->scope_lookup_cache && tp->current_scope && name) {
         JsScopeLookupCacheEntry probe = {tp->current_scope, name, NULL, false, true};
         const JsScopeLookupCacheEntry* cached = (const JsScopeLookupCacheEntry*)
             hashmap_get(tp->scope_lookup_cache, &probe);
         if (cached) {
-            if (g_js_scope_counters_enabled) g_js_scope_counters.cache_hits++;
             js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
                 JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             return cached->found ? cached->result : NULL;
         }
-        if (g_js_scope_counters_enabled) g_js_scope_counters.cache_misses++;
         js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
             JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
     }
@@ -528,7 +373,6 @@ void js_transpiler_destroy(JsTranspiler* tp) {
 
 void js_scope_lookup_cache_enable(JsTranspiler* tp) {
     if (!tp || tp->scope_lookup_cache) return;
-    if (getenv("LAMBDA_AST_TUNE_NO_SCOPE_CACHE")) return;
     tp->scope_lookup_cache = hashmap_new(sizeof(JsScopeLookupCacheEntry), 256,
         0, 0, js_scope_lookup_cache_hash, js_scope_lookup_cache_compare, NULL, NULL);
 }

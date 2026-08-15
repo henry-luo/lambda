@@ -229,21 +229,6 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 #endif
 }
 
-// Disabled because this observational probe added a debug-only C-call boundary
-// to MIR and made debug emission differ from release emission.
-/*
-static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
-        int64_t site_id) {
-#ifndef NDEBUG
-    jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, site_id));
-#else
-    (void)mt; (void)callee; (void)site_id;
-#endif
-}
-*/
-
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
     TSNode node = call->node;
@@ -436,45 +421,6 @@ static bool jm_store_ic_enabled() {
     return enabled != 0;
 }
 #endif
-
-static MIR_reg_t jm_profile_property_set_name_id(JsMirTranspiler* mt, JsMemberNode* mem) {
-    if (!mt || !mem || mem->computed ||
-            !mem->property || mem->property->node_type != JS_AST_NODE_IDENTIFIER) {
-        return 0;
-    }
-    JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-    if (!prop->name) return 0;
-
-    const char* object_name = "expr";
-    int object_len = 4;
-    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
-        if (obj->name && obj->name->len > 0) {
-            object_name = obj->name->chars;
-            object_len = (int)obj->name->len;
-        }
-    }
-
-    TSPoint point = ts_node_start_point(mem->node);
-    char label[192];
-    int len = snprintf(label, sizeof(label), "%.*s.%.*s@%u:%u",
-        object_len, object_name,
-        (int)prop->name->len, prop->name->chars,
-        point.row + 1, point.column + 1);
-    if (len < 0) return 0;
-    if (len >= (int)sizeof(label)) len = (int)sizeof(label) - 1;
-    return jm_module_name_id(mt, label, (uint32_t)len);
-}
-
-static void jm_emit_profile_property_set_site(JsMirTranspiler* mt, JsMemberNode* member) {
-    if (!JS_EXEC_PROFILE_ENABLED || js_exec_profile_mode() <= 0 || !member || member->computed ||
-            !member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) {
-        return;
-    }
-    MIR_reg_t label_id = jm_profile_property_set_name_id(mt, member);
-    jm_call_void_1(mt, "js_profile_property_set_site",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, label_id));
-}
 
 // True when this variable declarator was introduced by a `const` lexical
 // declaration. A `const` binding is immutable, so once the initializer has
@@ -5147,7 +5093,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             // An awaited RHS destroys raw MIR registers; restore the original
             // Reference so `obj.key ||= await value` writes its pre-await base.
             jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
-            jm_emit_profile_property_set_site(mt, member);
             jm_emit_put_value(mt, &ref, new_val);
             jm_emit_mov(mt, result, new_val);
             jm_emit_label(mt, l_end);
@@ -5166,7 +5111,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         // A property Reference is evaluated before its RHS by the language;
         // preserve that receiver/key across await instead of using dead MIR regs.
         jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
-        jm_emit_profile_property_set_site(mt, member);
         MIR_reg_t result = jm_emit_put_value(mt, &ref, new_val);
 
         // v20: update the mapped formal after the generic property write.
@@ -5242,7 +5186,6 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         if (!mt->last_closure_capture_is_assigned[i]) continue;
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
         if (!var) {
-            if (getenv("JS56_READBACK_TRACE")) fprintf(stderr, "  skip: var '%s' not found\n", mt->last_closure_capture_names[i]); // PRINTF_OK: env-gated dev tracer.
             continue;
         }
         if (var->from_block_func_decl) continue;
@@ -5684,7 +5627,6 @@ static MIR_reg_t jm_emit_optional_function_call(JsMirTranspiler* mt, MIR_reg_t c
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_call);
-    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     MIR_reg_t call_result;
     if (has_spread) {
@@ -7064,7 +7006,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             fallback_has_spread, callee_spill_slot, "optc", "optk");
     }
 
-    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
 
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);

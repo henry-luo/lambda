@@ -41,28 +41,6 @@ extern __thread EvalContext* context;
 extern Item js_make_number(double d);
 extern double js_get_number(Item value);
 
-#ifdef _WIN32
-#include <direct.h>
-#include <fcntl.h>
-#include <io.h>
-#include <process.h>
-#include <sys/stat.h>
-#define JS_TA_SET_STATS_MKDIR(path) _mkdir(path)
-#define JS_TA_SET_STATS_OPEN(path) _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
-#define JS_TA_SET_STATS_WRITE(fd, buf, len) _write(fd, buf, (unsigned int)(len))
-#define JS_TA_SET_STATS_CLOSE(fd) _close(fd)
-#define JS_TA_SET_STATS_PID() _getpid()
-#else
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#define JS_TA_SET_STATS_MKDIR(path) mkdir(path, 0755)
-#define JS_TA_SET_STATS_OPEN(path) open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644)
-#define JS_TA_SET_STATS_WRITE(fd, buf, len) write(fd, buf, len)
-#define JS_TA_SET_STATS_CLOSE(fd) close(fd)
-#define JS_TA_SET_STATS_PID() getpid()
-#endif
-
 extern "C" bool js_is_generator(Item obj);
 extern "C" Item js_bigint_constructor(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
@@ -168,105 +146,6 @@ static void js_dataview_link_prototype(Item view) {
     Item proto_key = (Item){.item = s2it(heap_create_name("prototype"))};
     Item proto = js_get_key_default(ctor, proto_key);
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
-}
-
-typedef struct JsTypedArraySetCounters {
-    long calls_total;
-    long typed_array_source_calls;
-    long array_like_source_calls;
-    long typed_array_elements_total;
-    long array_like_elements_total;
-    long same_type_fast_attempts;
-    long same_type_fast_hits;
-    long number_convert_attempts;
-    long number_convert_hits;
-    long bigint_convert_attempts;
-    long bigint_convert_hits;
-    long generic_boxed_fallbacks;
-    long generic_boxed_elements;
-    long array_like_loop_elements;
-    long empty_typed_array_sources;
-} JsTypedArraySetCounters;
-
-static bool g_js_ta_set_stats_enabled = false;
-static bool g_js_ta_set_stats_checked = false;
-static bool g_js_ta_set_stats_registered = false;
-static JsTypedArraySetCounters g_js_ta_set_stats;
-
-static void js_ta_set_stats_report(void);
-
-static int js_ta_set_stats_is_enabled(void) {
-    if (!g_js_ta_set_stats_checked) {
-        const char* flag = getenv("LAMBDA_JS_TA_SET_STATS");
-        if (flag && flag[0] && strcmp(flag, "0") != 0) {
-            g_js_ta_set_stats_enabled = true;
-        }
-        g_js_ta_set_stats_checked = true;
-    }
-    if (g_js_ta_set_stats_enabled && !g_js_ta_set_stats_registered) {
-        atexit(js_ta_set_stats_report);
-        g_js_ta_set_stats_registered = true;
-    }
-    return g_js_ta_set_stats_enabled ? 1 : 0;
-}
-
-static void js_ta_set_stats_add(long* counter, int64_t value) {
-    if (!counter || value <= 0) return;
-    *counter += (long)value;
-}
-
-static void js_ta_set_stats_write_line(int fd, const char* line) {
-    if (fd < 0 || !line) return;
-    size_t len = strlen(line);
-    const char* cur = line;
-    while (len > 0) {
-        int wrote = (int)JS_TA_SET_STATS_WRITE(fd, cur, len);
-        if (wrote <= 0) return;
-        cur += wrote;
-        len -= (size_t)wrote;
-    }
-}
-
-static void js_ta_set_stats_report(void) {
-    if (!g_js_ta_set_stats_enabled || g_js_ta_set_stats.calls_total == 0) return;
-    const char* dir = getenv("LAMBDA_JS_TA_SET_STATS_DIR");
-    if (!dir || !dir[0]) dir = "./temp/js_ta_set_stats";
-    JS_TA_SET_STATS_MKDIR(dir);
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)JS_TA_SET_STATS_PID());
-    int fd = JS_TA_SET_STATS_OPEN(path);
-    if (fd < 0) return;
-    js_ta_set_stats_write_line(fd,
-        "calls_total\ttyped_array_source_calls\tarray_like_source_calls\ttyped_array_elements_total\tarray_like_elements_total\tsame_type_fast_attempts\tsame_type_fast_hits\tnumber_convert_attempts\tnumber_convert_hits\tbigint_convert_attempts\tbigint_convert_hits\tgeneric_boxed_fallbacks\tgeneric_boxed_elements\tarray_like_loop_elements\tempty_typed_array_sources\n");
-    char line[768];
-    snprintf(line, sizeof(line),
-        "%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
-        g_js_ta_set_stats.calls_total,
-        g_js_ta_set_stats.typed_array_source_calls,
-        g_js_ta_set_stats.array_like_source_calls,
-        g_js_ta_set_stats.typed_array_elements_total,
-        g_js_ta_set_stats.array_like_elements_total,
-        g_js_ta_set_stats.same_type_fast_attempts,
-        g_js_ta_set_stats.same_type_fast_hits,
-        g_js_ta_set_stats.number_convert_attempts,
-        g_js_ta_set_stats.number_convert_hits,
-        g_js_ta_set_stats.bigint_convert_attempts,
-        g_js_ta_set_stats.bigint_convert_hits,
-        g_js_ta_set_stats.generic_boxed_fallbacks,
-        g_js_ta_set_stats.generic_boxed_elements,
-        g_js_ta_set_stats.array_like_loop_elements,
-        g_js_ta_set_stats.empty_typed_array_sources);
-    js_ta_set_stats_write_line(fd, line);
-    JS_TA_SET_STATS_CLOSE(fd);
-    log_notice("js-ta-set-stats: calls=%ld typed_sources=%ld array_like_sources=%ld same_hits=%ld number_hits=%ld bigint_hits=%ld generic=%ld array_like_elems=%ld",
-        g_js_ta_set_stats.calls_total,
-        g_js_ta_set_stats.typed_array_source_calls,
-        g_js_ta_set_stats.array_like_source_calls,
-        g_js_ta_set_stats.same_type_fast_hits,
-        g_js_ta_set_stats.number_convert_hits,
-        g_js_ta_set_stats.bigint_convert_hits,
-        g_js_ta_set_stats.generic_boxed_fallbacks,
-        g_js_ta_set_stats.array_like_loop_elements);
 }
 
 typedef struct JsTypedArraySpec {
@@ -2801,8 +2680,6 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
 // .set(source [, offset]) — bulk copy from another array/typed array
 extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (!js_is_typed_array(ta_item)) return ItemNull;
-    int ta_set_stats_enabled = js_ta_set_stats_is_enabled();
-    if (ta_set_stats_enabled) g_js_ta_set_stats.calls_total++;
     JsTypedArray* dst = js_get_typed_array_ptr(ta_item.map);
     // Js54 P6: gate the TA-spec OOB throw on dispatch mode (see fill).
     if (!dst || js_typed_array_is_out_of_bounds(dst)) {
@@ -2819,43 +2696,28 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
         }
         int src_len = js_typed_array_current_length(src);
-        if (ta_set_stats_enabled) {
-            g_js_ta_set_stats.typed_array_source_calls++;
-            js_ta_set_stats_add(&g_js_ta_set_stats.typed_array_elements_total, src_len);
-        }
         if ((int64_t)offset + (int64_t)src_len > (int64_t)target_len) {
             return js_throw_range_error("source is too large");
         }
         if (src_len <= 0) {
-            if (ta_set_stats_enabled) g_js_ta_set_stats.empty_typed_array_sources++;
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
         if (js_typed_array_is_bigint_element(dst->element_type) !=
             js_typed_array_is_bigint_element(src->element_type)) {
             return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
         }
-        if (ta_set_stats_enabled) g_js_ta_set_stats.same_type_fast_attempts++;
         if (js_typed_array_try_raw_set_same_type(dst, src, offset)) {
-            if (ta_set_stats_enabled) g_js_ta_set_stats.same_type_fast_hits++;
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
 
-        if (ta_set_stats_enabled) g_js_ta_set_stats.number_convert_attempts++;
         if (js_typed_array_try_arraynum_convert_number(dst, src, offset, false)) {
-            if (ta_set_stats_enabled) g_js_ta_set_stats.number_convert_hits++;
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
 
-        if (ta_set_stats_enabled) g_js_ta_set_stats.bigint_convert_attempts++;
         if (js_typed_array_try_arraynum_convert_bigint(dst, src, offset, false)) {
-            if (ta_set_stats_enabled) g_js_ta_set_stats.bigint_convert_hits++;
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
 
-        if (ta_set_stats_enabled) {
-            g_js_ta_set_stats.generic_boxed_fallbacks++;
-            js_ta_set_stats_add(&g_js_ta_set_stats.generic_boxed_elements, src_len);
-        }
         Item* values = (Item*)mem_alloc((size_t)src_len * sizeof(Item), MEM_CAT_JS_RUNTIME);
         if (!values) return js_throw_type_error("TypedArray.prototype.set allocation failed");
         for (int i = 0; i < src_len; i++) {
@@ -2894,11 +2756,6 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     } else {
         src_len = (int64_t)floor(length_double);
     }
-    if (ta_set_stats_enabled) {
-        g_js_ta_set_stats.array_like_source_calls++;
-        js_ta_set_stats_add(&g_js_ta_set_stats.array_like_elements_total, src_len);
-    }
-
     // Js55 P14: per ES §22.2.3.26.1 SetTypedArrayFromArrayLike, the targetLength
     // is captured BEFORE LengthOfArrayLike(src) is called (which can invoke the
     // source's length getter and resize the backing buffer). The range check at
@@ -2910,7 +2767,6 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
         return js_throw_range_error("source is too large");
     }
 
-    if (ta_set_stats_enabled) js_ta_set_stats_add(&g_js_ta_set_stats.array_like_loop_elements, src_len);
     for (int64_t i = 0; i < src_len; i++) {
         JS_ASSIGN_OR_RETURN(value, js_get_key_default(src_obj, (Item){.item = i2it(i)}));
         JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(ta_item, (Item){.item = i2it((int64_t)offset + i)}, value));

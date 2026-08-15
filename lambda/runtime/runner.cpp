@@ -28,6 +28,7 @@
 #include "render_map.h"
 #include "template_state.h"
 #include "edit_bridge.h"
+#include "interp.hpp"
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
@@ -144,9 +145,14 @@ typedef struct PhaseProfile {
     char script_path[PROFILE_PATH_MAX];
     double parse_ms;
     double ast_ms;
+    // T0 columns: `plan_ms` is the frame-plan pass, `interp_exec_ms` the walk.
+    // Both stay 0 on the JIT path so the TSV reads the same for either tier.
+    double plan_ms;
     double transpile_ms;
     double jit_init_ms;
     double mir_gen_ms;
+    double interp_exec_ms;
+    double peak_rss_mb;
     int code_len;
     int worker_thread;
     unsigned long thread_id;
@@ -250,16 +256,18 @@ void profile_dump_to_file() {
     create_dir_recursive("temp");
     FILE* f = fopen("temp/phase_profile.txt", "w");
     if (!f) return;
-    fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1)\n");
-    fprintf(f, "# script | parse | ast | transpile | jit_init | mir_gen | total | code_len | worker | thread_id\n");
+    // TSV format v2: `plan`, `interp_exec` and `peak_rss_mb` added for the T0
+    // turnaround/memory report; JIT-tier rows carry 0 in the T0 columns.
+    fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1) format=2\n");
+    fprintf(f, "# script | parse | ast | plan | transpile | jit_init | mir_gen | interp_exec | total | peak_rss_mb | code_len | worker | thread_id\n");
     for (int i = 0; i < profile_count; i++) {
         PhaseProfile* p = &profile_data[i];
-        double total = p->parse_ms + p->ast_ms + p->transpile_ms +
-                       p->jit_init_ms + p->mir_gen_ms;
-        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
-                p->script_path, p->parse_ms, p->ast_ms, p->transpile_ms,
-                p->jit_init_ms, p->mir_gen_ms,
-                total, p->code_len, p->worker_thread, p->thread_id);
+        double total = p->parse_ms + p->ast_ms + p->plan_ms + p->transpile_ms +
+                       p->jit_init_ms + p->mir_gen_ms + p->interp_exec_ms;
+        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
+                p->script_path, p->parse_ms, p->ast_ms, p->plan_ms, p->transpile_ms,
+                p->jit_init_ms, p->mir_gen_ms, p->interp_exec_ms,
+                total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
     }
     if (import_level_profile_count > 0) {
         fprintf(f, "\n# Parallel Import Levels\n");
@@ -669,6 +677,14 @@ void init_module_import(Transpiler *tp, AstScript *script) {
     log_leave();
 }
 
+// Both tiers finish a load the same way: the Script-sized prefix of the
+// Transpiler carries the AST, const/type lists and whichever artifact the tier
+// produced (a linked MIR context, or a frame plan and nothing else).
+void script_adopt_transpiler(Script* script, Transpiler* tp) {
+    if (!script || !tp) return;
+    memcpy(script, tp, sizeof(Script));
+}
+
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
         log_error("Error: Source code is NULL");
@@ -767,6 +783,49 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (tp->error_count > 0) {
         log_error("compiled '%s' with error!!", script_path);
         return;
+    }
+
+    // T0 (D8.1.1v2): stop after the AST passes and interpret. A script whose
+    // pre-scan finds a kind the walker cannot execute falls back to the whole
+    // module JIT path below, counted and logged — never silently half-run (R4).
+    if (lambda_tier_selected() == LAMBDA_TIER_INTERP) {
+        profile_time_t plan0, plan1;
+        if (profiling || compiler_timing) profile_get_time(&plan0);
+        AstNodeType reject = AST_NODE_NULL;
+        bool supported = interp_scan_supported(tp, &reject) && interp_plan_script(tp);
+        if (profiling || compiler_timing) profile_get_time(&plan1);
+        if (supported) {
+            tp->interp_supported = true;
+            script_adopt_transpiler(script, tp);
+            if (compiler_timing) {
+                LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
+                timing->parse_us = (uint64_t)(elapsed_ms_val(p0, p1) * 1000.0);
+                timing->ast_build_us = (uint64_t)(elapsed_ms_val(p1, p2) * 1000.0);
+                timing->index_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
+                timing->plan_us = (uint64_t)(elapsed_ms_val(plan0, plan1) * 1000.0);
+                timing->build_transpile_us = timing->parse_us + timing->ast_build_us +
+                    timing->index_us + timing->plan_us;
+                timing->valid = 1;
+            }
+            if (profiling) {
+                PhaseProfile prof;
+                memset(&prof, 0, sizeof(prof));
+                profile_set_script_path(&prof, script_path);
+                prof.parse_ms = elapsed_ms_val(p0, p1);
+                prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3);
+                prof.plan_ms = elapsed_ms_val(plan0, plan1);
+                prof.worker_thread = tls_parser ? 1 : 0;
+                prof.thread_id = profile_current_thread_id();
+                profile_record_phase(&prof);
+            }
+            log_notice("interp: planned file=%s module_slots=%u",
+                script_path, (unsigned)tp->interp_slab_count);
+            return;
+        }
+        tp->interp_reject_kind = reject;
+        interp_run_stats()->scripts_fallback++;
+        log_notice("interp: fallback file=%s reason=node:%s",
+            script_path, interp_node_kind_name(reject));
     }
 
     // compile the AST directly to MIR; this is the only supported Lambda backend.
@@ -1307,8 +1366,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         fprintf(stderr, "%d error(s) found.\n", transpiler.errors->length);
     }
 
-    // check for compilation failure
-    if (!new_script->jit_context) {
+    // check for compilation failure — a T0-planned script deliberately has no
+    // MIR context, so its success signal is the frame plan instead.
+    if (!new_script->jit_context && !new_script->interp_supported) {
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }
@@ -1386,9 +1446,6 @@ void runner_setup_context(Runner* runner) {
 
     // Store stack_limit in context for fast access from JIT-compiled code
     ctx->stack_limit = _lambda_stack_limit;
-    if (!lambda_side_stack_bind()) {
-        log_error("runner side-stack: failed to initialize execution regions");
-    }
 
     ctx->pool = runner->script->pool;
     ctx->type_list = runner->script->type_list;
@@ -1416,6 +1473,12 @@ void runner_setup_context(Runner* runner) {
 
     input_context = (Context*)ctx;
     if (!eval_context_thread_initialize(ctx)) return;
+    // The side-stack bind resolves its owner through the thread's context
+    // identity, so it must follow eval_context_thread_initialize: on a fresh
+    // thread the earlier ordering silently bound nothing.
+    if (!lambda_side_stack_bind()) {
+        log_error("runner side-stack: failed to initialize execution regions");
+    }
     // Phase 5: propagate ui_mode and result_arena from Runtime to context
     Runtime* ui_rt = runner->runtime;
     if (ui_rt && ui_rt->ui_mode && ui_rt->result_arena) {
@@ -1670,6 +1733,10 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (script->source) mem_free((void*)script->source);
     if (script->directory) mem_free((void*)script->directory);
     if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
+    // The T0 load path keeps the indexed AST alive for the Script's lifetime
+    // (AIO4) instead of releasing it at the MIR handoff; destroying a zeroed
+    // AstIndex is a no-op, so this covers both tiers.
+    ast_index_destroy(&script->ast_index);
     if (script->pool) pool_destroy(script->pool);
     if (script->type_list) arraylist_free(script->type_list);
     if (script->direct_imports) arraylist_free(script->direct_imports);
@@ -1806,7 +1873,7 @@ void runtime_cleanup(Runtime* runtime) {
     }
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
-    js_exec_profile_dump();
+    js_opt_trace_dump();
 
     js_canvas_cleanup();
     module_registry_cleanup_for_runtime(runtime);

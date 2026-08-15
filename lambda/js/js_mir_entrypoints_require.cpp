@@ -10,27 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #ifndef _WIN32
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <sys/time.h>
-#include <unistd.h>
-#define JS_MIR_VOL_STATS_MKDIR(path) mkdir(path, 0755)
-#define JS_MIR_VOL_STATS_OPEN(path) open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644)
-#define JS_MIR_VOL_STATS_WRITE(fd, buf, len) write(fd, buf, len)
-#define JS_MIR_VOL_STATS_CLOSE(fd) close(fd)
-#define JS_MIR_VOL_STATS_PID() getpid()
-#else
-#include <direct.h>
-#include <fcntl.h>
-#include <io.h>
-#include <process.h>
-#include <sys/stat.h>
-#include <windows.h>
-#define JS_MIR_VOL_STATS_MKDIR(path) _mkdir(path)
-#define JS_MIR_VOL_STATS_OPEN(path) _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
-#define JS_MIR_VOL_STATS_WRITE(fd, buf, len) _write(fd, buf, (unsigned int)(len))
-#define JS_MIR_VOL_STATS_CLOSE(fd) _close(fd)
-#define JS_MIR_VOL_STATS_PID() _getpid()
 #endif
 
 int js_dynamic_import_suppress_module_drain = 0;
@@ -224,17 +204,6 @@ static long js_mir_phase_now_us(void) {
 #endif
 }
 
-static bool js_mir_phase_progress_is_enabled(void) {
-    const char* value = getenv("LAMBDA_JS_MIR_PHASE_PROGRESS");
-    return value && value[0] && strcmp(value, "0") != 0;
-}
-
-static void js_mir_log_phase_progress(const char* filename, const char* phase, long elapsed_us) {
-    if (!js_mir_phase_progress_is_enabled()) return;
-    log_notice("js-mir-phase: file=%s phase=%s elapsed_ms=%ld",
-        filename ? filename : "<string>", phase, elapsed_us / 1000L);
-}
-
 extern "C" void js_mir_reset_last_phase_timing(void) {
     memset(&g_last_js_mir_phase_timing, 0, sizeof(g_last_js_mir_phase_timing));
 }
@@ -274,71 +243,6 @@ extern "C" void js_mir_end_document_phase_timing(JsMirPhaseTiming* out) {
 
 // Tune6 §3.2: MIR generated-code volume for the last transpile.
 static JsMirVolumeCounters g_last_js_mir_volume;
-static bool g_js_mir_volume_stats_enabled = false;
-static bool g_js_mir_volume_stats_checked = false;
-static bool g_js_mir_volume_stats_registered = false;
-static long g_js_mir_volume_stats_samples = 0;
-static long g_js_mir_volume_stats_total_functions = 0;
-static long g_js_mir_volume_stats_total_insns = 0;
-static long g_js_mir_volume_stats_max_insns = 0;
-
-static void js_mir_volume_stats_report(void);
-
-static int js_mir_volume_stats_is_enabled(void) {
-    if (!g_js_mir_volume_stats_checked) {
-        const char* flag = getenv("LAMBDA_JS_MIR_VOLUME_STATS");
-        if (flag && flag[0] && strcmp(flag, "0") != 0) {
-            g_js_mir_volume_stats_enabled = true;
-        }
-        g_js_mir_volume_stats_checked = true;
-    }
-    if (g_js_mir_volume_stats_enabled && !g_js_mir_volume_stats_registered) {
-        atexit(js_mir_volume_stats_report);
-        g_js_mir_volume_stats_registered = true;
-    }
-    return g_js_mir_volume_stats_enabled ? 1 : 0;
-}
-
-static void js_mir_volume_stats_write_line(int fd, const char* line) {
-    if (fd < 0 || !line) return;
-    size_t len = strlen(line);
-    const char* cur = line;
-    while (len > 0) {
-        int wrote = (int)JS_MIR_VOL_STATS_WRITE(fd, cur, len);
-        if (wrote <= 0) return;
-        cur += wrote;
-        len -= (size_t)wrote;
-    }
-}
-
-static void js_mir_volume_stats_report(void) {
-    if (!g_js_mir_volume_stats_enabled || g_js_mir_volume_stats_samples == 0) return;
-    const char* dir = getenv("LAMBDA_JS_MIR_VOLUME_STATS_DIR");
-    if (!dir || !dir[0]) dir = "./temp/js_mir_volume_stats";
-    JS_MIR_VOL_STATS_MKDIR(dir);
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)JS_MIR_VOL_STATS_PID());
-    int fd = JS_MIR_VOL_STATS_OPEN(path);
-    if (fd < 0) return;
-    js_mir_volume_stats_write_line(fd,
-        "samples\tlast_functions_discovered\tlast_mir_insns_emitted\ttotal_functions_discovered\ttotal_mir_insns_emitted\tmax_mir_insns_emitted\n");
-    char line[512];
-    snprintf(line, sizeof(line), "%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
-        g_js_mir_volume_stats_samples,
-        g_last_js_mir_volume.functions_discovered,
-        g_last_js_mir_volume.mir_insns_emitted,
-        g_js_mir_volume_stats_total_functions,
-        g_js_mir_volume_stats_total_insns,
-        g_js_mir_volume_stats_max_insns);
-    js_mir_volume_stats_write_line(fd, line);
-    JS_MIR_VOL_STATS_CLOSE(fd);
-    log_notice("js-mir-volume-stats: samples=%ld last_funcs=%ld last_insns=%ld total_insns=%ld max_insns=%ld",
-        g_js_mir_volume_stats_samples,
-        g_last_js_mir_volume.functions_discovered,
-        g_last_js_mir_volume.mir_insns_emitted,
-        g_js_mir_volume_stats_total_insns,
-        g_js_mir_volume_stats_max_insns);
-}
 
 extern "C" void js_mir_volume_counters_reset(void) {
     g_last_js_mir_volume.functions_discovered = 0;
@@ -348,14 +252,6 @@ extern "C" void js_mir_volume_counters_reset(void) {
 extern "C" void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted) {
     g_last_js_mir_volume.functions_discovered = functions_discovered;
     g_last_js_mir_volume.mir_insns_emitted = mir_insns_emitted;
-    if (js_mir_volume_stats_is_enabled()) {
-        g_js_mir_volume_stats_samples++;
-        g_js_mir_volume_stats_total_functions += functions_discovered;
-        g_js_mir_volume_stats_total_insns += mir_insns_emitted;
-        if (mir_insns_emitted > g_js_mir_volume_stats_max_insns) {
-            g_js_mir_volume_stats_max_insns = mir_insns_emitted;
-        }
-    }
 }
 
 extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
@@ -831,7 +727,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
-    js_mir_log_phase_progress(filename, "parse", g_last_js_mir_phase_timing.parse_us);
     log_mem_stage("js-core: ts_parsed");
 
     TSNode root = ts_tree_root_node(tp->tree);
@@ -848,7 +743,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
-    js_mir_log_phase_progress(filename, "ast", g_last_js_mir_phase_timing.ast_us);
     log_mem_stage("js-core: ast_built");
 
     // Run early error detection (static semantic validation)
@@ -863,7 +757,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
-    js_mir_log_phase_progress(filename, "early", g_last_js_mir_phase_timing.early_us);
 
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
@@ -943,7 +836,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     phase_start = js_mir_phase_now_us();
     bool transpile_ok = transpile_js_mir_ast(mt, js_ast);
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
-    js_mir_log_phase_progress(filename, "mir", g_last_js_mir_phase_timing.mir_us);
     log_mem_stage("js-core: ast_to_mir");
     if (!transpile_ok) {
         log_error("js-mir: collection/allocation failed for '%s'",
@@ -973,7 +865,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         (void)js_get_global_this();
         jm_load_imports(runtime, js_ast, filename);
         g_last_js_mir_phase_timing.imports_us = js_mir_phase_now_us() - phase_start;
-        js_mir_log_phase_progress(filename, "imports", g_last_js_mir_phase_timing.imports_us);
         log_mem_stage("js-core: imports_loaded");
     }
 
@@ -999,17 +890,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
 
     // Link and generate
-#ifndef NDEBUG
-    FILE* mir_gen_debug = NULL;
-    if (getenv("JS_MIR_GEN_TIMING")) {
-        create_dir_recursive("temp");
-        mir_gen_debug = fopen("temp/mir_gen_timing.txt", "w");
-        if (mir_gen_debug) {
-            MIR_gen_set_debug_file(ctx, mir_gen_debug);
-            MIR_gen_set_debug_level(ctx, 0);
-        }
-    }
-#endif
     // Count finalized executable MIR instructions (drives the interpreter
     // policy and the AST-tuning volume gate). Labels are structural and must
     // match the MT7 artifact counter used by test_mir_ratchet_gtest.
@@ -1082,7 +962,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     phase_start = js_mir_phase_now_us();
     MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : gen_interface, import_resolver);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
-    js_mir_log_phase_progress(filename, "link", g_last_js_mir_phase_timing.link_us);
     log_mem_stage("js-core: mir_linked");
     void* js_debug_info = jm_build_js_debug_info(mt, filename);
     context->debug_info = (ArrayList*)js_debug_info;
@@ -1091,12 +970,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     if (effective_opt != g_js_mir_optimize_level) {
         MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level);
     }
-#ifndef NDEBUG
-    if (mir_gen_debug) {
-        fclose(mir_gen_debug);
-        MIR_gen_set_debug_file(ctx, NULL);
-    }
-#endif
 
     // Find js_main
     typedef Item (*js_main_func_t)(Context*);

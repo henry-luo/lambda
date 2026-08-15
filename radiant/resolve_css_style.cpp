@@ -1729,6 +1729,15 @@ static bool css_contain_value_has_inline_size(const CssValue* value) {
     return css_value_has_identifier(value, "inline-size");
 }
 
+static bool css_contain_value_establishes_positioning_cb(const CssValue* value) {
+    // CSS Containment: layout and paint containment establish absolute/fixed CBs;
+    // strict and content expand to those containment modes.
+    return css_value_has_identifier(value, "layout") ||
+        css_value_has_identifier(value, "paint") ||
+        css_value_has_identifier(value, "strict") ||
+        css_value_has_identifier(value, "content");
+}
+
 static void resolve_contain_intrinsic_axis(LayoutContext* lycon, ViewBlock* block,
                                            CssPropertyCode property,
                                            const CssValue* value, bool horizontal) {
@@ -3177,10 +3186,6 @@ DisplayValue resolve_display_value(void* child) {
             DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
             return none_display;
         }
-        if (dom_elem && dom_elem->has_attribute("popover") && !dom_elem->is_popover_open()) {
-            DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
-            return none_display;
-        }
         // HTML spec §4.11.1: Non-summary children of closed <details> are hidden.
         // This must be checked here (not just in layout_flow_node) to cover all
         // layout paths including flex and grid when CSS overrides display.
@@ -3206,6 +3211,21 @@ DisplayValue resolve_display_value(void* child) {
         if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
             has_specified_display =
                 avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY) != nullptr;
+        }
+        if (dom_elem && dom_elem->has_attribute("popover") &&
+            !dom_elem->is_popover_open() && !has_specified_display) {
+            // the closed-popover UA display rule must yield to author display declarations
+            DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+            return none_display;
+        }
+        if (dom_elem && dom_elem->has_attribute("popover") &&
+            dom_elem->is_popover_open() && !has_specified_display) {
+            // the HTML popover UA rule makes an open popover block-level before fit-content sizing
+            bool object_fallback = dom_elem->tag_id == MARKUP_NAME_OBJECT &&
+                !dom_elem->get_attribute(MARKUP_NAME_DATA);
+            DisplayValue popover_display = {CSS_VALUE_BLOCK,
+                object_fallback ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW};
+            return needs_blockify ? blockify_display(popover_display) : popover_display;
         }
         if (dom_elem && !has_specified_display &&
             dom_elem->display.inner != CSS_VALUE_NONE &&
@@ -7987,6 +8007,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             bool contains_inline_size = css_contain_value_has_inline_size(value);
             block->blk->contain_size = contains_size;
             block->blk->contain_inline_size = contains_inline_size;
+            block->blk->contain_positioning =
+                css_contain_value_establishes_positioning_cb(value);
             break;
         }
         case CSS_PROPERTY_CONTENT_VISIBILITY: {

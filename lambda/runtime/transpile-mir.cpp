@@ -9,6 +9,7 @@
 #include "mir_emitter_shared.hpp"
 #include "mir_dump.h"
 #include "mir_policy.hpp"
+#include "interp.hpp"
 
 extern "C" int lambda_mir_lazy_enabled(void);
 #include "../js/js_runtime.h"
@@ -4299,53 +4300,8 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
 // Literal value extraction from source text
 // ============================================================================
 
-static int64_t parse_int_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    int end = ts_node_end_byte(node);
-    const char* text = source + start;
-    int len = end - start;
-
-    // Copy to null-terminated buffer
-    char buf[128];
-    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, text, len);
-    buf[len] = '\0';
-
-    // Handle hex (0x), octal (0o), binary (0b)
-    if (len > 2 && buf[0] == '0') {
-        if (buf[1] == 'x' || buf[1] == 'X') return strtoll(buf, NULL, 16);
-        if (buf[1] == 'o' || buf[1] == 'O') return strtoll(buf + 2, NULL, 8);
-        if (buf[1] == 'b' || buf[1] == 'B') return strtoll(buf + 2, NULL, 2);
-    }
-
-    // Remove underscores (1_000_000 -> 1000000)
-    char clean[128];
-    int ci = 0;
-    for (int i = 0; i < len && ci < (int)sizeof(clean) - 1; i++) {
-        if (buf[i] != '_') clean[ci++] = buf[i];
-    }
-    clean[ci] = '\0';
-
-    // C16 ruling 9: an integer-spelled literal may carry a non-negative
-    // exponent (`10e1` is int 100), and the grammar tokenizes that as an
-    // integer. strtoll stops at the 'e', so apply the exponent here. The
-    // frontend has already rejected anything outside the ingestion band, so
-    // this cannot overflow.
-    char* endptr = NULL;
-    int64_t value = strtoll(clean, &endptr, 10);
-    if (endptr && (*endptr == 'e' || *endptr == 'E')) {
-        const char* exp = endptr + 1;
-        if (*exp == '+') exp++;
-        long power = strtol(exp, NULL, 10);
-        for (long i = 0; i < power; i++) value *= 10;
-    }
-    return value;
-}
-
-static bool parse_bool_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    return source[start] == 't';
-}
+// parse_int_literal / parse_bool_literal live in ast.hpp — the T0 interpreter
+// decodes the same literal spellings from the same source bytes.
 
 // ============================================================================
 // Load constant from rt->consts[index]
@@ -6821,47 +6777,8 @@ static MIR_reg_t emit_machine_count(MirTranspiler* mt, AstNode* node) {
 // whose Lambda type is `int` return int's native lane. Both the direct-call and
 // the pipe-injection emitters need this, so it lives here rather than being
 // decided twice.
-static TypeId sysfunc_c_ret_type_id(SysFuncInfo* info) {
-TypeId c_ret_tid = LMD_TYPE_ANY;  // default: C function returns Item
-    switch (info->fn) {
-    // len() stays a raw machine count. Search/ordinal calls return Item so
-    // their public null result cannot be mistaken for an integer sentinel.
-    case SYSFUNC_LEN:
-        c_ret_tid = LMD_TYPE_INT; break;
-    // These keep an int64_t C result. `int64()` because its Lambda type IS
-    // int64; the bitwise/shift family because bit reinterpretation is a
-    // machine operation on machine words, not number math — its result is
-    // converted into the int lane at the boundary below.
-    case SYSFUNC_INT64:
-    case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
-    case SYSFUNC_BNOT: case SYSFUNC_SHL: case SYSFUNC_SHR:
-        c_ret_tid = LMD_TYPE_INT64; break;
-    // C functions returning Bool (uint8_t)
-    case SYSFUNC_CONTAINS: case SYSFUNC_STARTS_WITH: case SYSFUNC_ENDS_WITH:
-    case SYSFUNC_EXISTS:
-        c_ret_tid = LMD_TYPE_BOOL; break;
-    // C functions returning String*
-    case SYSFUNC_STRING: case SYSFUNC_FORMAT1: case SYSFUNC_FORMAT2:
-        c_ret_tid = LMD_TYPE_STRING; break;
-    // C functions returning Symbol*
-    case SYSFUNC_NAME: case SYSFUNC_SYMBOL:
-        c_ret_tid = LMD_TYPE_SYMBOL; break;
-    // C functions returning Type*
-    case SYSFUNC_TYPE:
-        c_ret_tid = LMD_TYPE_TYPE; break;
-    // C functions returning DateTime (uint64_t)
-    case SYSFUNC_DATETIME: case SYSFUNC_DATETIME0:
-    case SYSFUNC_DATE: case SYSFUNC_DATE0: case SYSFUNC_DATE3:
-    case SYSFUNC_TIME: case SYSFUNC_TIME0: case SYSFUNC_TIME3:
-    case SYSFUNC_JUSTNOW:
-        c_ret_tid = LMD_TYPE_DTIME; break;
-    // C functions returning double
-    case SYSPROC_CLOCK:
-        c_ret_tid = LMD_TYPE_FLOAT; break;
-    default: break;  // returns Item, no boxing needed
-    }
-    return c_ret_tid;
-}
+// sysfunc_c_ret_type_id lives in sys_func_registry.h — the T0 interpreter
+// selects the same result boxing from the same table.
 
 // Formal semantics 7.7: most value sys funcs declare their parameters as
 // `any - error`, so an error argument is rejected at the CALL BOUNDARY rather
@@ -10483,8 +10400,6 @@ static MIR_reg_t transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
 // Let/pub statements
 // ============================================================================
 
-static bool is_declaration_node(int node_type);
-static bool is_side_effect_stam(int node_type);
 
 static AstNode* mir_single_value_branch_node(AstNode* node) {
     AstNode* base = mir_unwrap_primary(node);
@@ -11866,40 +11781,8 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
 }
 
 // Check if a node type is a declaration (processed separately, not a value)
-static bool is_declaration_node(int node_type) {
-    switch (node_type) {
-    case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM:
-    case AST_NODE_TYPE_STAM: case AST_NODE_VAR_STAM:
-    case AST_NODE_OBJECT_TYPE:
-    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
-    case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
-    case AST_NODE_VIEW:
-        return true;
-    default:
-        return false;
-    }
-}
-
-// Check if a node type is a procedural side-effect statement.
-// These execute for side effects but do NOT produce output values.
-// NOTE: IF_EXPR (with block form), WHILE_STAM, FOR_STAM can appear in functional code
-// and produce values, so they are NOT included here.
-static bool is_side_effect_stam(int node_type) {
-    switch (node_type) {
-    case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_BREAK_STAM:
-    case AST_NODE_CONTINUE_STAM:
-    case AST_NODE_RETURN_STAM:
-    case AST_NODE_RAISE_STAM:
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_PIPE_FILE_STAM:
-    case AST_NODE_HANDLER_STAM:
-        return true;
-    default:
-        return false;
-    }
-}
+// is_declaration_node / is_side_effect_stam live in ast.hpp — the T0
+// interpreter splits content blocks with the same two predicates.
 
 static bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
     return node && node != last_value &&
@@ -25578,7 +25461,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     ast_index_destroy(&tp->ast_index);
 
     // Copy Script-sized portion of Transpiler back to the Script object
-    memcpy(script, tp, sizeof(Script));
+    script_adopt_transpiler(script, tp);
     script->jit_context = tp->jit_context;
     script->main_func   = tp->main_func;
 
@@ -25683,6 +25566,36 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             return nullptr;
         }
         output->root = ItemError;
+        return output;
+    }
+
+    // T0: a planned script has no `main` by construction — module init is the
+    // interpreter's job. Imports still fall back to JIT in P0/P1, so a planned
+    // main script with an import cone is not yet reachable (P1.5).
+    if (runner.script->interp_supported) {
+        if (compile_only) {
+            Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
+            Input* output = Input::create(output_pool, nullptr);
+            if (output) output->root = ItemNull;
+            return output;
+        }
+        runner_setup_context(&runner);
+        if (!runner.context) return nullptr;
+        Item result = interp_run_script(&runner, run_main);
+        preserve_context_last_error(result);
+        Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
+        Input* output = Input::create(output_pool, nullptr);
+        if (!output) {
+            log_error("interp: failed to create output Input");
+            if (output_pool) pool_destroy(output_pool);
+            return nullptr;
+        }
+        resolve_sys_paths_recursive(result);
+        if (runner.context->cwd) {
+            url_destroy((Url*)runner.context->cwd);
+            runner.context->cwd = NULL;
+        }
+        output->root = result;
         return output;
     }
 

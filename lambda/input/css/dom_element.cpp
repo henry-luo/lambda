@@ -1404,6 +1404,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
         target_style = element->pseudo_style_slot(PSEUDO_STYLE_PLACEHOLDER);
         pseudo_name = "::placeholder";
+    } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_BACKDROP);
+        pseudo_name = "::backdrop";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
@@ -1463,6 +1466,8 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         style = element->pseudo_style(PSEUDO_STYLE_MARKER);
     } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
         style = element->pseudo_style(PSEUDO_STYLE_PLACEHOLDER);
+    } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
+        style = element->pseudo_style(PSEUDO_STYLE_BACKDROP);
     }
 
     if (!style) {

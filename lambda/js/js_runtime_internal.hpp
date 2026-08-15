@@ -108,7 +108,6 @@ extern "C" void js_util_reset();
 Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 
-bool js_runtime_trace_enabled();
 Map* js_resolve_object_prototype();
 Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_found = nullptr);
 Item js_check_array_sym_iterator();

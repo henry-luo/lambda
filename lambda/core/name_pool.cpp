@@ -8,7 +8,6 @@
 #include "well_known_lambda_names.h"
 #include "well_known_name_lookup.h"
 #include "../js/js_well_known_names.h"
-#include "../js/js_exec_profile.h"
 
 static const WellKnownNameRecord* find_well_known_record(NameId id) {
     const WellKnownNameRecord* records = NULL;
@@ -33,18 +32,15 @@ NameId well_known_name_id(StrView name) {
         NameId candidate_id = g_well_known_name_lookup[slot];
         uint64_t probes = (uint64_t)probe + 1;
         if (candidate_id == NAME_ID_NONE) {
-            js_exec_profile_name_lookup(probes, 0, UINT32_MAX);
             return NAME_ID_NONE;
         }
         const WellKnownNameRecord* record = find_well_known_record(candidate_id);
         if (record && record->meta.hash == hash && record->len == name.length &&
                 memcmp(record->chars, name.str, name.length) == 0) {
-            js_exec_profile_name_lookup(probes, 1, candidate_id >> 16);
             return candidate_id;
         }
         slot = (slot + 1) & (g_well_known_name_lookup_capacity - 1);
     }
-    js_exec_profile_name_lookup(g_well_known_name_lookup_capacity, 0, UINT32_MAX);
     return NAME_ID_NONE;
 }
 

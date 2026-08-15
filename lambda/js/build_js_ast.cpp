@@ -551,14 +551,6 @@ static String* js_decode_identifier_name(JsTranspiler* tp, const char* source, i
     return name_pool_create_len(tp->name_pool, decoded_buf, oi);
 }
 
-static bool js_identifier_bytes_have_non_ascii(const char* source, int source_len) {
-    if (!source || source_len <= 0) return false;
-    for (int i = 0; i < source_len; i++) {
-        if ((unsigned char)source[i] >= 0x80) return true;
-    }
-    return false;
-}
-
 // Build JavaScript identifier node
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     if (ts_node_is_null(id_node)) {
@@ -583,13 +575,6 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
         log_error("Failed to create identifier name");
         return NULL;
     }
-    if (js_identifier_counters_is_enabled()) {
-        bool has_escape = memchr(source.str, '\\', source.length) != NULL;
-        bool has_non_ascii = js_identifier_bytes_have_non_ascii(identifier->name->chars, identifier->name->len);
-        js_identifier_counters_record_ast((int)source.length, identifier->name->len,
-            has_escape ? 1 : 0, has_non_ascii ? 1 : 0);
-    }
-
     // Look up in symbol table
     identifier->entry = js_scope_lookup(tp, identifier->name);
 
@@ -626,12 +611,6 @@ static JsAstNode* build_js_binding_identifier(JsTranspiler* tp, TSNode id_node) 
     if (!identifier->name) {
         log_error("Failed to create binding identifier name");
         return NULL;
-    }
-    if (js_identifier_counters_is_enabled()) {
-        bool has_escape = memchr(source.str, '\\', source.length) != NULL;
-        bool has_non_ascii = js_identifier_bytes_have_non_ascii(identifier->name->chars, identifier->name->len);
-        js_identifier_counters_record_ast((int)source.length, identifier->name->len,
-            has_escape ? 1 : 0, has_non_ascii ? 1 : 0);
     }
     identifier->entry = NULL;
     identifier->type = &TYPE_ANY;

@@ -680,235 +680,251 @@ ConstItem List::get(int index) const {
     return this->items[index].to_const();
 }
 
+// One shaped-field store. Shared by the varargs filler and the array filler so
+// a map literal lands identically whether the values arrive from generated
+// code's varargs call or from the T0 walker's rooted Item span.
+void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
+    if (!field->name) { // nested map
+        TypeId type_id = get_type_id(item);
+        if (type_id == LMD_TYPE_MAP) {
+            Map* nested_map = item.map;
+            *(Map**)field_ptr = nested_map;
+        } else {
+            log_error("expected a map, got data of type %s", get_type_name(type_id));
+            *(Map**)field_ptr = nullptr;
+        }
+    } else {
+        LaneStorageDesc lane = {};
+        if (shape_entry_uses_native_lane(field, &lane)) {
+            if (!map_shape_field_store_native_lane(field_ptr, field, item)) {
+                log_error("set_fields: value type %s does not fit nullable native map lane",
+                    get_type_name(get_type_id(item)));
+            }
+            return;   // the caller owns the shape cursor
+        }
+        TypeId storage_type_id = shape_entry_storage_type_id(field);
+        switch (storage_type_id) {
+        case LMD_TYPE_NULL: {
+            // For dynamically-typed fields (e.g. state-bound element attributes),
+            // store non-null values as raw tagged Items. The compiler sets shape type
+            // to LMD_TYPE_NULL when it can't resolve the type at compile time.
+            if (item.item != ITEM_NULL && get_type_id(item) != LMD_TYPE_NULL) {
+                *(Item*)field_ptr = item;
+            }
+            break;
+        }
+        case LMD_TYPE_UNDEFINED:
+            // Undefined fields carry no payload. Leaving their storage untouched
+            // preserves the distinct JS sentinel on every shaped-field read.
+            break;
+        case LMD_TYPE_BOOL: {
+            *(bool*)field_ptr = item.bool_val;
+            break;
+        }
+        case LMD_TYPE_INT: {
+            // Map fields use the same int64 lane as variables and arrays;
+            // the former double carrier could not represent ItemNull as a
+            // nullable-int sentinel.
+            TypeId item_type = get_type_id(item);
+            int64_t val;
+            if (is_float_type_id(item_type)) {
+                val = lambda_double_to_int_lane(item.get_double());
+            } else if (item_type == LMD_TYPE_BOOL) {
+                val = item.bool_val ? 1 : 0;
+            } else {
+                val = lambda_int_item_to_lane(item.item);
+            }
+            *(int64_t*)field_ptr = val;
+            break;
+        }
+        case LMD_TYPE_INT64: {
+            *(int64_t*)field_ptr = item.get_int64();
+            break;
+        }
+        case LMD_TYPE_UINT64: {
+            *(uint64_t*)field_ptr = item.get_uint64();
+            break;
+        }
+        case LMD_TYPE_NUM_SIZED: {
+            // The compact Item preserves the sized subtype for a plain
+            // field; the nullable form widens separately in its lane.
+            *(Item*)field_ptr = item;
+            break;
+        }
+        case LMD_TYPE_FLOAT:
+        case LMD_TYPE_FLOAT64: {
+            // handle type coercion: int → float, int64 → float
+            TypeId item_type = get_type_id(item);
+            double val;
+            if (item_type == LMD_TYPE_INT) {
+                val = lambda_int_item_value(item);
+            } else if (item_type == LMD_TYPE_INT64) {
+                val = (double)item.get_int64();
+            } else if (item_type == LMD_TYPE_UINT64) {
+                // A u64 Item carries a pointer, not double payload bits.
+                val = (double)item.get_uint64();
+            } else {
+                val = item.get_double();
+            }
+            *(double*)field_ptr = val;
+            break;
+        }
+        case LMD_TYPE_DECIMAL: {
+            // Integer-domain arithmetic uses the decimal payload carrier too;
+            // map fields must retain that GC object instead of dropping it.
+            *(Decimal**)field_ptr = item.get_decimal();
+            break;
+        }
+        case LMD_TYPE_DTIME:  {
+            // Retain the owner-backed object pointer rather than embedding
+            // today's one-word payload and losing its storage lifetime.
+            *(DateTime**)field_ptr = item.get_datetime_ptr();
+            break;
+        }
+        case LMD_TYPE_STRING: {
+            *(String**)field_ptr = item.get_safe_string();
+            break;
+        }
+        case LMD_TYPE_BINARY: {
+            *(Binary**)field_ptr = item.get_safe_binary();
+            break;
+        }
+        case LMD_TYPE_COMPLEX:
+            *(Complex**)field_ptr = item.get_complex();
+            break;
+        case LMD_TYPE_SYMBOL: {
+            Symbol *sym = item.get_safe_symbol();
+            *(Symbol**)field_ptr = sym;
+            break;
+        }
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
+        case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+        case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+            TypeId item_type = get_type_id(item);
+            if (item_type >= LMD_TYPE_RANGE && item_type <= LMD_TYPE_OBJECT) {
+                *(Container**)field_ptr = item.container;
+            } else {
+                *(Container**)field_ptr = nullptr;
+            }
+            break;
+        }
+        case LMD_TYPE_TYPE: {
+            if (get_type_id(item) == LMD_TYPE_NULL) {
+                *(void**)field_ptr = nullptr;
+            } else {
+                *(void**)field_ptr = (void*)item.type;
+            }
+            break;
+        }
+        case LMD_TYPE_FUNC: {
+            if (get_type_id(item) == LMD_TYPE_NULL) {
+                *(Function**)field_ptr = nullptr;
+            } else {
+                *(Function**)field_ptr = item.function;
+            }
+            break;
+        }
+        case LMD_TYPE_PATH: {
+            if (get_type_id(item) == LMD_TYPE_NULL) {
+                *(Path**)field_ptr = nullptr;
+            } else {
+                *(Path**)field_ptr = item.path;
+            }
+            break;
+        }
+        case LMD_TYPE_ANY: { // a special case
+            TypeId type_id = get_type_id(item);
+            TypedItem titem = {.type_id = type_id, .item = item.item};
+            switch (type_id) {
+            case LMD_TYPE_NULL: ;
+                break; // no extra work needed
+            case LMD_TYPE_BOOL:
+                titem.bool_val = item.bool_val;  break;
+            case LMD_TYPE_INT:
+                // C16: carry the numeric value; an int Item payload is not its value.
+                titem.double_val = lambda_int_item_value(item);  break;
+            case LMD_TYPE_INT64:
+                titem.long_val = item.get_int64();  break;
+            case LMD_TYPE_UINT64:
+                titem.uint64_val = item.get_uint64();  break;
+            case LMD_TYPE_FLOAT:
+            case LMD_TYPE_FLOAT64:
+                titem.double_val = item.get_double();  break;
+            case LMD_TYPE_DECIMAL:
+                // Preserve both decimal and integer-domain payloads in `any` fields.
+                titem.decimal = item.get_decimal();  break;
+            case LMD_TYPE_DTIME:
+                titem.datetime_ptr = item.get_datetime_ptr();  break;
+            case LMD_TYPE_STRING:
+                titem.string = item.get_safe_string();
+                break;
+            case LMD_TYPE_BINARY:
+                titem.binary = item.get_safe_binary();
+                break;
+            case LMD_TYPE_COMPLEX:
+                titem.pointer = item.get_complex();
+                break;
+            case LMD_TYPE_SYMBOL:
+                titem.symbol = item.get_safe_symbol();
+                break;
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
+            case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+            case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+                Container *container = item.container;
+                titem.container = container;
+                break;
+            }
+            case LMD_TYPE_TYPE:
+                titem.type = item.type;
+                break;
+            case LMD_TYPE_FUNC: {
+                Function* fn = item.function;
+                titem.function = fn;
+                break;
+            }
+            case LMD_TYPE_PATH:
+                titem.path = item.path;
+                break;
+            case LMD_TYPE_ERROR:
+            case LMD_TYPE_UNDEFINED:
+                // store sentinel — the type_id alone is enough to round-trip
+                // through typeditem_to_item. No payload to copy.
+                break;
+            default:
+                log_error("unknown type %s in set_fields", get_type_name(type_id));
+                // set as ERROR
+                titem = {.type_id = LMD_TYPE_ERROR};
+            }
+            // set in map
+            *(TypedItem*)field_ptr = titem;
+            break;
+        }
+        default:
+            log_error("unknown map storage type %s", get_type_name(storage_type_id));
+        }
+    }
+}
+
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
-        // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset,
-        //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
         void* field_ptr = map_field_ptr(map_data, field);
-        // always read an Item (uint64_t) from varargs - transpiler now passes Items via box functions like i2it()
+        // always read an Item (uint64_t) from varargs - transpiler passes Items via box functions like i2it()
         Item item = {.item = va_arg(args, uint64_t)};
-        if (!field->name) { // nested map
-            TypeId type_id = get_type_id(item);
-            if (type_id == LMD_TYPE_MAP) {
-                Map* nested_map = item.map;
-                *(Map**)field_ptr = nested_map;
-            } else {
-                log_error("expected a map, got data of type %s", get_type_name(type_id));
-                *(Map**)field_ptr = nullptr;
-            }
-        } else {
-            LaneStorageDesc lane = {};
-            if (shape_entry_uses_native_lane(field, &lane)) {
-                if (!map_shape_field_store_native_lane(field_ptr, field, item)) {
-                    log_error("set_fields: value type %s does not fit nullable native map lane",
-                        get_type_name(get_type_id(item)));
-                }
-                field = field->next;
-                continue;
-            }
-            TypeId storage_type_id = shape_entry_storage_type_id(field);
-            switch (storage_type_id) {
-            case LMD_TYPE_NULL: {
-                // For dynamically-typed fields (e.g. state-bound element attributes),
-                // store non-null values as raw tagged Items. The compiler sets shape type
-                // to LMD_TYPE_NULL when it can't resolve the type at compile time.
-                if (item.item != ITEM_NULL && get_type_id(item) != LMD_TYPE_NULL) {
-                    *(Item*)field_ptr = item;
-                }
-                break;
-            }
-            case LMD_TYPE_UNDEFINED:
-                // Undefined fields carry no payload. Leaving their storage untouched
-                // preserves the distinct JS sentinel on every shaped-field read.
-                break;
-            case LMD_TYPE_BOOL: {
-                *(bool*)field_ptr = item.bool_val;
-                break;
-            }
-            case LMD_TYPE_INT: {
-                // Map fields use the same int64 lane as variables and arrays;
-                // the former double carrier could not represent ItemNull as a
-                // nullable-int sentinel.
-                TypeId item_type = get_type_id(item);
-                int64_t val;
-                if (is_float_type_id(item_type)) {
-                    val = lambda_double_to_int_lane(item.get_double());
-                } else if (item_type == LMD_TYPE_BOOL) {
-                    val = item.bool_val ? 1 : 0;
-                } else {
-                    val = lambda_int_item_to_lane(item.item);
-                }
-                *(int64_t*)field_ptr = val;
-                break;
-            }
-            case LMD_TYPE_INT64: {
-                *(int64_t*)field_ptr = item.get_int64();
-                break;
-            }
-            case LMD_TYPE_UINT64: {
-                *(uint64_t*)field_ptr = item.get_uint64();
-                break;
-            }
-            case LMD_TYPE_NUM_SIZED: {
-                // The compact Item preserves the sized subtype for a plain
-                // field; the nullable form widens separately in its lane.
-                *(Item*)field_ptr = item;
-                break;
-            }
-            case LMD_TYPE_FLOAT:
-            case LMD_TYPE_FLOAT64: {
-                // handle type coercion: int → float, int64 → float
-                TypeId item_type = get_type_id(item);
-                double val;
-                if (item_type == LMD_TYPE_INT) {
-                    val = lambda_int_item_value(item);
-                } else if (item_type == LMD_TYPE_INT64) {
-                    val = (double)item.get_int64();
-                } else if (item_type == LMD_TYPE_UINT64) {
-                    // A u64 Item carries a pointer, not double payload bits.
-                    val = (double)item.get_uint64();
-                } else {
-                    val = item.get_double();
-                }
-                *(double*)field_ptr = val;
-                break;
-            }
-            case LMD_TYPE_DECIMAL: {
-                // Integer-domain arithmetic uses the decimal payload carrier too;
-                // map fields must retain that GC object instead of dropping it.
-                *(Decimal**)field_ptr = item.get_decimal();
-                break;
-            }
-            case LMD_TYPE_DTIME:  {
-                // Retain the owner-backed object pointer rather than embedding
-                // today's one-word payload and losing its storage lifetime.
-                *(DateTime**)field_ptr = item.get_datetime_ptr();
-                break;
-            }
-            case LMD_TYPE_STRING: {
-                *(String**)field_ptr = item.get_safe_string();
-                break;
-            }
-            case LMD_TYPE_BINARY: {
-                *(Binary**)field_ptr = item.get_safe_binary();
-                break;
-            }
-            case LMD_TYPE_COMPLEX:
-                *(Complex**)field_ptr = item.get_complex();
-                break;
-            case LMD_TYPE_SYMBOL: {
-                Symbol *sym = item.get_safe_symbol();
-                *(Symbol**)field_ptr = sym;
-                break;
-            }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-            case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-            case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-                TypeId item_type = get_type_id(item);
-                if (item_type >= LMD_TYPE_RANGE && item_type <= LMD_TYPE_OBJECT) {
-                    *(Container**)field_ptr = item.container;
-                } else {
-                    *(Container**)field_ptr = nullptr;
-                }
-                break;
-            }
-            case LMD_TYPE_TYPE: {
-                if (get_type_id(item) == LMD_TYPE_NULL) {
-                    *(void**)field_ptr = nullptr;
-                } else {
-                    *(void**)field_ptr = (void*)item.type;
-                }
-                break;
-            }
-            case LMD_TYPE_FUNC: {
-                if (get_type_id(item) == LMD_TYPE_NULL) {
-                    *(Function**)field_ptr = nullptr;
-                } else {
-                    *(Function**)field_ptr = item.function;
-                }
-                break;
-            }
-            case LMD_TYPE_PATH: {
-                if (get_type_id(item) == LMD_TYPE_NULL) {
-                    *(Path**)field_ptr = nullptr;
-                } else {
-                    *(Path**)field_ptr = item.path;
-                }
-                break;
-            }
-            case LMD_TYPE_ANY: { // a special case
-                TypeId type_id = get_type_id(item);
-                TypedItem titem = {.type_id = type_id, .item = item.item};
-                switch (type_id) {
-                case LMD_TYPE_NULL: ;
-                    break; // no extra work needed
-                case LMD_TYPE_BOOL:
-                    titem.bool_val = item.bool_val;  break;
-                case LMD_TYPE_INT:
-                    // C16: carry the numeric value; an int Item payload is not its value.
-                    titem.double_val = lambda_int_item_value(item);  break;
-                case LMD_TYPE_INT64:
-                    titem.long_val = item.get_int64();  break;
-                case LMD_TYPE_UINT64:
-                    titem.uint64_val = item.get_uint64();  break;
-                case LMD_TYPE_FLOAT:
-                case LMD_TYPE_FLOAT64:
-                    titem.double_val = item.get_double();  break;
-                case LMD_TYPE_DECIMAL:
-                    // Preserve both decimal and integer-domain payloads in `any` fields.
-                    titem.decimal = item.get_decimal();  break;
-                case LMD_TYPE_DTIME:
-                    titem.datetime_ptr = item.get_datetime_ptr();  break;
-                case LMD_TYPE_STRING:
-                    titem.string = item.get_safe_string();
-                    break;
-                case LMD_TYPE_BINARY:
-                    titem.binary = item.get_safe_binary();
-                    break;
-                case LMD_TYPE_COMPLEX:
-                    titem.pointer = item.get_complex();
-                    break;
-                case LMD_TYPE_SYMBOL:
-                    titem.symbol = item.get_safe_symbol();
-                    break;
-                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-                case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-                case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-                    Container *container = item.container;
-                    titem.container = container;
-                    break;
-                }
-                case LMD_TYPE_TYPE:
-                    titem.type = item.type;
-                    break;
-                case LMD_TYPE_FUNC: {
-                    Function* fn = item.function;
-                    titem.function = fn;
-                    break;
-                }
-                case LMD_TYPE_PATH:
-                    titem.path = item.path;
-                    break;
-                case LMD_TYPE_ERROR:
-                case LMD_TYPE_UNDEFINED:
-                    // store sentinel — the type_id alone is enough to round-trip
-                    // through typeditem_to_item. No payload to copy.
-                    break;
-                default:
-                    log_error("unknown type %s in set_fields", get_type_name(type_id));
-                    // set as ERROR
-                    titem = {.type_id = LMD_TYPE_ERROR};
-                }
-                // set in map
-                *(TypedItem*)field_ptr = titem;
-                break;
-            }
-            default:
-                log_error("unknown map storage type %s", get_type_name(storage_type_id));
-            }
-        }
+        set_field_value(field, field_ptr, item);
+        field = field->next;
+    }
+}
+
+void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
+                      int value_count) {
+    long count = map_type->length;
+    ShapeEntry *field = map_type->shape;
+    for (long i = 0; i < count; i++) {
+        void* field_ptr = map_field_ptr(map_data, field);
+        Item item = (i < value_count && values) ? values[i] : ItemNull;
+        set_field_value(field, field_ptr, item);
         field = field->next;
     }
 }

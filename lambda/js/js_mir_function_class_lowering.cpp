@@ -1600,7 +1600,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Transpile body (same as original, but params are native-typed)
         if (fn->body) {
-            jm_seed_boxed_float_const_cache(mt, fn->body);
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 JsAstNode* s = blk->statements;
@@ -2933,7 +2932,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Transpile body
         if (fn->body) {
-            jm_seed_boxed_float_const_cache(mt, fn->body);
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 if (!fn->is_async) {

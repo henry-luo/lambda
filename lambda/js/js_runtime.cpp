@@ -7,7 +7,6 @@
 #include "js_runtime_internal.hpp"
 #include "js_object_meta.h"
 #include "js_host_hooks.h"
-#include "js_job_queue.h"
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
 #include "js_exec_profile.h"
@@ -273,17 +272,14 @@ extern "C" Item js_using_dispose(Item resource) {
 
 #ifdef LAMBDA_JS_EXEC_PROFILE
 extern "C" Item js_profiled_push_d(double dval) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_BOX_FLOAT);
     return push_d(dval);
 }
 
 extern "C" double js_profiled_it2d(Item item) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_UNBOX_FLOAT);
     return it2d(item);
 }
 
 extern "C" int64_t js_profiled_it2i(Item item) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_UNBOX_INT);
     return it2i(item);
 }
 #endif
@@ -1044,7 +1040,6 @@ static int js_typemap_storage_capacity(TypeMap* tm) {
 }
 
 extern "C" Item js_new_object() {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT);
     js_object_metadata_initialize();
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     if (!m) return ItemNull;
@@ -3548,10 +3543,8 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
     {
         TypeId ct = get_type_id(callee);
         void* ret_addr = __builtin_return_address(0);
-        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx, last_fn=%.*s, total_calls=%d)",
-            (int)ct, argc, ret_addr, (unsigned long long)callee.item,
-            _trace_last_fn_len, _trace_last_fn,
-            _trace_total_calls);
+        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx)",
+            (int)ct, argc, ret_addr, (unsigned long long)callee.item);
         return js_throw_type_error("is not a constructor");
     }
 }
@@ -3807,7 +3800,6 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
 }
 
 extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT_TYPEMAP);
     if (!js_input || !tm || !typemap_ptr_is_plausible(tm) || tm == &EmptyMap ||
             tm->byte_size < 0) {
         return js_new_object();
@@ -4701,7 +4693,6 @@ static bool js_intrinsic_is_error_name(const char* name, int len) {
 
 extern "C" Item js_get_key_core(Item object, Item key,
                                                 Item receiver) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
     RootFrame property_roots(4);
     Rooted<Item> object_root(property_roots, object);
     Rooted<Item> key_root(property_roots, key);
@@ -6102,7 +6093,6 @@ static void js_array_try_promote_sparse_dense(Item array_item) {
     // it must not retain a stale sparse state after the authoritative map is
     // gone (Tune5 §5.7).
     container_set_js_elements_kind((Container*)arr, JS_ELEMENTS_HOLEY_TAGGED);
-    JS_PROPERTY_SET_BRANCH("array_sparse_promote_dense");
 }
 
 static void js_array_store_sparse_property(Item array_item, int64_t index, Item value, bool update_length) {
@@ -6370,7 +6360,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
                                   Item receiver, bool bypass_accessor_dispatch,
                                   bool strict) {
     if (js_property_key_needs_object_to_key(key)) {
-        JS_PROPERTY_SET_BRANCH("array_object_key_to_property_key");
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
     js_array_exotic_before_property_set(object, key, value);
@@ -6405,9 +6394,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-            JS_PROPERTY_SET_BRANCH("array_length");
             if (js_is_arguments_exotic_array(object)) {
-                JS_PROPERTY_SET_BRANCH("array_length_arguments_companion");
                 js_set_storage_mode(
                     js_arguments_companion_item(object), key, value,
                     receiver, bypass_accessor_dispatch, strict);
@@ -6505,18 +6492,15 @@ static Item js_set_array_core(Item object, Item key, Item value,
                     if (se0 && !jspd_is_accessor(se0)) own_data_prop = true;
                 }
                 if (!own_data_prop && !bypass_accessor_dispatch) {
-                    JS_PROPERTY_SET_BRANCH("array_named_proto_check");
                     Item lookup_root = js_get_prototype(object);
                     if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
                     JsSetterDispatchResult st = js_ordinary_set_via_accessor(
                         lookup_root, sk->chars, (int)sk->len, value, object);
                     if (st.status == JS_SET_DISPATCH_ERROR) return st.error_lane;
                     if (st.status == JS_SET_DISPATCHED) {
-                        JS_PROPERTY_SET_BRANCH("array_named_proto_dispatched");
                         return value;
                     }
                     if (st.status == JS_SET_NO_SETTER) {
-                        JS_PROPERTY_SET_BRANCH("array_named_proto_no_setter");
                         JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                             "set property which has only a getter on", sk->chars,
                             (int)sk->len));
@@ -6531,7 +6515,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
                     object, sk->chars, (int)sk->len, value,
                     bypass_accessor_dispatch, strict, &companion_write_handled));
                 if (own_data_prop && companion_write_handled) {
-                    JS_PROPERTY_SET_BRANCH("array_named_inplace");
                     return value;
                 }
                 // A named array property uses the companion map, so the ordinary
@@ -6548,7 +6531,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
                 }
                 pm = js_array_props(arr);
                 Item map_item = (Item){.map = pm};
-                JS_PROPERTY_SET_BRANCH("array_named_companion_generic");
                 js_set_storage_mode(
                     map_item, key, value, receiver, bypass_accessor_dispatch, strict);
                 return value;
@@ -6560,21 +6542,18 @@ static Item js_set_array_core(Item object, Item key, Item value,
         const char* prop_name = it2b(key) ? "true" : "false";
         int prop_len = it2b(key) ? 4 : 5;
         Item prop_key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-        JS_PROPERTY_SET_BRANCH("array_key_bool_to_named");
         js_set_storage_mode(
             object, prop_key, value, receiver, bypass_accessor_dispatch, strict);
         return value;
     }
     if (key_tid == LMD_TYPE_NULL) {
         Item prop_key = (Item){.item = s2it(heap_create_name("null", 4))};
-        JS_PROPERTY_SET_BRANCH("array_key_null_to_named");
         js_set_storage_mode(
             object, prop_key, value, receiver, bypass_accessor_dispatch, strict);
         return value;
     }
     if (key_tid == LMD_TYPE_UNDEFINED) {
         Item prop_key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-        JS_PROPERTY_SET_BRANCH("array_key_undefined_to_named");
         js_set_storage_mode(
             object, prop_key, value, receiver, bypass_accessor_dispatch, strict);
         return value;
@@ -6582,7 +6561,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
     if ((key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_INT64 || key_tid == LMD_TYPE_FLOAT) && !js_key_is_symbol(key) &&
         !js_array_key_is_index(key, NULL)) {
         Item prop_key = js_array_numeric_key_to_property_key(key);
-        JS_PROPERTY_SET_BRANCH("array_numeric_to_named");
         js_set_storage_mode(
             object, prop_key, value, receiver, bypass_accessor_dispatch, strict);
         return value;
@@ -6604,20 +6582,17 @@ static Item js_set_array_core(Item object, Item key, Item value,
                 if (status == JS_SHAPE_SLOT_ACCESSOR) {
                     JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                     if (pair && pair->setter.item != ItemNull.item) {
-                        JS_PROPERTY_SET_BRANCH("array_numeric_companion_accessor");
                         Item args[1] = { value };
                         js_call_function(pair->setter, object, args, 1);
                         return value;
                     }
                     // getter-only accessor: strict TypeError, sloppy no-op.
-                    JS_PROPERTY_SET_BRANCH("array_numeric_companion_getter_only");
                     JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                         "set property which has only a getter on", idx_buf, idx_len));
                     return value;
                 }
                 if (_se_idx) {
                     Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
-                    JS_PROPERTY_SET_BRANCH("array_numeric_companion_data");
                     js_set_storage_mode(
                         pm_item, idx_key, value, receiver, bypass_accessor_dispatch, strict);
                     return value;
@@ -6645,7 +6620,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
             int idx_len = 0;
             const char* idx_buf = js_property_index_chars(idx, &idx_len);
             Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
-            JS_PROPERTY_SET_BRANCH("array_arguments_extra_index");
             js_set_storage_mode(
                 map_item, str_key, value, receiver, bypass_accessor_dispatch, strict);
             return value;
@@ -6667,7 +6641,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
             if (!own_index_present) {
                 Item arr_proto = js_get_prototype_of(object);
                 if (js_is_proxy(arr_proto)) {
-                    JS_PROPERTY_SET_BRANCH("array_numeric_proto_proxy");
                     js_proxy_trap_set_with_receiver(arr_proto, prop_key, value, object);
                     return value;
                 }
@@ -6677,12 +6650,10 @@ static Item js_set_array_core(Item object, Item key, Item value,
                     if (ap) {
                         if (ap->setter.item != ItemNull.item &&
                             js_is_callable(ap->setter)) {
-                            JS_PROPERTY_SET_BRANCH("array_numeric_proto_accessor");
                             Item set_args[1] = { value };
                             js_call_function(ap->setter, object, set_args, 1);
                             return value;
                         }
-                        JS_PROPERTY_SET_BRANCH("array_numeric_proto_getter_only");
                         JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                             "set property which has only a getter on", idx_buf, idx_len));
                         return value;
@@ -6691,7 +6662,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
             }
         }
     }
-    JS_PROPERTY_SET_BRANCH("array_numeric_regular");
     return js_elements_set_mode(object, key, value, strict);
 }
 
@@ -7297,7 +7267,6 @@ static Item js_set_storage_mode(Item object, Item key,
     value = value_root.get();
     if (receiver_root.get().item == 0) receiver_root.set(object);
     receiver = receiver_root.get();
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_SET);
     // Fast path: result[i] = v where i is an existing own dense element of a
     // plain array. Bypasses the symbol/marker/accessor/proto preamble below,
     // which is all no-op for a non-negative integer key on such an array.
@@ -7305,7 +7274,6 @@ static Item js_set_storage_mode(Item object, Item key,
         int64_t kidx;
         if (js_key_as_array_index(key, &kidx) &&
                 js_array_fast_own_dense_set(object, kidx, value)) {
-            JS_PROPERTY_SET_BRANCH("top_array_int_dense_fast");
             return value;
         }
     }
@@ -7369,7 +7337,6 @@ static Item js_set_storage_mode(Item object, Item key,
     }
 
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
-        JS_PROPERTY_SET_BRANCH("top_nullish");
         return js_throw_type_error("Cannot set property on null or undefined");
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -7381,7 +7348,6 @@ static Item js_set_storage_mode(Item object, Item key,
         }
     }
     if (js_is_property_reference_primitive(type, object)) {
-        JS_PROPERTY_SET_BRANCH("top_primitive");
         return js_set_on_primitive_base(object, key, value, strict, false);
     }
     if (js_is_symbol(object)) {
@@ -7394,7 +7360,6 @@ static Item js_set_storage_mode(Item object, Item key,
         }
         JS_RETURN_IF_ERROR(js_property_error_if_strict(strict, "add property",
             prop_name, prop_len));
-        JS_PROPERTY_SET_BRANCH("top_symbol");
         return value;
     }
     if ((type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) && get_type_id(key) == LMD_TYPE_STRING) {
@@ -7408,7 +7373,6 @@ static Item js_set_storage_mode(Item object, Item key,
     Item ta_proto_result = value;
     if (js_ta_proto_chain_set(object, key, value, receiver_root.get(),
                               bypass_accessor_dispatch, &ta_proto_result)) {
-        JS_PROPERTY_SET_BRANCH("top_ta_proto_chain");
         return ta_proto_result;
     }
 
@@ -7416,7 +7380,6 @@ static Item js_set_storage_mode(Item object, Item key,
 
     // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
-        JS_PROPERTY_SET_BRANCH("top_array");
         return js_set_array_core(object, key, value,
                                      receiver_root.get(),
                                      bypass_accessor_dispatch, strict);
@@ -7426,7 +7389,6 @@ static Item js_set_storage_mode(Item object, Item key,
         Item out = ItemNull;
         if (js_dispatch_property_op(JS_EXOTIC_SET, object, 0, key, receiver,
                 ItemNull, value, bypass_accessor_dispatch, &out)) {
-            JS_PROPERTY_SET_BRANCH("top_jube_host_vmap");
             js_note_event_handler_property_set(object, key, value);
             return out;
         }
@@ -7449,14 +7411,12 @@ static Item js_set_storage_mode(Item object, Item key,
                     idx = -1;
                 }
             }
-            JS_PROPERTY_SET_BRANCH("top_typed_array_numeric");
             return js_typed_array_set(object, (Item){.item = i2it(idx)}, value);
         }
         // fall through for non-numeric string keys (e.g. __proto__)
     }
 
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
-        JS_PROPERTY_SET_BRANCH("top_map");
         Item result = js_set_map_core(object, key, value,
                                           receiver_root.get(),
                                           bypass_accessor_dispatch, strict);
@@ -7470,13 +7430,11 @@ static Item js_set_storage_mode(Item object, Item key,
 
     // Function: setting .prototype on a function (constructor pattern)
     if (type == LMD_TYPE_FUNC) {
-        JS_PROPERTY_SET_BRANCH("top_function");
         return js_set_function_core(object, key, value,
                                         receiver_root.get(),
                                         bypass_accessor_dispatch, strict);
     }
 
-    JS_PROPERTY_SET_BRANCH("top_other");
     return value;
 }
 
@@ -7760,7 +7718,6 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
 }
 
 extern "C" Item js_get_reference(Item object, Item key) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_ACCESS);
     // v18: throw TypeError when accessing properties on null or undefined
     TypeId type = get_type_id(object);
 
@@ -7864,26 +7821,17 @@ static Item js_super_lookup_base(Item receiver) {
     return proto;
 }
 
-static bool js_jube_ordinal_disabled(void) {
-    static int disabled = -1;
-    if (disabled < 0) {
-        const char* flag = getenv("LAMBDA_JS_NO_JUBE_ORDINAL");
-        disabled = flag && flag[0] && strcmp(flag, "0") != 0 ? 1 : 0;
-    }
-    return disabled != 0;
-}
-
 // DOM4's MIR entry keeps the ABI Item-shaped while moving the ordinal guard
 // and exact generic fallback into one runtime boundary. This preserves the
-// ordinary property semantics when a flow fact is stale or the kill switch is
-// enabled, including expandos, prototypes, and nullish errors.
+// ordinary property semantics when a flow fact is stale, including expandos,
+// prototypes, and nullish errors.
 extern "C" Item js_jube_member_get_by_ordinal(Item receiver, int64_t slot,
                                                int64_t ordinal, Item key) {
     RootFrame roots(3);
     Rooted<Item> receiver_root(roots, receiver);
     Rooted<Item> key_root(roots, key);
     Item out = ItemNull;
-    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+    if (slot >= 0 && ordinal >= 0 &&
             jube_member_get_by_ordinal(receiver_root.get(), (int)slot,
                 (uint32_t)ordinal, &out)) {
         return out;
@@ -7899,7 +7847,7 @@ extern "C" Item js_jube_member_set_by_ordinal(Item receiver, int64_t slot,
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
     Item out = ItemNull;
-    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+    if (slot >= 0 && ordinal >= 0 &&
             jube_member_set_by_ordinal(receiver_root.get(), (int)slot,
                 (uint32_t)ordinal, value_root.get(), &out)) {
         return js_assignment_set_result(value_root.get(), key_root.get(), out,
@@ -7916,7 +7864,7 @@ extern "C" Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
     Rooted<Item> receiver_root(roots, receiver);
     Rooted<Item> key_root(roots, key);
     Item out = ItemNull;
-    if (!js_jube_ordinal_disabled() && slot >= 0 && ordinal >= 0 &&
+    if (slot >= 0 && ordinal >= 0 &&
             jube_member_call_by_ordinal(receiver_root.get(), (int)slot,
                 (uint32_t)ordinal, args, argc > 0 ? (int)argc : 0, &out)) {
         return out;
@@ -8162,8 +8110,7 @@ static inline bool js_named_ic_receiver_map_is_fast(Map* m, uint8_t receiver_kin
 // constructor reservations, or NameId-versus-byte matching.
 static bool js_named_ic_find_entry(Item object, const char* name, int name_len,
         NameId name_id, Map** out_map, ShapeEntry** out_entry,
-        uint8_t* out_receiver_kind, Item* out_old_value, int* out_reason) {
-    if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
+        uint8_t* out_receiver_kind, Item* out_old_value) {
     if (out_map) *out_map = NULL;
     if (out_entry) *out_entry = NULL;
     if (out_old_value) *out_old_value = ItemNull;
@@ -8171,19 +8118,9 @@ static bool js_named_ic_find_entry(Item object, const char* name, int name_len,
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
-    if (!m) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_MAP;
-        return false;
-    }
-    if (!js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_PLAIN;
-        return false;
-    }
+    if (!m || !js_named_ic_receiver_map_is_fast(m, receiver_kind)) return false;
     TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_BAD_TYPEMAP;
-        return false;
-    }
+    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) return false;
 
     ShapeEntry* entry = name_id != NAME_ID_NONE
         ? typemap_hash_lookup_name_id(tm, name_id) : NULL;
@@ -8194,33 +8131,18 @@ static bool js_named_ic_find_entry(Item object, const char* name, int name_len,
         entry = typemap_hash_lookup_by_hash(tm, name, name_len,
             typemap_name_hash(name, name_len));
     }
-    if (!entry) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-        return false;
-    }
-    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NAME;
-        return false;
-    }
+    if (!entry || !js_load_ic_name_matches(entry, name, name_len, name_id)) return false;
     if (entry->flags != 0) {
         if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_FLAGS;
         return false;
     }
-    if (!js_load_ic_offset_ok(m, entry->byte_offset)) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_OFFSET;
-        return false;
-    }
+    if (!js_load_ic_offset_ok(m, entry->byte_offset)) return false;
     if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-        return false;
-    }
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
 
     Item old_value = _map_read_field(entry, m->data);
     if (js_is_deleted_sentinel(old_value)) {
         if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_DELETED;
         return false;
     }
     if (out_map) *out_map = m;
@@ -8249,19 +8171,14 @@ static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 
 static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         NameId name_id,
-        JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
-    if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
+        JsLoadICEntry* out_entry, Item* out_value) {
     if (!out_entry || !out_value || !name || name_len < 0) return false;
     Map* m = NULL;
     ShapeEntry* entry = NULL;
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Item value = ItemNull;
-    int reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
     if (!js_named_ic_find_entry(object, name, name_len, name_id, &m, &entry,
-            &receiver_kind, &value, &reason)) {
-        if (out_reason) *out_reason = (JsLoadICProfileReason)reason;
-        return false;
-    }
+            &receiver_kind, &value)) return false;
 
     out_entry->shape = m->type;
     out_entry->entry = entry;
@@ -8300,8 +8217,6 @@ static Item js_get_name_id_ic_impl(Item object, NameId name_id,
 #if !LAMBDA_INLINE_CACHE
     return js_get_name_id_ic_slow(object, name_id);
 #else
-    js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_PROBE);
-    js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_PROBE);
     if (!ic) return js_get_name_id_ic_slow(object, name_id);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
@@ -8311,8 +8226,6 @@ static Item js_get_name_id_ic_impl(Item object, NameId name_id,
         if (ic->state == JS_LOAD_IC_MONO) {
             if (ic->name_id == name_id && js_load_ic_try_hit_entry(m,
                     &ic->entries[0], receiver_kind, name_id, &value)) {
-                js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_MONO);
-                js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_HIT_MONO);
                 return value;
             }
         } else if (ic->state == JS_LOAD_IC_POLY) {
@@ -8321,28 +8234,22 @@ static Item js_get_name_id_ic_impl(Item object, NameId name_id,
             for (int i = 0; i < count; i++) {
                 if (ic->name_id == name_id && js_load_ic_try_hit_entry(m,
                         &ic->entries[i], receiver_kind, name_id, &value)) {
-                    js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_POLY);
-                    js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_HIT_POLY);
                     return value;
                 }
             }
         } else if (ic->state == JS_LOAD_IC_MEGAMORPHIC) {
-            js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
-            js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_MEGAMORPHIC);
             return js_get_name_id_ic_slow(object, name_id);
         }
     }
 
-    js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MISS);
     if (ic->miss_count != 0xffffu) ic->miss_count++;
 
     if (ic->state != JS_LOAD_IC_MEGAMORPHIC) {
         JsLoadICEntry entry;
         memset(&entry, 0, sizeof(entry));
         Item value = ItemNull;
-        JsLoadICProfileReason miss_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         if (js_load_ic_build_entry(object, name, name_len, name_id,
-                &entry, &value, &miss_reason)) {
+                &entry, &value)) {
             if (ic->name_id == NAME_ID_NONE) ic->name_id =
                 entry.name_id ? entry.name_id : name_id;
             for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
@@ -8356,23 +8263,16 @@ static Item js_get_name_id_ic_impl(Item object, NameId name_id,
                 ic->entries[0] = entry;
                 ic->count = 1;
                 ic->state = JS_LOAD_IC_MONO;
-                js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_MONO);
-                js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_INSTALL_MONO);
                 return value;
             }
             if (ic->count < JS_LOAD_IC_POLY_MAX) {
                 ic->entries[ic->count++] = entry;
                 ic->state = JS_LOAD_IC_POLY;
-                js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_POLY);
-                js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_INSTALL_POLY);
                 return value;
             }
             ic->state = JS_LOAD_IC_MEGAMORPHIC;
-            js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
-            js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_MEGAMORPHIC);
             return value;
         }
-        js_profile_load_ic_site(NULL, miss_reason);
     }
 
     return js_get_name_id_ic_slow(object, name_id);
@@ -8405,9 +8305,7 @@ static Item js_set_name_id_ic_slow(Item object, NameId name_id,
 }
 
 #if LAMBDA_INLINE_CACHE
-static inline bool js_store_ic_can_write_same_slot(ShapeEntry* entry, Item value,
-        JsStoreICProfileReason* out_reason) {
-    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_TYPE;
+static inline bool js_store_ic_can_write_same_slot(ShapeEntry* entry, Item value) {
     if (!entry || !entry->type) return false;
     TypeId field_type = entry->type->type_id;
     TypeId value_type = get_type_id(value);
@@ -8418,8 +8316,7 @@ static inline bool js_store_ic_can_write_same_slot(ShapeEntry* entry, Item value
 }
 
 static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
-        Item value, JsStoreICProfileReason* out_reason) {
-    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_TYPE;
+        Item value) {
     if (!entry || !entry->type || !data) return false;
     TypeId field_type = entry->type->type_id;
     TypeId value_type = get_type_id(value);
@@ -8439,23 +8336,11 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
 }
 
 static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
-        uint8_t receiver_kind, NameId name_id, Item value,
-        JsStoreICProfileReason* out_reason) {
-    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+        uint8_t receiver_kind, NameId name_id, Item value) {
     if (!m || !cached || !cached->shape || !cached->entry) return false;
     if (cached->name_id != name_id) return false;
-    if (cached->receiver_kind != receiver_kind) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_MAP;
-        return false;
-    }
-    if (m->type != cached->shape) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_BAD_TYPEMAP;
-        return false;
-    }
-    if (!js_load_ic_offset_ok(m, cached->byte_offset)) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_OFFSET;
-        return false;
-    }
+    if (cached->receiver_kind != receiver_kind || m->type != cached->shape ||
+            !js_load_ic_offset_ok(m, cached->byte_offset)) return false;
     ShapeEntry* entry = (ShapeEntry*)cached->entry;
     // A shared constructor shape names storage that a sibling instance may not
     // have assigned yet. Writing the raw slot here would leave the instance's
@@ -8463,29 +8348,21 @@ static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
     // reads and enumeration; creating the own property must go through the slow
     // path, which clears the reservation (and honours prototype setters).
     if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-        return false;
-    }
-    if (!js_store_ic_write_same_slot(entry, m->data, value, out_reason)) return false;
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
+    if (!js_store_ic_write_same_slot(entry, m->data, value)) return false;
     return true;
 }
 
 static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
         NameId name_id,
-        Item value, JsLoadICEntry* out_entry, JsStoreICProfileReason* out_reason) {
-    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+        Item value, JsLoadICEntry* out_entry) {
     if (!out_entry || !name || name_len < 0) return false;
     Map* m = NULL;
     ShapeEntry* entry = NULL;
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    int reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (!js_named_ic_find_entry(object, name, name_len, name_id, &m, &entry,
-            &receiver_kind, NULL, &reason)) {
-        if (out_reason) *out_reason = (JsStoreICProfileReason)reason;
-        return false;
-    }
-    if (!js_store_ic_can_write_same_slot(entry, value, out_reason)) return false;
+            &receiver_kind, NULL)) return false;
+    if (!js_store_ic_can_write_same_slot(entry, value)) return false;
 
     out_entry->shape = m->type;
     out_entry->entry = entry;
@@ -8512,20 +8389,14 @@ static void js_store_ic_install(JsStoreIC* ic, NameId name_id,
         ic->entries[0] = *entry;
         ic->count = 1;
         ic->state = JS_STORE_IC_MONO;
-        js_exec_profile_count(JS_EXEC_PROF_STORE_IC_INSTALL_MONO);
-        js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_INSTALL_MONO);
         return;
     }
     if (ic->count < JS_STORE_IC_POLY_MAX) {
         ic->entries[ic->count++] = *entry;
         ic->state = JS_STORE_IC_POLY;
-        js_exec_profile_count(JS_EXEC_PROF_STORE_IC_INSTALL_POLY);
-        js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_INSTALL_POLY);
         return;
     }
     ic->state = JS_STORE_IC_MEGAMORPHIC;
-    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
-    js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_MEGAMORPHIC);
 }
 #endif
 
@@ -8541,25 +8412,20 @@ static Item js_set_name_id_ic_impl(Item object, NameId name_id,
 #if !LAMBDA_INLINE_CACHE
     return js_set_name_id_ic_slow(object, name_id, value, strict);
 #else
-    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_PROBE);
-    js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_PROBE);
     if (!ic) return js_set_name_id_ic_slow(object, name_id, value, strict);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
     if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
-        JsStoreICProfileReason hit_miss = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         if (ic->state == JS_STORE_IC_MONO) {
             if (ic->name_id == name_id && js_store_ic_try_hit_entry(m,
-                    &ic->entries[0], receiver_kind, name_id, value, &hit_miss)) {
+                    &ic->entries[0], receiver_kind, name_id, value)) {
                 if (ic->name_id != NAME_ID_NONE) {
                     NameRef key_ref = name_pool_resolve_id(
                         context ? context->name_pool : NULL, ic->name_id);
                     if (key_ref) js_sync_global_var_module_binding(object,
                         (Item){.item = s2it(key_ref)}, value);
                 }
-                js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_MONO);
-                js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_HIT_MONO);
                 js_note_event_handler_property_set(object, name, name_len, value);
                 return value;
             }
@@ -8568,28 +8434,22 @@ static Item js_set_name_id_ic_impl(Item object, NameId name_id,
             if (count > JS_STORE_IC_POLY_MAX) count = JS_STORE_IC_POLY_MAX;
             for (int i = 0; i < count; i++) {
                 if (ic->name_id == name_id && js_store_ic_try_hit_entry(m,
-                        &ic->entries[i], receiver_kind, name_id, value, &hit_miss)) {
+                        &ic->entries[i], receiver_kind, name_id, value)) {
                     if (ic->name_id != NAME_ID_NONE) {
                         NameRef key_ref = name_pool_resolve_id(
                             context ? context->name_pool : NULL, ic->name_id);
                         if (key_ref) js_sync_global_var_module_binding(object,
                             (Item){.item = s2it(key_ref)}, value);
                     }
-                    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_POLY);
-                    js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_HIT_POLY);
                     js_note_event_handler_property_set(object, name, name_len, value);
                     return value;
                 }
             }
         } else if (ic->state == JS_STORE_IC_MEGAMORPHIC) {
-            js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
-            js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_MEGAMORPHIC);
             return js_set_name_id_ic_slow(object, name_id, value, strict);
         }
-        js_profile_store_ic_site(NULL, hit_miss);
     }
 
-    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MISS);
     if (ic->miss_count != 0xffffu) ic->miss_count++;
 
     Item result = js_set_name_id_ic_slow(object, name_id, value, strict);
@@ -8597,12 +8457,9 @@ static Item js_set_name_id_ic_impl(Item object, NameId name_id,
 
     JsLoadICEntry entry;
     memset(&entry, 0, sizeof(entry));
-    JsStoreICProfileReason miss_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (js_store_ic_build_entry(object, name, name_len, name_id,
-            value, &entry, &miss_reason)) {
+            value, &entry)) {
         js_store_ic_install(ic, name_id, &entry);
-    } else {
-        js_profile_store_ic_site(NULL, miss_reason);
     }
     return result;
 #endif
@@ -8898,7 +8755,6 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
         }
     }
     if (arr->length + arr->extra + 2 > arr->capacity) {
-        JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
         // Growth can compact the Array object as well as its item buffer, so
         // reload both exact roots before the post-growth length/store access.
         RootFrame roots(2);
@@ -8916,7 +8772,6 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
         // so subsequent dense scans correctly treat them as empty until they
         // are explicitly assigned.
         if (arr->items && arr->capacity > old_capacity) {
-            JS_PROPERTY_SET_BRANCH("array_push_expand_stamp_holes");
             Item hole = lam::hole_sentinel_item();
             // Relocation leaves the former tail payloads in their old positions;
             // only the new high tail is owned, so clear every non-logical slot.
@@ -9196,7 +9051,6 @@ extern "C" Item js_string_get_int(Item str_item, int64_t index) {
 }
 
 extern "C" Item js_elements_get_int(Item array, int64_t index) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_GET_INT);
     if (js_is_ordinary_numeric_array(array)) {
         if (index >= 0 && index < array.array_num->length &&
                 index < container_dense_capacity((Array*)array.array_num)) {
@@ -9298,7 +9152,6 @@ static Item js_array_store_index_value(Item array, int64_t index, Item value,
             return value;
         }
         if (js_array_should_store_sparse_for_index(arr, index)) {
-            JS_PROPERTY_SET_BRANCH("array_set_sparse_policy");
             log_debug("%s: sparse index %lld (gap %lld), skipping dense expansion",
                 sparse_log_name, (long long)index,
                 (long long)(index >= arr->length ? index - arr->length : 0));
@@ -9306,11 +9159,9 @@ static Item js_array_store_index_value(Item array, int64_t index, Item value,
             return value;
         }
         if (index == arr->length) {
-            JS_PROPERTY_SET_BRANCH("array_set_append_dense");
             js_array_push_item_direct(arr, value);
         } else {
             // Expand array: fill gaps with holes (deleted sentinel), then set the value
-            JS_PROPERTY_SET_BRANCH("array_set_expand_dense");
             Item hole = lam::hole_sentinel_item();
             while (arr->length < index) {
                 js_array_push_item_direct(arr, hole);
@@ -9327,7 +9178,6 @@ static Item js_array_store_index_value(Item array, int64_t index, Item value,
 
 static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
                                   bool bypass_accessor_dispatch, bool strict) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_SET_INT);
     if (js_is_ordinary_numeric_array(array)) {
         ArrayNum* numeric = array.array_num;
         // numeric arrays share the direct storage lane, but an append still
@@ -9642,7 +9492,6 @@ extern "C" int64_t js_elements_set_append_or_dense_int_fast(Item array, int64_t 
     if (js_array_should_store_sparse_for_index(arr, index)) return 0;
     Item arr_proto = js_get_prototype_of(array);
     if (js_is_proxy(arr_proto) || js_array_proto_index_guard_is_dirty(array)) return 0;
-    JS_PROPERTY_SET_BRANCH("array_set_append_dense_fast");
     js_array_push_item_direct(arr, value);
     return 1;
 }
@@ -9678,7 +9527,6 @@ static Item js_elements_set_mode(Item array, Item index, Item value, bool strict
     // Route to companion map.
     TypeId itid = get_type_id(index);
     if (itid == LMD_TYPE_BOOL) {
-        JS_PROPERTY_SET_BRANCH("array_set_bool_to_companion");
         const char* s = it2b(index) ? "true" : "false";
         int sl = it2b(index) ? 4 : 5;
         Item key = (Item){.item = s2it(heap_create_name(s, sl))};
@@ -9687,7 +9535,6 @@ static Item js_elements_set_mode(Item array, Item index, Item value, bool strict
 
     if (itid == LMD_TYPE_MAP || itid == LMD_TYPE_ARRAY ||
         itid == LMD_TYPE_ELEMENT || itid == LMD_TYPE_FUNC) {
-        JS_PROPERTY_SET_BRANCH("array_set_object_key_to_property_key");
         JS_ASSIGN_OR_RETURN_INTO(index, js_to_property_key(index));
         itid = get_type_id(index);
     }
@@ -9695,7 +9542,6 @@ static Item js_elements_set_mode(Item array, Item index, Item value, bool strict
     if ((itid == LMD_TYPE_STRING || itid == LMD_TYPE_INT || itid == LMD_TYPE_FLOAT) &&
         !js_key_is_symbol(index) && !js_array_key_is_index(index, NULL)) {
         Item prop_key = (itid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
-        JS_PROPERTY_SET_BRANCH("array_set_non_index_to_companion");
         // Non-index array keys live in the companion map; re-entering the
         // array setter here recurses through the same exotic setter path.
         return js_array_set_companion_key(array, prop_key, value);
@@ -9703,10 +9549,8 @@ static Item js_elements_set_mode(Item array, Item index, Item value, bool strict
 
     // v23: validate that the key is a valid numeric array index (not "foo", "__nw_0" etc.)
     // js_get_number on non-numeric strings returns NaN; (int64_t)NaN is UB in C/C++
-    JS_PROPERTY_SET_BRANCH("array_set_to_number");
     double idx_d = js_get_number(index);
     if (idx_d != idx_d) { // NaN check — non-numeric key
-        JS_PROPERTY_SET_BRANCH("array_set_nan_index");
         return value; // silently ignore non-numeric keys on arrays
     }
     int64_t idx = (int64_t)idx_d;
@@ -9746,7 +9590,6 @@ static Item js_elements_set_mode(Item array, Item index, Item value, bool strict
 
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
     if (arr->is_content == 1 && idx >= 0 && idx >= arr->length) {
-        JS_PROPERTY_SET_BRANCH("array_set_arguments_extra_index");
         return js_array_set_arguments_index(array, idx, value, false);
     }
 
@@ -9766,7 +9609,6 @@ extern "C" int64_t js_array_length(Item array) {
 }
 
 extern "C" Item js_array_push(Item array, Item value) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_PUSH);
     if (js_is_ordinary_numeric_array(array)) {
         int64_t length = array.array_num->length;
         if (js_array_value_is_numeric(value) && js_array_numeric_store(array, length, value)) {
@@ -9934,47 +9776,6 @@ static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_reje
 static Item js_promise_with_resolvers_for_constructor(Item constructor);
 extern "C" Item js_promise_async_function_start(void);
 extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception);
-
-// Invoke a JsFunction with args, handling env if it's a closure
-static bool js_invoke_trace_enabled() {
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char* env = getenv("LAMBDA_JS_INVOKE_TRACE");
-        enabled = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
-    }
-    return enabled != 0;
-}
-
-static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_count) {
-    if (!js_invoke_trace_enabled()) return;
-#ifndef NDEBUG
-    // Browser-smoke crash recovery can land after generated code faults, so
-    // emit the callee before entering it while the JsFunction metadata is valid.
-    const char* source_chars = "";
-    int source_len = 0;
-    if (fn && fn->source_text &&
-        (((uintptr_t)fn->source_text & 3) == 0) &&
-        (uintptr_t)fn->source_text >= 0x1000) {
-        source_chars = fn->source_text->chars;
-        source_len = fn->source_text->len > 120 ? 120 : (int)fn->source_text->len;
-    }
-    log_debug("js_invoke_trace: fn=%p func_ptr=%p argc=%d effective=%d params=%d env=%p name=%.*s source=%.*s",
-        (void*)fn,
-        fn ? fn->func_ptr : NULL,
-        arg_count,
-        effective_count,
-        fn ? fn->param_count : 0,
-        fn ? (void*)fn->env : NULL,
-        fn && fn->name ? (int)fn->name->len : 6,
-        fn && fn->name ? fn->name->chars : "(anon)",
-        source_len,
-        source_chars);
-#else
-    // Release builds strip debug logging; avoid preparing trace-only values
-    // that would be optimized away and trip -Wunused-but-set-variable.
-    (void)fn; (void)arg_count; (void)effective_count;
-#endif
-}
 
 // Compiled JS wrappers use a fixed MIR signature, so the dynamic dispatcher
 // must materialize each supported arity as an exact C++ function-pointer type.
@@ -10234,8 +10035,6 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     js_pending_call_argc = adapter.actual_count;
     Item* effective_args = adapter.invoke_items;
 
-    js_invoke_trace_call(fn, arg_count, effective_count);
-
     if (fn->native_call) {
         // The factory selected this exact adapter from the callback's declared
         // type. Repeated calls never cast an opaque address by runtime arity.
@@ -10369,19 +10168,6 @@ static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
     fn = (JsFunction*)fn_root.get().function;
     return js_invoke_fn_raw_or_async(fn, source_args, arg_count,
         scalar_result_home);
-}
-
-// Call a JavaScript function stored as an Item
-
-// Debug: check callee before calling, print site info if null
-extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
-    if (!js_is_callable(callee)) {
-        log_error("js-debug-callee: non-function callee at site_id=%lld (type=%d)",
-            (long long)site_id, get_type_id(callee));
-    }
-    // diagnostics must be observational; returning null changed the checked
-    // call target and hid the original failure whenever a caller reused it.
-    return callee;
 }
 
 // Forward declarations for builtin dispatch
@@ -14429,10 +14215,6 @@ static void js_prepare_new_target_for_call(bool install_new_target,
 static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted,
         Item construct_new_target) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
-    static thread_local const char* js_call_name_stack[64];
-    static thread_local int js_call_name_length_stack[64];
-    static thread_local int js_call_name_depth = 0;
     struct JsCallDepthGuard {
         int* depth;
         bool ok;
@@ -14481,23 +14263,14 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
             FuncDebugInfo* caller_info = context && context->debug_info
                 ? lookup_debug_info(context->debug_info, caller_addr)
                 : nullptr;
-            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d func_raw=0x%llx",
+            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) func_raw=0x%llx",
                 get_type_id(func_item), arg_count, get_type_id(this_val),
-                _trace_last_fn_len, _trace_last_fn ? _trace_last_fn : "(null)", _trace_total_calls,
                 (unsigned long long)func_item.item);
             if (caller_info) {
                 log_error("js_call_function caller: %s (%s:%u)",
                           caller_info->lambda_func_name ? caller_info->lambda_func_name : "?",
                           caller_info->source_file ? caller_info->source_file : "?",
                           caller_info->source_line);
-            }
-            int trace_start = js_call_name_depth > 6 ? js_call_name_depth - 6 : 0;
-            for (int trace_index = js_call_name_depth - 1;
-                 trace_index >= trace_start; trace_index--) {
-                log_error("js_call_function stack[%d]: %.*s", trace_index,
-                          js_call_name_length_stack[trace_index],
-                          js_call_name_stack[trace_index]
-                              ? js_call_name_stack[trace_index] : "(anon)");
             }
             error_count++;
         }
@@ -14518,30 +14291,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         // it can never escape after this C frame returns.
         invoke_result_home = &local_result_home;
         uses_local_result_home = true;
-    }
-    bool runtime_trace_enabled = js_runtime_trace_enabled();
-    struct JsCallNameGuard {
-        int* depth;
-        bool pushed;
-        JsCallNameGuard(int* depth_ptr, const char** names, int* lengths,
-                        const char* name, int name_length, bool enabled)
-            : depth(depth_ptr), pushed(enabled && *depth_ptr < 64) {
-            if (pushed) {
-                names[*depth] = name;
-                lengths[*depth] = name_length;
-                (*depth)++;
-            }
-        }
-        ~JsCallNameGuard() { if (pushed) (*depth)--; }
-    } call_name_guard(&js_call_name_depth, js_call_name_stack,
-                      js_call_name_length_stack,
-                      fn && fn->name ? fn->name->chars : "(anon)",
-                      fn && fn->name ? (int)fn->name->len : 6,
-                      runtime_trace_enabled);
-    if (runtime_trace_enabled) {
-        if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
-        else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
-        _trace_total_calls++;
     }
 
     if (!fn || (!fn->func_ptr && !fn->native_call)) {
@@ -30082,11 +29831,16 @@ enum JsPromiseCapabilityAction {
     JS_PROMISE_CAPABILITY_REJECT
 };
 static Item js_all_resolve_element(Item counter_obj, Item index_item, Item result_item, Item value);
+static Item js_all_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static Item js_promise_element_call_capability(Item counter_obj, const char* key,
                                                 int key_len, Item value);
 static Item js_promise_call_stored_capability(Item counter_obj,
                                               JsPromiseCapabilityAction action,
                                               Item value);
+static Item js_promise_settle_combinator_result(Item counter_obj, Item result_item,
+                                                JsPromiseCapabilityAction action,
+                                                Item value, bool resolve_native,
+                                                bool custom_sync);
 static bool js_promise_custom_capability_settled(Item counter_obj);
 static void js_promise_mark_custom_capability_settled(Item counter_obj);
 static Item js_promise_make_combinator_counter(int remaining,
@@ -30096,22 +29850,12 @@ static Item js_promise_make_combinator_counter(int remaining,
                                                Item* values_out,
                                                Item* called_out);
 static Item js_promise_make_bound_element_handler(JsNativeP4 handler, Item counter,
-                                                   int index, Item result_item,
-                                                   bool mark_anonymous);
-static Item js_promise_run_array_combinator(Item iterable,
-        JsNativeP4 fulfill_handler, JsNativeP4 reject_handler,
-        bool skip_resolve, bool reject_aggregate);
-static Item js_promise_run_iterable_combinator(Item iterable,
-        const char* counter_name, int counter_name_len,
-        JsNativeP4 fulfill_handler, JsNativeP4 reject_handler,
-        bool reject_aggregate);
-static Item js_all_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
+                                                   int index, Item result_item);
 static Item js_any_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
 static Item js_any_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
 static Item js_settled_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, Item* out_error);
-static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection);
 static Item js_promise_make_aggregate_error(Item errors);
 static void js_promise_mark_anonymous_builtin(Item fn_item);
 static Item js_promise_species_constructor(Item promise);
@@ -30277,7 +30021,7 @@ static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item th
     runner_root.set(js_new_native_function(js_promise_thenable_job));
     Item bound_args[3] = {promise_root.get(), thenable_root.get(), then_fn_root.get()};
     thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
-    js_enqueue_promise_job(thunk_root.get());
+    js_microtask_enqueue(thunk_root.get());
 }
 
 static void js_promise_resolve_with_value(JsPromise* p, Item value) {
@@ -30518,7 +30262,7 @@ static void js_promise_enqueue_wrapped_job(Item thunk, Item resource, Item domai
     Item hook_args[2] = {resource_root.get(), thunk_root.get()};
     thunk_root.set(js_bind_function(hook_runner_root.get(), ItemNull, hook_args, 2));
     previous_root.set(js_async_hooks_enter_resource(resource_root.get()));
-    js_enqueue_promise_job(thunk_root.get());
+    js_microtask_enqueue(thunk_root.get());
     js_async_hooks_restore_resource(previous_root.get());
 }
 
@@ -31034,36 +30778,14 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
     js_promise_then(native_root.get(), resolve_fn_root.get(), reject_fn_root.get());
 }
 
-static bool js_promise_resolve_elements_with_constructor(Item constructor, Item resolve_method,
-    Item arr_item, Item* out_array, Item reject) {
-    RootFrame roots(6);
-    Rooted<Item> constructor_root(roots, constructor);
-    Rooted<Item> resolve_method_root(roots, resolve_method);
-    Rooted<Item> array_root(roots, arr_item);
-    Rooted<Item> reject_root(roots, reject);
-    Rooted<Item> resolved_root(roots, ItemNull);
-    Rooted<Item> next_root(roots, ItemNull);
-    Array* arr = array_root.get().array;
-    resolved_root.set(js_array_new(arr->length));
-    for (int i = 0; i < arr->length; i++) {
-        Item args[1] = {arr->items[i]};
-        next_root.set(js_call_function(resolve_method_root.get(), constructor_root.get(), args, 1));
-        if (item_is_error(next_root.get())) {
-            Item error = js_error_lane_payload(next_root.get());
-            js_promise_call_capability_reject(reject_root.get(), error);
-            return false;
-        }
-        js_array_store_owned(resolved_root.get().array, i, next_root.get());
-    }
-    *out_array = resolved_root.get();
-    return true;
-}
-
 static Item js_promise_combinator_iterable_with_constructor(
     Item constructor, Item iterable, int kind, Item promise, Item resolve, Item reject) {
-    RootFrame roots(1);
+    RootFrame roots(2);
+    Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> internal_result_root(roots, ItemNull);
     const bool custom_constructor = !js_promise_is_builtin_promise_constructor(constructor);
+    const bool array_input = get_type_id(iterable_root.get()) == LMD_TYPE_ARRAY;
+    const bool use_internal_result = kind != 3 && (custom_constructor || array_input);
     Item resolve_method = js_get_key_cstr(constructor, "resolve");
     if (item_is_error(resolve_method)) {
         Item error = js_error_lane_payload(resolve_method);
@@ -31076,11 +30798,14 @@ static Item js_promise_combinator_iterable_with_constructor(
         return promise;
     }
 
-    Item iterator = js_get_iterator(iterable);
-    if (item_is_error(iterator)) {
-        Item error = js_error_lane_payload(iterator);
-        js_promise_call_capability_reject(reject, error);
-        return promise;
+    Item iterator = ItemNull;
+    if (!array_input) {
+        iterator = js_get_iterator(iterable_root.get());
+        if (item_is_error(iterator)) {
+            Item error = js_error_lane_payload(iterator);
+            js_promise_call_capability_reject(reject, error);
+            return promise;
+        }
     }
 
     Item counter = ItemNull;
@@ -31093,6 +30818,14 @@ static Item js_promise_combinator_iterable_with_constructor(
             &values_arr, &called_arr);
         js_set_key_cstr(counter, "__cap_resolve", resolve);
         js_set_key_cstr(counter, "__cap_reject", reject);
+        if (use_internal_result) {
+            // Array combinators retain the native forwarding boundary used by
+            // the legacy fast path; without it aggregate reactions run before
+            // later combinators have published their own jobs.
+            JsPromise* internal_result = js_alloc_promise();
+            if (!internal_result) return ItemError;
+            internal_result_root.set(js_promise_to_item(internal_result));
+        }
         if (custom_constructor) {
             js_set_key_default(counter,
                 (Item){.item = s2it(heap_create_name("__in_iteration", 15))},
@@ -31100,30 +30833,34 @@ static Item js_promise_combinator_iterable_with_constructor(
             js_set_key_default(counter,
                 (Item){.item = s2it(heap_create_name("__cap_settled", 14))},
                 (Item){.item = ITEM_FALSE});
-            // An asynchronous element settles through this native promise so
-            // forwarding adds the reaction job required after the loop exits.
-            JsPromise* internal_result = js_alloc_promise();
-            if (!internal_result) return ItemError;
-            internal_result_root.set(js_promise_to_item(internal_result));
         }
     }
 
     int index = 0;
     while (true) {
-        Item elem = js_iterator_step(iterator);
-        if (item_is_error(elem)) {
-            Item error = js_error_lane_payload(elem);
-            js_promise_call_capability_reject(reject, error);
-            return promise;
+        Item elem;
+        if (array_input) {
+            Array* array = iterable_root.get().array;
+            if (index >= array->length) break;
+            elem = array->items[index];
+        } else {
+            elem = js_iterator_step(iterator);
+            if (item_is_error(elem)) {
+                Item error = js_error_lane_payload(elem);
+                js_promise_call_capability_reject(reject, error);
+                return promise;
+            }
+            if (elem.item == JS_ITER_DONE_SENTINEL) break;
         }
-        if (elem.item == JS_ITER_DONE_SENTINEL) break;
 
         Item args[1] = {elem};
         Item next_promise = js_call_function(resolve_method, constructor, args, 1);
         if (item_is_error(next_promise)) {
             Item error = js_error_lane_payload(next_promise);
-            Item close_result = js_iterator_close(iterator);
-            if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
+            if (!array_input) {
+                Item close_result = js_iterator_close(iterator);
+                if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
+            }
             js_promise_call_capability_reject(reject, error);
             return promise;
         }
@@ -31136,6 +30873,9 @@ static Item js_promise_combinator_iterable_with_constructor(
                 js_promise_call_capability_reject(reject, error);
                 return promise;
             }
+            // direct array iteration has no iterator step to advance the index;
+            // omitting this increment leaves Promise.race in an endless loop.
+            index++;
             continue;
         }
 
@@ -31146,15 +30886,16 @@ static Item js_promise_combinator_iterable_with_constructor(
 
         JsNativeP4 fulfill_handler = kind == 0 ? js_all_resolve_element :
             (kind == 1 ? js_settled_fulfill_element : js_any_fulfill_element);
-        JsNativeP4 reject_handler = kind == 1 ? js_settled_reject_element :
-            js_any_reject_element;
-        Item result_item = custom_constructor ? internal_result_root.get() : counter;
+        JsNativeP4 reject_handler = kind == 0 ? js_all_reject_element :
+            (kind == 1 ? js_settled_reject_element : js_any_reject_element);
+        Item result_item = use_internal_result ? internal_result_root.get() : promise;
         Item fulfill_fn = js_promise_make_bound_element_handler(fulfill_handler,
-            counter, index, result_item, true);
-        // Promise.all shares the capability reject function directly; only
-        // the resolve element has the per-element AlreadyCalled gate.
-        Item reject_fn = kind == 0 ? reject : js_promise_make_bound_element_handler(
-            reject_handler, counter, index, result_item, true);
+            counter, index, result_item);
+        Item reject_fn = (kind == 0 && custom_constructor) ? reject :
+            js_promise_make_bound_element_handler(reject_handler,
+                counter, index, result_item);
+        // D7.2.2: Promise.all exposes the capability reject directly; wrapping
+        // it changes observable callback identity for custom constructors.
 
         Item error = ItemNull;
         if (custom_constructor) {
@@ -31168,8 +30909,10 @@ static Item js_promise_combinator_iterable_with_constructor(
                     (Item){.item = s2it(heap_create_name("__in_iteration", 15))},
                     (Item){.item = ITEM_FALSE});
             }
-            Item close_result = js_iterator_close(iterator);
-            if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
+            if (!array_input) {
+                Item close_result = js_iterator_close(iterator);
+                if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
+            }
             js_promise_call_capability_reject(reject, error);
             return promise;
         }
@@ -31184,24 +30927,37 @@ static Item js_promise_combinator_iterable_with_constructor(
     if (kind != 3) {
         int remaining = (int)it2i(js_get_key_default(counter, (Item){.item = s2it(heap_create_name("remaining", 9))})) - 1;
         js_set_key_cstr(counter, "remaining", (Item){.item = i2it(remaining)});
-        if (remaining == 0) {
+        bool capability_settled = custom_constructor &&
+            js_promise_custom_capability_settled(counter);
+        if (remaining == 0 && !capability_settled) {
             Item final_value = kind == 2 ? js_promise_make_aggregate_error(values_arr) : values_arr;
-            bool should_call_capability = !custom_constructor ||
-                !js_promise_custom_capability_settled(counter);
-            if (should_call_capability) {
-                Item cap_result = js_promise_call_stored_capability(counter,
+            if (custom_constructor) {
+                Item cap_result;
+                cap_result = js_promise_call_stored_capability(counter,
                     kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
                     final_value);
-                if (custom_constructor) js_promise_mark_custom_capability_settled(counter);
+                js_promise_mark_custom_capability_settled(counter);
                 if (item_is_error(cap_result)) {
                     Item error = js_error_lane_payload(cap_result);
                     js_promise_call_capability_reject(reject, error);
                 }
+            } else if (use_internal_result) {
+                (void)js_promise_settle_combinator_result(counter,
+                    internal_result_root.get(),
+                    kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
+                    final_value, false, false);
+            } else {
+                (void)js_promise_settle_combinator_result(counter, promise,
+                    kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
+                    final_value, false, false);
             }
         } else if (custom_constructor &&
-                   !js_promise_custom_capability_settled(counter)) {
+                   !capability_settled && !array_input) {
             // install the forwarding reaction only after the synchronous loop
             // has had a chance to call a custom capability directly.
+            js_promise_forward_native_to_capability(internal_result_root.get(), resolve, reject);
+        }
+        if (array_input && (!custom_constructor || !capability_settled)) {
             js_promise_forward_native_to_capability(internal_result_root.get(), resolve, reject);
         }
     }
@@ -31210,103 +30966,24 @@ static Item js_promise_combinator_iterable_with_constructor(
 }
 
 static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind) {
-    RootFrame roots(9);
+    RootFrame roots(5);
     Rooted<Item> constructor_root(roots, constructor);
     Rooted<Item> iterable_root(roots, iterable);
     Rooted<Item> resolve_root(roots, ItemNull);
     Rooted<Item> reject_root(roots, ItemNull);
     Rooted<Item> promise_root(roots, ItemNull);
-    Rooted<Item> array_root(roots, ItemNull);
-    Rooted<Item> rejection_root(roots, ItemNull);
-    Rooted<Item> resolve_method_root(roots, ItemNull);
-    Rooted<Item> resolved_root(roots, ItemNull);
     Item resolve = ItemNull;
     Item reject = ItemNull;
     promise_root.set(js_promise_new_capability(constructor_root.get(), &resolve, &reject));
     if (item_is_error(promise_root.get())) return promise_root.get();
     resolve_root.set(resolve);
     reject_root.set(reject);
-    if (!js_promise_is_builtin_promise_constructor(constructor_root.get())) {
-        return js_promise_combinator_iterable_with_constructor(
-            constructor_root.get(), iterable_root.get(), kind, promise_root.get(),
-            resolve_root.get(), reject_root.get());
-    }
-
-    if (get_type_id(iterable_root.get()) != LMD_TYPE_ARRAY) {
-        return js_promise_combinator_iterable_with_constructor(
-            constructor_root.get(), iterable_root.get(), kind, promise_root.get(),
-            resolve_root.get(), reject_root.get());
-    }
-
-    Item arr_item = ItemNull;
-    Item rejection = ItemNull;
-    if (!js_promise_materialize_iterable(iterable_root.get(), &arr_item, &rejection)) {
-        rejection_root.set(rejection);
-        js_promise_call_capability_reject(reject_root.get(), rejection_root.get());
-        return promise_root.get();
-    }
-    array_root.set(arr_item);
-
-    Array* arr = array_root.get().array;
-    resolve_method_root.set(js_get_key_cstr(constructor_root.get(), "resolve"));
-    if (item_is_error(resolve_method_root.get())) {
-        Item error = js_error_lane_payload(resolve_method_root.get());
-        js_promise_call_capability_reject(reject_root.get(), error);
-        return promise_root.get();
-    }
-    if (!js_is_callable(resolve_method_root.get())) {
-        Item error = js_promise_make_type_error("Promise resolve is not callable", 31);
-        js_promise_call_capability_reject(reject_root.get(), error);
-        return promise_root.get();
-    }
-
-    if (arr->length == 0) {
-        if (kind == 0 || kind == 1) {
-            js_promise_call_capability_resolve(resolve_root.get(), reject_root.get(), js_array_new(0));
-        } else if (kind == 2) {
-            js_promise_call_capability_reject(reject_root.get(), js_promise_make_aggregate_error(js_array_new(0)));
-        }
-        return promise_root.get();
-    }
-
-    Item resolved_arr = ItemNull;
-    if (!js_promise_resolve_elements_with_constructor(constructor_root.get(), resolve_method_root.get(),
-        array_root.get(), &resolved_arr, reject_root.get())) {
-        return promise_root.get();
-    }
-    resolved_root.set(resolved_arr);
-
-    if (kind == 3) {
-        Array* resolved = resolved_root.get().array;
-        for (int i = 0; i < resolved->length; i++) {
-            Item error = ItemNull;
-            if (!js_invoke_promise_then(resolved->items[i], resolve_root.get(), reject_root.get(), &error)) {
-                js_promise_call_capability_reject(reject_root.get(), error);
-                return promise_root.get();
-            }
-        }
-        return promise_root.get();
-    }
-
-    Item native = ItemNull;
-    if (kind == 0) {
-        native = js_promise_run_array_combinator(resolved_root.get(),
-            js_all_resolve_element, js_all_reject_element, true, false);
-    } else if (kind == 1) {
-        native = js_promise_run_array_combinator(resolved_root.get(),
-            js_settled_fulfill_element, js_settled_reject_element, true, false);
-    } else if (kind == 2) {
-        native = js_promise_run_array_combinator(resolved_root.get(),
-            js_any_fulfill_element, js_any_reject_element, true, true);
-    }
-
-    if (item_is_error(native)) {
-        Item error = js_error_lane_payload(native);
-        js_promise_call_capability_reject(reject_root.get(), error);
-        return promise_root.get();
-    }
-    js_promise_forward_native_to_capability(native, resolve_root.get(), reject_root.get());
-    return promise_root.get();
+    // D7.2.2/D7.3: every combinator uses one iterator transaction, including
+    // arrays, so custom @@iterator and close behavior cannot diverge by input
+    // representation.
+    return js_promise_combinator_iterable_with_constructor(
+        constructor_root.get(), iterable_root.get(), kind, promise_root.get(),
+        resolve_root.get(), reject_root.get());
 }
 
 static Item js_promise_with_resolvers_for_constructor(Item constructor) {
@@ -31359,7 +31036,7 @@ extern "C" Item js_await_sync(Item value) {
                 // before we read p->state. This handles thenables whose .then()
                 // invokes resolve() synchronously.
                 if (p->state == JS_PROMISE_PENDING) {
-                    js_run_microtasks();
+                    js_microtask_flush();
                 }
                 if (p->state == JS_PROMISE_FULFILLED) {
                     return p->result;
@@ -31378,7 +31055,7 @@ extern "C" Item js_await_sync(Item value) {
         // observable tick ordering (e.g.
         // `Promise.resolve().then(...); await 1; assert(...)`) see stale
         // state. The drain is bounded by TASK_FLUSH_SAFETY_LIMIT.
-        js_run_microtasks();
+        js_microtask_flush();
         return value;
     }
 
@@ -31387,11 +31064,11 @@ extern "C" Item js_await_sync(Item value) {
         // microtask queue before resuming. Drain microtasks first so any
         // pending `.then()` handlers fire in the correct order relative to
         // continuation. Mirrors the non-promise drain above.
-        js_run_microtasks();
+        js_microtask_flush();
         return p->result;
     }
     if (p->state == JS_PROMISE_REJECTED) {
-        js_run_microtasks();
+        js_microtask_flush();
         // Rejected promise: throw the rejection reason
         return js_throw_value(p->result);
     }
@@ -31400,7 +31077,7 @@ extern "C" Item js_await_sync(Item value) {
     // then handlers run as microtasks and only resolve the awaited promise after
     // the queue is flushed. Drain is bounded by TASK_FLUSH_SAFETY_LIMIT (see
     // js_event_loop.cpp:js_microtask_flush).
-    js_run_microtasks();
+    js_microtask_flush();
     if (p->state == JS_PROMISE_FULFILLED) {
         return p->result;
     }
@@ -32011,55 +31688,6 @@ static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, I
     return true;
 }
 
-static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection) {
-    if (get_type_id(iterable) == LMD_TYPE_ARRAY) {
-        *out_array = iterable;
-        return true;
-    }
-    Item arr = js_iterable_to_array(iterable);
-    if (item_is_error(arr)) {
-        *out_rejection = js_error_lane_payload(arr);
-        return false;
-    }
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
-        *out_rejection = js_throw_type_error("Promise combinator input is not iterable");
-        return false;
-    }
-    *out_array = arr;
-    return true;
-}
-
-static Item js_promise_builtin_constructor_resolve(Item value, Item* out_promise) {
-    RootFrame roots(3);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> constructor_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    constructor_root.set(js_get_constructor((Item){.item = s2it(heap_create_name("Promise", 7))}));
-    if (item_is_error(constructor_root.get())) {
-        if (out_promise) *out_promise = js_error_lane_payload(constructor_root.get());
-        return constructor_root.get();
-    }
-    resolve_root.set(js_get_key_default(constructor_root.get(),
-        (Item){.item = s2it(heap_create_name("resolve", 7))}));
-    if (item_is_error(resolve_root.get())) {
-        if (out_promise) *out_promise = js_error_lane_payload(resolve_root.get());
-        return resolve_root.get();
-    }
-    if (!js_is_callable(resolve_root.get())) {
-        Item error = js_throw_type_error("Promise resolve is not callable");
-        if (out_promise) *out_promise = js_error_lane_payload(error);
-        return error;
-    }
-    Item args[1] = {value_root.get()};
-    *out_promise = js_call_function(resolve_root.get(), constructor_root.get(), args, 1);
-    if (item_is_error(*out_promise)) {
-        Item error = *out_promise;
-        *out_promise = js_error_lane_payload(error);
-        return error;
-    }
-    return js_status_ok();
-}
-
 static Item js_promise_make_combinator_counter(int remaining,
                                                const char* values_name,
                                                int values_name_len,
@@ -32089,8 +31717,7 @@ static Item js_promise_make_combinator_counter(int remaining,
 }
 
 static Item js_promise_make_bound_element_handler(JsNativeP4 handler, Item counter,
-                                                   int index, Item result_item,
-                                                   bool mark_anonymous) {
+                                                   int index, Item result_item) {
     RootFrame roots(4);
     Rooted<Item> counter_root(roots, counter);
     Rooted<Item> result_root(roots, result_item);
@@ -32099,272 +31726,24 @@ static Item js_promise_make_bound_element_handler(JsNativeP4 handler, Item count
     base_root.set(js_new_native_function(handler));
     Item args[3] = {counter_root.get(), (Item){.item = i2it(index)}, result_root.get()};
     bound_root.set(js_bind_function(base_root.get(), ItemNull, args, 3));
-    if (mark_anonymous) js_promise_mark_anonymous_builtin(bound_root.get());
+    js_promise_mark_anonymous_builtin(bound_root.get());
     return bound_root.get();
 }
 
-static bool js_promise_invoke_bound_element(Item elem, int index, Item counter,
-                                             Item result_item,
-                                             JsNativeP4 fulfill_handler,
-                                             JsNativeP4 reject_handler,
-                                             Item* out_error) {
-    RootFrame roots(5);
-    Rooted<Item> elem_root(roots, elem);
-    Rooted<Item> counter_root(roots, counter);
-    Rooted<Item> result_root(roots, result_item);
-    Rooted<Item> fulfill_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
-    fulfill_root.set(js_promise_make_bound_element_handler(fulfill_handler,
-        counter_root.get(), index, result_root.get(), false));
-    reject_root.set(js_promise_make_bound_element_handler(reject_handler,
-        counter_root.get(), index, result_root.get(), false));
-    return js_invoke_promise_then(elem_root.get(), fulfill_root.get(), reject_root.get(), out_error);
-}
-
-static Item js_promise_run_array_combinator(Item iterable,
-        JsNativeP4 fulfill_handler, JsNativeP4 reject_handler,
-        bool skip_resolve, bool reject_aggregate) {
-    // The iterable, result promise, and combinator counter all survive nested
-    // allocations while handlers are built; keeping only raw pointers here
-    // let forced GC move them before the next element was processed.
-    RootFrame roots(9);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> arr_root(roots, ItemNull);
-    Rooted<Item> rejection_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> counter_root(roots, ItemNull);
-    Rooted<Item> results_root(roots, ItemNull);
-    Rooted<Item> called_root(roots, ItemNull);
-    Rooted<Item> elem_root(roots, ItemNull);
-    Rooted<Item> error_root(roots, ItemNull);
-    Item arr_item = ItemNull;
-    Item rejection = ItemNull;
-    if (!js_promise_materialize_iterable(iterable_root.get(), &arr_item, &rejection)) {
-        rejection_root.set(rejection);
-        return js_promise_reject(rejection_root.get());
-    }
-    arr_root.set(arr_item);
-    int count = arr_root.get().array->length;
-    if (count == 0) {
-        if (reject_aggregate) {
-            return js_promise_reject(js_promise_make_aggregate_error(js_array_new(0)));
-        }
-        return js_promise_resolve(js_array_new(0));
-    }
-
-    JsPromise* result = js_alloc_promise();
-    if (!result) return ItemNull;
-    result_root.set(js_promise_to_item(result));
-    Item results_arr = ItemNull;
-    Item called_arr = ItemNull;
-    const char* counter_name = reject_aggregate ? "errors" : "results";
-    int counter_name_len = reject_aggregate ? 6 : 7;
-    counter_root.set(js_promise_make_combinator_counter(count, counter_name, counter_name_len, count,
-        &results_arr, &called_arr));
-    results_root.set(results_arr);
-    called_root.set(called_arr);
-    for (int i = 0; i < count; i++) {
-        elem_root.set(arr_root.get().array->items[i]);
-        Item elem = elem_root.get();
-        if (!skip_resolve) {
-            Item resolve_status = js_promise_builtin_constructor_resolve(elem, &elem);
-            if (item_is_error(resolve_status)) {
-                JsPromise* current_result = js_get_promise(result_root.get());
-                if (current_result) js_promise_settle(current_result, JS_PROMISE_REJECTED, elem);
-                return result_root.get();
-            }
-            elem_root.set(elem);
-        }
-        Item error = ItemNull;
-        if (!js_promise_invoke_bound_element(elem_root.get(), i, counter_root.get(),
-                result_root.get(), fulfill_handler, reject_handler, &error)) {
-            error_root.set(error);
-            JsPromise* current_result = js_get_promise(result_root.get());
-            if (current_result) {
-                js_promise_settle(current_result, JS_PROMISE_REJECTED, error_root.get());
-            }
-            return result_root.get();
-        }
-    }
-    return result_root.get();
-}
-
 extern "C" Item js_promise_all(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
-        return js_promise_run_iterable_combinator(iterable, "results", 7,
-            js_all_resolve_element, js_all_reject_element, false);
-    }
-    return js_promise_run_array_combinator(iterable,
-        js_all_resolve_element, js_all_reject_element, false, false);
+    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 0);
 }
 
-static Item js_promise_run_iterable_combinator(Item iterable,
-        const char* counter_name, int counter_name_len,
-        JsNativeP4 fulfill_handler, JsNativeP4 reject_handler,
-        bool reject_aggregate) {
-    Item iterator = js_get_iterator(iterable);
-    if (item_is_error(iterator)) return js_promise_reject(js_error_lane_payload(iterator));
-
-    JsPromise* result = js_alloc_promise();
-    if (!result) return ItemNull;
-    Item result_item = js_promise_to_item(result);
-
-    Item results_arr = ItemNull;
-    Item called_arr = ItemNull;
-    Item counter = js_promise_make_combinator_counter(1, counter_name, counter_name_len, 0,
-        &results_arr, &called_arr);
-
-    int index = 0;
-    while (true) {
-        Item elem = js_iterator_step(iterator);
-        if (item_is_error(elem)) {
-            Item error = js_error_lane_payload(elem);
-            js_promise_settle(result, JS_PROMISE_REJECTED, error);
-            return result_item;
-        }
-        if (elem.item == JS_ITER_DONE_SENTINEL) break;
-
-        js_array_push_item_direct(results_arr.array, make_js_undefined());
-        js_array_push_item_direct(called_arr.array, (Item){.item = ITEM_FALSE});
-        int remaining = (int)it2i(js_get_key_default(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}));
-        js_set_key_cstr(counter, "remaining", (Item){.item = i2it(remaining + 1)});
-
-        Item resolve_status = js_promise_builtin_constructor_resolve(elem, &elem);
-        if (item_is_error(resolve_status)) {
-            Item error = elem;
-            Item close_result = js_iterator_close(iterator);
-            if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
-            js_promise_settle(result, JS_PROMISE_REJECTED, error);
-            return result_item;
-        }
-
-        Item error = ItemNull;
-        if (!js_promise_invoke_bound_element(elem, index, counter, result_item,
-                fulfill_handler, reject_handler, &error)) {
-            Item close_result = js_iterator_close(iterator);
-            if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
-            js_promise_settle(result, JS_PROMISE_REJECTED, error);
-            return result_item;
-        }
-        index++;
-    }
-
-    int remaining = (int)it2i(js_get_key_cstr(counter, "remaining")) - 1;
-    js_set_key_cstr(counter, "remaining", (Item){.item = i2it(remaining)});
-    if (remaining == 0) {
-        Item settled = reject_aggregate ? js_promise_make_aggregate_error(results_arr) : results_arr;
-        js_promise_settle(result, reject_aggregate ? JS_PROMISE_REJECTED : JS_PROMISE_FULFILLED, settled);
-    }
-    return result_item;
+extern "C" Item js_promise_race(Item iterable) {
+    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 3);
 }
-
-static Item js_promise_run_race(Item iterable) {
-    // Array and iterator inputs share the resolving capability; only iterator
-    // failures need IteratorClose, so keep that distinction in the loop.
-    RootFrame roots(10);
-    Rooted<Item> iterable_root(roots, iterable);
-    Rooted<Item> array_root(roots, ItemNull);
-    Rooted<Item> iterator_root(roots, ItemNull);
-    Rooted<Item> result_root(roots, ItemNull);
-    Rooted<Item> resolving_state_root(roots, ItemNull);
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
-    Rooted<Item> elem_root(roots, ItemNull);
-    Rooted<Item> error_root(roots, ItemNull);
-
-    bool array_input = get_type_id(iterable_root.get()) == LMD_TYPE_ARRAY;
-    if (array_input) {
-        Item arr_item = ItemNull;
-        Item rejection = ItemNull;
-        if (!js_promise_materialize_iterable(iterable_root.get(), &arr_item, &rejection)) {
-            return js_promise_reject(rejection);
-        }
-        array_root.set(arr_item);
-    } else {
-        iterator_root.set(js_get_iterator(iterable_root.get()));
-        if (item_is_error(iterator_root.get())) {
-            return js_promise_reject(js_error_lane_payload(iterator_root.get()));
-        }
-    }
-
-    JsPromise* result = js_alloc_promise();
-    if (!result) return ItemNull;
-    result_root.set(js_promise_to_item(result));
-    resolving_state_root.set(js_promise_make_resolving_state(result));
-    resolve_base_root.set(js_new_native_function(js_resolve_callback));
-    reject_base_root.set(js_new_native_function(js_reject_callback));
-    Item resolving_state = resolving_state_root.get();
-    resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull,
-        &resolving_state, 1));
-    resolving_state = resolving_state_root.get();
-    reject_root.set(js_bind_function(reject_base_root.get(), ItemNull,
-        &resolving_state, 1));
-
-    int index = 0;
-    while (true) {
-        if (array_input) {
-            Array* array = array_root.get().array;
-            if (index >= array->length) break;
-            elem_root.set(array->items[index++]);
-        } else {
-            Item next = js_iterator_step(iterator_root.get());
-            if (item_is_error(next)) {
-                error_root.set(js_error_lane_payload(next));
-                js_promise_settle(result, JS_PROMISE_REJECTED, error_root.get());
-                return result_root.get();
-            }
-            if (next.item == JS_ITER_DONE_SENTINEL) break;
-            elem_root.set(next);
-        }
-
-        Item elem = elem_root.get();
-        Item resolve_status = js_promise_builtin_constructor_resolve(elem, &elem);
-        if (item_is_error(resolve_status)) {
-            error_root.set(elem);
-            if (!array_input) {
-                Item close_result = js_iterator_close(iterator_root.get());
-                if (item_is_error(close_result)) error_root.set(js_error_lane_payload(close_result));
-            }
-            js_promise_settle(result, JS_PROMISE_REJECTED, error_root.get());
-            return result_root.get();
-        }
-        elem_root.set(elem);
-        Item error = ItemNull;
-        if (!js_invoke_promise_then(elem_root.get(), resolve_root.get(), reject_root.get(), &error)) {
-            error_root.set(error);
-            if (!array_input) {
-                Item close_result = js_iterator_close(iterator_root.get());
-                if (item_is_error(close_result)) error_root.set(js_error_lane_payload(close_result));
-            }
-            js_promise_settle(result, JS_PROMISE_REJECTED, error_root.get());
-            return result_root.get();
-        }
-    }
-    return result_root.get();
-}
-
-JS_FORWARD_ITEM(js_promise_race, (Item iterable), js_promise_run_race, (iterable))
 
 extern "C" Item js_promise_any(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
-        return js_promise_run_iterable_combinator(iterable, "errors", 6,
-            js_any_fulfill_element, js_any_reject_element, true);
-    }
-    // `any` uses the same per-element counter and rejection aggregate as the
-    // other array combinators; keeping a second loop let its rooting drift.
-    return js_promise_run_array_combinator(iterable,
-        js_any_fulfill_element, js_any_reject_element, false, true);
+    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 2);
 }
 
 extern "C" Item js_promise_all_settled(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
-        return js_promise_run_iterable_combinator(iterable, "results", 7,
-            js_settled_fulfill_element, js_settled_reject_element, false);
-    }
-    return js_promise_run_array_combinator(iterable,
-        js_settled_fulfill_element, js_settled_reject_element, false, false);
+    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 1);
 }
 
 // =============================================================================
@@ -37415,21 +36794,6 @@ static bool js_cc_env_truthy(const char* name) {
     return value && value[0] && strcmp(value, "0") != 0;
 }
 
-static bool js_cc_debug_enabled(void) {
-    const char* value = getenv("NODE_DEBUG_NATIVE");
-    return value && strstr(value, "COMPILE_CACHE") != NULL;
-}
-
-static void js_cc_debugf(const char* fmt, ...) {
-    char line[8192];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(line, sizeof(line), fmt, args);
-    va_end(args);
-    fputs(line, stderr);
-    fflush(stderr);
-}
-
 #define g_js_cc_dir (js_runtime_state.commonjs_compile_cache.directory)
 #define g_js_cc_enabled (js_runtime_state.commonjs_compile_cache.enabled)
 #define g_js_cc_disabled (js_runtime_state.commonjs_compile_cache.disabled)
@@ -37487,47 +36851,14 @@ static bool js_cc_mkdir_recursive(const char* path) {
     return js_cc_mkdir_one(tmp);
 }
 
-static bool js_cc_file_exists(const char* path) {
-    uv_fs_t req;
-    int r = uv_fs_access(NULL, &req, path, 0, NULL);
-    uv_fs_req_cleanup(&req);
-    return r == 0;
-}
-
-static void js_cc_current_script(char* out, int out_size) {
-    if (!out || out_size <= 0) return;
-    out[0] = '\0';
-    Item process_obj = js_get_process_object_value();
-    if (!js_cc_is_object(process_obj)) return;
-    Item argv = js_get_key_default(process_obj, js_cc_key("argv"));
-    if (get_type_id(argv) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(argv);
-    char arg_buf[4096];
-    for (int64_t i = 1; i < len; i++) {
-        if (!js_cc_get_string(js_elements_get_int(argv, i), arg_buf, (int)sizeof(arg_buf))) continue;
-        if (strcmp(arg_buf, "-r") == 0) {
-            i++;
-            continue;
-        }
-        if (arg_buf[0] == '-') continue;
-        snprintf(out, (size_t)out_size, "%s", arg_buf);
-        return;
-    }
-}
-
 static void js_cc_emit_cache_report(void) {
     if (!g_js_cc_enabled || g_js_cc_disabled || g_js_cc_reported || !g_js_cc_dir[0]) return;
     g_js_cc_reported = true;
-
-    char script[4096];
-    js_cc_current_script(script, (int)sizeof(script));
-    if (!script[0]) return;
 
     char cache_subdir[4096];
     char cache_file[4096];
     snprintf(cache_subdir, sizeof(cache_subdir), "%s/v1", g_js_cc_dir);
     snprintf(cache_file, sizeof(cache_file), "%s/entry.cache", cache_subdir);
-    bool accepted = js_cc_file_exists(cache_file);
     js_cc_mkdir_recursive(cache_subdir);
     FILE* fp = fopen(cache_file, "wb");
     if (fp) {
@@ -37535,16 +36866,6 @@ static void js_cc_emit_cache_report(void) {
         fclose(fp);
     }
 
-    if (js_cc_debug_enabled()) {
-        js_cc_debugf("reading cache from %s for CommonJS %s\n", g_js_cc_dir, script);
-        if (accepted) {
-            js_cc_debugf("cache for %s was accepted, keeping the in-memory entry\n", script);
-            js_cc_debugf("skip %s because cache was the same\n", script);
-        } else {
-            js_cc_debugf("%s was not initialized, initializing the in-memory entry\n", script);
-            js_cc_debugf("writing cache for %s success\n", script);
-        }
-    }
 }
 
 static void js_cc_init_from_env(void) {
@@ -37583,9 +36904,6 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
     js_cc_init_from_env();
     if (g_js_cc_disabled || js_cc_env_truthy("NODE_DISABLE_COMPILE_CACHE")) {
         g_js_cc_disabled = true;
-        if (js_cc_debug_enabled()) {
-            js_cc_debugf("Disabled by NODE_DISABLE_COMPILE_CACHE\n");
-        }
         return js_cc_result(3, NULL, "Disabled by NODE_DISABLE_COMPILE_CACHE");
     }
     if (g_js_cc_enabled) {
@@ -37615,9 +36933,6 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
     // versus CRT getcwd mismatch that rejected an explicitly granted directory.
     if (!js_cc_write_allowed(dir)) {
         const char* msg = "Skipping compile cache because write permission for path is not granted";
-        if (js_cc_debug_enabled()) {
-            js_cc_debugf("Skipping compile cache because write permission for %s is not granted\n", abs_dir);
-        }
         return js_cc_result(0, NULL, msg);
     }
 
@@ -37636,9 +36951,6 @@ extern "C" Item js_module_get_compile_cache_dir(void) {
 extern "C" Item js_module_flush_compile_cache(void) {
     js_cc_init_from_env();
     js_cc_emit_cache_report();
-    if (js_cc_debug_enabled()) {
-        js_cc_debugf("module.flushCompileCache() finished\n");
-    }
     return make_js_undefined();
 }
 

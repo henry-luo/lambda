@@ -1028,10 +1028,6 @@ struct JsRuntimeState {
     int pending_args_is_strict = 0;
     Item pending_args_callee = {0};
 
-    const char* trace_last_fn = "(none)";
-    int trace_last_fn_len = 6;
-    int trace_total_calls = 0;
-
     // Each context owns both range descriptors and the registry that resets
     // them. A heap replacement in one runtime must never touch another.
     JsRootRange event_loop_queue_roots = {};
@@ -1090,6 +1086,3 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_deferred_instance_field_class (js_runtime_state.operations.deferred_instance_field_class)
 #define js_pending_args_is_strict (js_runtime_state.pending_args_is_strict)
 #define js_pending_args_callee (js_runtime_state.pending_args_callee)
-#define _trace_last_fn (js_runtime_state.trace_last_fn)
-#define _trace_last_fn_len (js_runtime_state.trace_last_fn_len)
-#define _trace_total_calls (js_runtime_state.trace_total_calls)
