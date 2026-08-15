@@ -63,6 +63,7 @@ Item js_property_key_from_lane(JsPropertyLane lane);
 Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
 const char* js_property_index_chars(int64_t index, int* out_len);
+bool js_descriptor_is_enumerable(Item descriptor);
 
 // Tune5 §4.3: final semantic operation ABI.  The legacy runtime entry points
 // may delegate to these shells while migration is staged, but new semantic

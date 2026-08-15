@@ -554,8 +554,6 @@ static inline const String* jm_param_binding_name(JsAstNode* param_node) {
 void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
 bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len);
-int jm_detect_typed_array_new(JsAstNode* rhs);
-int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len);
 TypeId jm_detect_ctor_field_type(JsAstNode* rhs);
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
@@ -599,38 +597,6 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
 bool jm_should_inline(JsFuncCollected* fc);
 MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);
 MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call);
-int jm_typed_array_elem_shift(int ta_type);
-int jm_typed_array_elem_size(int ta_type);
-JsMirVarEntry* jm_get_typed_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
-JsMirVarEntry* jm_get_js_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
-MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
-                                                 MIR_reg_t idx_native,
-                                                 MIR_reg_t h_items = 0, MIR_reg_t h_len = 0);
-bool jm_typed_array_is_int(int ta_type);
-MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
-                                               MIR_reg_t idx_native, int ta_type,
-                                               MIR_reg_t h_data = 0, MIR_reg_t h_len = 0,
-                                               MIR_reg_t type_guard = 0);
-MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr_reg,
-                                                      MIR_reg_t idx_native, int ta_type,
-                                                      TypeId target_type,
-                                                      MIR_reg_t h_data = 0,
-                                                      MIR_reg_t type_guard = 0);
-MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
-                                               MIR_reg_t idx_native, MIR_reg_t val_boxed,
-                                               int ta_type,
-                                               MIR_reg_t h_data = 0, MIR_reg_t h_len = 0,
-                                               MIR_reg_t type_guard = 0,
-                                               bool strict = false);
-MIR_reg_t jm_transpile_number_get(JsMirTranspiler* mt, MIR_reg_t object_reg,
-                                  MIR_reg_t number_key);
-MIR_reg_t jm_transpile_typed_array_get_number(JsMirTranspiler* mt,
-    MIR_reg_t arr_reg, MIR_reg_t number_key, int ta_type,
-    MIR_reg_t h_data = 0, MIR_reg_t h_len = 0, MIR_reg_t type_guard = 0);
-MIR_reg_t jm_transpile_typed_array_set_number(JsMirTranspiler* mt,
-    MIR_reg_t arr_reg, MIR_reg_t number_key, MIR_reg_t value_reg, int ta_type,
-    MIR_reg_t h_data = 0, MIR_reg_t h_len = 0, MIR_reg_t type_guard = 0,
-    bool strict = false);
 MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem);
 MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr);
 MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj);
@@ -701,10 +667,6 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
                                           const char* export_name, int export_len);
 // Js52 R1: closure env size accounting for remapped scope_env_slot captures.
 int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has_remapped);
-void jm_p6_reinfer_return_type(JsFuncCollected* fc);
-TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg);
-void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
-                               FnParamEvidence** evidence);
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node);
 void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);
@@ -712,18 +674,7 @@ void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool jm_scope_env_name_matches_binding(const char* scope_name, const char* name,
     JsAstNode* binding_node);
 bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root);
-uint64_t js_path_index_hash(const void* item, uint64_t seed0, uint64_t seed1);
-int js_path_index_compare(const void* a, const void* b, void* udata);
-void jm_add_dep(JsImportGraphNode* nodes, int parent_idx, int dep_idx);
-void jm_discover_js_imports_recursive(
-    TSParser* parser, int parent_idx,
-    JsImportGraphNode** nodes, int* count, int* capacity,
-    struct hashmap* path_map);
-int jm_compute_depth(JsImportGraphNode* nodes, int idx);
 bool jm_validate_mir_labels(MIR_context_t ctx);
-bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node);
-void* jm_compile_js_worker(void* arg);
-int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char* filename);
 bool js_activate_runtime_name_pool(void);
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);

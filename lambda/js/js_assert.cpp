@@ -113,12 +113,7 @@ static Item js_assert_diff_key(void) {
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_item_is_date, (Item value), (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_DATE))
 
-static bool js_assert_string_equals(Item value, const char* text) {
-    if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
-    String* s = it2s(value);
-    size_t len = strlen(text);
-    return s && s->len == len && memcmp(s->chars, text, len) == 0;
-}
+#define js_assert_string_equals js_string_equals
 
 static bool js_assert_has_date_prototype(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP || js_assert_item_is_date(value)) return false;
@@ -2959,12 +2954,7 @@ static Item js_assert_throw_invalid_throws_expected(Item error_expected) {
     return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
 }
 
-static bool js_assert_is_vm_context_error(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item marker = js_get_key_cstr(value, "__vm_context_error__");
-    return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
-           (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
-}
+#define js_assert_is_vm_context_error js_is_vm_context_error
 
 static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor) {
     Item expected_name = js_get_key_cstr(expected_ctor, "name");
@@ -3851,13 +3841,6 @@ static bool js_assert_key_is_array_index(Item key) {
     return true;
 }
 
-static bool js_assert_descriptor_is_enumerable(Item desc) {
-    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    bool found = false;
-    Item enumerable = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &found);
-    return found && js_is_truthy(enumerable);
-}
-
 static Item js_assert_enumerable_own_keys(Item object) {
     Item result = js_array_new(0);
 
@@ -3867,7 +3850,7 @@ static Item js_assert_enumerable_own_keys(Item object) {
         for (int64_t i = 0; i < sym_count; i++) {
             Item key = js_elements_get_int(symbols, i);
             Item desc = js_object_get_own_property_descriptor(object, key);
-            if (js_assert_descriptor_is_enumerable(desc)) {
+            if (js_descriptor_is_enumerable(desc)) {
                 js_array_push(result, key);
             }
         }
@@ -3903,7 +3886,7 @@ static Item js_assert_filter_keys(Item keys, bool want_index_keys) {
 
 static bool js_assert_has_enumerable_own_key(Item object, Item key) {
     Item desc = js_object_get_own_property_descriptor(object, key);
-    return js_assert_descriptor_is_enumerable(desc);
+    return js_descriptor_is_enumerable(desc);
 }
 
 static bool js_assert_tag_equals(Item value, const char* tag) {

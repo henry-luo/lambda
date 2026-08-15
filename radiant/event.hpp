@@ -2221,6 +2221,8 @@ typedef struct ViewState {
         struct {
             float x;
             float y;
+            float min_x;
+            float min_y;
             float max_x;
             float max_y;
             uint8_t h_hovered : 1;
@@ -3100,6 +3102,14 @@ void scroll_state_set_max_for_view(DocState* state, View* view, void* pane,
                                    float h_max, float v_max);
 
 /**
+ * Set a concrete view's signed scroll ranges through ViewState.scroll.
+ * Reverse flex containers can expose a negative scroll origin.
+ */
+void scroll_state_set_range_for_view(DocState* state, View* view, void* pane,
+                                     float h_min, float h_max,
+                                     float v_min, float v_max);
+
+/**
  * Set a concrete view's scroll position through ViewState.scroll.
  * The pane argument remains a compatibility mirror for rendering.
  */
@@ -3113,6 +3123,13 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
 void scroll_state_get_position_for_view(DocState* state, View* view, void* pane,
                                         float* out_h_pos, float* out_v_pos,
                                         float* out_h_max, float* out_v_max);
+
+/**
+ * Read a concrete view's signed scroll ranges through ViewState.scroll.
+ */
+void scroll_state_get_range_for_view(DocState* state, View* view, void* pane,
+                                     float* out_h_min, float* out_h_max,
+                                     float* out_v_min, float* out_v_max);
 
 /**
  * Store scrollbar hover and drag-session substate in ViewState.scroll.

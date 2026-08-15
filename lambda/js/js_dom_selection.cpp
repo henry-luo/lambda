@@ -470,10 +470,8 @@ extern "C" Item js_range_intersects_node(Item self_v, Item node_v) {
     return make_bool(dom_range_intersects_node(r, n));
 }
 
-extern "C" Item js_range_detach(Item self_v) {
-    // per spec, detach() is a no-op (legacy)
-    return make_undef();
-}
+// per spec, detach() is a no-op (legacy)
+JS_FORWARD_ITEM(js_range_detach, (Item self_v), make_undef, ())
 
 #define JS_DOM_SELF_ALIAS(name, target) \
     extern "C" Item name(Item self_v) { return target(self_v); }

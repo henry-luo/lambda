@@ -879,15 +879,7 @@ static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_ite
     if (get_type_id(offset_item) == LMD_TYPE_INT) offset = it2i(offset_item);
     if (offset < 0) offset = 0;
 
-    // Compute element size from type
-    int elem_size = 1;
-    switch (ta->element_type) {
-        case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
-        case JS_TYPED_INT16: case JS_TYPED_UINT16: case JS_TYPED_FLOAT16: elem_size = 2; break;
-        case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
-        case JS_TYPED_FLOAT64: elem_size = 8; break;
-        default: break;
-    }
+    int elem_size = js_typed_array_element_size(ta->element_type);
 
     int64_t view_byte_length = js_typed_array_byte_length(view);
     int64_t byte_len = view_byte_length - offset * elem_size;
@@ -1998,9 +1990,9 @@ static Item js_buffer_swap_words(Item buf, int word_len) {
     return buf;
 }
 
-extern "C" Item js_buffer_swap16(Item buf) { return js_buffer_swap_words(buf, 2); }
-extern "C" Item js_buffer_swap32(Item buf) { return js_buffer_swap_words(buf, 4); }
-extern "C" Item js_buffer_swap64(Item buf) { return js_buffer_swap_words(buf, 8); }
+JS_FORWARD_ITEM(js_buffer_swap16, (Item buf), js_buffer_swap_words, (buf, 2))
+JS_FORWARD_ITEM(js_buffer_swap32, (Item buf), js_buffer_swap_words, (buf, 4))
+JS_FORWARD_ITEM(js_buffer_swap64, (Item buf), js_buffer_swap_words, (buf, 8))
 
 // ─── Helpers & statics ──────────────────────────────────────────────────────
 

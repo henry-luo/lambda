@@ -1615,8 +1615,8 @@ static Item js_socket_ref_or_unref(bool do_ref) {
 }
 JS_FORWARD_STATIC_ITEM(js_socket_ref, (void), js_socket_ref_or_unref, (true))
 JS_FORWARD_STATIC_ITEM(js_socket_unref, (void), js_socket_ref_or_unref, (false))
-static Item js_socket_cork(void) { return js_get_this(); }
-static Item js_socket_uncork(void) { return js_get_this(); }
+JS_FORWARD_STATIC_ITEM(js_socket_cork, (void), js_get_this, ())
+JS_FORWARD_STATIC_ITEM(js_socket_uncork, (void), js_get_this, ())
 
 static JsSocket* socket_from_handle_object(Item self) {
     TypeId type = get_type_id(self);

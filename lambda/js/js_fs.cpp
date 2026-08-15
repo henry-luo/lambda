@@ -419,21 +419,7 @@ static Item fs_buffer_from_bytes(const char* data, int len) {
 static const char* fs_typed_array_name(JsTypedArray* ta) {
     if (!ta) return "Uint8Array";
     if (ta->is_buffer) return "Buffer";
-    switch (ta->element_type) {
-        case JS_TYPED_INT8: return "Int8Array";
-        case JS_TYPED_UINT8: return "Uint8Array";
-        case JS_TYPED_INT16: return "Int16Array";
-        case JS_TYPED_UINT16: return "Uint16Array";
-        case JS_TYPED_INT32: return "Int32Array";
-        case JS_TYPED_UINT32: return "Uint32Array";
-        case JS_TYPED_FLOAT16: return "Float16Array";
-        case JS_TYPED_FLOAT32: return "Float32Array";
-        case JS_TYPED_FLOAT64: return "Float64Array";
-        case JS_TYPED_UINT8_CLAMPED: return "Uint8ClampedArray";
-        case JS_TYPED_BIGINT64: return "BigInt64Array";
-        case JS_TYPED_BIGUINT64: return "BigUint64Array";
-        default: return "Uint8Array";
-    }
+    return js_typed_array_type_name_from_type(ta->element_type);
 }
 
 static JsTypedArray* fs_get_typed_array(Item buffer_item) {

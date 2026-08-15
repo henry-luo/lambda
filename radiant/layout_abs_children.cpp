@@ -79,6 +79,8 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
         state.original_given_width = lycon->block.given_width;
         state.original_given_height = lycon->block.given_height;
 
+        lycon->abspos_static_size_override_x = false;
+        lycon->abspos_static_size_override_y = false;
         if (ctx->prepare_child) {
             ctx->prepare_child(lycon, container, ctx, &state);
         }

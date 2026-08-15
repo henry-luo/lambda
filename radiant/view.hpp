@@ -1354,6 +1354,8 @@ typedef struct PositionProp {
     ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
+    bool static_x_needs_inline_cb_extent; // inline CB width is finalized after abs layout
+    bool static_x_uses_inline_start;    // blockified abs child uses inline CB start edge
     bool static_y_needs_parent_offset;  // flex static y was computed in parent-local coords
     bool has_static_parent_offset_x;    // static x captured parent-to-containing-block offset
     bool has_static_parent_offset_y;    // static y captured parent-to-containing-block offset
@@ -1581,6 +1583,7 @@ typedef struct {
     DocState* state_ref;
 
     float v_scroll_position, h_scroll_position;
+    float v_min_scroll, h_min_scroll;
     float v_max_scroll, h_max_scroll;
     float v_handle_y, v_handle_height;
     float h_handle_x, h_handle_width;

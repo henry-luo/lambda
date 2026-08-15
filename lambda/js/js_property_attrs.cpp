@@ -194,13 +194,12 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
     return clone;
 }
 
-static TypeMap* js_typemap_clone_for_mutation(Item obj) {
-    // A snapshot Map may already own a private TypeMap. Private ownership is
-    // normally enough, but its shape is the reset blueprint while that exact
-    // TypeMap is installed; detach before changing it (D6.2.2v2).
-    return js_typemap_clone_for_mutation_ex(obj,
-        js_proto_snapshot_requires_typemap_detach(obj));
-}
+// a snapshot Map may already own a private TypeMap. Private ownership is
+// normally enough, but its shape is the reset blueprint while that exact
+// TypeMap is installed; detach before changing it (D6.2.2v2).
+JS_FORWARD_STATIC_RETURN(TypeMap*, js_typemap_clone_for_mutation, (Item obj),
+    js_typemap_clone_for_mutation_ex,
+    (obj, js_proto_snapshot_requires_typemap_detach(obj)))
 
 static void js_shape_entry_update_flags_impl(Item obj, NameId name_id,
         const char* name, int name_len, uint8_t set_mask, uint8_t clear_mask) {
@@ -384,9 +383,9 @@ static inline bool js_attrs_name_is_digits(const char* name, int name_len) {
     return true;
 }
 
-static inline bool js_attrs_name_is_length(const char* name, int name_len) {
-    return name && name_len == 6 && memcmp(name, "length", 6) == 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_attrs_name_is_length,
+    (const char* name, int name_len),
+    name && name_len == 6 && memcmp(name, "length", 6) == 0)
 
 static int64_t js_attrs_parse_index_name(const char* name, int name_len) {
     if (!js_attrs_name_is_digits(name, name_len)) return -1;

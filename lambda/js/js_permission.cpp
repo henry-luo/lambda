@@ -123,13 +123,9 @@ extern "C" void js_permission_reset(void) {
     js_permission_clear_grants(policy->fs_write_grants);
 }
 
-extern "C" int js_permission_enabled(void) {
-    return g_permission_enabled ? 1 : 0;
-}
-
-extern "C" int js_permission_has_net(void) {
-    return (!g_permission_enabled || g_permission_net) ? 1 : 0;
-}
+JS_FORWARD_EXPRESSION(int, js_permission_enabled, (void), g_permission_enabled ? 1 : 0)
+JS_FORWARD_EXPRESSION(int, js_permission_has_net, (void),
+    (!g_permission_enabled || g_permission_net) ? 1 : 0)
 
 static void js_perm_normalize_absolute(const char* in, char* out, int out_size) {
     if (!out || out_size <= 0) return;
@@ -317,29 +313,22 @@ static bool js_permission_has_grant(JsPermissionGrant* grants, const char* path)
     return false;
 }
 
-static int js_permission_has_fs_grant(const char* path, JsPermissionGrant* grants) {
-    return js_permission_has_grant(grants, path) ? 1 : 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(int, js_permission_has_fs_grant,
+    (const char* path, JsPermissionGrant* grants),
+    js_permission_has_grant(grants, path) ? 1 : 0)
 
-static int js_permission_has_full_fs_grant(JsPermissionGrant* grants) {
-    return (!g_permission_enabled || js_permission_grants_have_all(grants)) ? 1 : 0;
-}
+JS_FORWARD_STATIC_EXPRESSION(int, js_permission_has_full_fs_grant,
+    (JsPermissionGrant* grants),
+    (!g_permission_enabled || js_permission_grants_have_all(grants)) ? 1 : 0)
 
-extern "C" int js_permission_has_fs_read(const char* path) {
-    return js_permission_has_fs_grant(path, g_fs_read_grants);
-}
-
-extern "C" int js_permission_has_fs_write(const char* path) {
-    return js_permission_has_fs_grant(path, g_fs_write_grants);
-}
-
-extern "C" int js_permission_has_full_fs_read(void) {
-    return js_permission_has_full_fs_grant(g_fs_read_grants);
-}
-
-extern "C" int js_permission_has_full_fs_write(void) {
-    return js_permission_has_full_fs_grant(g_fs_write_grants);
-}
+JS_FORWARD_RETURN(int, js_permission_has_fs_read, (const char* path),
+    js_permission_has_fs_grant, (path, g_fs_read_grants))
+JS_FORWARD_RETURN(int, js_permission_has_fs_write, (const char* path),
+    js_permission_has_fs_grant, (path, g_fs_write_grants))
+JS_FORWARD_RETURN(int, js_permission_has_full_fs_read, (void),
+    js_permission_has_full_fs_grant, (g_fs_read_grants))
+JS_FORWARD_RETURN(int, js_permission_has_full_fs_write, (void),
+    js_permission_has_full_fs_grant, (g_fs_write_grants))
 
 static void js_permission_drop_grants(JsPermissionGrant* grants, const char* path) {
     if (!path) {

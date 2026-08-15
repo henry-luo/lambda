@@ -1066,6 +1066,22 @@ static void append_json_format_field(StrBuf* buf, int indent, const char* key,
     append_json_comma_newline(buf, comma);
 }
 
+// absolute descendants do not move with a DOM ancestor that is outside their containing block.
+static bool absolute_scroll_container_is_in_positioned_chain(
+        ViewBlock* scroll_container, ViewBlock* containing_block) {
+    if (!scroll_container || !containing_block) return false;
+    for (ViewElement* current = containing_block; current; current = current->parent_view()) {
+        if (!current->is_block()) continue;
+        ViewBlock* current_block = lam::view_require_block(current);
+        if (current_block == scroll_container) return true;
+        if (current_block->position &&
+            current_block->positionp()->position == CSS_VALUE_FIXED) {
+            break;
+        }
+    }
+    return false;
+}
+
 /**
  * Calculate the CSS transform translation offset for a view element.
  * This extracts the translate() portion from CSS transforms to apply to layout coordinates.
@@ -1081,8 +1097,12 @@ static void append_json_format_field(StrBuf* buf, int indent, const char* key,
 static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y) {
     float abs_x = rect ? rect->x : view->x;
     float abs_y = rect ? rect->y : view->y;
+    ViewBlock* positioned_block = view->is_block() ? lam::view_require_block(view) : nullptr;
     bool is_fixed = false;
     bool is_absolute = false;
+    bool has_fixed_ancestor = false;
+    bool has_positioned_ancestor_coordinate = false;
+    ViewBlock* absolute_containing_block = nullptr;
 
     if (view->is_block()) {
         ViewBlock* block = lam::view_require_block(view);
@@ -1097,7 +1117,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
     //   so we don't add any parent positions
     // For absolute elements: position is relative to containing block, so we need
     //   to add the containing block's absolute position
-    // For all other elements: accumulate parent positions normally
+        // For all other elements: accumulate parent positions normally
     if (is_fixed) {
         // Fixed: position already relative to viewport, nothing to add
     } else if (is_absolute) {
@@ -1106,15 +1126,41 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
 
         ViewBlock* cb = find_positioned_containing_block(
             lam::view_require_element(view));
+        ViewBlock* spanner_cb = nullptr;
+        if (multicol_find_spanner_containing_block(
+                positioned_block, &spanner_cb)) {
+            // CSS Multicol §6.1: a spanner bypasses positioned ancestors
+            // between itself and the multicol container.
+            cb = spanner_cb;
+        }
+        absolute_containing_block = cb;
 
         if (cb) {
             // Add containing block's position
-            abs_x += cb->x;
-            abs_y += cb->y;
+            float cb_x = cb->x;
+            float cb_y = cb->y;
+            if (cb->view_type == RDT_VIEW_INLINE) {
+                ViewSpan* cb_span = lam::view_require<RDT_VIEW_INLINE>(static_cast<View*>(cb));
+                if (cb_span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
+                    const FragmentUnion* split = cb_span->fragment_union(FRAGMENT_UNION_INLINE_CB);
+                    // CSS Position 3 §4.1: absolute descendants use the first
+                    // inline fragment, not the union's visible DOM rectangle.
+                    if (positioned_block && (positioned_block->positionp()->has_left || positioned_block->positionp()->has_right)) {
+                        cb_x = split->min_x;
+                    }
+                if (positioned_block && positioned_block->positionp()->has_top &&
+                    !positioned_block->positionp()->has_bottom) {
+                        cb_y = split->min_y;
+                    }
+                }
+            }
+            abs_x += cb_x;
+            abs_y += cb_y;
 
             // Now get containing block's absolute position based on its positioning
             if (cb->positionp()->position == CSS_VALUE_FIXED) {
                 // Fixed: already relative to viewport, done
+                has_fixed_ancestor = true;
             } else if (cb->positionp()->position == CSS_VALUE_ABSOLUTE) {
                 // Absolute containing block: recursively find ITS containing block chain
                 ViewBlock* current = cb;
@@ -1127,7 +1173,10 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     abs_x += cb_cb->x;
                     abs_y += cb_cb->y;
 
-                    if (cb_cb->positionp()->position == CSS_VALUE_FIXED) break;
+                    if (cb_cb->positionp()->position == CSS_VALUE_FIXED) {
+                        has_fixed_ancestor = true;
+                        break;
+                    }
                     if (cb_cb->positionp()->position != CSS_VALUE_ABSOLUTE) {
                         // Relative: continue with normal DOM walk
                         ViewElement* parent = cb_cb->parent_view();
@@ -1149,6 +1198,11 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     if (parent->is_block()) {
                         abs_x += parent->x;
                         abs_y += parent->y;
+                        if (parent->position &&
+                            parent->positionp()->position == CSS_VALUE_FIXED) {
+                            has_fixed_ancestor = true;
+                            break;
+                        }
                     }
                     parent = parent->parent_view();
                 }
@@ -1164,28 +1218,30 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         while (parent) {
             if (parent->is_block()) {
                 ViewBlock* parent_block = lam::view_require_block(parent);
+                if (parent_block->position &&
+                    parent_block->positionp()->position == CSS_VALUE_ABSOLUTE) {
+                    float parent_abs_x = 0.0f;
+                    float parent_abs_y = 0.0f;
+                    // an in-flow descendant inherits an absolute ancestor's
+                    // containing-block coordinate, not that ancestor's local y.
+                    calculate_absolute_position(
+                        static_cast<View*>(parent_block), nullptr,
+                        &parent_abs_x, &parent_abs_y);
+                    abs_x += parent_abs_x;
+                    abs_y += parent_abs_y;
+                    has_positioned_ancestor_coordinate = true;
+                    break;
+                }
                 abs_x += parent->x;  abs_y += parent->y;
 
                 // If parent is fixed, its position is relative to viewport (root at 0,0)
                 // so we can stop here
                 if (parent_block->position &&
                     parent_block->positionp()->position == CSS_VALUE_FIXED) {
+                    has_fixed_ancestor = true;
                     break;
                 }
 
-                // If parent is absolute, its position is relative to its containing block
-                // We need to find that containing block and continue from there
-                if (parent_block->position &&
-                    parent_block->positionp()->position == CSS_VALUE_ABSOLUTE) {
-                    ViewBlock* positioned_parent_cb =
-                        find_positioned_containing_block(parent_block);
-                    if (!positioned_parent_cb) {
-                        // No positioned ancestor - containing block is root (already at 0,0)
-                        break;
-                    }
-                    parent = reinterpret_cast<ViewElement*>(positioned_parent_cb);
-                    continue;  // Continue loop with containing block as parent
-                }
             }
             parent = parent->parent_view();
         }
@@ -1199,7 +1255,11 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 bool is_root_scroller = parent_block->doc &&
                     parent_block->doc->view_tree &&
                     parent_block->doc->view_tree->root == static_cast<View*>(parent_block);
-                if (!is_root_scroller && parent_block->scroller && parent_block->scroll_mut()->pane) {
+                bool scroll_affects_absolute = !is_absolute ||
+                    absolute_scroll_container_is_in_positioned_chain(
+                        parent_block, absolute_containing_block);
+                if (scroll_affects_absolute && !is_root_scroller &&
+                    parent_block->scroller && parent_block->scroll_mut()->pane) {
                     // visual rects for descendants move by ancestor element scroll; abspos containing-block math is separate above.
                     DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
                     float scroll_x = 0.0f, scroll_y = 0.0f;
@@ -1210,6 +1270,10 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 }
                 if (parent_block->position &&
                     parent_block->positionp()->position == CSS_VALUE_FIXED) {
+                    break;
+                }
+                if (parent_block->position &&
+                    parent_block->positionp()->position == CSS_VALUE_ABSOLUTE) {
                     break;
                 }
             }
@@ -1225,7 +1289,8 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             doc->view_tree->root->is_block()
             ? lam::view_require_block(doc->view_tree->root)
             : nullptr;
-        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+        if (!has_fixed_ancestor && !has_positioned_ancestor_coordinate &&
+            root_block && root_block->scroller && root_block->scroll_mut()->pane) {
             // root scroll moves the viewport for every non-fixed box; element scroll remains paint-time only.
             DocState* state = root_block->doc ? root_block->doc->state : NULL;
             float scroll_x = 0.0f, scroll_y = 0.0f;

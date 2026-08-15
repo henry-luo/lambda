@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "event.hpp"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -39,15 +40,37 @@ static float sticky_axis_offset(bool has_start, float start,
                                 bool has_end, float end,
                                 float viewport_start, float viewport_end,
                                 float element_start, float element_end) {
+    float offset = 0.0f;
     if (has_start) {
         float minimum = viewport_start + start;
-        return element_start < minimum ? minimum - element_start : 0.0f;
+        if (element_start < minimum) offset = minimum - element_start;
     }
     if (has_end) {
         float maximum = viewport_end - end;
-        return element_end > maximum ? maximum - element_end : 0.0f;
+        // both inset edges constrain the sticky view rectangle; returning after
+        // the start edge leaves a box outside the end edge when both are set.
+        if (element_end + offset > maximum) {
+            offset += maximum - (element_end + offset);
+        }
     }
-    return 0.0f;
+    return offset;
+}
+
+static float sticky_inset_value(bool has_inset, float value, float percent,
+                               float scrollport_size) {
+    if (!has_inset) return 0.0f;
+    // CSS Position 3 resolves sticky inset percentages against the scrollport;
+    // ignoring the percentage lane turns declarations such as top:40% into zero.
+    return !isnan(percent) ? percent * scrollport_size / 100.0f : value;
+}
+
+static float sticky_scrollport_axis_size(ViewBlock* block, LayoutAxis axis) {
+    if (!block) return 0.0f;
+    float size = layout_axis_size(block, axis);
+    size -= layout_axis_border_start(
+        block->bound ? block->bound->border : nullptr, axis);
+    size -= layout_axis_border_end(block->bound, axis);
+    return max(size, 0.0f);
 }
 
 static float sticky_clamp_axis_offset(float offset, float local_start,
@@ -60,6 +83,27 @@ static float sticky_clamp_axis_offset(float offset, float local_start,
         return min(0.0f, containing_start - local_start);
     }
     return offset;
+}
+
+static ViewBlock* sticky_containing_block(ViewBlock* block) {
+    if (!block) return nullptr;
+    ViewElement* parent = block->parent_view();
+    while (parent && parent->view_type == RDT_VIEW_INLINE) {
+        // CSS Position 3: an inline wrapper does not terminate the sticky
+        // containing-block chain; continue to its block formatting context.
+        parent = parent->parent_view();
+    }
+    if (!parent || !parent->is_block()) return nullptr;
+    ViewBlock* containing_block = lam::view_require_block(parent);
+    for (ViewElement* ancestor = parent; ancestor; ancestor = ancestor->parent_view()) {
+        if (ancestor->view_type == RDT_VIEW_TABLE) {
+            // a table-cell sticky box is contained by the table grid, not its row's
+            // 50px box, so row sizing must not cancel its scrollport constraint.
+            containing_block = lam::view_require_block(ancestor);
+            break;
+        }
+    }
+    return containing_block;
 }
 
 static bool float_is_left(ViewBlock* block) {
@@ -115,6 +159,21 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
         // Only use parent height if it has an explicit (non-auto) height
         if (cb.has_definite_height) {
             cb_height = cb.content_height;
+            bool is_table_positioning_context =
+                parent_block->view_type == RDT_VIEW_TABLE ||
+                parent_block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+                parent_block->view_type == RDT_VIEW_TABLE_ROW ||
+                parent_block->view_type == RDT_VIEW_TABLE_CELL;
+            if (is_table_positioning_context &&
+                layout_axis_has_given_size(parent_block, false)) {
+                // CSS 2.1 §17.5.3: a table height is a minimum; percentage
+                // offsets use the specified height, not the expanded grid.
+                float specified_height = layout_axis_given_size(
+                    parent_block->block(), LAYOUT_AXIS_Y);
+                cb_height = layout_css_size_to_content_box(
+                    parent_block->bound, layout_box_sizing(parent_block),
+                    specified_height, false);
+            }
         }
     }
 
@@ -162,15 +221,37 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
 }
 // apply CSS Position 3 sticky constraints to the nearest scroll container.
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
+    if (lycon && lycon->defer_sticky_positioning) return;
     if (!block->position) return;
 
     ViewElement* scroll_ancestor = NULL;
     for (ViewElement* p = block->parent_view(); p; p = p->parent_view()) {
         if (!p->is_block()) continue;
         ViewBlock* pb = lam::view_require_block(p);
+        if (pb->position && pb->positionp()->position == CSS_VALUE_FIXED) {
+            // a fixed subtree escapes ancestor scrolling; its fixed box still
+            // supplies the viewport-local sticky constraint when no scroller exists.
+            scroll_ancestor = p;
+            break;
+        }
+        if (pb->position && pb->positionp()->position == CSS_VALUE_ABSOLUTE &&
+            !find_positioned_containing_block(pb)) {
+            // an absolute subtree with the initial containing block is not
+            // contained by a DOM scroller that merely wraps its source node;
+            // its sticky constraint still participates in the document viewport.
+            ViewBlock* root_block = find_initial_containing_view_block(pb);
+            if (root_block && root_block->scroller && root_block->scroll()->pane) {
+                scroll_ancestor = static_cast<ViewElement*>(root_block);
+            }
+            break;
+        }
         if (pb->scroller &&
-            (pb->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
-             pb->scroll()->overflow_y != CSS_VALUE_VISIBLE)) {
+            ((pb->scroll()->overflow_x != CSS_VALUE_VISIBLE &&
+              pb->scroll()->overflow_x != CSS_VALUE_CLIP) ||
+             (pb->scroll()->overflow_y != CSS_VALUE_VISIBLE &&
+              pb->scroll()->overflow_y != CSS_VALUE_CLIP))) {
+            // overflow:clip clips without creating a scroll container; skipping it
+            // lets sticky positioning use the nearest ancestor with a scrollport.
             scroll_ancestor = p;
             break;
         }
@@ -182,11 +263,13 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
 
     ViewBlock* scroller = lam::view_require_block(scroll_ancestor);
 
+    // sticky insets resolve against the scrollport padding box, not the content box.
+    LayoutAxisPair<float> scroll_start = layout_axis_pair(
+        layout_axis_decoration_start(scroller->bound, LAYOUT_AXIS_X),
+        layout_axis_decoration_start(scroller->bound, LAYOUT_AXIS_Y));
     LayoutAxisPair<float> scroll_end = layout_axis_pair(
-        layout_content_size_from_border_box(
-            scroller, layout_axis_size(scroller, LAYOUT_AXIS_X), true),
-        layout_content_size_from_border_box(
-            scroller, layout_axis_size(scroller, LAYOUT_AXIS_Y), false));
+        sticky_scrollport_axis_size(scroller, LAYOUT_AXIS_X),
+        sticky_scrollport_axis_size(scroller, LAYOUT_AXIS_Y));
     // Walk from element's parent up to (not including) the scroller, accumulating
     LayoutAxisPair<float> offset_to_scroller = {};
     for (ViewElement* p = block->parent_view(); p && p != scroll_ancestor; p = p->parent_view()) {
@@ -199,33 +282,84 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
+    LayoutAxisPair<float> scroll_positions = {};
+    if (scroller->scroller && scroller->scroll()->pane) {
+        DocState* state = scroller->doc ? scroller->doc->state : nullptr;
+        scroll_state_get_position_for_view(
+            state, static_cast<View*>(scroller), scroller->scroll()->pane,
+            &scroll_positions[LAYOUT_AXIS_X], &scroll_positions[LAYOUT_AXIS_Y],
+            nullptr, nullptr);
+    }
+    // scrollTop/scrollLeft are deferred until the scroller's content extent is known;
+    // sticky layout still needs the requested post-scroll position in this pass.
+    if (scroller->has_pending_element_scroll_x()) {
+        scroll_positions[LAYOUT_AXIS_X] = scroller->pending_scroll_x();
+    }
+    if (scroller->has_pending_element_scroll_y()) {
+        scroll_positions[LAYOUT_AXIS_Y] = scroller->pending_scroll_y();
+    }
     LayoutAxisPair<float> offsets = {};
     for (LayoutAxis axis : layout_axes()) {
         LayoutAxisRefs geometry(block, axis);
         LayoutAxisRefs insets(block->position, axis);
-        float element_start = geometry.get_position() + offset_to_scroller[axis];
-        offsets[axis] = sticky_axis_offset(
+        float start_inset = sticky_inset_value(
             *insets.insets.start.has, *insets.insets.start.value,
+            *insets.insets.start.percent, scroll_end[axis]);
+        float end_inset = sticky_inset_value(
             *insets.insets.end.has, *insets.insets.end.value,
-            0.0f, scroll_end[axis], element_start,
+            *insets.insets.end.percent, scroll_end[axis]);
+        // sticky constraints use the post-scroll position relative to the scrollport;
+        // the visual-rect calculation applies this same scroll translation later.
+        float element_start = geometry.get_position() + offset_to_scroller[axis] -
+            scroll_positions[axis];
+        offsets[axis] = sticky_axis_offset(
+            *insets.insets.start.has, start_inset,
+            *insets.insets.end.has, end_inset,
+            scroll_start[axis], scroll_start[axis] + scroll_end[axis], element_start,
             element_start + geometry.get_size());
     }
-    // Constrain: element must stay within its containing block (parent).
-    ViewElement* parent = block->parent_view();
-    if (parent && parent->is_block() &&
-        (offsets[LAYOUT_AXIS_X] != 0 || offsets[LAYOUT_AXIS_Y] != 0)) {
-        ViewBlock* cb = lam::view_require_block(parent);
+    // constrain the sticky box within its containing block.
+    ViewBlock* cb = sticky_containing_block(block);
+    if (cb && (offsets[LAYOUT_AXIS_X] != 0 || offsets[LAYOUT_AXIS_Y] != 0)) {
+        float parent_to_cb_offset_x = 0.0f;
+        float parent_to_cb_offset_y = 0.0f;
+        layout_parent_to_containing_block_offset(
+            block, cb, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
+        LayoutAxisPair<float> block_to_cb_offset = layout_axis_pair(
+            parent_to_cb_offset_x, parent_to_cb_offset_y);
         LayoutAxisPair<float> containing_end = layout_axis_pair(
             layout_content_size_from_border_box(
-                cb, layout_axis_size(cb, LAYOUT_AXIS_X), true),
+                cb, layout_axis_size(cb, LAYOUT_AXIS_X), true) +
+                layout_axis_padding_start(cb->bound, LAYOUT_AXIS_X),
             layout_content_size_from_border_box(
-                cb, layout_axis_size(cb, LAYOUT_AXIS_Y), false)
+                cb, layout_axis_size(cb, LAYOUT_AXIS_Y), false) +
+                layout_axis_padding_start(cb->bound, LAYOUT_AXIS_Y)
         );
-    for (LayoutAxis axis : layout_axes()) {
-        LayoutAxisRefs geometry(block, axis);
+        LayoutAxisPair<float> containing_start = layout_axis_pair(0.0f, 0.0f);
+        if (cb->scroller && cb->scroll()->pane) {
+            DocState* state = cb->doc ? cb->doc->state : nullptr;
+            float min_scroll_x = 0.0f;
+            float min_scroll_y = 0.0f;
+            float max_scroll_x = 0.0f;
+            float max_scroll_y = 0.0f;
+            scroll_state_get_range_for_view(
+                state, static_cast<View*>(cb), cb->scroll()->pane,
+                &min_scroll_x, &max_scroll_x, &min_scroll_y, &max_scroll_y);
+            containing_start[LAYOUT_AXIS_X] = min_scroll_x;
+            containing_start[LAYOUT_AXIS_Y] = min_scroll_y;
+            // a scroll container's sticky containing block spans its scrollable
+            // content, not only the currently visible scrollport.
+            containing_end[LAYOUT_AXIS_X] += max_scroll_x;
+            containing_end[LAYOUT_AXIS_Y] += max_scroll_y;
+        }
+        for (LayoutAxis axis : layout_axes()) {
+            LayoutAxisRefs geometry(block, axis);
+            // CSS Position 3 clamps against the containing block's padding box;
+            // the cell's own zero-based coordinate would reject valid table shifts.
+            float local_start = block_to_cb_offset[axis] + geometry.get_position();
             offsets[axis] = sticky_clamp_axis_offset(
-                offsets[axis], geometry.get_position(),
-                geometry.get_position() + geometry.get_size(), 0.0f, containing_end[axis]);
+                offsets[axis], local_start,
+                local_start + geometry.get_size(), containing_start[axis], containing_end[axis]);
         }
     }
 
@@ -236,11 +370,41 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         y_geometry.set_position(y_geometry.get_position() + offsets[LAYOUT_AXIS_Y]);
 
         if (block->view_type == RDT_VIEW_INLINE) {
-            layout_shift_inline_descendants(
-                lam::view_require_element(block), offsets[LAYOUT_AXIS_X],
+            // CSS Position 3 §3.4: sticky translation moves the entire inline
+            // box, including positioned descendants using that box as CB.
+            layout_shift_view_children(
+                static_cast<View*>(block), offsets[LAYOUT_AXIS_X],
                 offsets[LAYOUT_AXIS_Y]);
         }
     }
+}
+
+static void layout_apply_sticky_positions_recursive(LayoutContext* lycon, View* view) {
+    if (!lycon || !view) return;
+
+    ViewBlock* block = nullptr;
+    if (view->is_block()) {
+        block = lam::view_require_block(view);
+    } else if (view->view_type == RDT_VIEW_INLINE) {
+        block = lam::unsafe_view_block_api_span(static_cast<ViewSpan*>(view));
+    }
+    if (block && block->position && block->positionp()->position == CSS_VALUE_STICKY) {
+        layout_sticky_positioned(lycon, block);
+    }
+
+    if (!view->is_element()) return;
+    ViewElement* element = lam::view_require_element(view);
+    for (View* child = element->first_child; child; child = child->next()) {
+        layout_apply_sticky_positions_recursive(lycon, child);
+    }
+}
+
+void layout_apply_sticky_positions(LayoutContext* lycon, View* root) {
+    if (!lycon || !root) return;
+    bool saved_defer = lycon->defer_sticky_positioning;
+    lycon->defer_sticky_positioning = false;
+    layout_apply_sticky_positions_recursive(lycon, root);
+    lycon->defer_sticky_positioning = saved_defer;
 }
 // find the root view used for static/absolute/fixed containing-block fallback.
 ViewBlock* find_initial_containing_view_block(ViewBlock* element) {
@@ -299,7 +463,9 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     return nullptr;
 }
 
-static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containing_block, float* out_x, float* out_y) {
+void layout_parent_to_containing_block_offset(ViewBlock* block,
+                                              ViewBlock* containing_block,
+                                              float* out_x, float* out_y) {
     LayoutAxisPair<float> parent_to_cb_offset = {};
     ViewElement* walk_start = block->parent_view();
     ViewElement* containing_element = reinterpret_cast<ViewElement*>(containing_block);
@@ -378,6 +544,17 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
     return static_direction;
 }
 
+static TextDirection get_static_position_block_context_direction(
+    ViewElement* parent) {
+    ViewElement* direction_view = parent;
+    // CSS 2.1 §10.3.7: an inline containing block inherits static-position
+    // direction from its block formatting context, not the inline fragment.
+    while (direction_view && direction_view->view_type == RDT_VIEW_INLINE) {
+        direction_view = direction_view->parent_view();
+    }
+    return get_static_position_direction(direction_view ? direction_view : parent);
+}
+
 static bool static_position_parent_uses_right_block_start(ViewElement* parent) {
     for (View* ancestor = parent; ancestor && ancestor->is_element();
          ancestor = ancestor->parent) {
@@ -409,6 +586,26 @@ static bool positioned_element_is_replaced(ViewBlock* block) {
         block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
         (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
         is_form_control;
+}
+
+static bool positioned_element_has_replaced_sizing(ViewBlock* block) {
+    if (!block) return false;
+
+    // CSS Position 3 §4.1: native controls and widgets that are not directly
+    // representing replaced content use stretch-fit automatic sizing. Image
+    // inputs remain the direct-replacement exception among form controls.
+    if (block->form_control()) {
+        const char* input_type = block->get_attribute("type");
+        return block->tag() == MARKUP_NAME_INPUT && input_type &&
+            strcmp(input_type, "image") == 0;
+    }
+    if (block->tag() == MARKUP_NAME_METER || block->tag() == MARKUP_NAME_PROGRESS) {
+        return false;
+    }
+    return block->display.inner == RDT_DISPLAY_REPLACED ||
+        block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
+        block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
+        (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data"));
 }
 
 static bool positioned_axis_is_auto(ViewBlock* block, bool horizontal) {
@@ -657,6 +854,76 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
     return line_x;
 }
 
+static float inline_containing_block_origin_x(ViewBlock* containing_block) {
+    if (!containing_block || containing_block->view_type != RDT_VIEW_INLINE) {
+        return 0.0f;
+    }
+    ViewSpan* cb_span = lam::view_require<RDT_VIEW_INLINE>(
+        static_cast<View*>(containing_block));
+    if (cb_span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
+        return cb_span->fragment_union(FRAGMENT_UNION_INLINE_CB)->min_x;
+    }
+    return containing_block->x;
+}
+
+static float inline_containing_block_origin_y(ViewBlock* containing_block) {
+    if (!containing_block || containing_block->view_type != RDT_VIEW_INLINE) {
+        return 0.0f;
+    }
+    ViewSpan* cb_span = lam::view_require<RDT_VIEW_INLINE>(
+        static_cast<View*>(containing_block));
+    if (cb_span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
+        return cb_span->fragment_union(FRAGMENT_UNION_INLINE_CB)->min_y;
+    }
+    return containing_block->y;
+}
+
+static float inline_containing_block_width(ViewBlock* containing_block) {
+    if (!containing_block || containing_block->view_type != RDT_VIEW_INLINE) {
+        return 0.0f;
+    }
+    ViewSpan* cb_span = lam::view_require<RDT_VIEW_INLINE>(
+        static_cast<View*>(containing_block));
+    const FragmentUnion* fragment = nullptr;
+    if (cb_span->has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)) {
+        fragment = cb_span->fragment_union(FRAGMENT_UNION_SPLIT_INLINE);
+    } else if (cb_span->has_fragment_union(FRAGMENT_UNION_INLINE)) {
+        fragment = cb_span->fragment_union(FRAGMENT_UNION_INLINE);
+    }
+    if (fragment && fragment->max_x > fragment->min_x) {
+        return fragment->max_x - fragment->min_x;
+    }
+    return containing_block->width;
+}
+
+static float static_position_line_x(BlockContext* pa_block, Linebox* pa_line,
+                                    TextDirection static_direction, bool was_inline,
+                                    ViewBlock* containing_block) {
+    float line_x = (pa_block && pa_line)
+        ? calculate_static_line_x(pa_block, pa_line, static_direction, was_inline)
+        : 0.0f;
+    if (was_inline && containing_block && containing_block->view_type == RDT_VIEW_INLINE) {
+        float inline_cb_origin = inline_containing_block_origin_x(containing_block);
+        // CSS Position 3 §4.1: static inline coordinates are local to the
+        // positioned inline containing block, not its block ancestor.
+        line_x -= inline_cb_origin;
+    }
+    return line_x;
+}
+
+static float static_position_line_y(BlockContext* pa_block, Linebox* pa_line,
+                                    ViewElement* parent, bool was_inline) {
+    float line_y = pa_block ? pa_block->advance_y : 0.0f;
+    if (!was_inline && parent && parent->view_type == RDT_VIEW_INLINE &&
+        pa_line && !pa_line->is_line_start &&
+        layout_block_writing_mode(layout_nearest_block_ancestor(parent)) == WM_HORIZONTAL_TB) {
+        // CSS 2.1 §10.3.7: a block-level abspos child of an inline sequence
+        // uses the following line's static block position without breaking flow.
+        line_y += pa_block->line_height > 0.0f ? pa_block->line_height : 0.0f;
+    }
+    return line_y;
+}
+
 static float containing_block_padding_width(ViewBlock* cb, float* border_left_out) {
     BoxMetrics box = layout_box_metrics(cb);
     if (border_left_out) *border_left_out = box.border.left;
@@ -732,6 +999,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     bool is_form_control_replaced =
         block->form_control();
     bool is_replaced = positioned_element_is_replaced(block);
+    bool has_replaced_sizing = positioned_element_has_replaced_sizing(block);
     float preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
     // CSS 2.1 §10.3.7: auto margins use the containing block's resolved direction.
     TextDirection cb_direction = get_static_position_direction(containing_block);
@@ -743,25 +1011,27 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->positionp()->has_left && block->positionp()->has_right && !is_intrinsic_width;
     bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width &&
                       !width_is_auto && !is_stretch_width);
+    has_width = has_width || (lycon->abspos_static_size_override_x && width_is_auto);
     // Aspect-ratio owns the auto width when a max-height transfers a definite
     // size, so the two-inset stretch equation must not consume that axis first.
     bool ratio_transfers_max_height = !has_width && !is_intrinsic_width &&
         preferred_aspect_ratio > 0.0f && !is_replaced &&
         layout_explicit_max_axis_or(block, false, -1.0f) >= 0.0f;
     ViewElement* parent = block->parent_view();
-    TextDirection static_direction = get_static_position_direction(parent);
+    TextDirection static_direction =
+        get_static_position_block_context_direction(parent);
     bool was_inline = false;
     was_inline = layout_element_was_inline(
         lam::dom_require<DOM_NODE_ELEMENT>(block), false);
     float parent_to_cb_offset_x = 0;
     float parent_to_cb_offset_y = 0;
-    calculate_parent_to_cb_offset(block, containing_block, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
-    float static_line_x = (pa_block && pa_line)
-        ? calculate_static_line_x(pa_block, pa_line, static_direction, was_inline)
-        : 0.0f;
+    layout_parent_to_containing_block_offset(block, containing_block,
+                                             &parent_to_cb_offset_x, &parent_to_cb_offset_y);
+    float static_line_x = static_position_line_x(
+        pa_block, pa_line, static_direction, was_inline, containing_block);
     float static_left = parent_to_cb_offset_x + static_line_x;
     bool can_inset_stretch_width = !ratio_transfers_max_height &&
-        (!is_replaced || stretch_form_width);
+        (!has_replaced_sizing || stretch_form_width);
     bool width_from_inset_stretch = false;
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints.
     if (positioned_prepare_axis(
@@ -832,7 +1102,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float intrinsic_height_basis = -1.0f;
         if (block->positionp()->has_top && block->positionp()->has_bottom &&
             positioned_axis_is_auto(block, false) &&
-            (!is_replaced || (is_form_control_replaced && positioned_axis_is_auto(block, false)))) {
+            (!has_replaced_sizing || (is_form_control_replaced && positioned_axis_is_auto(block, false)))) {
             bool intrinsic_auto_margin_top = block->bound &&
                 block->boundary()->margin.top_type == CSS_VALUE_AUTO;
             bool intrinsic_auto_margin_bottom = block->bound &&
@@ -897,18 +1167,22 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->positionp()->has_top && block->positionp()->has_bottom;
     bool has_height = (lycon->block.given_height >= 0 && !height_is_auto &&
                        !is_intrinsic_height && !is_stretch_height);
+    has_height = has_height || (lycon->abspos_static_size_override_y && height_is_auto);
     // When opposing insets resolve an auto width first, aspect-ratio transfers
     // that used width to auto height; otherwise the vertical inset equation
     bool ratio_transfers_width_to_height = preferred_aspect_ratio > 0.0f &&
         (has_width || width_from_inset_stretch) && height_is_auto &&
         !is_intrinsic_height && !is_replaced;
 
-    float static_top = parent_to_cb_offset_y + (pa_block ? pa_block->advance_y : 0.0f) - border_offset_y;
+    float static_top = parent_to_cb_offset_y + static_position_line_y(
+        pa_block, pa_line, parent, was_inline) - border_offset_y;
+    bool can_inset_stretch_height =
+        (!ratio_transfers_width_to_height && !ratio_transfers_max_height) &&
+        (!has_replaced_sizing || stretch_form_height);
     if (positioned_prepare_axis(
             lycon, block, cb_height, static_top, LAYOUT_AXIS_Y,
             is_intrinsic_height, is_stretch_height, has_height,
-            ((!ratio_transfers_width_to_height && !ratio_transfers_max_height) &&
-             (!is_replaced || stretch_form_height)), cb.has_definite_height,
+            can_inset_stretch_height, cb.has_definite_height,
             &content_height)) {
     } else if (ratio_transfers_max_height) {
         float max_height = layout_explicit_max_axis_or(block, false, 0.0f);
@@ -1208,7 +1482,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // such an ancestor, we must jump to its containing block rather than continuing
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
     ViewElement* parent = block->parent_view();
-    calculate_parent_to_cb_offset(block, cb, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
+    layout_parent_to_containing_block_offset(block, cb,
+                                             &parent_to_cb_offset_x, &parent_to_cb_offset_y);
     if (!block->positionp()->has_left && !block->positionp()->has_right) {
         block->position->has_static_parent_offset_x = true;
         block->position->static_parent_offset_x = parent_to_cb_offset_x;
@@ -1218,36 +1493,97 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         block->position->static_parent_offset_y = parent_to_cb_offset_y;
     }
     // CSS 2.1 §10.3.7: Detect direction of the static-position containing block.
-    TextDirection static_direction = get_static_position_direction(parent);
+    TextDirection static_direction =
+        get_static_position_block_context_direction(parent);
     bool static_x_uses_right_block_start =
         static_position_parent_uses_right_block_start(parent);
-
+    bool was_inline = false;
+    if (elmt->is_element()) {
+        was_inline = layout_element_was_inline(elmt->as_element(), false);
+    }
+    bool defer_vertical_rtl_static_y = layout_block_inline_axis_is_vertical(block) &&
+        parent && parent->view_type == RDT_VIEW_INLINE && pa_line &&
+        cb->view_type != RDT_VIEW_INLINE && static_direction == TD_RTL &&
+        !block->positionp()->has_top && !block->positionp()->has_bottom;
+    float vertical_rtl_static_line_right = defer_vertical_rtl_static_y
+        ? pa_line->right - (was_inline ? pa_line->text_indent_offset : 0.0f)
+        : 0.0f;
     if (!block->positionp()->has_top && !block->positionp()->has_bottom) {
-        float static_y = parent_to_cb_offset_y + pa_block->advance_y;
+        float static_y = parent_to_cb_offset_y + static_position_line_y(
+            pa_block, pa_line, parent, was_inline);
         // Add margin.top (if not already included)
         if (block->bound && block->boundary_mut()->margin.top > 0) {
             static_y += block->boundary()->margin.top;
         }
         block->y = static_y;
+        if (defer_vertical_rtl_static_y) {
+            // CSS Position 3 §4.1: an auto-inset blockified box in a vertical
+            // RTL line uses the inline-end static edge, not the LTR cursor.
+            block->y = parent_to_cb_offset_y + vertical_rtl_static_line_right -
+                block->height;
+        } else if (layout_block_inline_axis_is_vertical(block) && was_inline && parent &&
+            parent->view_type == RDT_VIEW_INLINE && pa_line) {
+            bool containing_inline_is_parent = cb->view_type == RDT_VIEW_INLINE &&
+                cb == lam::unsafe_view_block_api_span(
+                    lam::view_require<RDT_VIEW_INLINE>(parent));
+            // CSS Position 3 §4.1: RTL vertical lines expose the cursor relative
+            // to the line edge; LTR keeps the existing text-indent adjustment.
+            block->y = containing_inline_is_parent
+                ? pa_line->advance_x - parent->x
+                : static_direction == TD_RTL
+                    ? pa_line->advance_x - pa_line->left
+                    : pa_line->advance_x - (pa_block ? pa_block->text_indent : 0.0f);
+            if (cb->view_type != RDT_VIEW_INLINE) {
+                block->y = pa_line->advance_x;
+            }
+        } else if (layout_block_inline_axis_is_vertical(block) && !was_inline && parent &&
+                   parent->view_type == RDT_VIEW_INLINE &&
+                   cb->view_type == RDT_VIEW_INLINE) {
+            if (cb == lam::unsafe_view_block_api_span(
+                    lam::view_require<RDT_VIEW_INLINE>(parent))) {
+                // CSS Position 3 §4.1: the static position of a blockified
+                // child is local to its own inline containing-block fragment.
+                block->y -= inline_containing_block_origin_y(cb);
+            } else if (static_direction == TD_RTL) {
+                // CSS Writing Modes: an outer inline containing block keeps the
+                // parent line's RTL indent as the child's local static offset.
+                block->y = pa_line->text_indent_offset;
+            }
+        }
     }
     // Similarly for X when neither left nor right specified
     if (!block->positionp()->has_left && !block->positionp()->has_right) {
         // CSS 2.1 §10.3.7: Use the static position — where the element would
         // For originally-inline elements (blockified by §9.7), the static X is
         // the inline cursor (advance_x), adjusted for float avoidance and text-align.
-        bool was_inline = false;
-        if (elmt->is_element()) {
-            DomElement* elem = elmt->as_element();
-            was_inline = layout_element_was_inline(elem, false);
-        }
-        float line_x = calculate_static_line_x(
-            pa_block, pa_line, static_direction, was_inline);
+        float line_x = static_position_line_x(
+            pa_block, pa_line, static_direction, was_inline, cb);
 
         float static_x = parent_to_cb_offset_x + line_x;
         if (block->bound && block->boundary_mut()->margin.left > 0) {
             static_x += block->boundary()->margin.left;
         }
         block->x = static_x;
+        if (layout_block_inline_axis_is_vertical(block) && parent &&
+            parent->view_type == RDT_VIEW_INLINE && cb->view_type != RDT_VIEW_INLINE &&
+            pa_line) {
+            // CSS Writing Modes: vertical-lr blockified boxes start after the
+            // parent inline fragment; using the line edge alone drops one box width.
+            block->x = parent_to_cb_offset_x + pa_line->left +
+                (layout_block_writing_mode(block) == WM_VERTICAL_LR && !was_inline
+                    ? block->width : 0.0f);
+        } else if (layout_block_inline_axis_is_vertical(block) && parent &&
+                   parent->view_type == RDT_VIEW_INLINE &&
+                   cb->view_type == RDT_VIEW_INLINE) {
+            // CSS Position 3: a blockified child of an inline containing block
+            // uses that inline fragment's physical start edge.
+            if (layout_block_writing_mode(block) == WM_VERTICAL_LR) {
+                block->x = parent_to_cb_offset_x + (was_inline ? 0.0f : block->width);
+            } else {
+                block->x = was_inline ? parent->x : parent->x - block->width;
+            }
+            block->position->static_x_uses_inline_start = !was_inline;
+        }
     }
     // CSS 2.2 Section 9.4.1: "Absolutely positioned elements ... establish new BFCs"
     lycon->block.is_bfc_root = true;
@@ -1276,10 +1612,31 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             lycon->block.content_width);
     }
 
-    setup_inline(lycon, block);
     // CSS 2.1 §10.3.7: Save the pre-layout width (border-box) computed by
     float pre_layout_width = block->width;
-
+    bool vertical_writing_abs = layout_block_inline_axis_is_vertical(block);
+    bool preserve_vertical_static_x = vertical_writing_abs && parent &&
+        parent->view_type == RDT_VIEW_INLINE &&
+        !block->positionp()->has_left && !block->positionp()->has_right;
+    float vertical_static_x = block->x;
+    if (vertical_writing_abs && block->blk) {
+        block->blk->vertical_geometry_published = false;
+    }
+    if (vertical_writing_abs) {
+        // CSS Writing Modes: the absolute block's logical inline size is its
+        // physical height; using physical width here prevents inline wrapping.
+        float physical_content_width = lycon->block.content_width;
+        float physical_content_height = lycon->block.content_height;
+        lycon->block.content_width = lycon->block.content_height;
+        lycon->block.content_height = physical_content_width;
+        setup_inline(lycon, block);
+        // the surrogate line uses the logical inline extent, while child sizing
+        // and intrinsic replaced-element resolution still use physical axes.
+        lycon->block.content_width = physical_content_width;
+        lycon->block.content_height = physical_content_height;
+    } else {
+        setup_inline(lycon, block);
+    }
     layout_block_inner_content(lycon, block);
     // Apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
@@ -1315,7 +1672,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     bool is_table_container = block->display.inner == CSS_VALUE_TABLE;
     bool has_form_intrinsic_width = block->form_control() && block->width > 0;
 
-    if (!(lycon->block.given_width >= 0 || (block->positionp()->has_left && block->positionp()->has_right))) {
+    // vertical writing has already mapped logical inline/block flow to physical
+    // dimensions; a second horizontal auto-width pass would swap those axes.
+    if ((!vertical_writing_abs || block->width <= 0.0f) &&
+        !(lycon->block.given_width >= 0 || (block->positionp()->has_left && block->positionp()->has_right))) {
         if (!(has_flex_calculated_width || has_grid_calculated_width || has_form_intrinsic_width ||
               is_table_container)) {
             if (pre_layout_width > 0) {
@@ -1415,8 +1775,13 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
     }
 
-    if (is_intrinsic_width && block->positionp()->has_left &&
+    bool late_auto_width_position = block->display.inner == CSS_VALUE_TABLE &&
+        positioned_axis_is_auto(block, true) && block->positionp()->has_left &&
+        block->positionp()->has_right;
+    if ((is_intrinsic_width || late_auto_width_position) && block->positionp()->has_left &&
         block->positionp()->has_right) {
+        // CSS 2.1 §10.3.7: a table's intrinsic width is known only after its
+        // grid layout, so opposing auto margins must be resolved afterward.
         LayoutContainingBlock used_cb = layout_absolute_containing_block(lycon, cb);
         float used_content_width = layout_used_css_size_from_border_box(
             block, block->width, true);
@@ -1428,19 +1793,19 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
     // CSS 2.1 §10.3.7: For RTL direction with neither left nor right specified,
     // For inline-level elements, account for float avoidance and text-align.
+    bool preserve_vertical_lr_block_static_x =
+        layout_block_writing_mode(block) == WM_VERTICAL_LR && !was_inline &&
+        parent && parent->view_type == RDT_VIEW_INLINE;
     if ((static_direction == TD_RTL || static_x_uses_right_block_start) &&
+        !preserve_vertical_lr_block_static_x &&
         !block->positionp()->has_left && !block->positionp()->has_right) {
-        bool was_inline_rtl = false;
-        if (elmt->is_element()) {
-            DomElement* elem = elmt->as_element();
-            was_inline_rtl = layout_element_was_inline(elem, false);
-        }
         // right edge; pa_line->advance_x tracks the left cursor instead.
         // This preserves vertical-rl's right-to-left block progression when
         // CSS Positioned resolves both physical horizontal insets as auto.
         float line_right = pa_line->right;
-        // For inline-level elements, apply float avoidance + text-align
-        if (was_inline_rtl) {
+        // CSS 2.1 §10.3.7: static placement uses the available line edge,
+        // including when an originally block-level box is inside an inline CB.
+        {
             float avail_left = 0.0f;
             float avail_right = 0.0f;
             if (positioned_static_line_bounds(pa_block, pa_line, &avail_left, &avail_right)) {
@@ -1456,6 +1821,18 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         }
 
         float margin_right = (block->bound) ? block->boundary()->margin.right : 0;
+        if (cb && cb->view_type == RDT_VIEW_INLINE) {
+            // CSS 2.1 §10.3.7: an inline containing block's static edge is
+            // its own fragment edge, not the ancestor line's right edge.
+            line_right = inline_containing_block_width(cb);
+            block->position->static_x_needs_inline_cb_extent = true;
+        } else if (was_inline && parent && parent->view_type == RDT_VIEW_INLINE &&
+                   pa_line && static_direction == TD_RTL &&
+                   pa_line->text_indent_offset != 0.0f) {
+            // CSS 2.1 §§10.3.7, 16.1: an inline-origin abspos box in an RTL
+            // first line uses the indented line-end edge of its block CB.
+            line_right -= pa_line->text_indent_offset;
+        }
         block->x = parent_to_cb_offset_x + line_right - block->width - margin_right;
     }
     // CSS 2.1 §10.3.7: When width is auto (shrink-to-fit) and 'right' is specified
@@ -1491,9 +1868,15 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             : layout_border_size_from_content_box(
                 block, layout_apply_min_max_axis(block, ratio_height, false, false), false);
     }
-    if (!((abs_block_given_height >= 0 && !ratio_auto_height) ||
+    bool late_auto_height_position = block->display.inner == CSS_VALUE_TABLE &&
+        positioned_axis_is_auto(block, false) && block->positionp()->has_top &&
+        block->positionp()->has_bottom;
+    // vertical writing has already mapped logical inline/block flow to physical
+    // dimensions; a second vertical auto-height pass would truncate the inline axis.
+    if ((!vertical_writing_abs || block->height <= 0.0f || late_auto_height_position) &&
+        !((abs_block_given_height >= 0 && !ratio_auto_height) ||
           (block->positionp()->has_top && block->positionp()->has_bottom &&
-           !is_intrinsic_height))) {
+           !is_intrinsic_height && block->display.inner != CSS_VALUE_TABLE))) {
         if (!(has_flex_calculated_height || has_grid_calculated_height || has_replaced_intrinsic_height)) {
             float flow_height = lycon->block.advance_y;
             // Note: advance_y already includes top border + top padding from setup_inline
@@ -1520,8 +1903,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 }
             }
 
-            if (is_intrinsic_height && block->positionp()->has_top &&
-                block->positionp()->has_bottom) {
+            if ((is_intrinsic_height || late_auto_height_position) &&
+                block->positionp()->has_top && block->positionp()->has_bottom) {
+                // CSS 2.1 §10.6.4: a late intrinsic height is known only after
+                // child layout, so auto margins must be resolved again here.
                 float used_content_height = layout_used_css_size_from_border_box(
                     block, block->height, false);
                 LayoutContainingBlock used_cb = layout_absolute_containing_block(lycon, cb);
@@ -1547,6 +1932,26 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             block->y = new_y;
         }
     }
+    // CSS Writing Modes: absolute flow boxes need the same logical-to-physical
+    // child publication as normal blocks after their used size is finalized.
+    if (vertical_writing_abs && !is_flex_container && !is_grid_container &&
+        !is_table_container) {
+        layout_publish_vertical_flow_geometry(lycon, block, lycon->block.advance_y);
+        layout_publish_vertical_children(block, layout_block_writing_mode(block), false,
+            lycon->block.line_height, lycon->block.first_line_max_descender, true);
+        layout_normalize_vertical_breaks(block);
+        if (preserve_vertical_static_x) {
+            // content-axis publication must not replace the outer positioned
+            // origin with the temporary vertical text coordinate.
+            block->x = vertical_static_x;
+        }
+    }
+    if (defer_vertical_rtl_static_y) {
+        // CSS Position 3 §4.1: resolve the RTL static edge after shrink-to-fit
+        // sizing, because the provisional width is not the used border-box size.
+        block->y = parent_to_cb_offset_y + vertical_rtl_static_line_right -
+            block->height;
+    }
     lycon->depth--;
     log_leave();
 }
@@ -1556,11 +1961,13 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
     if (block->positionp()->position != CSS_VALUE_ABSOLUTE &&
         block->positionp()->position != CSS_VALUE_FIXED) return;
 
+    bool needs_inline_cb_extent = block->positionp()->static_x_needs_inline_cb_extent;
     bool needs_offset_delta_x = block->positionp()->has_static_parent_offset_x &&
         !block->positionp()->has_left && !block->positionp()->has_right;
     bool needs_offset_delta_y = block->positionp()->has_static_parent_offset_y &&
         !block->positionp()->has_top && !block->positionp()->has_bottom;
     if (!block->positionp()->static_x_needs_parent_offset &&
+        !needs_inline_cb_extent &&
         !block->positionp()->static_y_needs_parent_offset &&
         !needs_offset_delta_x && !needs_offset_delta_y) return;
 
@@ -1569,7 +1976,21 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
 
     float offset_x = 0;
     float offset_y = 0;
-    calculate_parent_to_cb_offset(block, cb, &offset_x, &offset_y);
+    layout_parent_to_containing_block_offset(block, cb, &offset_x, &offset_y);
+
+    if (needs_inline_cb_extent && cb->view_type == RDT_VIEW_INLINE) {
+        float inline_cb_width = inline_containing_block_width(cb);
+        float margin_right = block->bound ? block->boundary()->margin.right : 0.0f;
+        // CSS 2.1 §10.3.7: inline fragment geometry is finalized after its
+        // out-of-flow child is laid out, so resolve this static edge now.
+        block->x = block->positionp()->static_x_uses_inline_start
+            ? offset_x
+            : offset_x + inline_cb_width - block->width - margin_right;
+        block->position->static_x_needs_inline_cb_extent = false;
+        block->position->static_x_uses_inline_start = false;
+        block->position->static_parent_offset_x = offset_x;
+        block->position->has_static_parent_offset_x = true;
+    }
 
     if (block->positionp()->static_x_needs_parent_offset) {
         block->x += offset_x;
@@ -1598,24 +2019,25 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
 
 }
 
-void layout_finalize_static_positioned_abs_descendants(ViewBlock* root) {
-    if (!root || !root->is_element()) return;
+static void finalize_static_positioned_abs_descendants_view(View* view) {
+    if (!view || !view->is_element()) return;
 
-    finalize_static_positioned_abs_descendant(root);
+    if (view->is_block()) {
+        finalize_static_positioned_abs_descendant(lam::view_require_block(view));
+    }
 
-    ViewElement* elem = lam::view_require_element(root);
-    for (View* child = elem->first_child; child; child = child->next_sibling) {
-        ViewBlock* child_block = lam::view_as_block(child);
-        if (child_block) {
-            layout_finalize_static_positioned_abs_descendants(child_block);
-        } else if (child && child->is_element()) {
-            ViewElement* child_elem = lam::view_require_element(child);
-            for (View* nested = child_elem->first_child; nested; nested = nested->next_sibling) {
-                ViewBlock* nested_block = lam::view_as_block(nested);
-                if (nested_block) layout_finalize_static_positioned_abs_descendants(nested_block);
-            }
+    ViewElement* element = lam::view_require_element(view);
+    // inline descendants can nest arbitrarily; stopping after one inline level
+    // left deferred static positions unresolved inside nested inline CBs.
+    for (View* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            finalize_static_positioned_abs_descendants_view(child);
         }
     }
+}
+
+void layout_finalize_static_positioned_abs_descendants(ViewBlock* root) {
+    finalize_static_positioned_abs_descendants_view(root);
 }
 
 void layout_shift_static_positioned_abs_descendants(ViewElement* root, float delta_x, float delta_y) {

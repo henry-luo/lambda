@@ -32,6 +32,10 @@ typedef enum JsTypedArrayType {
     JS_TYPED_FLOAT16,
 } JsTypedArrayType;
 
+int js_typed_array_element_size(JsTypedArrayType type);
+const char* js_typed_array_type_name_from_type(JsTypedArrayType type);
+bool js_typed_array_is_integer_type(JsTypedArrayType type);
+
 // ArrayBuffer identity stays stable while its handle replaces storage on
 // resize, detach, transfer, and copy-on-write.
 typedef struct JsArrayBuffer {
@@ -104,6 +108,8 @@ Item binary_from_typed_array(JsTypedArray* ta);
 Item binary_from_dataview(JsDataView* dv);
 Item js_typed_array_get(Item ta, Item index);
 Item js_typed_array_set(Item ta, Item index, Item value);
+Item js_typed_array_set_numeric(Item ta, double index, bool is_negative_zero,
+                                Item value);
 int  js_typed_array_length(Item ta);
 int  js_typed_array_byte_length(Item ta);
 int  js_typed_array_byte_offset(Item ta);

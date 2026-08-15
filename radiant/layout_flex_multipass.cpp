@@ -228,10 +228,15 @@ static void flex_normalize_break_item_boxes(LayoutContext* lycon,
     }
 }
 
-static float flex_in_flow_content_bottom(ViewElement* elem) {
-    if (!elem) return 0.0f;
+void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
+                                   bool include_out_of_flow,
+                                   float* out_min, float* out_max) {
+    if (out_min) *out_min = 0.0f;
+    if (out_max) *out_max = 0.0f;
+    if (!elem) return;
 
-    float max_bottom = 0.0f;
+    float min_edge = 0.0f;
+    float max_edge = 0.0f;
     for (View* child = elem->first_child; child; child = child->next()) {
         if (layout_view_is_block_flow_box(child)) {
             ViewElement* child_elem = lam::view_require_element(child);
@@ -239,32 +244,56 @@ static float flex_in_flow_content_bottom(ViewElement* elem) {
                 continue;
             }
             ViewBlock* child_block = lam::view_as_block(child_elem);
-            if (child_block && (layout_view_is_abs_or_fixed(child_block) ||
-                                element_has_float(child_block))) {
+            bool child_is_fixed = child_block && child_block->position &&
+                child_block->positionp()->position == CSS_VALUE_FIXED;
+            bool child_is_out_of_flow = child_block &&
+                layout_view_is_abs_or_fixed(child_block);
+            if (child_is_fixed ||
+                (child_is_out_of_flow && !include_out_of_flow) ||
+                (child_block && element_has_float(child_block))) {
                 continue;
             }
 
-            float child_height = child_elem->height;
-            float child_content_bottom = flex_in_flow_content_bottom(child_elem);
-            if (child_content_bottom > child_height) {
-                child_height = child_content_bottom;
+            float child_size = layout_axis_size(child_elem, axis);
+            float child_min_edge = 0.0f;
+            float child_max_edge = child_size;
+            bool child_overflow_visible = !child_block || !child_block->scroller ||
+                (child_block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
+                 child_block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
+            if (child_overflow_visible) {
+                float nested_min_edge = 0.0f;
+                float nested_max_edge = 0.0f;
+                layout_in_flow_content_bounds(
+                    child_elem, axis, include_out_of_flow,
+                    &nested_min_edge, &nested_max_edge);
+                child_min_edge = min(0.0f, nested_min_edge);
+                child_max_edge = max(child_size, nested_max_edge);
             }
-            float margin_bottom = child_elem->bound ? child_elem->boundary()->margin.bottom : 0.0f;
-            float bottom = child_elem->y + child_height + margin_bottom;
-            if (bottom > max_bottom) {
-                max_bottom = bottom;
-            }
+            float child_pos = layout_axis_pos(child_elem, axis);
+            min_edge = min(min_edge, child_pos + child_min_edge);
+            max_edge = max(max_edge, child_pos + child_max_edge);
         } else if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             for (TextRect* rect = text ? text->rect : nullptr; rect; rect = rect->next) {
-                float bottom = rect->y + rect->height;
-                if (bottom > max_bottom) {
-                    max_bottom = bottom;
-                }
+                float start = axis == LAYOUT_AXIS_X ? rect->x : rect->y;
+                float end = axis == LAYOUT_AXIS_X ? rect->x + rect->width
+                                                  : rect->y + rect->height;
+                min_edge = min(min_edge, start);
+                max_edge = max(max_edge, end);
             }
         }
     }
-    return max_bottom;
+    if (out_min) *out_min = min_edge;
+    if (out_max) *out_max = max_edge;
+}
+
+float layout_in_flow_content_extent(ViewElement* elem, LayoutAxis axis,
+                                    bool include_out_of_flow) {
+    float min_edge = 0.0f;
+    float max_edge = 0.0f;
+    layout_in_flow_content_bounds(
+        elem, axis, include_out_of_flow, &min_edge, &max_edge);
+    return max_edge;
 }
 
 static float flex_outer_axis_size_used(ViewElement* item, LayoutContext* lycon,
@@ -274,8 +303,8 @@ static float flex_outer_axis_size_used(ViewElement* item, LayoutContext* lycon,
         layout_has_cyclic_percentage_ratio_descendant(lycon, item->as_element());
     if (cyclic_ratio_overflow) return layout_axis_size(item, axis);
     float size = layout_axis_size(item, axis);
-    if (include_content && axis == LAYOUT_AXIS_Y) {
-        size = max(size, flex_in_flow_content_bottom(item));
+    if (include_content) {
+        size = max(size, layout_in_flow_content_extent(item, axis));
     }
     return size + layout_axis_margin_start(item->bound, axis) +
         layout_axis_margin_end(item->bound, axis);
@@ -421,6 +450,7 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     ViewBlock* child_block = state->child_block;
     if (!child_block || !child_block->position) return;
 
+
     FlexProp* flex = container->embed ? container->embedp()->flex : nullptr;
     int flex_direction = flex ? flex->direction : CSS_VALUE_ROW;
     bool is_row = flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE;
@@ -523,12 +553,80 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
 
 }
 
+static void layout_flex_abs_prepare_child(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx, AbsChildLayoutState* state) {
+    if (!lycon || !container || !ctx || !ctx->flex || !state || !state->child_block ||
+        !state->child_block->position || !state->child_block->blk) return;
+
+    ViewBlock* child = state->child_block;
+    ViewBlock* containing_block = find_containing_block(
+        child, child->positionp()->position);
+    if (!containing_block) return;
+
+    LayoutContainingBlock child_cb = layout_absolute_containing_block(
+        lycon, containing_block);
+    LayoutContainingBlock flex_cb = layout_containing_block_for_view(container);
+    FlexAxes axes(flex_main_axis_from_props(ctx->flex));
+
+    for (LayoutAxis axis : layout_axes()) {
+        LayoutAxisRefs refs(child, axis);
+        bool horizontal = axis == LAYOUT_AXIS_X;
+        if (refs.has_any_inset() || !layout_css_size_is_automatic(child, horizontal)) {
+            continue;
+        }
+
+        int alignment = axis == axes.main ? ctx->flex->justify : ctx->flex->align_items;
+        if (axis == axes.cross && child->fi &&
+            child->fi->align_self != CSS_VALUE_AUTO && child->fi->align_self != 0) {
+            alignment = child->fi->align_self;
+        }
+        if (alignment != CSS_VALUE_CENTER) continue;
+
+        float flex_start_x = 0.0f;
+        float flex_start_y = 0.0f;
+        layout_parent_to_containing_block_offset(
+            child, containing_block, &flex_start_x, &flex_start_y);
+        float flex_start = (axis == LAYOUT_AXIS_X ? flex_start_x : flex_start_y) -
+            (axis == LAYOUT_AXIS_X ? child_cb.padding_x : child_cb.padding_y) +
+            layout_axis_decoration_start(container->bound, axis);
+        float flex_size = axis == LAYOUT_AXIS_X
+            ? flex_cb.content_width : flex_cb.content_height;
+        float containing_size = axis == LAYOUT_AXIS_X
+            ? child_cb.padding_width : child_cb.padding_height;
+        float containing_start = axis == LAYOUT_AXIS_X
+            ? child_cb.padding_x : child_cb.padding_y;
+        float static_center = flex_start + flex_size / 2.0f - containing_start;
+        // center alignment must size the auto axis before content layout; otherwise
+        // shrink-to-fit consumes the flex line's start edge and centers the wrong box.
+        float available = 2.0f * min(
+            max(static_center, 0.0f), max(containing_size - static_center, 0.0f));
+        float margin_start = refs.margins.start_type &&
+            *refs.margins.start_type == CSS_VALUE_AUTO ? 0.0f : refs.margin_start();
+        float margin_end = refs.margins.end_type &&
+            *refs.margins.end_type == CSS_VALUE_AUTO ? 0.0f : refs.margin_end();
+        float border_size = max(available - margin_start - margin_end, 0.0f);
+        float css_size = layout_used_css_size_from_border_box(
+            child, border_size, horizontal);
+        layout_store_given_axis(lycon, child, css_size, horizontal, false);
+        // the absolute child layout must retain this provisional size through
+        // block-content sizing even though the authored dimension is auto.
+        *refs.given_type = CSS_VALUE__LENGTH;
+        if (horizontal) {
+            lycon->abspos_static_size_override_x = true;
+        } else {
+            lycon->abspos_static_size_override_y = true;
+        }
+    }
+}
+
 static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* container) {
     AbsStaticContext ctx = {};
     ctx.kind = ABS_STATIC_FLEX;
     ctx.containing_block = layout_containing_block_for_view(container);
-    ctx.flex = lycon ? lycon->flex_container : nullptr;
+    ctx.flex = container->embed && container->embedp()->flex
+        ? container->embedp()->flex : static_cast<FlexProp*>(lycon ? lycon->flex_container : nullptr);
     ctx.resolve_percent_against_content_box = true;
+    ctx.prepare_child = layout_flex_abs_prepare_child;
     ctx.after_child = layout_flex_abs_after_child;
     layout_absolute_children_in_context(lycon, container, &ctx);
 }

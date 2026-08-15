@@ -502,7 +502,9 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
                     return false;
                 }
             } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                if (value->data.number.value < 0) {
+                // CSS Values & Units §5.1: a unitless number is a length only
+                // when it is zero; nonzero width/height numbers are invalid.
+                if (value->data.number.value != 0.0) {
                     return false;
                 }
             }

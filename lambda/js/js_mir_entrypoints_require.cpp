@@ -142,16 +142,13 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
         context->active_js_module_state->module_id, inherited_ic + local_ic);
 }
 
-static uint32_t js_preamble_consumer_name_base(const JsPreambleState* preamble) {
-    // every consumer gets a fresh state whose prefix is the immutable preamble;
-    // using a prior consumer's appended count shifts this unit's names past the
-    // prefix that js_link_compiled_name_table actually installs.
-    return preamble ? preamble->module_property_count : 0;
-}
-
-static uint32_t js_preamble_consumer_ic_base(const JsPreambleState* preamble) {
-    return preamble ? preamble->ic_count : 0;
-}
+// every consumer gets a fresh state whose prefix is the immutable preamble;
+// using a prior consumer's appended count shifts this unit's names past the
+// prefix that js_link_compiled_name_table actually installs.
+JS_FORWARD_STATIC_EXPRESSION(uint32_t, js_preamble_consumer_name_base,
+    (const JsPreambleState* preamble), preamble ? preamble->module_property_count : 0)
+JS_FORWARD_STATIC_EXPRESSION(uint32_t, js_preamble_consumer_ic_base,
+    (const JsPreambleState* preamble), preamble ? preamble->ic_count : 0)
 
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt) {
     bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
@@ -616,13 +613,10 @@ static bool js_source_contains_ascii(const char* source, size_t source_len, cons
     return false;
 }
 
-static bool js_is_line_terminator(char ch) {
-    return ch == '\n' || ch == '\r';
-}
-
-static bool js_is_trivia_char(char ch) {
-    return ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f' || js_is_line_terminator(ch);
-}
+JS_FORWARD_STATIC_EXPRESSION(bool, js_is_line_terminator, (char ch),
+    ch == '\n' || ch == '\r')
+JS_FORWARD_STATIC_EXPRESSION(bool, js_is_trivia_char, (char ch),
+    ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f' || js_is_line_terminator(ch))
 
 static size_t js_skip_trivia(const char* source, size_t source_len, size_t offset,
                              bool allow_hashbang, bool* saw_line_terminator) {
@@ -969,15 +963,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     if (!g_jm_preamble_compile_only) {
         phase_start = js_mir_phase_now_us();
-#ifndef _WIN32
-        bool has_static_imports = js_source_contains_ascii(js_source, js_source_len,
-            "import ") || js_source_contains_ascii(js_source, js_source_len, "import{");
-        if (has_static_imports && jm_precompile_js_imports(runtime, js_source, filename) < 0) {
-            log_error("js-mir: failed to precompile import closure");
-            return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
-                runtime, js_context, reusing_context);
-        }
-#endif
         if (!js_activate_runtime_name_pool()) {
             log_error("js-mir: failed to activate dynamic NamePool");
             return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
@@ -1968,9 +1953,9 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
     return NULL;
 }
 
-static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
-    return js_require_read_resolved_path_internal(path_buf, path_buf_size, true);
-}
+JS_FORWARD_STATIC_RETURN(char*, js_require_read_resolved_path,
+    (char* path_buf, int path_buf_size), js_require_read_resolved_path_internal,
+    (path_buf, path_buf_size, true))
 
 static Item js_cjs_key(const char* name, int len) {
     return (Item){.item = s2it(heap_create_name(name, len))};
