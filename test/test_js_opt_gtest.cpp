@@ -597,7 +597,7 @@ TEST(JsOpt, NonExtensibleArrayFallsBack) {
     expect_trace_off_same("array_non_extensible", source, output);
 }
 
-TEST(JsOpt, Result29NumberIndexedLaneUsesGuardedHelpers) {
+TEST(JsOpt, Result29NumberIndexedLaneUsesSharedReferenceSemantics) {
     const char* source =
         "var array = [10, 20]; var numberKey = 1.0;\n"
         "var old = array[numberKey]; array[numberKey] = old + 5;\n"
@@ -611,15 +611,17 @@ TEST(JsOpt, Result29NumberIndexedLaneUsesGuardedHelpers) {
 
     char* mir = read_fixture_mir("result29_number_indexed_lane");
     ASSERT_NE(mir, nullptr);
-    // D6.2.2v2/D8.4.3: numeric keys keep the integer lane only after the
-    // identity guard; the non-identity lane must retain Reference semantics.
-    EXPECT_NE(strstr(mir, "js_get_number_reference"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set_number_assignment"), nullptr);
+    // D1.3: numeric keys use the same property read/write kernels as every
+    // other indexed key, so reference semantics have one compiler path.
+    EXPECT_NE(strstr(mir, "js_get_reference"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set"), nullptr);
+    EXPECT_EQ(strstr(mir, "js_get_number_reference"), nullptr);
+    EXPECT_EQ(strstr(mir, "js_set_number_assignment"), nullptr);
     free(mir);
     expect_trace_off_same("result29_number_indexed_lane", source, output);
 }
 
-TEST(JsOpt, Result29TypedArrayGuardUsesRuntimeFact) {
+TEST(JsOpt, Result29TypedArrayUsesSharedReferenceSemantics) {
     const char* source =
         "function indexedGuards() {\n"
         "  const typed = new Uint8Array(8); const exact = 1 | 0;\n"
@@ -636,11 +638,12 @@ TEST(JsOpt, Result29TypedArrayGuardUsesRuntimeFact) {
 
     char* mir = read_fixture_mir("result29_typed_array_guard");
     ASSERT_NE(mir, nullptr);
-    // D6.2.2v2: direct element access is valid only after the runtime
-    // constructor/type fact guard has accepted the receiver.
-    EXPECT_NE(strstr(mir, "js_typed_array_matches_type"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_prepare_write_ptr"), nullptr);
-    EXPECT_NE(strstr(mir, "js_elements_get_int"), nullptr);
+    // D1.3: typed-array elements share the generic property kernels; the
+    // runtime, rather than a duplicated compiler lane, owns their semantics.
+    EXPECT_NE(strstr(mir, "js_get_reference"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set"), nullptr);
+    EXPECT_EQ(strstr(mir, "js_typed_array_matches_type"), nullptr);
+    EXPECT_EQ(strstr(mir, "js_typed_array_set"), nullptr);
     free(mir);
     expect_trace_off_same("result29_typed_array_guard", source, output);
 }
@@ -749,7 +752,7 @@ TEST(JsOpt, Result29SuperIndexedAssignmentKeepsNullBaseError) {
     expect_trace_off_same("result29_super_indexed_assignment", source, output);
 }
 
-TEST(JsOpt, NamedLoadStoreICLowering) {
+TEST(JsOpt, NamedLoadStoreUsesSharedPropertySemantics) {
     const char* source =
         "function f(o) { o.x = o.x + 1; return o.x; }\n"
         "var a = {x: 1}; var n = 0;\n"
@@ -762,10 +765,10 @@ TEST(JsOpt, NamedLoadStoreICLowering) {
     expect_ok_output(output);
     char* mir = read_fixture_mir("named_ic_warm");
     ASSERT_NE(mir, nullptr);
-    // The compact trace schema no longer exposes IC counters; finalized MIR
-    // remains the stable contract that named accesses lower through the ICs.
-    EXPECT_NE(strstr(mir, "js_get_name_id_ic"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set_name_id_ic"), nullptr);
+    // NameId is still the compiler identity, but property behavior belongs to
+    // the shared receiver-aware Get/Set semantics rather than a private cache.
+    EXPECT_NE(strstr(mir, "js_get"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set"), nullptr);
     free(mir);
     expect_trace_off_same("named_ic_warm", source, output);
 }

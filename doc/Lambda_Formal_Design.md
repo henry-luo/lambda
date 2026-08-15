@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.23.0 (2026-08-15)
+**Spec version:** 1.24.0 (2026-08-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1119,15 +1119,14 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.4 Dispatch policy
 
-- **D8.4.1** **No inline caches anywhere in the Lambda lane** —
-  *specialization over caching*: specialized lowerings have no
-  dynamic-dispatch sites by construction; open sites use closed-switch
-  runtime dispatch; a hot open site is a DF12 inference bug first.
-  Multi-version dispatch, when it comes, is a guard chain, never a
-  patchable cache. *Lambda's dispatch space is closed; JS's is open* —
-  LambdaJS keeps its ICs (guard-based cache cells beside immutable MIR,
-  never patched instructions). Generated code stays immutable — an
-  architectural asset the cache tiers rely on. [LC1]
+- **D8.4.1v2** **No inline caches anywhere in the Lambda lane or LambdaJS** —
+  *shared semantic dispatch over per-site caching*: specialized lowerings have
+  no dynamic-dispatch sites by construction; open sites use runtime dispatch;
+  a hot open site is a DF12 inference bug first. Multi-version dispatch, when
+  it comes, is a guard chain, never a patchable cache. LambdaJS named and
+  indexed property accesses use the shared runtime reference/property kernels;
+  TypeMap shape metadata remains ordinary lookup data, not mutable per-site
+  cache state. Generated code stays immutable. [LC1]
 - **D8.4.2v2*** Core direct calls pass individual ABI operands (`Context*`,
   args); returns are shaped per the companion-lane convention (D5.2.1v2)
   — the trailing scalar-home operand is retired. `Item* + argc` is the JS

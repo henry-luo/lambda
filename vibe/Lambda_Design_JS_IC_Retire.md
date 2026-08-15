@@ -1,8 +1,25 @@
-# Retiring the JS Callsite Inline Cache — Shape-Resident Named Fast Path
+# Retiring the JS Callsite Inline Cache — Shared Runtime Property Path
 
-**Status: PROPOSAL** (not yet approved). Scope: LambdaJS named-property load/store fast path only. Lambda-lane dispatch is untouched (D8.4.1 already forbids ICs there). Companion history: `vibe/jube/JS_Tune_History.md` (Tune11/12 built the IC); supersedes JR8 (`vibe/jube/JS_Runtime_Redesign.md` §JR8) for load/store sites if accepted. Two tiers: **Tier B** (§4, IR1–IR9) is the universal shape-resident lookup that replaces the IC; **Tier A** (§5, IR10–IR15, from user sketch 2026-08-15) is a compile-predicted mono fast path layered above it.
+**Status: IMPLEMENTED** (2026-08-15). Scope: LambdaJS named-property
+load/store ICs and compiler-side indexed specializations. Lambda-lane dispatch
+is governed by D8.4.1v2. The implementation retired the per-callsite IC and
+the duplicated MIR array/typed-array lanes, routing named and indexed accesses
+through the shared runtime reference/property kernels. The proposed
+shape-resident probe and Tier A compile-predicted slot layer remain future
+options, not part of this change. Companion history: `vibe/jube/JS_Tune_History.md`.
 
-## 1. What exists today
+### Implementation result
+
+The final design is intentionally smaller than the proposal below: one
+immutable MIR lowering path constructs a Reference and calls the runtime
+property operation; the runtime owns array, typed-array, prototype, accessor,
+descriptor, and strictness semantics. This preserves D1.3's one-core-runtime
+boundary without introducing another cache or compiler/runtime semantic copy.
+The change removed 3,172 physical C/C++ lines from `lambda/js` relative to
+the clean baseline, with the required baseline gates remaining the acceptance
+criteria. Sections below retain the original alternatives as design history.
+
+## 1. What existed before retirement
 
 Every non-computed `obj.name` load/store site in MIR-lowered JS carries a **per-callsite polymorphic inline cache**: a `JsLoadIC`/`JsStoreIC` cell (`js_runtime.h:115–137`) with a mono/poly(4-way)/megamorphic state machine, probed by `js_get_name_id_ic` / `js_set_name_id_ic` (`js_runtime.cpp:8285–8609`). The cell caches `(shape ptr, ShapeEntry ptr, byte offset, name_id, receiver_kind)` and a hit revalidates ~6 guards before reading/writing the slot.
 
@@ -73,9 +90,16 @@ The 2×16 site-reason enums collapse to per-entry counters: `NAMED_FAST_PROBE`, 
 
 With O(1) per-shape probes, a QuickJS-style chain walk (repeat the probe up the prototype chain; any accessor/flagged/exotic level bails to the semantic path) would accelerate **method loads — the case the callsite IC never served**. Tune11 P6a (intrinsic-proto caching, richards −23.3%) shows chain-walk cost is real. Out of scope here; propose only after IR1–IR7 land and measure.
 
-### IR9 — Doctrine updates (on acceptance, per rule 17)
+### IR9 — Doctrine update (landed, per rule 17)
 
-D8.4.1 currently reads "*LambdaJS keeps its ICs (guard-based cache cells beside immutable MIR, never patched instructions)*" (`doc/Lambda_Formal_Design.md:1122–1130`). Revise to **D8.4.1v2**: *specialization over caching* extends to the JS lane — the JS named-property fast path is **shape-resident** (NameId-keyed probe of the receiver's TypeMap index); no per-site mutable dispatch state in either lane; generated code stays immutable (DI14 unchanged — this deletes data cells, it does not begin patching). Update both the formal spec (v2 + semver bump) and this ledger; record the JR8 supersession in `JS_Runtime_Redesign.md` (feedback-vector *load/store* slots are no longer needed; call/guard feedback, if ever built, is a separate case) and the reversal note in `JS_Tune_History.md`.
+D8.4.1v2 now extends *specialization over caching* to the JS lane: named
+property accesses use the shared runtime reference/property kernels, with no
+per-site mutable dispatch state in either lane; generated code stays immutable
+(DI14 unchanged). The implementation intentionally stopped short of the
+proposal's new shape-resident and Tier A compiler fast paths: removing the
+existing IC and the duplicated indexed MIR lanes was the smaller design that
+kept runtime semantics in one owner. The formal spec was bumped to v1.24.0;
+this ledger records the proposal and its implemented simplification.
 
 ## 5. Tier A — compile-predicted member specialization (`load_member` / `store_member`)
 

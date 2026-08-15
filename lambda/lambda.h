@@ -16,16 +16,6 @@ typedef uint64_t size_t;
 #define false 0
 #endif
 
-// The build configuration exposes this as an environment-overridable LambdaJS
-// inline-cache definition. Keep standalone native users on the normal path.
-#ifndef LAMBDA_INLINE_CACHE
-#define LAMBDA_INLINE_CACHE 1
-#endif
-
-#if LAMBDA_INLINE_CACHE != 0 && LAMBDA_INLINE_CACHE != 1
-#error "LAMBDA_INLINE_CACHE must be 0 or 1"
-#endif
-
 #define null 0
 
 // C math declarations for freestanding C consumers.
