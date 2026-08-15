@@ -613,6 +613,7 @@ static MIR_reg_t create_func_reg (MIR_context_t ctx, MIR_func_t func, const char
 static void func_regs_finish (MIR_context_t ctx MIR_UNUSED, MIR_func_t func) {
   func_regs_t func_regs = func->internal;
 
+  if (func_regs == NULL) return; /* already freed by MIR_release_func_ir */
   VARR_DESTROY (reg_desc_t, func_regs->reg_descs);
   HTAB_DESTROY (size_t, func_regs->name2rdn_tab);
   HTAB_DESTROY (size_t, func_regs->hrn2rdn_tab);
@@ -812,6 +813,21 @@ static void remove_func_insns (MIR_context_t ctx, MIR_item_t func_item,
   while ((insn = DLIST_HEAD (MIR_insn_t, *insns)) != NULL) {
     remove_insn (ctx, func_item, insn, insns);
   }
+}
+
+/* Free a generated function's IR (insn lists and reg tables) keeping the item, its thunk, and the
+   published machine code.  The function stays callable through func_item->addr /
+   func->call_addr, but can not be inlined, interpreted, or re-generated afterwards.  Call it only
+   after code generation set func->machine_code. */
+void MIR_release_func_ir (MIR_context_t ctx, MIR_item_t func_item) {
+  MIR_func_t func;
+
+  if (func_item == NULL || func_item->item_type != MIR_func_item)
+    MIR_get_error_func (ctx) (MIR_wrong_param_value_error, "MIR_release_func_ir: wrong func item");
+  func = func_item->u.func;
+  remove_func_insns (ctx, func_item, &func->insns);
+  remove_func_insns (ctx, func_item, &func->original_insns);
+  func_regs_finish (ctx, func); /* frees reg tables and clears func->internal */
 }
 
 static void remove_item (MIR_context_t ctx, MIR_item_t item) {
@@ -4066,6 +4082,7 @@ static void process_inlines (MIR_context_t ctx, MIR_item_t func_item) {
     called_func = called_func_item->u.func;
     called_func_insns_num = DLIST_LENGTH (MIR_insn_t, called_func->insns);
     if (called_func->first_lref != NULL || called_func->vararg_p || called_func->jret_p
+        || called_func_insns_num == 0 /* IR released by MIR_release_func_ir: keep a plain call */
         || called_func_insns_num > (func_insn->code != MIR_CALL ? MIR_MAX_INSNS_FOR_INLINE
                                                                 : MIR_MAX_INSNS_FOR_CALL_INLINE)
         || (func_insns_num > MIR_MAX_FUNC_INLINE_GROWTH * original_func_insns_num / 100

@@ -18425,86 +18425,17 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 // ============================================================================
 
 static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) {
-    // base_type(type_id) returns a Type* for runtime type checking
-    TypeId tid = type_node->type ? type_node->type->type_id : LMD_TYPE_ANY;
-
-    // If this is a TypeType, get the actual type and check for special cases
-    if (type_node->type && type_node->type->type_id == LMD_TYPE_TYPE) {
-        TypeType* tt = (TypeType*)type_node->type;
-        if (tt->type) {
-            // For datetime sub-types (date, time), load the specific LIT_TYPE_DATE/TIME pointer
-            // because date/time/dtime share the same type_id (LMD_TYPE_DTIME)
-            extern Type TYPE_DATE, TYPE_TIME;
-            extern TypeType LIT_TYPE_DATE, LIT_TYPE_TIME;
-            if (tt->type == &TYPE_DATE) {
-                MIR_reg_t r = new_reg(mt, "tdate", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_DATE)));
-                return r;
-            }
-            if (tt->type == &TYPE_TIME) {
-                MIR_reg_t r = new_reg(mt, "ttime", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_TIME)));
-                return r;
-            }
-            // For 'list' bare keyword: emit &LIT_TYPE_LIST directly so fn_is returns BOOL_FALSE
-            // (LMD_TYPE_LIST no longer exists; 'list' type never matches at runtime)
-            extern Type TYPE_LIST;
-            extern TypeType LIT_TYPE_LIST;
-            if (tt->type == &TYPE_LIST) {
-                MIR_reg_t r = new_reg(mt, "tlist", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_LIST)));
-                return r;
-            }
-            // `number` has no runtime TypeId; keep its TypeType singleton instead of base_type(LMD_TYPE_TYPE).
-            extern Type TYPE_NUMBER;
-            extern TypeType LIT_TYPE_NUMBER;
-            if (tt->type == &TYPE_NUMBER) {
-                MIR_reg_t r = new_reg(mt, "tnumber", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_NUMBER)));
-                return r;
-            }
-            // `integer` is an abstract numeric domain like `number`; preserve its singleton.
-            extern Type TYPE_INTEGER;
-            extern TypeType LIT_TYPE_INTEGER;
-            if (tt->type == &TYPE_INTEGER) {
-                MIR_reg_t r = new_reg(mt, "tinteger", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_INTEGER)));
-                return r;
-            }
-            // For NUM_SIZED sub-types (i8..f32), load the specific LIT_TYPE_Xxx pointer
-            // so fn_is can distinguish between different sized type checks
-            if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {
-                extern TypeType LIT_TYPE_I8, LIT_TYPE_I16, LIT_TYPE_I32;
-                extern TypeType LIT_TYPE_U8, LIT_TYPE_U16, LIT_TYPE_U32;
-                extern TypeType LIT_TYPE_F16, LIT_TYPE_F32;
-                TypeType* sized_lit = nullptr;
-                switch ((NumSizedType)tt->type->kind) {
-                    case NUM_INT8:    sized_lit = &LIT_TYPE_I8;  break;
-                    case NUM_INT16:   sized_lit = &LIT_TYPE_I16; break;
-                    case NUM_INT32:   sized_lit = &LIT_TYPE_I32; break;
-                    case NUM_UINT8:   sized_lit = &LIT_TYPE_U8;  break;
-                    case NUM_UINT16:  sized_lit = &LIT_TYPE_U16; break;
-                    case NUM_UINT32:  sized_lit = &LIT_TYPE_U32; break;
-                    case NUM_FLOAT16: sized_lit = &LIT_TYPE_F16; break;
-                    case NUM_FLOAT32: sized_lit = &LIT_TYPE_F32; break;
-                    default: break;
-                }
-                if (sized_lit) {
-                    MIR_reg_t r = new_reg(mt, "tsized", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)sized_lit)));
-                    return r;
-                }
-            }
-            tid = tt->type->type_id;
-        }
+    // base_type(type_id) returns a Type* for runtime type checking. The
+    // singleton selection (date/time, list, number/integer, sized numerics)
+    // lives in ast.hpp so the T0 walker resolves the same identity.
+    TypeId tid = LMD_TYPE_ANY;
+    TypeType* singleton = lambda_type_node_singleton(type_node->type, &tid);
+    if (singleton) {
+        MIR_reg_t r = new_reg(mt, "tlit", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)singleton)));
+        return r;
     }
-
     return emit_call_1(mt, "base_type", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, tid));
 }
 
@@ -25619,6 +25550,14 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                   script_path ? script_path : "<unknown>");
         jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         tp->jit_context = NULL;
+    }
+
+    // After the final MIR_link + jit_gen_func the machine code of every
+    // function is published and this sealed per-module ctx never links again,
+    // so the MIR IR is dead weight — release it, keeping only the executable
+    // code. MIR-interp scripts keep their IR: there it IS the executable.
+    if (tp->jit_context && tp->main_func && !use_mir_interp_for_script) {
+        jit_release_generated_ir(ctx);
     }
 
     if (out_mir_module_count) *out_mir_module_count = mir_module_count;

@@ -357,6 +357,45 @@ void* jit_gen_func(MIR_context_t ctx, const char *func_name) {
     return func_ptr;
 }
 
+// Free the MIR IR (insn lists + reg tables) of every generated function in ctx,
+// keeping the published machine code callable through item->addr/call_addr.
+// The IR's only post-generation consumers are re-generation (short-circuited
+// once func->machine_code is set), link-time inlining (a sealed per-module ctx
+// never runs MIR_link again), the MIR interpreter, and lazy generation — the
+// machine_code gate below skips interp-interface and lazy-pending functions,
+// whose IR is still live input. LAMBDA_MIR_KEEP_IR=1 disables for debugging.
+size_t jit_release_generated_ir(MIR_context_t ctx) {
+    static int keep_ir = -1;
+    if (keep_ir < 0) {
+        const char* flag = getenv("LAMBDA_MIR_KEEP_IR");
+        keep_ir = flag && flag[0] && strcmp(flag, "0") != 0;
+    }
+    if (keep_ir || !ctx) return 0;
+    size_t released = 0, bytes = 0;
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
+        module = DLIST_NEXT(MIR_module_t, module)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items); item != NULL;
+            item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type != MIR_func_item) continue;
+            // machine_code == NULL: not generated (MIR-interp interface, or a
+            // lazy-gen wrapper still pending) — that IR must stay.
+            if (item->u.func->machine_code == NULL) continue;
+            if (DLIST_HEAD(MIR_insn_t, item->u.func->insns) == NULL) continue;  // already released
+            // account insn allocation sizes (header embeds ops[1]) before freeing
+            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns); insn != NULL;
+                insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                size_t nops = insn->nops;
+                bytes += sizeof(struct MIR_insn) + (nops > 1 ? (nops - 1) * sizeof(MIR_op_t) : 0);
+            }
+            MIR_release_func_ir(ctx, item);
+            released++;
+        }
+    }
+    if (released) log_info("mir-release-ir: freed %zu KB of insns across %zu generated functions"
+        " (reg tables freed additionally)", bytes / 1024, released);
+    return released;
+}
+
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {
     log_debug("finding import module:: %s, %p", mod_name, ctx);
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;

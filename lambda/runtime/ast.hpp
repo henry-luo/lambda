@@ -447,6 +447,46 @@ static inline bool parse_bool_literal(const char* source, TSNode node) {
     return source[start] == 't';
 }
 
+// A type node's runtime identity is not always its TypeId: `date`/`time` share
+// LMD_TYPE_DTIME, `list`/`number`/`integer` have no runtime TypeId of their own,
+// and every sized numeric shares LMD_TYPE_NUM_SIZED. Those denote one specific
+// TypeType singleton; anything else is base_type(tid). Shared so both tiers give
+// `is`/`query` the same type identity.
+//
+// Returns the singleton when one applies, else NULL with *out_tid set to the
+// TypeId the caller should pass to base_type().
+static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_tid) {
+    TypeId tid = node_type ? node_type->type_id : LMD_TYPE_ANY;
+    if (node_type && node_type->type_id == LMD_TYPE_TYPE) {
+        TypeType* tt = (TypeType*)node_type;
+        if (tt->type) {
+            if (tt->type == &TYPE_DATE)    { if (out_tid) *out_tid = tid; return &LIT_TYPE_DATE; }
+            if (tt->type == &TYPE_TIME)    { if (out_tid) *out_tid = tid; return &LIT_TYPE_TIME; }
+            // 'list' never matches at runtime (LMD_TYPE_LIST no longer exists),
+            // so fn_is must see the singleton rather than a base_type lookup.
+            if (tt->type == &TYPE_LIST)    { if (out_tid) *out_tid = tid; return &LIT_TYPE_LIST; }
+            if (tt->type == &TYPE_NUMBER)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_NUMBER; }
+            if (tt->type == &TYPE_INTEGER) { if (out_tid) *out_tid = tid; return &LIT_TYPE_INTEGER; }
+            if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {
+                switch ((NumSizedType)tt->type->kind) {
+                case NUM_INT8:    if (out_tid) *out_tid = tid; return &LIT_TYPE_I8;
+                case NUM_INT16:   if (out_tid) *out_tid = tid; return &LIT_TYPE_I16;
+                case NUM_INT32:   if (out_tid) *out_tid = tid; return &LIT_TYPE_I32;
+                case NUM_UINT8:   if (out_tid) *out_tid = tid; return &LIT_TYPE_U8;
+                case NUM_UINT16:  if (out_tid) *out_tid = tid; return &LIT_TYPE_U16;
+                case NUM_UINT32:  if (out_tid) *out_tid = tid; return &LIT_TYPE_U32;
+                case NUM_FLOAT16: if (out_tid) *out_tid = tid; return &LIT_TYPE_F16;
+                case NUM_FLOAT32: if (out_tid) *out_tid = tid; return &LIT_TYPE_F32;
+                default: break;
+                }
+            }
+            tid = tt->type->type_id;
+        }
+    }
+    if (out_tid) *out_tid = tid;
+    return NULL;
+}
+
 // Content-list item classification, shared by MIR lowering and the T0
 // interpreter so both split a content block into declarations, side-effect
 // statements, and value expressions the same way.
