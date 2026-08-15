@@ -7,8 +7,12 @@
 > **[measured 2026-08-14]** below were revised from proposal fidelity to
 > observed behaviour once shape 2 was emitting; §1.4 corrects §1.2's site
 > split, §8 is re-costed against it, and RVO10 is new.
-> Ledger **RV1–RV16** (+ addenda RV3a, RV10a, RV14a) + open issues
-> **RVO1–RVO11**. **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
+> Ledger **RV1–RV17** (+ addenda RV3a, RV10a, RV14a, RV17a) + open issues
+> **RVO1–RVO12**. **RV17/RV17a** (ruled 2026-08-15, §2.1) are what make
+> **shape 4 reachable from ordinary source**: an `if` whose arms differ joins
+> to `T | error` — the union — instead of widening to ANY, so a `T^E` body
+> finally names its value component and can be admitted to the native lane.
+> Landed for `T = float` (impl log §5). **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
 > boundary: a C helper or sys func returns a wide scalar by pushing it on the
 > number stack and returning an ordinary Item, because it owns no watermark
 > to tear down; the eager per-call restore that made that unsafe is retired
@@ -21,7 +25,7 @@
 > proposal fidelity until then. The 2026-08-14 rulings on Windows lowering,
 > LambdaJS scope, DTIME, and the error-lane encoding are folded into
 > **RV12**, **RV13**, **RV8**, and **RV9** (RVO1/RVO2/RVO5/RVO6/RVO7
-> retired); RVO3, RVO4, RVO8, and RVO9 remain open.
+> retired); RVO3, RVO4, RVO8, RVO9, and RVO12 remain open.
 > This design **revives SF14's original two-lane return** (implemented
 > 2026-07-15, superseded 2026-07-16) with new measured evidence and a new
 > pending-Item encoding that removes the defect that killed the first
@@ -49,6 +53,12 @@ than two lanes**:
 | 2 | boxed return, may carry a wide scalar | `[item, scalar]` | raw 64-bit payload, live iff lane 1 is a pending Item |
 | 3 | native return, infallible (TE-17) | `[native]` | — |
 | 4 | native return, `^E` | `[native, error]` | error Item (`ItemNull` when no error) |
+
+Shape 4 has a **typing precondition** as well as a signature one: the body
+must name its value component, which for the canonical guarded-`raise` body
+means the branch join must produce `T | error` rather than ANY (**RV17**,
+§2.1). Under ANY the body proves no native carrier and the whole function
+deoptimizes to boxed — shape 4 unreachable from ordinary source.
 
 These are the shapes for entries that **own a number-frame watermark** —
 Lambda `fn`/`pn`. A C helper or sys func owns none, so it needs no shape at
@@ -241,6 +251,103 @@ inline-double encoding, and JS numbers make shape 2 *more* frequent there,
 so the census argument is stronger, not weaker. Sequencing (whether LJS
 migrates inside P1/P2 or as a follow-on slice) is an implementation-plan
 detail, not a design question.
+
+### 2.1 What makes shape 4 *reachable* — the branch-union join
+
+**RV17 — A `T^E` body reaches the native lane only if its type names the
+value component; the if-join must therefore produce `T | error`, not ANY.**
+*(ruled 2026-08-15, user; implemented same day for `T = float`)*
+
+RV2 settles shape selection from the **signature**: `fn f(x: float) float^`
+declares a native return and `can_raise`, so the signature asks for shape 4.
+That was never the blocker. The blocker was on the **body** side, and it was
+a *typing* defect, not a codegen one.
+
+The canonical `^E` body is a guarded branch:
+
+```lambda
+fn half(x: float) float^ {
+    if (x < 0.0) { raise error("negative") } else { x / 2.0 }
+}
+```
+
+The arms differ, so the if-join widened to `TYPE_ANY`. ANY is not a native
+carrier, so the body could not prove a native return lane, so admission
+deoptimized the whole function to a boxed Item — **and shape 4 became
+unreachable from ordinary user source.** Goal (b) of §0 ("typed functions
+return in native lanes, with `^E` carried on a second lane instead of
+deoptimizing to boxed ANY") was defeated before codegen was consulted,
+because the type system had already thrown away the fact that made it true.
+
+**The join is the fix, and the union is the only join that works.** Each arm
+*contributes* a type; a diverging (raise) arm contributes `error`, since it
+never yields a value. Differing contributions join as their **union**
+(`|` is union everywhere — **S10.1.1**), so the body types as `float | error`.
+
+That type is **shape 4 spelled as a type**:
+
+| union component | lane |
+|---|---|
+| `float` — the value component | lane 1, native `d` |
+| `error` — the raise arms | lane 2, error Item |
+
+which is why the union is not merely *a* precise join but the *right* one
+here. **D2.8.1** ("no native lane slot ever holds an error") is the rule that
+forces `T^E` to be split across two lanes at all; `T | error` is the static
+statement of exactly that split, in the type system, at the point where the
+branches meet. Under ANY the compiler had to rediscover the split at the
+return boundary with no evidence; under the union it is carried there.
+
+**Why neither neighbouring option qualifies** — both were implemented,
+measured, and reverted before this ruling (impl log §5):
+
+- **ANY** conflates *"may be an error"* with *"may be anything"*. It preserves
+  error-ness (which is why the boxed path stayed correct) but says nothing
+  about the value component, so lane 1 has no declared carrier.
+- **Bare `T`** (narrowing to the non-raising arm) names the value component
+  but **destroys the error signal**, so `^`/`^err` consumers stop seeing a
+  failure that can still happen. Observed as `[nan, null]` — the error arm
+  reaching `it2d`.
+
+Only the union carries **both** facts, which is precisely what a two-lane
+return needs: one fact per lane.
+
+**Scope of the ruling.** The union fires only when an arm **diverges**. The
+general `T1 | T2` join for merely-differing arms is *more precise* but shifts
+the **E208 containment surface** — programs that let an error escape
+uncontained start failing to compile (measured: 95 corpus tests) — which is a
+language-surface decision, not a typing cleanup, and is deliberately not taken
+here. Native admission is likewise **float-only** today: the `d` lane has a
+universal `it2d` fixup for a boxed value arm, while the INT-family lanes have
+no way to *tell* a boxed Item from a native `int64` at the return boundary —
+both are `MIR_T_I64`, and the fixup's trigger is a register-class test — so a
+boxed Item lands as tag bits and saturates to the inf sentinel. `int^`/`i64^`
+bodies stay boxed until that discriminator exists (**RVO12**) — a *lane*
+limitation, not a typing one; RV17 has already done its work for them.
+
+**RV17a — A can-raise call's result register is a boxed join, whatever its
+declared type says; consumers must be told.** *(corollary, ruled with RV17)*
+
+Shape 4 returns two lanes, but the call site immediately merges them into one
+boxed value-or-error Item — that Item *is* what `^`, `^err`, and `or` split
+on. So between the merge and the consumer, the register holds a **boxed
+join** while the call's declared type still names the **success scalar**. A
+consumer that trusts the declared type re-boxes the join through the scalar
+lane and sends the error arm through `it2d` — the same `nan` as the bare-`T`
+failure above, now arriving by a different road.
+
+This is the same class of carrier lie the emitter already publishes for
+inferred slow-body routes, so it takes the same channel rather than a new
+one: **an error-lane merge publishes "returned boxed item", and boxing passes
+a published join through untouched.** Explicit propagation (`f(...)^`) is
+excluded — it consumes the error *at the call site*, so from there on the
+declared scalar type is truthful, which is how every other reopen witness
+already treats propagation.
+
+The general rule, stated once: **a lane merge changes the carrier, so it must
+publish the carrier.** Shape 4 is the first construct where an ordinary typed
+call produces one, which is why the lie surfaced only when RV17 made shape 4
+reachable.
 
 ---
 
@@ -910,3 +1017,55 @@ numbering stays traceable.)*
   direction, and it reuses the pass RV16 would otherwise retire — so
   sequencing matters: the coloring pass must outlive RV16 long enough to
   validate the reclaims, or the check needs its own liveness.
+
+- **RVO12 — Shape 4 on the INT-family lanes.** *(opened 2026-08-15 with
+  RV17)* RV17 gives an `int^`/`i64^` body the same `int | error` type that
+  unlocked `float^`, but native admission is still float-only, so those
+  bodies remain boxed. The gap is **not** typing and not shape selection —
+  it is a missing **discriminator** at the return boundary. *(Corrected
+  2026-08-15: an earlier draft of this issue said "missing conversion" —
+  wrong, and misleading about where the work is. `it2l` exists and
+  `emit_unbox` already handles every int type. Nothing needs writing.)*
+
+  `emit_function_return` fixes up a boxed value arm by testing
+  `MIR_reg_type(value) != MIR_T_D` and calling `it2d`. That trigger is a
+  **register-class test standing in for a representation question**. On the
+  float lane the proxy is faithful — a boxed Item is always `MIR_T_I64`, a
+  native double always `MIR_T_D` — so the branch fires exactly when the value
+  is boxed, which is why its comment can claim `it2d` is universal and the
+  frame needn't carry the semantic TypeId. On the int lane the proxy is
+  **degenerate**: a boxed Item and a native `int64` are both `MIR_T_I64`, so
+  no register-class difference survives to test, the branch can never fire,
+  and the fall-through `MIR_MOV` ships the Item's tag bits out as the int
+  lane — outside int53, saturating to the inf sentinel (the havlak failure
+  mode). The restriction is therefore deliberate, not provisional.
+
+  This is a live instance of the anti-pattern
+  [`Lambda_Design_Compiling_Lane.md`] already names — *never read back
+  `MIR_reg_type` to learn representation* (§4.5 confines the API to physical
+  questions such as move selection). The float path gets away with the
+  violation because the physical class happens to encode the semantic fact;
+  the int path is where the rule bites. Adding an `it2l` arm here would not
+  help: it would need the same discriminator the branch lacks.
+
+  Two candidate resolutions, not yet chosen: **(a)** carry the boxedness in
+  `ValueRep` so the return boundary can discriminate without asking MIR, then
+  apply `it2l`/`it2d` from that fact — this is the Compiling-Lane doctrine
+  applied to return values, and it fixes the float path's rule violation as
+  a side effect, but it adds a branch to every native int return a union body
+  can reach; or
+  **(b)** have the branch join emit an *unboxed* value arm when the union's
+  value component is a native carrier, so the fixup is unnecessary on either
+  lane — the better shape, since it removes the `it2d` on the float path and
+  the need to discriminate at all, but it means teaching the if-merge itself
+  about lanes rather than only the return boundary. **(b)** is the one that
+  composes with RV17's direction (the type already states the split; the
+  merge should honour it), so it is the presumptive answer absent evidence
+  against it — with **(a)** as the fallback if some merge site turns out to
+  be unable to produce an unboxed arm.
+
+  Interaction with **§5.8** of [`Lambda_Semantics_Int_Type.md`]: the int lane
+  reaches this only after the `INT64_ERROR`/`INT_LANE_INF` collision is
+  settled, since shape 4's whole premise is that the error leaves the value
+  lane alone. Resolving RVO12 before that gate would re-introduce exactly
+  the domain-value theft §0 lists as the thing v3 exists to stop.

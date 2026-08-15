@@ -5524,6 +5524,36 @@ static AstNode* build_null_noop(Transpiler* tp, TSNode source_node) {
     return (AstNode*)null_node;
 }
 
+// Does this branch leave the expression rather than produce a value? Only
+// `raise` qualifies today. A block diverges when its LAST item does, which is
+// the only position whose value the block would yield.
+static bool ast_branch_diverges(AstNode* node) {
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_RAISE_STAM:
+        case AST_NODE_RAISE_EXPR:
+            return true;
+        case AST_NODE_PRIMARY: {
+            AstNode* inner = ((AstPrimaryNode*)node)->expr;
+            if (!inner) return false;
+            node = inner;
+            continue;
+        }
+        case AST_NODE_LIST:
+        case AST_NODE_CONTENT: {
+            AstNode* last = NULL;
+            for (AstNode* it = ((AstListNode*)node)->item; it; it = it->next) last = it;
+            if (!last) return false;
+            node = last;
+            continue;
+        }
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+
 // Unified build_if_expr: handles both expression and block forms
 // When a branch is a content block, creates a new scope for variable shadowing
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
@@ -5600,23 +5630,61 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
-    // Determine the type of the if expression
-    TypeId then_type_id = ast_node->then->type->type_id;
-    TypeId else_type_id = ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL;
+    // Determine the type of the if expression.
+    //
+    // Each arm CONTRIBUTES a type to the join. A `raise` arm never yields a
+    // value — control unwinds carrying an error — so its contribution is the
+    // error type, not the raised expression's own type. This is what lets a
+    // one-armed-raise body type as `T | error` below instead of collapsing.
+    Type* then_contrib = ast_branch_diverges(ast_node->then)
+        ? &TYPE_ERROR : ast_node->then->type;
+    Type* else_contrib = !ast_node->otherwise ? &TYPE_NULL
+        : ast_branch_diverges(ast_node->otherwise)
+            ? &TYPE_ERROR : ast_node->otherwise->type;
+    TypeId then_type_id = then_contrib->type_id;
+    TypeId else_type_id = else_contrib->type_id;
 
-    Type* else_type = ast_node->otherwise ? ast_node->otherwise->type : NULL;
     LambdaNumericDecision numeric_join = lambda_numeric_classify(LAMBDA_NUM_OP_ADD,
-        lambda_numeric_kind_from_type(ast_node->then->type),
-        lambda_numeric_kind_from_type(else_type));
+        lambda_numeric_kind_from_type(then_contrib),
+        lambda_numeric_kind_from_type(ast_node->otherwise ? else_contrib : NULL));
     if (numeric_join.valid) {
         ast_node->type = lambda_numeric_type_from_kind(numeric_join.result);
     } else if (then_type_id != else_type_id) {
-        ast_node->type = &TYPE_ANY;
+        // When one arm DIVERGES by raising, the join is the union of the
+        // contributions — `T | error` — not ANY: the union records both that
+        // the value lane is exactly T and that error-ness is present, where
+        // ANY erased the first and my earlier bare-T narrowing erased the
+        // second. Representation is unaffected: a union's type_id is
+        // LMD_TYPE_TYPE, which consumers already treat as boxed/dynamic
+        // ("unions retain their runtime Item tag" — the shape-storage rule),
+        // and the hardened native-return admission treats it as unprovable,
+        // so the boxed error join that `^`/`^err` consumes stays intact.
+        //
+        // Plain differing arms (no divergence) still join as ANY for now: the
+        // general `T1 | T2` join is more precise but makes the E208
+        // containment checker see error-capable branches that ANY hid —
+        // observed as 95 corpus failures (`function may return error from
+        // call to 'float'`) — i.e. it changes which programs compile, which
+        // is a language-surface decision, not a typing cleanup. ANY also
+        // still absorbs a diverging arm when the surviving arm is ANY.
+        bool has_divergence = then_contrib == &TYPE_ERROR ||
+            else_contrib == &TYPE_ERROR;
+        if (!has_divergence ||
+                then_type_id == LMD_TYPE_ANY || else_type_id == LMD_TYPE_ANY) {
+            ast_node->type = &TYPE_ANY;
+        } else {
+            TypeBinary* join = (TypeBinary*)alloc_type_kind(tp->pool,
+                TYPE_KIND_BINARY, sizeof(TypeBinary));
+            join->left = then_contrib;
+            join->right = else_contrib;
+            join->op = OPERATOR_UNION;
+            ast_node->type = (Type*)join;
+        }
     } else if (then_type_id >= LMD_TYPE_CONTAINER) {
         // reuse branch type to preserve full struct (TypeMap, TypeArray, etc.)
-        ast_node->type = ast_node->then->type;
+        ast_node->type = then_contrib;
     } else {
-        ast_node->type = ast_node->then->type;
+        ast_node->type = then_contrib;
     }
     log_debug("end build if expr");
     return (AstNode*)ast_node;
