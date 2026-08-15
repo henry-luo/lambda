@@ -1593,6 +1593,8 @@ typedef struct MulticolFragmentPlacement {
 } MulticolFragmentPlacement;
 
 bool is_multicol_container(ViewBlock* block);
+bool multicol_find_spanner_containing_block(ViewBlock* block,
+                                            ViewBlock** out_containing_block);
 float multicol_used_block_axis_extent(ViewBlock* block);
 float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
                                                ViewBlock* block,
@@ -2042,6 +2044,12 @@ typedef enum LayoutAxis {
     LAYOUT_AXIS_X,
     LAYOUT_AXIS_Y,
 } LayoutAxis;
+
+float layout_in_flow_content_extent(ViewElement* elem, LayoutAxis axis,
+                                    bool include_out_of_flow = false);
+void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
+                                   bool include_out_of_flow,
+                                   float* out_min, float* out_max);
 
 template <typename T>
 struct LayoutAxisPair {
@@ -2927,6 +2935,12 @@ typedef struct LayoutContext {
 
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
+    // CSS Align 3 abspos sizing can temporarily provide an auto-axis size from
+    // the flex static-position rectangle before the child is laid out.
+    bool abspos_static_size_override_x;
+    bool abspos_static_size_override_y;
+    // CSS Position 3 sticky constraints require final scrollport and containing-block geometry.
+    bool defer_sticky_positioning;
     // Structured layout debug categories and optional release profiling buckets
     radiant::LayoutDebugState layout_debug;
     radiant::LayoutProfiler profiler;
@@ -2971,6 +2985,8 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                bool center_block_axis,
                                                bool use_central_baseline,
                                                bool reverse_inline_axis);
+void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* block,
+                                           float flow_height);
 typedef enum LayoutTextRectContentKind {
     LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE = 0,
     LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE,
@@ -2983,7 +2999,10 @@ float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode pare
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
 void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
-                                      bool swap_dimensions);
+                                      bool swap_dimensions,
+                                      float line_height = 0.0f,
+                                      float line_block_start = 0.0f,
+                                      bool publish_atomic_lines = false);
 void layout_normalize_vertical_breaks(ViewBlock* block);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
 float layout_compute_in_flow_child_width_extent(
@@ -3110,7 +3129,7 @@ typedef void (*AbsAfterChildFn)(LayoutContext* lycon, ViewBlock* container,
 typedef struct AbsStaticContext {
     AbsStaticContextKind kind;
     LayoutContainingBlock containing_block;
-    FlexContainerLayout* flex;
+    FlexProp* flex;
     GridContainerLayout* grid;
     bool resolve_percent_against_content_box;
     AbsPrepareChildFn prepare_child;
@@ -3576,10 +3595,14 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* o
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
+void layout_apply_sticky_positions(LayoutContext* lycon, View* root);
 bool element_has_float(ViewBlock* block);
 ViewBlock* find_initial_containing_view_block(ViewBlock* element);
 ViewBlock* find_positioned_containing_block(ViewElement* view);
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
+void layout_parent_to_containing_block_offset(ViewBlock* block,
+                                              ViewBlock* containing_block,
+                                              float* out_x, float* out_y);
 void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
@@ -4131,14 +4154,20 @@ struct LayoutContextScope {
     Linebox saved_line;
     FontBox saved_font;
     bool saved_table_cell_first_row_layout;
+    bool saved_abspos_static_size_override_x;
+    bool saved_abspos_static_size_override_y;
     explicit LayoutContextScope(LayoutContext* l)
         : lycon(l), saved_block(l->block), saved_line(l->line), saved_font(l->font),
-          saved_table_cell_first_row_layout(l->table_cell_first_row_layout) {}
+          saved_table_cell_first_row_layout(l->table_cell_first_row_layout),
+          saved_abspos_static_size_override_x(l->abspos_static_size_override_x),
+          saved_abspos_static_size_override_y(l->abspos_static_size_override_y) {}
     ~LayoutContextScope() {
         lycon->block = saved_block;
         lycon->line  = saved_line;
         lycon->font  = saved_font;
         lycon->table_cell_first_row_layout = saved_table_cell_first_row_layout;
+        lycon->abspos_static_size_override_x = saved_abspos_static_size_override_x;
+        lycon->abspos_static_size_override_y = saved_abspos_static_size_override_y;
     }
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;

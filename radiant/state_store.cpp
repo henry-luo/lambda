@@ -3850,6 +3850,8 @@ static ViewState* scroll_view_state_get_or_create(DocState* state, View* view, S
     if (created) {
         view_state->data.scroll.x = pane->h_scroll_position;
         view_state->data.scroll.y = pane->v_scroll_position;
+        view_state->data.scroll.min_x = pane->h_min_scroll;
+        view_state->data.scroll.min_y = pane->v_min_scroll;
         view_state->data.scroll.max_x = pane->h_max_scroll;
         view_state->data.scroll.max_y = pane->v_max_scroll;
     }
@@ -3858,12 +3860,18 @@ static ViewState* scroll_view_state_get_or_create(DocState* state, View* view, S
 
 void scroll_state_set_max_for_view(DocState* state, View* view, void* pane_ptr,
                                    float h_max, float v_max) {
+    scroll_state_set_range_for_view(state, view, pane_ptr, 0.0f, h_max, 0.0f, v_max);
+}
+
+void scroll_state_set_range_for_view(DocState* state, View* view, void* pane_ptr,
+                                     float h_min, float h_max,
+                                     float v_min, float v_max) {
     if (!pane_ptr) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     if (state) scroll_state_attach(state, pane_ptr);
 
-    if (h_max < 0.0f) h_max = 0.0f;
-    if (v_max < 0.0f) v_max = 0.0f;
+    if (h_max < h_min) h_max = h_min;
+    if (v_max < v_min) v_max = v_min;
     SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLL_SET_MAX, view);
 
     ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
@@ -3876,26 +3884,40 @@ void scroll_state_set_max_for_view(DocState* state, View* view, void* pane_ptr,
         old_y = view_state->data.scroll.y;
         old_max_x = view_state->data.scroll.max_x;
         old_max_y = view_state->data.scroll.max_y;
+        view_state->data.scroll.min_x = h_min;
+        view_state->data.scroll.min_y = v_min;
         view_state->data.scroll.max_x = h_max;
         view_state->data.scroll.max_y = v_max;
+        if (view_state->data.scroll.x < h_min) view_state->data.scroll.x = h_min;
         if (view_state->data.scroll.x > h_max) view_state->data.scroll.x = h_max;
+        if (view_state->data.scroll.y < v_min) view_state->data.scroll.y = v_min;
         if (view_state->data.scroll.y > v_max) view_state->data.scroll.y = v_max;
+        pane->h_min_scroll = h_min;
+        pane->v_min_scroll = v_min;
         pane->h_scroll_position = view_state->data.scroll.x;
         pane->v_scroll_position = view_state->data.scroll.y;
     }
 
+    pane->h_min_scroll = h_min;
+    pane->v_min_scroll = v_min;
     pane->h_max_scroll = h_max;
     pane->v_max_scroll = v_max;
 
+    if (pane->h_scroll_position < pane->h_min_scroll) {
+        pane->h_scroll_position = pane->h_min_scroll;
+    }
     if (pane->h_scroll_position > pane->h_max_scroll) {
         pane->h_scroll_position = pane->h_max_scroll;
+    }
+    if (pane->v_scroll_position < pane->v_min_scroll) {
+        pane->v_scroll_position = pane->v_min_scroll;
     }
     if (pane->v_scroll_position > pane->v_max_scroll) {
         pane->v_scroll_position = pane->v_max_scroll;
     }
 
     if (state) {
-        view_state_log_scroll_transition(state, view, "scroll.max",
+        view_state_log_scroll_transition(state, view, "scroll.range",
             old_x, old_y, old_max_x, old_max_y,
             pane->h_scroll_position, pane->v_scroll_position,
             pane->h_max_scroll, pane->v_max_scroll);
@@ -3910,8 +3932,10 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     if (state) scroll_state_attach(state, pane_ptr);
 
-    if (h_pos < 0.0f) h_pos = 0.0f;
-    if (v_pos < 0.0f) v_pos = 0.0f;
+    float h_min = pane->h_min_scroll;
+    float v_min = pane->v_min_scroll;
+    if (h_pos < h_min) h_pos = h_min;
+    if (v_pos < v_min) v_pos = v_min;
     if (h_pos > pane->h_max_scroll) h_pos = pane->h_max_scroll;
     if (v_pos > pane->v_max_scroll) v_pos = pane->v_max_scroll;
     SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLL_SET_POSITION, view);
@@ -3925,8 +3949,12 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
     if (view_state) {
         old_x = view_state->data.scroll.x;
         old_y = view_state->data.scroll.y;
+        h_min = view_state->data.scroll.min_x;
+        v_min = view_state->data.scroll.min_y;
         old_max_x = view_state->data.scroll.max_x;
         old_max_y = view_state->data.scroll.max_y;
+        if (h_pos < h_min) h_pos = h_min;
+        if (v_pos < v_min) v_pos = v_min;
         view_state->data.scroll.x = h_pos;
         view_state->data.scroll.y = v_pos;
         view_state->data.scroll.max_x = pane->h_max_scroll;
@@ -3987,6 +4015,32 @@ void scroll_state_get_position_for_view(DocState* state, View* view, void* pane_
     }
 
     scroll_state_get_position(state, pane_ptr, out_h_pos, out_v_pos, out_h_max, out_v_max);
+}
+
+void scroll_state_get_range_for_view(DocState* state, View* view, void* pane_ptr,
+                                     float* out_h_min, float* out_h_max,
+                                     float* out_v_min, float* out_v_max) {
+    if (out_h_min) *out_h_min = 0.0f;
+    if (out_h_max) *out_h_max = 0.0f;
+    if (out_v_min) *out_v_min = 0.0f;
+    if (out_v_max) *out_v_max = 0.0f;
+
+    ViewState* view_state = state && view
+        ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : NULL;
+    if (view_state && view_state->kind == VIEW_STATE_SCROLL) {
+        if (out_h_min) *out_h_min = view_state->data.scroll.min_x;
+        if (out_h_max) *out_h_max = view_state->data.scroll.max_x;
+        if (out_v_min) *out_v_min = view_state->data.scroll.min_y;
+        if (out_v_max) *out_v_max = view_state->data.scroll.max_y;
+        return;
+    }
+
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (!pane) return;
+    if (out_h_min) *out_h_min = pane->h_min_scroll;
+    if (out_h_max) *out_h_max = pane->h_max_scroll;
+    if (out_v_min) *out_v_min = pane->v_min_scroll;
+    if (out_v_max) *out_v_max = pane->v_max_scroll;
 }
 
 static void scroll_interaction_mark_dirty(DocState* state) {

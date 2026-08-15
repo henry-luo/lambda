@@ -115,6 +115,30 @@ static bool span_has_direct_visible_text(ViewSpan* span) {
     return false;
 }
 
+static bool span_has_direct_text_on_both_sides_of_block(ViewSpan* span) {
+    bool saw_in_flow_block = false;
+    bool has_text_before_block = false;
+    bool has_text_after_block = false;
+    for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            bool visible = text->width > 0.0f && text->height > 0.0f &&
+                !text_is_all_collapsible_space(
+                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span);
+            if (visible) {
+                if (saw_in_flow_block) has_text_after_block = true;
+                else has_text_before_block = true;
+            }
+            continue;
+        }
+        ViewBlock* block = lam::view_as_block(child);
+        if (block && !layout_block_is_out_of_flow_positioned(block)) {
+            saw_in_flow_block = true;
+        }
+    }
+    return has_text_before_block && has_text_after_block;
+}
+
 static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
     if (!text || !text->text || text->length == 0) return false;
     CssEnum white_space = span && span->blk ? span->block()->white_space : CSS_VALUE_NORMAL;
@@ -398,6 +422,20 @@ static bool inline_span_has_forced_break_view(View* view) {
     return found;
 }
 
+static bool inline_span_has_out_of_flow_descendant(ViewSpan* span) {
+    if (!span) return false;
+    bool found = false;
+    auto inspect = [&](View* candidate) -> bool {
+        if (candidate != static_cast<View*>(span) && layout_view_is_out_of_flow(candidate)) {
+            found = true;
+        }
+        return found;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(static_cast<View*>(span), inspect, no_finish, false);
+    return found;
+}
+
 static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
     if (!span || !span->has_inline_fragment_union()) return false;
     bool found_child = false;
@@ -546,7 +584,18 @@ static void span_record_current_split_line_fragment(LayoutContext* lycon, ViewSp
     if (fragment_height <= 0.0f) fragment_height = font->ascender + font->descender;
     if (fragment_height <= 0.0f) fragment_height = span_line_height;
 
-    span_record_split_inline_fragment(span, lycon->line.left, lycon->line.right,
+    float fragment_min_x = lycon->line.left;
+    float fragment_max_x = lycon->line.right;
+    if (lycon->line.text_indent_offset != 0.0f) {
+        // CSS 2.1 §16.1: text-indent belongs to the block's first line,
+        // not to an inline descendant's own border-box fragment.
+        if (lycon->block.direction == CSS_VALUE_RTL) {
+            fragment_min_x += lycon->line.text_indent_offset;
+        } else {
+            fragment_max_x -= lycon->line.text_indent_offset;
+        }
+    }
+    span_record_split_inline_fragment(span, fragment_min_x, fragment_max_x,
                                       fragment_y, fragment_y + fragment_height);
 }
 
@@ -783,6 +832,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     auto get_child_content_bottom = [&get_child_content_y_edge](View* c) {
         return get_child_content_y_edge(c, true);
     };
+    bool has_out_of_flow_descendant = inline_span_has_out_of_flow_descendant(span);
 
     float min_x = get_child_outer_left(child);
     float child_sy = get_child_static_y(child);
@@ -804,21 +854,30 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             child = child->next();
             continue;
         }
-        float child_min_x = get_child_outer_left(child);
-        float child_max_x = get_child_outer_right(child);
+        // CSS 2.1 §9.2.1.1: a zero-width BR forces the next line but does not
+        // contribute a horizontal edge to its ancestor inline box.
+        if (child->view_type != RDT_VIEW_BR || child->width > 0.0f) {
+            float child_min_x = get_child_outer_left(child);
+            float child_max_x = get_child_outer_right(child);
 
-        if (child_min_x < min_x) min_x = child_min_x;
-        if (child_max_x > max_x) max_x = child_max_x;
+            if (child_min_x < min_x) min_x = child_min_x;
+            if (child_max_x > max_x) max_x = child_max_x;
+        }
 
-        float sy = get_child_static_y(child);
-        if (sy < visual_min_y) visual_min_y = sy;
-        float sb = get_child_static_bottom(child);
-        if (sb > visual_max_y) visual_max_y = sb;
+        if (!has_out_of_flow_descendant || child->view_type != RDT_VIEW_BR ||
+            child->height > 0.0f) {
+            // CSS 2.1 §9.2.1.1: a collapsed BR forces the next line but has no
+            // vertical border-box extent to include in a split inline union.
+            float sy = get_child_static_y(child);
+            if (sy < visual_min_y) visual_min_y = sy;
+            float sb = get_child_static_bottom(child);
+            if (sb > visual_max_y) visual_max_y = sb;
 
-        float cy = get_child_content_y(child);
-        float cb = get_child_content_bottom(child);
-        if (cy < content_min_y) content_min_y = cy;
-        if (cb > content_max_y) content_max_y = cb;
+            float cy = get_child_content_y(child);
+            float cb = get_child_content_bottom(child);
+            if (cy < content_min_y) content_min_y = cy;
+            if (cb > content_max_y) content_max_y = cb;
+        }
 
         child = child->next();
     }
@@ -924,6 +983,10 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     Linebox saved_line = lycon->line;
     FontBox saved_font = lycon->font;
     CssEnum saved_vertical_align = lycon->line.vertical_align;
+    float first_line_text_indent = saved_line.text_indent_offset;
+    if (first_line_text_indent == 0.0f && lycon->block.line_number == 0) {
+        first_line_text_indent = lycon->block.text_indent;
+    }
 
     DomNode* child = first_child;
     bool in_inline_sequence = false;
@@ -1041,8 +1104,19 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             if (ViewBlock* fragment_block = lam::view_as_block(block_fragment); (!fragment_block || !layout_block_is_self_collapsing(fragment_block)) && (block_fragment->width > 0.0f || block_fragment->height > 0.0f)) {
                 float relative_x = 0.0f, relative_y = 0.0f;
                 layout_relative_position_offset(fragment_block, &relative_x, &relative_y);
+                float split_left = lycon->line.left;
+                float split_right = lycon->line.right;
+                if (first_line_text_indent != 0.0f) {
+                    // CSS 2.1 §16.1: an RTL first-line indent narrows the
+                    // block-in-inline fragment from its inline-start edge.
+                    if (lycon->block.direction == CSS_VALUE_RTL) {
+                        split_left += first_line_text_indent;
+                    } else {
+                        split_right -= first_line_text_indent;
+                    }
+                }
                 span_record_split_inline_fragment(
-                    span, lycon->line.left, lycon->line.right,
+                    span, split_left, split_right,
                     block_fragment->y - relative_y,
                     block_fragment->y - relative_y + block_fragment->height);
             }
@@ -1265,6 +1339,21 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
+    // CSS Position 3 §4.1: preserve the first inline box origin separately
+    // because the visible DOM rectangle may start on a later line fragment.
+    FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);
+    if (inline_cb) {
+        float inline_cb_x = span->x;
+        // CSS Text 3 §4.1: collapsible whitespace at a line's inline end does
+        // not belong to the first generated inline box's containing-block edge.
+        if (!lycon->line.is_line_start && lycon->line.trailing_space_width > 0.0f) {
+            inline_cb_x = max(lycon->line.left,
+                              inline_cb_x - lycon->line.trailing_space_width);
+        }
+        inline_cb->min_x = inline_cb->max_x = inline_cb_x;
+        inline_cb->min_y = inline_cb->max_y = span->y;
+        span->set_has_fragment_union(FRAGMENT_UNION_INLINE_CB, true);
+    }
 
     dom_node_resolve_style(elmt, lycon);
     DomElement* elmt_elem = lam::dom_as<DOM_NODE_ELEMENT>(elmt);
@@ -1429,6 +1518,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (has_block_children || (has_table_internal && has_block_children)) {
 
         float pre_split_advance_y = lycon->block.advance_y;
+        float first_line_text_indent = lycon->line.text_indent_offset;
+        if (first_line_text_indent == 0.0f && lycon->block.line_number == 0) {
+            first_line_text_indent = lycon->block.text_indent;
+        }
         layout_inline_with_block_children(
             lycon, elmt_elem, span, child, inline_left_edge, span_resolved_line_height);
 
@@ -1437,14 +1530,25 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         compute_span_bounding_box(span, true, lycon->font.font_handle);  // get vertical bounds from children
         float containing_line_width = lycon->line.right - lycon->line.left;
         float measured_right = span->x + span->width;
-        span->x = lycon->line.left;
+        float span_line_left = lycon->line.left;
+        if (lycon->block.direction == CSS_VALUE_RTL &&
+            first_line_text_indent != 0.0f) {
+            // CSS 2.1 §16.1: a block-in-inline fragment begins after the
+            // RTL first-line indent, so its union must not include the indent.
+            span_line_left += first_line_text_indent;
+        }
+        span->x = span_line_left;
         float measured_width = measured_right - span->x;
         if (measured_width < 0.0f) measured_width = 0.0f;
-        span->width = span->has_split_inline_fragment_union() ? max(measured_width, containing_line_width) : measured_width; // empty split inlines do not stretch across the containing block.
-        // CSS 2.1 §9.2.1.1: For relatively-positioned block-in-inline spans,
-        if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {
-            span->y = pre_split_advance_y;
-        }
+        bool has_direct_visible_text = span_has_direct_visible_text(span);
+        bool direct_text_brackets_block =
+            span_has_direct_text_on_both_sides_of_block(span);
+        // CSS 2.1 §9.2.1.1: a split inline spans the line extent when direct
+        // content brackets an in-flow block; an out-of-flow child must not
+        // widen the inline containing block beyond its direct content.
+        span->width = span->has_split_inline_fragment_union() &&
+            (!has_direct_visible_text || direct_text_brackets_block)
+            ? max(measured_width, containing_line_width) : measured_width;
         // CSS 2.1 §9.2.1.1: Extend span bounding box upward to cover the leading
         {
             bool has_inline_start = inline_has_axis_edge_decoration(

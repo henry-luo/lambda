@@ -9774,12 +9774,19 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (value_type == LMD_TYPE_INT) return (float)it2i(scroll_value);
         if (value_type == LMD_TYPE_FLOAT) return (float)it2d(scroll_value);
         if (value_type == LMD_TYPE_BOOL) return it2b(scroll_value) ? 1.0f : 0.0f;
+        if (value_type == LMD_TYPE_STRING) {
+            const char* text = fn_to_cstr(scroll_value);
+            if (text) {
+                char* end = nullptr;
+                double parsed = strtod(text, &end);
+                if (end != text) return (float)parsed;
+            }
+        }
         return 0.0f;
     };
 
     if (strcmp(prop, "scrollTop") == 0 || strcmp(prop, "scrollLeft") == 0) {
         float scroll_value = item_to_scroll_value(value);
-        if (scroll_value < 0.0f) scroll_value = 0.0f;
 
         bool is_vertical = strcmp(prop, "scrollTop") == 0;
         bool is_root_scroll_target =
@@ -9797,7 +9804,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
 
-        if (elem->scroller && elem->scroll()->pane) {
+        bool layout_pending = elem->doc && elem->doc->state &&
+            ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
+        if (elem->scroller && elem->scroll()->pane && !layout_pending) {
             float current_x = 0.0f;
             float current_y = 0.0f;
             DocState* state = elem->doc ? elem->doc->state : nullptr;
@@ -9817,6 +9826,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
 
+        // initial script execution can see a pane before flex sizing computes its max;
+        // defer the requested scroll so finalization clamps it against the real overflow.
         if (is_vertical) {
             elem->set_pending_scroll_y(scroll_value);
             elem->set_has_pending_element_scroll_y(true);
@@ -12845,8 +12856,6 @@ extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
         x += js_dom_item_to_float(js_dom_get_property_impl(elem_item, js_string_key("scrollLeft")));
         y += js_dom_item_to_float(js_dom_get_property_impl(elem_item, js_string_key("scrollTop")));
     }
-    if (x < 0.0f) x = 0.0f;
-    if (y < 0.0f) y = 0.0f;
     // scroll(), scrollTo(), and scrollBy() share the element scroll setters
     // so pending viewport/element scroll state stays in one place.
     js_dom_set_property_impl(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));

@@ -84,11 +84,21 @@ void layout_shift_view_children(View* view, float offset_x, float offset_y) {
 void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y) {
     if (!view) return;
     for (View* child = view->first_child; child; child = child->next_sibling) {
-        child->x += offset_x;
-        child->y += offset_y;
+        ViewBlock* child_block = lam::view_as_block(child);
+        bool child_is_out_of_flow = child_block &&
+            layout_block_is_out_of_flow_positioned(child_block);
+        // CSS Position 3: an out-of-flow child uses the shifted positioned
+        // ancestor as its containing-block origin; shifting its local origin
+        // here would apply the relative offset twice.
+        if (!child_is_out_of_flow) {
+            child->x += offset_x;
+            child->y += offset_y;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
-            layout_shift_text_rects(
-                lam::view_require<RDT_VIEW_TEXT>(child), offset_x, offset_y);
+            if (!child_is_out_of_flow) {
+                layout_shift_text_rects(
+                    lam::view_require<RDT_VIEW_TEXT>(child), offset_x, offset_y);
+            }
         }
         // block descendants establish their own coordinate space for inline layout.
         if (child->is_element() && child->view_type != RDT_VIEW_BLOCK) {
@@ -2576,8 +2586,16 @@ void line_align(LayoutContext* lycon) {
             offset = available_width - line_width;
         }
         // CSS 2.1 §16.2 + CSS3 Text §7.1 overflow alignment:
+        bool vertical_line = lycon->block.establishing_element &&
+            layout_block_inline_axis_is_vertical(lycon->block.establishing_element);
+        bool vertical_out_of_flow_line = vertical_line &&
+            lycon->block.establishing_element->position &&
+            (lycon->block.establishing_element->positionp()->position == CSS_VALUE_ABSOLUTE ||
+             lycon->block.establishing_element->positionp()->position == CSS_VALUE_FIXED);
+        // CSS Writing Modes: the RTL overflow shift is invalid for an
+        // out-of-flow vertical line whose physical text origin is already set.
         if ((text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) &&
-            (offset > 0 || (is_rtl && offset < 0))) {
+            (offset > 0 || (is_rtl && offset < 0 && !vertical_out_of_flow_line))) {
             if (is_wrapped_continuation) {
                 align_wrapped_continuation(lycon, offset, view);
             } else {
@@ -2984,6 +3002,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     dom_node_resolve_style(elmt, lycon);
 
+    if (html->position && html->positionp()->position == CSS_VALUE_ABSOLUTE) {
+        // CSS Position 3 §4.1: resolve root insets against the initial containing block
+        // before the root's used size is derived from opposing inset edges.
+        LayoutContainingBlock initial_cb = layout_initial_containing_block(lycon);
+        layout_resolve_percent_offsets_for_child(html, initial_cb);
+    }
+
     bool root_is_table = html->display.inner == CSS_VALUE_TABLE;
     if (root_is_table && html->blk) {
         // the viewport seed is not an authored width; table roots must shrink-wrap
@@ -3069,6 +3094,25 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         } else if (!isnan(html->block()->given_height_percent)) {
             root_css_height = physical_height * html->block()->given_height_percent / 100.0f;
             root_has_explicit_height = (root_css_height > 0);
+        }
+    }
+
+    if (root_is_abspos) {
+        // CSS 2.1 §10.3.7/§10.6.4: opposing insets determine an auto root
+        // size from the initial containing block, including the root border box.
+        if (!root_has_explicit_width && html->positionp()->has_left &&
+            html->positionp()->has_right) {
+            root_css_width = max(
+                physical_width - html->positionp()->left - html->positionp()->right -
+                root_bp_left - root_bp_right, 0.0f);
+            root_has_explicit_width = true;
+        }
+        if (!root_has_explicit_height && html->positionp()->has_top &&
+            html->positionp()->has_bottom) {
+            root_css_height = max(
+                physical_height - html->positionp()->top - html->positionp()->bottom -
+                root_bp_top - root_bp_bottom, 0.0f);
+            root_has_explicit_height = true;
         }
     }
 
@@ -3166,18 +3210,38 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     if (elmt->is_element()) {
         child = lam::dom_require_element(elmt)->first_child;
     }
-    while (child) {
-        if (child->is_element()) {
-            const char* tag_name = child->node_name();
-            DisplayValue child_display = resolve_display_value(child);
-            if (!layout_display_is_none(child_display)) {
-                layout_block(lycon, child, child_display);
-            }
-            if (strcmp(tag_name, "body") == 0) {
-                body_node = child;
+    bool root_is_flex_or_grid = html->display.inner == CSS_VALUE_FLEX ||
+        html->display.inner == CSS_VALUE_GRID;
+    if (root_is_flex_or_grid) {
+        // CSS Flexbox/Grid: the root's formatting context must lay out its
+        // children; treating them as ordinary blocks loses auto cross sizing.
+        for (DomNode* root_child = elmt->is_element()
+                 ? lam::dom_require_element(elmt)->first_child : nullptr;
+             root_child; root_child = root_child->next_sibling) {
+            if (root_child->is_element() &&
+                strcmp(root_child->node_name(), "body") == 0) {
+                body_node = root_child;
             }
         }
-        child = child->next_sibling;
+        if (html->display.inner == CSS_VALUE_FLEX) {
+            layout_flex_content(lycon, html);
+        } else {
+            layout_grid_content(lycon, html);
+        }
+    } else {
+        while (child) {
+            if (child->is_element()) {
+                const char* tag_name = child->node_name();
+                DisplayValue child_display = resolve_display_value(child);
+                if (!layout_display_is_none(child_display)) {
+                    layout_block(lycon, child, child_display);
+                }
+                if (strcmp(tag_name, "body") == 0) {
+                    body_node = child;
+                }
+            }
+            child = child->next_sibling;
+        }
     }
 
     auto t_body_find = high_resolution_clock::now();
@@ -3216,21 +3280,57 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         float body_margin_left = body_view->bound ? body_view->boundary()->margin.left : 0.0f;
         float body_margin_right = body_view->bound ? body_view->boundary()->margin.right : 0.0f;
         float body_margin_bottom = body_view->bound ? body_view->boundary()->margin.bottom : 0.0f;
-        float content_block_size = layout_compute_in_flow_child_width_extent(body_view);
+        float content_block_size = body_view->width;
+        if (content_block_size <= 0.0f) {
+            content_block_size = layout_compute_in_flow_child_width_extent(body_view);
+        }
         if (content_block_size <= 0.0f) {
             FontHandle* line_font = body_view->font ? body_view->fontp()->font_handle : lycon->font.font_handle;
             float line_extent = line_font ? calc_normal_line_height(line_font) : 0.0f;
             content_block_size = line_extent > 0.0f ? line_extent : body_view->height;
+        }
+        WritingMode body_mode = layout_block_writing_mode(body_view);
+        float trailing_child_margin = 0.0f;
+        for (View* child = body_view->first_placed_child(); child; child = child->next()) {
+            LayoutVerticalFlowChild info = {};
+            if (!layout_classify_vertical_flow_child(body_view, child, &info) ||
+                !info.normal_block || info.atomic_inline ||
+                layout_block_is_out_of_flow_positioned(info.block)) {
+                continue;
+            }
+            trailing_child_margin = layout_vertical_flow_block_end_margin(
+                info.block, body_mode);
         }
         body_view->width = content_block_size;
         body_view->content_width = content_block_size;
         body_view->height = physical_height - body_view->y - body_margin_bottom;
         if (body_view->height < 0.0f) body_view->height = 0.0f;
         body_view->content_height = body_view->height;
-        html->width = body_margin_left + content_block_size + body_margin_right;
+        float root_block_start_margin = body_mode == WM_VERTICAL_RL
+            ? body_margin_right : body_margin_left;
+        float root_block_end_margin = body_mode == WM_VERTICAL_LR
+            ? body_margin_right : trailing_child_margin;
+        // CSS Writing Modes: a vertical-lr root body uses both physical
+        // block-axis margins; the vertical-rl flow-end margin is already
+        // represented by its final in-flow child margin.
+        html->width = root_block_start_margin + content_block_size +
+            root_block_end_margin;
         html->content_width = html->width;
         html->height = physical_height;
         html->content_height = physical_height;
+
+        float target_html_x = body_mode == WM_VERTICAL_RL
+            ? physical_width - html->width : 0.0f;
+        html->x = target_html_x;
+        float target_body_x = body_mode == WM_VERTICAL_RL
+            ? html->width - body_margin_right - body_view->width
+            : body_margin_left;
+        float body_delta_x = target_body_x - body_view->x;
+        if (fabsf(body_delta_x) > 0.01f) {
+            // child coordinates are already rooted in the HTML formatting context;
+            // moving the body box must not translate its separately published flow.
+            body_view->x += body_delta_x;
+        }
     }
 
     if (!root_has_explicit_height && !root_uses_vertical_writing) {
@@ -3392,6 +3492,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
 
     lycon->run_mode = radiant::RunMode::PerformLayout;
     lycon->sizing_mode = radiant::SizingMode::InherentSize;
+    lycon->defer_sticky_positioning = true;
 
     lycon->width = uicon->viewport_width > 0 ? uicon->viewport_width : 1200;
     lycon->height = uicon->viewport_height > 0 ? uicon->viewport_height : 800;
@@ -3589,6 +3690,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
             log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
                      target_x, target_y);
         }
+        layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
     }
 
     auto t_layout = high_resolution_clock::now();
