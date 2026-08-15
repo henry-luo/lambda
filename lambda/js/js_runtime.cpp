@@ -270,20 +270,6 @@ extern "C" Item js_using_dispose(Item resource) {
     return js_call_function(dispose, resource, NULL, 0);
 }
 
-#ifdef LAMBDA_JS_EXEC_PROFILE
-extern "C" Item js_profiled_push_d(double dval) {
-    return push_d(dval);
-}
-
-extern "C" double js_profiled_it2d(Item item) {
-    return it2d(item);
-}
-
-extern "C" int64_t js_profiled_it2i(Item item) {
-    return it2i(item);
-}
-#endif
-
 typedef struct JsArrayRuntimeItemsEntry {
     Item* items;
     Array* owner;

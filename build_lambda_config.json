@@ -1045,7 +1045,10 @@
       ],
       "linker_flags": [],
       "build_dir": "build_debug",
-      "debug": true
+      "debug": true,
+      "defines": [
+        "LAMBDA_JS_EXEC_PROFILE"
+      ]
     },
     "debug_profile": {
       "output": "lambda-debug-profile.exe",
@@ -3745,7 +3748,8 @@
             "additional_sources": [
               "lib/test_utils.c",
               "lib/test_utils_runtime.cpp",
-              "lambda/runtime/runtime-state.cpp"
+              "lambda/runtime/runtime-state.cpp",
+              "lambda/runtime/side_stack.c"
             ],
             "binary": "test_dir_gtest.exe",
             "icon": "📁"
@@ -4703,7 +4707,7 @@
           {
             "source": "test/test_js_opt_gtest.cpp",
             "name": "JavaScript Optimization Contract Tests",
-            "category": "extended",
+            "category": "baseline",
             "dependencies": [
               "lambda-lib"
             ],
