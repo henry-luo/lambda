@@ -828,6 +828,17 @@ static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
     return variant && em_returns_result_pair(variant->result.companion);
 }
 
+// RV9 — the ONE definition of how lane 2 spells "no error", for both sides.
+//
+// The register (pair) form spells it `ItemNull`, so the consumer's check is a
+// single compare against a constant. The context-lane form predates that
+// ruling and spells it 0, tested as non-zero. Producer and consumer MUST agree:
+// `ItemNull` is NOT zero, so a producer writing the register spelling into a
+// consumer testing non-zero reports EVERY successful call as an error — silent,
+// total, and exactly the two-independent-derivations class RV10 names. Both
+// sides therefore key off this predicate rather than deriving it separately.
+static inline bool em_error_lane_in_register(FnCompanionTransport companion);
+
 // RV12: this entry hands lane 2 back through `Context::mir_companion_slot`
 // rather than a second MIR result, because it is reachable from C. On Windows
 // every shape-2 entry takes this path, since MIR rejects nres > 1 there.
@@ -842,6 +853,35 @@ static inline bool em_returns_companion_slot(FnCompanionTransport companion) {
 
 static inline bool em_variant_returns_slot(const FnVariantAnalysis* variant) {
     return variant && em_returns_companion_slot(variant->result.companion);
+}
+
+static inline bool em_error_lane_in_register(FnCompanionTransport companion) {
+    return em_returns_result_pair(companion);
+}
+
+// RV9 debug check. It runs in the COMPILER, not in generated code: the emitted
+// MIR must stay byte-identical across build configurations (the MT7 ratchet and
+// the `.mir-check` fixtures compare it), so a debug-only runtime assert is not
+// available on this path. Cross-checks the call site's belief about the error
+// lane's transport against the callee descriptor's, the same defence
+// `em_assert_callee_result_count` gives the result COUNT.
+static inline void em_assert_error_lane_agreement(const char* call_name,
+        const FnVariantAnalysis* variant, bool call_site_uses_register) {
+#ifndef NDEBUG
+    if (!variant || variant->result.shape != RETURN_SHAPE_NATIVE_ERROR) return;
+    bool callee_uses_register = em_error_lane_in_register(variant->result.companion);
+    if (callee_uses_register != call_site_uses_register) {
+        log_error("mir: error-lane encoding mismatch calling %s — call site "
+            "reads the %s form, callee writes the %s form. `ItemNull` is not "
+            "zero, so this would report every successful call as an error "
+            "(RV9/RV10).", call_name ? call_name : "<anon>",
+            call_site_uses_register ? "register" : "context-lane",
+            callee_uses_register ? "register" : "context-lane");
+        abort();
+    }
+#else
+    (void)call_name; (void)variant; (void)call_site_uses_register;
+#endif
 }
 
 // The transport an entry uses, derived once from its shape and reachability.
