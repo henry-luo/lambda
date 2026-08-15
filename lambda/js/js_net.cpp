@@ -5,6 +5,7 @@
  * Registered as built-in module 'net' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
 #include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
@@ -169,8 +170,6 @@ struct JsBoundSocket {
 };
 
 typedef struct SocketWriteReq {
-    uv_write_t req;
-    char*      data;
     size_t     len;
     JsSocket*  sock;
     Item       callback;
@@ -904,15 +903,45 @@ static void socket_handle_remote_eof(JsSocket* sock) {
     socket_close_now(sock);
 }
 
+// One completion for a socket write, whether libuv accepted the submission or
+// rejected it: a rejected write also un-counts the bytes it never sent.
+static void socket_write_settled(void* ud, int status, const char* data, size_t len) {
+    (void)data; (void)len;
+    SocketWriteReq* wreq = (SocketWriteReq*)ud;
+    if (!wreq) return;
+    JsSocket* sock = wreq->sock;
+    if (sock) {
+        sock->buffer_size -= (int64_t)wreq->len;
+        if (sock->buffer_size < 0) sock->buffer_size = 0;
+        if (status != 0) {
+            sock->bytes_written -= (int64_t)wreq->len;
+            if (sock->bytes_written < 0) sock->bytes_written = 0;
+        }
+        socket_update_io_counters(sock);
+    }
+    if (is_callable(wreq->callback)) {
+        if (status == 0) {
+            js_call_function(wreq->callback, make_undefined_item(), NULL, 0);
+        } else {
+            Item err = make_uv_error(status, "write", NULL, -1);
+            js_call_function(wreq->callback, make_undefined_item(), &err, 1);
+        }
+        js_microtask_flush();
+    }
+    if (status == 0) {
+        socket_maybe_emit_drain(sock);
+        socket_maybe_close_after_drain(sock);
+    }
+    mem_free(wreq);
+}
+
 static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
                                 Item callback, bool counted_before) {
     SocketWriteReq* wreq = (SocketWriteReq*)mem_calloc(1, sizeof(SocketWriteReq), MEM_CAT_JS_RUNTIME);
-    uv_buf_t buf = uv_buf_init(copy, (unsigned int)data_len);
-    wreq->data = copy;
+    if (!wreq) { mem_free(copy); return (Item){.item = b2it(false)}; }
     wreq->len = data_len;
     wreq->sock = sock;
     wreq->callback = callback;
-    wreq->req.data = wreq;
 
     if (!counted_before) {
         sock->bytes_written += (int64_t)data_len;
@@ -920,43 +949,10 @@ static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
         socket_update_io_counters(sock);
     }
 
-    int r = uv_write(&wreq->req, (uv_stream_t*)&sock->tcp, &buf, 1,
-        [](uv_write_t* req, int status) {
-            SocketWriteReq* wreq = (SocketWriteReq*)req->data;
-            if (!wreq) return;
-            if (wreq->sock) {
-                wreq->sock->buffer_size -= (int64_t)wreq->len;
-                if (wreq->sock->buffer_size < 0) wreq->sock->buffer_size = 0;
-                socket_update_io_counters(wreq->sock);
-            }
-            if (is_callable(wreq->callback)) {
-                if (status == 0) {
-                    js_call_function(wreq->callback, make_undefined_item(), NULL, 0);
-                } else {
-                    Item err = make_uv_error(status, "write", NULL, -1);
-                    js_call_function(wreq->callback, make_undefined_item(), &err, 1);
-                }
-                js_microtask_flush();
-            }
-            socket_maybe_emit_drain(wreq->sock);
-            socket_maybe_close_after_drain(wreq->sock);
-            if (wreq->data) mem_free(wreq->data);
-            mem_free(wreq);
-        });
-
-    if (r != 0) {
-        sock->bytes_written -= (int64_t)data_len;
-        sock->buffer_size -= (int64_t)data_len;
-        if (sock->bytes_written < 0) sock->bytes_written = 0;
-        if (sock->buffer_size < 0) sock->buffer_size = 0;
-        socket_update_io_counters(sock);
-        if (is_callable(callback)) {
-            Item err = make_uv_error(r, "write", NULL, -1);
-            js_call_function(callback, make_undefined_item(), &err, 1);
-            js_microtask_flush();
-        }
-        mem_free(copy);
-        mem_free(wreq);
+    // C2.8: the shared helper adopts `copy` and settles exactly once, so the
+    // rejected-submission path can no longer double- or under-free.
+    if (js_node_stream_write_owned((uv_stream_t*)&sock->tcp, copy, data_len,
+            socket_write_settled, wreq) != 0) {
         return (Item){.item = b2it(false)};
     }
 
@@ -2161,10 +2157,7 @@ typedef struct NetResolveReq {
 static void client_connect_cb(uv_connect_t* req, int status);
 
 static Item make_uv_error(int status, const char* syscall, const char* host, int port) {
-    const char* code = uv_err_name(status);
-    if (strcmp(syscall, "getaddrinfo") == 0 && strcmp(code, "EAI_NONAME") == 0) {
-        code = "ENOTFOUND";
-    }
+    const char* code = js_node_uv_code(status, syscall);
     char msg[512];
     if (strcmp(syscall, "getaddrinfo") == 0) {
         snprintf(msg, sizeof(msg), "%s %s %s", syscall, code, host ? host : "");
@@ -2173,26 +2166,20 @@ static Item make_uv_error(int status, const char* syscall, const char* host, int
     } else {
         snprintf(msg, sizeof(msg), "%s %s", syscall, code);
     }
-
-    Item err = js_new_error(make_string_item(msg));
-    js_set_key_cstr(err, "code", make_string_item(code));
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(status)});
-    js_set_key_cstr(err, "syscall", make_string_item(syscall));
-    if (host) js_set_key_cstr(err, "address", make_string_item(host));
-    if (port >= 0) js_set_key_cstr(err, "port", (Item){.item = i2it(port)});
-    return err;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = syscall; spec.message = msg;
+    spec.code = code; spec.address = host; spec.port = port;
+    return js_node_uv_error(spec);
 }
 
 static Item make_path_connect_error(int status, const char* path) {
-    const char* code = uv_err_name(status);
+    const char* code = js_node_uv_code(status, "connect");
     char msg[512];
     snprintf(msg, sizeof(msg), "connect %s %s", code, path ? path : "");
-    Item err = js_new_error(make_string_item(msg));
-    js_set_key_cstr(err, "code", make_string_item(code));
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(status)});
-    js_set_key_cstr(err, "syscall", make_string_item("connect"));
-    if (path) js_set_key_cstr(err, "path", make_string_item(path));
-    return err;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = "connect"; spec.message = msg;
+    spec.code = code; spec.path = path;
+    return js_node_uv_error(spec);
 }
 
 static Item make_invalid_ip_address_error(Item address) {

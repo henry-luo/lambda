@@ -5,6 +5,7 @@
  * Registered as built-in module 'dns' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
 #include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
@@ -120,16 +121,10 @@ static Item make_node_error(const char* name, const char* code, const char* mess
 static Item make_dns_error_with_syscall(int status, const char* hostname,
                                         const char* syscall) {
     const char* code = uv_err_name(status);
-    const char* msg = uv_strerror(status);
-    if (!code) code = "UNKNOWN";
-    if (!msg) msg = "unknown error";
-
-    Item error = js_new_error(make_string_item(msg));
-    js_set_key_cstr(error, "code", make_string_item(code));
-    js_set_key_cstr(error, "errno", (Item){.item = i2it(status)});
-    js_set_key_cstr(error, "syscall", make_string_item(syscall));
-    if (hostname) js_set_key_cstr(error, "hostname", make_string_item(hostname));
-    return error;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = syscall; spec.hostname = hostname;
+    spec.code = code ? code : "UNKNOWN";
+    return js_node_uv_error(spec);
 }
 JS_FORWARD_STATIC_ITEM(make_dns_error, (int status, const char* hostname), make_dns_error_with_syscall, (status, hostname, "getaddrinfo"))
 JS_FORWARD_STATIC_ITEM(make_dns_resolve_error, (int status, const char* hostname, const char* syscall), make_dns_error_with_syscall, (status, hostname, syscall))

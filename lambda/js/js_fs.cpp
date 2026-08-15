@@ -5,6 +5,7 @@
  * Registered as built-in module 'fs' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_typed_array.h"
@@ -2570,8 +2571,8 @@ extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item) {
 // C0.3: the syscall name used to be hardcoded to "access" for every caller,
 // so an fs error never identified the operation that actually failed.
 static Item make_fs_error(int uv_err, const char* syscall, const char* path) {
-    const char* msg = uv_strerror(uv_err);
-    Item err = js_new_error(make_string_item(msg));
+    // fs keeps its own code table: unmapped errnos report ERR_FS rather than
+    // the raw uv name.
     const char* code = "ERR_FS";
     if (uv_err == UV_ENOENT) code = "ENOENT";
     else if (uv_err == UV_EACCES) code = "EACCES";
@@ -2580,13 +2581,10 @@ static Item make_fs_error(int uv_err, const char* syscall, const char* path) {
     else if (uv_err == UV_ENOTDIR) code = "ENOTDIR";
     else if (uv_err == UV_EPERM) code = "EPERM";
     else if (uv_err == UV_EBADF) code = "EBADF";
-    js_set_key_cstr(err, "code", make_string_item(code));
-    if (path) {
-        js_set_key_cstr(err, "path", make_string_item(path));
-    }
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(uv_err)});
-    js_set_key_cstr(err, "syscall", make_string_item(syscall ? syscall : "fs"));
-    return err;
+    JsNodeUvError spec;
+    spec.status = uv_err; spec.code = code; spec.path = path;
+    spec.syscall = syscall ? syscall : "fs";
+    return js_node_uv_error(spec);
 }
 
 // fs.access(path[, mode], callback)

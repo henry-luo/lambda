@@ -5,6 +5,7 @@
  * Registered as built-in module 'child_process' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
 #include "js_node_common.hpp"
 #include "js_host_hooks.h"
 #include "js_runtime_state.hpp"
@@ -77,20 +78,16 @@ static Item make_spawn_error_args_array(Item args_array) {
 
 static Item make_uv_spawn_error(int status, const char* file, Item spawnargs) {
     const char* code = uv_err_name(status);
-    const char* errstr = uv_strerror(status);
     char msg[512];
     snprintf(msg, sizeof(msg), "spawn %s %s", file ? file : "", code);
-
-    Item err = js_new_error(make_string_item(msg));
-    js_set_key_cstr(err, "code", make_string_item(code));
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(status)});
     char syscall[512];
     snprintf(syscall, sizeof(syscall), "spawn %s", file ? file : "");
-    js_set_key_cstr(err, "syscall", make_string_item(syscall));
-    if (file) js_set_key_cstr(err, "path", make_string_item(file));
-    js_set_key_cstr(err, "spawnargs", spawnargs);
-    (void)errstr;
-    return err;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = syscall; spec.message = msg;
+    spec.code = code; spec.path = file;
+    spec.extra_key = js_name_item("spawnargs", 9);
+    spec.extra_value = spawnargs;
+    return js_node_uv_error(spec);
 }
 
 static void emit_shell_args_warning(void) {

@@ -10,6 +10,7 @@
  * Registered as built-in module 'http' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
 #include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
@@ -743,7 +744,7 @@ static void http_conn_note_write_done(JsHttpConn* conn, int len) {
 }
 
 typedef struct HttpResponseWriteReq {
-    char* data;
+    struct JsHttpConn* conn;
     Item  response;
     Item  callback;
     int   len;
@@ -840,14 +841,11 @@ static Item http_error_with_code(const char* code, const char* message) {
 }
 
 static Item http_error_from_uv(int status) {
-    Item err = js_new_error(make_string_item(uv_strerror(status)));
-    const char* code = uv_err_name(status);
-    if (code) {
-        // Node tests branch on err.code before cleanup; missing uv codes can
-        // skip close handlers and leave server handles alive until drain.
-        js_set_key_cstr(err, "code", make_string_item(code));
-    }
-    return err;
+    // Node tests branch on err.code before cleanup; missing uv codes can skip
+    // close handlers and leave server handles alive until drain.
+    JsNodeUvError spec;
+    spec.status = status;
+    return js_node_uv_error(spec);
 }
 
 static Item http_response_error_tick(Item env_item) {
@@ -1552,6 +1550,26 @@ extern "C" Item js_http_res_send_internal(Item self, Item chunk_item) {
 }
 
 // helper: serialize headers + body to HTTP response bytes, write to socket
+// One completion for a response write. The connection is reached through the
+// request wrapper rather than the uv handle so a rejected submission — which
+// never touches libuv — settles identically.
+static void http_response_write_settled(void* ud, int status, const char* data,
+        size_t len) {
+    (void)status; (void)data; (void)len;
+    HttpResponseWriteReq* write_req = (HttpResponseWriteReq*)ud;
+    if (!write_req) return;
+    JsHttpConn* c = write_req->conn;
+    if (c && c->pending_response_writes > 0) c->pending_response_writes--;
+    bool close_after = write_req->close_after;
+    http_conn_note_write_done(c, write_req->len);
+    mem_free(write_req);
+    if (close_after && c && !c->destroyed) {
+        c->close_after_response_writes = true;
+        http_conn_maybe_close_after_response_writes(c);
+    }
+    if (c && !c->destroyed) http_conn_maybe_close_for_server_close(c);
+}
+
 static void http_response_flush(Item self) {
     Item handle_item = js_get_key_cstr(self, "__conn__");
     if (handle_item.item == 0) return;
@@ -1839,43 +1857,23 @@ static void http_response_flush(Item self) {
     uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
     HttpResponseWriteReq* write_req =
         (HttpResponseWriteReq*)mem_calloc(1, sizeof(HttpResponseWriteReq), MEM_CAT_JS_RUNTIME);
-    write_req->data = full;
+    write_req->conn = conn;
     write_req->response = self;
     write_req->callback = js_get_key_cstr(self, "__end_callback__");
     write_req->len = total;
     write_req->close_after = close_after;
     write_req->final = true;
-    wreq->data = write_req;
+    Item end_callback = write_req->callback;
     conn->pending_response_writes++;
     conn->bytes_written += total;
     // HTTP accepted sockets share net.Socket counters; update when bytes are
     // queued so response callbacks can observe bytesWritten before flush.
     http_conn_update_socket_counters(conn);
 
-    int write_status = uv_write(wreq, http_conn_stream(conn), &buf, 1,
-        [](uv_write_t* req, int status) {
-            HttpResponseWriteReq* write_req = (HttpResponseWriteReq*)req->data;
-            bool close_after = false;
-            JsHttpConn* c = req && req->handle ? (JsHttpConn*)((uv_stream_t*)req->handle)->data : NULL;
-            if (c && c->pending_response_writes > 0) {
-                c->pending_response_writes--;
-            }
-            if (write_req) {
-                (void)status;
-                close_after = write_req->close_after;
-                http_conn_note_write_done(c, write_req->len);
-                if (write_req->data) mem_free(write_req->data);
-                mem_free(write_req);
-            }
-            if (close_after && c && !c->destroyed) {
-                c->close_after_response_writes = true;
-                http_conn_maybe_close_after_response_writes(c);
-            }
-            if (c && !c->destroyed) {
-                http_conn_maybe_close_for_server_close(c);
-            }
-            mem_free(req);
-        });
+    // C2.8: the shared helper adopts `full` and settles once on either path;
+    // the branch-specific bookkeeping below stays at the call site.
+    int write_status = js_node_stream_write_owned(http_conn_stream(conn), full,
+        (size_t)total, http_response_write_settled, write_req);
     if (write_status != 0) {
         if (conn->pending_response_writes > 0) conn->pending_response_writes--;
         conn->bytes_written -= total;
@@ -1889,13 +1887,10 @@ static void http_response_flush(Item self) {
         js_set_key_cstr(self, "writableFinished", (Item){.item = b2it(true)});
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        if (js_is_callable(write_req->callback)) {
-            js_call_function(write_req->callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback)) {
+            js_call_function(end_callback, make_js_undefined(), NULL, 0);
         }
         js_microtask_flush();
-        if (write_req->data) mem_free(write_req->data);
-        mem_free(write_req);
-        mem_free(wreq);
         if (close_after && conn && !conn->destroyed) {
             conn->close_after_response_writes = true;
             http_conn_maybe_close_after_response_writes(conn);
@@ -1909,11 +1904,9 @@ static void http_response_flush(Item self) {
         http_response_mark_sent(self, true);
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        if (js_is_callable(write_req->callback)) {
-            js_call_function(write_req->callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback)) {
+            js_call_function(end_callback, make_js_undefined(), NULL, 0);
         }
-        write_req->response = make_js_undefined();
-        write_req->callback = make_js_undefined();
         js_microtask_flush();
     }
 
@@ -2563,7 +2556,7 @@ static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn) {
 }
 
 typedef struct HttpConnWriteReq {
-    char* data;
+    JsHttpConn* conn;
     int   len;
     bool  close_after;
 } HttpConnWriteReq;
@@ -2574,45 +2567,28 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
     int len = 0;
     if (!js_item_bytes(data_item, &data, &len)) return false;
 
+    // C2.8: js_node_stream_write owns the request wrapper and the byte copy on
+    // both the accepted and the rejected path, so there is one free either way.
     HttpConnWriteReq* write_req =
         (HttpConnWriteReq*)mem_calloc(1, sizeof(HttpConnWriteReq), MEM_CAT_JS_RUNTIME);
-    uv_write_t* req = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
-    char* copy = NULL;
-    if (len > 0) {
-        copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
-        memcpy(copy, data, (size_t)len);
-    }
-    write_req->data = copy;
+    if (!write_req) return false;
+    write_req->conn = conn;
     write_req->len = len;
     write_req->close_after = close_after;
-    req->data = write_req;
-
-    uv_buf_t buf = uv_buf_init(copy ? copy : (char*)"", (unsigned int)len);
-    int r = uv_write(req, http_conn_stream(conn), &buf, 1,
-        [](uv_write_t* req, int status) {
-            HttpConnWriteReq* write_req = (HttpConnWriteReq*)req->data;
-            bool close_after = false;
-            JsHttpConn* c = req && req->handle ? (JsHttpConn*)((uv_stream_t*)req->handle)->data : NULL;
-            if (write_req) {
-                close_after = write_req->close_after;
-                http_conn_note_write_done(c, write_req->len);
-                if (write_req->data) mem_free(write_req->data);
-                mem_free(write_req);
-            }
-            if (close_after && c && !c->destroyed) {
+    int r = js_node_stream_write(http_conn_stream(conn), data, (size_t)len,
+        [](void* ud, int status, const char* bytes, size_t byte_len) {
+            (void)bytes; (void)byte_len;
+            HttpConnWriteReq* wr = (HttpConnWriteReq*)ud;
+            JsHttpConn* c = wr->conn;
+            if (status == 0) {
+                http_conn_note_write_done(c, wr->len);
+                if (wr->close_after && c && !c->destroyed) http_conn_close_now(c);
+            } else if (wr->close_after && c && !c->destroyed) {
                 http_conn_close_now(c);
             }
-            mem_free(req);
-        });
-    if (r != 0) {
-        // single-owner rule: libuv never runs the callback for a submission it
-        // rejected, so these frees are the only ones for this request.
-        if (copy) mem_free(copy);
-        mem_free(write_req);
-        mem_free(req);
-        if (close_after) http_conn_close_now(conn);
-        return false;
-    }
+            mem_free(wr);
+        }, write_req);
+    if (r != 0) return false;
     conn->bytes_written += len;
     http_conn_update_socket_counters(conn);
     return http_conn_note_write_queued(conn, len);
@@ -4458,17 +4434,17 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 }
 
 typedef struct HttpClientWriteReq {
-    char* data;
     JsHttpClientReq* creq;
     Item  callback;
 } HttpClientWriteReq;
 
-static void http_client_write_cb(uv_write_t* req, int status) {
-    HttpClientWriteReq* write_req = (HttpClientWriteReq*)req->data;
+static void http_client_write_settled(void* ud, int status, const char* bytes,
+        size_t byte_len) {
+    (void)bytes; (void)byte_len;
+    HttpClientWriteReq* write_req = (HttpClientWriteReq*)ud;
     JsHttpClientReq* creq = write_req ? write_req->creq : NULL;
     if (write_req) {
         http_call_write_callback(write_req->callback);
-        if (write_req->data) mem_free(write_req->data);
         mem_free(write_req);
     }
     if (creq && creq->close_after_send && !creq->destroyed) {
@@ -4477,7 +4453,6 @@ static void http_client_write_cb(uv_write_t* req, int status) {
         js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
         js_http_close_client_req(creq);
     }
-    mem_free(req);
 }
 
 static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int len, Item callback) {
@@ -4485,26 +4460,15 @@ static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int
         http_call_write_callback(callback);
         return;
     }
-    char* copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
-    memcpy(copy, data, (size_t)len);
-    uv_buf_t buf = uv_buf_init(copy, (unsigned int)len);
-    uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
     HttpClientWriteReq* write_req =
         (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
-    write_req->data = copy;
+    if (!write_req) { http_call_write_callback(callback); return; }
     write_req->creq = creq;
     write_req->callback = callback;
-    wreq->data = write_req;
-    // C0.4 single-owner rule: libuv only runs the write callback for a request
-    // it accepted, so a synchronous failure leaves this side the sole owner of
-    // the wrapper and the copied bytes. Freeing here is the only free, and the
-    // caller's write callback still has to settle or req.write(data, cb) hangs.
-    if (uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb) != 0) {
-        mem_free(copy);
-        mem_free(write_req);
-        mem_free(wreq);
-        http_call_write_callback(callback);
-    }
+    // C2.8: the shared helper settles exactly once whether or not libuv
+    // accepted the submission, so the caller's write callback always runs.
+    js_node_stream_write(http_client_stream(creq), data, (size_t)len,
+        http_client_write_settled, write_req);
 }
 
 static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk, Item callback) {
@@ -4709,27 +4673,25 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
 
     // send the HTTP request
     if (creq->send_buf && creq->send_len > 0) {
-        uv_buf_t buf = uv_buf_init(creq->send_buf, (unsigned int)creq->send_len);
-        uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
         HttpClientWriteReq* write_req =
             (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
-        write_req->data = creq->send_buf;
+        if (!write_req) return;
         write_req->creq = creq;
         write_req->callback = make_js_undefined();
-        wreq->data = write_req;
-        creq->send_buf = NULL; // ownership transferred
         creq->sent = true;
-        // C0.4 single-owner rule: a rejected submission never reaches
-        // http_client_write_cb, so this side owns the wrapper and the send
-        // buffer it just took over. Surface it as a request error instead of
-        // leaving a connected request that never completes.
-        if (uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb) != 0) {
-            mem_free(write_req->data);
-            mem_free(write_req);
-            mem_free(wreq);
+        // C2.8: js_node_stream_write copies and owns the bytes, so the request
+        // send buffer is released here rather than being handed to libuv.
+        int r = js_node_stream_write(http_client_stream(creq), creq->send_buf,
+            (size_t)creq->send_len, http_client_write_settled, write_req);
+        mem_free(creq->send_buf);
+        creq->send_buf = NULL;
+        if (r != 0) {
+            // a rejected submission leaves a connected request that can never
+            // complete; surface it as EPIPE instead.
             creq->sent = false;
-            Item err = js_new_error(make_string_item("write EPIPE"));
-            js_set_key_cstr(err, "code", make_string_item("EPIPE"));
+            JsNodeUvError spec;
+            spec.status = r; spec.code = "EPIPE"; spec.message = "write EPIPE";
+            Item err = js_node_uv_error(spec);
             Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
             http_listener_invoke(on_err, creq->js_object, &err, 1);
             creq->destroyed = true;
