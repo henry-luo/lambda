@@ -295,6 +295,13 @@ struct MirTranspiler {
     // The native body epilogue must follow the carrier actually emitted by
     // content lowering; a post-scope AST type probe cannot see boxed locals.
     bool native_body_result_is_raw;
+    // RVO12(a): the carrier the body producer ACTUALLY emitted, published by
+    // the producer instead of inferred at the boundary. `native_body_result_is_raw`
+    // was the one-bit ancestor of this (it says "lane", for two int paths);
+    // this says which carrier, for every producer that knows. VALUE_REP_NONE
+    // means "not published" and keeps the legacy proxy cascade — so adoption
+    // is incremental and cannot regress a producer that has not opted in.
+    ValueRep body_tail_rep;
     AstNode* native_body_tail_expr;
 
     // Variadic function body context: when true, return/raise must emit restore_vargs
@@ -7638,8 +7645,23 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         }
     }
 
-    // Arithmetic ops with native types
-    if (both_int || both_float || int_float) {
+    // Arithmetic ops with native types.
+    //
+    // Gate on the OPERATOR SET this block implements, not only on operand
+    // types: the block eagerly transpiles both operands, so an operator that
+    // ends in its `default: break` re-evaluates them on the boxed path below
+    // — duplicating side effects (a native-int call runs twice), and for a
+    // can-raise LHS the native operand fetch consumes the error lane with
+    // `emit_return_if_item_error`, PROPAGATING an error that `or` was about
+    // to contain. Latent while can-raise callees could not be admitted as
+    // native int operands; surfaced when the raise-arm admission widened.
+    bool native_arith_op = bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+        bi->op == OPERATOR_MUL || bi->op == OPERATOR_DIV ||
+        bi->op == OPERATOR_POW || bi->op == OPERATOR_EQ ||
+        bi->op == OPERATOR_NE || bi->op == OPERATOR_LT ||
+        bi->op == OPERATOR_LE || bi->op == OPERATOR_GT ||
+        bi->op == OPERATOR_GE;
+    if ((both_int || both_float || int_float) && native_arith_op) {
         // A flex-int subexpression is semantically boxed at an ordinary
         // expression boundary, but this float-domain consumer has already
         // proved its raw lane. Re-enter through the native producer or the
@@ -8360,7 +8382,17 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
              if_tid, then_tid, else_tid, then_mir, else_mir);
 
     // If branches have different MIR types or the node type is ANY, always box to Item (I64)
-    bool need_boxing = (if_tid == LMD_TYPE_ANY ||
+    //
+    // RVO12(a): a structured result (a `T | error` branch union, RV17) must box
+    // too. `type_to_mir` collapses every non-float type to I64, so for
+    // `int | error` the register-class comparison sees I64 == I64 and concludes
+    // "no boxing" — while both arms do store Items. The merge register would
+    // then hold an Item that the whole downstream believes is an int lane, and
+    // the tag bits ship as the value (saturating to the inf sentinel). Unions
+    // retain their runtime Item tag (the shape-storage rule), so the boxed
+    // carrier is the correct one; making it explicit here is what lets the
+    // return boundary know what it holds.
+    bool need_boxing = (if_tid == LMD_TYPE_ANY || if_tid == LMD_TYPE_TYPE ||
                         then_mir != else_mir ||
                         then_mir != type_to_mir(if_tid));
 
@@ -11792,6 +11824,9 @@ static MIR_reg_t transpile_content_tail_value(MirTranspiler* mt, AstNode* node) 
             return emit_int_lane_if_item(mt, transpile_expr(mt, native_value));
         }
     }
+    // Every remaining path leaves through the boxing funnel, so the carrier is
+    // an Item BY CONSTRUCTION — not by inspection of the register afterwards.
+    mt->body_tail_rep = VALUE_REP_ITEM;
     return transpile_box_item(mt, node);
 }
 
@@ -16525,19 +16560,34 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     }
 
     MIR_reg_t dyn_result;
-    // v3 (RV12 / §1.4): dynamic dispatch keeps the caller-donated home. The
-    // whole path is C-mediated — JIT calls `fn_callN_into`, which resolves
-    // `fn->invoke` and calls the public wrapper — and a C prototype has no
-    // portable spelling for MIR's two-result convention. These entries move to
-    // the companion lane only once the RV12 context-slot transport exists,
-    // which is why that phase is not Windows-specific.
-    int dyn_scalar_home_id = em_scalar_home_new(&mt->em);
-    MIR_reg_t dyn_scalar_home = em_materialize_frame_ref(&mt->em,
+    // P1.4: the dynamic path is C-mediated — JIT calls `fn_callN_into`, which
+    // resolves `fn->invoke` and calls the public wrapper — and a C prototype
+    // has no portable spelling for MIR's two-result convention.
+    //
+    // Under v3 that is settled by RV12 rather than by a second result: the
+    // wrapper returns a pending Item and leaves lane 2 in
+    // `Context::mir_companion_slot`, and the trampoline resolves it before
+    // returning (`fn_call_boxed_N_into`, and `LambdaDynamicNativeInvoker`
+    // for the `fn->invoke` path). Every consumer of the trailing operand is
+    // `#if !LAMBDA_RETURN_V3`, so the caller donates NOTHING here: the operand
+    // stays in the C signature — keeping one call shape across both
+    // conventions — and is passed null. Materializing a frame slot the callee
+    // never reads was the last return-side home in the emitter.
+    int dyn_scalar_home_id = 0;
+    MIR_reg_t dyn_scalar_home;
+#if LAMBDA_RETURN_V3
+    dyn_scalar_home = new_reg(mt, "dyn_no_home", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, dyn_scalar_home), MIR_new_int_op(mt->ctx, 0)));
+#else
+    dyn_scalar_home_id = em_scalar_home_new(&mt->em);
+    dyn_scalar_home = em_materialize_frame_ref(&mt->em,
         em_scalar_home_ref(&mt->em, dyn_scalar_home_id));
     if (!dyn_scalar_home) {
         log_error("mir: dynamic call has no caller-owned scalar result home");
         abort();
     }
+#endif
 
     if (arg_count == 0) {
         async_emit_invoke_resume_point(mt, call_node);
@@ -16626,7 +16676,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-    em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
+    // Home identity only exists when a home was donated; under v3 the result
+    // is already resolved by the trampoline, so there is nothing to bind.
+    if (dyn_scalar_home_id) {
+        em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
+    }
     if (!call_node->propagate && !mt->emitting_async_call &&
             mir_is_native_scalar_value_type(call_tid)) {
         // A dynamic dispatcher can reject a valid Lambda signature for its
@@ -21093,19 +21147,20 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     // mirrors how a tail-raise proc is admitted, and reuses the same caller
     // merge that reconstructs the Item join for `^`/`^err` consumers.
     //
-    // FLOAT only, deliberately: the D return lane has the universal it2d
-    // fixup for a boxed value arm (the if-merge is boxed, since the union's
-    // type_id is LMD_TYPE_TYPE), while native INT-family lanes have no
-    // boxed-to-lane conversion at the return boundary — a boxed Item would
-    // flow onto the i64 lane as tag bits and saturate to the inf sentinel.
-    if (signature && signature->can_raise && return_tid == LMD_TYPE_FLOAT &&
-            lambda_type_is_union(body_decl)) {
+    // Every native lane, not just FLOAT: RVO12(a) made the body producer
+    // publish its carrier, so the return boundary unboxes a boxed value arm to
+    // the declared lane instead of guessing. Before that, only D worked — its
+    // register class happened to be a faithful carrier proxy, while the int
+    // lanes had none (Item and int lane are both I64) and shipped tag bits.
+    if (signature && signature->can_raise && lambda_type_is_union(body_decl) &&
+            (return_tid == LMD_TYPE_FLOAT || return_tid == LMD_TYPE_INT ||
+             return_tid == LMD_TYPE_INT64)) {
         TypeBinary* join = (TypeBinary*)body_decl;
         Type* value_side =
             join->left && join->left->type_id == LMD_TYPE_ERROR ? join->right
             : join->right && join->right->type_id == LMD_TYPE_ERROR ? join->left
             : NULL;
-        if (value_side && value_side->type_id == LMD_TYPE_FLOAT) return false;
+        if (value_side && value_side->type_id == return_tid) return false;
     }
     return !mir_expr_proves_native_return_lane(mt, body, return_tid);
 }
@@ -22614,6 +22669,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
     mt->native_body_result_is_raw = false;
+    mt->body_tail_rep = VALUE_REP_NONE;
     mt->native_body_tail_expr = NULL;
 
     log_debug("mir: params bound, transpiling body of '%s'", name_buf->str);
@@ -22721,7 +22777,20 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // native int arithmetic body also already is the raw return lane;
         // treating its ABI-oriented effective type as a boxed Item would
         // unbox the lane a second time and read its tag bits as a pointer.
-        if (!mt->block_returned && !mt->native_body_result_is_raw) {
+        if (!mt->block_returned && !mt->native_body_result_is_raw &&
+                mt->body_tail_rep == VALUE_REP_ITEM) {
+            // RVO12(a) — the producer PUBLISHED its carrier, so the boundary
+            // does not have to guess it from syntax, register class, or the
+            // semantic type (the three proxies below, none of which is the
+            // fact: `MIR_reg_type` cannot separate an Item from an int lane
+            // since both are I64, and the semantic type is documented not to
+            // be carrier evidence). One rule replaces all three: an Item is
+            // unboxed to the declared return lane, whatever that lane is.
+            body_result = emit_unbox_contract_lane(mt, body_result,
+                nfi_body->return_type, mt->current_return_type);
+        } else if (!mt->block_returned && !mt->native_body_result_is_raw) {
+            // Legacy proxy cascade — reached only when no producer published a
+            // carrier (VALUE_REP_NONE). Retire each arm as its producers opt in.
             MIR_type_t body_mir = MIR_reg_type(mt->ctx, body_result, mt->em.func);
             // Content lowering deliberately boxes a non-arithmetic tail so
             // declarations and ordinary expression statements share the Item

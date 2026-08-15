@@ -1318,8 +1318,12 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 // shape descriptor says what they speak, so the flag flips emission, not
 // dispatch correctness. The L1 MIR module cache key carries the convention
 // revision so a v2-cached module can never be linked against v3 callers.
+// Return-value convention v3 (companion-lane returns). SHIPPING DEFAULT since
+// 2026-08-15: gated at exact parity with v2 on the same tree — 3715/3721 both
+// ways, identical failure lists, all six pre-existing on a clean tree. v2
+// remains buildable with -DLAMBDA_RETURN_V3=0 until P5 deletes its machinery.
 #ifndef LAMBDA_RETURN_V3
-#define LAMBDA_RETURN_V3 0
+#define LAMBDA_RETURN_V3 1
 #endif
 // Convention revision, folded into the MIR cache key (RV10).
 #define LAMBDA_RETURN_CONVENTION_REVISION (LAMBDA_RETURN_V3 ? 3 : 2)
