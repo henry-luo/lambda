@@ -33,8 +33,7 @@ bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un) {
         if (un->operand->node_type != JS_AST_NODE_IDENTIFIER) return false;
         {
             JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
-            const char* uvname = jm_format_name("_js_%.*s",
-                (int)uid->name->len, uid->name->chars);
+            const char* uvname = jm_var_name(uid->name);
             JsMirVarEntry* uvar = jm_find_var(mt, uvname);
             return uvar && (uvar->type_id == LMD_TYPE_INT ||
                 uvar->type_id == LMD_TYPE_FLOAT) && !uvar->from_env;
@@ -1059,16 +1058,14 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
 
     case JS_AST_NODE_IDENTIFIER: {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
-        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_var_name(id->name);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var) return var->type_id;
         // P5: Check module-level variable type for arithmetic type inference.
         // When a MODVAR was initialized with a numeric literal, modvar_type is set
         // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
         if (mt->module_consts) {
-            JsModuleConstEntry mv_lookup;
-            mv_lookup.name = jm_persist_name(vname);
-            JsModuleConstEntry* mv_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mv_lookup);
+            JsModuleConstEntry* mv_mc = jm_find_module_const(mt, vname);
             if (mv_mc && mv_mc->const_type == MCONST_MODVAR &&
                 (mv_mc->modvar_type == LMD_TYPE_INT || mv_mc->modvar_type == LMD_TYPE_FLOAT))
                 return mv_mc->modvar_type;
@@ -1269,7 +1266,7 @@ Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return NULL;
     if (node->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
-        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_var_name(id->name);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var) return var->full_type;
     }
@@ -1488,7 +1485,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // Identifiers: use native register directly if variable is typed
     if (expr && expr->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)expr;
-        const char* vname = jm_format_name("_js_%.*s", (int)id->name->len, id->name->chars);
+        const char* vname = jm_var_name(id->name);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var && jm_is_native_type(var->type_id)) {
             if (var->tdz_active) {
@@ -1511,9 +1508,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             boxed = var->reg;
         } else if (mt->module_consts) {
             // check module-level variables (e.g. top-level let/var accessed from for-loop update)
-            JsModuleConstEntry lookup;
-            lookup.name = jm_persist_name(vname);
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
             if (mc && mc->const_type == MCONST_MODVAR) {
                 boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
@@ -1589,7 +1584,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         TypeId assign_var_type = LMD_TYPE_ANY;
         if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* aid = (JsIdentifierNode*)asgn->left;
-            const char* avname = jm_format_name("_js_%.*s", (int)aid->name->len, aid->name->chars);
+            const char* avname = jm_var_name(aid->name);
             JsMirVarEntry* avar = jm_find_var(mt, avname);
             native_assign = avar && !avar->from_env &&
                             (avar->type_id == LMD_TYPE_INT || avar->type_id == LMD_TYPE_FLOAT);

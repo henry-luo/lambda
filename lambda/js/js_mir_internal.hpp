@@ -164,6 +164,16 @@ int js_module_const_cmp(const void *a, const void *b, void *udata);
 uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1);
 const char* jm_persist_name(const char* name);
 const char* jm_format_name(const char* format, ...);
+// MIR-level name of a JS variable ("_js_<source name>").
+const char* jm_var_name(const char* name, int len);
+static inline const char* jm_var_name(const String* name) {
+    return name ? jm_var_name(name->chars, (int)name->len) : NULL;
+}
+// Module-const table lookup: the entry for `name` in `consts`, or NULL.
+JsModuleConstEntry* jm_find_module_const_in(struct hashmap* consts, const char* name);
+static inline JsModuleConstEntry* jm_find_module_const(JsMirTranspiler* mt, const char* name) {
+    return mt ? jm_find_module_const_in(mt->module_consts, name) : NULL;
+}
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,

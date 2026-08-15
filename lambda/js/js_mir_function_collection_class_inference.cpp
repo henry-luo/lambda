@@ -331,7 +331,7 @@ JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node) {
 const char* jm_get_param_name(JsAstNode* param_node, int index) {
     JsIdentifierNode* pid = jm_get_param_identifier(param_node);
     if (pid && pid->name) {
-        return jm_format_name("_js_%.*s", (int)pid->name->len, pid->name->chars);
+        return jm_var_name(pid->name);
     }
     return jm_format_name("_js_p%d", index);
 }
@@ -1553,7 +1553,7 @@ void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
         // Check if this is a recursive call — args passed to self propagate evidence
         if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-            const char* cname = jm_format_name("_js_%.*s", (int)cid->name->len, cid->name->chars);
+            const char* cname = jm_var_name(cid->name);
             if (strncmp(cname, self_name, strlen(self_name)) == 0) {
                 // Recursive call: pass-through params are type-consistent
                 // but only reinforce if there's already arithmetic evidence
@@ -1822,7 +1822,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     // Build self-name for recursive call detection
     const char* self_name = NULL;
     if (fn->name) {
-        self_name = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
+        self_name = jm_var_name(fn->name);
     }
 
     // Accumulate evidence
@@ -2025,7 +2025,7 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             JsCallNode* call = (JsCallNode*)expr;
             if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-                const char* cn = jm_format_name("_js_%.*s", (int)cid->name->len, cid->name->chars);
+                const char* cn = jm_var_name(cid->name);
                 if (strncmp(cn, self_name, strlen(self_name)) == 0) {
                     t = LMD_TYPE_FLOAT; // recursive JS Number calls return binary64
                 }
@@ -2110,7 +2110,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
 
     const char* self_name = NULL;
     if (fn->name) {
-        self_name = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
+        self_name = jm_var_name(fn->name);
     }
 
     // For expression-body arrow functions: infer from the expression directly
