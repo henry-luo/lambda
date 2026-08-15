@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3: a MAY_SET property access contributes one ERROR-tag branch, while js_with_save_depth and the abrupt catch exit add none.",
+      "description": "D8.4.3: a MAY_SET named access contributes one ERROR-tag branch, while js_with_save_depth and the abrupt catch exit add none.",
   "checks": [
     {
       "in_func": "_js_dynamicCaught_#_body",
       "expect": [
-        "call\tjs_get_p_r6_n1_a4, js_get",
+        "call\tjs_get_name_id_p_r6_n1_a2, js_get_name_id",
         "call\tjs_error_lane_payload"
       ],
       "count": {

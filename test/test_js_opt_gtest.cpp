@@ -1,7 +1,7 @@
 // Focused JavaScript optimization-contract tests.
 //
 // These tests run one small JS fixture per child process with JS_OPT_TRACE=1
-// and assert the selected cache/guard/IC path in addition to the semantic
+// and assert the selected optimization path in addition to the semantic
 // result. The profile-enabled child is intentional: release timing captures
 // must remain free of contract tracing overhead.
 
@@ -59,7 +59,10 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "tla_deferred_body",
     "tla_drain",
     "uri_error_cache_hit",
-    "uri_error_cache_miss"
+    "uri_error_cache_miss",
+    "named_fast_probe",
+    "named_fast_hit",
+    "named_fast_miss"
 };
 
 static const char* kReasonNames[JS_OPT_REASON_COUNT] = {
@@ -70,7 +73,16 @@ static const char* kReasonNames[JS_OPT_REASON_COUNT] = {
     "length_not_writable",
     "capture_bearing_short_regex",
     "keyless_cache_entry",
-    "shape_changed"
+    "shape_changed",
+    "named_fast_no_key",
+    "named_fast_host_dynamic",
+    "named_fast_no_receiver",
+    "named_fast_no_entry",
+    "named_fast_attributes",
+    "named_fast_bounds",
+    "named_fast_reserved",
+    "named_fast_deleted",
+    "named_fast_value_type"
 };
 
 struct TraceResult {
@@ -752,7 +764,7 @@ TEST(JsOpt, Result29SuperIndexedAssignmentKeepsNullBaseError) {
     expect_trace_off_same("result29_super_indexed_assignment", source, output);
 }
 
-TEST(JsOpt, NamedLoadStoreUsesSharedPropertySemantics) {
+TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
     const char* source =
         "function f(o) { o.x = o.x + 1; return o.x; }\n"
         "var a = {x: 1}; var n = 0;\n"
@@ -760,17 +772,19 @@ TEST(JsOpt, NamedLoadStoreUsesSharedPropertySemantics) {
         "console.log(n); console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
-    ASSERT_TRUE(run_fixture("named_ic_warm", source, &trace,
+    ASSERT_TRUE(run_fixture("named_fast_path", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
-    char* mir = read_fixture_mir("named_ic_warm");
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_PROBE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
+    char* mir = read_fixture_mir("named_fast_path");
     ASSERT_NE(mir, nullptr);
-    // NameId is still the compiler identity, but property behavior belongs to
-    // the shared receiver-aware Get/Set semantics rather than a private cache.
-    EXPECT_NE(strstr(mir, "js_get"), nullptr);
-    EXPECT_NE(strstr(mir, "js_set"), nullptr);
+    // NameId is the compiler identity and the shared runtime head owns the
+    // receiver, descriptor, prototype, and strictness fallback semantics.
+    EXPECT_NE(strstr(mir, "js_get_name_id"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
     free(mir);
-    expect_trace_off_same("named_ic_warm", source, output);
+    expect_trace_off_same("named_fast_path", source, output);
 }
 
 TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {

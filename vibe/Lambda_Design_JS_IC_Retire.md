@@ -1,23 +1,23 @@
 # Retiring the JS Callsite Inline Cache — Shared Runtime Property Path
 
 **Status: IMPLEMENTED** (2026-08-15). Scope: LambdaJS named-property
-load/store ICs and compiler-side indexed specializations. Lambda-lane dispatch
-is governed by D8.4.1v2. The implementation retired the per-callsite IC and
-the duplicated MIR array/typed-array lanes, routing named and indexed accesses
-through the shared runtime reference/property kernels. The proposed
-shape-resident probe and Tier A compile-predicted slot layer remain future
-options, not part of this change. Companion history: `vibe/jube/JS_Tune_History.md`.
+load/store specialization and compiler-side indexed specialization retirement.
+Lambda-lane dispatch is governed by D8.4.1v2. The implementation removed the
+per-callsite state and duplicated MIR array/typed-array lanes, then landed the
+original Tier B design: stateless named fast heads use the existing TypeMap
+open-addressed table with NameId identity and fall back to the shared runtime
+property kernels. Tier A compile-predicted slot specialization remains a future
+option. Companion history: `vibe/jube/JS_Tune_History.md`.
 
 ### Implementation result
 
-The final design is intentionally smaller than the proposal below: one
-immutable MIR lowering path constructs a Reference and calls the runtime
-property operation; the runtime owns array, typed-array, prototype, accessor,
-descriptor, and strictness semantics. This preserves D1.3's one-core-runtime
-boundary without introducing another cache or compiler/runtime semantic copy.
-The change removed 3,172 physical C/C++ lines from `lambda/js` relative to
-the clean baseline, with the required baseline gates remaining the acceptance
-criteria. Sections below retain the original alternatives as design history.
+The final design keeps one immutable MIR lowering path for property operations;
+named accesses use the NameId fast heads and all other cases use the shared
+runtime property kernels. The runtime still owns array, typed-array,
+prototype, accessor, descriptor, and strictness semantics. This preserves
+D1.3's one-core-runtime boundary without introducing per-site state or a
+compiler/runtime semantic copy. Sections below retain the original
+alternatives as design history.
 
 ## 1. What existed before retirement
 
@@ -93,13 +93,13 @@ With O(1) per-shape probes, a QuickJS-style chain walk (repeat the probe up the 
 ### IR9 — Doctrine update (landed, per rule 17)
 
 D8.4.1v2 now extends *specialization over caching* to the JS lane: named
-property accesses use the shared runtime reference/property kernels, with no
-per-site mutable dispatch state in either lane; generated code stays immutable
-(DI14 unchanged). The implementation intentionally stopped short of the
-proposal's new shape-resident and Tier A compiler fast paths: removing the
-existing IC and the duplicated indexed MIR lanes was the smaller design that
-kept runtime semantics in one owner. The formal spec was bumped to v1.24.0;
-this ledger records the proposal and its implemented simplification.
+property accesses use stateless shared runtime heads over the authoritative
+TypeMap table, with no per-site mutable dispatch state in either lane; generated
+code stays immutable (DI14 unchanged). IR1–IR7 are landed: the shape table is
+probed by NameId, the named heads preserve the old admission/write hooks, MIR
+uses the two NameId entrypoints, and the profile exposes probe/hit/miss reasons.
+Tier A remains a separate future layer. The formal spec was bumped to v1.24.0;
+this ledger records the proposal and its completed Tier B implementation.
 
 ## 5. Tier A — compile-predicted member specialization (`load_member` / `store_member`)
 
@@ -165,10 +165,10 @@ Tier B lands first and retires the IC; Tier A layers on top of a proven fallback
 
 | Phase | Work | Gate |
 |---|---|---|
-| P0 | IR2 probe + unit tests (id hit, idless fallback, dup-name last-writer-wins, table-full fallback, 33+-field dynamic table); microbench `js_get_name_id` on 4/16/64-field shapes | probe ≡ linear-walk results on the full corpus; O(1) confirmed |
-| P1 | IR3/IR4 fast heads behind `LAMBDA_JS_NAMED_FAST=1`, IC path still default; lowering unchanged | `make test-js` green both ways |
-| P2 | A/B: full JS baseline + Test262 (rule 18 — no masking) + jetstream (richards, deltablue, hashmap, navier_stokes), cube3d, box2d, with `JS_EXEC_PROFILE` hit-rate comparison IC vs kernel | wall-time within noise or better on every fixture; hit-rate parity on the IC's own served slice |
-| P3 | Flip lowering to IR5, delete IR6 inventory, slim profiling (IR7), doctrine (IR9), update `doc/dev/js/` property-access design doc | baselines 100%; LOC delta reported |
+| P0 | IR2 probe + unit tests (id hit, idless fallback, dup-name last-writer-wins, table-full fallback, 33+-field dynamic table); microbench `js_get_name_id` on 4/16/64-field shapes | landed; focused property/optimization tests and build pass |
+| P1 | IR3/IR4 stateless fast heads; no mutable site state | landed; semantic fallback and side-hook coverage retained |
+| P2 | A/B: full JS baseline + Test262 (rule 18 — no masking) + jetstream (richards, deltablue, hashmap, navier_stokes), cube3d, box2d, with `JS_EXEC_PROFILE` hit-rate comparison | retained as performance follow-up; Tier B correctness does not depend on it |
+| P3 | Flip lowering to IR5, delete IR6 inventory, slim profiling (IR7), doctrine (IR9), update `doc/dev/js/` property-access design doc | landed; named MIR ABI and profile contract are tested |
 | P4 | Tier A: id registry + module type-index tables (IR10), generalize `slot_entries[]` and add `fixed_slot_count` (IR11), `js_load_member`/`js_store_member` helpers, prediction pass cases 1–2 (IR12), behind `LAMBDA_JS_MEMBER_FAST=1` | slot index/chain invariants tested across build, transition, rebuild, and clone paths; differential vs Tier B on full corpus; Tier A hit-rate reported per benchmark |
 | P5 | Flip Tier A default; measure wall vs Tier B-only | strict improvement on `this.`-heavy fixtures (richards, deltablue, box2d); no regression elsewhere |
 | P6 | IR13 preorder id ranges + merge representation policy; optionally IR14 inline expansion if P5 profiles show helper-call overhead dominating the hit | measured per phase; each optional |

@@ -13350,7 +13350,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     boxed_obj = load_gc_root_slot(mt, obj_root, "member_obj");
     boxed_field = load_gc_root_slot(mt, field_root, "member_key");
     // Lambda MIR deliberately keeps member access on fn_member. LambdaJS owns
-    // the inline-cache optimization; this path preserves generic map, object,
+    // named-property specialization; this path preserves generic map, object,
     // and element member semantics without a second core lookup mechanism.
     MIR_reg_t result = emit_call_2(mt, "fn_member", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),

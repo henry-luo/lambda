@@ -7059,7 +7059,8 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
             map_put_heap(m, canonical_key ? canonical_key : str_key, value, js_input);
             TypeMap* shape = (TypeMap*)m->type;
             ShapeEntry* entry = canonical_key
-                ? typemap_hash_lookup_name_id(shape, name_ref_id(canonical_key)) : NULL;
+                ? typemap_hash_lookup_by_name_id(shape, name_ref_id(canonical_key),
+                    property_key_hash(canonical_key)) : NULL;
             if (entry && canonical_key) {
                 // JS maps own canonical keys; Input shapes deliberately retain NULL.
                 entry->key_kind = property_key_kind(canonical_key);
@@ -8032,20 +8033,222 @@ static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool
 // the flag.
 JS_FORWARD_ITEM(js_super_property_set, (Item receiver, Item key, Item value, int64_t strict), js_super_property_set_impl, (receiver, key, value, strict != 0))
 
+enum {
+    JS_NAMED_FAST_RECEIVER_MAP = 0,
+    JS_NAMED_FAST_RECEIVER_ARRAY_PROPS = 1,
+};
+
+static inline void js_named_fast_profile_probe(void) {
+    js_opt_trace_record(JS_OPT_NAMED_FAST_PROBE, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+}
+
+static inline void js_named_fast_profile_miss(JsOptReason reason) {
+    js_opt_trace_record(JS_OPT_NAMED_FAST_MISS, reason,
+        JS_OPT_OUTCOME_FALLBACK);
+}
+
+static inline void js_named_fast_profile_hit(void) {
+    js_opt_trace_record(JS_OPT_NAMED_FAST_HIT, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+}
+
+static inline bool js_named_fast_array_name_allowed(const char* name,
+        int name_len) {
+    if (!name || name_len <= 0) return false;
+    if (name_len == 6 && memcmp(name, "length", 6) == 0) return false;
+    int64_t index = -1;
+    return !js_array_parse_index_name(name, name_len, &index);
+}
+
+static inline Map* js_named_fast_receiver_map(Item object, const char* name,
+        int name_len, uint8_t* out_receiver_kind) {
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_MAP) {
+        Map* map = object.map;
+        if (!map || !map->data) return NULL;
+        bool dataset_owner = false;
+        // dataset views use an ordinary Map shell, but their hidden owner
+        // marker routes writes to DOM attributes; raw slots would bypass that
+        // hook and make MutationObserver state diverge from the property.
+        js_map_shape_lookup_ext(map, "__lambda_dataset_element", 24,
+            &dataset_owner);
+        if (dataset_owner) return NULL;
+        if (out_receiver_kind) *out_receiver_kind = JS_NAMED_FAST_RECEIVER_MAP;
+        return map;
+    }
+    if (type == LMD_TYPE_ARRAY && js_named_fast_array_name_allowed(name,
+            name_len)) {
+        Array* arr = object.array;
+        if (!arr || !js_array_has_props(arr) ||
+                js_dom_collection_has_live_property_state(object)) return NULL;
+        if (out_receiver_kind) {
+            *out_receiver_kind = JS_NAMED_FAST_RECEIVER_ARRAY_PROPS;
+        }
+        return js_array_props(arr);
+    }
+    return NULL;
+}
+
+static inline bool js_named_fast_receiver_map_is_fast(Map* map,
+        uint8_t receiver_kind) {
+    if (!map || !map->data) return false;
+    if (receiver_kind == JS_NAMED_FAST_RECEIVER_ARRAY_PROPS) {
+        return map_kind_is_array_props(map->map_kind);
+    }
+    return receiver_kind == JS_NAMED_FAST_RECEIVER_MAP &&
+        js_object_uses_ordinary_shape((Item){.map = map});
+}
+
+static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
+        Map** out_map, ShapeEntry** out_entry, uint8_t* out_receiver_kind,
+        Item* out_value, JsOptReason* out_reason) {
+    if (out_map) *out_map = NULL;
+    if (out_entry) *out_entry = NULL;
+    if (out_receiver_kind) *out_receiver_kind = JS_NAMED_FAST_RECEIVER_MAP;
+    if (out_value) *out_value = ItemNull;
+    if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_NO_RECEIVER;
+    if (!key || name_id == NAME_ID_NONE || key->len > 2147483647u) return false;
+
+    const char* name = key->chars;
+    int name_len = (int)key->len;
+    uint8_t receiver_kind = JS_NAMED_FAST_RECEIVER_MAP;
+    Map* map = js_named_fast_receiver_map(object, name, name_len,
+        &receiver_kind);
+    if (!map || !js_named_fast_receiver_map_is_fast(map, receiver_kind)) {
+        return false;
+    }
+    TypeMap* type_map = (TypeMap*)map->type;
+    if (!type_map || !typemap_ptr_is_plausible(type_map) || !type_map->shape) {
+        return false;
+    }
+
+    ShapeEntry* entry = typemap_hash_lookup_by_name_id(type_map, name_id,
+        property_key_hash(key));
+    if (!entry) {
+        entry = typemap_hash_lookup_idless(type_map, name, name_len);
+    }
+    if (!entry) {
+        if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_NO_ENTRY;
+        return false;
+    }
+    if (entry->flags != 0) {
+        if (receiver_kind == JS_NAMED_FAST_RECEIVER_MAP) {
+            js_map_promote_descriptor_kind(map);
+        }
+        if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_ATTRIBUTES;
+        return false;
+    }
+    if (!shape_entry_storage_fits_data(entry, map->data_cap)) {
+        if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_BOUNDS;
+        return false;
+    }
+    if (receiver_kind == JS_NAMED_FAST_RECEIVER_MAP &&
+            map_ctor_offset_is_reserved(map, entry->byte_offset)) {
+        if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_RESERVED;
+        return false;
+    }
+
+    Item value = _map_read_field(entry, map->data);
+    if (js_is_deleted_sentinel(value)) {
+        if (receiver_kind == JS_NAMED_FAST_RECEIVER_MAP) {
+            js_map_promote_descriptor_kind(map);
+        }
+        if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_DELETED;
+        return false;
+    }
+    if (out_map) *out_map = map;
+    if (out_entry) *out_entry = entry;
+    if (out_receiver_kind) *out_receiver_kind = receiver_kind;
+    if (out_value) *out_value = value;
+    if (out_reason) *out_reason = JS_OPT_REASON_NONE;
+    return true;
+}
+
+static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
+        Item value) {
+    if (!entry || !entry->type) return false;
+    TypeId field_type = entry->type->type_id;
+    TypeId value_type = get_type_id(value);
+    return field_type == value_type ||
+        (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) ||
+        (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT);
+}
+
+static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
+        Item value) {
+    if (!entry || !entry->type || !data) return false;
+    TypeId field_type = entry->type->type_id;
+    TypeId value_type = get_type_id(value);
+    void* field_ptr = (char*)data + entry->byte_offset;
+    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
+        *(double*)field_ptr = lambda_int_item_value(value);
+        return true;
+    }
+    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
+        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
+        return true;
+    }
+    if (field_type != value_type) return false;
+    return js_store_typed_value(field_ptr, value_type, value);
+}
+
 extern "C" Item js_get_name_id(Item object, NameId name_id) {
+    js_named_fast_profile_probe();
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
         name_id);
-    if (!key) return ItemNull;
-    // NameId is the compiler/runtime identity; materialize only at this
-    // existing property-operation boundary (D4.6.1v2).
-    return js_get_reference(object, (Item){.item = s2it(key)});
+    if (!key) {
+        js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_NO_KEY);
+        return ItemNull;
+    }
+    Item key_item = (Item){.item = s2it(key)};
+    Item host_value = ItemNull;
+    // host-backed names are live state; the placeholder shape must never win.
+    if (js_get_host_dynamic_property(object, key_item, &host_value)) {
+        js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_HOST_DYNAMIC);
+        return host_value;
+    }
+    Item value = ItemNull;
+    JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_RECEIVER;
+    if (js_named_fast_lookup(object, key, name_id, NULL, NULL, NULL,
+            &value, &reason)) {
+        js_named_fast_profile_hit();
+        return value;
+    }
+    js_named_fast_profile_miss(reason);
+    return js_get_reference(object, key_item);
 }
 
 extern "C" Item js_set_name_id(Item object, NameId name_id,
-    Item value, int64_t strict) {
+        Item value, int64_t strict) {
+    js_named_fast_profile_probe();
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
         name_id);
-    if (!key) return ItemNull;
+    if (!key) {
+        js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_NO_KEY);
+        return ItemNull;
+    }
+    Map* map = NULL;
+    ShapeEntry* entry = NULL;
+    JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_RECEIVER;
+    if (js_named_fast_lookup(object, key, name_id, &map, &entry,
+            NULL, NULL, &reason) &&
+            js_named_fast_store_can_write_same_slot(entry, value) &&
+            js_named_fast_store_same_slot(entry, map->data, value)) {
+        // Raw writes are valid only after the shared admission kernel has
+        // proved a live default data slot; these hooks preserve observable
+        // global bindings and DOM event-handler updates on the hit path.
+        js_sync_global_var_module_binding(object,
+            (Item){.item = s2it(key)}, value);
+        js_note_event_handler_property_set(object, key->chars,
+            (int)key->len, value);
+        js_named_fast_profile_hit();
+        return value;
+    }
+    if (reason == JS_OPT_REASON_NONE) {
+        reason = JS_OPT_REASON_NAMED_FAST_VALUE_TYPE;
+    }
+    js_named_fast_profile_miss(reason);
     return js_set_key_policy(object, (Item){.item = s2it(key)}, value, strict);
 }
 
@@ -30794,7 +30997,7 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
         ctx->module_state_id != prev_module_state_id;
     if (switched_module_state) {
         // An async continuation can run after another module has become active;
-        // restore the suspended function's name/IC image before state code
+        // restore the suspended function's name image before state code
         // resolves sealed property lanes (D5.4.3).
         js_set_active_module_state_id(ctx->module_state_id);
     }

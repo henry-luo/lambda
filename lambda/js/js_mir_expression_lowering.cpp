@@ -1154,7 +1154,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
             ref.is_private = jm_is_private_name(key_name);
             if (key_name && !ref.is_private) {
                 ref.named_key_id = well_known_name_id({key_name->chars, key_name->len});
-                // The IC receives the owner module's resolved NameId at
+                // the runtime receives the owner module's resolved NameId at
                 // execution time. A compiler-time ID would bake a realm into
                 // shared MIR (D5.4.3, D5.4.4).
                 ref.named_key_index = jm_module_name_index(mt,
@@ -1320,12 +1320,10 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
             return result;
         }
         if (!ref->is_private && ref->named_key_index != UINT32_MAX) {
-            MIR_reg_t lane = jm_emit_reference_name_id(mt, ref);
-            return jm_call_4(mt, "js_get", MIR_T_I64,
+            MIR_reg_t name_id = jm_emit_reference_name_id(mt, ref);
+            return jm_call_2(mt, "js_get_name_id", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id));
         }
         MIR_reg_t key = ref->key_reg;
         if (ref->computed_key && !ref->property_key_canonicalized) {
@@ -1388,29 +1386,36 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
         }
         else {
-            MIR_reg_t key = ref->key_reg;
-            if (ref->computed_key && !ref->property_key_canonicalized) {
-                key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                jm_emit_error_lane_propagate_check(mt);
-                jm_create_gc_root_slot(mt, key);
-            }
-            MIR_reg_t lane = ref->named_key_index != UINT32_MAX
-                ? jm_emit_reference_name_id(mt, ref)
-                : jm_call_1(mt, "js_property_lane_for_canonical_key",
+            if (ref->named_key_index != UINT32_MAX) {
+                MIR_reg_t name_id = jm_emit_reference_name_id(mt, ref);
+                result = jm_call_4(mt, "js_set_name_id", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
+            } else {
+                MIR_reg_t key = ref->key_reg;
+                if (ref->computed_key && !ref->property_key_canonicalized) {
+                    key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                    jm_emit_error_lane_propagate_check(mt);
+                    jm_create_gc_root_slot(mt, key);
+                }
+                MIR_reg_t lane = jm_call_1(mt, "js_property_lane_for_canonical_key",
                     MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            result = jm_call_5(mt, "js_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
-            result = jm_call_5(mt, "js_assignment_set_result", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+                result = jm_call_5(mt, "js_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+                result = jm_call_5(mt, "js_assignment_set_result", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+            }
         }
         break;
     case JS_MIR_REF_SUPER_PROPERTY:
@@ -6688,13 +6693,9 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 if (mem_obj_spill >= 0) jm_gen_spill_load(mt, obj, mem_obj_spill);
                 MIR_reg_t name_id = jm_module_name_id(mt, key_name->chars,
                     key_name->len);
-                MIR_reg_t key_item = jm_box_property_name_literal(mt,
-                    key_name->chars, key_name->len);
-                MIR_reg_t val = jm_call_4(mt, "js_get", MIR_T_I64,
+                MIR_reg_t val = jm_call_2(mt, "js_get_name_id", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id));
                 jm_emit_error_lane_propagate_check(mt);
                 return val;
             }
