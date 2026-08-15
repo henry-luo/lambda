@@ -84,21 +84,13 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
     // and append each consumer unit at the base encoded into its MIR.
     if (inherits_preamble) {
         uint32_t active_names = js_active_module_name_count();
-        uint32_t active_ics = js_active_module_ic_count();
         if (active_names == 0 && inherited > 0 &&
                 !lambda_module_state_link_property_keys(
                     context->active_js_module_state->module_id,
                     inherited_specs, inherited, inherited_bytes)) {
             return false;
         }
-        uint32_t inherited_ic = g_jm_preamble_in->ic_count;
-        if (active_ics == 0 && inherited_ic > 0 &&
-                !js_link_module_ic_table(
-                    context->active_js_module_state->module_id, inherited_ic)) {
-            return false;
-        }
-        if (js_active_module_name_count() < inherited ||
-                js_active_module_ic_count() < inherited_ic) {
+        if (js_active_module_name_count() < inherited) {
             log_error("js-preamble-link: consumer is missing its inherited prefix");
             return false;
         }
@@ -116,10 +108,7 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
         image_bytes);
     mem_free(image);
     if (!linked) return false;
-    uint32_t inherited_ic = inherits_preamble ? g_jm_preamble_in->ic_count : 0;
-    uint32_t local_ic = mt ? mt->ic_count : 0;
-    return js_link_module_ic_table(
-        context->active_js_module_state->module_id, inherited_ic + local_ic);
+    return true;
 }
 
 // every consumer gets a fresh state whose prefix is the immutable preamble;
@@ -127,8 +116,6 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
 // prefix that js_link_compiled_name_table actually installs.
 JS_FORWARD_STATIC_EXPRESSION(uint32_t, js_preamble_consumer_name_base,
     (const JsPreambleState* preamble), preamble ? preamble->module_property_count : 0)
-JS_FORWARD_STATIC_EXPRESSION(uint32_t, js_preamble_consumer_ic_base,
-    (const JsPreambleState* preamble), preamble ? preamble->ic_count : 0)
 
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt) {
     bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
@@ -161,10 +148,6 @@ bool js_append_compiled_name_table(const JsMirTranspiler* mt) {
     }
     bool linked = lambda_module_state_append_property_keys(
         context->active_js_module_state->module_id, image, count, bytes);
-    if (linked && mt && mt->ic_count > 0) {
-        linked = js_append_module_ic_table(
-            context->active_js_module_state->module_id, mt->ic_count);
-    }
     mem_free(image);
     return linked;
 }
@@ -182,8 +165,6 @@ bool js_capture_compiled_name_table(const JsMirTranspiler* mt,
         ? g_jm_preamble_in->module_property_count : 0;
     uint32_t inherited_bytes = g_jm_preamble_in
         ? g_jm_preamble_in->module_property_bytes_size : 0;
-    uint32_t inherited_ic = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
-    state->ic_count = inherited_ic + (mt ? mt->ic_count : 0);
     if ((!mt || !mt->module_name_specs || mt->module_name_specs->length == 0) &&
             inherited_count == 0) return true;
     return jm_build_property_key_image(
@@ -385,7 +366,6 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         return (Item){.item = ITEM_ERROR};
     }
     mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
-    mt->module_ic_base = js_preamble_consumer_ic_base(g_jm_preamble_in);
 
     mt->module = MIR_new_module(ctx, "ts_script");
 
@@ -819,7 +799,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
     mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
-    mt->module_ic_base = js_preamble_consumer_ic_base(g_jm_preamble_in);
 
     // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
@@ -1396,10 +1375,8 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
         return ItemError;
     }
     uint32_t unit_state_id = js_get_active_module_state_id();
-    // D3.4.4v2: immutable cached MIR keeps the property/IC indices encoded at
-    // the preamble boundary. Give it a private slab with that exact prefix;
-    // executing against the growing browser-consumer slab aliases its first
-    // script names and ICs once any user unit has appended to the table.
+    // D3.4.4v2: immutable cached MIR keeps property indices encoded at the
+    // preamble boundary, so each cached unit receives its exact name prefix.
     bool linked = lambda_module_state_link_property_keys(unit_state_id,
             base_preamble->module_property_specs,
             base_preamble->module_property_count,
@@ -1408,8 +1385,6 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
             compiled_state->module_property_specs,
             compiled_state->module_property_count,
             compiled_state->module_property_bytes_size) &&
-        js_link_module_ic_table(unit_state_id, base_preamble->ic_count) &&
-        js_append_module_ic_table(unit_state_id, compiled_state->ic_count) &&
         js_copy_module_state_var_prefix(consumer_state_id, unit_state_id,
             (uint32_t)base_preamble->module_var_count);
     if (!linked) {
@@ -1464,7 +1439,6 @@ bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out
     out_state->module_var_count = source->module_var_count;
     out_state->module_state_id = UINT32_MAX;
     out_state->entry_count = source->entry_count;
-    out_state->ic_count = source->ic_count;
     out_state->owns_compiled_state = false;
     if (!js_preamble_entries_copy(source->entries, source->entry_count,
                                   &out_state->entries)) {
@@ -1540,10 +1514,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     if (!lambda_module_state_link_property_keys(js_get_active_module_state_id(),
             cached->module_property_specs, cached->module_property_count,
             cached->module_property_bytes_size)) {
-        preamble_state_destroy(out_state);
-        return ItemError;
-    }
-    if (!js_link_module_ic_table(js_get_active_module_state_id(), cached->ic_count)) {
         preamble_state_destroy(out_state);
         return ItemError;
     }
@@ -1896,6 +1866,19 @@ static void js_cjs_update_cached_default(Item filename, Item module) {
     js_set_key_default(ns, js_cjs_key("default", (int)strlen("default")), js_cjs_exports(module));
 }
 
+// all loader clients project the same cached namespace to its CJS default;
+// keeping that projection here prevents raw and canonical require probes from
+// drifting apart.
+static Item js_cjs_cached_value(Item specifier) {
+    Item namespace_item = js_module_get(specifier);
+    if (get_type_id(namespace_item) == LMD_TYPE_NULL) return ItemNull;
+    Item default_value = js_get_key_default(namespace_item,
+        js_cjs_key("default", (int)strlen("default")));
+    TypeId type = get_type_id(default_value);
+    return type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED
+        ? default_value : namespace_item;
+}
+
 extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
@@ -2050,17 +2033,8 @@ extern "C" Item js_require(Item specifier) {
     if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
 
     // Check if already loaded in module cache
-    Item existing = js_module_get(specifier);
+    Item existing = js_cjs_cached_value(specifier);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
-        // For CJS modules, the cached value is the namespace.
-        // Extract the default export (which is module.exports)
-        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_get_key_default(existing, def_key);
-        TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
-            if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, def_val);
-            return def_val;
-        }
         if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, existing);
         return existing;
     }
@@ -2084,17 +2058,10 @@ extern "C" Item js_require(Item specifier) {
     jm_track_active_js_transpile(NULL, NULL, source);
 
     Item resolved_spec = (Item){.item = s2it(heap_create_name(path_buf, strlen(path_buf)))};
-    existing = js_module_get(resolved_spec);
+    existing = js_cjs_cached_value(resolved_spec);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
-        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_get_key_default(existing, def_key);
-        TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
-            if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, def_val);
-            return def_val;
-        }
         if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, existing);
         return existing;
     }
@@ -2147,14 +2114,11 @@ extern "C" Item js_require(Item specifier) {
 
     // For CJS, extract the default export (module.exports)
     if (js_is_cjs_file(path_buf)) {
-        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_get_key_default(ns, def_key);
-        TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
-            js_cjs_note_child(resolved_spec, def_val);
-            return def_val;
+        Item result = js_cjs_cached_value(resolved_spec);
+        if (get_type_id(result) != LMD_TYPE_NULL) {
+            js_cjs_note_child(resolved_spec, result);
+            return result;
         }
-        js_cjs_note_child(resolved_spec, ns);
     }
 
     return ns;

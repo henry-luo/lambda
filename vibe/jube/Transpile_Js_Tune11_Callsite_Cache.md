@@ -1,7 +1,13 @@
 # Transpile JS Tune11 Proposal: Plain-Map Property Access ICs
 
 Date: 2026-06-24
-Status: P1/P2/P3/P4/P5 slices implemented; P6a cached intrinsic prototypes implemented; js262 clean
+Status: historical proposal; the LambdaJS per-callsite IC was retired on
+2026-08-15 under formal D8.4.1v2. P6a cached intrinsic prototypes remains
+runtime behavior; the IC candidates below are no longer active work items.
+
+Implementation note: named and indexed property access now uses the shared
+runtime reference/property kernels. The compiler-side array and typed-array
+specializations were also removed so runtime semantics have one owner.
 
 Primary sources:
 

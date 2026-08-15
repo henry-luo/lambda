@@ -792,7 +792,6 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
     mt->module_name_base = js_active_module_name_count();
-    mt->module_ic_base = js_active_module_ic_count();
 
     if (inherit_caller_environment && g_eval_preamble_entries &&
             g_eval_preamble_entry_count > 0) {
@@ -1806,8 +1805,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
         mt->module_name_base = js_eval_fresh_module_scope
             ? 0 : js_active_module_name_count();
-        mt->module_ic_base = js_eval_fresh_module_scope
-            ? 0 : js_active_module_ic_count();
         // This lowering mode describes eval's global var environment. Indirect
         // eval is global-scope too, so Annex-B declaration lowering must keep
         // its eval export path even though it never inherits caller lexicals.

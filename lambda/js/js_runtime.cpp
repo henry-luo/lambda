@@ -23,6 +23,18 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/utf.h"
 
+static Item js_runtime_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
+}
+
+#define js_dc_key js_runtime_key
+#define js_cluster_key js_runtime_key
+#define js_repl_key js_runtime_key
+#define js_trace_key js_runtime_key
+#define js_async_hooks_key js_runtime_key
+#define js_vm_stm_key js_runtime_key
+#define js_cc_key js_runtime_key
+
 typedef struct JsProxyMapCarrier {
     Map base;
     JsProxyData payload;
@@ -8020,252 +8032,6 @@ static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool
 // the flag.
 JS_FORWARD_ITEM(js_super_property_set, (Item receiver, Item key, Item value, int64_t strict), js_super_property_set_impl, (receiver, key, value, strict != 0))
 
-#if LAMBDA_INLINE_CACHE
-static bool js_array_named_ic_enabled() {
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char* flag = getenv("LAMBDA_JS_ARRAY_NAMED_IC");
-        enabled = (!flag || flag[0] == '\0' || strcmp(flag, "0") != 0) ? 1 : 0;
-    }
-    return enabled != 0;
-}
-
-static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
-#ifdef NDEBUG
-    (void)m;
-    (void)byte_offset;
-    return true;
-#else
-    if (!m || !m->data || byte_offset < 0) return false;
-    return byte_offset < (int64_t)m->data_cap;
-#endif
-}
-
-static inline bool js_load_ic_name_matches(ShapeEntry* entry,
-        const char* name, int name_len, NameId name_id) {
-    if (name_id != NAME_ID_NONE) {
-        if (typemap_shape_entry_has_name_id(entry, name_id)) return true;
-        // The only legal byte fallback for a generated key is an id-less
-        // Input field.  Two generated names sharing bytes remain distinct.
-        return entry && entry->name_id == NAME_ID_NONE &&
-            typemap_shape_name_equals_hash(entry, name, name_len,
-                typemap_name_hash(name, name_len));
-    }
-    return typemap_shape_name_equals_hash(entry, name, name_len,
-        typemap_name_hash(name, name_len));
-}
-
-static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
-    if (!name || name_len <= 0) return false;
-    if (name_len == 6 && memcmp(name, "length", 6) == 0) return false;
-    int64_t index = -1;
-    return !js_array_parse_index_name(name, name_len, &index);
-}
-
-static inline Map* js_named_ic_receiver_map(Item object, const char* name, int name_len,
-        uint8_t* out_receiver_kind) {
-    TypeId type = get_type_id(object);
-    if (type == LMD_TYPE_MAP) {
-        if (out_receiver_kind) *out_receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-        return object.map;
-    }
-    if (type == LMD_TYPE_ARRAY && js_array_named_ic_enabled() &&
-            js_named_ic_array_name_allowed(name, name_len)) {
-        Array* arr = object.array;
-        if (!js_array_has_props(arr)) return NULL;
-        // Live DOM collection names are derived from the current tree; an IC
-        // hit would bypass its refresh hook and expose removed or renamed nodes.
-        if (js_dom_collection_has_live_property_state(object)) return NULL;
-        if (out_receiver_kind) *out_receiver_kind = JS_NAMED_IC_RECEIVER_ARRAY_PROPS;
-        return js_array_props(arr);
-    }
-    return NULL;
-}
-
-static inline bool js_named_ic_receiver_map_is_fast(Map* m, uint8_t receiver_kind) {
-    if (!m || !m->data) return false;
-    if (receiver_kind == JS_NAMED_IC_RECEIVER_ARRAY_PROPS) {
-        return map_kind_is_array_props(m->map_kind);
-    }
-    return receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-        js_object_uses_ordinary_shape((Item){.map = m});
-}
-
-// Load/store ICs share the same shape admission policy. Keeping that policy in
-// one kernel prevents the two caches from drifting on Input tombstones,
-// constructor reservations, or NameId-versus-byte matching.
-static bool js_named_ic_find_entry(Item object, const char* name, int name_len,
-        NameId name_id, Map** out_map, ShapeEntry** out_entry,
-        uint8_t* out_receiver_kind, Item* out_old_value) {
-    if (out_map) *out_map = NULL;
-    if (out_entry) *out_entry = NULL;
-    if (out_old_value) *out_old_value = ItemNull;
-    if (!name || name_len < 0) return false;
-
-    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
-    if (!m || !js_named_ic_receiver_map_is_fast(m, receiver_kind)) return false;
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) return false;
-
-    ShapeEntry* entry = name_id != NAME_ID_NONE
-        ? typemap_hash_lookup_name_id(tm, name_id) : NULL;
-    if (!entry && name_id != NAME_ID_NONE) {
-        entry = typemap_hash_lookup_idless(tm, name, name_len);
-    }
-    if (!entry && name_id == NAME_ID_NONE) {
-        entry = typemap_hash_lookup_by_hash(tm, name, name_len,
-            typemap_name_hash(name, name_len));
-    }
-    if (!entry || !js_load_ic_name_matches(entry, name, name_len, name_id)) return false;
-    if (entry->flags != 0) {
-        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
-        return false;
-    }
-    if (!js_load_ic_offset_ok(m, entry->byte_offset)) return false;
-    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
-
-    Item old_value = _map_read_field(entry, m->data);
-    if (js_is_deleted_sentinel(old_value)) {
-        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
-        return false;
-    }
-    if (out_map) *out_map = m;
-    if (out_entry) *out_entry = entry;
-    if (out_receiver_kind) *out_receiver_kind = receiver_kind;
-    if (out_old_value) *out_old_value = old_value;
-    return true;
-}
-
-#if LAMBDA_INLINE_CACHE
-static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
-        uint8_t receiver_kind, NameId name_id, Item* out_value) {
-    if (!m || !cached || !cached->shape || !cached->entry) return false;
-    if (cached->name_id != name_id) return false;
-    if (cached->receiver_kind != receiver_kind) return false;
-    if (m->type != cached->shape) return false;
-    if (!js_load_ic_offset_ok(m, cached->byte_offset)) return false;
-    ShapeEntry* entry = (ShapeEntry*)cached->entry;
-    // A shared constructor shape can name storage that is still absent on this
-    // instance; an IC hit must not turn the zero-filled reservation into data.
-    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
-    if (out_value) *out_value = _map_read_field(entry, m->data);
-    return true;
-}
-
-static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
-        NameId name_id,
-        JsLoadICEntry* out_entry, Item* out_value) {
-    if (!out_entry || !out_value || !name || name_len < 0) return false;
-    Map* m = NULL;
-    ShapeEntry* entry = NULL;
-    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    Item value = ItemNull;
-    if (!js_named_ic_find_entry(object, name, name_len, name_id, &m, &entry,
-            &receiver_kind, &value)) return false;
-
-    out_entry->shape = m->type;
-    out_entry->entry = entry;
-    out_entry->byte_offset = entry->byte_offset;
-    out_entry->name_id = entry->name_id != NAME_ID_NONE
-        ? entry->name_id : name_id;
-    out_entry->receiver_kind = receiver_kind;
-    *out_value = value;
-    return true;
-}
-
-#endif
-#endif
-
-static Item js_get_name_id_ic_slow(Item object, NameId name_id) {
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
-    return js_get_reference(object, key
-        ? (Item){.item = s2it(key)} : make_js_undefined());
-}
-
-static Item js_get_name_id_ic_impl(Item object, NameId name_id,
-        JsLoadIC* ic) {
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
-    if (!key || key->len > 2147483647u) {
-        return js_get_name_id_ic_slow(object, name_id);
-    }
-    Item host_value = ItemNull;
-    // Live window properties cannot be cached from the preamble's placeholder
-    // map because resize and scroll mutate their host-backed values in place.
-    if (js_get_host_dynamic_property(object,
-            (Item){.item = s2it(key)}, &host_value)) {
-        return host_value;
-    }
-    const char* name = key->chars;
-    int name_len = (int)key->len;
-#if !LAMBDA_INLINE_CACHE
-    return js_get_name_id_ic_slow(object, name_id);
-#else
-    if (!ic) return js_get_name_id_ic_slow(object, name_id);
-
-    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
-    if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
-        Item value = ItemNull;
-        if (ic->state == JS_LOAD_IC_MONO) {
-            if (ic->name_id == name_id && js_load_ic_try_hit_entry(m,
-                    &ic->entries[0], receiver_kind, name_id, &value)) {
-                return value;
-            }
-        } else if (ic->state == JS_LOAD_IC_POLY) {
-            int count = ic->count;
-            if (count > JS_LOAD_IC_POLY_MAX) count = JS_LOAD_IC_POLY_MAX;
-            for (int i = 0; i < count; i++) {
-                if (ic->name_id == name_id && js_load_ic_try_hit_entry(m,
-                        &ic->entries[i], receiver_kind, name_id, &value)) {
-                    return value;
-                }
-            }
-        } else if (ic->state == JS_LOAD_IC_MEGAMORPHIC) {
-            return js_get_name_id_ic_slow(object, name_id);
-        }
-    }
-
-    if (ic->miss_count != 0xffffu) ic->miss_count++;
-
-    if (ic->state != JS_LOAD_IC_MEGAMORPHIC) {
-        JsLoadICEntry entry;
-        memset(&entry, 0, sizeof(entry));
-        Item value = ItemNull;
-        if (js_load_ic_build_entry(object, name, name_len, name_id,
-                &entry, &value)) {
-            if (ic->name_id == NAME_ID_NONE) ic->name_id =
-                entry.name_id ? entry.name_id : name_id;
-            for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
-                if (ic->entries[i].shape == entry.shape &&
-                        ic->entries[i].receiver_kind == entry.receiver_kind) {
-                    ic->entries[i] = entry;
-                    return value;
-                }
-            }
-            if (ic->state == JS_LOAD_IC_EMPTY || ic->count == 0) {
-                ic->entries[0] = entry;
-                ic->count = 1;
-                ic->state = JS_LOAD_IC_MONO;
-                return value;
-            }
-            if (ic->count < JS_LOAD_IC_POLY_MAX) {
-                ic->entries[ic->count++] = entry;
-                ic->state = JS_LOAD_IC_POLY;
-                return value;
-            }
-            ic->state = JS_LOAD_IC_MEGAMORPHIC;
-            return value;
-        }
-    }
-
-    return js_get_name_id_ic_slow(object, name_id);
-#endif
-}
-JS_FORWARD_ITEM(js_get_name_id_ic, (Item object, NameId name_id,         JsLoadIC* ic), js_get_name_id_ic_impl, (object, name_id, ic))
-
 extern "C" Item js_get_name_id(Item object, NameId name_id) {
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
         name_id);
@@ -8282,175 +8048,6 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
     if (!key) return ItemNull;
     return js_set_key_policy(object, (Item){.item = s2it(key)}, value, strict);
 }
-
-static Item js_set_name_id_ic_slow(Item object, NameId name_id,
-        Item value, int64_t strict) {
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
-    return js_set_key_policy(object,
-        key ? (Item){.item = s2it(key)} : make_js_undefined(), value, strict);
-}
-
-#if LAMBDA_INLINE_CACHE
-static inline bool js_store_ic_can_write_same_slot(ShapeEntry* entry, Item value) {
-    if (!entry || !entry->type) return false;
-    TypeId field_type = entry->type->type_id;
-    TypeId value_type = get_type_id(value);
-    if (field_type == value_type) return true;
-    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) return true;
-    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) return true;
-    return false;
-}
-
-static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
-        Item value) {
-    if (!entry || !entry->type || !data) return false;
-    TypeId field_type = entry->type->type_id;
-    TypeId value_type = get_type_id(value);
-    void* field_ptr = (char*)data + entry->byte_offset;
-
-    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-        *(double*)field_ptr = lambda_int_item_value(value);
-        return true;
-    }
-    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
-        *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
-        return true;
-    }
-    if (field_type != value_type) return false;
-
-    return js_store_typed_value(field_ptr, value_type, value);
-}
-
-static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
-        uint8_t receiver_kind, NameId name_id, Item value) {
-    if (!m || !cached || !cached->shape || !cached->entry) return false;
-    if (cached->name_id != name_id) return false;
-    if (cached->receiver_kind != receiver_kind || m->type != cached->shape ||
-            !js_load_ic_offset_ok(m, cached->byte_offset)) return false;
-    ShapeEntry* entry = (ShapeEntry*)cached->entry;
-    // A shared constructor shape names storage that a sibling instance may not
-    // have assigned yet. Writing the raw slot here would leave the instance's
-    // ctor_reserved_mask set, so the value would be stored but stay invisible to
-    // reads and enumeration; creating the own property must go through the slow
-    // path, which clears the reservation (and honours prototype setters).
-    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
-    if (!js_store_ic_write_same_slot(entry, m->data, value)) return false;
-    return true;
-}
-
-static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
-        NameId name_id,
-        Item value, JsLoadICEntry* out_entry) {
-    if (!out_entry || !name || name_len < 0) return false;
-    Map* m = NULL;
-    ShapeEntry* entry = NULL;
-    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    if (!js_named_ic_find_entry(object, name, name_len, name_id, &m, &entry,
-            &receiver_kind, NULL)) return false;
-    if (!js_store_ic_can_write_same_slot(entry, value)) return false;
-
-    out_entry->shape = m->type;
-    out_entry->entry = entry;
-    out_entry->byte_offset = entry->byte_offset;
-    out_entry->name_id = entry->name_id != NAME_ID_NONE
-        ? entry->name_id : name_id;
-    out_entry->receiver_kind = receiver_kind;
-    return true;
-}
-
-static void js_store_ic_install(JsStoreIC* ic, NameId name_id,
-        JsLoadICEntry* entry) {
-    if (!ic || !entry || !entry->shape) return;
-    if (ic->name_id == NAME_ID_NONE) ic->name_id =
-        entry->name_id ? entry->name_id : name_id;
-    for (int i = 0; i < ic->count && i < JS_STORE_IC_POLY_MAX; i++) {
-        if (ic->entries[i].shape == entry->shape &&
-                ic->entries[i].receiver_kind == entry->receiver_kind) {
-            ic->entries[i] = *entry;
-            return;
-        }
-    }
-    if (ic->state == JS_STORE_IC_EMPTY || ic->count == 0) {
-        ic->entries[0] = *entry;
-        ic->count = 1;
-        ic->state = JS_STORE_IC_MONO;
-        return;
-    }
-    if (ic->count < JS_STORE_IC_POLY_MAX) {
-        ic->entries[ic->count++] = *entry;
-        ic->state = JS_STORE_IC_POLY;
-        return;
-    }
-    ic->state = JS_STORE_IC_MEGAMORPHIC;
-}
-#endif
-
-static Item js_set_name_id_ic_impl(Item object, NameId name_id,
-        Item value, int64_t strict,
-        JsStoreIC* ic) {
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
-    if (!key || key->len > 2147483647u) {
-        return js_set_name_id_ic_slow(object, name_id, value, strict);
-    }
-    const char* name = key->chars;
-    int name_len = (int)key->len;
-#if !LAMBDA_INLINE_CACHE
-    return js_set_name_id_ic_slow(object, name_id, value, strict);
-#else
-    if (!ic) return js_set_name_id_ic_slow(object, name_id, value, strict);
-
-    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
-    if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
-        if (ic->state == JS_STORE_IC_MONO) {
-            if (ic->name_id == name_id && js_store_ic_try_hit_entry(m,
-                    &ic->entries[0], receiver_kind, name_id, value)) {
-                if (ic->name_id != NAME_ID_NONE) {
-                    NameRef key_ref = name_pool_resolve_id(
-                        context ? context->name_pool : NULL, ic->name_id);
-                    if (key_ref) js_sync_global_var_module_binding(object,
-                        (Item){.item = s2it(key_ref)}, value);
-                }
-                js_note_event_handler_property_set(object, name, name_len, value);
-                return value;
-            }
-        } else if (ic->state == JS_STORE_IC_POLY) {
-            int count = ic->count;
-            if (count > JS_STORE_IC_POLY_MAX) count = JS_STORE_IC_POLY_MAX;
-            for (int i = 0; i < count; i++) {
-                if (ic->name_id == name_id && js_store_ic_try_hit_entry(m,
-                        &ic->entries[i], receiver_kind, name_id, value)) {
-                    if (ic->name_id != NAME_ID_NONE) {
-                        NameRef key_ref = name_pool_resolve_id(
-                            context ? context->name_pool : NULL, ic->name_id);
-                        if (key_ref) js_sync_global_var_module_binding(object,
-                            (Item){.item = s2it(key_ref)}, value);
-                    }
-                    js_note_event_handler_property_set(object, name, name_len, value);
-                    return value;
-                }
-            }
-        } else if (ic->state == JS_STORE_IC_MEGAMORPHIC) {
-            return js_set_name_id_ic_slow(object, name_id, value, strict);
-        }
-    }
-
-    if (ic->miss_count != 0xffffu) ic->miss_count++;
-
-    Item result = js_set_name_id_ic_slow(object, name_id, value, strict);
-    if (item_is_error(result) || ic->state == JS_STORE_IC_MEGAMORPHIC) return result;
-
-    JsLoadICEntry entry;
-    memset(&entry, 0, sizeof(entry));
-    if (js_store_ic_build_entry(object, name, name_len, name_id,
-            value, &entry)) {
-        js_store_ic_install(ic, name_id, &entry);
-    }
-    return result;
-#endif
-}
-JS_FORWARD_ITEM(js_set_name_id_ic, (Item object, NameId name_id,         Item value, int64_t strict, JsStoreIC* ic), js_set_name_id_ic_impl, (object, name_id, value, strict, ic))
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
 // Returns the byte offset of the code unit at utf16_idx, or str_len if out of range.
@@ -23710,12 +23307,6 @@ typedef struct JsArraySparseKeyCursor {
     bool ready;
 } JsArraySparseKeyCursor;
 
-static int js_array_sparse_key_cmp(const void* left, const void* right) {
-    int64_t a = *(const int64_t*)left;
-    int64_t b = *(const int64_t*)right;
-    return (a > b) - (a < b);
-}
-
 static void js_array_sparse_key_cursor_init(JsArraySparseKeyCursor* cursor) {
     if (!cursor) return;
     cursor->props = NULL;
@@ -23777,7 +23368,7 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
             cursor->keys[pos++] = entry->index;
         }
     }
-    if (pos > 1) qsort(cursor->keys, (size_t)pos, sizeof(int64_t), js_array_sparse_key_cmp);
+    if (pos > 1) qsort(cursor->keys, (size_t)pos, sizeof(int64_t), js_array_sparse_index_cmp);
     int unique = 0;
     for (int i = 0; i < pos; i++) {
         if (unique > 0 && cursor->keys[i] == cursor->keys[unique - 1]) continue;
@@ -31736,11 +31327,8 @@ extern "C" Item js_promise_all_settled(Item iterable) {
 // v14: ES Module Runtime
 // =============================================================================
 
-// Module records live in a growable context-owned list.  Namespace Items and
-// TLA edges therefore keep stable addresses across imports (D5.4.3), while
-// the scheduler remains local to the active JS realm.
-#define js_module_first (js_runtime_state.modules.first)
-#define js_module_last (js_runtime_state.modules.last)
+// Module descriptors and TLA edges live in the Runtime-owned canonical
+// registry; only scheduler counters and the active namespace are realm-local.
 #define js_active_module_namespace (js_runtime_state.modules.active_namespace)
 #define g_tla_module_depth (js_runtime_state.modules.module_depth)
 #define g_async_eval_order_counter (js_runtime_state.modules.async_eval_order_counter)
@@ -31760,21 +31348,6 @@ static void js_module_ensure_roots() {
 void js_module_cache_reset() {
     if (!js_active_runtime_state) return;
     js_module_ensure_roots();
-    JsModule* module = js_module_first;
-    while (module) {
-        JsModule* next = module->next;
-        if (module->roots_epoch == js_get_heap_epoch()) {
-            heap_unregister_gc_root(&module->specifier_item.item);
-            heap_unregister_gc_root(&module->namespace_obj.item);
-            heap_unregister_gc_root(&module->awaited_target.item);
-            heap_unregister_gc_root(&module->evaluation_error.item);
-        }
-        mem_free(module->async_parents);
-        mem_free(module);
-        module = next;
-    }
-    js_module_first = NULL;
-    js_module_last = NULL;
     js_active_module_namespace = ItemNull;
     g_tla_module_depth = 0;
     g_async_eval_order_counter = 0;
@@ -31836,18 +31409,18 @@ extern "C" void js_tla_enter_module(void) {
 static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
     typedef Item (*js_main_fn)(Context*);
     while (1) {
-        JsModule* best = NULL;
+        ModuleDescriptor* best = NULL;
         int best_aeo = -1;
-        for (JsModule* m = js_module_first; m; m = m->next) {
+        Runtime* runtime = context ? context->runtime : NULL;
+        for (ModuleDescriptor* m = module_registry_first_for_runtime(runtime);
+                m; m = module_registry_next(m)) {
             if (!m->post_await_pending || m->body_executed) continue;
             if (!m->deferred_main_ptr) continue;
             if (m->pending_async_deps > 0) continue;
             if (m->async_eval_order < 0) continue;
             if (skip_pending_awaits) {
-                Item candidate_spec = (Item){.item = s2it(m->specifier)};
-                Item candidate_awaited = js_module_get_awaited_target(candidate_spec);
-                const char* candidate_state = js_promise_state_name(candidate_awaited);
-                if (get_type_id(candidate_awaited) != LMD_TYPE_NULL &&
+                const char* candidate_state = js_promise_state_name(m->awaited_target);
+                if (get_type_id(m->awaited_target) != LMD_TYPE_NULL &&
                         candidate_state && strcmp(candidate_state, "pending") == 0) {
                     continue;
                 }
@@ -31858,9 +31431,9 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
             }
         }
         if (!best) break;
-        JsModule* m = best;
-        log_debug("P7d: depth-0 drain firing post-await for '%.*s' (AEO=%d)",
-            (int)m->specifier->len, m->specifier->chars, m->async_eval_order);
+        ModuleDescriptor* m = best;
+        log_debug("P7d: depth-0 drain firing post-await for '%s' (AEO=%d)",
+            m->path ? m->path : "<module>", m->async_eval_order);
         js_main_fn main_fn = (js_main_fn)m->deferred_main_ptr;
         m->deferred_main_ptr = NULL;
         // Restore the module's evaluation context (module-vars and namespace)
@@ -31871,10 +31444,10 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
         if (m->saved_module_state_id != UINT32_MAX) {
             js_set_active_module_state_id(m->saved_module_state_id);
         }
-        Item spec = (Item){.item = s2it(m->specifier)};
+        Item spec = m->specifier_item;
         const char* previous_current_file = context ? context->current_file : NULL;
-        if (context) context->current_file = m->specifier->chars;
-        Item awaited_target = js_module_get_awaited_target(spec);
+        if (context) context->current_file = m->path;
+        Item awaited_target = m->awaited_target;
         if (get_type_id(awaited_target) != LMD_TYPE_NULL) {
             // The continuation must not run until the first TLA target has
             // settled; otherwise a rejected promise chain is mistaken for a
@@ -31968,79 +31541,47 @@ extern "C" Item js_get_live_binding_default(Item specifier) {
     return js_get_key_default(ns, key);
 }
 
-static JsModule* js_module_find(Item specifier);
-
-extern "C" void js_module_register(Item specifier, Item namespace_obj) {
-    if (get_type_id(specifier) != LMD_TYPE_STRING) return;
-
-    String* spec = it2s(specifier);
-    // registration and lookup share one scan so specifier identity cannot drift
-    JsModule* module = js_module_find(specifier);
-    if (module) {
-        module->specifier_item = specifier;
-        module->namespace_obj = namespace_obj;
-        js_module_ensure_roots();
-        if (module->roots_epoch != js_get_heap_epoch()) {
-            heap_register_gc_root(&module->specifier_item.item);
-            heap_register_gc_root(&module->namespace_obj.item);
-            heap_register_gc_root(&module->awaited_target.item);
-            heap_register_gc_root(&module->evaluation_error.item);
-            module->roots_epoch = js_get_heap_epoch();
-        }
-        return;
-    }
-
-    JsModule* m = (JsModule*)mem_calloc(1, sizeof(JsModule), MEM_CAT_JS_RUNTIME);
-    if (!m) {
-        log_error("module: failed to allocate module record");
-        return;
-    }
-    m->specifier_item = specifier;
-    m->specifier = spec;
-    m->namespace_obj = namespace_obj;
-    m->awaited_target = ItemNull;  // Js57 P5
-    m->evaluation_error = ItemNull;
-    m->has_tla = 0;                // Js57 P7d
-    m->pending_async_deps = 0;
-    m->async_parent_count = 0;
-    m->deferred_main_ptr = NULL;
-    m->body_executed = 0;
-    m->post_await_pending = 0;
-    m->body_state = 0;
-    m->async_eval_order = -1;
-    m->saved_module_state_id = UINT32_MAX;
-    js_module_ensure_roots();
-    if (context && context->heap && context->heap->gc) {
-        heap_register_gc_root(&m->specifier_item.item);
-        heap_register_gc_root(&m->namespace_obj.item);
-        heap_register_gc_root(&m->awaited_target.item);
-        heap_register_gc_root(&m->evaluation_error.item);
-        m->roots_epoch = js_get_heap_epoch();
-    }
-    if (js_module_last) js_module_last->next = m;
-    else js_module_first = m;
-    js_module_last = m;
-}
-
 // Js57 P5 (fulfillment/rejection-order): module TLA awaited-target tracking.
 // Helpers used to make dynamic-import promises wait on whatever Promise the
 // imported module's first top-level await is blocked on. The dynamic-import
 // path multiplexes resolution order through this so siblings whose static
 // imports transitively depend on the same TLA all chain on the same target.
-static JsModule* js_module_find(Item specifier) {
+static ModuleDescriptor* js_module_find(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return NULL;
     String* spec = it2s(specifier);
-    for (JsModule* module = js_module_first; module; module = module->next) {
-        if (module->specifier->len == spec->len &&
-            memcmp(module->specifier->chars, spec->chars, spec->len) == 0) {
-            return module;
-        }
+    return spec ? module_get_for_runtime(context ? context->runtime : NULL, spec->chars) : NULL;
+}
+
+#ifndef NDEBUG
+static const char* js_module_path(const ModuleDescriptor* module) {
+    return module && module->path ? module->path : "<module>";
+}
+#endif
+
+extern "C" void js_module_register(Item specifier, Item namespace_obj) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) return;
+    String* spec = it2s(specifier);
+    if (!spec) return;
+    Runtime* runtime = context ? context->runtime : NULL;
+    ModuleDescriptor* module = js_module_find(specifier);
+    if (!module) {
+        module_register_loading_with_namespace_ops_for_runtime(
+            runtime, spec->chars, "js", NULL);
+        module = js_module_find(specifier);
     }
-    return NULL;
+    if (!module) {
+        log_error("module: failed to allocate descriptor for '%s'", spec->chars);
+        return;
+    }
+    module->specifier_item = specifier;
+    module->namespace_obj = namespace_obj;
+    module->source_lang = "js";
+    module->initialized = true;
+    module->loading = false;
 }
 
 extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m || get_type_id(error) == LMD_TYPE_NULL) return;
     if (get_type_id(m->evaluation_error) != LMD_TYPE_NULL) return;
     Item observed = item_is_error(error) ? js_error_lane_payload(error) : error;
@@ -32055,7 +31596,7 @@ extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
     // completion; dropping this propagation lets the importer run as if the
     // dependency fulfilled, which is observable as a missing module throw.
     for (int i = 0; i < m->async_parent_count; i++) {
-        JsModule* parent = m->async_parents[i];
+        ModuleDescriptor* parent = m->async_parents[i];
         if (!parent) continue;
         if (parent->body_executed) continue;
         if (parent->pending_async_deps > 0) parent->pending_async_deps--;
@@ -32064,12 +31605,12 @@ extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
 }
 
 extern "C" Item js_module_get_evaluation_error(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     return m ? m->evaluation_error : ItemNull;
 }
 
 extern "C" void js_module_set_awaited_target(Item specifier, Item target) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     // Only the first TLA wins. Subsequent awaits in the same module body are
     // dropped by P4 anyway.
@@ -32078,12 +31619,11 @@ extern "C" void js_module_set_awaited_target(Item specifier, Item target) {
     if (!p) return;  // Non-Promise await — body finished already, no point.
     if (p->state != JS_PROMISE_PENDING) return;  // No need to defer.
     m->awaited_target = target;
-    log_debug("P5: module '%.*s' awaited target captured",
-        (int)m->specifier->len, m->specifier->chars);
+    log_debug("P5: module '%s' awaited target captured", js_module_path(m));
 }
 
 extern "C" Item js_module_get_awaited_target(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return ItemNull;
     return m->awaited_target;
 }
@@ -32113,15 +31653,14 @@ extern "C" Item js_p5_module_await(Item specifier, Item value) {
 }
 
 extern "C" void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier) {
-    JsModule* cur = js_module_find(current_specifier);
-    JsModule* dep = js_module_find(dep_specifier);
+    ModuleDescriptor* cur = js_module_find(current_specifier);
+    ModuleDescriptor* dep = js_module_find(dep_specifier);
     if (!cur || !dep) return;
     if (get_type_id(dep->awaited_target) == LMD_TYPE_NULL) return;
     if (get_type_id(cur->awaited_target) != LMD_TYPE_NULL) return;
     cur->awaited_target = dep->awaited_target;
-    log_debug("P5: module '%.*s' inherits awaited target from '%.*s'",
-        (int)cur->specifier->len, cur->specifier->chars,
-        (int)dep->specifier->len, dep->specifier->chars);
+    log_debug("P5: module '%s' inherits awaited target from '%s'",
+        js_module_path(cur), js_module_path(dep));
 }
 
 // =============================================================================
@@ -32130,20 +31669,19 @@ extern "C" void js_module_inherit_awaited_target(Item current_specifier, Item de
 // =============================================================================
 
 extern "C" void js_module_mark_has_tla(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     m->has_tla = 1;
-    log_debug("P7d: module '%.*s' marked has_tla=1",
-        (int)m->specifier->len, m->specifier->chars);
+    log_debug("P7d: module '%s' marked has_tla=1", js_module_path(m));
 }
 
 extern "C" int js_module_get_has_tla(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     return m ? m->has_tla : 0;
 }
 
 extern "C" void js_module_save_context(Item specifier, uint32_t module_state_id) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     m->saved_module_state_id = module_state_id;
 }
@@ -32153,7 +31691,7 @@ extern "C" void js_module_save_context(Item specifier, uint32_t module_state_id)
 // settled yet). Used by jm_load_imports to decide whether an importer should
 // register itself as a parent of the just-loaded dep.
 extern "C" int js_module_needs_async_settle(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return 0;
     if (get_type_id(m->evaluation_error) != LMD_TYPE_NULL) return 0;
     if (m->has_tla && !m->body_executed) return 1;
@@ -32166,8 +31704,8 @@ extern "C" int js_module_needs_async_settle(Item specifier) {
 // the parent's pending_async_deps counter. The parent will be notified when
 // the dep's body fully completes via js_module_complete_tla_body.
 extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_specifier) {
-    JsModule* dep = js_module_find(dep_specifier);
-    JsModule* par = js_module_find(parent_specifier);
+    ModuleDescriptor* dep = js_module_find(dep_specifier);
+    ModuleDescriptor* par = js_module_find(parent_specifier);
     if (!dep || !par || dep == par) return;  // ignore missing/self edges
     // Avoid duplicate parent entries — the spec counts each requested dep at
     // most once per importer.
@@ -32177,15 +31715,15 @@ extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_
     if (dep->async_parent_count >= dep->async_parent_capacity) {
         int next_capacity = dep->async_parent_capacity == 0
             ? 4 : dep->async_parent_capacity * 2;
-        JsModule** next = (JsModule**)mem_calloc(next_capacity,
-            sizeof(JsModule*), MEM_CAT_JS_RUNTIME);
+        ModuleDescriptor** next = (ModuleDescriptor**)mem_calloc(next_capacity,
+            sizeof(ModuleDescriptor*), MEM_CAT_JS_RUNTIME);
         if (!next) {
             log_error("P7d: failed to grow async parent list");
             return;
         }
         if (dep->async_parents && dep->async_parent_count > 0) {
             memcpy(next, dep->async_parents,
-                (size_t)dep->async_parent_count * sizeof(JsModule*));
+            (size_t)dep->async_parent_count * sizeof(ModuleDescriptor*));
         }
         mem_free(dep->async_parents);
         dep->async_parents = next;
@@ -32193,10 +31731,8 @@ extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_
     }
     dep->async_parents[dep->async_parent_count++] = par;
     par->pending_async_deps++;
-    log_debug("P7d: module '%.*s' registered as async parent of '%.*s' (par pending=%d)",
-        (int)par->specifier->len, par->specifier->chars,
-        (int)dep->specifier->len, dep->specifier->chars,
-        par->pending_async_deps);
+    log_debug("P7d: module '%s' registered as async parent of '%s' (par pending=%d)",
+        js_module_path(par), js_module_path(dep), par->pending_async_deps);
 }
 
 // Store the C function pointer (js_main) for the deferred body. Called by the
@@ -32204,31 +31740,31 @@ extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_
 // would normally be invoked — instead of calling it directly, the pointer is
 // stashed here and invoked later from js_module_complete_tla_body.
 extern "C" void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     m->deferred_main_ptr = main_ptr;
-    log_debug("P7d: module '%.*s' deferred_main_ptr=%p (pending=%d)",
-        (int)m->specifier->len, m->specifier->chars, main_ptr, m->pending_async_deps);
+    log_debug("P7d: module '%s' deferred_main_ptr=%p (pending=%d)",
+        js_module_path(m), main_ptr, m->pending_async_deps);
 }
 
 extern "C" int js_module_pending_async_deps(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     return m ? m->pending_async_deps : 0;
 }
 
 extern "C" void js_module_mark_post_await_pending(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     m->post_await_pending = 1;
 }
 
 extern "C" int js_module_get_body_state(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     return m ? m->body_state : 0;
 }
 
 extern "C" void js_module_set_body_state(Item specifier, int state) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     m->body_state = state;
 }
@@ -32236,12 +31772,12 @@ extern "C" void js_module_set_body_state(Item specifier, int state) {
 // AEO assignment — counter assigns ascending integers in DFS post-order. Each
 // module gets at most one AEO; subsequent calls are no-ops.
 extern "C" int js_module_assign_async_eval_order(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return -1;
     if (m->async_eval_order < 0) {
         m->async_eval_order = ++g_async_eval_order_counter;
-        log_debug("P7d: module '%.*s' AEO=%d",
-            (int)m->specifier->len, m->specifier->chars, m->async_eval_order);
+        log_debug("P7d: module '%s' AEO=%d",
+            js_module_path(m), m->async_eval_order);
     }
     return m->async_eval_order;
 }
@@ -32252,36 +31788,36 @@ extern "C" int js_module_assign_async_eval_order(Item specifier) {
 // the single scheduler; a second ready queue only duplicated that eligibility
 // state and could diverge from the scan during nested completion.
 extern "C" void js_module_complete_tla_body(Item specifier) {
-    JsModule* m = js_module_find(specifier);
+    ModuleDescriptor* m = js_module_find(specifier);
     if (!m) return;
     if (m->body_executed) return;  // idempotent
     // Snapshot parent list because js_module_register_async_parent may run
     // during deferred-body invocation if a parent itself triggers more imports.
     int parent_count = m->async_parent_count;
-    JsModule** parents = NULL;
+    ModuleDescriptor** parents = NULL;
     if (parent_count > 0) {
-        parents = (JsModule**)mem_alloc((size_t)parent_count * sizeof(JsModule*),
+        parents = (ModuleDescriptor**)mem_alloc((size_t)parent_count * sizeof(ModuleDescriptor*),
             MEM_CAT_JS_RUNTIME);
         if (!parents) {
             log_error("P7d: failed to snapshot async parent list");
             return;
         }
         memcpy(parents, m->async_parents,
-            (size_t)parent_count * sizeof(JsModule*));
+            (size_t)parent_count * sizeof(ModuleDescriptor*));
     }
     m->body_executed = 1;
     m->post_await_pending = 0;
     log_debug("P7d: module '%.*s' body_executed=1, notifying %d parents",
-        (int)m->specifier->len, m->specifier->chars, m->async_parent_count);
+        js_module_path(m), m->async_parent_count);
 
     // First pass: just decrement parent dependency counts. Do not execute
     // bodies while the parent list is being traversed.
     for (int i = 0; i < parent_count; i++) {
-        JsModule* par = parents[i];
+        ModuleDescriptor* par = parents[i];
         if (par->pending_async_deps > 0) par->pending_async_deps--;
         if (par->pending_async_deps == 0 && !par->body_executed && par->deferred_main_ptr) {
-            log_debug("P7d: module '%.*s' all deps settled — eligible for AEO drain",
-                (int)par->specifier->len, par->specifier->chars);
+            log_debug("P7d: module '%s' all deps settled — eligible for AEO drain",
+                js_module_path(par));
         }
     }
 
@@ -33064,10 +32600,6 @@ extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_
 #define js_dc_channel_ctor (js_runtime_state.diagnostics_channels.channel_constructor)
 #define js_dc_tracing_channel_ctor (js_runtime_state.diagnostics_channels.tracing_channel_constructor)
 #define js_dc_bounded_channel_ctor (js_runtime_state.diagnostics_channels.bounded_channel_constructor)
-
-static Item js_dc_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
-}
 
 static bool js_dc_is_symbol(Item value) {
     return get_type_id(value) == LMD_TYPE_SYMBOL ||
@@ -34100,10 +33632,6 @@ extern "C" bool js_is_vm_context_error(Item value) {
 #define js_cluster_primary_options_root_epoch (js_runtime_state.cluster.primary_options_root_epoch)
 #define js_cluster_next_worker_id (js_runtime_state.cluster.next_worker_id)
 
-static Item js_cluster_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
-}
-
 static bool js_cluster_is_object_item(Item item) {
     TypeId type = get_type_id(item);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
@@ -34320,10 +33848,6 @@ static Item js_cluster_setup_primary(Item options) {
     js_runtime_set_native_key(self, (Item){.item = s2it(heap_create_name("fork", 4))},
         js_cluster_fork);
     return make_js_undefined();
-}
-
-static Item js_repl_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
 }
 
 static void js_repl_set_str(Item obj, const char* name, const char* value) {
@@ -34894,8 +34418,6 @@ extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_
 }
 
 // AsyncLocalStorage: constructor creates an object with run/getStore/enterWith/disable
-static Item js_async_hooks_key(const char* name);
-
 static Item js_als_constructor(Item options) {
     Item self = js_get_this();
     // handle options: { defaultValue, name }
@@ -34986,10 +34508,6 @@ static Item js_als_withScope(Item store) {
 #define js_trace_event_count (js_runtime_state.trace.event_count)
 #define js_trace_initialized (js_runtime_state.trace.initialized)
 #define js_trace_file_written (js_runtime_state.trace.file_written)
-
-static Item js_trace_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
-}
 
 static void js_trace_copy_cstr(char* dst, int dst_size, const char* src, int src_len) {
     if (!dst || dst_size <= 0) return;
@@ -35338,10 +34856,6 @@ extern "C" Item js_get_internal_trace_events_binding(void) {
 #define js_async_hook_count (js_runtime_state.async_hooks.hook_count)
 #define js_async_pending_destroy_resources (js_runtime_state.async_hooks.pending_destroy_resources)
 #define js_async_pending_destroy_count (js_runtime_state.async_hooks.pending_destroy_count)
-
-static Item js_async_hooks_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
-}
 
 static Item js_async_hooks_symbol_key(const char* name, int name_len) {
     return js_symbol_for((Item){.item = s2it(heap_create_name(name, name_len))});
@@ -35927,10 +35441,6 @@ extern "C" Item js_get_async_hooks_namespace(void) {
         js_set_key_cstr(ah_ns, "default", ah_ns);
     }
     return ah_ns;
-}
-
-static Item js_vm_stm_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
 }
 
 static Item js_vm_stm_string(const char* chars, int len) {
@@ -36756,10 +36266,6 @@ static Item js_internal_crypto_getOpenSSLSecLevel(void) {
     return (Item){.item = i2it(0)};
 }
 
-static Item js_cc_key(const char* name) {
-    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
-}
-
 static bool js_cc_is_object(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
@@ -37233,7 +36739,7 @@ extern "C" Item js_module_get_builtin(Item specifier) {
 extern "C" Item js_module_get(Item specifier) {
     Item builtin = js_module_get_builtin(specifier);
     if (get_type_id(builtin) != LMD_TYPE_NULL) return builtin;
-    JsModule* module = js_module_find(specifier);
+    ModuleDescriptor* module = js_module_find(specifier);
     if (module) return module->namespace_obj;
     return ItemNull;
 }

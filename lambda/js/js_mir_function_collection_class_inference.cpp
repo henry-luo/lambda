@@ -1160,78 +1160,6 @@ bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len)
     return false;
 }
 
-// detect typed array constructor type from a new expression
-// also detects chained method calls like new Uint8Array(n).map(fn)
-int jm_detect_typed_array_new(JsAstNode* rhs) {
-    if (!rhs) return -1;
-    // direct: new TypedArray(...)
-    if (rhs->node_type == JS_AST_NODE_NEW_EXPRESSION) {
-        JsCallNode* new_call = (JsCallNode*)rhs;
-        if (!new_call->callee || new_call->callee->node_type != JS_AST_NODE_IDENTIFIER) return -1;
-        JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
-        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Uint8Array", 10) == 0) return JS_TYPED_UINT8;
-        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int32Array", 10) == 0) return JS_TYPED_INT32;
-        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int16Array", 10) == 0) return JS_TYPED_INT16;
-        if (ctor->name->len == 9 && strncmp(ctor->name->chars, "Int8Array", 9) == 0) return JS_TYPED_INT8;
-        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint32Array", 11) == 0) return JS_TYPED_UINT32;
-        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint16Array", 11) == 0) return JS_TYPED_UINT16;
-        if (ctor->name->len == 17 && strncmp(ctor->name->chars, "Uint8ClampedArray", 17) == 0) return JS_TYPED_UINT8_CLAMPED;
-        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float16Array", 12) == 0) return JS_TYPED_FLOAT16;
-        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float64Array", 12) == 0) return JS_TYPED_FLOAT64;
-        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float32Array", 12) == 0) return JS_TYPED_FLOAT32;
-        return -1;
-    }
-    // chained: new TypedArray(n).map(fn) / .filter(fn) / .slice(...) etc.
-    // TypedArray methods that preserve type: map, filter, slice, sort, reverse, subarray
-    if (rhs->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-        JsCallNode* call = (JsCallNode*)rhs;
-        if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-            JsMemberNode* cm = (JsMemberNode*)call->callee;
-            if (!cm->computed && cm->property &&
-                cm->property->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* method = (JsIdentifierNode*)cm->property;
-                bool preserves_type = false;
-                if (method->name->len == 3 && strncmp(method->name->chars, "map", 3) == 0) preserves_type = true;
-                else if (method->name->len == 6 && strncmp(method->name->chars, "filter", 6) == 0) preserves_type = true;
-                else if (method->name->len == 5 && strncmp(method->name->chars, "slice", 5) == 0) preserves_type = true;
-                else if (method->name->len == 4 && strncmp(method->name->chars, "sort", 4) == 0) preserves_type = true;
-                else if (method->name->len == 7 && strncmp(method->name->chars, "reverse", 7) == 0) preserves_type = true;
-                else if (method->name->len == 8 && strncmp(method->name->chars, "subarray", 8) == 0) preserves_type = true;
-                if (preserves_type) {
-                    return jm_detect_typed_array_new(cm->object);
-                }
-            }
-        }
-    }
-    return -1;
-}
-
-// look up typed array type for a class instance field by name.
-// checks the class and its superclass chain for instance fields with typed array initializers.
-int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len) {
-    while (ce) {
-        for (int i = 0; i < ce->instance_field_count; i++) {
-            JsInstanceFieldEntry* f = &ce->instance_fields[i];
-            if (f->name && (int)f->name->len == prop_len &&
-                strncmp(f->name->chars, prop_name, prop_len) == 0) {
-                return jm_detect_typed_array_new(f->initializer);
-            }
-        }
-        // also check ctor_prop_ta_types for constructor body assignments
-        if (ce->constructor && ce->constructor->fc) {
-            JsFuncCollected* fc = ce->constructor->fc;
-            for (int i = 0; i < fc->ctor_prop_count; i++) {
-                if (fc->ctor_prop_lens[i] == prop_len &&
-                    strncmp(fc->ctor_prop_ptrs[i], prop_name, prop_len) == 0) {
-                    return fc->ctor_prop_ta_types[i];
-                }
-            }
-        }
-        ce = ce->superclass;
-    }
-    return -1;
-}
-
 // P1: Detect field type from constructor init expression (this.x ).
 // Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING for literals,
 // or LMD_TYPE_NULL (unknown) for complex expressions.
@@ -1308,8 +1236,6 @@ static void jm_scan_ctor_prop_assignment(JsFuncCollected* fc, JsAssignmentNode* 
     if (is_new_prop) idx = fc->ctor_prop_count;
     fc->ctor_prop_ptrs[idx] = prop->name->chars;
     fc->ctor_prop_lens[idx] = (int)prop->name->len;
-    int ta_type = jm_detect_typed_array_new(asgn->right);
-    if (ta_type >= 0 || is_new_prop) fc->ctor_prop_ta_types[idx] = ta_type;
     TypeId detected_type = jm_detect_ctor_field_type(asgn->right);
     if (detected_type != LMD_TYPE_NULL || is_new_prop) {
         fc->ctor_prop_types[idx] = detected_type;
@@ -1540,7 +1466,10 @@ void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
                            bin->op == JS_OP_BIT_XOR || bin->op == JS_OP_BIT_LSHIFT ||
                            bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT);
 
-        if (is_arith) {
+        if (is_arith || (bin->op == JS_OP_ADD && self_name && li >= 0 && ri >= 0)) {
+            // recursive numeric accumulators have no literal on the add node;
+            // without this evidence their second parameter stays boxed and
+            // the tail-call loop cannot be formed.
             if (li >= 0 && jm_expr_has_bigint_literal(bin->right)) evidence[li].compared_with_non_numeric = true;
             if (ri >= 0 && jm_expr_has_bigint_literal(bin->left))  evidence[ri].compared_with_non_numeric = true;
             // Parameter used in arithmetic with int literal → int evidence
@@ -2023,7 +1952,8 @@ bool jm_add_chain_has_string(JsAstNode* expr) {
 // Infer return type by collecting types from all return statements.
 // For recursive calls to self, assume result type matches the base-case return type.
 void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
-                                       TypeId* collected, int* count, int max_count) {
+                                       JsFuncCollected* fc, TypeId* collected,
+                                       int* count, int max_count) {
     if (!node || *count >= max_count) return;
 
     switch (node->node_type) {
@@ -2053,9 +1983,18 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             default: break;
             }
         } else if (expr->node_type == JS_AST_NODE_IDENTIFIER) {
-            // Can't resolve variable type without scope — use ANY
-            // But for parameter names that will be typed, we'll treat them specially
-            t = LMD_TYPE_ANY; // will be refined later
+            // parameter return values inherit the already-proven native lane.
+            JsIdentifierNode* id = (JsIdentifierNode*)expr;
+            JsAstNode* param = fc && fc->node ? fc->node->params : NULL;
+            for (int pi = 0; param && fc && pi < fc->param_count;
+                    pi++, param = param->next) {
+                if (jm_js_name_equal(id->name, jm_param_binding_name(param))) {
+                    TypeId param_type = jm_param_type(fc, pi);
+                    if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT)
+                        t = param_type;
+                    break;
+                }
+            }
         } else if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
             JsBinaryNode* bin = (JsBinaryNode*)expr;
             switch (bin->op) {
@@ -2099,47 +2038,47 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
         JsAstNode* s = blk->statements;
-        while (s) { jm_infer_return_type_walk(s, self_name, collected, count, max_count); s = s->next; }
+        while (s) { jm_infer_return_type_walk(s, self_name, fc, collected, count, max_count); s = s->next; }
         break;
     }
     case JS_AST_NODE_IF_STATEMENT: {
         JsIfNode* n = (JsIfNode*)node;
-        jm_infer_return_type_walk(n->consequent, self_name, collected, count, max_count);
-        jm_infer_return_type_walk(n->alternate, self_name, collected, count, max_count);
+        jm_infer_return_type_walk(n->consequent, self_name, fc, collected, count, max_count);
+        jm_infer_return_type_walk(n->alternate, self_name, fc, collected, count, max_count);
         break;
     }
     case JS_AST_NODE_WHILE_STATEMENT: {
         JsWhileNode* n = (JsWhileNode*)node;
-        jm_infer_return_type_walk(n->body, self_name, collected, count, max_count);
+        jm_infer_return_type_walk(n->body, self_name, fc, collected, count, max_count);
         break;
     }
     case JS_AST_NODE_FOR_STATEMENT: {
         JsForNode* n = (JsForNode*)node;
-        jm_infer_return_type_walk(n->body, self_name, collected, count, max_count);
+        jm_infer_return_type_walk(n->body, self_name, fc, collected, count, max_count);
         break;
     }
     case JS_AST_NODE_TRY_STATEMENT: {
         JsTryNode* n = (JsTryNode*)node;
-        jm_infer_return_type_walk(n->block, self_name, collected, count, max_count);
-        jm_infer_return_type_walk(n->handler, self_name, collected, count, max_count);
-        jm_infer_return_type_walk(n->finalizer, self_name, collected, count, max_count);
+        jm_infer_return_type_walk(n->block, self_name, fc, collected, count, max_count);
+        jm_infer_return_type_walk(n->handler, self_name, fc, collected, count, max_count);
+        jm_infer_return_type_walk(n->finalizer, self_name, fc, collected, count, max_count);
         break;
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* n = (JsCatchNode*)node;
-        jm_infer_return_type_walk(n->body, self_name, collected, count, max_count);
+        jm_infer_return_type_walk(n->body, self_name, fc, collected, count, max_count);
         break;
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* n = (JsSwitchNode*)node;
         JsAstNode* c = n->cases;
-        while (c) { jm_infer_return_type_walk(c, self_name, collected, count, max_count); c = c->next; }
+        while (c) { jm_infer_return_type_walk(c, self_name, fc, collected, count, max_count); c = c->next; }
         break;
     }
     case JS_AST_NODE_SWITCH_CASE: {
         JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
         JsAstNode* s = n->consequent;
-        while (s) { jm_infer_return_type_walk(s, self_name, collected, count, max_count); s = s->next; }
+        while (s) { jm_infer_return_type_walk(s, self_name, fc, collected, count, max_count); s = s->next; }
         break;
     }
     default: break;
@@ -2193,7 +2132,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
     TypeId collected[32];
     int count = 0;
     jm_infer_return_type_walk(fn->body, self_name && self_name[0] ? self_name : NULL,
-                               collected, &count, 32);
+                               fc, collected, &count, 32);
 
     if (count == 0) {
         fc->return_type = LMD_TYPE_NULL; // no return statements → returns undefined

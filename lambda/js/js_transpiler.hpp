@@ -183,7 +183,6 @@ struct JsPreambleState {
     PropertyKeySpec* module_property_specs; // sealed spelling image for MIR property names
     uint32_t module_property_count;
     uint32_t module_property_bytes_size;
-    uint32_t ic_count;        // module-owned named-property IC cells
     bool owns_compiled_state;   // clones share the immutable MIR context
 };
 

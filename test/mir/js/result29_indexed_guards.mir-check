@@ -1,16 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D6.2.2v2/D8.4.3: indexed specialization is runtime-guarded and exact integer stores use the fused semantic assignment kernel.",
+  "description": "D1.3: indexed reads and writes use the shared runtime reference/property kernels.",
   "checks": [
     {
       "in_func": "_js_indexedGuards_#_body",
       "expect": [
-        "call\tjs_typed_array_matches_type",
-        "call\tjs_elements_set_existing_dense_int_fast",
-        "call\tjs_set_number_assignment",
-        "call\tjs_get_number_reference",
-        "call\tjs_set_index_assignment",
-        "call\tjs_elements_get_int"
+        "call\tjs_get_reference",
+        "call\tjs_set"
       ]
     }
   ]

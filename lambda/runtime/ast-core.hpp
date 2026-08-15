@@ -608,9 +608,6 @@ typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
     TsTypeAnnotationNode* ts_type;
-    // p6 stores its recomputed numeric-local fact on the declaration so long
-    // JavaScript names never need a copied, fixed-capacity inference table.
-    TypeId p6_type;
 } AstDeclaratorNode;
 
 typedef struct AstSpreadNode : AstNode {

@@ -1,8 +1,25 @@
-# Retiring the JS Callsite Inline Cache — Shape-Resident Named Fast Path
+# Retiring the JS Callsite Inline Cache — Shared Runtime Property Path
 
-**Status: PROPOSAL** (not yet approved). Scope: LambdaJS named-property load/store fast path only. Lambda-lane dispatch is untouched (D8.4.1 already forbids ICs there). Companion history: `vibe/jube/JS_Tune_History.md` (Tune11/12 built the IC); supersedes JR8 (`vibe/jube/JS_Runtime_Redesign.md` §JR8) for load/store sites if accepted. Two tiers: **Tier B** (§4, IR1–IR9) is the universal shape-resident lookup that replaces the IC; **Tier A** (§5, IR10–IR15, from user sketch 2026-08-15) is a compile-predicted mono fast path layered above it.
+**Status: IMPLEMENTED** (2026-08-15). Scope: LambdaJS named-property
+load/store ICs and compiler-side indexed specializations. Lambda-lane dispatch
+is governed by D8.4.1v2. The implementation retired the per-callsite IC and
+the duplicated MIR array/typed-array lanes, routing named and indexed accesses
+through the shared runtime reference/property kernels. The proposed
+shape-resident probe and Tier A compile-predicted slot layer remain future
+options, not part of this change. Companion history: `vibe/jube/JS_Tune_History.md`.
 
-## 1. What exists today
+### Implementation result
+
+The final design is intentionally smaller than the proposal below: one
+immutable MIR lowering path constructs a Reference and calls the runtime
+property operation; the runtime owns array, typed-array, prototype, accessor,
+descriptor, and strictness semantics. This preserves D1.3's one-core-runtime
+boundary without introducing another cache or compiler/runtime semantic copy.
+The change removed 3,172 physical C/C++ lines from `lambda/js` relative to
+the clean baseline, with the required baseline gates remaining the acceptance
+criteria. Sections below retain the original alternatives as design history.
+
+## 1. What existed before retirement
 
 Every non-computed `obj.name` load/store site in MIR-lowered JS carries a **per-callsite polymorphic inline cache**: a `JsLoadIC`/`JsStoreIC` cell (`js_runtime.h:115–137`) with a mono/poly(4-way)/megamorphic state machine, probed by `js_get_name_id_ic` / `js_set_name_id_ic` (`js_runtime.cpp:8285–8609`). The cell caches `(shape ptr, ShapeEntry ptr, byte offset, name_id, receiver_kind)` and a hit revalidates ~6 guards before reading/writing the slot.
 
@@ -73,21 +90,40 @@ The 2×16 site-reason enums collapse to per-entry counters: `NAMED_FAST_PROBE`, 
 
 With O(1) per-shape probes, a QuickJS-style chain walk (repeat the probe up the prototype chain; any accessor/flagged/exotic level bails to the semantic path) would accelerate **method loads — the case the callsite IC never served**. Tune11 P6a (intrinsic-proto caching, richards −23.3%) shows chain-walk cost is real. Out of scope here; propose only after IR1–IR7 land and measure.
 
-### IR9 — Doctrine updates (on acceptance, per rule 17)
+### IR9 — Doctrine update (landed, per rule 17)
 
-D8.4.1 currently reads "*LambdaJS keeps its ICs (guard-based cache cells beside immutable MIR, never patched instructions)*" (`doc/Lambda_Formal_Design.md:1122–1130`). Revise to **D8.4.1v2**: *specialization over caching* extends to the JS lane — the JS named-property fast path is **shape-resident** (NameId-keyed probe of the receiver's TypeMap index); no per-site mutable dispatch state in either lane; generated code stays immutable (DI14 unchanged — this deletes data cells, it does not begin patching). Update both the formal spec (v2 + semver bump) and this ledger; record the JR8 supersession in `JS_Runtime_Redesign.md` (feedback-vector *load/store* slots are no longer needed; call/guard feedback, if ever built, is a separate case) and the reversal note in `JS_Tune_History.md`.
+D8.4.1v2 now extends *specialization over caching* to the JS lane: named
+property accesses use the shared runtime reference/property kernels, with no
+per-site mutable dispatch state in either lane; generated code stays immutable
+(DI14 unchanged). The implementation intentionally stopped short of the
+proposal's new shape-resident and Tier A compiler fast paths: removing the
+existing IC and the duplicated indexed MIR lanes was the smaller design that
+kept runtime semantics in one owner. The formal spec was bumped to v1.24.0;
+this ledger records the proposal and its implemented simplification.
 
 ## 5. Tier A — compile-predicted member specialization (`load_member` / `store_member`)
 
-Tier B makes every named access an honest O(1) lookup; Tier A removes even that lookup at sites where the **compiler** can predict the receiver's shape. The helpers are `js_load_member(obj, site_desc)` and `js_store_member(obj, site_desc, value, strict)`, where `site_desc` is one packed immutable constant `[type_index:16 | prop_index:16 | name_id:32]` (NameId is already `[pool16][ordinal16]`, D4.6.1v2): `type_index` names the predicted canonical pre-shape, `prop_index` is B's definition ordinal within it, `name_id` feeds the Tier B head on guard failure — inside the same helper, so a miss costs one branch, never a cliff. Mono by design: one predicted type per site, no install, no state transitions; polymorphic sites simply run Tier B for the minority shapes (and IR13 recovers the dominant polymorphism family, subtypes).
+Tier B makes every named access an honest O(1) lookup; Tier A removes even that lookup at sites where the **compiler** can predict the receiver's shape. The helpers are `js_load_member(obj, site_desc)` and `js_store_member(obj, site_desc, value, strict)`, where `site_desc` is one packed immutable constant `[type_index:16 | prop_index:16 | name_id:32]` (NameId is already `[pool16][ordinal16]`, D4.6.1v2): `type_index` names the predicted canonical pre-shape, `prop_index` indexes that TypeMap's existing `slot_entries[]`, and `name_id` feeds the Tier B head on guard failure — inside the same helper, so a miss costs one branch, never a cliff. Mono by design: one predicted type per site, no install, no state transitions; polymorphic sites simply run Tier B for the minority shapes (and IR13 recovers the dominant polymorphism family, subtypes).
 
 ### IR10 — Type identity, guard, and the invariant that pays for it
 
 Canonical pre-shapes receive a runtime `fast_type_id` (`uint32` on TypeMap) at registration; the site's `type_index` is **module-image-relative** and resolves through the active module state exactly like NameIds (`js_active_module_name_id` pattern + per-function register memo) — baking a raw id or pointer would bake a realm into shared MIR (same D5.4.3/D5.4.4 discipline the IC comment cites). Guard = `receiver.map->type->fast_type_id == resolved_id`: two dependent loads + one compare. The load-bearing invariant: **only canonical, unmutated pre-shapes carry an id, and the Map-local clone primitive (`js_property_attrs.h:133`) never copies it** — so delete, redefine, accessor install, freeze, and post-construction extension all detach the instance to an id-less TypeMap and the guard fails. One enforcement point, and it makes the per-hit `flags`/deleted checks *free* — they are subsumed by shape identity. The one thing identity does **not** subsume is the ctor reservation mask (same shared TypeMap, per-instance mask — the exact hazard `js_store_ic_try_hit_entry` documents), so the reserved-bit test for `prop_index`'s offset stays on the hit path.
 
-### IR11 — The ordinal field table
+### IR11 — `slot_entries[]` is the sole property-ordinal index
 
-`ShapeEntry` chains are not O(1)-indexable, so canonical pre-shapes gain a flat `MemberSpec by_ordinal[]` — `{byte_offset, field TypeId, flags, name_id}` — built once at pre-shape creation from the same compile-time layout that combined derived pre-shaping already computes (Tune11 P5 merges inherited field metadata base-first at compile time). Load hit = spec fetch + typed slot read; store hit = same-slot type compatibility against the spec (exact, INT→FLOAT, INT→INT64 — today's `js_store_ic_can_write_same_slot` rule) or fall back. Exotic receivers — the global object, `window` host dynamics, DOM live collections, array companion maps — are excluded by **never assigning them ids**: all admission policy centralizes in id assignment instead of per-access checks.
+Do **not** add `MemberSpec[]`, `by_ordinal[]`, or any second ordinal representation. Generalize the existing `TypeMap::slot_entries` index (`lambda-data.hpp:347–348`) so that, whenever it is published, its invariant is:
+
+```text
+slot_entries[i] = the i-th ShapeEntry in definition/layout order
+slot_count      = the number of indexed ShapeEntry pointers
+prop_index      = i
+```
+
+The shape chain remains authoritative (D3.4.1/D3.4.2); `slot_entries[]` is only its immutable O(1) index. Tier A resolves `ShapeEntry* entry = predicted_type->slot_entries[prop_index]`, then uses `entry->byte_offset`, `entry->type`, `entry->flags`, `entry->name_id`, and the shared lane read/store helpers. Keeping the full `ShapeEntry` is required by D3.4.6: storage is derived from the full `Type*`/`LaneStorageDesc`, so a reduced `{TypeId, offset, flags}` copy would be both duplicate state and insufficient for nullable/composite contracts.
+
+Today `slot_count` also implicitly means "the whole indexed region is a contiguous pointer-width constructor prefix." Split that physical-layout fact from logical property indexing: add `fixed_slot_count`, the number of leading `slot_entries[]` whose offsets are `i * sizeof(void*)`. `slot_count` owns ordinal coverage; `fixed_slot_count` is only a storage-layout certificate used by `typemap_fixed_slot_prefix_count` / `typemap_entry_uses_fixed_slot`. It is metadata about one prefix, not another ordinal table. Producers, transition/rebuild paths, and TypeMap clone paths must rebuild the full `slot_entries[]` in chain order and preserve or recompute `fixed_slot_count`; no cloned index may retain pointers into the source chain.
+
+Registration of a Tier A descriptor requires one proof point: `slot_entries != NULL`, `prop_index < slot_count`, the indexed entry's property identity matches the compiled property, and the canonical shape/layout certificate is valid. After the exact shape guard, load hit = entry fetch + typed slot read; store hit = same-slot type compatibility against that entry (exact, INT→FLOAT, INT→INT64 — today's `js_store_ic_can_write_same_slot` rule) or Tier B fallback. The per-instance constructor reservation test remains because shape identity cannot subsume it. Exotic receivers — the global object, `window` host dynamics, DOM live collections, array companion maps — are excluded by **never assigning them ids**: all admission policy centralizes in id assignment instead of per-access checks.
 
 ### IR12 — Prediction: where `type_index` comes from (the key challenge)
 
@@ -102,7 +138,7 @@ Everything unpredicted emits the plain Tier B call. Expectation-setting: Tier A 
 
 ### IR13 — Subtype admission by id ranges (the inheritance optimization)
 
-Combined derived pre-shaping is already **base-first**, so prefix layout compatibility is the physical default for class hierarchies. Assign `fast_type_id`s in preorder over the module's static class hierarchy so every subtree is a contiguous range; an A-site guard becomes `(id − A_first) <= A_subtree_span` — **one compare admits every layout-compatible descendant**, turning the dominant polymorphism family (subtype poly: deltablue's variable/constraint hierarchies, box2d shapes) back into Tier A hits. The binding constraint is **representation** compatibility, not name-prefix compatibility: the pre-shape merge must preserve every base field's `(byte_offset, field TypeId)` in the derived layout — widen at merge time (e.g., INT→FLOAT unification) or refuse. Refusal is graceful: C gets its own id family, A-sites fall back to Tier B for C receivers, nothing is wrong — just slower. Dynamic proto surgery (`Object.setPrototypeOf`, expando-heavy factories) never gets ids at all.
+Combined derived pre-shaping is already **base-first**, so prefix layout compatibility is the physical default for class hierarchies. Assign `fast_type_id`s in preorder over the module's static class hierarchy so every subtree is a contiguous range; an A-site guard becomes `(id − A_first) <= A_subtree_span` — **one compare admits every layout-compatible descendant**, turning the dominant polymorphism family (subtype poly: deltablue's variable/constraint hierarchies, box2d shapes) back into Tier A hits. The binding constraint is **representation** compatibility, not name-prefix compatibility: the pre-shape merge must preserve every base field's `slot_entries[]` position, `byte_offset`, and full `Type*`/lane descriptor in the derived layout (D3.4.6) — widen at merge time (e.g., INT→FLOAT unification) or refuse. Refusal is graceful: C gets its own id family, A-sites fall back to Tier B for C receivers, nothing is wrong — just slower. Dynamic proto surgery (`Object.setPrototypeOf`, expando-heavy factories) never gets ids at all.
 
 ### IR14 — Helper first, inline later
 
@@ -110,7 +146,7 @@ v1 emits the helper call (simple, measurable, one new entry pair). But the profi
 
 ### IR15 — Precedent: this generalizes the Jube ordinal path
 
-The triple already ships. The Jube interface path lowers exactly `(type slot, member ordinal, key fallback)`: `ref.jube_slot`/`jube_ordinal` (`js_mir_expression_lowering.cpp:1260–1276`) → `js_jube_member_get_by_ordinal(receiver, slot, ordinal, key)` (`js_runtime.cpp:7880`) over per-type member tables that carry ordinal→kind/arity/result metadata (`jube_interface.h:49–65`), compile-time proven by `jm_infer_jube_type`, with the ordinary property path as the semantic fallback. Tier A extends this from host interface types (document, DOM) to user object shapes; long-term the two unify into one member-ordinal dispatch. Jube's member **kind** dimension also names the deferred upgrade: with a compile-known class, `prop_index` can address prototype *method* ordinals — accelerating `this.method()` dispatch, which neither the retiring IC nor Tier B serves (OQ5, staged with IR8).
+The triple already ships. The Jube interface path lowers exactly `(type slot, member ordinal, key fallback)`: `ref.jube_slot`/`jube_ordinal` (`js_mir_expression_lowering.cpp:1260–1276`) → `js_jube_member_get_by_ordinal(receiver, slot, ordinal, key)` (`js_runtime.cpp:7880`) over per-type member tables that carry ordinal→kind/arity/result metadata (`jube_interface.h:49–65`), compile-time proven by `jm_infer_jube_type`, with the ordinary property path as the semantic fallback. Tier A extends the dispatch pattern from host interface types (document, DOM) to user object shapes, but its user-shape ordinal resolves through the one existing `TypeMap::slot_entries[]` index from IR11. Jube's member **kind** dimension also names the deferred upgrade: with a compile-known class, `prop_index` can address prototype *method* ordinals — accelerating `this.method()` dispatch, which neither the retiring IC nor Tier B serves (OQ5, staged with IR8).
 
 ## 6. Performance expectations
 
@@ -120,7 +156,7 @@ Expected outcome is **parity-to-win on IC-friendly benchmarks from Tier B alone,
 - **Tier B mono-hit parity with the IC**: the IC hit and the IR2 probe do the same admission work; the delta is cell-load+6-guards vs hash-probe+3-guards — noise-level either way.
 - **Poly/mega/miss win**: no 4-entry scans, no probe-then-install double lookups, no permanently-penalized megamorphic sites (today's mega sites pay probe + slow path on every access; the kernel just runs once).
 - **Compile/link win**: fewer MIR operands and calls per named site, no IC table link/append per module activation, simpler MIR cache key.
-- **Memory win**: `sizeof(JsLoadIC)` ≈ 88 bytes × sites per module image, gone; Tier B adds no per-TypeMap allocation (IR2 reuses the existing table). Tier A adds one `by_ordinal[]` table + id per **canonical pre-shape** — amortized across all instances of the shape, bounded by class/literal-site count, not object count.
+- **Memory win**: `sizeof(JsLoadIC)` / `sizeof(JsStoreIC)` is 136 bytes on the current 64-bit ABI × sites per module image, gone; Tier B adds no per-TypeMap allocation (IR2 reuses the existing table). Tier A adds no second ordinal table: canonical pre-shapes reuse `slot_entries[]` and add only identity/registry metadata. Generalizing a previously partial `slot_entries[]` may add suffix pointers, still once per shape and amortized across all instances.
 - **Proto-hit unchanged for fields** (both tiers miss today; IR8 covers it); prototype **methods** become reachable only via the IR15/OQ5 method-ordinal extension — the single biggest still-unserved pattern.
 
 ## 7. Migration plan
@@ -133,7 +169,7 @@ Tier B lands first and retires the IC; Tier A layers on top of a proven fallback
 | P1 | IR3/IR4 fast heads behind `LAMBDA_JS_NAMED_FAST=1`, IC path still default; lowering unchanged | `make test-js` green both ways |
 | P2 | A/B: full JS baseline + Test262 (rule 18 — no masking) + jetstream (richards, deltablue, hashmap, navier_stokes), cube3d, box2d, with `JS_EXEC_PROFILE` hit-rate comparison IC vs kernel | wall-time within noise or better on every fixture; hit-rate parity on the IC's own served slice |
 | P3 | Flip lowering to IR5, delete IR6 inventory, slim profiling (IR7), doctrine (IR9), update `doc/dev/js/` property-access design doc | baselines 100%; LOC delta reported |
-| P4 | Tier A: id registry + module type-index tables (IR10), ordinal field tables on pre-shapes (IR11), `js_load_member`/`js_store_member` helpers, prediction pass cases 1–2 (IR12), behind `LAMBDA_JS_MEMBER_FAST=1` | differential vs Tier B on full corpus; Tier A hit-rate reported per benchmark |
+| P4 | Tier A: id registry + module type-index tables (IR10), generalize `slot_entries[]` and add `fixed_slot_count` (IR11), `js_load_member`/`js_store_member` helpers, prediction pass cases 1–2 (IR12), behind `LAMBDA_JS_MEMBER_FAST=1` | slot index/chain invariants tested across build, transition, rebuild, and clone paths; differential vs Tier B on full corpus; Tier A hit-rate reported per benchmark |
 | P5 | Flip Tier A default; measure wall vs Tier B-only | strict improvement on `this.`-heavy fixtures (richards, deltablue, box2d); no regression elsewhere |
 | P6 | IR13 preorder id ranges + merge representation policy; optionally IR14 inline expansion if P5 profiles show helper-call overhead dominating the hit | measured per phase; each optional |
 
@@ -146,6 +182,7 @@ P2 is the honest checkpoint: if the cells measurably beat the kernel somewhere, 
 - **Shapes that mutate under the probe**: none — the probe reads the live table; there is no cached copy to go stale. This risk exists only in the design being retired (dangling cached `ShapeEntry*` after Map-local shape clone, guarded today by shape-identity compare).
 - **Ultra-hot monomorphic loops regress a few percent under Tier B alone**: the lever is Tier A (P4) — compile-predicted specialization at exactly those sites — not a shape-resident memo hack; if P2 shows a gap on a fixture Tier A cannot predict, that result comes back here before P3.
 - **Tier A invariant leaks**: a path that mutates a canonical pre-shape without going through the Map-local clone primitive would leave a stale `fast_type_id` matching a changed layout. Mitigation: the id lives beside the shape data it describes; a debug assert in the clone primitive plus a `LAMBDA_JS_MEMBER_FAST=0` kill switch; P4 differential runs with the assert hot.
+- **`slot_entries[]` publication drift**: a producer could publish a partial index or a clone could retain source-chain pointers, making `prop_index` disagree with definition order. Mitigation: one invariant for every populated index, construction-time/debug assertions that `slot_count` covers the chain exactly, and focused P4 tests for constructor build, append/transition, type-changing rebuild, descriptor clone, delete, and resurrection. `fixed_slot_count` is validated separately as a prefix-layout certificate.
 - **Prediction staleness across MIR cache reuse**: `prop_index`/`type_index` are meaningful only against the pre-shape layout computed by the same compilation; module type-index tables are populated by the same module image, and cross-version reuse must invalidate via the existing cache keys (OQ4 audits this).
 
 ## 9. Open questions

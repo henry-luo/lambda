@@ -1,7 +1,7 @@
 # AST Interpreter — Implementation Plan, Phases P0–P1
 
 **Date:** 2026-08-15 (rev 2 — **P0 landed**)
-**Status:** **P0 complete and gated (2026-08-15)**; P1 not started. The §6 measurement report is published and reviewed. Exit gate of the P0→P1 arc is that report plus the full-baseline differential + GC-stress gates (§7); P0's own gate G0 is recorded in §2.7.
+**Status:** **P0 complete and gated (2026-08-15)**; **P1 partially landed** — see §3.0 for the slice-by-slice state. The §6 measurement report is published and reviewed. Exit gate of the P0→P1 arc is that report plus the full-baseline differential + GC-stress gates (§7); P0's own gate G0 is recorded in §2.7.
 **Design authority:** `doc/Lambda_Formal_Design.md` **D8.1.1v2** (T0 default, tiered execution), D5.1.1/D5.1.2 (side-stack frames), D5.3.2/D5.3.3 (MAY_GC + native rooting contract), D6.2.1/D6.2.3/D6.2.4 (function values, snapshot captures, traced env), D7.2.1/D7.2.2 (module slabs, init transaction), DI14; `doc/Lambda_Formal_Semantics.md` S3.1, S7.7.1/S7.7.2, S7.11.4, S9.1, S11.2.1, SI3.
 **Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This plan implements §11's P0 and P1 exactly; P2 (tiering/satellites), P3 (CONST/PREDICATE modes), P4 (REPL persistent env), P5 (default flip) are **out of scope here** and get their own plan revisions.
 **Scope rule:** P0/P1 never touch MIR lowering, emission, or the default execution path — `LAMBDA_TIER` unset or `jit` must remain byte-identical to today (MT7/D8.6.1 untouched by construction).
@@ -167,6 +167,26 @@ Defects 2–4 were invisible to the ordinary differential and appeared only unde
 
 Each slice lands independently behind `LAMBDA_TIER=interp`, extends the frame-plan cost table for its kinds, adds/extends `.ls` tests **with goldens** (rule 8), and moves its scripts from fallback to supported.
 
+### 3.0 P1 progress — **partially landed 2026-08-15**
+
+Two slices are in, verified over the **full 651-script baseline corpus** (every directory `test_lambda_gtest` discovers, functional and procedural): **105 interpreted end to end with byte-identical output, 546 counted fallbacks, 0 divergences**. GC stress over all 105 clean, `test_interp_gtest` 118/118, default tier 718/718.
+
+> **Correction to the P0 gate record.** G0.1 and the first P1 verification were measured over `test/lambda` only (279 scripts), not the full baseline. Worse, every harness — the gtest subset, the GC-stress loop, and the sweep — invoked `lambda.exe <script>` directly, so **`run` mode was untested by construction** through all of P0 and most of P1. Widening the sweep to the whole corpus immediately found a `run`-mode defect (below). The subset list now records each script's invocation mode and the gtest honours it, plus a dedicated `ProceduralMainIsInvokedUnderRunMode` case so the path stays covered even if the subset's only procedural script ever leaves it.
+
+| Slice | State | What landed |
+|---|---|---|
+| P1.4 procedural + errors | **partial** | `EvalSignal` plumbing on `InterpFrame` (payload in the reserved slot); `VAR_STAM`, `ASSIGN_STAM` to a named binding, `WHILE_STAM`/`DO_WHILE_STAM`, `BREAK`/`CONTINUE`, explicit `RETURN`; `RAISE_STAM`/`RAISE_EXPR`; `AstCallNode::propagate` (`f(...)^`); `INDEX_ASSIGN_STAM`/`MEMBER_ASSIGN_STAM` through `array_set_cow`/`map_set_cow` for a plain-binding root; `run`-mode `pn main()` invocation. **Not yet:** nested COW paths (`a.b.c = v`), declaration-boundary skip (S7.7.2), `HANDLER_EXPR`/`HANDLER_STAM`, `CURRENT_ERROR`, self-tail-call iteration |
+| P1.1 comprehensions | **partial** | `FOR_EXPR`/`FOR_STAM` core: nested `AstLoopNode` chains, key/value and index binding, `key_filter`, `key_only`, the `let` clause, `where`, and the spreadable output stream. **Not yet:** `group`/`order`/`limit`/`offset` clauses and equi-joins (rejected by the pre-scan), `PIPE`, implicit contexts (`~`, `~#`, `last`) |
+| P1.2 / P1.3 / P1.5 | not started | match & types; elements, paths & queries; modules |
+
+Five defects the differential caught while landing these, all fixed:
+
+1. **`and`/`or` short-circuited on an error operand.** An error is *falsy* (`is_truthy` returns `BOOL_FALSE` for `LMD_TYPE_ERROR`), which is precisely what makes `int("x") or 7` yield `7`. Returning early on an error broke containment. The walker now short-circuits only where `fn_and`/`fn_or` would return the left operand anyway and delegates the rest to the helper — the division of labour AI3 asks for.
+2. **A braced `for` body's scope was unreachable from the AST.** `build_for_expr` created a per-iteration `NameScope` and dropped the reference; `AstListNode::vars` exists for exactly this and `build_content` never filled it, so the frame plan could not see the body's bindings. Fixed at the source in `build_ast.cpp` — lowering resolves those names through its own hashmaps and reads that field nowhere, so the write is inert for the JIT.
+3. **`lambda.exe run` never invoked the user's `pn main()`.** `interp_run_script` set `Context::run_main` but had no equivalent of the generated module entry's scan for a top-level `pn main` and its zero-argument call, so *every* `run`-mode script silently produced empty output. Only the full-corpus sweep could see this — the 279-script sweep never used `run`.
+4. **A bare top-level definition was never bound.** A script whose top level is a single statement carries it directly under `AST_SCRIPT` rather than inside a content list, so `pn main(){…}` alone reached `eval_expr`, which built an anonymous closure and left the name unbound. Adding any second top-level item masked it. The top-level walk now hoists and binds definitions the way `build_content`'s pass 1 does.
+5. **Content-block value classification diverged in two places.** A `for` reached as an expression always yields its stream (the discard decision belongs to the enclosing block, as `transpile_expr` defers it to `transpile_content`), and the block-expression shortcut must exclude a lone `for` so its spreadable result flattens through `list_push_spread` instead of nesting. `is_proc_flow_side_effect_node` was promoted to `ast.hpp` so both tiers make the call from one predicate.
+
 ### P1.1 Comprehensions, pipes, implicit contexts
 
 - [ ] `FOR_EXPR`/`FOR_STAM` with the full clause set (`AstForNode`: `where/group/order/limit/limit_from_end/offset/then`; `AstLoopNode` joins incl. `join_keys`/`key_filter`/`key_only`/`optional`), `LOOP`, `ORDER_SPEC`, `GROUP_CLAUSE`, `JOIN_KEY`; accumulators/group tables through the same container/sort helpers as lowering (S6 total order lives in the helpers).
@@ -247,15 +267,24 @@ Published *in this document* (section replaces TBD cells; house style `[measured
 
 Release build (`make release`, rule 10), macOS/arm64, one warm-up + five measured runs, median. Both tiers on the same binary, selected by `LAMBDA_TIER`. Peak RSS is the child process's own `ru_maxrss`, reported by the CLI under `LAMBDA_RSS_REPORT=1` — `RUSAGE_CHILDREN` is a running maximum over every reaped child and cannot attribute a peak to one run. Reproduce with `make interp-bench`; raw data in `temp/interp_bench.tsv` and `temp/interp_repl_bench.tsv`.
 
-**End-to-end turnaround and memory**
+**What the `jit` column actually is.** The shipped default path is not uniformly native codegen. `transpile-mir.cpp` flips `MIR_link` from `MIR_set_gen_interface` to `MIR_set_interp_interface` once a module exceeds `MIR_LARGE_MODULE_INSN_THRESHOLD` (100 000 MIR instructions), independent of optimization level — the size-triggered escape hatch AI19 retires at P5. Two of the C2 rows cross that line, so their baseline is *full lowering + link, then MIR-interp execution*, not generated machine code. Every row below records which mode ran, and the C2 rows additionally carry a **forced-native** column measured with `LAMBDA_JS_LARGE_INTERP=0`, which is the `--jit-all` steady-state baseline. The 1 000-line row is the method's own control: it sits below the threshold, so its default and forced-native cells agree to within noise.
+
+**C1 / C3 / C4 — baseline is native codegen throughout** (0 of the 81 subset scripts and none of the REPL histories tripped the hatch)
 
 | # | Corpus | scripts | jit total ms | interp total ms | speed-up | jit peak RSS MB | interp peak RSS MB | RSS ratio | fallback |
 |---|---|---|---|---|---|---|---|---|---|
 | C1 | `test/lambda` P0 subset | 81 | 1439.5 | 850.0 | **1.69×** | 58.6 | 30.0 | 0.51× | 0 |
-| C2 | synthetic 1 000-line | 1 | 306.6 | 25.0 | **12.3×** | 228.3 | 29.4 | 0.13× | 0 |
-| C2 | synthetic 5 000-line | 1 | 1 392.7 | 208.6 | **6.7×** | 2 133.8 | 42.7 | 0.02× | 0 |
-| C2 | synthetic 20 000-line | 1 | 32 618.9 | 2 228.1 | **14.6×** | 5 376.4 | 92.4 | 0.017× | 0 |
 | C4 | `validate` on a schema fixture | 1 | 9.9 | 8.8 | 1.13× | 11.5 | 11.5 | 1.00× | 0 |
+
+**C2 — synthetic scale, all three execution modes** `[re-measured 2026-08-15]`
+
+| lines | MIR insns | default `jit` mode | default `jit` | forced native (`--jit-all` equivalent) | interp | vs default | vs native |
+|---|---|---|---|---|---|---|---|
+| 1 000 | ~29 k | native codegen | 304.5 ms / 229.8 MB | 301.9 ms / 229.1 MB | **25.5 ms / 29.4 MB** | 11.9× | **11.9×** |
+| 5 000 | 145 045 | **MIR-interp** (over threshold) | 1 433.4 ms / 2 133.6 MB | 2 929.6 ms / 3 924.6 MB | **215.5 ms / 42.7 MB** | 6.7× | **13.6×** |
+| 20 000 | 580 045 | **MIR-interp** (over threshold) | 32 618.9 ms / 5 376.4 MB | 63 511.3 ms / 4 228.8 MB † | **2 228.1 ms / 92.4 MB** | 14.6× | **28.5×** |
+
+† Single run, not a median of five: at ~64 s per invocation the standard protocol exceeds a practical budget. Treat it as an order-of-magnitude figure, not a precise one. Its RSS being *below* the default row is not a typo — disabling the escape hatch also drops large modules to opt=0 (`transpile-mir.cpp`, "the expensive optimizer passes do not pay back on cold generated code"), so this cell measures unoptimized codegen, and MIR-interp holds the full IR resident throughout. The two RSS figures are therefore not a clean codegen-versus-no-codegen contrast; only the T0 column is directly comparable across all three.
 
 **C3 — REPL per-line latency vs history length**
 
@@ -282,9 +311,10 @@ Top fallback reasons: `FOR_EXPR` 32, does-not-compile-on-either-tier 23, `IMPORT
 
 Required findings, against §6.3's criteria:
 
-- **C2 and C3 must show net total-time wins for interp.** They do, decisively: 6.7–14.6× on run-once straight-line code and 9.4× at REPL history 1 000, with the gap widening in program size exactly as the compile-dominance argument predicts. The design's premise holds; P2 may proceed on this evidence.
-- **C1 must show the compile share eliminated and its net direction documented.** Real-workload turnaround is **1.69× faster** on the 81-script subset. This is the conservative number: these scripts are small and helper-dominated, so the compile share is a smaller slice than in C2, and the walker still wins outright.
-- **RSS deltas must separate AST/plan retention from MIR/code-page savings.** The AST + `ast_index` retention cost (AIO4) is visible as C1's floor — interp holds 30.0 MB where the JIT holds 58.6 MB, i.e. keeping the indexed AST alive is *cheaper* than the MIR module it replaces. On C2 the separation is stark: MIR IR plus code pages scale with program size (228 MB → 2.1 GB → 5.4 GB at 1k/5k/20k lines) while the interpreter stays flat at 29–92 MB. **The 20 000-line case is the headline: 5.4 GB versus 92 MB, a 58× reduction**, and it is the same pressure `count_lambda_mir_volume` and the `mir_policy.hpp` size thresholds exist to manage.
+- **C2 and C3 must show net total-time wins for interp.** They do, decisively, and against *both* baselines: 6.7–14.6× versus the shipped default path, 11.9–28.5× versus forced native codegen, and 9.4× at REPL history 1 000. The gap widens with program size exactly as the compile-dominance argument predicts. The design's premise holds; P2 may proceed on this evidence.
+- **C1 must show the compile share eliminated and its net direction documented.** Real-workload turnaround is **1.69× faster** on the 81-script subset, against a native-codegen baseline throughout. This is the conservative number: these scripts are small and helper-dominated, so the compile share is a smaller slice than in C2, and the walker still wins outright.
+- **RSS deltas must separate AST/plan retention from MIR/code-page savings.** The AST + `ast_index` retention cost (AIO4) is visible as C1's floor — interp holds 30.0 MB where the JIT holds 58.6 MB, i.e. keeping the indexed AST alive is *cheaper* than the MIR module it replaces. On C2 the separation is stark and the mode column sharpens it: at 5 000 lines the MIR *IR alone* costs 2.13 GB (the default path never generated code), and adding codegen takes it to 3.92 GB, while T0 stays at 42.7 MB. At 20 000 lines the IR alone is 5.38 GB against T0's 92.4 MB — a **58× reduction**, and the same pressure `count_lambda_mir_volume` and the `mir_policy.hpp` thresholds exist to manage.
+- **A caveat on the C2 default-path rows.** Because the escape hatch fired at 5 000 and 20 000 lines, the "default `jit`" speed-ups there (6.7× and 14.6×) compare T0 against the *cheaper* of the two JIT modes — one that had already skipped codegen. They understate the win against `--jit-all`: the forced-native column is roughly double at 5 000 lines and about twice again at 20 000 (28.5×). This was not noticed in the first pass of this report; the mode column exists so the next reader does not have to re-derive it, and `test/interp/run_bench.py` now reads the mode back out of the run log and prints it in every row.
 - **C4** is measured but uninformative at P0 by construction: `validate` does not route its schema through the tier switch yet, so both tiers pay the same cost. De-JIT-ing the validator is `EvalMode::PREDICATE` work in P3 (AI17); this row is the before-baseline for that change.
 - **C5 (hot-loop kernel)** is deliberately not in this table. §6.1 scopes it to P1, and the constructs that make an honest hot kernel — `for` comprehensions and tail recursion — are on the P0 exclusion list, so any number measured now would describe the JIT fallback rather than the walker. It is a P1 gate deliverable.
 

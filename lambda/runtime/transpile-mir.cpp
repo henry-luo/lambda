@@ -11908,12 +11908,8 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
 // is_declaration_node / is_side_effect_stam live in ast.hpp — the T0
 // interpreter splits content blocks with the same two predicates.
 
-static bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
-    return node && node != last_value &&
-           (node->node_type == AST_NODE_IF_EXPR ||
-            node->node_type == AST_NODE_WHILE_STAM ||
-            node->node_type == AST_NODE_FOR_STAM);
-}
+// is_proc_flow_side_effect_node lives in ast.hpp — the T0 walker makes the
+// same value-or-side-effect call for content-block items.
 
 static bool side_effect_result_can_error(int node_type) {
     switch (node_type) {

@@ -658,32 +658,9 @@ struct JsPromiseRuntimeState : JsRootedState {
     JsItemStack domain_stack = {};
 };
 
-// Module records are context-owned because namespace identity, TLA ordering,
-// and saved module-variable slabs are observable within one realm only.
-struct JsModule {
-    JsModule* next = NULL;
-    Item specifier_item = {};
-    String* specifier = NULL;
-    Item namespace_obj = {};
-    Item awaited_target = {};
-    Item evaluation_error = {};
-    int has_tla = 0;
-    int pending_async_deps = 0;
-    int async_parent_count = 0;
-    int async_parent_capacity = 0;
-    JsModule** async_parents = NULL;
-    void* deferred_main_ptr = NULL;
-    int body_executed = 0;
-    int post_await_pending = 0;
-    int body_state = 0;
-    int async_eval_order = -1;
-    uint32_t saved_module_state_id = UINT32_MAX;
-    uint64_t roots_epoch = 0;
-};
-
+// Module scheduling state is context-owned; canonical descriptors and their
+// namespace/TLA edges live in Runtime::module_registry.
 struct JsModuleRuntimeState {
-    JsModule* first = NULL;
-    JsModule* last = NULL;
     Item active_namespace = {};
     int module_depth = 0;
     int async_eval_order_counter = 0;

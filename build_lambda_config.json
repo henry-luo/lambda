@@ -66,8 +66,7 @@
     "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
   ],
   "configurable_defines": {
-    "JS_TEST262_FAST_PATHS": "1",
-    "LAMBDA_INLINE_CACHE": "1"
+    "JS_TEST262_FAST_PATHS": "1"
   },
   "includes": [
     ".",
@@ -633,6 +632,9 @@
       "name": "lambda-rt",
       "description": "Static active Lambda and LambdaJS runtime layer",
       "pic_linux": true,
+      "required_symbols_macos": [
+        "_js_opt_trace_is_enabled"
+      ],
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",

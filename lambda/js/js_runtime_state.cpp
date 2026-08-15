@@ -929,61 +929,6 @@ extern "C" Item js_active_module_name_item(uint32_t module_name_index,
 JS_FORWARD_EXPRESSION(uint32_t, js_active_module_name_count, (void),
     context && context->active_js_module_state
         ? context->active_js_module_state->property_key_count : 0)
-JS_FORWARD_EXPRESSION(uint32_t, js_active_module_ic_count, (void),
-    context && context->active_js_module_state
-        ? context->active_js_module_state->ic_count : 0)
-
-extern "C" bool js_link_module_ic_table(uint32_t module_state_id,
-        uint32_t count) {
-    LambdaModuleState* state = js_module_state_at(module_state_id);
-    if (!state) return false;
-    if (state->ic_cells && state->ic_count != count) {
-        log_error("js-ic-table: sealed count changed for module %u",
-                  module_state_id);
-        return false;
-    }
-    if (count == 0) {
-        state->ic_count = 0;
-        state->ic_cell_size = 0;
-        return true;
-    }
-    if (!state->ic_cells) {
-        state->ic_cells = mem_calloc((size_t)count, sizeof(JsLoadIC),
-            MEM_CAT_EVAL);
-        if (!state->ic_cells) return false;
-        state->ic_cell_size = sizeof(JsLoadIC);
-        state->ic_count = count;
-    }
-    return state->ic_count == count;
-}
-
-extern "C" bool js_append_module_ic_table(uint32_t module_state_id,
-        uint32_t count) {
-    LambdaModuleState* state = js_module_state_at(module_state_id);
-    if (!state) return false;
-    if (count == 0) return true;
-    if (state->ic_cell_size != 0 && state->ic_cell_size != sizeof(JsLoadIC)) {
-        log_error("js-ic-table: incompatible cell size for module %u",
-            module_state_id);
-        return false;
-    }
-    if (state->ic_count > UINT32_MAX - count) return false;
-    uint32_t old_count = state->ic_count;
-    uint32_t total = old_count + count;
-    void* cells = mem_realloc(state->ic_cells,
-        (size_t)total * sizeof(JsLoadIC), MEM_CAT_EVAL);
-    if (!cells) return false;
-    memset((uint8_t*)cells + (size_t)old_count * sizeof(JsLoadIC), 0,
-        (size_t)count * sizeof(JsLoadIC));
-    state->ic_cells = cells;
-    state->ic_cell_size = sizeof(JsLoadIC);
-    state->ic_count = total;
-    return true;
-}
-
-JS_FORWARD_EXPRESSION(void*, js_active_module_ic, (uint32_t index),
-    context && context->active_js_module_state
-        ? lambda_module_ic_at(context->active_js_module_state, index) : NULL)
 JS_FORWARD_EXPRESSION(uint32_t, js_get_batch_preamble_var_count, (void),
     js_runtime_state.batch_preamble_var_count)
 

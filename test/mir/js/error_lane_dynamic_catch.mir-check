@@ -5,7 +5,7 @@
     {
       "in_func": "_js_dynamicCaught_#_body",
       "expect": [
-        "call\tjs_get_name_id_ic_p_r6_n1_a3, js_get_name_id_ic",
+        "call\tjs_get_p_r6_n1_a4, js_get",
         "call\tjs_error_lane_payload"
       ],
       "count": {
