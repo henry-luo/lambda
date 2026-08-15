@@ -2351,10 +2351,8 @@ int main(int argc, char *argv[]) {
                 js_store_process_exec_argv(js_exec_argc_store, js_exec_argv_store);
             }
 
-            // Tune6: optional per-phase transpile timing + scope-lookup counters,
-            // gated by JS_TRANSPILE_TIMING. Used by the JS transpile timing
-            // benchmark (test_js_transpile_timing_gtest). Phase timing comes from
-            // js_mir_get_last_phase_timing; transpile_js_to_mir_len resets it.
+            // optional compiler timing, gated by JS_TRANSPILE_TIMING or
+            // LAMBDA_COMPILER_TIMING.
             const char* tune6_timing_env = getenv("JS_TRANSPILE_TIMING");
             bool tune6_timing = tune6_timing_env && tune6_timing_env[0] &&
                                 strcmp(tune6_timing_env, "0") != 0;
@@ -2362,15 +2360,13 @@ int main(int argc, char *argv[]) {
                 // Initialize the profile lifecycle even when a fixture takes
                 // no instrumented branch; otherwise a zero-event contract
                 // sample would never register its final trace record.
-                (void)js_exec_profile_mode();
+                (void)js_opt_trace_is_enabled();
             }
             const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
             bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
                                    strcmp(compiler_timing_env, "0") != 0;
             tune6_timing = tune6_timing || compiler_timing;
             if (tune6_timing) {
-                js_scope_counters_set_enabled(1);
-                js_scope_counters_reset();
                 js_mir_volume_counters_reset();
             }
 
@@ -2421,7 +2417,6 @@ int main(int argc, char *argv[]) {
 
             if (tune6_timing) {
                 JsMirPhaseTiming t; js_mir_get_last_phase_timing(&t);
-                JsScopeCounters sc; js_scope_counters_get(&sc);
                 printf("JS_TRANSPILE_TIMING file=%s bytes=%zu "
                        "parse_ms=%.3f ast_ms=%.3f early_ms=%.3f imports_ms=%.3f "
                        "mir_ms=%.3f link_ms=%.3f exec_ms=%.3f cleanup_ms=%.3f total_ms=%.3f\n",
@@ -2429,10 +2424,6 @@ int main(int argc, char *argv[]) {
                        t.parse_us / 1000.0, t.ast_us / 1000.0, t.early_us / 1000.0,
                        t.imports_us / 1000.0, t.mir_us / 1000.0, t.link_us / 1000.0,
                        t.execute_us / 1000.0, t.cleanup_us / 1000.0, t.total_us / 1000.0);
-                printf("JS_AST_COUNTERS file=%s scope_lookups=%ld "
-                       "scope_entries_scanned=%ld scopes_walked=%ld cache_hits=%ld cache_misses=%ld\n",
-                       js_file, sc.lookup_calls, sc.entries_scanned, sc.scopes_walked,
-                       sc.cache_hits, sc.cache_misses);
                 JsMirVolumeCounters vc; js_mir_volume_counters_get(&vc);
                 printf("JS_MIR_VOLUME file=%s functions=%ld mir_insns=%ld\n",
                        js_file, vc.functions_discovered, vc.mir_insns_emitted);
@@ -2451,7 +2442,6 @@ int main(int argc, char *argv[]) {
                            vc.functions_discovered, vc.mir_insns_emitted);
                 }
                 fflush(stdout);
-                js_scope_counters_set_enabled(0);
             }
 
             // JS mode: no REPL printing of last expression value
@@ -4647,7 +4637,7 @@ int main(int argc, char *argv[]) {
             js_batch_execution_mode = 0;
             // _exit skips atexit and runtime_cleanup: flush the JS exec
             // profile explicitly or a profiled batch run records nothing.
-            js_exec_profile_dump();
+            js_opt_trace_dump();
 #ifndef _WIN32
             _exit(0);
 #else

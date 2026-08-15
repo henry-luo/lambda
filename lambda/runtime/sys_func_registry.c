@@ -64,11 +64,6 @@ extern Item js_iterator_result_value(Item result);
 extern Item js_profiled_push_d(double dval);
 extern double js_profiled_it2d(Item item);
 extern int64_t js_profiled_it2i(Item item);
-extern void js_profile_shape_guard_hit(void);
-extern void js_profile_shape_guard_miss(void);
-extern void js_profile_shape_guard_hit_site(uint32_t label_name_id, void* expected_shape, void* actual_shape);
-extern void js_profile_shape_guard_miss_site(uint32_t label_name_id, void* expected_shape, void* actual_shape);
-extern void js_profile_property_set_site(uint32_t label_name_id);
 #endif
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
@@ -1315,11 +1310,6 @@ JitImport jit_runtime_imports[] = {
     {"js_profiled_push_d", FPTR(js_profiled_push_d),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"js_profile_shape_guard_hit", FPTR(js_profile_shape_guard_hit), JIT_IMPORT_VOID_PRESERVES},
-    {"js_profile_shape_guard_miss", FPTR(js_profile_shape_guard_miss), JIT_IMPORT_VOID_PRESERVES},
-    {"js_profile_shape_guard_hit_site", FPTR(js_profile_shape_guard_hit_site), JIT_IMPORT_VOID_PRESERVES},
-    {"js_profile_shape_guard_miss_site", FPTR(js_profile_shape_guard_miss_site), JIT_IMPORT_VOID_PRESERVES},
-    {"js_profile_property_set_site", FPTR(js_profile_property_set_site), JIT_IMPORT_VOID_PRESERVES},
 #endif
     {"box_int64_value", FPTR(box_int64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
@@ -2093,7 +2083,6 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
     {"js_elements_set_number", FPTR(js_elements_set_number)},
-    {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
     {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},

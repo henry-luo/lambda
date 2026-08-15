@@ -189,11 +189,6 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->ctx = ctx;
     mt->em.ctx = ctx;
     mt->em.name_pool = tp ? tp->name_pool : NULL;
-    mt->em.note_mir_call = js_exec_profile_note_mir_call;
-#if JS_EXEC_PROFILE_ENABLED
-    // profile builds also rank helpers by dynamic call count (env-gated at emit)
-    mt->em.helper_call_counter = js_exec_profile_helper_call_counter;
-#endif
     mt->em.call_owner = mt;
     mt->em.root_call_value = js_call_root_value;
     mt->em.note_call_exception = jm_note_call_error_lane;
@@ -252,12 +247,8 @@ MIR_label_t jm_new_label(JsMirTranspiler* mt) {
     return label;
 }
 
-static void jm_clear_boxed_float_const_cache(JsMirTranspiler* mt) {
+static void jm_clear_block_caches(JsMirTranspiler* mt) {
     if (!mt) return;
-    mt->boxed_float_const_cache_count = mt->boxed_float_const_cache_seed_count;
-    // Property-name Items are immutable NameId values.  They are still
-    // block-local here: a first definition in one branch must not be reused
-    // from a sibling branch that does not dominate it.
     mt->property_name_cache_count = 0;
     mt->module_name_id_cache_count = 0;
     mt->module_ic_cache_count = 0;
@@ -648,7 +639,7 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
     em_emit_insn(&mt->em, insn);
     if (!insn) return;
     if (insn->code == MIR_JMP || insn->code == MIR_RET)
-        jm_clear_boxed_float_const_cache(mt);
+        jm_clear_block_caches(mt);
     if (insn->code == MIR_JMP || insn->code == MIR_RET) {
         jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
     }
@@ -659,7 +650,7 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         log_error("js-mir: attempt to emit NULL label — skipping");
         return;
     }
-    jm_clear_boxed_float_const_cache(mt);
+    jm_clear_block_caches(mt);
     // Async state-machine labels merge distinct resume activations, so the
     // prior call result cannot dominate the label. Ordinary labels can be
     // deliberate exception-rethrow targets and must retain their Item carrier.
@@ -678,7 +669,7 @@ void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLan
     // dominate the handler (for example `throw x; p = 1;` followed by `catch`
     // reading `p`).  Re-materialize the key at every merged label so MIR never
     // consumes an uninitialized root slot (D8.4.3).
-    jm_clear_boxed_float_const_cache(mt);
+    jm_clear_block_caches(mt);
     if (mt->in_async && !mt->in_generator && state != JS_ERROR_LANE_SET)
         mt->last_call_result_reg = 0;
     jm_error_lane_set_state(mt, state == JS_ERROR_LANE_UNREACHABLE ? JS_ERROR_LANE_UNKNOWN : state);

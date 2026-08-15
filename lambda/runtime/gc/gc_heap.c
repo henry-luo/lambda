@@ -14,7 +14,6 @@
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
 #include "../../lambda.h"
-#include "../../js/js_exec_profile_weak.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -30,15 +29,9 @@ static inline uint64_t gc_now_nanos(void) {
 // default keeps the collector independent when no host integration is linked.
 __attribute__((weak)) void gc_weak_slots_processed(void) {}
 
-#ifdef LAMBDA_JS_EXEC_PROFILE
-#define GC_PROFILE_ENTER(label) js_weak_profile_property_set_branch_enter(label)
-#define GC_PROFILE_LEAVE(label, token) js_weak_profile_property_set_branch_leave(label, token)
-#define GC_PROFILE_COUNT(label, count) js_weak_profile_property_set_branch_add_count(label, count)
-#else
 #define GC_PROFILE_ENTER(label) 0
 #define GC_PROFILE_LEAVE(label, token) ((void)(token))
 #define GC_PROFILE_COUNT(label, count) ((void)(count))
-#endif
 
 // Hook to release a memory-context node when a registered heap is destroyed.
 // Installed by the allocator factory (lambda/mem_factory_rt.cpp); NULL when unused.

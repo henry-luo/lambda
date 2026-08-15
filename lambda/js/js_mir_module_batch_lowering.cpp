@@ -4,8 +4,6 @@
 #include "../jube/jube_registry.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
-static bool jm_module_phase_progress_is_enabled(void);
-static void jm_log_module_phase_progress(const char* filename, const char* phase);
 
 static bool jm_native_specialization_allowed(JsFuncCollected* fc) {
     if (!fc || !fc->node) return false;
@@ -2363,7 +2361,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
     // Function collection is the sole producer of callable identity. Publish
     // a pointer index once so all later analysis/lowering lookups are O(1).
-    if (mt->func_count > 0 && !getenv("LAMBDA_AST_TUNE_NO_FUNC_INDEX")) {
+    if (mt->func_count > 0) {
         int cap = 1;
         while (cap < mt->func_count * 2) cap <<= 1;
         mt->func_index_nodes = (JsFunctionNode**)pool_calloc(
@@ -4664,9 +4662,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                          jm_native_specialization_allowed(fc) &&
                          !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
-        // diagnostic switch for demand-driven native lowering experiments;
-        // the default remains the existing specialization policy.
-        if (getenv("LAMBDA_AST_TUNE_NO_NATIVE_BODIES")) eligible = false;
         bool has_native_param = false;
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {
@@ -4873,8 +4868,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // control flow (for/while/if/switch/try) will update this register,
     // so eval() returns the last evaluated expression value per ES spec.
     mt->eval_completion_reg = result;
-    jm_seed_boxed_float_const_cache(mt, root);
-
     // Js57 Track A: allocate the module-level scope env when any top-level
     // closure captures a non-modvar block-let. Mirrors the function-body path
     // at js_mir_function_class_lowering.cpp's "fc->has_scope_env" branch.
@@ -5709,7 +5702,6 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
 #ifndef NDEBUG
     int func_count = 0, insn_count = 0;
 #endif
-    bool trace_validation = getenv("JS_MIR_VALIDATE_TRACE") != NULL;
     for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
          m = DLIST_NEXT(MIR_module_t, m)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
@@ -5734,7 +5726,7 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
             }
         }
     }
-    if (trace_validation || !safe) {
+    if (!safe) {
         log_debug("js-mir: validate scanned %d funcs %d insns safe=%d", func_count, insn_count, safe);
     }
     return safe;
@@ -5743,17 +5735,6 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
 // ============================================================================
 // ES Module loading: compile and execute a module, returning its namespace
 // ============================================================================
-
-static bool jm_module_phase_progress_is_enabled(void) {
-    const char* value = getenv("LAMBDA_JS_MIR_PHASE_PROGRESS");
-    return value && value[0] && strcmp(value, "0") != 0;
-}
-
-static void jm_log_module_phase_progress(const char* filename, const char* phase) {
-    if (!jm_module_phase_progress_is_enabled()) return;
-    log_notice("js-module-phase: file=%s phase=%s",
-        filename ? filename : "<module>", phase);
-}
 
 static bool jm_module_has_top_level_await(JsAstNode* ast) {
     if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
@@ -5775,7 +5756,6 @@ static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
 
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
-    jm_log_module_phase_progress(filename, "begin");
     // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
     // binds the Context-owned JS state. Test262's hot batch path calls this
     // entrypoint directly; without this bind, TLA state dereferences a null
@@ -5810,7 +5790,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     jm_track_active_js_transpile(tp, NULL, NULL);
 
 
-    jm_log_module_phase_progress(filename, "parse-begin");
     if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
         // Js57 P7b: parse failure is a SyntaxError. Return ITEM_ERROR (not
         // ItemNull) so the batch driver short-circuits its post-test global
@@ -5822,10 +5801,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
-    jm_log_module_phase_progress(filename, "parse-end");
 
     TSNode root = ts_tree_root_node(tp->tree);
-    jm_log_module_phase_progress(filename, "ast-begin");
     JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
@@ -5834,13 +5811,11 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
-    jm_log_module_phase_progress(filename, "ast-end");
 
     // Js57 P7b: run early-error checks before any further compilation. The
     // module path previously skipped this and crashed on illegal forms like
     // `await 0;` (escaped await — contextually-reserved keyword written
     // with a unicode escape, which is a SyntaxError per the spec).
-    jm_log_module_phase_progress(filename, "early-begin");
     int p7b_early_errors = js_check_early_errors(tp, js_ast);
     if (p7b_early_errors > 0) {
         log_error("js-mir: module: %d early error(s) for '%s'", p7b_early_errors, filename);
@@ -5849,7 +5824,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
-    jm_log_module_phase_progress(filename, "early-end");
 
     // Js57 P5: register the current module BEFORE jm_load_imports so the
     // inherit-awaited-target call inside the loader has a registry entry to
@@ -5904,7 +5878,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     mt->module = MIR_new_module(ctx, "js_module");
 
-    jm_log_module_phase_progress(filename, "mir-begin");
     if (!transpile_js_mir_ast(mt, js_ast)) {
         log_error("js-mir: module: collection/allocation failed for '%s'", filename);
         jm_clear_active_js_transpile(NULL, mt, NULL);
@@ -5914,7 +5887,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
-    jm_log_module_phase_progress(filename, "mir-end");
 
     // Module entry points bypass the script compiler's prelink step.  Its
     // local spelling image must be collected before imports can run: an entry
@@ -5934,7 +5906,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // This mirrors the source-entry static phase.  In particular, do not let
     // jm_load_imports create a dynamic child before this module's own names
     // have joined the static root (D4.6.1v2, D4.6.2v2).
-    jm_log_module_phase_progress(filename, "imports-begin");
     if (!js_activate_runtime_name_pool()) {
         log_error("js-mir: module: failed to activate dynamic NamePool for '%s'",
             filename ? filename : "<module>");
@@ -5949,7 +5920,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // Realm construction is runtime work, after the static root is sealed.
     (void)js_get_global_this();
     jm_load_imports(runtime, js_ast, filename);
-    jm_log_module_phase_progress(filename, "imports-end");
 
     RootFrame import_error_roots(1);
     Rooted<Item> imported_error(import_error_roots,
@@ -5979,9 +5949,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
-    jm_log_module_phase_progress(filename, "link-begin");
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
-    jm_log_module_phase_progress(filename, "link-end");
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
@@ -6050,9 +6018,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_debug("P7d: module '%s' pending=%d — deferring body", filename, p7d_pending);
         // namespace stays as the empty/placeholder until deferred run completes.
     } else {
-        jm_log_module_phase_progress(filename, "execute-begin");
         namespace_obj = js_main((Context*)context);
-        jm_log_module_phase_progress(filename, "execute-end");
         module_body_threw = item_is_error(namespace_obj);
     }
     // Microtasks retain their function owner context, while module-vars and

@@ -733,15 +733,6 @@ static void js_runtime_make_non_enumerable(Item object, Item name) {
     js_object_define_property(object_root.get(), name_root.get(), desc_root.get());
 }
 
-bool js_runtime_trace_enabled() {
-    static int trace_enabled = -1;
-    if (trace_enabled < 0) {
-        const char* env = getenv("JS_RUNTIME_TRACE");
-        trace_enabled = (env && env[0] != '\0' && strcmp(env, "0") != 0) ? 1 : 0;
-    }
-    return trace_enabled != 0;
-}
-
 // Forward declaration: defined in js_globals.cpp.
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
 
@@ -814,12 +805,10 @@ static Item js_canonical_property_string(Item value) {
 
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) {
-        js_exec_profile_name_lookup_bypassed();
         return js_symbol_to_key(key);
     }
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_STRING) {
-        js_exec_profile_name_lookup_bypassed();
         Item result = js_canonical_property_string(key);
         return result;
     }
@@ -853,7 +842,6 @@ extern "C" Item js_to_property_key(Item key) {
 // js_define_accessor_partial without ever materializing a __get_/__set_ marker key.
 
 extern "C" void js_set_module_var(int index, Item value) {
-    js_exec_profile_count(JS_EXEC_PROF_MODULE_VAR_SET);
     if (index >= 0 && context && context->active_js_module_state &&
             index < (int)context->active_js_module_state->var_count) {
         js_active_module_vars[index] = value;
@@ -861,7 +849,6 @@ extern "C" void js_set_module_var(int index, Item value) {
 }
 
 extern "C" Item js_get_module_var(int index) {
-    js_exec_profile_count(JS_EXEC_PROF_MODULE_VAR_GET);
     if (index >= 0 && context && context->active_js_module_state &&
             index < (int)context->active_js_module_state->var_count) {
         return js_active_module_vars[index];

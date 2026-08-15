@@ -1,13 +1,6 @@
 #include "js_mir_internal.hpp"
 #include <limits.h>
 
-static bool js_ast_tune_function_index_enabled() {
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = getenv("LAMBDA_AST_TUNE_NO_FUNC_INDEX") ? 0 : 1;
-    return enabled != 0;
-}
-
 static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
     if (!fn || ts_node_is_null(fn->node)) return false;
     TSNode node = ts_node_parent(fn->node);
@@ -1117,7 +1110,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
 // ============================================================================
 
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn) {
-    if (js_ast_tune_function_index_enabled() && mt && fn &&
+    if (mt && fn &&
             mt->func_index_capacity && mt->func_index_nodes && mt->func_index_ids) {
         uintptr_t key = (uintptr_t)fn >> 3;
         key ^= key >> 17;

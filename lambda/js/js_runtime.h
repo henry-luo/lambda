@@ -468,7 +468,6 @@ Item js_create_regex_literal_items(Item pattern_item, Item flags_item);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
 Item js_regex_exec(Item regex, Item str);
-Item js_debug_check_callee(Item callee, int64_t site_id);
 Item js_get_this();
 Item js_get_lexical_this_binding(void);
 Item js_resolve_lexical_this(Item this_val);
@@ -870,48 +869,6 @@ bool js_unicode_id_is_continue(uint32_t cp);
 
 bool js_regexp_virtual_property_is_overridden(Item regex, const char* name, int name_len);
 void js_regexp_mark_virtual_property_overridden(Item regex, const char* name, int name_len);
-
-// Tune6 diagnostics: scope-lookup counters. Used by the JS transpile timing
-// benchmark to test whether the linear-scan scope lookup is the AST-build
-// bottleneck on large/minified libraries. Counting is gated by an enable flag so
-// there is zero accumulation cost in normal runs.
-typedef struct JsScopeCounters {
-    long lookup_calls;     // calls to js_scope_lookup + js_scope_lookup_current
-    long entries_scanned;  // total NameEntry compared across all lookups
-    long scopes_walked;    // total parent scopes visited across all lookups
-    long cache_hits;
-    long cache_misses;
-} JsScopeCounters;
-
-void js_scope_counters_set_enabled(int enabled);
-void js_scope_counters_reset(void);
-void js_scope_counters_get(JsScopeCounters* out);
-
-// Tune9 diagnostics: identifier-shape counters for Unicode identifier rows.
-// Disabled by default; LAMBDA_JS_IDENTIFIER_STATS=1 also emits a per-process TSV
-// under ./temp/js_identifier_stats.
-typedef struct JsIdentifierCounters {
-    long ast_identifiers;
-    long ast_escaped_identifiers;
-    long ast_non_ascii_identifiers;
-    long ast_source_bytes;
-    long ast_decoded_bytes;
-    long early_identifier_checks;
-    long early_escape_checks;
-    long early_unicode_normalizations;
-    long early_reserved_hits;
-    long early_contextual_escape_hits;
-} JsIdentifierCounters;
-
-void js_identifier_counters_set_enabled(int enabled);
-void js_identifier_counters_reset(void);
-void js_identifier_counters_get(JsIdentifierCounters* out);
-int js_identifier_counters_is_enabled(void);
-void js_identifier_counters_record_ast(int source_len, int decoded_len,
-    int has_escape, int has_non_ascii);
-void js_identifier_counters_record_early_check(void);
-void js_identifier_counters_record_early_escape(int normalized,
-    int reserved_hit, int contextual_hit);
 
 // Tune6 §3.2: MIR generated-code volume for the last transpile. Drives the
 // MIR-lowering reduction work (§3.3) — identifies which fixtures emit the most MIR.

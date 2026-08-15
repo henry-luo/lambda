@@ -34,7 +34,6 @@ extern "C" void ensure_jit_imports_initialized(void);
 
 bool jm_float_const_is_inline(double value);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
-void jm_seed_boxed_float_const_cache(JsMirTranspiler* mt, JsAstNode* scope_root);
 
 extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;

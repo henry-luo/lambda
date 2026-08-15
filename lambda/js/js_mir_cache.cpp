@@ -229,12 +229,3 @@ const JsPreambleState* js_mir_cache_adopt(
 void js_mir_cache_record_instantiation(JsMirCache* cache) {
     if (cache) cache->stats.instantiations++;
 }
-
-void js_mir_cache_get_stats(const JsMirCache* cache, JsMirCacheStats* stats) {
-    if (!stats) return;
-    if (!cache) {
-        memset(stats, 0, sizeof(*stats));
-        return;
-    }
-    *stats = cache->stats;
-}

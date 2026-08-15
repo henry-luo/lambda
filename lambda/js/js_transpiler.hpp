@@ -147,9 +147,6 @@ void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
 // Early error detection (js_early_errors.cpp)
 int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
 
-// Debug functions
-void print_js_ast_node(JsAstNode* node, int indent);
-
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
@@ -222,7 +219,6 @@ const JsPreambleState* js_mir_cache_adopt(
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble, JsPreambleState* compiled_state);
 void js_mir_cache_record_instantiation(JsMirCache* cache);
-void js_mir_cache_get_stats(const JsMirCache* cache, JsMirCacheStats* stats);
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state, uint64_t* result_home);
@@ -312,11 +308,8 @@ bool js_is_truthy(Item value);
 
 // Object and property functions
 Item js_new_object();
-Item js_new_array(int length);
 Item js_get_reference(Item object, Item key);
 Item js_set_key_default(Item object, Item key, Item value);
-Item js_property_delete(Item object, Item key);
-bool js_property_has(Item object, Item key);
 
 // Function call functions
 Item js_call_function(Item func, Item this_binding, Item* args, int arg_count);
@@ -340,7 +333,6 @@ Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
-Item js_array_pop(Item array);
 
 // Math helpers retained for exact namespace operations.
 
@@ -350,8 +342,6 @@ Item js_get_prototype(Item object);
 void js_set_prototype(Item object, Item prototype);
 
 // Global object and built-ins
-Item js_get_global();
-void js_init_global_object();
 
 #ifdef __cplusplus
 }

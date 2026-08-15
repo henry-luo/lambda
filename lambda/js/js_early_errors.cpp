@@ -301,10 +301,6 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
     JsIdentifierNode* id = (JsIdentifierNode*)node;
     if (!id->name) return;
     const char* name = id->name->chars;
-    if (js_identifier_counters_is_enabled()) {
-        js_identifier_counters_record_early_check();
-    }
-
     // check if the name itself is a reserved word
     if (is_reserved_word(name, ctx->in_strict)) {
         ee_error(ctx, node, "'%s' is a reserved word and cannot be used as an identifier", name);
@@ -349,8 +345,6 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
                 contextual_hit = !reserved_hit &&
                     (strcmp(normalized, "await") == 0 || strcmp(normalized, "yield") == 0);
             }
-            js_identifier_counters_record_early_escape(normalized_ok ? 1 : 0,
-                reserved_hit ? 1 : 0, contextual_hit ? 1 : 0);
             if (normalized_ok) {
                 if (reserved_hit) {
                     ee_error(ctx, node, "'%s' (via unicode escape) is a reserved word", normalized);

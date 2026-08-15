@@ -447,16 +447,6 @@ struct JsMirTranspiler {
     JsFuncCollected* current_fc;    // current function being transpiled
     JsAstNode* discarded_expression; // outer expression whose value is unobserved
 
-    // Immediate JS-number Items are non-GC values. Reusing them within one
-    // basic block removes repeated constant moves without allowing a value
-    // first defined on one branch to be read from another branch.
-    struct JsMirBoxedFloatConst {
-        uint64_t bits;
-        MIR_reg_t reg;
-    } boxed_float_const_cache[32];
-    int boxed_float_const_cache_count;
-    int boxed_float_const_cache_seed_count;
-    MIR_item_t boxed_float_const_cache_func;
     struct {
         uint32_t module_name_index;
         NameId direct_name_id;

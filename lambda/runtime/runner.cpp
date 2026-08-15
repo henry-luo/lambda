@@ -1806,7 +1806,7 @@ void runtime_cleanup(Runtime* runtime) {
     }
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
-    js_exec_profile_dump();
+    js_opt_trace_dump();
 
     js_canvas_cleanup();
     module_registry_cleanup_for_runtime(runtime);

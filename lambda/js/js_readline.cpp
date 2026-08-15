@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "js_event_loop.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
@@ -25,7 +26,6 @@ extern "C" Item js_readline_completion_rejected_bound(Item rl_item, Item tab_cou
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
 extern "C" void js_stream_flush_data_now(Item self);
-extern "C" void js_enqueue_promise_job(Item job);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern Item js_make_number(double d);
 
@@ -253,7 +253,7 @@ static void readline_enqueue_output_write(Item rl, Item data) {
     if (!js_is_callable(write_fn)) return;
     Item args[1] = {data};
     Item job = js_bind_function(write_fn, output, args, 1);
-    js_enqueue_promise_job(job);
+    js_microtask_enqueue(job);
 }
 
 static void readline_completion_output_write(Item rl, Item data) {
@@ -301,7 +301,7 @@ static void readline_reject_later(Item reject, Item err) {
     if (!js_is_callable(reject)) return;
     Item args[1] = {err};
     Item job = js_bind_function(reject, ItemNull, args, 1);
-    js_enqueue_promise_job(job);
+    js_microtask_enqueue(job);
 }
 
 static Item readline_rejected_promise(Item err) {
@@ -1476,7 +1476,7 @@ static void readline_enqueue_input_data(Item rl, Item data_item) {
         job = js_bind_function(js_new_native_function(js_readline_deferred_input_data),
                                ItemNull, args, 2);
     }
-    js_enqueue_promise_job(job);
+    js_microtask_enqueue(job);
 }
 
 extern "C" Item js_readline_bound_input_end(Item rl, Item data_item) {
