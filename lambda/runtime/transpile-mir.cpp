@@ -16677,19 +16677,34 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     }
 
     MIR_reg_t dyn_result;
-    // v3 (RV12 / §1.4): dynamic dispatch keeps the caller-donated home. The
-    // whole path is C-mediated — JIT calls `fn_callN_into`, which resolves
-    // `fn->invoke` and calls the public wrapper — and a C prototype has no
-    // portable spelling for MIR's two-result convention. These entries move to
-    // the companion lane only once the RV12 context-slot transport exists,
-    // which is why that phase is not Windows-specific.
-    int dyn_scalar_home_id = em_scalar_home_new(&mt->em);
-    MIR_reg_t dyn_scalar_home = em_materialize_frame_ref(&mt->em,
+    // P1.4: the dynamic path is C-mediated — JIT calls `fn_callN_into`, which
+    // resolves `fn->invoke` and calls the public wrapper — and a C prototype
+    // has no portable spelling for MIR's two-result convention.
+    //
+    // Under v3 that is settled by RV12 rather than by a second result: the
+    // wrapper returns a pending Item and leaves lane 2 in
+    // `Context::mir_companion_slot`, and the trampoline resolves it before
+    // returning (`fn_call_boxed_N_into`, and `LambdaDynamicNativeInvoker`
+    // for the `fn->invoke` path). Every consumer of the trailing operand is
+    // `#if !LAMBDA_RETURN_V3`, so the caller donates NOTHING here: the operand
+    // stays in the C signature — keeping one call shape across both
+    // conventions — and is passed null. Materializing a frame slot the callee
+    // never reads was the last return-side home in the emitter.
+    int dyn_scalar_home_id = 0;
+    MIR_reg_t dyn_scalar_home;
+#if LAMBDA_RETURN_V3
+    dyn_scalar_home = new_reg(mt, "dyn_no_home", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, dyn_scalar_home), MIR_new_int_op(mt->ctx, 0)));
+#else
+    dyn_scalar_home_id = em_scalar_home_new(&mt->em);
+    dyn_scalar_home = em_materialize_frame_ref(&mt->em,
         em_scalar_home_ref(&mt->em, dyn_scalar_home_id));
     if (!dyn_scalar_home) {
         log_error("mir: dynamic call has no caller-owned scalar result home");
         abort();
     }
+#endif
 
     if (arg_count == 0) {
         async_emit_invoke_resume_point(mt, call_node);
@@ -16778,7 +16793,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-    em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
+    // Home identity only exists when a home was donated; under v3 the result
+    // is already resolved by the trampoline, so there is nothing to bind.
+    if (dyn_scalar_home_id) {
+        em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
+    }
     if (!call_node->propagate && !mt->emitting_async_call &&
             mir_is_native_scalar_value_type(call_tid)) {
         // A dynamic dispatcher can reject a valid Lambda signature for its

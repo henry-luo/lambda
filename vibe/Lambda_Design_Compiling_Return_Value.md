@@ -1,8 +1,11 @@
 # Lambda Return-Value Convention v3 — Companion-Lane Wide Scalars and Native `T^E` Lanes
 
-> **Status: DECIDED 2026-08-14 (user ruling) — migration P0/P1.1/P1.2/P1.3
-> IMPLEMENTED 2026-08-14** behind the whole-module flag `LAMBDA_RETURN_V3`
-> (default 0; v1 ABI still ships). Impl log, deviations and gate results:
+> **Status: SHIPPING as of 2026-08-15.** `LAMBDA_RETURN_V3` defaults to **1**;
+> the cutover was gated by running the same tree both ways — 3721 tests,
+> 3715 passed, **identical failure lists**, all six failures reproduced on a
+> clean tree. v2 stays buildable with `-DLAMBDA_RETURN_V3=0` until P5 deletes
+> its machinery. *(Decided 2026-08-14 by user ruling; P0/P1.1/P1.2/P1.3
+> implemented that day behind the flag.)* Impl log, deviations and gate results:
 > [`Lambda_Impl_Return_Value.md`] §5. Sections marked
 > **[measured 2026-08-14]** below were revised from proposal fidelity to
 > observed behaviour once shape 2 was emitting; §1.4 corrects §1.2's site
