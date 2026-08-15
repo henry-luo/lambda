@@ -417,6 +417,7 @@ enum PseudoStyleKind : uint8_t {
     PSEUDO_STYLE_FIRST_LETTER,
     PSEUDO_STYLE_MARKER,
     PSEUDO_STYLE_PLACEHOLDER,
+    PSEUDO_STYLE_BACKDROP,
     PSEUDO_STYLE_COUNT,
 };
 
@@ -456,6 +457,7 @@ struct DomElementExt {
     float ruby_column_start_overhang;
     bool has_simple_ruby_column_geometry;
     bool popover_open;
+    bool dialog_modal;
 };
 
 /**
@@ -830,6 +832,11 @@ struct DomElement : DomNode {
     void set_popover_open(bool value) {
         DomElementExt* data = ensure_ext();
         if (data) data->popover_open = value;
+    }
+    bool is_dialog_modal() const { return ext && ext->dialog_modal; }
+    void set_dialog_modal(bool value) {
+        DomElementExt* data = ensure_ext();
+        if (data) data->dialog_modal = value;
     }
     void reset_view_ext() {
         if (!ext) return;

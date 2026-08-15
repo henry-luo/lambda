@@ -484,10 +484,8 @@ extern "C" bool js_dom_mutation_since_affects_subtree(
 
 extern "C" bool js_dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
-    // DOM3 geometry is a read-only snapshot of the last committed layout.
-    // Forcing layout from a property getter re-entered the host loop during JS
-    // dispatch and made ordinary measurements a synchronous reflow hazard.
-    // A pending document reflow is consumed by the normal frame/layout phase.
+    // geometry reads use the last committed layout; headless callers flush at
+    // the CSSOM View entry point without re-entering the host-driven loop.
     return doc && doc->view_tree && doc->view_tree->root;
 }
 
@@ -514,7 +512,7 @@ extern "C" bool js_dom_commit_headless_layout_checkpoint(void) {
         return false;
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
-    // commit pending mutations; geometry getters remain snapshots and never reflow.
+    // commit pending mutations; geometry getters remain snapshots.
     radiant_reconcile_js_dom_mutations(uicon, doc);
     return true;
 }
@@ -14374,6 +14372,29 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // click() on a disabled form control is a no-op (no event fires).
     if (operation == JUBE_DOM_CLICK) {
         return js_dom_click_method_bridge(elem_item);
+    }
+
+    if (operation == JUBE_DOM_SHOW_POPOVER) {
+        // programmatic opening must use the same state transition as a popover button
+        if (elem) js_dom_activate_popover((void*)elem, 1);
+        return make_js_undefined();
+    }
+
+    if (operation == JUBE_DOM_HIDE_POPOVER) {
+        // programmatic closing must publish the same live-state transition as a popover button
+        if (elem) js_dom_activate_popover((void*)elem, 2);
+        return make_js_undefined();
+    }
+
+    if (operation == JUBE_DOM_SHOW_MODAL) {
+        if (elem && elem->tag_id == MARKUP_NAME_DIALOG) {
+            // showModal makes the dialog open and establishes modal top-layer state
+            elem->set_dialog_modal(true);
+            elem->set_attribute("open", "");
+            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE,
+                                   (DomNode*)elem, elem->parent);
+        }
+        return make_js_undefined();
     }
 
     // getElementById(id) — for DocumentFragment hosts. The DOM spec puts

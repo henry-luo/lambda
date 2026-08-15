@@ -1,13 +1,16 @@
 # Lambda Impl Plan — Return-Value Convention v3 (Companion-Lane Returns)
 
-**Date**: 2026-08-14  **Status**: **P0 / P1.1 / P1.2 / P1.3 / P1.5 / P1.6
-LANDED** behind `LAMBDA_RETURN_V3` (default 0); P1.4 partial, P1.7 partial.
-Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV17 + addenda
-RV3a / RV10a / RV14a; formal spec D5.2.1v2 / **D5.2.2v2** / **D5.2.3** /
-D2.7.2v2 / D8.4.2v2, **v1.22.0**). Open design residue: RVO8 (GVN multi-out),
-RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide temporaries across a loop
-back edge — gates P2.7's reclaim). RVO3 and RVO4 closed 2026-08-14; RVO10
-superseded by RV14/RV15.
+**Date**: 2026-08-14  **Status**: **v3 IS THE SHIPPING DEFAULT since
+2026-08-15** (`LAMBDA_RETURN_V3` default **1**; v2 still buildable with
+`-DLAMBDA_RETURN_V3=0` until P5). P0 / P1.1–P1.6 / P2 / P2.6 / P2.7.0 / P3
+LANDED; P1.7 partial; P2.5, P2.7 (protocol), P4, P5 open.
+Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV18 + addenda
+RV3a / RV10a / RV14a / RV17a; formal spec D5.2.1v2 / **D5.2.2v2** /
+**D5.2.3** / D2.7.2v2 / D8.4.2v2, **v1.22.0**). Open design residue: RVO8
+(GVN multi-out), RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide
+temporaries across a loop back edge — gates P2.7's reclaim). RVO3 and RVO4
+closed 2026-08-14; RVO10 superseded by RV14/RV15; **RVO12 opened and closed
+2026-08-15** (shape 4 on all three lanes).
 **Tree anchor**: master `af254850f`, plus `7187898f1` for the landed phases
 (line refs are as of those commits; anchor by symbol name when they drift).
 
@@ -1158,10 +1161,12 @@ rather than the deletion removing it.
       overflow exit's `ret` + `make_one_ret` merge homes); fixed by returning
       a dead 0 on the value lane there. Root-cause chain + the new
       `LAMBDA_MIR_GEN_DEBUG` observation layer in the 2026-08-15 log.
-      Remaining P2 items, all measured/scoped but NOT implemented: the
-      `can_raise` deopt is really a **raise-arm** deopt (`^E` alone already
-      returns natively — see the 2026-08-15 measurement table); RV9 debug
-      assert; INT64_ERROR retirement (plan tracks it against v5 §5.8).
+      **Raise-arm deopt CLOSED later the same day** (RV17 + RV18 + the
+      operator gate; RVO12): a `T^E` body of the form
+      `if (…) { raise … } else { <T> }` now returns natively on **all three
+      lanes** — `func d, i64` / `func i64, i64` under v3, from ordinary
+      source. Remaining P2 items, measured/scoped but NOT implemented: RV9
+      debug assert; INT64_ERROR retirement (tracked against v5 §5.8).
 - [ ] P2.5 LambdaJS migration (node/js262 gates)
 - [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
       2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).
@@ -1484,3 +1489,133 @@ across 8 probes (`test/mir/mir_budgets.json`), after which the ratchet reports
 zero remaining slack. `js_tune6`'s `linux-debug` and `default` profiles are
 left alone — they are separate platform measurements and this host cannot take
 them; the file's own convention is that each platform re-baselines its own.
+
+### 2026-08-15 — RVO12 CLOSED: shape 4 on ALL lanes (int/i64 join float)
+
+*(Later same day; supersedes the "int stays boxed" scope notes in the RV17/
+RV18 sections above.)*
+
+The `or`-containment failure that forced the int-widening revert is diagnosed
+and fixed at the root. The caller merge was correct; the abort came from
+`transpile_binary_out`'s native-arithmetic block, which is entered on operand
+types alone (`both_int || both_float || int_float`) with **no operator
+check**. The now-native `int^` call made the operand witness say INT, so `or`
+entered the block; the eager native operand fetch ran
+`emit_return_if_item_error` on the merged join — propagating the error `or`
+existed to contain — converted both operands to doubles, found no
+`OPERATOR_OR` case in the switch, and fell through (`default: break`) to the
+boxed `or`, re-evaluating both operands.
+
+Fix: gate the block on the operator set it implements (ADD/SUB/MUL/DIV/POW +
+the six comparisons). This also repairs a **latent master bug**: `f() or 9`
+with an ordinary non-raising native-int `f` evaluated `f()` twice — side
+effects duplicated, unnoticed because the duplicated work was usually pure
+and its results dead.
+
+Diagnosis correction worth recording: the first trace reading called the
+fatal tag test a *null* check (`eq tag, 27`, assumed `LMD_TYPE_NULL`). 27 is
+`LMD_TYPE_ERROR`; NULL is 1. One enum lookup rewrote the narrative from
+"missing error case in a null path" to "error propagation emitted by the
+operand fetch". Check tag constants against `EnumTypeId` before narrating a
+dump.
+
+With the gate in place the INT/INT64 admission is re-applied and holds:
+`func d, i64` / `func i64, i64` under v3 on all three lanes; destructure,
+`or` containment, and arithmetic-on-recovered all correct;
+`raise_arm_native_return.ls` extended to pin the int/i64 `or` cases the
+original test missed. Full chain that closed RVO12: **RV17** (union names the
+value component) → **RV18** (producer publishes the carrier) → **operator
+gate** (non-arith ops never enter the native-arith block) — each necessary,
+only all three sufficient.
+
+Gates: **both flag states green** — 3718/3721 and 3717/3721+lib_alpine-flake,
+where the 3 persistent failures are forced-GC divergences a **clean tree
+reproduces exactly** (verified by stashing the whole working set), and
+`lib_alpine` passes standalone (known parallel-load flake).
+
+### 2026-08-15 — P1.4 completed, P2.7 measured under v3, and the CUTOVER
+
+**P1.4 — done, and two thirds of it turned out to be moot.**
+
+The plan asked for three things. Only the first needed code:
+
+1. *Dynamic dispatch drops the caller-donated home.* **Implemented.** The
+   whole chain — `fn_callN_into` → `lambda_dynamic_call` →
+   `lambda_dynamic_invoke_by_count` → `LambdaDynamicNativeInvoker` — guards
+   every use of the trailing operand with `#if !LAMBDA_RETURN_V3`, so under v3
+   the callee already ignored it while the emitter still allocated a frame
+   slot and materialized its address on every dynamic call. That was the last
+   return-side home in the emitter. The operand stays in the C signature (one
+   call shape across both conventions) and is passed null.
+2. *`nres=2` public wrappers.* **Moot — superseded by RV12.** The slot
+   transport is the answer for C-reachable entries: one MIR result plus
+   `Context::mir_companion_slot`. A 2-result wrapper is exactly what RV12
+   ruled out, so this item was asking for the rejected design.
+3. *Invoke metadata gains a shape field; entry-equivalence compares shapes.*
+   **Moot — the resolver is shape-agnostic by construction.**
+   `lambda_item_resolve_pending_slot()` is documented and implemented as
+   "safe to call on any Item — a resolved one passes straight through", so the
+   dynamic path is correct for every callee shape without consulting
+   metadata. A shape field would be data nobody reads. (`function_eq` still
+   compares `requires_scalar_result_home`, which is uniformly 1 under v3 and
+   therefore harmless; retiring the bit belongs to P5's deletion sweep.)
+
+**P2.7 — measured under v3 for the first time; protocol change NOT shipped.**
+
+Every prior P2.7 costing was taken with the flag off, which counts a
+population v3 deletes. Under v3:
+
+| bench | `_scalar_home` params | adopt sites | home share |
+|---|---|---|---|
+| deltablue | 0 | 3 | 0.9% |
+| richards | 0 | 1 | 0.3% |
+| havlak | 0 | 4 | 0.7% |
+| json | 0 | 3 | 0.7% |
+
+**Eleven sites across four benchmarks**, and attribution by defining
+instruction names them exactly: `pn_push` ×4, `fn_fill` ×3, `pn_splice` ×2,
+`fn_slice3` ×2. RV14/RV15/RV16 — per-binding slots, retiring the eager
+restore, the back-edge reclaim, plus closing RVO11's liveness obligation —
+were designed against 757 sites. Against 11 they are not worth their risk,
+which is a sharper version of the same conclusion the 2026-08-14 entry
+reached at 23.
+
+*Attribution warning, again.* A first pass blamed `int2it_lane` for 13 of
+deltablue's v2-era adopts. It is already marked
+`RESULT_SCALAR_STABLE | NUMBER_STACK_PRESERVES`; the register was a φ-merge
+of the inline and cold int-boxing arms, one of which happens to be that call.
+Attributing by defining instruction is necessary but **not sufficient** when
+the definition is a merge — check whether the def is a join before believing
+it. (Fourth heuristic in this effort to mislead.)
+
+*Why the obvious cheap fix was not taken.* All four survivors are declared
+`&TYPE_ANY`, so the type-driven rule correctly declines to narrow them. Every
+return path of all four was read and none is number-home-backed (`pn_push` /
+`pn_splice` return the array argument; `fn_fill` returns `{.array}` /
+`{.array_num}` / `ItemError`; `fn_slice3` delegates to `fn_slice`, which
+returns a substring, `x2it` binary pointer, `array_num_slice_result`,
+`{.array}`, or `ItemError`). So marking them stable **would** be sound. It was
+not done because both mechanisms cost more than 11 sites are worth: an
+explicit `jit_runtime_imports` row means hand-writing GC/reentry/arg-class
+bits that are conservative today, and setting `success_type` reaches type
+inference. Recorded here so the next attempt starts from the audit rather
+than repeating it.
+
+**CUTOVER — `LAMBDA_RETURN_V3` default 0 → 1.**
+
+Gated by running the **same tree both ways**:
+
+| build | total | passed | failed |
+|---|---|---|---|
+| v2 (`LAMBDA_RETURN_V3=0`) | 3721 | 3715 | 6 |
+| v3 (`LAMBDA_RETURN_V3=1`) | 3721 | 3715 | 6 |
+
+**Identical counts and identical failure lists** — `result29_indexed_guards`,
+three `MirGcStressTest` forced-GC divergences, `dom_module_props`, and `tco`.
+All six were then reproduced on a **clean tree** (whole working set stashed,
+rebuilt), so none is attributable to v3 or to this session; three of them
+(`result29_indexed_guards`, `dom_module_props`, `tco`) arrived with the
+upstream "JS LOC reduction" merge and are worth their own investigation.
+
+v2 remains buildable via `-DLAMBDA_RETURN_V3=0` until P5 deletes its
+machinery; the `#ifndef` guard is unchanged, only the default moved.

@@ -65,7 +65,9 @@ typedef enum PseudoElementType {
     PSEUDO_ELEMENT_FIRST_LETTER,  // ::first-letter
     PSEUDO_ELEMENT_SELECTION,     // ::selection
     PSEUDO_ELEMENT_MARKER,        // ::marker
-    PSEUDO_ELEMENT_PLACEHOLDER    // ::placeholder
+    PSEUDO_ELEMENT_PLACEHOLDER,   // ::placeholder
+    // keep existing numeric values stable because cascade routing uses them
+    PSEUDO_ELEMENT_BACKDROP       // ::backdrop
 } PseudoElementType;
 
 /**

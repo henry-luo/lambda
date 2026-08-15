@@ -800,7 +800,7 @@ Restrictions:
 
 - persistent cache warm hits are not accepted as the primary G2/G3 proof;
 - a test/module sample may not disappear from the manifest because it was cached or made lazy;
-- do not implement a new AST interpreter (**D8.1.1**);
+- ~~do not implement a new AST interpreter (**D8.1.1**)~~ — lifted 2026-08-15 by **D8.1.1v2**/AI1; interpreter work proceeds under `vibe/Lambda_Design_Ast_Interpreter.md` phases P0–P5, not this doc's contingencies;
 - do not patch MIR/vendor code;
 - do not weaken optimization level, validation, early errors, rooting, or link correctness;
 - do not add source-level parallelism until profiler data proves independent work and determinism/diagnostics are preserved.

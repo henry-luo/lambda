@@ -9,6 +9,7 @@
 #include "mir_emitter_shared.hpp"
 #include "mir_dump.h"
 #include "mir_policy.hpp"
+#include "interp.hpp"
 
 extern "C" int lambda_mir_lazy_enabled(void);
 #include "../js/js_runtime.h"
@@ -294,6 +295,13 @@ struct MirTranspiler {
     // The native body epilogue must follow the carrier actually emitted by
     // content lowering; a post-scope AST type probe cannot see boxed locals.
     bool native_body_result_is_raw;
+    // RVO12(a): the carrier the body producer ACTUALLY emitted, published by
+    // the producer instead of inferred at the boundary. `native_body_result_is_raw`
+    // was the one-bit ancestor of this (it says "lane", for two int paths);
+    // this says which carrier, for every producer that knows. VALUE_REP_NONE
+    // means "not published" and keeps the legacy proxy cascade — so adoption
+    // is incremental and cannot regress a producer that has not opted in.
+    ValueRep body_tail_rep;
     AstNode* native_body_tail_expr;
 
     // Variadic function body context: when true, return/raise must emit restore_vargs
@@ -4292,53 +4300,8 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
 // Literal value extraction from source text
 // ============================================================================
 
-static int64_t parse_int_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    int end = ts_node_end_byte(node);
-    const char* text = source + start;
-    int len = end - start;
-
-    // Copy to null-terminated buffer
-    char buf[128];
-    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, text, len);
-    buf[len] = '\0';
-
-    // Handle hex (0x), octal (0o), binary (0b)
-    if (len > 2 && buf[0] == '0') {
-        if (buf[1] == 'x' || buf[1] == 'X') return strtoll(buf, NULL, 16);
-        if (buf[1] == 'o' || buf[1] == 'O') return strtoll(buf + 2, NULL, 8);
-        if (buf[1] == 'b' || buf[1] == 'B') return strtoll(buf + 2, NULL, 2);
-    }
-
-    // Remove underscores (1_000_000 -> 1000000)
-    char clean[128];
-    int ci = 0;
-    for (int i = 0; i < len && ci < (int)sizeof(clean) - 1; i++) {
-        if (buf[i] != '_') clean[ci++] = buf[i];
-    }
-    clean[ci] = '\0';
-
-    // C16 ruling 9: an integer-spelled literal may carry a non-negative
-    // exponent (`10e1` is int 100), and the grammar tokenizes that as an
-    // integer. strtoll stops at the 'e', so apply the exponent here. The
-    // frontend has already rejected anything outside the ingestion band, so
-    // this cannot overflow.
-    char* endptr = NULL;
-    int64_t value = strtoll(clean, &endptr, 10);
-    if (endptr && (*endptr == 'e' || *endptr == 'E')) {
-        const char* exp = endptr + 1;
-        if (*exp == '+') exp++;
-        long power = strtol(exp, NULL, 10);
-        for (long i = 0; i < power; i++) value *= 10;
-    }
-    return value;
-}
-
-static bool parse_bool_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    return source[start] == 't';
-}
+// parse_int_literal / parse_bool_literal live in ast.hpp — the T0 interpreter
+// decodes the same literal spellings from the same source bytes.
 
 // ============================================================================
 // Load constant from rt->consts[index]
@@ -6814,47 +6777,8 @@ static MIR_reg_t emit_machine_count(MirTranspiler* mt, AstNode* node) {
 // whose Lambda type is `int` return int's native lane. Both the direct-call and
 // the pipe-injection emitters need this, so it lives here rather than being
 // decided twice.
-static TypeId sysfunc_c_ret_type_id(SysFuncInfo* info) {
-TypeId c_ret_tid = LMD_TYPE_ANY;  // default: C function returns Item
-    switch (info->fn) {
-    // len() stays a raw machine count. Search/ordinal calls return Item so
-    // their public null result cannot be mistaken for an integer sentinel.
-    case SYSFUNC_LEN:
-        c_ret_tid = LMD_TYPE_INT; break;
-    // These keep an int64_t C result. `int64()` because its Lambda type IS
-    // int64; the bitwise/shift family because bit reinterpretation is a
-    // machine operation on machine words, not number math — its result is
-    // converted into the int lane at the boundary below.
-    case SYSFUNC_INT64:
-    case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
-    case SYSFUNC_BNOT: case SYSFUNC_SHL: case SYSFUNC_SHR:
-        c_ret_tid = LMD_TYPE_INT64; break;
-    // C functions returning Bool (uint8_t)
-    case SYSFUNC_CONTAINS: case SYSFUNC_STARTS_WITH: case SYSFUNC_ENDS_WITH:
-    case SYSFUNC_EXISTS:
-        c_ret_tid = LMD_TYPE_BOOL; break;
-    // C functions returning String*
-    case SYSFUNC_STRING: case SYSFUNC_FORMAT1: case SYSFUNC_FORMAT2:
-        c_ret_tid = LMD_TYPE_STRING; break;
-    // C functions returning Symbol*
-    case SYSFUNC_NAME: case SYSFUNC_SYMBOL:
-        c_ret_tid = LMD_TYPE_SYMBOL; break;
-    // C functions returning Type*
-    case SYSFUNC_TYPE:
-        c_ret_tid = LMD_TYPE_TYPE; break;
-    // C functions returning DateTime (uint64_t)
-    case SYSFUNC_DATETIME: case SYSFUNC_DATETIME0:
-    case SYSFUNC_DATE: case SYSFUNC_DATE0: case SYSFUNC_DATE3:
-    case SYSFUNC_TIME: case SYSFUNC_TIME0: case SYSFUNC_TIME3:
-    case SYSFUNC_JUSTNOW:
-        c_ret_tid = LMD_TYPE_DTIME; break;
-    // C functions returning double
-    case SYSPROC_CLOCK:
-        c_ret_tid = LMD_TYPE_FLOAT; break;
-    default: break;  // returns Item, no boxing needed
-    }
-    return c_ret_tid;
-}
+// sysfunc_c_ret_type_id lives in sys_func_registry.h — the T0 interpreter
+// selects the same result boxing from the same table.
 
 // Formal semantics 7.7: most value sys funcs declare their parameters as
 // `any - error`, so an error argument is rejected at the CALL BOUNDARY rather
@@ -7721,8 +7645,23 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         }
     }
 
-    // Arithmetic ops with native types
-    if (both_int || both_float || int_float) {
+    // Arithmetic ops with native types.
+    //
+    // Gate on the OPERATOR SET this block implements, not only on operand
+    // types: the block eagerly transpiles both operands, so an operator that
+    // ends in its `default: break` re-evaluates them on the boxed path below
+    // — duplicating side effects (a native-int call runs twice), and for a
+    // can-raise LHS the native operand fetch consumes the error lane with
+    // `emit_return_if_item_error`, PROPAGATING an error that `or` was about
+    // to contain. Latent while can-raise callees could not be admitted as
+    // native int operands; surfaced when the raise-arm admission widened.
+    bool native_arith_op = bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+        bi->op == OPERATOR_MUL || bi->op == OPERATOR_DIV ||
+        bi->op == OPERATOR_POW || bi->op == OPERATOR_EQ ||
+        bi->op == OPERATOR_NE || bi->op == OPERATOR_LT ||
+        bi->op == OPERATOR_LE || bi->op == OPERATOR_GT ||
+        bi->op == OPERATOR_GE;
+    if ((both_int || both_float || int_float) && native_arith_op) {
         // A flex-int subexpression is semantically boxed at an ordinary
         // expression boundary, but this float-domain consumer has already
         // proved its raw lane. Re-enter through the native producer or the
@@ -8443,7 +8382,17 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
              if_tid, then_tid, else_tid, then_mir, else_mir);
 
     // If branches have different MIR types or the node type is ANY, always box to Item (I64)
-    bool need_boxing = (if_tid == LMD_TYPE_ANY ||
+    //
+    // RVO12(a): a structured result (a `T | error` branch union, RV17) must box
+    // too. `type_to_mir` collapses every non-float type to I64, so for
+    // `int | error` the register-class comparison sees I64 == I64 and concludes
+    // "no boxing" — while both arms do store Items. The merge register would
+    // then hold an Item that the whole downstream believes is an int lane, and
+    // the tag bits ship as the value (saturating to the inf sentinel). Unions
+    // retain their runtime Item tag (the shape-storage rule), so the boxed
+    // carrier is the correct one; making it explicit here is what lets the
+    // return boundary know what it holds.
+    bool need_boxing = (if_tid == LMD_TYPE_ANY || if_tid == LMD_TYPE_TYPE ||
                         then_mir != else_mir ||
                         then_mir != type_to_mir(if_tid));
 
@@ -10451,8 +10400,6 @@ static MIR_reg_t transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
 // Let/pub statements
 // ============================================================================
 
-static bool is_declaration_node(int node_type);
-static bool is_side_effect_stam(int node_type);
 
 static AstNode* mir_single_value_branch_node(AstNode* node) {
     AstNode* base = mir_unwrap_primary(node);
@@ -11834,40 +11781,8 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
 }
 
 // Check if a node type is a declaration (processed separately, not a value)
-static bool is_declaration_node(int node_type) {
-    switch (node_type) {
-    case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM:
-    case AST_NODE_TYPE_STAM: case AST_NODE_VAR_STAM:
-    case AST_NODE_OBJECT_TYPE:
-    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
-    case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
-    case AST_NODE_VIEW:
-        return true;
-    default:
-        return false;
-    }
-}
-
-// Check if a node type is a procedural side-effect statement.
-// These execute for side effects but do NOT produce output values.
-// NOTE: IF_EXPR (with block form), WHILE_STAM, FOR_STAM can appear in functional code
-// and produce values, so they are NOT included here.
-static bool is_side_effect_stam(int node_type) {
-    switch (node_type) {
-    case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_BREAK_STAM:
-    case AST_NODE_CONTINUE_STAM:
-    case AST_NODE_RETURN_STAM:
-    case AST_NODE_RAISE_STAM:
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_PIPE_FILE_STAM:
-    case AST_NODE_HANDLER_STAM:
-        return true;
-    default:
-        return false;
-    }
-}
+// is_declaration_node / is_side_effect_stam live in ast.hpp — the T0
+// interpreter splits content blocks with the same two predicates.
 
 static bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
     return node && node != last_value &&
@@ -11909,6 +11824,9 @@ static MIR_reg_t transpile_content_tail_value(MirTranspiler* mt, AstNode* node) 
             return emit_int_lane_if_item(mt, transpile_expr(mt, native_value));
         }
     }
+    // Every remaining path leaves through the boxing funnel, so the carrier is
+    // an Item BY CONSTRUCTION — not by inspection of the register afterwards.
+    mt->body_tail_rep = VALUE_REP_ITEM;
     return transpile_box_item(mt, node);
 }
 
@@ -16642,19 +16560,34 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     }
 
     MIR_reg_t dyn_result;
-    // v3 (RV12 / §1.4): dynamic dispatch keeps the caller-donated home. The
-    // whole path is C-mediated — JIT calls `fn_callN_into`, which resolves
-    // `fn->invoke` and calls the public wrapper — and a C prototype has no
-    // portable spelling for MIR's two-result convention. These entries move to
-    // the companion lane only once the RV12 context-slot transport exists,
-    // which is why that phase is not Windows-specific.
-    int dyn_scalar_home_id = em_scalar_home_new(&mt->em);
-    MIR_reg_t dyn_scalar_home = em_materialize_frame_ref(&mt->em,
+    // P1.4: the dynamic path is C-mediated — JIT calls `fn_callN_into`, which
+    // resolves `fn->invoke` and calls the public wrapper — and a C prototype
+    // has no portable spelling for MIR's two-result convention.
+    //
+    // Under v3 that is settled by RV12 rather than by a second result: the
+    // wrapper returns a pending Item and leaves lane 2 in
+    // `Context::mir_companion_slot`, and the trampoline resolves it before
+    // returning (`fn_call_boxed_N_into`, and `LambdaDynamicNativeInvoker`
+    // for the `fn->invoke` path). Every consumer of the trailing operand is
+    // `#if !LAMBDA_RETURN_V3`, so the caller donates NOTHING here: the operand
+    // stays in the C signature — keeping one call shape across both
+    // conventions — and is passed null. Materializing a frame slot the callee
+    // never reads was the last return-side home in the emitter.
+    int dyn_scalar_home_id = 0;
+    MIR_reg_t dyn_scalar_home;
+#if LAMBDA_RETURN_V3
+    dyn_scalar_home = new_reg(mt, "dyn_no_home", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, dyn_scalar_home), MIR_new_int_op(mt->ctx, 0)));
+#else
+    dyn_scalar_home_id = em_scalar_home_new(&mt->em);
+    dyn_scalar_home = em_materialize_frame_ref(&mt->em,
         em_scalar_home_ref(&mt->em, dyn_scalar_home_id));
     if (!dyn_scalar_home) {
         log_error("mir: dynamic call has no caller-owned scalar result home");
         abort();
     }
+#endif
 
     if (arg_count == 0) {
         async_emit_invoke_resume_point(mt, call_node);
@@ -16743,7 +16676,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-    em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
+    // Home identity only exists when a home was donated; under v3 the result
+    // is already resolved by the trampoline, so there is nothing to bind.
+    if (dyn_scalar_home_id) {
+        em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
+    }
     if (!call_node->propagate && !mt->emitting_async_call &&
             mir_is_native_scalar_value_type(call_tid)) {
         // A dynamic dispatcher can reject a valid Lambda signature for its
@@ -21210,19 +21147,20 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     // mirrors how a tail-raise proc is admitted, and reuses the same caller
     // merge that reconstructs the Item join for `^`/`^err` consumers.
     //
-    // FLOAT only, deliberately: the D return lane has the universal it2d
-    // fixup for a boxed value arm (the if-merge is boxed, since the union's
-    // type_id is LMD_TYPE_TYPE), while native INT-family lanes have no
-    // boxed-to-lane conversion at the return boundary — a boxed Item would
-    // flow onto the i64 lane as tag bits and saturate to the inf sentinel.
-    if (signature && signature->can_raise && return_tid == LMD_TYPE_FLOAT &&
-            lambda_type_is_union(body_decl)) {
+    // Every native lane, not just FLOAT: RVO12(a) made the body producer
+    // publish its carrier, so the return boundary unboxes a boxed value arm to
+    // the declared lane instead of guessing. Before that, only D worked — its
+    // register class happened to be a faithful carrier proxy, while the int
+    // lanes had none (Item and int lane are both I64) and shipped tag bits.
+    if (signature && signature->can_raise && lambda_type_is_union(body_decl) &&
+            (return_tid == LMD_TYPE_FLOAT || return_tid == LMD_TYPE_INT ||
+             return_tid == LMD_TYPE_INT64)) {
         TypeBinary* join = (TypeBinary*)body_decl;
         Type* value_side =
             join->left && join->left->type_id == LMD_TYPE_ERROR ? join->right
             : join->right && join->right->type_id == LMD_TYPE_ERROR ? join->left
             : NULL;
-        if (value_side && value_side->type_id == LMD_TYPE_FLOAT) return false;
+        if (value_side && value_side->type_id == return_tid) return false;
     }
     return !mir_expr_proves_native_return_lane(mt, body, return_tid);
 }
@@ -22731,6 +22669,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
     mt->native_body_result_is_raw = false;
+    mt->body_tail_rep = VALUE_REP_NONE;
     mt->native_body_tail_expr = NULL;
 
     log_debug("mir: params bound, transpiling body of '%s'", name_buf->str);
@@ -22838,7 +22777,20 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // native int arithmetic body also already is the raw return lane;
         // treating its ABI-oriented effective type as a boxed Item would
         // unbox the lane a second time and read its tag bits as a pointer.
-        if (!mt->block_returned && !mt->native_body_result_is_raw) {
+        if (!mt->block_returned && !mt->native_body_result_is_raw &&
+                mt->body_tail_rep == VALUE_REP_ITEM) {
+            // RVO12(a) — the producer PUBLISHED its carrier, so the boundary
+            // does not have to guess it from syntax, register class, or the
+            // semantic type (the three proxies below, none of which is the
+            // fact: `MIR_reg_type` cannot separate an Item from an int lane
+            // since both are I64, and the semantic type is documented not to
+            // be carrier evidence). One rule replaces all three: an Item is
+            // unboxed to the declared return lane, whatever that lane is.
+            body_result = emit_unbox_contract_lane(mt, body_result,
+                nfi_body->return_type, mt->current_return_type);
+        } else if (!mt->block_returned && !mt->native_body_result_is_raw) {
+            // Legacy proxy cascade — reached only when no producer published a
+            // carrier (VALUE_REP_NONE). Retire each arm as its producers opt in.
             MIR_type_t body_mir = MIR_reg_type(mt->ctx, body_result, mt->em.func);
             // Content lowering deliberately boxes a non-arithmetic tail so
             // declarations and ordinary expression statements share the Item
@@ -25509,7 +25461,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     ast_index_destroy(&tp->ast_index);
 
     // Copy Script-sized portion of Transpiler back to the Script object
-    memcpy(script, tp, sizeof(Script));
+    script_adopt_transpiler(script, tp);
     script->jit_context = tp->jit_context;
     script->main_func   = tp->main_func;
 
@@ -25614,6 +25566,36 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             return nullptr;
         }
         output->root = ItemError;
+        return output;
+    }
+
+    // T0: a planned script has no `main` by construction — module init is the
+    // interpreter's job. Imports still fall back to JIT in P0/P1, so a planned
+    // main script with an import cone is not yet reachable (P1.5).
+    if (runner.script->interp_supported) {
+        if (compile_only) {
+            Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
+            Input* output = Input::create(output_pool, nullptr);
+            if (output) output->root = ItemNull;
+            return output;
+        }
+        runner_setup_context(&runner);
+        if (!runner.context) return nullptr;
+        Item result = interp_run_script(&runner, run_main);
+        preserve_context_last_error(result);
+        Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
+        Input* output = Input::create(output_pool, nullptr);
+        if (!output) {
+            log_error("interp: failed to create output Input");
+            if (output_pool) pool_destroy(output_pool);
+            return nullptr;
+        }
+        resolve_sys_paths_recursive(result);
+        if (runner.context->cwd) {
+            url_destroy((Url*)runner.context->cwd);
+            runner.context->cwd = NULL;
+        }
+        output->root = result;
         return output;
     }
 

@@ -37,6 +37,7 @@
 #include "runtime/runtime-state.h"
 #include "runtime/ast.hpp"  // For print_root_item declaration
 #include "runtime/emit_sexpr.h"  // For --emit-sexpr command
+#include "runtime/interp.hpp"  // T0 tier selection + run summary
 
 // Error handling with stack traces
 #include "runtime/lambda-error.h"
@@ -521,7 +522,47 @@ static void lambda_main_mempool_cleanup_once(void) {
     mempool_cleanup();
 }
 
+// Peak resident set for the T0 memory report. macOS reports ru_maxrss in
+// bytes, Linux in kilobytes.
+static double lambda_peak_rss_mb(void) {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS counters;
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) return 0.0;
+    return (double)counters.PeakWorkingSetSize / (1024.0 * 1024.0);
+#else
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0.0;
+#if defined(__APPLE__)
+    return (double)usage.ru_maxrss / (1024.0 * 1024.0);
+#else
+    return (double)usage.ru_maxrss / 1024.0;
+#endif
+#endif
+}
+
+// No silent caps (R4): the fallback count is always visible, and gates pin it
+// to zero outside the committed exclusion list.
+static void lambda_report_interp_run(void) {
+    // LAMBDA_RSS_REPORT lets the §6 measurement driver read a per-process peak
+    // for either tier; without it the default path stays exactly as quiet as
+    // it is today.
+    const char* rss_report = getenv("LAMBDA_RSS_REPORT");
+    bool force_report = rss_report && rss_report[0] && strcmp(rss_report, "0") != 0;
+    if (lambda_tier_selected() != LAMBDA_TIER_INTERP && !force_report) return;
+    InterpRunStats* stats = interp_run_stats();
+    // stderr, not stdout: the differential gate compares script output against
+    // the shared goldens, and a summary line on stdout would diverge every test.
+    fprintf(stderr, "interp: executed=%llu fallback=%llu excluded=%llu nodes=%llu peak_rss_mb=%.2f\n",
+        (unsigned long long)stats->scripts_executed,
+        (unsigned long long)stats->scripts_fallback,
+        (unsigned long long)stats->scripts_excluded,
+        (unsigned long long)stats->nodes_evaluated,
+        lambda_peak_rss_mb());
+    fflush(stderr);
+}
+
 static int lambda_main_finish(int ret_code) {
+    lambda_report_interp_run();
     clipboard_store_shutdown();
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
@@ -1861,10 +1902,39 @@ static int node_runner_main(int argc, char** argv) {
     return lambda_main_finish(final_status);
 }
 
+// LAMBDA_TIER selects the execution tier (D8.1.1v2). Unset or `jit` keeps the
+// shipped eager whole-module pipeline bit-for-bit; `interp` runs T0. `auto`
+// (T0 + per-function promotion) needs the P2 promotion machinery, so it is
+// accepted and reported but still runs as `jit`.
+static void apply_lambda_tier_env(void) {
+    const char* text = getenv("LAMBDA_TIER");
+    if (!text || !text[0]) return;
+    LambdaTier tier = LAMBDA_TIER_JIT;
+    if (!lambda_tier_parse(text, &tier)) {
+        log_warn("interp: unrecognized LAMBDA_TIER='%s'; using jit", text);
+        return;
+    }
+    if (tier == LAMBDA_TIER_AUTO) {
+        log_notice("interp: LAMBDA_TIER=auto needs per-function promotion (P2); using jit");
+        tier = LAMBDA_TIER_JIT;
+    }
+    lambda_tier_set(tier);
+}
+
 static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
     if (!arg || !runtime) return false;
     // Keep accepting --mir as an explicit spelling of the sole backend.
     if (strcmp(arg, "--mir") == 0) {
+        return true;
+    }
+    if (strncmp(arg, "--tier=", 7) == 0) {
+        LambdaTier tier = LAMBDA_TIER_JIT;
+        if (lambda_tier_parse(arg + 7, &tier)) {
+            if (tier == LAMBDA_TIER_AUTO) tier = LAMBDA_TIER_JIT;
+            lambda_tier_set(tier);
+        } else {
+            log_warn("interp: unrecognized %s; using jit", arg);
+        }
         return true;
     }
     if (strcmp(arg, "--mir-interp") == 0) {
@@ -1894,6 +1964,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
+    apply_lambda_tier_env();
     jube_set_host_executable_path(argc > 0 ? argv[0] : NULL);
     // Strip --no-log before reading log.conf. Batch workers share the working
     // directory, so even briefly opening configured outputs races on log.txt.

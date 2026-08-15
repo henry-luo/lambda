@@ -7,6 +7,8 @@ extern "C" {
 #include <tree_sitter/api.h>
 #include <sys/types.h>
 #include <time.h>
+#include <stdlib.h>
+#include <string.h>
 #include "ts-enum.h"
 #include "../../lib/mempool.h"
 
@@ -394,6 +396,94 @@ typedef struct AstEventHandler : AstNode {
     struct AstEventHandler* next_handler; // next handler in list
 } AstEventHandler;
 
+// Literal spellings that carry no const-pool entry are re-read from source at
+// use. Shared by MIR lowering and the T0 interpreter so both decode the same
+// bytes to the same value.
+static inline int64_t parse_int_literal(const char* source, TSNode node) {
+    int start = ts_node_start_byte(node);
+    int end = ts_node_end_byte(node);
+    const char* text = source + start;
+    int len = end - start;
+
+    // Copy to null-terminated buffer
+    char buf[128];
+    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, text, len);
+    buf[len] = '\0';
+
+    // Handle hex (0x), octal (0o), binary (0b)
+    if (len > 2 && buf[0] == '0') {
+        if (buf[1] == 'x' || buf[1] == 'X') return strtoll(buf, NULL, 16);
+        if (buf[1] == 'o' || buf[1] == 'O') return strtoll(buf + 2, NULL, 8);
+        if (buf[1] == 'b' || buf[1] == 'B') return strtoll(buf + 2, NULL, 2);
+    }
+
+    // Remove underscores (1_000_000 -> 1000000)
+    char clean[128];
+    int ci = 0;
+    for (int i = 0; i < len && ci < (int)sizeof(clean) - 1; i++) {
+        if (buf[i] != '_') clean[ci++] = buf[i];
+    }
+    clean[ci] = '\0';
+
+    // C16 ruling 9: an integer-spelled literal may carry a non-negative
+    // exponent (`10e1` is int 100), and the grammar tokenizes that as an
+    // integer. strtoll stops at the 'e', so apply the exponent here. The
+    // frontend has already rejected anything outside the ingestion band, so
+    // this cannot overflow.
+    char* endptr = NULL;
+    int64_t value = strtoll(clean, &endptr, 10);
+    if (endptr && (*endptr == 'e' || *endptr == 'E')) {
+        const char* exp = endptr + 1;
+        if (*exp == '+') exp++;
+        long power = strtol(exp, NULL, 10);
+        for (long i = 0; i < power; i++) value *= 10;
+    }
+    return value;
+}
+
+static inline bool parse_bool_literal(const char* source, TSNode node) {
+    int start = ts_node_start_byte(node);
+    return source[start] == 't';
+}
+
+// Content-list item classification, shared by MIR lowering and the T0
+// interpreter so both split a content block into declarations, side-effect
+// statements, and value expressions the same way.
+static inline bool is_declaration_node(int node_type) {
+    switch (node_type) {
+    case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM:
+    case AST_NODE_TYPE_STAM: case AST_NODE_VAR_STAM:
+    case AST_NODE_OBJECT_TYPE:
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+    case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
+    case AST_NODE_VIEW:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Procedural side-effect statements: they execute but contribute no output
+// value. IF_EXPR / WHILE_STAM / FOR_STAM can appear in functional code and do
+// produce values, so they are deliberately absent.
+static inline bool is_side_effect_stam(int node_type) {
+    switch (node_type) {
+    case AST_NODE_ASSIGN_STAM:
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+    case AST_NODE_RETURN_STAM:
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_PIPE_FILE_STAM:
+    case AST_NODE_HANDLER_STAM:
+        return true;
+    default:
+        return false;
+    }
+}
+
 typedef Item (*main_func_t)(Context*);
 typedef struct MIR_context *MIR_context_t;
 
@@ -434,6 +524,17 @@ struct Script : Input {
     struct hashmap* func_name_map;  // maps char* (MIR name) → char* (Lambda name)
 
     ArrayList* direct_imports;  // direct Lambda import dependencies, populated by MIR cache phases
+
+    // ---- T0 AST interpreter (D8.1.1v2) ----
+    // Module top level owns a frame plan just like a function does; its
+    // module-level bindings live in a persistent-rooted slab rather than in
+    // per-activation slots (AI6/D7.2.1).
+    FnFramePlan interp_plan;
+    Item* interp_slab;              // persistent-rooted module binding storage
+    uint32_t interp_slab_count;     // Item lanes in interp_slab (tails follow)
+    bool interp_planned;            // frame-plan pass has run for this Script
+    bool interp_supported;          // pre-scan found only P0/P1-covered kinds
+    AstNodeType interp_reject_kind; // first unsupported kind, for the log line
 };
 
 typedef struct Runtime Runtime;

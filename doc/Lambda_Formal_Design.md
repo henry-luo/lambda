@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.22.0 (2026-08-14)
+**Spec version:** 1.23.0 (2026-08-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1031,12 +1031,20 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1** Tree-sitter grammar → typed AST → **MIR Direct**
-  (`transpile-mir.cpp`) → MIR JIT. MIR-interp is the sole non-JIT
-  execution path; there is **no AST-walking interpreter** — a const-folder
-  over the pure core subset instead (*possible ≠ needed*); a reference
-  interpreter is KIV for spec purposes only and never wired into eval.
-  [U26]
+- **D8.1.1v2*** Tree-sitter grammar → typed AST → **tiered execution**:
+  a boxed AST-walking interpreter (**T0**) is the default execution mode
+  and the retained AST is the runtime source of truth; **MIR Direct**
+  (`transpile-mir.cpp`) → MIR JIT (**T1**) compiles individual hot
+  definitions on demand (per-definition promotion cells, default 3rd
+  call), with whole-module eager compilation under explicit policy. The
+  const-folder is the same engine in CONST mode; MIR-interp demotes to a
+  codegen diagnostic. Promotion swaps entry-pointer data, never patches
+  code (D8.4.1, DI14); D5.1.2's "no hotness detection" continues to
+  scope stack primitives — definition-site counters are tier policy, not
+  primitive adaptivity. *(Historical: v1 ruled the opposite — "no
+  AST-walking interpreter", MIR-interp as sole non-JIT path [U26] —
+  reversed by user ruling 2026-08-15; the full record is
+  `Lambda_Design_Unified_AST.md` §12.)* [AI1–AI22]
 - **D8.1.2** Grammar is regenerated from `grammar.js` (never hand-edit
   `parser.c`); build config generates the build files (never hand-edit
   the Lua). [rules 5, 7]
@@ -1192,7 +1200,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-13.
+Status of `*`-marked rulings as of 2026-08-15.
 
 | Ruling | Status |
 |---|---|
@@ -1231,6 +1239,7 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (js_dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
+| D8.1.1v2 | Decided 2026-08-15 (user ruling); implementation not started — the shipped pipeline remains whole-module eager MIR JIT with MIR-interp as the size-pressure valve until Ast_Interpreter phases P0–P5 land (`vibe/Lambda_Design_Ast_Interpreter.md` §11). |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
@@ -1303,6 +1312,12 @@ Numbered `DO#` (design-open); each links to its record.
   deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
   OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
   JR3.
+- **DO25** Interpreter tier (D8.1.1v2) opens: satellite-module treatment
+  under the MT7 emission budgets (AIO2); cross-context visibility of
+  promotion cells (AIO8); once-called hot bodies — `run`-mode `main`
+  with heavy inline loops never re-enters, so backedge marking never
+  pays; escape hatches vs eventual OSR (AIO11); T0 TCO parity before the
+  default flip (AIO1). [Ast_Interpreter AIO1–AIO12]
 
 **Runtime services & modules**
 - **DO16** Name identity: temporal canonical accepted; dynamic-intern
@@ -1391,7 +1406,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
-| D8.1–D8.2 | U1–U36 | `Lambda_Design_Unified_AST.md`, `Lambda_Impl_Tune_Ast.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1 + call-ABI notes | `Lambda_Design_Compiling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |

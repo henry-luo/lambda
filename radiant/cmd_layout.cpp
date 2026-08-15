@@ -4222,6 +4222,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
+        if (old_dom->is_popover_open() && new_dom->has_attribute("popover")) {
+            // Reconciliation replaces the DOM wrapper, but popover openness is
+            // live state and must survive an unrelated class/style mutation.
+            new_dom->set_popover_open(true);
+        }
+
         if (new_dom == old_dom) {
             new_dom->parent = parent_dom;
             new_dom->prev_sibling = old_previous;

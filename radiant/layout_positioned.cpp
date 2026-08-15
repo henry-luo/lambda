@@ -23,6 +23,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
 static TextDirection get_static_position_direction(ViewElement* parent);
+static void layout_view_absolute_origin(ViewBlock* view, float* out_x, float* out_y);
 
 static float relative_inset_offset(bool has_start, float start, float start_percent,
                                    bool has_end, float end, float end_percent,
@@ -417,6 +418,22 @@ ViewBlock* find_initial_containing_view_block(ViewBlock* element) {
     return root;
 }
 
+static ViewBlock* containment_positioning_block(ViewElement* ancestor) {
+    if (!ancestor) return nullptr;
+    if (ancestor->view_type == RDT_VIEW_INLINE) {
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
+        if (span->blk && span->block()->contain_positioning) {
+            return lam::unsafe_view_block_api_span(span);
+        }
+    } else if (ancestor->is_block()) {
+        ViewBlock* block = lam::view_require_block(ancestor);
+        if (block->blk && block->block()->contain_positioning) {
+            return block;
+        }
+    }
+    return nullptr;
+}
+
 ViewBlock* find_positioned_containing_block(ViewElement* view) {
     for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
          ancestor;
@@ -434,14 +451,23 @@ ViewBlock* find_positioned_containing_block(ViewElement* view) {
                 return ancestor_block;
             }
         }
+        ViewBlock* containing_block = containment_positioning_block(ancestor);
+        if (containing_block) {
+            return containing_block;
+        }
     }
     return nullptr;
 }
 
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     if (position_type == CSS_VALUE_FIXED) {
-        // Fixed positioning uses viewport as containing block
-        // For now, return the root block (will be enhanced for viewport support)
+        for (ViewElement* ancestor = element ? element->parent_view() : nullptr;
+             ancestor;
+             ancestor = ancestor->parent_view()) {
+            ViewBlock* containing_block = containment_positioning_block(ancestor);
+            if (containing_block) return containing_block;
+        }
+        // Fixed positioning falls back to the initial fixed containing block.
         return find_initial_containing_view_block(element);
     }
 
@@ -469,12 +495,6 @@ void layout_parent_to_containing_block_offset(ViewBlock* block,
     LayoutAxisPair<float> parent_to_cb_offset = {};
     ViewElement* walk_start = block->parent_view();
     ViewElement* containing_element = reinterpret_cast<ViewElement*>(containing_block);
-
-    if (walk_start == containing_element) {
-        *out_x = parent_to_cb_offset.x;
-        *out_y = parent_to_cb_offset.y;
-        return;
-    }
 
     while (walk_start && !walk_start->is_block() && walk_start != containing_element) {
         walk_start = walk_start->parent_view();
@@ -518,6 +538,17 @@ void layout_parent_to_containing_block_offset(ViewBlock* block,
          block->positionp()->position == CSS_VALUE_FIXED)) {
         parent_to_cb_offset.x += containing_block->x;
         parent_to_cb_offset.y += containing_block->y;
+    }
+
+    if (containing_block && block->position &&
+        block->positionp()->position == CSS_VALUE_FIXED) {
+        // Fixed descendants use viewport coordinates even when their DOM parent
+        // is the containing block, so include that block's document origin.
+        float cb_origin_x = 0.0f;
+        float cb_origin_y = 0.0f;
+        layout_view_absolute_origin(containing_block, &cb_origin_x, &cb_origin_y);
+        parent_to_cb_offset.x += cb_origin_x;
+        parent_to_cb_offset.y += cb_origin_y;
     }
 
     *out_x = parent_to_cb_offset.x;
@@ -606,6 +637,20 @@ static bool positioned_element_has_replaced_sizing(ViewBlock* block) {
         block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
         block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
         (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data"));
+}
+
+static bool positioned_is_open_popover_object(ViewBlock* block) {
+    return block && block->tag() == MARKUP_NAME_OBJECT && block->is_element() &&
+        block->as_element()->is_popover_open() &&
+        !block->get_attribute(MARKUP_NAME_DATA);
+}
+
+static float positioned_open_popover_intrinsic_border_size(
+        LayoutContext* lycon, ViewBlock* block, bool horizontal) {
+    IntrinsicSize intrinsic = layout_measure_replaced(
+        lycon, block, lycon->available_space);
+    float content_size = horizontal ? intrinsic.max_width : intrinsic.max_height;
+    return layout_border_size_from_content_box(block, content_size, horizontal);
 }
 
 static bool positioned_axis_is_auto(ViewBlock* block, bool horizontal) {
@@ -940,6 +985,24 @@ static float positioned_final_content_axis(ViewBlock* block, float size, LayoutA
         : constrained;
 }
 
+static void layout_view_absolute_origin(ViewBlock* view, float* out_x, float* out_y) {
+    if (!view || !out_x || !out_y) return;
+    float x = view->x;
+    float y = view->y;
+    for (ViewElement* parent = view->parent_view(); parent; parent = parent->parent_view()) {
+        if (!parent->is_block()) continue;
+        ViewBlock* parent_block = lam::view_require_block(parent);
+        x += parent_block->x;
+        y += parent_block->y;
+        if (parent_block->position &&
+            parent_block->positionp()->position == CSS_VALUE_FIXED) {
+            break;
+        }
+    }
+    *out_x = x;
+    *out_y = y;
+}
+
 static void recalculate_right_positioned_x(ViewBlock* block, ViewBlock* cb) {
     float border_left = 0.0f;
     float padding_width = containing_block_padding_width(cb, &border_left);
@@ -963,6 +1026,14 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (is_icb) {
         border_offset_x = 0.0f;
         border_offset_y = 0.0f;
+    } else if (block->position && block->positionp()->position == CSS_VALUE_FIXED) {
+        // Fixed boxes store viewport coordinates; a contained fixed CB must
+        // contribute its already-laid-out document origin to that coordinate.
+        float cb_origin_x = 0.0f;
+        float cb_origin_y = 0.0f;
+        layout_view_absolute_origin(containing_block, &cb_origin_x, &cb_origin_y);
+        border_offset_x += cb_origin_x;
+        border_offset_y += cb_origin_y;
     }
 
     layout_resolve_percent_offsets_for_child(block, cb);
@@ -1000,6 +1071,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->form_control();
     bool is_replaced = positioned_element_is_replaced(block);
     bool has_replaced_sizing = positioned_element_has_replaced_sizing(block);
+    bool is_open_popover_object = positioned_is_open_popover_object(block);
     float preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
     // CSS 2.1 §10.3.7: auto margins use the containing block's resolved direction.
     TextDirection cb_direction = get_static_position_direction(containing_block);
@@ -1042,6 +1114,13 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         width_from_inset_stretch = can_inset_stretch_width && !has_width &&
             !is_intrinsic_width && !is_stretch_width &&
             block->positionp()->has_left && block->positionp()->has_right;
+    } else if (is_intrinsic_width && is_open_popover_object) {
+        // An open object popover is a replaced box; fit-content must measure its
+        // default replaced content instead of collapsing to padding and border.
+        float border_width = positioned_open_popover_intrinsic_border_size(
+            lycon, block, true);
+        content_width = layout_used_css_size_from_border_box(block, border_width, true);
+        has_width = true;
     } else if (is_intrinsic_width) {
         IntrinsicSizes intrinsic = layout_measure_intrinsic_widths(
             lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
@@ -1184,6 +1263,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
             is_intrinsic_height, is_stretch_height, has_height,
             can_inset_stretch_height, cb.has_definite_height,
             &content_height)) {
+    } else if (is_intrinsic_height && is_open_popover_object) {
+        float border_height = positioned_open_popover_intrinsic_border_size(
+            lycon, block, false);
+        content_height = layout_used_css_size_from_border_box(block, border_height, false);
+        has_height = true;
     } else if (ratio_transfers_max_height) {
         float max_height = layout_explicit_max_axis_or(block, false, 0.0f);
         content_height = layout_css_size_to_content_box(

@@ -9,6 +9,7 @@
 #include "type_contract.hpp"
 #include "concurrency.h"
 #include "hosted-call-dispatch.hpp"
+#include "interp.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -898,8 +899,12 @@ static Item lambda_dynamic_argument_limit_error(const char* caller, int64_t coun
 }
 
 static bool lambda_dynamic_abi_is_core(FunctionEntryAbi abi) {
+    // The interpreted entry is a Core Lambda callable too: it carries the same
+    // TypeFunc signature and needs the same optional/rest adaptation. Only its
+    // final invocation differs (AI7).
     return abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
-        abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE;
+        abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
+        abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED;
 }
 
 static bool lambda_dynamic_signature_has_var_parameter(const TypeFunc* signature) {
@@ -932,7 +937,7 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
             "task launch requires a boxed Lambda procedure entry");
     }
-    if (!fn->ptr) {
+    if (!fn->ptr && fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
             "function has no native entry");
     }
@@ -1085,6 +1090,11 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
     if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER) {
         return lambda_dynamic_invoke_host_adapter(fn, args, count, caller);
     }
+    if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
+        // The single tier-dispatch point (AI7): `args` is already the rooted
+        // span the adapter built, which is exactly what interp_call needs.
+        return interp_call(fn, args, count);
+    }
     // This is the Core boxed ABI dispatch; hosted native callbacks use the
     // shared Item-only switch in hosted-call-dispatch.hpp above.
     switch (count) {
@@ -1125,7 +1135,8 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     // layout. Validate this byte before reading Core Function metadata.
     if (fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION &&
             fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
-            fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
+            fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER &&
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
             "function does not publish a Core boxed dynamic-call entry");
     }

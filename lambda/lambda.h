@@ -1100,6 +1100,9 @@ enum {
     FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE,
     FN_ENTRY_ABI_FOREIGN,
     FN_ENTRY_ABI_HOST_ADAPTER,
+    // T0 (AI7): a cold Lambda function with no native entry. `ptr` is NULL and
+    // `def` carries the AST definition site that `interp_call` evaluates.
+    FN_ENTRY_ABI_LAMBDA_INTERPRETED,
 };
 
 // Function as first-class value
@@ -1127,6 +1130,13 @@ struct Function {
     void* closure_env;    // closure environment (NULL if no captures)
     const char* name;     // function name for stack traces (may be NULL)
     struct Context* runtime_context; // owner passed through generated calls
+    // Trailing only: generated code pokes type_id at offset 0 and
+    // closure_field_count at offset 2, so no field may shift.
+    // AST definition site (AstFuncNode*) — the T0 body plus, with `module`,
+    // the (module, node) identity D6.2.1/S5.5.1 already require. NULL for
+    // natively-compiled and foreign entries.
+    const void* def;
+    struct Script* def_module;  // owner of def's const_list / type_list / slab
 };
 
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
@@ -1308,8 +1318,12 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 // shape descriptor says what they speak, so the flag flips emission, not
 // dispatch correctness. The L1 MIR module cache key carries the convention
 // revision so a v2-cached module can never be linked against v3 callers.
+// Return-value convention v3 (companion-lane returns). SHIPPING DEFAULT since
+// 2026-08-15: gated at exact parity with v2 on the same tree — 3715/3721 both
+// ways, identical failure lists, all six pre-existing on a clean tree. v2
+// remains buildable with -DLAMBDA_RETURN_V3=0 until P5 deletes its machinery.
 #ifndef LAMBDA_RETURN_V3
-#define LAMBDA_RETURN_V3 0
+#define LAMBDA_RETURN_V3 1
 #endif
 // Convention revision, folded into the MIR cache key (RV10).
 #define LAMBDA_RETURN_CONVENTION_REVISION (LAMBDA_RETURN_V3 ? 3 : 2)
@@ -2056,6 +2070,8 @@ ArrayNum* array_float_fill(ArrayNum* arr, int count, ...);
 
 typedef struct Map Map;
 Map* map_fill(Map* map, ...);
+// Same fill from a caller-rooted Item span; the T0 walker has no varargs.
+Map* map_fill_items(Map* map, const Item* values, int value_count);
 
 typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
