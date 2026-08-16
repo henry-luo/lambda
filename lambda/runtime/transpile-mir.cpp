@@ -630,13 +630,7 @@ static Type* mir_native_param_contract(const NativeFuncInfo* info, int index) {
     return info ? mir_param_contract_at(info->fn_node, index) : NULL;
 }
 
-static bool mir_type_needs_mutable_clone(TypeId type_id) {
-    return type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_ARRAY ||
-           type_id == LMD_TYPE_ARRAY_NUM || type_id == LMD_TYPE_MAP ||
-           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT;
-}
 
-static AstNode* mir_unwrap_primary(AstNode* node);
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected);
 static bool mir_nested_control_writes_name(AstNode* node, const String* name);
@@ -664,43 +658,10 @@ static bool mir_inferred_native_argument_proven(MirTranspiler* mt,
         mir_expr_proves_native_return_lane(mt, argument, expected);
 }
 
-static bool mir_expr_may_return_container(AstNode* expr, TypeId expr_tid, TypeId target_tid) {
-    if (mir_type_needs_mutable_clone(expr_tid) && expr_tid != LMD_TYPE_ANY) return true;
-    if (expr_tid != LMD_TYPE_ANY && target_tid != LMD_TYPE_ANY) return false;
 
-    AstNode* root_expr = mir_unwrap_primary(expr);
-    if (!root_expr) return target_tid == LMD_TYPE_ANY;
-    switch (root_expr->node_type) {
-    case AST_NODE_ARRAY:
-    case AST_NODE_MAP:
-    case AST_NODE_ELEMENT:
-    case AST_NODE_LIST:
-    case AST_NODE_IDENT:
-    case AST_NODE_INDEX_EXPR:
-    case AST_NODE_MEMBER_EXPR:
-    case AST_NODE_CALL_EXPR:
-    case AST_NODE_IF_EXPR:
-    case AST_NODE_MATCH_EXPR:
-    case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM:
-        return true;
-    default:
-        // `any` arithmetic/comparison paths are scalar in practice; cloning
-        // their boxed result turns tight integer loops into runtime calls.
-        return false;
-    }
-}
-
-static AstNode* mir_unwrap_primary(AstNode* node) {
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* primary = (AstPrimaryNode*)node;
-        node = primary->expr;
-    }
-    return node;
-}
 
 static AstFuncNode* mir_direct_call_function(AstCallNode* call) {
-    AstNode* function = call ? mir_unwrap_primary(call->function) : NULL;
+    AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
     if (!function || function->node_type != AST_NODE_IDENT) return NULL;
     NameEntry* entry = ((AstIdentNode*)function)->entry;
     AstNode* node = entry ? entry->node : NULL;
@@ -716,7 +677,7 @@ static bool mir_region_scalar_expr(AstNode* node) {
         // Parser-built literals use a primary wrapper with no child expression.
         return true;
     }
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_NULL:
@@ -753,7 +714,7 @@ static bool mir_region_map_scalar_value(AstNode* node) {
             !((AstPrimaryNode*)node)->expr) {
         return node->type && mir_region_immediate_value_type(node->type->type_id);
     }
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return true;  // an omitted map value is null
     if (node->node_type == AST_NODE_NULL) return true;
     if (!node->type || !mir_region_immediate_value_type(node->type->type_id)) {
@@ -777,7 +738,7 @@ static bool mir_region_map_scalar_value(AstNode* node) {
 
 static bool mir_region_map_value(AstNode* node, AstFuncNode* producer,
         bool* saw_recursive_call) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return true;  // an omitted map value is null
     if (mir_region_map_scalar_value(node)) return true;
     if (node->node_type != AST_NODE_CALL_EXPR ||
@@ -793,7 +754,7 @@ static bool mir_region_map_value(AstNode* node, AstFuncNode* producer,
 
 static bool mir_region_producer_node(AstNode* node, AstFuncNode* producer,
         bool* saw_map, bool* saw_recursive_call) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_CONTENT:
@@ -851,7 +812,7 @@ static bool mir_region_same_name(String* left, String* right) {
 
 static bool mir_region_scalar_field_node(AstNode* node, String* field_name,
         bool* saw_field) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_CONTENT:
@@ -900,12 +861,12 @@ static bool mir_region_producer_scalar_field(AstFuncNode* producer,
 
 static bool mir_region_consumer_scalar_member(AstNode* node,
         AstFuncNode* consumer, AstFuncNode* producer) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_MEMBER_EXPR || !consumer ||
             !consumer->param) return false;
     AstFieldNode* member = (AstFieldNode*)node;
-    AstNode* object = mir_unwrap_primary(member->object);
-    AstNode* field = mir_unwrap_primary(member->field);
+    AstNode* object = ast_unwrap_primary(member->object);
+    AstNode* field = ast_unwrap_primary(member->field);
     if (!object || !field || field->next || object->node_type != AST_NODE_IDENT ||
             field->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* object_ident = (AstIdentNode*)object;
@@ -923,7 +884,7 @@ static bool mir_region_consumer_return(AstNode* node, AstFuncNode* consumer,
             !((AstPrimaryNode*)node)->expr) {
         return true;
     }
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_NULL:
@@ -941,7 +902,7 @@ static bool mir_region_consumer_return(AstNode* node, AstFuncNode* consumer,
         AstCallNode* call = (AstCallNode*)node;
         if (!is_recursive_call(call, consumer)) return false;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            AstNode* value = mir_unwrap_primary(arg);
+            AstNode* value = ast_unwrap_primary(arg);
             if (!value || (value->node_type != AST_NODE_IDENT &&
                     value->node_type != AST_NODE_MEMBER_EXPR)) return false;
         }
@@ -961,7 +922,7 @@ static bool mir_region_consumer_condition(AstNode* node,
         AstFuncNode* consumer) {
     if (node && node->node_type == AST_NODE_PRIMARY &&
             !((AstPrimaryNode*)node)->expr) return true;
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_NULL:
@@ -992,7 +953,7 @@ static bool mir_region_consumer_condition(AstNode* node,
 
 static bool mir_region_consumer_node(AstNode* node, AstFuncNode* consumer,
         AstFuncNode* producer, bool* saw_recursive_call) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_CONTENT:
@@ -1060,35 +1021,8 @@ static MirVarEntry* find_var(MirTranspiler* mt, const char* name);
 static bool has_elem_type_invalidation(const char* var_name, AstNode* node,
         TypeId safe_elem);
 
-enum { MIR_COW_PATH_MAX = 32 };
 
-typedef struct MirCowPath {
-    AstNode* root;
-    AstNode* segment[MIR_COW_PATH_MAX];
-    bool is_member[MIR_COW_PATH_MAX];
-    int count;
-} MirCowPath;
 
-static bool mir_collect_cow_path(MirCowPath* path, AstNode* node) {
-    node = mir_unwrap_primary(node);
-    if (!node) return false;
-    if (node->node_type == AST_NODE_IDENT) {
-        path->root = node;
-        return true;
-    }
-    if (node->node_type != AST_NODE_INDEX_EXPR && node->node_type != AST_NODE_MEMBER_EXPR) {
-        return false;
-    }
-    AstFieldNode* field = (AstFieldNode*)node;
-    if (!mir_collect_cow_path(path, field->object) || !field->field ||
-            field->field->next || path->count >= MIR_COW_PATH_MAX) {
-        return false;
-    }
-    path->segment[path->count] = field->field;
-    path->is_member[path->count] = node->node_type == AST_NODE_MEMBER_EXPR;
-    path->count++;
-    return true;
-}
 
 static MirVarEntry* mir_direct_root_binding(MirTranspiler* mt, AstNode* node) {
     while (node && node->node_type == AST_NODE_PRIMARY) {
@@ -1102,7 +1036,7 @@ static MirVarEntry* mir_direct_root_binding(MirTranspiler* mt, AstNode* node) {
 }
 
 static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
-    AstNode* root_expr = mir_unwrap_primary(expr);
+    AstNode* root_expr = ast_unwrap_primary(expr);
     if (!root_expr) return false;
     if (root_expr->node_type == AST_NODE_IDENT) {
         MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
@@ -1111,22 +1045,11 @@ static bool mir_expr_produces_cow_owner(MirTranspiler* mt, AstNode* expr) {
     // Literals and calls return values into a binding. Member/index reads are
     // borrows of an existing owner and must not turn cursor rebinding into a
     // second COW root before their retained parent slot is available.
-    switch (root_expr->node_type) {
-    case AST_NODE_ARRAY:
-    case AST_NODE_MAP:
-    case AST_NODE_ELEMENT:
-    case AST_NODE_LIST:
-    case AST_NODE_OBJECT_LITERAL:
-    case AST_NODE_NEW_EXPR:
-    case AST_NODE_CALL_EXPR:
-        return true;
-    default:
-        return false;
-    }
+    return ast_expr_produces_owned_container(root_expr);
 }
 
 static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr) {
-    AstNode* root_expr = mir_unwrap_primary(expr);
+    AstNode* root_expr = ast_unwrap_primary(expr);
     if (!root_expr || root_expr->node_type != AST_NODE_IDENT) return false;
     MirVarEntry* source = mir_direct_root_binding(mt, root_expr);
     return source && source->cow_owned;
@@ -2059,7 +1982,7 @@ static GlobalVarEntry* find_global_var(MirTranspiler* mt, const char* name) {
 }
 
 static bool mir_argument_is_module_binding(MirTranspiler* mt, AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base || base->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* ident = (AstIdentNode*)base;
     if (ident->entry) {
@@ -2083,7 +2006,7 @@ static bool mir_module_binding_has_native_lane(MirTranspiler* mt,
     // rejected that already-proven lane and forced a boxed wrapper, where a
     // typed-array argument lost its raw witness on the recursive edge
     // (S4.1, D2.2.2, D3.2.1).
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     TypeId actual = base && base->type ? base->type->type_id : LMD_TYPE_ANY;
     if (actual == LMD_TYPE_ANY || actual == LMD_TYPE_TYPE) {
         AstIdentNode* ident = base && base->node_type == AST_NODE_IDENT
@@ -3673,7 +3596,7 @@ static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node) {
     // arithmetic body despite no INT_LANE_NULL being admissible there.
     if (node->type && node->type->type_id != LMD_TYPE_ANY &&
             lambda_type_accepts_null(node->type)) return true;
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base) return false;
     if (base->node_type == AST_NODE_BINARY) {
         AstBinaryNode* binary = (AstBinaryNode*)base;
@@ -3754,7 +3677,7 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
         // recreate the hot per-element boundary (S4.1, D2.4, D3.2.1).
         return true;
     }
-    AstNode* primary = mir_unwrap_primary(source_node);
+    AstNode* primary = ast_unwrap_primary(source_node);
     if (primary && primary->node_type == AST_NODE_IDENT &&
             mir_unwrap_decl_type(target)->type_id == LMD_TYPE_MAP) {
         // An annotated binding is checked on every assignment before its
@@ -3883,7 +3806,7 @@ static bool mir_argument_may_return_item_error(MirTranspiler* mt,
 
 static bool mir_direct_call_has_parameter_error_guard(MirTranspiler* mt,
         AstCallNode* call) {
-    AstNode* function = mir_unwrap_primary(call ? call->function : NULL);
+    AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     if (!function || function->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* ident = (AstIdentNode*)function;
     AstNode* target = ident->entry ? ident->entry->node : NULL;
@@ -3925,7 +3848,7 @@ static bool mir_argument_may_return_item_error(MirTranspiler* mt,
     if (!argument) return false;
     if (mir_expr_proven_nonnull_under_dense_guard(mt, argument)) return false;
     if (argument->type && lambda_type_accepts_error(argument->type)) return true;
-    AstNode* base = mir_unwrap_primary(argument);
+    AstNode* base = ast_unwrap_primary(argument);
     return base && base->node_type == AST_NODE_CALL_EXPR &&
         mir_direct_call_has_parameter_error_guard(mt, (AstCallNode*)base);
 }
@@ -4722,7 +4645,7 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
 
 static MIR_reg_t mir_emit_cow_path_key(MirTranspiler* mt, AstNode* segment,
         bool is_member) {
-    AstNode* key_node = mir_unwrap_primary(segment);
+    AstNode* key_node = ast_unwrap_primary(segment);
     if (is_member && key_node && key_node->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)key_node;
         MIR_reg_t name = emit_load_string_literal(mt, ident->name->chars);
@@ -4734,7 +4657,7 @@ static MIR_reg_t mir_emit_cow_path_key(MirTranspiler* mt, AstNode* segment,
     return transpile_box_item(mt, segment);
 }
 
-static MIR_reg_t mir_emit_cow_path_array(MirTranspiler* mt, const MirCowPath* path,
+static MIR_reg_t mir_emit_cow_path_array(MirTranspiler* mt, const AstCowPath* path,
         AstNode* terminal, bool terminal_is_member) {
     MIR_reg_t array = emit_call_0(mt, "array_plain", MIR_T_P);
     for (int i = 0; i <= path->count; i++) {
@@ -4756,13 +4679,13 @@ static void mir_attach_function_type(MirTranspiler* mt, MIR_reg_t function,
 }
 
 static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
-        const MirCowPath* path, AstNode* terminal, bool terminal_is_member,
+        const AstCowPath* path, AstNode* terminal, bool terminal_is_member,
         MIR_reg_t value) {
     // Keep the owner spine in compiler registers/root slots.  The former
     // temporary Lambda array allocated once per nested write and made COW's
     // cold path observable on otherwise allocation-free stores.
-    MIR_reg_t keys[MIR_COW_PATH_MAX + 1];
-    int key_roots[MIR_COW_PATH_MAX + 1];
+    MIR_reg_t keys[AST_COW_PATH_MAX + 1];
+    int key_roots[AST_COW_PATH_MAX + 1];
     int value_root = create_gc_root_slot(mt, value);
     for (int i = 0; i <= path->count; i++) {
         AstNode* segment = i == path->count ? terminal : path->segment[i];
@@ -5398,7 +5321,7 @@ static LambdaNumericKind mir_bitwise_kind_from_type_id(TypeId type_id) {
 static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
         AstNode* node) {
     if (!node) return LAMBDA_NUM_INVALID;
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base) {
         // A literal primary has no child expression, but its own type still
         // proves the numeric lane. Dropping that fact made an otherwise native
@@ -5408,7 +5331,7 @@ static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
     bool call_is_bitwise = false;
     if (base->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)base;
-        AstNode* function = mir_unwrap_primary(call->function);
+        AstNode* function = ast_unwrap_primary(call->function);
         if (function && function->node_type == AST_NODE_SYS_FUNC) {
             AstSysFuncNode* sys = (AstSysFuncNode*)function;
             if (sys->fn_info) {
@@ -5470,7 +5393,7 @@ static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
     }
     if (base->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)base;
-        AstNode* function = mir_unwrap_primary(call->function);
+        AstNode* function = ast_unwrap_primary(call->function);
         if (function && function->node_type == AST_NODE_SYS_FUNC) {
             AstSysFuncNode* sys = (AstSysFuncNode*)function;
             AstNode* first = call->argument;
@@ -5783,7 +5706,7 @@ static TypeId mir_direct_native_return_type(MirTranspiler* mt,
         AstCallNode* call) {
     NativeFuncInfo* native = mir_direct_native_info(mt, call);
     TypeId result = native && native->has_native ? native->return_type : LMD_TYPE_ANY;
-    AstNode* function = mir_unwrap_primary(call ? call->function : NULL);
+    AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     AstNode* target = function && function->node_type == AST_NODE_IDENT
         ? (((AstIdentNode*)function)->entry
             ? ((AstIdentNode*)function)->entry->node : NULL) : NULL;
@@ -5803,7 +5726,7 @@ static TypeId mir_direct_native_return_type(MirTranspiler* mt,
 
 static NativeFuncInfo* mir_direct_native_info(MirTranspiler* mt,
         AstCallNode* call) {
-    AstNode* function = mir_unwrap_primary(call ? call->function : NULL);
+    AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     if (!function || function->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)function;
     AstNode* target = ident->entry ? ident->entry->node : NULL;
@@ -5819,7 +5742,7 @@ static NativeFuncInfo* mir_direct_native_info(MirTranspiler* mt,
 }
 
 static TypeFunc* mir_direct_call_signature(AstCallNode* call) {
-    AstNode* function = mir_unwrap_primary(call ? call->function : NULL);
+    AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     AstNode* target = function && function->node_type == AST_NODE_IDENT
         ? (((AstIdentNode*)function)->entry
             ? ((AstIdentNode*)function)->entry->node : NULL) : NULL;
@@ -5882,7 +5805,7 @@ static bool mir_is_exact_u32_value(MirTranspiler* mt, AstNode* node) {
 }
 
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
-    AstNode* unwrapped = mir_unwrap_primary(object);
+    AstNode* unwrapped = ast_unwrap_primary(object);
     if (unwrapped && unwrapped->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
         char name[128];
@@ -6010,7 +5933,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             // lane and turns its tag into infinity on the next boundary.
             return LMD_TYPE_ANY;
         }
-        AstNode* direct_callee = mir_unwrap_primary(call->function);
+        AstNode* direct_callee = ast_unwrap_primary(call->function);
         if (direct_callee && direct_callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)direct_callee)->fn_info;
             if (info && info->can_raise) {
@@ -6559,7 +6482,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
 static TypeId mir_native_arithmetic_operand_type(MirTranspiler* mt,
         AstNode* node) {
     TypeId tid = get_effective_type(mt, node);
-    AstNode* primary = mir_unwrap_primary(node);
+    AstNode* primary = ast_unwrap_primary(node);
     if (primary && primary->node_type == AST_NODE_INDEX_EXPR) {
         // An indexed read can retain the AST TYPE wrapper from `int[]` even
         // after the live binding has established its ArrayNum element lane.
@@ -6627,7 +6550,7 @@ static bool mir_binary_numeric_decision(
 }
 
 static bool mir_c14c_known_float_result(AstNode* node) {
-    AstNode* unwrapped = mir_unwrap_primary(node);
+    AstNode* unwrapped = ast_unwrap_primary(node);
     if (!unwrapped || unwrapped->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* binary = (AstBinaryNode*)unwrapped;
     if (binary->op != OPERATOR_IDIV && binary->op != OPERATOR_MOD) return false;
@@ -6713,7 +6636,7 @@ static MIR_reg_t mir_unbox_exact_native_numeric_result(
 
 static MIR_reg_t mir_emit_string_concat_item(MirTranspiler* mt,
         MirVarEntry* owner, MIR_reg_t left_ptr, AstNode* right_expr) {
-    AstNode* right_node = mir_unwrap_primary(right_expr);
+    AstNode* right_node = ast_unwrap_primary(right_expr);
     if (right_node && right_node->node_type == AST_NODE_BINARY &&
             ((AstBinaryNode*)right_node)->op == OPERATOR_JOIN) {
         // Flatten nested RHS joins into the same exclusive buffer. The old
@@ -6756,8 +6679,8 @@ static bool mir_matches_compact_loop_sub(MirTranspiler* mt, AstBinaryNode* binar
             binary->op != OPERATOR_SUB) {
         return false;
     }
-    AstNode* left = mir_unwrap_primary(binary->left);
-    AstNode* right = mir_unwrap_primary(binary->right);
+    AstNode* left = ast_unwrap_primary(binary->left);
+    AstNode* right = ast_unwrap_primary(binary->right);
     if (!left || !right || left->node_type != AST_NODE_IDENT ||
             right->node_type != AST_NODE_IDENT) {
         return false;
@@ -6774,7 +6697,7 @@ static bool mir_matches_compact_loop_sub(MirTranspiler* mt, AstBinaryNode* binar
 
 static bool mir_matches_compact_loop_add(MirTranspiler* mt, AstBinaryNode* binary) {
     if (!mt->compact_loop_add_lhs || binary->op != OPERATOR_ADD) return false;
-    AstNode* left = mir_unwrap_primary(binary->left);
+    AstNode* left = ast_unwrap_primary(binary->left);
     if (!left || left->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* left_ident = (AstIdentNode*)left;
     return left_ident->name->len == mt->compact_loop_add_lhs->len &&
@@ -6842,7 +6765,7 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
     // A parenthesized native producer has the same lane contract as its
     // underlying binary node; inspect that producer before deciding whether
     // the consumer may reopen it (S4.5.3, D2.2.2).
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* bi = (AstBinaryNode*)node;
     if (bi->op != OPERATOR_ADD && bi->op != OPERATOR_SUB &&
@@ -6873,7 +6796,7 @@ static bool mir_native_int_tree_operand(MirTranspiler* mt, AstNode* node) {
 }
 
 static bool mir_is_native_int_tree(MirTranspiler* mt, AstNode* node) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node) return false;
     if (mir_native_arithmetic_operand_type(mt, node) == LMD_TYPE_INT) return true;
     if (node->node_type != AST_NODE_BINARY) return false;
@@ -6897,10 +6820,10 @@ static bool mir_native_int_bitwise_value_proven(MirTranspiler* mt,
 static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node);
 
 static bool mir_native_int_bitwise_tree(MirTranspiler* mt, AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base || base->node_type != AST_NODE_CALL_EXPR) return false;
     AstCallNode* call = (AstCallNode*)base;
-    AstNode* function = mir_unwrap_primary(call->function);
+    AstNode* function = ast_unwrap_primary(call->function);
     if (!function || function->node_type != AST_NODE_SYS_FUNC) return false;
     SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
     AstNode* first = call->argument;
@@ -6918,10 +6841,10 @@ static bool mir_native_int_bitwise_tree(MirTranspiler* mt, AstNode* node) {
 
 static bool mir_native_int_bitwise_value_proven(MirTranspiler* mt,
         AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (base && base->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)base;
-        AstNode* function = mir_unwrap_primary(call->function);
+        AstNode* function = ast_unwrap_primary(call->function);
         if (function && function->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
             AstNode* first = call->argument;
@@ -6955,10 +6878,10 @@ static bool mir_native_int_bitwise_value_proven(MirTranspiler* mt,
 
 static bool mir_native_int_bitwise_error_free(MirTranspiler* mt,
         AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (base && base->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)base;
-        AstNode* function = mir_unwrap_primary(call->function);
+        AstNode* function = ast_unwrap_primary(call->function);
         SysFuncInfo* info = function && function->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)function)->fn_info : NULL;
         AstNode* first = call->argument;
@@ -6985,10 +6908,10 @@ static bool mir_native_int_bitwise_error_free(MirTranspiler* mt,
 // Item as a lane would feed tag bits into the enclosing array store or OR.
 static MIR_reg_t transpile_native_int_bitwise_value(MirTranspiler* mt,
         AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     AstCallNode* call = base && base->node_type == AST_NODE_CALL_EXPR
         ? (AstCallNode*)base : NULL;
-    AstNode* function = call ? mir_unwrap_primary(call->function) : NULL;
+    AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
     SysFuncInfo* info = function && function->node_type == AST_NODE_SYS_FUNC
         ? ((AstSysFuncNode*)function)->fn_info : NULL;
     AstNode* first = call ? call->argument : NULL;
@@ -7023,7 +6946,7 @@ static MIR_reg_t transpile_native_int_bitwise_value(MirTranspiler* mt,
 }
 
 static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
-    AstNode* primary = mir_unwrap_primary(node);
+    AstNode* primary = ast_unwrap_primary(node);
     if (primary && mir_native_int_bitwise_tree(mt, primary)) {
         return transpile_native_int_bitwise_value(mt, primary);
     }
@@ -7097,7 +7020,7 @@ struct MirNativeIndexValue {
 // expression tree and sanitize once at the array boundary instead of re-running
 // the full int-lane slow-arm check after every add/multiply.
 static MirNativeIndexValue mir_emit_native_index_expr(MirTranspiler* mt, AstNode* node) {
-    AstNode* unwrapped = mir_unwrap_primary(node);
+    AstNode* unwrapped = ast_unwrap_primary(node);
     if (unwrapped && unwrapped->node_type == AST_NODE_BINARY &&
             mir_index_expr_is_native_int(mt, unwrapped)) {
         AstBinaryNode* binary = (AstBinaryNode*)unwrapped;
@@ -7289,7 +7212,7 @@ static bool mir_assignment_has_native_int_lane(
     snprintf(name_buf, sizeof(name_buf), "%.*s",
         (int)assign->target->len, assign->target->chars);
     MirVarEntry* var = find_var(mt, name_buf);
-    AstNode* value = mir_unwrap_primary(assign->value);
+    AstNode* value = ast_unwrap_primary(assign->value);
     return var && var->type_id == LMD_TYPE_INT && value &&
         value->node_type == AST_NODE_BINARY &&
         mir_is_native_int_arith(mt, value);
@@ -7301,13 +7224,13 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
 
 static bool mir_literal_int_value(AstNode* node, int64_t* value) {
     if (!node || !value) return false;
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     bool negative = false;
     if (node && node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op != OPERATOR_NEG && unary->op != OPERATOR_POS) return false;
         negative = unary->op == OPERATOR_NEG;
-        node = mir_unwrap_primary(unary->operand);
+        node = ast_unwrap_primary(unary->operand);
     }
     if (!node || node->node_type != AST_NODE_LITERAL) return false;
     AstLiteralNode* literal = (AstLiteralNode*)node;
@@ -8203,7 +8126,7 @@ static bool mir_binary_arithmetic_result_is_boxed(MirTranspiler* mt,
 }
 
 static bool mir_value_expr_is_boxed(MirTranspiler* mt, AstNode* node) {
-    AstNode* evaluated = mir_unwrap_primary(node);
+    AstNode* evaluated = ast_unwrap_primary(node);
     return evaluated && (evaluated->node_type == AST_NODE_MATCH_EXPR ||
         (evaluated->node_type == AST_NODE_IF_EXPR &&
          get_effective_type(mt, evaluated) == LMD_TYPE_ANY));
@@ -8211,7 +8134,7 @@ static bool mir_value_expr_is_boxed(MirTranspiler* mt, AstNode* node) {
 
 static MIR_reg_t mir_box_evaluated_node(MirTranspiler* mt, AstNode* node,
         MIR_reg_t value, TypeId type_id) {
-    AstNode* evaluated = mir_unwrap_primary(node);
+    AstNode* evaluated = ast_unwrap_primary(node);
     if (type_id == LMD_TYPE_INT && evaluated &&
             (evaluated->node_type == AST_NODE_CONTENT ||
              evaluated->node_type == AST_NODE_LIST)) {
@@ -8225,8 +8148,8 @@ static MIR_reg_t mir_box_evaluated_node(MirTranspiler* mt, AstNode* node,
         return value;
     }
     if (type_id == LMD_TYPE_INT &&
-            mir_unwrap_primary(node) &&
-            mir_unwrap_primary(node)->node_type == AST_NODE_INDEX_EXPR) {
+            ast_unwrap_primary(node) &&
+            ast_unwrap_primary(node)->node_type == AST_NODE_INDEX_EXPR) {
         // indexed reads may already carry an Item when the container witness
         // is dynamic; preserve that carrier instead of tagging it a second time.
         return emit_box_int_if_needed(mt, value);
@@ -9492,7 +9415,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
     // the typed-vs-boxed representation tuning notes). Everything else about the loop —
     // comprehension output, where/order/limit, nested sources, break/continue —
     // is deliberately left on the shared path below.
-    AstNode* range_src = mir_unwrap_primary(loop->as);
+    AstNode* range_src = ast_unwrap_primary(loop->as);
     bool counted_range = !key_only && key_filter == 0 &&
         range_src && range_src->node_type == AST_NODE_BINARY &&
         ((AstBinaryNode*)range_src)->op == OPERATOR_TO &&
@@ -9788,7 +9711,7 @@ static bool mir_string_names_equal(const String* left, const String* right) {
 }
 
 static bool mir_node_is_ident_named(AstNode* node, const String* name) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     return node && node->node_type == AST_NODE_IDENT &&
         mir_string_names_equal(((AstIdentNode*)node)->name, name);
 }
@@ -9836,12 +9759,12 @@ static bool mir_nested_control_writes_name(AstNode* node, const String* name) {
 static bool mir_positive_sub_loop_candidate(MirTranspiler* mt,
         AstWhileNode* while_node, String** out_lhs, String** out_rhs,
         String** out_counter) {
-    AstNode* cond = mir_unwrap_primary(while_node->cond);
+    AstNode* cond = ast_unwrap_primary(while_node->cond);
     if (!cond || cond->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* comparison = (AstBinaryNode*)cond;
     if (comparison->op != OPERATOR_GE) return false;
-    AstNode* left = mir_unwrap_primary(comparison->left);
-    AstNode* right = mir_unwrap_primary(comparison->right);
+    AstNode* left = ast_unwrap_primary(comparison->left);
+    AstNode* right = ast_unwrap_primary(comparison->right);
     if (!left || !right || left->node_type != AST_NODE_IDENT ||
             right->node_type != AST_NODE_IDENT) return false;
     String* lhs_name = ((AstIdentNode*)left)->name;
@@ -9878,7 +9801,7 @@ static bool mir_positive_sub_loop_candidate(MirTranspiler* mt,
         if (item->node_type != AST_NODE_ASSIGN_STAM) continue;
         AstAssignStamNode* assign = (AstAssignStamNode*)item;
         if (mir_string_names_equal(assign->target, rhs_name)) return false;
-        AstNode* value = mir_unwrap_primary(assign->value);
+        AstNode* value = ast_unwrap_primary(assign->value);
         if (mir_string_names_equal(assign->target, lhs_name)) {
             if (!value || value->node_type != AST_NODE_BINARY) return false;
             AstBinaryNode* subtract = (AstBinaryNode*)value;
@@ -9919,7 +9842,7 @@ static bool mir_positive_sub_loop_candidate(MirTranspiler* mt,
                 if (item->node_type != AST_NODE_ASSIGN_STAM) continue;
                 AstAssignStamNode* assign = (AstAssignStamNode*)item;
                 if (!mir_string_names_equal(assign->target, counter_name)) continue;
-                AstNode* value = mir_unwrap_primary(assign->value);
+                AstNode* value = ast_unwrap_primary(assign->value);
                 if (!value || value->node_type != AST_NODE_BINARY) {
                     counter_name = NULL;
                     break;
@@ -9944,11 +9867,11 @@ static bool mir_positive_sub_loop_candidate(MirTranspiler* mt,
 
 static bool mir_forward_compact_loop_candidate(MirTranspiler* mt,
         AstWhileNode* while_node, String** out_counter) {
-    AstNode* cond = mir_unwrap_primary(while_node ? while_node->cond : NULL);
+    AstNode* cond = ast_unwrap_primary(while_node ? while_node->cond : NULL);
     if (!cond || cond->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* comparison = (AstBinaryNode*)cond;
     if (comparison->op != OPERATOR_LT && comparison->op != OPERATOR_LE) return false;
-    AstNode* left = mir_unwrap_primary(comparison->left);
+    AstNode* left = ast_unwrap_primary(comparison->left);
     if (!left || left->node_type != AST_NODE_IDENT) return false;
     String* counter_name = ((AstIdentNode*)left)->name;
     if (!counter_name) return false;
@@ -9986,7 +9909,7 @@ static bool mir_forward_compact_loop_candidate(MirTranspiler* mt,
         if (item->node_type != AST_NODE_ASSIGN_STAM) continue;
         AstAssignStamNode* assign = (AstAssignStamNode*)item;
         if (!mir_string_names_equal(assign->target, counter_name)) continue;
-        AstNode* value = mir_unwrap_primary(assign->value);
+        AstNode* value = ast_unwrap_primary(assign->value);
         if (!value || value->node_type != AST_NODE_BINARY) return false;
         AstBinaryNode* add = (AstBinaryNode*)value;
         if (add->op != OPERATOR_ADD ||
@@ -10039,12 +9962,12 @@ static bool mir_dense_positive_counter_name(const MirDenseScan* scan,
 }
 
 static bool mir_dense_product_term(AstNode* node, const MirDenseScan* scan) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* product = (AstBinaryNode*)node;
     if (product->op != OPERATOR_MUL) return false;
-    AstNode* left = mir_unwrap_primary(product->left);
-    AstNode* right = mir_unwrap_primary(product->right);
+    AstNode* left = ast_unwrap_primary(product->left);
+    AstNode* right = ast_unwrap_primary(product->right);
     if (!left || !right || left->node_type != AST_NODE_IDENT ||
             right->node_type != AST_NODE_IDENT) return false;
     String* left_name = ((AstIdentNode*)left)->name;
@@ -10056,12 +9979,12 @@ static bool mir_dense_product_term(AstNode* node, const MirDenseScan* scan) {
 }
 
 static bool mir_dense_matrix_index(AstNode* node, const MirDenseScan* scan) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* add = (AstBinaryNode*)node;
     if (add->op != OPERATOR_ADD) return false;
-    AstNode* left = mir_unwrap_primary(add->left);
-    AstNode* right = mir_unwrap_primary(add->right);
+    AstNode* left = ast_unwrap_primary(add->left);
+    AstNode* right = ast_unwrap_primary(add->right);
     if (!left || !right) {
         return false;
     }
@@ -10079,7 +10002,7 @@ static bool mir_dense_matrix_index(AstNode* node, const MirDenseScan* scan) {
 
 static bool mir_dense_index_proven(MirTranspiler* mt, AstNode* node,
         const MirDenseScan* scan) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || !scan) return false;
     if (node->node_type == AST_NODE_IDENT) {
         // the loop guard is `0 <= counter <= extent` (or `<`); a direct counter is the
@@ -10088,7 +10011,7 @@ static bool mir_dense_index_proven(MirTranspiler* mt, AstNode* node,
     }
     if (node->node_type == AST_NODE_BINARY) {
         AstBinaryNode* subtract = (AstBinaryNode*)node;
-        AstNode* left = mir_unwrap_primary(subtract->left);
+        AstNode* left = ast_unwrap_primary(subtract->left);
         if (subtract->op == OPERATOR_SUB && left &&
                 left->node_type == AST_NODE_IDENT &&
                 mir_is_one_int_literal(mt, subtract->right) &&
@@ -10109,7 +10032,7 @@ static bool mir_dense_array_elem_supported(TypeId elem_type) {
 }
 
 static MirVarEntry* mir_dense_typed_array_root(MirTranspiler* mt, AstNode* node) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)node;
     if (!ident->name) return NULL;
@@ -10175,7 +10098,7 @@ static void mir_dense_scan_node(MirTranspiler* mt, AstNode* node,
         }
         case AST_NODE_WHILE_STAM: {
             AstWhileNode* while_node = (AstWhileNode*)node;
-            AstNode* cond = mir_unwrap_primary(while_node->cond);
+            AstNode* cond = ast_unwrap_primary(while_node->cond);
             if (!cond || cond->node_type != AST_NODE_BINARY ||
                     (((AstBinaryNode*)cond)->op != OPERATOR_LT &&
                      ((AstBinaryNode*)cond)->op != OPERATOR_LE)) {
@@ -10183,8 +10106,8 @@ static void mir_dense_scan_node(MirTranspiler* mt, AstNode* node,
                 break;
             }
             AstBinaryNode* comparison = (AstBinaryNode*)cond;
-            AstNode* left = mir_unwrap_primary(comparison->left);
-            AstNode* right = mir_unwrap_primary(comparison->right);
+            AstNode* left = ast_unwrap_primary(comparison->left);
+            AstNode* right = ast_unwrap_primary(comparison->right);
             if (!left || !right || left->node_type != AST_NODE_IDENT ||
                     right->node_type != AST_NODE_IDENT ||
                     !mir_dense_name_is(((AstIdentNode*)right)->name,
@@ -10220,7 +10143,7 @@ static void mir_dense_scan_node(MirTranspiler* mt, AstNode* node,
                 bool index_proven = index && !index->next &&
                     mir_dense_index_proven(mt, index, scan);
                 mir_dense_add_root(scan,
-                    ((AstIdentNode*)mir_unwrap_primary(field->object))->name,
+                    ((AstIdentNode*)ast_unwrap_primary(field->object))->name,
                     root->elem_type,
                     index_proven);
                 if (index_proven && mir_dense_matrix_index(index, scan)) {
@@ -10266,11 +10189,11 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
         AstWhileNode* while_node, String* compact_counter) {
     if (!mt || mt->typed_array_inbounds_guard || !while_node ||
             !compact_counter || !while_node->body) return 0;
-    AstNode* cond = mir_unwrap_primary(while_node->cond);
+    AstNode* cond = ast_unwrap_primary(while_node->cond);
     if (!cond || cond->node_type != AST_NODE_BINARY) return 0;
     AstBinaryNode* comparison = (AstBinaryNode*)cond;
-    AstNode* left = mir_unwrap_primary(comparison->left);
-    AstNode* right = mir_unwrap_primary(comparison->right);
+    AstNode* left = ast_unwrap_primary(comparison->left);
+    AstNode* right = ast_unwrap_primary(comparison->right);
     bool inclusive = comparison->op == OPERATOR_LE;
     if ((comparison->op != OPERATOR_LT && !inclusive) ||
             !left || !right || left->node_type != AST_NODE_IDENT ||
@@ -10406,11 +10329,11 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
         mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
         mt->loop_stack[mt->loop_depth].nonnegative_upper_bound = NULL;
         mt->loop_stack[mt->loop_depth].positive_counter = NULL;
-        AstNode* condition = mir_unwrap_primary(while_node ? while_node->cond : NULL);
+        AstNode* condition = ast_unwrap_primary(while_node ? while_node->cond : NULL);
         if (compact_counter && condition && condition->node_type == AST_NODE_BINARY) {
             AstBinaryNode* comparison = (AstBinaryNode*)condition;
-            AstNode* left = mir_unwrap_primary(comparison->left);
-            AstNode* right = mir_unwrap_primary(comparison->right);
+            AstNode* left = ast_unwrap_primary(comparison->left);
+            AstNode* right = ast_unwrap_primary(comparison->right);
             if ((comparison->op == OPERATOR_LT || comparison->op == OPERATOR_LE) &&
                     left && left->node_type == AST_NODE_IDENT &&
                     right && right->node_type == AST_NODE_IDENT) {
@@ -10447,7 +10370,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     MIR_reg_t cond = transpile_expr(mt, while_node->cond);
     TypeId cond_tid = get_effective_type(mt, while_node->cond);
     MIR_reg_t cond_val = cond;
-    AstNode* condition_node = mir_unwrap_primary(while_node->cond);
+    AstNode* condition_node = ast_unwrap_primary(while_node->cond);
     bool native_numeric_comparison = false;
     if (cond_tid != LMD_TYPE_BOOL && condition_node &&
             condition_node->node_type == AST_NODE_BINARY) {
@@ -10557,14 +10480,14 @@ static MIR_reg_t transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
 
 
 static AstNode* mir_single_value_branch_node(AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base || (base->node_type != AST_NODE_CONTENT &&
             base->node_type != AST_NODE_LIST)) return base;
     AstListNode* list = (AstListNode*)base;
     if (!list->item || list->item->next ||
             is_declaration_node(list->item->node_type) ||
             is_side_effect_stam(list->item->node_type)) return NULL;
-    return mir_unwrap_primary(list->item);
+    return ast_unwrap_primary(list->item);
 }
 
 static bool mir_native_int_value_for_u32(MirTranspiler* mt, AstNode* node) {
@@ -10576,7 +10499,7 @@ static bool mir_native_int_value_for_u32(MirTranspiler* mt, AstNode* node) {
 }
 
 static bool mir_native_u32_initializer(MirTranspiler* mt, AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base) return false;
     if (base->node_type != AST_NODE_IF_EXPR) {
         return mir_native_int_value_for_u32(mt, base);
@@ -10589,7 +10512,7 @@ static bool mir_native_u32_initializer(MirTranspiler* mt, AstNode* node) {
 
 static MIR_reg_t transpile_native_u32_initializer(MirTranspiler* mt,
         AstNode* node) {
-    AstNode* base = mir_unwrap_primary(node);
+    AstNode* base = ast_unwrap_primary(node);
     if (!base || base->node_type != AST_NODE_IF_EXPR) {
         return transpile_native_int_expr(mt, node);
     }
@@ -10904,7 +10827,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         mir_native_u32_initializer(mt, asn->as);
                     predicted_expr_tid = native_u32_initializer
                         ? LMD_TYPE_INT : get_effective_type(mt, asn->as);
-                    AstNode* native_initializer = mir_unwrap_primary(asn->as);
+                    AstNode* native_initializer = ast_unwrap_primary(asn->as);
                     bool native_int_initializer = predicted_expr_tid == LMD_TYPE_INT &&
                         native_initializer && native_initializer->node_type == AST_NODE_BINARY &&
                         mir_is_native_int_arith(mt, native_initializer);
@@ -10927,7 +10850,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // runtime, so degrading to Item — never unboxing — is the only
                 // representation that keeps inference unobservable (D3.2.1).
                 if (mt->last_call_returned_boxed_item &&
-                        mt->last_call_record_node == mir_unwrap_primary(asn->as)) {
+                        mt->last_call_record_node == ast_unwrap_primary(asn->as)) {
                     expr_tid = LMD_TYPE_ANY;
                 }
                 // The AST retains the source annotation explicitly.  Inferring
@@ -11004,7 +10927,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      declared_lane_desc.kind == LANE_STORAGE_SIZED_I64 ||
                      declared_lane_desc.kind == LANE_STORAGE_POINTER)));
                 bool declared_array_contract = declared_array_element != NULL;
-                AstNode* declaration_source = mir_unwrap_primary(asn->as);
+                AstNode* declaration_source = ast_unwrap_primary(asn->as);
                 bool declared_array_literal = declaration_source &&
                     declaration_source->node_type == AST_NODE_ARRAY;
                 bool bool_array_coercion_boundary = declared_array_element &&
@@ -11258,8 +11181,8 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 }
 
                 bool cow_owned = mir_expr_produces_cow_owner(mt, asn->as) &&
-                    mir_expr_may_return_container(asn->as, expr_tid, var_tid);
-                bool cow_binding = mir_expr_may_return_container(asn->as, expr_tid, var_tid) &&
+                    ast_expr_may_return_container(asn->as, expr_tid, var_tid);
+                bool cow_binding = ast_expr_may_return_container(asn->as, expr_tid, var_tid) &&
                     mir_expr_is_owned_binding_alias(mt, asn->as);
                 MirVarEntry* cow_source = cow_binding
                     ? mir_direct_root_binding(mt, asn->as) : NULL;
@@ -11346,7 +11269,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // Alias declarations such as `tmp = prev` carry the
                     // source row's proven storage contract even when the
                     // initializer crossed the COW binding ABI as an Item.
-                    AstNode* source = mir_unwrap_primary(asn->as);
+                    AstNode* source = ast_unwrap_primary(asn->as);
                     if (source && source->node_type == AST_NODE_IDENT) {
                         MirVarEntry* source_var = mir_direct_root_binding(mt, source);
                         if (source_var && source_var->elem_type != LMD_TYPE_ANY) {
@@ -11955,14 +11878,14 @@ static bool side_effect_result_can_error(int node_type) {
 }
 
 static MIR_reg_t transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
-    AstNode* tail_value = mir_unwrap_primary(node);
+    AstNode* tail_value = ast_unwrap_primary(node);
     if (mt->native_return_tid == LMD_TYPE_INT && mt->native_body_tail_expr &&
             tail_value == mt->native_body_tail_expr) {
         // A braced native body reaches this helper after content lowering has
         // executed its declarations and side effects. Keep the final exact
         // int arithmetic in the raw return lane; boxing it here would make the
         // native epilogue either discard the value or unbox it twice.
-        AstNode* native_value = mir_unwrap_primary(node);
+        AstNode* native_value = ast_unwrap_primary(node);
         if (mir_is_native_int_arith(mt, native_value)) {
             mt->native_body_result_is_raw = true;
             return transpile_binary_out(mt, (AstBinaryNode*)native_value, true);
@@ -12247,11 +12170,11 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 // ============================================================================
 
 static Type* mir_trusted_map_member_contract(AstNode* source) {
-    AstNode* primary = mir_unwrap_primary(source);
+    AstNode* primary = ast_unwrap_primary(source);
     if (!primary || primary->node_type != AST_NODE_MEMBER_EXPR) return NULL;
     AstFieldNode* member = (AstFieldNode*)primary;
-    AstNode* object = mir_unwrap_primary(member->object);
-    AstNode* field_node = mir_unwrap_primary(member->field);
+    AstNode* object = ast_unwrap_primary(member->object);
+    AstNode* field_node = ast_unwrap_primary(member->field);
     if (!object || !field_node || field_node->node_type != AST_NODE_IDENT ||
             !member->object->type) {
         return NULL;
@@ -12269,7 +12192,7 @@ static Type* mir_trusted_map_member_contract(AstNode* source) {
 }
 
 static Type* mir_proven_map_field_contract(AstNode* value) {
-    AstNode* primary = mir_unwrap_primary(value);
+    AstNode* primary = ast_unwrap_primary(value);
     if (!primary && value && value->node_type == AST_NODE_PRIMARY) {
         // Parser-built literals keep their type on a leaf PRIMARY with no
         // child expression; preserve that node for target-shape proof.
@@ -12289,7 +12212,7 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
         if (declaration && declaration->node_type == AST_NODE_ASSIGN &&
                 !entry->type_widened) {
             AstNode* initializer = ((AstNamedNode*)declaration)->as;
-            AstNode* initializer_root = mir_unwrap_primary(initializer);
+            AstNode* initializer_root = ast_unwrap_primary(initializer);
             // A local binding can retain an initializer's proven map result
             // until its type is widened; this recovers recursive call results
             // whose early AST call node was built against a forward `any` ABI.
@@ -12301,7 +12224,7 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
     }
     if (primary->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)primary;
-        AstNode* function_expr = mir_unwrap_primary(call->function);
+        AstNode* function_expr = ast_unwrap_primary(call->function);
         TypeFunc* function_type = function_expr && function_expr->type &&
             function_expr->type->type_id == LMD_TYPE_FUNC
             ? (TypeFunc*)function_expr->type : NULL;
@@ -12510,7 +12433,7 @@ static bool mir_map_literal_matches_contract(AstMapNode* map_node,
 }
 
 static Type* mir_direct_map_contract(AstNode* value, Type* target) {
-    AstNode* primary = mir_unwrap_primary(value);
+    AstNode* primary = ast_unwrap_primary(value);
     target = mir_unwrap_decl_type(target);
     if (!primary || primary->node_type != AST_NODE_MAP || !target ||
             target->type_id != LMD_TYPE_MAP || target == &TYPE_MAP ||
@@ -12531,7 +12454,7 @@ static MIR_reg_t transpile_expr_with_map_contract(MirTranspiler* mt,
     Type* saved_contract = mt->map_contract_hint;
     AstNode* saved_node = mt->map_contract_hint_node;
     mt->map_contract_hint = contract;
-    mt->map_contract_hint_node = mir_unwrap_primary(value);
+    mt->map_contract_hint_node = ast_unwrap_primary(value);
     MIR_reg_t result = transpile_expr(mt, value);
     mt->map_contract_hint = saved_contract;
     mt->map_contract_hint_node = saved_node;
@@ -12570,7 +12493,7 @@ static MIR_reg_t emit_map_alloc(MirTranspiler* mt, TypeMap* contract,
 static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     TypeMap* map_contract = NULL;
     AstNode* hinted_node = mt->map_contract_hint_node
-        ? mir_unwrap_primary(mt->map_contract_hint_node) : NULL;
+        ? ast_unwrap_primary(mt->map_contract_hint_node) : NULL;
     if (hinted_node == (AstNode*)map_node && mt->map_contract_hint) {
         Type* hint = mir_unwrap_decl_type(mt->map_contract_hint);
         if (hint && hint->type_id == LMD_TYPE_MAP && hint != &TYPE_MAP &&
@@ -13302,7 +13225,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     // fn_member. Unwrap before the gate so C3 can use the fixed-shape offsets.
     Type* ast_obj_type = field_node->object->type
         ? mir_unwrap_decl_type(field_node->object->type) : NULL;
-    AstNode* object_expr = mir_unwrap_primary(field_node->object);
+    AstNode* object_expr = ast_unwrap_primary(field_node->object);
     if (object_expr && object_expr->node_type == AST_NODE_IDENT) {
         AstIdentNode* object_ident = (AstIdentNode*)object_expr;
         if (object_ident->entry && object_ident->entry->declared_type) {
@@ -13481,7 +13404,7 @@ static bool mir_index_expr_nonnegative(MirTranspiler* mt, AstNode* node) {
     if (node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* binary = (AstBinaryNode*)node;
     if (binary->op == OPERATOR_SUB) {
-        AstNode* left = mir_unwrap_primary(binary->left);
+        AstNode* left = ast_unwrap_primary(binary->left);
         if (!left || left->node_type != AST_NODE_IDENT ||
                 !mir_is_one_int_literal(mt, binary->right)) return false;
         String* name = ((AstIdentNode*)left)->name;
@@ -13499,7 +13422,7 @@ static bool mir_index_expr_nonnegative(MirTranspiler* mt, AstNode* node) {
 
 static MirVarEntry* mir_typed_array_cache_for_object(MirTranspiler* mt,
         AstNode* object) {
-    AstNode* unwrapped = mir_unwrap_primary(object);
+    AstNode* unwrapped = ast_unwrap_primary(object);
     if (!unwrapped || unwrapped->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)unwrapped;
     if (!ident->name) return NULL;
@@ -13508,7 +13431,7 @@ static MirVarEntry* mir_typed_array_cache_for_object(MirTranspiler* mt,
 }
 
 static bool mir_dense_guard_root(MirTranspiler* mt, AstNode* object) {
-    AstNode* unwrapped = mir_unwrap_primary(object);
+    AstNode* unwrapped = ast_unwrap_primary(object);
     if (!unwrapped || unwrapped->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* ident = (AstIdentNode*)unwrapped;
     if (!ident->name) return false;
@@ -13840,7 +13763,7 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
 
 static TypeId mir_tracked_array_element_type(MirTranspiler* mt,
         AstNode* object) {
-    AstNode* unwrapped = mir_unwrap_primary(object);
+    AstNode* unwrapped = ast_unwrap_primary(object);
     if (!unwrapped || unwrapped->node_type != AST_NODE_IDENT) return LMD_TYPE_ANY;
     AstIdentNode* ident = (AstIdentNode*)unwrapped;
     char name[128];
@@ -14024,7 +13947,7 @@ static bool mir_index_expr_is_native_int(MirTranspiler* mt, AstNode* node) {
 
 static MIR_reg_t mir_emit_dense_index_expr(MirTranspiler* mt, AstNode* node) {
     AstNode* original = node;
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_BINARY) {
         // A literal primary has no child expression, so unwrapping it yields
         // null even though the primary itself is a valid native operand.
@@ -14101,7 +14024,7 @@ static MIR_reg_t emit_machine_index(MirTranspiler* mt, MIR_reg_t value, TypeId t
 }
 
 static MIR_reg_t emit_index_value(MirTranspiler* mt, AstNode* field, bool use_native) {
-    AstNode* native_node = mir_unwrap_primary(field);
+    AstNode* native_node = ast_unwrap_primary(field);
     if (use_native && native_node && native_node->node_type == AST_NODE_BINARY &&
             mir_index_expr_is_native_int(mt, native_node)) {
         // An array subscript has already proved that this arithmetic is a
@@ -14641,7 +14564,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
 static bool mir_call_may_suspend(AstCallNode* call_node) {
     if (!call_node) return false;
-    AstNode* function = mir_unwrap_primary(call_node->function);
+    AstNode* function = ast_unwrap_primary(call_node->function);
     if (function && function->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
         return info && info->is_async;
@@ -14661,7 +14584,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     AstNode* fn_expr = call_node->function;
 
     if (call_node->is_proc_method) {
-        AstNode* unwrapped = mir_unwrap_primary(fn_expr);
+        AstNode* unwrapped = ast_unwrap_primary(fn_expr);
         AstFieldNode* member = unwrapped && unwrapped->node_type == AST_NODE_MEMBER_EXPR
             ? (AstFieldNode*)unwrapped : NULL;
         MirVarEntry* receiver = member ? mir_direct_root_binding(mt, member->object) : NULL;
@@ -14699,7 +14622,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
 
     // Check for system function calls. Parser-built identifiers may retain a
     // primary wrapper, which otherwise bypasses the COW-aware sysproc paths.
-    AstNode* sys_fn_expr = mir_unwrap_primary(fn_expr);
+    AstNode* sys_fn_expr = ast_unwrap_primary(fn_expr);
     if (sys_fn_expr && sys_fn_expr->node_type == AST_NODE_SYS_FUNC) {
         AstSysFuncNode* sys = (AstSysFuncNode*)sys_fn_expr;
         SysFuncInfo* info = sys->fn_info;
@@ -15798,9 +15721,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             MIR_reg_t saved_region_capability_reg = mt->region_capability_reg;
             AstNode* candidate_arg = call_node->argument;
             AstCallNode* producer_call = candidate_arg && !candidate_arg->next &&
-                mir_unwrap_primary(candidate_arg) &&
-                mir_unwrap_primary(candidate_arg)->node_type == AST_NODE_CALL_EXPR
-                ? (AstCallNode*)mir_unwrap_primary(candidate_arg) : NULL;
+                ast_unwrap_primary(candidate_arg) &&
+                ast_unwrap_primary(candidate_arg)->node_type == AST_NODE_CALL_EXPR
+                ? (AstCallNode*)ast_unwrap_primary(candidate_arg) : NULL;
             AstFuncNode* producer = mir_direct_call_function(producer_call);
             if (local_func && fn_def && producer_call &&
                     mir_region_consumer_candidate(fn_def, producer) &&
@@ -15950,7 +15873,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     if (mir_param_is_inferred_specialization(call_nfi->fn_node, i) &&
                             mir_native_func_param_uses_lane(call_nfi, i) &&
                             resolved_args[i]) {
-                        AstNode* carrier_base = mir_unwrap_primary(resolved_args[i]);
+                        AstNode* carrier_base = ast_unwrap_primary(resolved_args[i]);
                         if (carrier_base && carrier_base->node_type == AST_NODE_IDENT) {
                             AstIdentNode* carrier_ident = (AstIdentNode*)carrier_base;
                             char carrier_name[128];
@@ -16065,7 +15988,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     bool proven_array_witness =
                         get_effective_type(mt, resolved_args[i]) == LMD_TYPE_ARRAY_NUM &&
                         mir_known_index_element_type(mt, resolved_args[i]) == witness_elem;
-                    AstNode* witness_source = mir_unwrap_primary(resolved_args[i]);
+                    AstNode* witness_source = ast_unwrap_primary(resolved_args[i]);
                     if (proven_array_witness && witness_source &&
                             witness_source->node_type == AST_NODE_IDENT) {
                         AstIdentNode* witness_ident = (AstIdentNode*)witness_source;
@@ -16125,7 +16048,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                             (native_int_arg || native_int_bitwise_arg ||
                              mir_expr_proves_native_return_lane(
                                 mt, resolved_args[i], param_tid));
-                        AstNode* native_arg_base = mir_unwrap_primary(resolved_args[i]);
+                        AstNode* native_arg_base = ast_unwrap_primary(resolved_args[i]);
                         if (native_lane_arg && native_arg_base &&
                                 native_arg_base->node_type == AST_NODE_IDENT) {
                             AstIdentNode* native_ident = (AstIdentNode*)native_arg_base;
@@ -17373,7 +17296,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             // native int arithmetic) before this return firewall; a raw
             // native body must evaluate that tail directly in its i64 lane or
             // the boxed Item bits become the published return value.
-            AstNode* native_value = mir_unwrap_primary(ret_node->value);
+            AstNode* native_value = ast_unwrap_primary(ret_node->value);
             val = transpile_binary_out(mt, (AstBinaryNode*)native_value, true);
             native_value_lane = true;
             map_contract_constructed = false;
@@ -17500,11 +17423,11 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
     snprintf(name_buf, sizeof(name_buf), "%.*s", (int)assign->target->len, assign->target->chars);
 
     MirVarEntry* var = find_var(mt, name_buf);
-    AstNode* assign_value = mir_unwrap_primary(assign->value);
+    AstNode* assign_value = ast_unwrap_primary(assign->value);
     if (var && var->type_id == LMD_TYPE_STRING && var->env_offset < 0 &&
             assign_value && assign_value->node_type == AST_NODE_BINARY) {
         AstBinaryNode* concat = (AstBinaryNode*)assign_value;
-        AstNode* concat_left = mir_unwrap_primary(concat->left);
+        AstNode* concat_left = ast_unwrap_primary(concat->left);
         if (concat->op == OPERATOR_JOIN && concat_left &&
                 concat_left->node_type == AST_NODE_IDENT) {
             AstIdentNode* left_ident = (AstIdentNode*)concat_left;
@@ -17610,8 +17533,8 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         }
 
         bool cow_owned = mir_expr_produces_cow_owner(mt, assign->value) &&
-            mir_expr_may_return_container(assign->value, val_tid, var_tid);
-        bool cow_binding = mir_expr_may_return_container(assign->value, val_tid, var_tid) &&
+            ast_expr_may_return_container(assign->value, val_tid, var_tid);
+        bool cow_binding = ast_expr_may_return_container(assign->value, val_tid, var_tid) &&
             mir_expr_is_owned_binding_alias(mt, assign->value);
         MirVarEntry* cow_source = cow_binding
             ? mir_direct_root_binding(mt, assign->value) : NULL;
@@ -17708,7 +17631,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
                     MIR_new_reg_op(mt->ctx, src)));
             } else {
                 MIR_reg_t src = val;
-                AstNode* source_node = mir_unwrap_primary(assign->value);
+                AstNode* source_node = ast_unwrap_primary(assign->value);
                 bool raw_string_literal = source_node &&
                     source_node->node_type == AST_NODE_LITERAL &&
                     ((AstLiteralNode*)source_node)->literal_type ==
@@ -17884,7 +17807,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* index = (AstFieldNode*)node;
-        AstNode* index_expr = mir_unwrap_primary(index->field);
+        AstNode* index_expr = ast_unwrap_primary(index->field);
         if (index_expr && index_expr->node_type == AST_NODE_BINARY &&
                 ((AstBinaryNode*)index_expr)->op == OPERATOR_TO) {
             // Range subscripts already return a boxed array Item from fn_index;
@@ -17910,7 +17833,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         }
     }
 
-    AstNode* evaluated = mir_unwrap_primary(node);
+    AstNode* evaluated = ast_unwrap_primary(node);
     if (evaluated && (evaluated->node_type == AST_NODE_MATCH_EXPR ||
             (evaluated->node_type == AST_NODE_IF_EXPR &&
              get_effective_type(mt, evaluated) == LMD_TYPE_ANY))) {
@@ -18115,13 +18038,13 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // through the scalar lane would send the ERROR arm through it2d/it2l and
     // silently destroy the error.
     if (mt->last_call_returned_boxed_item &&
-            mt->last_call_record_node == mir_unwrap_primary(node)) {
+            mt->last_call_record_node == ast_unwrap_primary(node)) {
         return val;
     }
 
     if (tid == LMD_TYPE_DTIME && node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* dtime_call = (AstCallNode*)node;
-        AstNode* dtime_callee = mir_unwrap_primary(dtime_call->function);
+        AstNode* dtime_callee = ast_unwrap_primary(dtime_call->function);
         if (dtime_callee && dtime_callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* dtime_info = ((AstSysFuncNode*)dtime_callee)->fn_info;
             if (dtime_info && dtime_info->c_ret_type == C_RET_DTIME) {
@@ -18134,7 +18057,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
-        AstNode* direct_callee = mir_unwrap_primary(call->function);
+        AstNode* direct_callee = ast_unwrap_primary(call->function);
         if (direct_callee && direct_callee->node_type == AST_NODE_SYS_FUNC &&
                 ((AstSysFuncNode*)direct_callee)->fn_info &&
                 ((AstSysFuncNode*)direct_callee)->fn_info->fn == SYSFUNC_INT64) {
@@ -18673,8 +18596,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // a private candidate and validates its full occurrence contract before
         // installing the replacement at the annotated root.
         if (ca->key && !ca->key->next) {
-            MirCowPath typed_path = {};
-            bool has_typed_path = mir_collect_cow_path(&typed_path, ca->object);
+            AstCowPath typed_path = {};
+            bool has_typed_path = ast_collect_cow_path(&typed_path, ca->object);
             MirVarEntry* typed_root = has_typed_path
                 ? mir_direct_root_binding(mt, typed_path.root) : NULL;
             Type* typed_contract = typed_root && typed_root->full_type
@@ -18774,7 +18697,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         // even when AST inference reports ANY (S4.1, D2.2.2).
                         value_native_proven = true;
                     }
-                    AstNode* value_base = mir_unwrap_primary(ca->value);
+                    AstNode* value_base = ast_unwrap_primary(ca->value);
                     if (!value_native_proven && value_base &&
                             value_base->node_type == AST_NODE_CALL_EXPR &&
                             mir_direct_native_scalar_lane_proven(mt,
@@ -18944,8 +18867,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return result;
         }
 
-        MirCowPath cow_path = {};
-        bool has_cow_path = mir_collect_cow_path(&cow_path, ca->object);
+        AstCowPath cow_path = {};
+        bool has_cow_path = ast_collect_cow_path(&cow_path, ca->object);
         MirVarEntry* cow_root = has_cow_path ? mir_direct_root_binding(mt, cow_path.root) : NULL;
         if (cow_root && cow_path.count > 0 && mir_root_may_need_cow(cow_root) &&
                 (cow_root->cow_marked || cow_root->cow_children_may_be_shared)) {
@@ -19056,7 +18979,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 // (S4.1, D2.2.2, D3.2.2).
                 value_native_proven = true;
             }
-            AstNode* value_base = mir_unwrap_primary(ca->value);
+            AstNode* value_base = ast_unwrap_primary(ca->value);
             if (!value_native_proven && value_base &&
                     value_base->node_type == AST_NODE_CALL_EXPR &&
                     mir_direct_native_scalar_item_can_unbox(mt,
@@ -19094,7 +19017,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             if (!value_native_proven && mir_native_int_bitwise_tree(mt, ca->value)) {
                 value_native_proven = true;
             }
-            AstNode* value_base = mir_unwrap_primary(ca->value);
+            AstNode* value_base = ast_unwrap_primary(ca->value);
             if (!value_native_proven && value_base &&
                     value_base->node_type == AST_NODE_CALL_EXPR &&
                     mir_direct_native_scalar_item_can_unbox(mt,
@@ -19445,13 +19368,13 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return result;
         }
 
-        MirCowPath cow_path = {};
-        bool has_cow_path = mir_collect_cow_path(&cow_path, ca->object);
+        AstCowPath cow_path = {};
+        bool has_cow_path = ast_collect_cow_path(&cow_path, ca->object);
         MirVarEntry* cow_root = has_cow_path ? mir_direct_root_binding(mt, cow_path.root) : NULL;
         if (cow_root && cow_root->full_type && cow_path.count == 0 &&
                 mir_unwrap_decl_type(cow_root->full_type)->type_id == LMD_TYPE_MAP) {
             TypeMap* typed_map = (TypeMap*)mir_unwrap_decl_type(cow_root->full_type);
-            AstNode* direct_object = mir_unwrap_primary(ca->object);
+            AstNode* direct_object = ast_unwrap_primary(ca->object);
             // The caller-side var admission detaches a marked root before this
             // body starts. A direct scalar field write does not traverse a
             // child pointer, so the retained child-sharing bit is relevant
@@ -20730,10 +20653,10 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
 // Only returns native types for simple cases where the return path is singular.
 // ============================================================================
 static Type* direct_call_return_contract(AstNode* body) {
-    AstNode* expr = mir_unwrap_primary(body);
+    AstNode* expr = ast_unwrap_primary(body);
     if (!expr || expr->node_type != AST_NODE_CALL_EXPR) return NULL;
     AstCallNode* call = (AstCallNode*)expr;
-    AstNode* callee = mir_unwrap_primary(call->function);
+    AstNode* callee = ast_unwrap_primary(call->function);
     if (callee && callee->type && callee->type->type_id == LMD_TYPE_FUNC) {
         return ((TypeFunc*)callee->type)->returned;
     }
@@ -20748,7 +20671,7 @@ static Type* direct_call_return_contract(AstNode* body) {
 }
 
 static AstNode* function_body_result_expr(AstFuncNode* fn_node) {
-    AstNode* body = fn_node ? mir_unwrap_primary(fn_node->body) : NULL;
+    AstNode* body = fn_node ? ast_unwrap_primary(fn_node->body) : NULL;
     // A braced function body is represented as content, whose item chain
     // holds its statements. Inspect its tail expression rather than the
     // content wrapper so a statically closed return keeps its native ABI.
@@ -20757,7 +20680,7 @@ static AstNode* function_body_result_expr(AstFuncNode* fn_node) {
         AstListNode* block = (AstListNode*)body;
         AstNode* last = block->item;
         while (last && last->next) last = last->next;
-        body = mir_unwrap_primary(last);
+        body = ast_unwrap_primary(last);
     }
     // A3: a braced proc ends in a `return` *statement*, whose own node carries
     // no type — which made every such body defer and denied procs the native
@@ -20766,7 +20689,7 @@ static AstNode* function_body_result_expr(AstFuncNode* fn_node) {
     // (transpile_return_stam) while `emit_return_if_item_error` diverts a raised
     // diagnostic, so inspect the value instead of the wrapper.
     if (body && body->node_type == AST_NODE_RETURN_STAM) {
-        body = mir_unwrap_primary(((AstReturnNode*)body)->value);
+        body = ast_unwrap_primary(((AstReturnNode*)body)->value);
     }
     return body;
 }
@@ -20805,7 +20728,7 @@ static bool declaration_may_check_boundary(AstNode* stam) {
 }
 
 static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
-    AstNode* body = fn_node ? mir_unwrap_primary(fn_node->body) : NULL;
+    AstNode* body = fn_node ? ast_unwrap_primary(fn_node->body) : NULL;
     if (!body) return false;
     if (body->node_type != AST_NODE_LIST && body->node_type != AST_NODE_CONTENT) {
         return declaration_may_check_boundary(body);
@@ -20874,7 +20797,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     // Its declared payload type must not by itself certify a raw return lane.
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
-        AstNode* callee = mir_unwrap_primary(call->function);
+        AstNode* callee = ast_unwrap_primary(call->function);
         Type* callee_type = callee ? callee->type : NULL;
         bool can_raise = callee_type && callee_type->type_id == LMD_TYPE_FUNC &&
             ((TypeFunc*)callee_type)->can_raise;
@@ -21094,7 +21017,7 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
     // keep that case dynamic until its callee shape is known (D5.2.1v2).
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
-        AstNode* callee = mir_unwrap_primary(call->function);
+        AstNode* callee = ast_unwrap_primary(call->function);
         if (!callee) return false;
         if (callee->node_type == AST_NODE_SYS_FUNC) return true;
         if (callee->node_type != AST_NODE_IDENT) return false;
@@ -21112,7 +21035,7 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
 static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         TypeId expected, int* return_count, bool wide_free = false) {
     while (node) {
-        AstNode* current = mir_unwrap_primary(node);
+        AstNode* current = ast_unwrap_primary(node);
         if (!current) {
             node = node->next;
             continue;
@@ -21191,7 +21114,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
 
 static bool mir_proc_has_value_return(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (!fn_node) return false;
-    AstNode* body = mir_unwrap_primary(fn_node->body);
+    AstNode* body = ast_unwrap_primary(fn_node->body);
     int return_count = 0;
     mir_proc_return_values_prove(mt, body, LMD_TYPE_ANY, &return_count);
     return return_count > 0;
@@ -21205,14 +21128,14 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
     TypeFunc* signature = fn_node->type && fn_node->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)fn_node->type : NULL;
     if (signature && signature->can_raise) return LMD_TYPE_ANY;
-    AstNode* body = mir_unwrap_primary(fn_node->body);
+    AstNode* body = ast_unwrap_primary(fn_node->body);
     AstNode* tail = function_body_result_expr(fn_node);
     AstNode* terminal = body;
     if (terminal && (terminal->node_type == AST_NODE_LIST ||
             terminal->node_type == AST_NODE_CONTENT)) {
         terminal = ((AstListNode*)terminal)->item;
         while (terminal && terminal->next) terminal = terminal->next;
-        terminal = mir_unwrap_primary(terminal);
+        terminal = ast_unwrap_primary(terminal);
     }
     if (!body || !tail || !terminal ||
             terminal->node_type != AST_NODE_RETURN_STAM) {
@@ -21256,7 +21179,7 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (!body) return true;
     if (body->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)body;
-        AstNode* callee = mir_unwrap_primary(call->function);
+        AstNode* callee = ast_unwrap_primary(call->function);
         Type* callee_type = callee ? callee->type : NULL;
         if (callee_type && callee_type->type_id == LMD_TYPE_FUNC) {
             TypeFunc* signature = (TypeFunc*)callee_type;
@@ -21396,7 +21319,7 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
             // call (D5.2, D5.3).
             return MIR_SCALAR_RETURN_NONE;
         }
-        AstNode* body = mir_unwrap_primary(fn_node->body);
+        AstNode* body = ast_unwrap_primary(fn_node->body);
         int return_count = 0;
         if (mir_proc_return_values_prove(mt, body, LMD_TYPE_ANY,
                 &return_count, true) && return_count > 0) {
@@ -22916,7 +22839,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // P4-3.3: Native return — produce unboxed native value
         NativeFuncInfo* nfi_body = find_native_func_info(mt, name_buf->str);
         AstNode* native_body_expr = function_body_result_expr(fn_node);
-        AstNode* native_body_wrapper = mir_unwrap_primary(fn_node->body);
+        AstNode* native_body_wrapper = ast_unwrap_primary(fn_node->body);
         bool native_body_is_block = native_body_wrapper &&
             (native_body_wrapper->node_type == AST_NODE_LIST ||
              native_body_wrapper->node_type == AST_NODE_CONTENT);
@@ -22926,7 +22849,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             mir_is_native_int_arith(mt, native_body_expr);
         mt->native_body_tail_expr = native_body_expr;
         if (native_int_body_lane &&
-                mir_unwrap_primary(fn_node->body) == native_body_expr) {
+                ast_unwrap_primary(fn_node->body) == native_body_expr) {
             // the expression-form body has the same ABI firewall as an
             // explicit return: generic lowering boxes exact int arithmetic,
             // which cannot be published as the raw native return register.
@@ -23185,7 +23108,7 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
         // Parser-built `null` is an empty primary rather than an AST_NODE_NULL.
         return true;
     }
-    AstNode* value_node = mir_unwrap_primary(value);
+    AstNode* value_node = ast_unwrap_primary(value);
     if (value_node && (value_node->node_type == AST_NODE_NULL ||
             (value_node->node_type == AST_NODE_LITERAL &&
              ((AstLiteralNode*)value_node)->literal_type == AST_LITERAL_NULL))) {
@@ -23214,7 +23137,7 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
     }
     if (value_node && value_node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)value_node;
-        AstNode* callee = mir_unwrap_primary(call->function);
+        AstNode* callee = ast_unwrap_primary(call->function);
         if (callee && callee->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)callee;
             AstNode* target = ident->entry ? ident->entry->node : NULL;
@@ -23238,7 +23161,7 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
         Type* source_array = field->object ? field->object->type : NULL;
         Type* source_element = mir_array_occurrence_element(source_array);
         if (!source_element) {
-            AstNode* source_node = mir_unwrap_primary(field->object);
+            AstNode* source_node = ast_unwrap_primary(field->object);
             if (source_node && source_node->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident = (AstIdentNode*)source_node;
                 AstNode* binding = ident->entry ? ident->entry->node : NULL;
@@ -23352,7 +23275,7 @@ static bool has_elem_type_invalidation(const char* var_name, AstNode* node, Type
         // declaration-site witness rather than allowing a later raw load.
         if (node->node_type == AST_NODE_CALL_EXPR) {
             AstCallNode* call = (AstCallNode*)node;
-            AstNode* callee_node = mir_unwrap_primary(call->function);
+            AstNode* callee_node = ast_unwrap_primary(call->function);
             AstFuncNode* callee = NULL;
             if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident = (AstIdentNode*)callee_node;
@@ -23365,7 +23288,7 @@ static bool has_elem_type_invalidation(const char* var_name, AstNode* node, Type
             }
             AstNamedNode* param = callee ? callee->param : NULL;
             for (AstNode* arg = call->argument; arg; arg = arg->next) {
-                AstNode* unwrapped_arg = mir_unwrap_primary(arg);
+                AstNode* unwrapped_arg = ast_unwrap_primary(arg);
                 bool names_array = false;
                 if (unwrapped_arg && unwrapped_arg->node_type == AST_NODE_IDENT) {
                     String* arg_name = ((AstIdentNode*)unwrapped_arg)->name;
@@ -23451,7 +23374,7 @@ static bool has_elem_type_invalidation(const char* var_name, AstNode* node, Type
 // The function definition an identifier names, or NULL when it names anything
 // else (a local, an import, a builtin).
 static AstFuncNode* mir_ident_local_func(AstNode* node) {
-    node = mir_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)node;
     AstNode* target = ident->entry ? ident->entry->node : NULL;
@@ -23498,14 +23421,14 @@ static TypeId mir_array_type_element_type(Type* array_type) {
 }
 
 static TypeId mir_literal_array_element_type(AstNode* arg) {
-    arg = mir_unwrap_primary(arg);
+    arg = ast_unwrap_primary(arg);
     if (!arg || arg->node_type != AST_NODE_ARRAY) return LMD_TYPE_ANY;
     return mir_array_type_element_type(arg->type);
 }
 
 static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
     if (!arg) return LMD_TYPE_ANY;
-    AstNode* unwrapped = mir_unwrap_primary(arg);
+    AstNode* unwrapped = ast_unwrap_primary(arg);
     TypeId static_elem = mir_array_type_element_type(unwrapped ? unwrapped->type : arg->type);
     if (static_elem != LMD_TYPE_ANY) return static_elem;
     TypeId literal_elem = mir_literal_array_element_type(arg);
@@ -23513,7 +23436,7 @@ static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
 
     if (unwrapped && unwrapped->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)unwrapped;
-        AstNode* callee = mir_unwrap_primary(call->function);
+        AstNode* callee = ast_unwrap_primary(call->function);
         if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
             AstNode* value = call->argument ? call->argument->next : NULL;
@@ -23564,7 +23487,7 @@ static TypeId mir_callsite_arg_type(MirTranspiler* mt, AstNode* arg) {
     TypeId tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) return tid;
 
-    AstNode* unwrapped = mir_unwrap_primary(arg);
+    AstNode* unwrapped = ast_unwrap_primary(arg);
     if (unwrapped && unwrapped->node_type == AST_NODE_IDENT && mt->prepass_enclosing) {
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
         CallSiteEntry* enc = mir_callsite_entry(mt, mt->prepass_enclosing, false);

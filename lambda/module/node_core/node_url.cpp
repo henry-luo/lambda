@@ -175,9 +175,12 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
         return object;
     }
     *object_root = object.item;
+    // Callers hand in a freshly built, still-unrooted value. Register it before
+    // node_url_string() allocates the key, otherwise a GC inside that
+    // allocation collects the value and the property publishes a dead item.
+    *value_root = value.item;
     Item key = node_url_string(name);
     *key_root = key.item;
-    *value_root = value.item;
     if (own_property) {
         node_url_host->value->property_set_own(node_url_root_value(object_root),
             node_url_root_value(key_root), node_url_root_value(value_root));
@@ -480,9 +483,12 @@ static Item node_url_legacy_query(const char* search) {
         char* decoded_key = url_decode_form(pair, strlen(pair), &key_length);
         char* decoded_value = url_decode_form(raw_value, strlen(raw_value), &value_length);
         if (decoded_key && decoded_value) {
+            // Root each string as it is built: allocating the value string can
+            // trigger a GC that would collect a still-unrooted key, publishing
+            // the pair under a dead name.
             Item key = make_string_item(decoded_key, (int)key_length);
-            Item value = make_string_item(decoded_value, (int)value_length);
             *key_root = key.item;
+            Item value = make_string_item(decoded_value, (int)value_length);
             *value_root = value.item;
             Item existing = js_get_key_default(node_url_root_value(query_root),
                 node_url_root_value(key_root));
@@ -1319,16 +1325,24 @@ extern "C" Item js_usp_size(void) {
     return (Item){.item = i2it((int)js_array_length(entries))};
 }
 
+// Defined with the namespace builders below; declared here so the instance
+// builder publishes through the same key/function rooting discipline.
+template <typename Target>
+static Item js_url_set_method(Item ns, const char* name, Target target,
+        int adapter_arity, bool constructable = false,
+        bool non_enumerable = false);
+
 // new URLSearchParams([init])
 extern "C" Item js_url_search_params_new(Item init) {
     if (!node_url_ensure_host()) return ItemNull;
     Item obj = node_url_host->script->new_object_with_class(
         JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS);
     JubeRootFrame frame = {};
-    if (!node_url_roots_begin(&frame, 2)) return obj;
+    if (!node_url_roots_begin(&frame, 3)) return obj;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* entries_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    if (!object_root || !entries_root) {
+    uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    if (!object_root || !entries_root || !key_root) {
         node_url_host->node->roots->root_frame_end(&frame);
         return obj;
     }
@@ -1382,20 +1396,24 @@ extern "C" Item js_url_search_params_new(Item init) {
         *entries_root = entries.item;
     }
 
-    Item entries_key = make_string_item("__entries__");
-    js_set_key_default(obj, entries_key, entries);
+    // A property key stays live only while rooted: js_set_key_default() can
+    // allocate shape storage, and a GC there frees an unrooted key and leaves a
+    // poisoned name in the instance shape.
+    *key_root = make_string_item("__entries__").item;
+    js_set_key_default(obj, node_url_root_value(key_root), entries);
     // URLSearchParams entries are an internal list; exposing the backing array
     // as enumerable makes assert deep-equality compare implementation storage.
-    js_mark_non_enumerable(obj, entries_key);
+    js_mark_non_enumerable(obj, node_url_root_value(key_root));
 
     // set methods
     auto usp_method = [&](const char* name, auto target, int adapter_arity) {
-        Item key = make_string_item(name);
-        js_set_key_default(obj, key,
-            jube_new_function(node_url_host->script, target, adapter_arity));
+        // Publishing through js_url_set_method keeps the key rooted across the
+        // function allocation. Building the key inline here let a GC inside
+        // jube_new_function() free it before the key reached the shape.
         // URLSearchParams methods live on the prototype in Node; keeping these
         // fallback own methods enumerable leaks per-instance functions.
-        js_mark_non_enumerable(obj, key);
+        js_url_set_method(obj, name, target, adapter_arity,
+            /*constructable=*/false, /*non_enumerable=*/true);
     };
     usp_method("append", js_usp_append, 2);
     usp_method("delete", js_usp_delete, 2);
@@ -1412,10 +1430,10 @@ extern "C" Item js_url_search_params_new(Item init) {
 
     // size as getter
     int64_t sz = js_array_length(entries);
-    Item size_key = make_string_item("size");
-    js_set_key_default(obj, size_key, (Item){.item = i2it((int)sz)});
+    *key_root = make_string_item("size").item;
+    js_set_key_default(obj, node_url_root_value(key_root), (Item){.item = i2it((int)sz)});
     // size is observable as state, but it is not an enumerable data field.
-    js_mark_non_enumerable(obj, size_key);
+    js_mark_non_enumerable(obj, node_url_root_value(key_root));
 
     node_url_host->node->roots->root_frame_end(&frame);
     return obj;
@@ -1427,7 +1445,7 @@ extern "C" Item js_url_search_params_new(Item init) {
 
 template <typename Target>
 static Item js_url_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
+        int adapter_arity, bool constructable, bool non_enumerable) {
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return ItemNull;
     uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
@@ -1438,10 +1456,19 @@ static Item js_url_set_method(Item ns, const char* name, Target target,
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = jube_new_function(node_url_host->script, target,
-        adapter_arity);
+    // A plain native function carries no [[Construct]] slot, so publishing the
+    // module's URL/Url/URLSearchParams entry points through jube_new_function
+    // made `new url.X()` throw "is not a constructor" while the identically
+    // targeted globals worked. Constructor exports must request the
+    // constructable binding.
+    Item fn = constructable
+        ? jube_new_constructor(node_url_host->script, target, adapter_arity)
+        : jube_new_function(node_url_host->script, target, adapter_arity);
     *function_root = fn.item;
-    js_set_key_default(ns, key, fn);
+    js_set_key_default(ns, node_url_root_value(key_root), fn);
+    if (non_enumerable) {
+        js_mark_non_enumerable(ns, node_url_root_value(key_root));
+    }
     node_url_host->node->roots->root_frame_end(&frame);
     return fn;
 }
@@ -1461,7 +1488,7 @@ Item node_url_namespace(void) {
     }
 
     // URL constructor (as a function, not class)
-    Item url_ctor = js_url_set_method(url_module_namespace, "URL", js_url_module_construct, 2);
+    Item url_ctor = js_url_set_method(url_module_namespace, "URL", js_url_module_construct, 2, true);
     *constructor_root = url_ctor.item;
     js_url_set_method(url_ctor, "createObjectURL", js_url_createObjectURL, 1);
     js_url_set_method(url_ctor, "revokeObjectURL", js_url_revokeObjectURL, 1);
@@ -1472,7 +1499,7 @@ Item node_url_namespace(void) {
     js_url_set_method(url_module_namespace, "format", js_url_format, 1);
     js_url_set_method(url_module_namespace, "resolve", js_url_resolve, 2);
     js_url_set_method(url_module_namespace, "resolveObject", js_url_resolve, 2);
-    js_url_set_method(url_module_namespace, "Url", js_url_legacy_construct, 0);
+    js_url_set_method(url_module_namespace, "Url", js_url_legacy_construct, 0, true);
 
     // file URL conversion
     js_url_set_method(url_module_namespace, "fileURLToPath", js_url_fileURLToPath, 1);
@@ -1480,7 +1507,7 @@ Item node_url_namespace(void) {
     js_url_set_method(url_module_namespace, "urlToHttpOptions", js_url_to_http_options, 1);
 
     // URLSearchParams constructor
-    js_url_set_method(url_module_namespace, "URLSearchParams", js_url_search_params_new, 1);
+    js_url_set_method(url_module_namespace, "URLSearchParams", js_url_search_params_new, 1, true);
 
     // default export
     Item default_key = make_string_item("default");

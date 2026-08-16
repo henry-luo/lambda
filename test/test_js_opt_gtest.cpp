@@ -257,14 +257,21 @@ static bool parse_trace(char* text, TraceResult* out) {
     return true;
 }
 
+// Run against the ordinary debug lambda.exe, which defines
+// LAMBDA_JS_EXEC_PROFILE and which `make build` keeps current.
+//
+// This deliberately no longer prefers ./lambda-debug-profile.exe. Nothing in
+// the normal build flow refreshes that artifact, and selecting it on mere
+// existence bound the whole suite to whatever stale copy happened to be on
+// disk. A copy built without LAMBDA_JS_EXEC_PROFILE compiles the trace hooks
+// down to no-op inlines, so the child exits 0 and writes its MIR dump but
+// never writes a .trace — turning every fixture here red with no hint why.
 static const char* opt_executable() {
     const char* configured = getenv("LAMBDA_JS_OPT_EXE");
     if (configured && configured[0]) return configured;
 #ifdef _WIN32
-    if (OPT_ACCESS("lambda-debug-profile.exe", 0) == 0) return "lambda-debug-profile.exe";
     return "lambda.exe";
 #else
-    if (OPT_ACCESS("./lambda-debug-profile.exe", X_OK) == 0) return "./lambda-debug-profile.exe";
     return "./lambda.exe";
 #endif
 }
@@ -304,6 +311,8 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
     options.merge_stderr = true;
     ShellResult result = shell_exec(executable, args, &options);
     bool ok = result.exit_code == 0 && !result.timed_out;
+    int exit_code = result.exit_code;
+    bool timed_out = result.timed_out;
     if (output && output_size > 0) {
         if (result.stdout_buf) {
             snprintf(output, output_size, "%s", result.stdout_buf);
@@ -312,13 +321,35 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
         }
     }
     shell_result_free(&result);
-    if (!ok) return false;
+    // Report which of these failure modes fired: they are otherwise
+    // indistinguishable at the call site, which is what made a stale
+    // non-profiling executable look like 19 unrelated contract failures.
+    if (!ok) {
+        fprintf(stderr, "js-opt fixture '%s': child %s exited %d%s\n",
+            name, executable, exit_code, timed_out ? " (timed out)" : "");
+        return false;
+    }
     if (!trace_enabled) return OPT_ACCESS(trace_path, 0) != 0;
 
     char* trace_text = read_text(trace_path);
-    if (!trace_text) return false;
+    if (!trace_text) {
+        // A clean exit with no trace means the trace hooks compiled away:
+        // js_opt_trace_dump() is a no-op inline unless LAMBDA_JS_EXEC_PROFILE
+        // is defined for the build under test.
+        fprintf(stderr,
+            "js-opt fixture '%s': %s ran cleanly but wrote no trace to '%s'.\n"
+            "  That binary was built without LAMBDA_JS_EXEC_PROFILE.\n"
+            "  Rebuild it with `make build`, or set LAMBDA_JS_OPT_EXE to a"
+            " profiling build.\n",
+            name, executable, trace_path);
+        return false;
+    }
     bool parsed = parse_trace(trace_text, trace);
     free(trace_text);
+    if (!parsed) {
+        fprintf(stderr, "js-opt fixture '%s': malformed trace at '%s'\n",
+            name, trace_path);
+    }
     return parsed;
 }
 

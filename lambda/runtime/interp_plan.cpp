@@ -409,25 +409,41 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     }
     // A compound assignment through a nested path (`a.b.c = v`) has its own
     // COW path-set lowering; only a plain binding root is covered here.
+    // `a[i] = v` / `a.f = v` through a plain binding root: the *_cow helpers
+    // own the sharing decision (S9.1.2) and the walker publishes whatever owner
+    // they hand back, so no mark inspection happens here. The marks themselves
+    // come from cow_bind_var at the aliasing binding, exactly as lowering does.
+    // Still gated: a nested path (`a.b.c = v`), which has its own path-set
+    // lowering, and a declared map/array contract, whose checked setters
+    // validate the full occurrence contract before installing a replacement.
     if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
             node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
-        AstNode* target = ((AstCompoundAssignNode*)node)->object;
-        while (target && target->node_type == AST_NODE_PRIMARY &&
-                ((AstPrimaryNode*)target)->expr) {
-            target = ((AstPrimaryNode*)target)->expr;
+        AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        AstCowPath path = {};
+        AstNode* root = ast_unwrap_primary(ca->object);
+        NameEntry* entry = root && root->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)root)->entry : NULL;
+        // Two shapes reach this syntax but not this lowering: a masked or
+        // sliced write (`arr[arr gt 25] = 0`, where the key is a mask, not an
+        // index) and element mutation (`el.attr = v`, which lowering routes
+        // through its own edit bridge rather than the map setter).
+        AstNode* root_init = entry && entry->node &&
+            entry->node->node_type == AST_NODE_ASSIGN
+            ? ((AstNamedNode*)entry->node)->as : NULL;
+        bool element_root = root_init && root_init->type &&
+            root_init->type->type_id == LMD_TYPE_ELEMENT;
+        bool indexed_key = node->node_type != AST_NODE_INDEX_ASSIGN_STAM ||
+            (ca->key && ca->key->type &&
+             (ca->key->type->type_id == LMD_TYPE_INT ||
+              ca->key->type->type_id == LMD_TYPE_INT64));
+        if (!ast_collect_cow_path(&path, ca->object) || path.count != 0 ||
+                !entry || entry->import || element_root || !indexed_key ||
+                (entry->node && entry->node->node_type == AST_NODE_ASSIGN &&
+                 ((AstNamedNode*)entry->node)->declared_type)) {
+            sc->ok = false;
+            sc->reject = node->node_type;
+            return;
         }
-        (void)target;
-        // Interior mutation is gated entirely for now. `array_set_cow` /
-        // `map_set_cow` copy only when the owner is *marked* shared, and that
-        // mark is established by lowering when a `var` binding aliases another
-        // root (`var h = g`). Without it the helpers see an unshared container
-        // and mutate in place, so an aliased `let` observes the write —
-        // test/lambda/proc/let_finality.ls expects `g[0]` to stay 4 after
-        // `h[0] = 77`. Reproducing this needs the COW marking machinery
-        // (D3.2.2/D8.3.2), not just the setter, so these scripts stay on JIT.
-        sc->ok = false;
-        sc->reject = node->node_type;
-        return;
     }
     // The whole import cone must be interpretable or none of it is: a
     // JIT-compiled module numbers its slab slots in its own lowering pass,
@@ -601,8 +617,26 @@ typedef struct PlanCtx {
     bool failed;
 } PlanCtx;
 
+// A binding owns its container when the initializer produces a fresh one, or
+// when it aliases a binding that already owns one -- the same forward
+// propagation the JIT performs over MirVarEntry::cow_owned. Declarations are
+// visited in source order, so the source binding is always decided first.
+static void plan_mark_cow_owned(NameEntry* entry) {
+    AstNode* decl = entry ? entry->node : NULL;
+    if (!decl || decl->node_type != AST_NODE_ASSIGN) return;
+    AstNode* init = ast_unwrap_primary(((AstNamedNode*)decl)->as);
+    if (!init) return;
+    if (init->node_type == AST_NODE_IDENT) {
+        NameEntry* src = ((AstIdentNode*)init)->entry;
+        entry->cow_owned = src && src->cow_owned;
+        return;
+    }
+    entry->cow_owned = ast_expr_produces_owned_container(init);
+}
+
 static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
     if (!entry || entry->storage_assigned) return;
+    plan_mark_cow_owned(entry);
     if (pc->next_slot > UINT16_MAX) { pc->failed = true; return; }
     entry->slot = (int32_t)pc->next_slot++;
     entry->binding_storage = pc->storage;
@@ -737,6 +771,21 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t r = 1 + plan_need(b->right);
         uint32_t at_call = 2;
         uint32_t best = l > r ? l : r;
+        return best > at_call ? best : at_call;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        // owner, key and value are each published to a slot and all three stay
+        // live across the *_cow call, which may detach a copy. Budgeting fewer
+        // makes those slots alias the rest of the frame and the write corrupts
+        // unrelated bindings under collection pressure.
+        AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        uint32_t o = plan_need(ca->object);
+        uint32_t k = 1 + plan_need(ca->key);
+        uint32_t v = 2 + plan_need(ca->value);
+        uint32_t at_call = 3;
+        uint32_t best = o > k ? o : k;
+        if (v > best) best = v;
         return best > at_call ? best : at_call;
     }
     case AST_NODE_MEMBER_EXPR:

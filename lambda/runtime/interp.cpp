@@ -539,13 +539,6 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
 #undef SYS_DISPATCH
 }
 
-static AstNode* interp_unwrap_primary(AstNode* node) {
-    while (node && node->node_type == AST_NODE_PRIMARY &&
-            ((AstPrimaryNode*)node)->expr) {
-        node = ((AstPrimaryNode*)node)->expr;
-    }
-    return node;
-}
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     int argc = injected ? 1 : 0;
@@ -574,7 +567,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return ItemError;
     }
 
-    AstNode* callee = interp_unwrap_primary(node->function);
+    AstNode* callee = ast_unwrap_primary(node->function);
 
     // `print` is Lambda-variadic but not C-variadic: lowering emits one
     // pn_print per argument with an explicit " " separator between them, and
@@ -777,7 +770,7 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
 // Fills an N-D literal's leaves in row-major order, mirroring
 // mir_emit_ndim_leaves.
 static void interp_fill_ndim(InterpFrame* f, AstNode* node, Scratch& arr, int* flat) {
-    node = interp_unwrap_primary(node);
+    node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_ARRAY) return;
     AstArrayNode* a = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)a->type;
@@ -1009,7 +1002,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         // Aggregate form: the whole left value becomes the right side's first
         // argument — `d |> f(x)` is `f(d, x)` and `d |> sum` is `sum(d)`.
         // Evaluating the right side on its own would call it with no receiver.
-        AstNode* target = interp_unwrap_primary(node->right);
+        AstNode* target = ast_unwrap_primary(node->right);
         Item piped = left.get();
         if (target && target->node_type == AST_NODE_CALL_EXPR) {
             return eval_call(f, (AstCallNode*)target, &piped);
@@ -1433,6 +1426,29 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
             // `let x: float = 7 div 2` observes 3.0, not the int 3. Only the
             // lanes whose boxed form already agrees reach here (interp_plan.cpp
             // gates the rest), so this one conversion closes the gap.
+            // Aliasing an owned container is an ownership boundary: the root
+            // must be marked shared before any later write, or array_set_cow /
+            // map_set_cow would see an unshared owner and mutate in place, so
+            // the aliased `let` would observe the write (proc/let_finality.ls).
+            // Same helper and same condition lowering uses at its `cow_binding`
+            // site, minus the register bookkeeping T0 has no use for (AI3).
+            AstNode* init = ast_unwrap_primary(named->as);
+            if (init && init->node_type == AST_NODE_IDENT) {
+                NameEntry* src = ((AstIdentNode*)init)->entry;
+                TypeId init_tid = named->as->type
+                    ? named->as->type->type_id : LMD_TYPE_ANY;
+                TypeId var_tid = named->declared_type
+                    ? named->declared_type->type_id : LMD_TYPE_ANY;
+                if (src && src->cow_owned &&
+                        ast_expr_may_return_container(named->as, init_tid, var_tid)) {
+                    // cow_bind_var may detach a copy, so it is a safepoint: the
+                    // operand has to be reachable from a frame slot, not a C++
+                    // local, or a collection during the clone frees it.
+                    Scratch alias_slot(f);
+                    alias_slot.set(value);
+                    value = cow_bind_var(alias_slot.get());
+                }
+            }
             Type* decl_type = named->declared_type;
             if (decl_type && decl_type->type_id == LMD_TYPE_FLOAT &&
                     get_type_id(value) != LMD_TYPE_FLOAT) {
@@ -1708,7 +1724,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // Nested paths (`a.b.c = v`) have their own path-set lowering and are
         // rejected by the pre-scan until that slice lands.
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
-        AstNode* target = interp_unwrap_primary(ca->object);
+        AstNode* target = ast_unwrap_primary(ca->object);
         NameEntry* root = target && target->node_type == AST_NODE_IDENT
             ? ((AstIdentNode*)target)->entry : NULL;
         if (!root) {
@@ -1737,12 +1753,21 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Scratch value_slot(f);
         value_slot.set(value);
 
+        // Dispatch on the owner's runtime type, not the syntax: `m["k"] = v`
+        // is an INDEX_ASSIGN over a map, and lowering picks the setter by owner
+        // type too. Each *_cow entry rejects a mismatched owner itself.
         Item replacement;
-        if (node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
-            replacement = map_set_cow(owner.get(), key_slot.get(), value_slot.get());
-        } else {
+        switch (get_type_id(owner.get())) {
+        case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_ELEMENT:
             replacement = array_set_cow(owner.get(), it2l(key_slot.get()),
                 value_slot.get());
+            break;
+        case LMD_TYPE_VMAP:
+            replacement = vmap_set_cow(owner.get(), key_slot.get(), value_slot.get());
+            break;
+        default:
+            replacement = map_set_cow(owner.get(), key_slot.get(), value_slot.get());
+            break;
         }
         if (item_is_error(replacement)) return replacement;
         // Publish the (possibly new) owner back at its binding.

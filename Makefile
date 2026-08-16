@@ -2615,9 +2615,12 @@ test-extended: build-test
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=extended --parallel
 	@$(MAKE) dom-ui-run
 
-test-js-opt: build-test build-debug-profile
+# Runs against the debug lambda.exe from `build`: it defines
+# LAMBDA_JS_EXEC_PROFILE, and unlike lambda-debug-profile.exe it is rebuilt by
+# the ordinary flow, so the suite cannot bind to a stale non-profiling binary.
+test-js-opt: build build-test
 	@echo "Running JavaScript optimization contract tests..."
-	@LAMBDA_JS_OPT_EXE=./lambda-debug-profile.exe ./test/test_js_opt_gtest.exe --gtest_color=no
+	@./test/test_js_opt_gtest.exe --gtest_color=no
 
 test-library: build
 	@echo "Running library test suite..."
