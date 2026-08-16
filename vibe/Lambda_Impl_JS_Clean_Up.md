@@ -188,7 +188,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.11 join/toLocaleString kernel
 - [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 3 walkers migrated, rest are deliberately partial (see §13)
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
-- [~] C3.3 shared emitter — decision taken (adopt); guard + tls + http done, 5 modules left (§16)
+- [~] C3.3 shared emitter — tls, http, net done; readline/fs, child_process, https, stream left (§16)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
 - [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
 - [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
@@ -468,7 +468,15 @@ Three things the migration exposed, all fixed:
    `createServer()`'s bare handler. Splitting `http_dispatch_one` out restores
    the constructor-handler path.
 
-Remaining modules, in the plan's order: `js_net.cpp` (two intra-file clones,
-the largest), `js_readline.cpp`/`js_fs.cpp`, `js_child_process.cpp` (replay),
-`js_https.cpp`, `js_stream.cpp` (canonical, most hooks). Each should re-check
-points 2 and 3 above: they are easy to reproduce.
+`js_net.cpp` followed (−151): it carried **two** complete emitters of its own,
+one per surface, each with its own record type and once-sweep. Both are gone
+and neither storage key remains. The `allowHalfOpen` hook survives — the one
+place net genuinely needs behaviour around registration.
+
+Running total for C3.3: −255 lines across three modules, and both C0
+regression tests still green unchanged.
+
+Remaining, in the plan's order: `js_readline.cpp`/`js_fs.cpp`,
+`js_child_process.cpp` (replay), `js_https.cpp`, `js_stream.cpp` (canonical,
+most hooks). Each should re-check points 2 and 3 above deliberately — the net
+migration hit neither only because they were checked for.
