@@ -282,8 +282,20 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_MAP_TYPE:
     case AST_NODE_ELMT_TYPE:
     case AST_NODE_FUNC_TYPE:
-    // --- P1.3: documents ---
+    // --- P1.3: documents, paths, queries ---
     case AST_NODE_ELEMENT:
+    // --- P1.2: match ---
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_MATCH_ARM:
+    case AST_NODE_CONSTRAINED_TYPE:
+    // --- P1.1: pipes and implicit contexts ---
+    case AST_NODE_PIPE:
+    case AST_NODE_CURRENT_ITEM:
+    case AST_NODE_CURRENT_INDEX:
+    case AST_NODE_PATH_EXPR:
+    case AST_NODE_PATH_INDEX_EXPR:
+    case AST_NODE_PARENT_EXPR:
+    case AST_NODE_QUERY_EXPR:
         return true;
     default:
         return false;
@@ -350,14 +362,28 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             sc->reject = node->node_type;
             return;
         }
+        TypeFunc* signature = (TypeFunc*)node->type;
         // A variadic definition binds its rest arguments to `varg()`, which the
         // generated wrapper installs from a trailing physical parameter. The
         // walker has no vararg context yet, so those definitions stay on JIT.
-        TypeFunc* signature = (TypeFunc*)node->type;
         if (signature && signature->type_id == LMD_TYPE_FUNC && signature->is_variadic) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
+        }
+        // A `var` parameter is an inout binding: the callee's writes have to be
+        // published back into the caller's binding on return. lambda_dynamic_call
+        // refuses these outright ("dynamic dispatch of a function with `var`
+        // parameters is deferred") and the walker has no write-back either, so a
+        // mutation would simply be lost (test/lambda/proc/var_param.ls).
+        if (signature && signature->type_id == LMD_TYPE_FUNC) {
+            for (TypeParam* param = signature->param; param; param = param->next) {
+                if (param->is_var_param) {
+                    sc->ok = false;
+                    sc->reject = node->node_type;
+                    return;
+                }
+            }
         }
     }
     // N-D numeric literals become one shaped ArrayNum via array_num_new_ndim;
@@ -395,12 +421,18 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
                 ((AstPrimaryNode*)target)->expr) {
             target = ((AstPrimaryNode*)target)->expr;
         }
-        if (!target || target->node_type != AST_NODE_IDENT ||
-                !((AstIdentNode*)target)->entry) {
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
+        (void)target;
+        // Interior mutation is gated entirely for now. `array_set_cow` /
+        // `map_set_cow` copy only when the owner is *marked* shared, and that
+        // mark is established by lowering when a `var` binding aliases another
+        // root (`var h = g`). Without it the helpers see an unshared container
+        // and mutate in place, so an aliased `let` observes the write —
+        // test/lambda/proc/let_finality.ls expects `g[0]` to stay 4 after
+        // `h[0] = 77`. Reproducing this needs the COW marking machinery
+        // (D3.2.2/D8.3.2), not just the setter, so these scripts stay on JIT.
+        sc->ok = false;
+        sc->reject = node->node_type;
+        return;
     }
     // The whole import cone must be interpretable or none of it is: a
     // JIT-compiled module numbers its slab slots in its own lowering pass,
@@ -409,7 +441,12 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // symbol registration and stay on the JIT entirely.
     if (node->node_type == AST_NODE_IMPORT) {
         AstImportNode* imp = (AstImportNode*)node;
-        if (imp->is_cross_lang || !imp->script || !imp->script->interp_supported) {
+        // An aliased import (`import alias: path`) registers *qualified* names
+        // (`alias.member`) through push_qualified_name, a second binding shape
+        // the plan pass does not resolve — test/lambda/latex/test_latex_picture.ls
+        // reads them as null. Plain `import .module` is covered.
+        if (imp->alias || imp->namespace_name || imp->default_name ||
+                imp->is_cross_lang || !imp->script || !imp->script->interp_supported) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -506,6 +543,16 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // variadic rows still have no generic dispatch to mirror.
         if (info && info->fn == SYSPROC_PRINT && info->func_ptr) {
             interp_visit_children(node, interp_scan_visit, ctx);
+            return;
+        }
+        // Math entries carrying a native lane (floor/ceil/round/trunc/abs …)
+        // preserve their argument's declared type: lowering keeps `trunc(n:int)`
+        // in the int lane, while the boxed helper alone yields float
+        // (test/lambda/proc/native_math_type_preserving.ls). That lane choice is
+        // type-inference work, the same gap that keeps the bitwise family out.
+        if (info && info->native_c_name && info->native_func_ptr) {
+            sc->ok = false;
+            sc->reject = node->node_type;
             return;
         }
         if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
