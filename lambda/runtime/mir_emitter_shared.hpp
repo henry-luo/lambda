@@ -319,6 +319,11 @@ enum ScalarPayloadProvenance {
 };
 struct MirValue {
     MIR_reg_t reg;
+    // shape-2 calls keep the raw pair in registers until the first consumer.
+    // the companion is intentionally metadata, not a second published Item:
+    // rv4.1 forbids a pending lane from entering roots or spills.
+    MIR_reg_t pending_companion;
+    bool maybe_pending;
     MIR_type_t mir_type;
     Type* contract_type;
     TypeId semantic_type;
@@ -419,6 +424,16 @@ struct MirFrameState {
     MIR_label_t anchor;
     MIR_label_t return_label;
     MIR_reg_t return_reg;
+    // rv6 tail forwarding keeps the pair returned by a same-shape callee in
+    // these registers until this frame's publication boundary. The pair is
+    // never written to a root slot or scalar home (D5.2.1v2).
+    MIR_reg_t pending_return_item;
+    MIR_reg_t pending_return_companion;
+    // rv4.2 ownership is frame-local. Nested function emission suspends the
+    // outer frame, so the live pair must be restored with that frame rather
+    // than leaking into the nested body (D5.2.1v2).
+    MIR_reg_t pending_live_item;
+    MIR_reg_t pending_live_companion;
     MIR_reg_t error_return_reg;
     MIR_reg_t incoming_scalar_home;
     int return_lane_kind;
@@ -503,6 +518,12 @@ struct MirEmitter {
     MirFrameState frame;           // canonical physical activation state
     MirFunctionMetadata last_function;
     MirFunctionArgumentState argument_registers;
+    // RV4.2 mechanical guard: one unresolved shape-2 pair may be live in a
+    // lowering sequence. The companion must be consumed or forwarded before
+    // another call, safepoint, spill, or publication can overwrite its lane
+    // (D5.2.1v2, D5.2.2v2).
+    MIR_reg_t pending_live_item;
+    MIR_reg_t pending_live_companion;
     // Per-function 8-byte native-stack scratch for inline double<->bits
     // reinterpretation. Keyed by func_item, not by frame lifecycle, so a
     // stale register can never leak into a different function's body.
@@ -588,6 +609,8 @@ static inline void em_frame_dispose(MirEmitter* em) {
     if (frame->scalar_home_bindings) mem_free(frame->scalar_home_bindings);
     if (frame->scalar_home_fixups) mem_free(frame->scalar_home_fixups);
     memset(frame, 0, sizeof(*frame));
+    em->pending_live_item = 0;
+    em->pending_live_companion = 0;
 }
 
 // Detach the complete frame: partial saves leaked new facts across nested
@@ -596,6 +619,10 @@ static inline MirFrameState em_frame_suspend(MirEmitter* em) {
     MirFrameState saved = {};
     if (!em) return saved;
     saved = em->frame;
+    saved.pending_live_item = em->pending_live_item;
+    saved.pending_live_companion = em->pending_live_companion;
+    em->pending_live_item = 0;
+    em->pending_live_companion = 0;
     memset(&em->frame, 0, sizeof(em->frame));
     return saved;
 }
@@ -604,6 +631,8 @@ static inline void em_frame_restore(MirEmitter* em, MirFrameState saved) {
     if (!em) return;
     em_frame_dispose(em);
     em->frame = saved;
+    em->pending_live_item = saved.pending_live_item;
+    em->pending_live_companion = saved.pending_live_companion;
 }
 
 static inline bool em_root_ensure_index_map(int** map, int* capacity,
@@ -818,13 +847,11 @@ static inline FnReturnShape em_return_shape(bool native_return, bool can_raise,
 
 // Is this entry's lane 2 physically a second MIR result?
 //
-// Two transports can carry a shape-2 return, and the existing descriptor fields
-// already tell them apart: a non-zero `scalar_home_lane_mask` means the v2
-// trailing caller-donated home, zero means the v3 register pair. Entries that
-// must stay callable from C (the public `_b` wrappers reached through the
-// boxed-call trampolines and `fn->invoke`) therefore keep the home transport
-// while internal bodies move to pairs, with no mixed-convention ambiguity —
-// the call site reads the callee's descriptor, never its own locals (RV10).
+// a scalar-home mask describes which lane would use a v2 home; it does not by
+// itself describe the physical ABI.  The transport does: v3 public `_b`
+// wrappers use a context slot even when their boxed result is wide-capable.
+// call sites must read the transport rather than recreating the old mask rule
+// (RV10), or they append an argument the wrapper never declared.
 //
 // Windows x86-64 hard-errors on nres > 1 (`mir-x86_64.c`), so RV12 lowers lane
 // 2 to a context slot there; that lowering lands in P3.
@@ -838,6 +865,15 @@ static inline bool em_returns_result_pair(FnCompanionTransport companion) {
 
 static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
     return variant && em_returns_result_pair(variant->result.companion);
+}
+
+// the trailing pointer exists only for the v2 caller-donated-home transport.
+// in particular, a v3 context-slot wrapper can still return a dynamic scalar
+// but has no `_scalar_home` parameter.  keeping this predicate transport-based
+// prevents direct calls from silently growing a stale extra ABI argument.
+static inline bool em_variant_accepts_scalar_home(
+        const FnVariantAnalysis* variant) {
+    return variant && variant->result.companion == FN_COMPANION_HOME;
 }
 
 // RV9 — the ONE definition of how lane 2 spells "no error", for both sides.
@@ -964,6 +1000,8 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
         TypeId semantic_type, ValueRep rep, JitValueClass value_class) {
     MirValue value = {};
     value.reg = reg;
+    value.pending_companion = 0;
+    value.maybe_pending = false;
     value.mir_type = mir_type;
     value.contract_type = NULL;
     value.semantic_type = semantic_type;
@@ -974,8 +1012,15 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
     value.scalar_provenance = SCALAR_PROVENANCE_UNKNOWN;
     return value;
 }
+static inline MirValue em_materialize_pending_value(MirEmitter* em,
+        MirValue value);
 static inline MirValue em_require_rep(MirEmitter* em, MirValue value,
         ValueRep required) {
+    if (value.maybe_pending) {
+        // representation conversion is a first consumer: never reinterpret
+        // the pending tag or companion as an ordinary Item/native lane.
+        value = em_materialize_pending_value(em, value);
+    }
     if (value.rep == required) return value;
     if (em && em->convert_rep) {
         MirValue converted = em->convert_rep(em->call_owner, value, required);
@@ -1367,6 +1412,40 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
     // carrier must be announced to the spill tracker and the root machinery
     // exactly once, and only after this patch.
     return result;
+}
+
+// materialize a direct-call result at the first consumer/escape.  Keeping
+// this beside the pair resolver prevents callers from publishing a pending
+// Item through the spill tracker or root frame (D5.2.1v2, RV4.1).
+static inline MirValue em_materialize_pending_value(MirEmitter* em,
+        MirValue value) {
+    if (!value.maybe_pending) return value;
+    if (!value.pending_companion) {
+        log_error("mir-value: pending Item has no companion register");
+        abort();
+    }
+    if (em && em->pending_live_companion &&
+            (em->pending_live_item != value.reg ||
+             em->pending_live_companion != value.pending_companion)) {
+        log_error("mir-value: pending companion ownership mismatch");
+        abort();
+    }
+    value.reg = em_resolve_pending_pair(em, value.reg,
+        value.pending_companion);
+    if (em) {
+        em->pending_live_item = 0;
+        em->pending_live_companion = 0;
+    }
+    value.pending_companion = 0;
+    value.maybe_pending = false;
+    if (em && em->after_call_result) {
+        em->after_call_result(em->call_owner, value.reg, value.mir_type);
+    }
+    if (em && em->root_call_value && mir_gc_value_needs_root(
+            value.value_class, value.mir_type)) {
+        em->root_call_value(em->call_owner, value.reg);
+    }
+    return value;
 }
 static inline int em_add_const(MirEmitter* em, void* ptr) {
     if (!em || !em->const_list || !ptr) return -1;
@@ -3558,8 +3637,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         const MirCallOptions* options = NULL) {
     MirCallResult call_result = {};
     if (!em || !target || source_nargs < 0) return call_result;
-    bool accepts_scalar_home = variant &&
-        variant->result.scalar_home_lane_mask != 0;
+    bool accepts_scalar_home = em_variant_accepts_scalar_home(variant);
     // Context-aware generated entries carry EvalContext in a call register.
     // The option keeps JS on its current ABI until its full entry/call graph is
     // migrated as one unit.
@@ -3673,20 +3751,20 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     metadata.normal_result.transport = JIT_RETURN_MIR_RESULT;
     metadata.normal_result.scalar_class = normal.scalar_class;
     metadata.normal_result.may_use_scalar_return_home =
-        normal.may_need_caller_scalar_home;
+        accepts_scalar_home && normal.may_need_caller_scalar_home;
     if (variant && variant->result.error_lane == FN_ERROR_LANE_CONTEXT_ITEM) {
         metadata.error_result.value = {JIT_ABI_ITEM, JIT_VALUE_BOXED_ITEM};
         metadata.error_result.transport = JIT_RETURN_CONTEXT_ERROR;
         metadata.error_result.scalar_class =
             variant->result.error.scalar_class;
         metadata.error_result.may_use_scalar_return_home =
-            variant->result.error.may_need_caller_scalar_home;
+            accepts_scalar_home && variant->result.error.may_need_caller_scalar_home;
     }
     metadata.abi_args = abi_args;
     metadata.abi_arg_count = (uint16_t)nargs;
     metadata.source_arg_count = (uint16_t)source_nargs;
     metadata.scalar_return_home_arg_index = (int16_t)scalar_home_arg_index;
-    metadata.scalar_home_lane_mask = variant
+    metadata.scalar_home_lane_mask = accepts_scalar_home
         ? variant->result.scalar_home_lane_mask : 0;
     // RV10: read the callee's shape, never derive one here. An unknown callee
     // is assumed to speak the universal pair shape (§6).
@@ -3757,30 +3835,35 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         call_result.error = em_value(companion, MIR_T_I64, LMD_TYPE_ERROR,
             VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
     } else if (callee_returns_pair) {
-        // RV4.2 single-live: lane 2 dies at the next call, so resolve before
-        // anything else can clobber it. This eager form is correct by
-        // construction; RV6's lazy `maybe_pending` propagation (resolve only at
-        // escape sites) is a strict refinement on top of it, not a prerequisite.
-        //
-        // Nothing between the call and this patch may spill or root the raw
-        // result — see em_publish_call_result. The pair itself is GC-safe while
-        // it lives in registers (RV5: lane 1 is tag bits, lane 2 raw non-pointer
-        // bits), so an intervening safepoint has nothing to trace.
-        result = em_resolve_pending_pair(em, result, companion);
-        em_publish_call_result(em, &metadata, result, result_type);
+        // rv6: keep the pair in registers until the first consumer. The raw
+        // lanes are GC-safe while they remain live here; publication is deferred
+        // to em_materialize_pending_value so a pending Item never reaches a
+        // root slot or spill (D5.2.1v2, RV4.1).
     } else if (em_variant_returns_slot(variant)) {
-        // RV12 slot transport: identical protocol, lane 2 read from the
-        // context cell instead of a second result register. Loaded eagerly
-        // because the slot dies at the next call (RV4.2), and resolved before
-        // publication for the same reason the register form is — a pending
-        // Item must never be spilled or rooted.
+        // rv12 slot transport: load the companion now, but defer resolution
+        // until the first consumer. A slot result is an escape boundary for a
+        // C-reachable wrapper, so callers that return or publish it must still
+        // materialize before crossing that boundary.
         MIR_reg_t slot = em_load_frame_top(em, em->frame.runtime,
             offsetof(Context, mir_companion_slot), "companion_slot");
-        result = em_resolve_pending_pair(em, result, slot);
-        em_publish_call_result(em, &metadata, result, result_type);
+        companion = slot;
     }
     call_result.normal = em_value(result, result_type, normal.semantic_type,
         normal.abi_rep, metadata.normal_result.value.value_class);
+    if ((callee_returns_pair || em_variant_returns_slot(variant)) &&
+            variant && variant->result.shape == RETURN_SHAPE_ITEM_SCALAR) {
+        call_result.normal.pending_companion = companion;
+        call_result.normal.maybe_pending = true;
+        // Keep the one-live-pair invariant explicit even while most consumers
+        // still take the fail-closed immediate-materialization path.
+        if (em->pending_live_companion) {
+            log_error("mir-direct-call: second pending companion is live at %s",
+                call_name ? call_name : "<anon>");
+            abort();
+        }
+        em->pending_live_item = result;
+        em->pending_live_companion = companion;
+    }
     call_result.normal.scalar_home_id = scalar_home_id;
     call_result.normal.scalar_provenance = scalar_home_id
         ? SCALAR_PROVENANCE_ACTIVATION_HOME : SCALAR_PROVENANCE_NONE;

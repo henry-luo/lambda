@@ -181,7 +181,21 @@ This is visible in the corpus: `test/lambda/import.ls` falls back because its de
 
 ### 3.0 P1 progress — **partially landed 2026-08-15**
 
-Four slices are in (two complete, two partial), verified over the **full baseline corpus** — every directory `test_lambda_gtest` discovers, functional and procedural: **652 scripts, 127 interpreted end to end with byte-identical output, 525 counted fallbacks, 0 divergences**. GC stress over all 127 clean, `test_interp_gtest` 140/140, default tier 719/719.
+All five slices are in (three complete, two partial), verified over the **full baseline corpus** — every directory `test_lambda_gtest` discovers, functional and procedural: **653 scripts, 312 interpreted end to end with byte-identical output, 317 counted fallbacks, 0 divergences, 24 inconclusive**. GC stress over all 312 clean but for the pre-existing JIT `path.ls` rooting defect (the JIT differs stressed vs unstressed; T0 is stable both ways — AI18's executable-spec role). `test_interp_gtest` 284/284, default tier 720/720.
+
+*Inconclusive* is its own verdict, not a silent absorption (R4): a script that exceeds the sweep's budget on both a parallel and a 3×-budget retry is named and excluded from the interpreted list rather than counted as either answer. The same confirm-before-accusing retry applies to a mismatch — every genuine T0 divergence found so far reproduces on a direct re-run, so a one-off under N-way load must not be reported as one.
+
+Import-cone leverage was the dominant effect: `IMPORT` fell **203 → 9** once the handful of modules its cone depended on could interpret (`pdf/util.ls`, `graph/style.ls`, `graphviz/records.ls`, `chart/util.ls`) plus aliased imports opened. Each unblocking was a gate *removal* or a few lines mirroring an existing lowering, never new walker machinery:
+
+| change | LOC | effect |
+|---|---|---|
+| `sysfunc_native_math_always_float` promoted to `sys_func_registry.h`; gate narrowed to the type-preserving family, whose result is re-narrowed by the call's static type (the same input `POST_PROCESS_UNBOX` uses) | ~20 | `SYS_FUNC` 42 → 12; unblocked `pdf/util.ls` (78 dependents) |
+| `map()`/`map([k, v, …])` mirrored to `vmap_new`/`vmap_from_array`, as lowering emits | ~6 | unblocked `graphviz/records.ls` (52) |
+| map-spread gate removed — `{*:base, k: v}` records the merge on the *shape entry*, so `eval_map`'s positional fill already hands `map_fill_items` what lowering does | −8 | unblocked `graph/style.ls` (60) |
+| aliased-import gate removed — `push_qualified_name` entries carry the same `node` + `import` pair `plan_resolve_import` already matches | −4 | `IMPORT` 203 → 9 |
+| declared-`float` binding coercion (S7.7.2); `int`/`bool` need none, the rest stay gated | ~10 | `ASSIGN` gate narrowed |
+
+One real T0 defect surfaced, found only because the sweep compares `run` mode too: `run_main`'s scan could reach the same `pn main` through two root children (a top-level `pn` is linked both as a root statement and inside the content item list), and the `break` left only the inner loop — so the whole procedure ran twice.
 
 > **Correction to the P0 gate record.** G0.1 and the first P1 verification were measured over `test/lambda` only (279 scripts), not the full baseline. Worse, every harness — the gtest subset, the GC-stress loop, and the sweep — invoked `lambda.exe <script>` directly, so **`run` mode was untested by construction** through all of P0 and most of P1. Widening the sweep to the whole corpus immediately found a `run`-mode defect (below). The subset list now records each script's invocation mode and the gtest honours it, plus a dedicated `ProceduralMainIsInvokedUnderRunMode` case so the path stays covered even if the subset's only procedural script ever leaves it.
 

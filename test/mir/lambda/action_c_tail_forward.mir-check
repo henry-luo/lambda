@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Action C: same-shape boxed direct returns forward the pending pair; the public wrapper resolves it once at the slot/Item boundary.",
+  "checks": [
+    {
+      "return_convention": 3,
+      "in_func": "_forward_#",
+      "expect": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "ret\t"
+      ],
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "return_convention": 3,
+      "in_func": "_forward_b_#",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    }
+  ]
+}

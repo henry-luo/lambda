@@ -1837,7 +1837,7 @@ class PremakeGenerator:
             self.premake_content.append(f'        "{source}",')
 
         # Add source files from dependent inline libraries
-        inline_libs = ['strbuf', 'strview', 'mem-pool', 'datetime', 'string', 'num_stack', 'url']
+        inline_libs = ['strbuf', 'strview', 'mem-pool', 'datetime', 'string', 'url']
         for dep in dependencies:
             if dep in inline_libs:
                 # Find the actual library definition to get its sources
@@ -1862,7 +1862,7 @@ class PremakeGenerator:
         all_includes.append("lib/mem-pool/include")
 
         # Add external library include paths for meta-library dependencies
-        inline_libs = ['strbuf', 'strview', 'mem-pool', 'datetime', 'string', 'num_stack', 'url']
+        inline_libs = ['strbuf', 'strview', 'mem-pool', 'datetime', 'string', 'url']
         external_deps = [dep for dep in dependencies if dep not in inline_libs]
         for lib_name in external_deps:
             if lib_name in self.external_libraries:

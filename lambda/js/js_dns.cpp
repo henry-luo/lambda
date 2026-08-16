@@ -246,7 +246,7 @@ static void dns_scheduled_timer_cb(uv_timer_t* timer) {
 }
 
 static Item dns_emit_scheduled_common(Item env_item, int success_arg_count) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (!env) return make_js_undefined();
 
     Item callback = env[0];
@@ -300,9 +300,7 @@ static void dns_enqueue_scheduled(Item fn) {
 }
 
 static void dns_schedule(Item* values, int count, JsNativeP1 target) {
-    Item* env = js_alloc_env(count);
-    for (int i = 0; i < count; i++) env[i] = values[i];
-    dns_enqueue_scheduled(js_new_native_closure(target, 0, env, count));
+    js_schedule_native_env(dns_enqueue_scheduled, target, 0, values, count);
 }
 
 static void dns_lookup_schedule(Item callback, Item resolve, Item reject,

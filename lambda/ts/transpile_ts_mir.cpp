@@ -856,7 +856,8 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
     Item result = transpile_js_ast_to_mir(runtime, tp, ts_ast, filename, result_home);
     log_debug("ts-mir: JS MIR transpiler returned");
 
-    ts_transpiler_destroy(tp);
+    // transpile_js_ast_to_mir owns the delegated parser, including its failure
+    // cleanup, so destroying it here would double-delete the Tree-sitter tree.
     log_debug("ts-mir: transpilation completed");
     return result;
 }

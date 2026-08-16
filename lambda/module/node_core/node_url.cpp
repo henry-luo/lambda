@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <climits>
 #include <math.h>
 
 static const JubeHostAPI* node_url_host = NULL;
@@ -57,6 +58,28 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
     if (!buf || buf_size <= 0 || get_type_id(value) != LMD_TYPE_STRING ||
             !node_url_host->value->string_copy) return NULL;
     return node_url_host->value->string_copy(value, buf, (size_t)buf_size, NULL) ? buf : NULL;
+}
+
+// Copy a string Item into a fresh NUL-terminated buffer sized to the value.
+// item_to_cstr()'s fixed caller buffers either truncate or fail outright on
+// long input; a query string has no bounded length. Caller frees.
+static char* node_url_string_dup(Item value, size_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (get_type_id(value) != LMD_TYPE_STRING || !node_url_host || !node_url_host->value ||
+            !node_url_host->value->string_length || !node_url_host->value->string_copy) {
+        return NULL;
+    }
+    size_t length = node_url_host->value->string_length(value);
+    char* text = (char*)mem_alloc(length + 1, MEM_CAT_TEMP);
+    if (!text) return NULL;
+    size_t copied = 0;
+    if (!node_url_host->value->string_copy(value, text, length + 1, &copied)) {
+        mem_free(text);
+        return NULL;
+    }
+    text[copied] = '\0';
+    if (out_len) *out_len = copied;
+    return text;
 }
 
 static Item node_url_string(const char* text, int length) {
@@ -152,9 +175,12 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
         return object;
     }
     *object_root = object.item;
+    // Callers hand in a freshly built, still-unrooted value. Register it before
+    // node_url_string() allocates the key, otherwise a GC inside that
+    // allocation collects the value and the property publishes a dead item.
+    *value_root = value.item;
     Item key = node_url_string(name);
     *key_root = key.item;
-    *value_root = value.item;
     if (own_property) {
         node_url_host->value->property_set_own(node_url_root_value(object_root),
             node_url_root_value(key_root), node_url_root_value(value_root));
@@ -448,16 +474,21 @@ static Item node_url_legacy_query(const char* search) {
         char* equals = strchr(pair, '=');
         char* raw_value = equals ? equals + 1 : (char*)"";
         if (equals) *equals = '\0';
-        for (char* p = pair; *p; p++) if (*p == '+') *p = ' ';
-        for (char* p = raw_value; *p; p++) if (*p == '+') *p = ' ';
         size_t key_length = 0;
         size_t value_length = 0;
-        char* decoded_key = url_decode_component(pair, strlen(pair), &key_length);
-        char* decoded_value = url_decode_component(raw_value, strlen(raw_value), &value_length);
+        // Node's legacy query parser is lenient: '+' is a space and a malformed
+        // escape passes through literally. Hand-rolled '+' loops plus a strict
+        // decode dropped the whole pair on malformed input, disagreeing with
+        // parse_query_entries() — the URLSearchParams path over the same syntax.
+        char* decoded_key = url_decode_form(pair, strlen(pair), &key_length);
+        char* decoded_value = url_decode_form(raw_value, strlen(raw_value), &value_length);
         if (decoded_key && decoded_value) {
+            // Root each string as it is built: allocating the value string can
+            // trigger a GC that would collect a still-unrooted key, publishing
+            // the pair under a dead name.
             Item key = make_string_item(decoded_key, (int)key_length);
-            Item value = make_string_item(decoded_value, (int)value_length);
             *key_root = key.item;
+            Item value = make_string_item(decoded_value, (int)value_length);
             *value_root = value.item;
             Item existing = js_get_key_default(node_url_root_value(query_root),
                 node_url_root_value(key_root));
@@ -975,9 +1006,15 @@ static Item parse_query_entries(const char* qs, int qs_len) {
         return entries;
     }
 
-    char buf[4096];
-    if (qs_len >= (int)sizeof(buf)) qs_len = (int)sizeof(buf) - 1;
-    memcpy(buf, qs, qs_len);
+    // strtok_r/url_decode mutate in place, so the query needs its own copy —
+    // but sized to the input. The previous 4096-byte stack buffer clamped
+    // qs_len and silently dropped every parameter past the cut.
+    char* buf = (char*)mem_alloc((size_t)qs_len + 1, MEM_CAT_TEMP);
+    if (!buf) {
+        node_url_host->node->roots->root_frame_end(&frame);
+        return entries;
+    }
+    memcpy(buf, qs, (size_t)qs_len);
     buf[qs_len] = '\0';
 
     // URL-decode a string in-place (application/x-www-form-urlencoded: '+' -> ' ')
@@ -1003,6 +1040,7 @@ static Item parse_query_entries(const char* qs, int qs_len) {
         js_array_push(entries, entry);
         pair = strtok_r(NULL, "&", &saveptr);
     }
+    mem_free(buf);
     node_url_host->node->roots->root_frame_end(&frame);
     return entries;
 }
@@ -1169,47 +1207,63 @@ extern "C" Item js_usp_sort(void) {
     return make_js_undefined();
 }
 
+// Borrowed UTF-8 view of a string entry; non-strings serialize as empty. The
+// pointer stays valid while its rooted Item is untouched, so callers hold at
+// most one view at a time.
+static bool node_url_string_view(Item value, const char** out, size_t* out_len) {
+    *out = NULL;
+    *out_len = 0;
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    const uint8_t* bytes = node_url_host->value->string_bytes(value);
+    if (!bytes) return false;
+    *out = (const char*)bytes;
+    *out_len = node_url_host->value->string_length(value);
+    return true;
+}
+
 // URLSearchParams.prototype.toString()
 extern "C" Item js_usp_toString(void) {
     Item self = js_get_this();
     Item entries = js_get_key_default(self, make_string_item("__entries__"));
     int64_t len = js_array_length(entries);
     if (len == 0) return make_string_item("", 0);
+    if (!node_url_host || !node_url_host->value ||
+            !node_url_host->value->string_bytes || !node_url_host->value->string_length) {
+        return make_string_item("", 0);
+    }
 
-    char buf[8192];
-    int pos = 0;
-    for (int64_t i = 0; i < len && pos < (int)sizeof(buf) - 100; i++) {
-        if (i > 0) buf[pos++] = '&';
+    // Measure then write, through the shared form-urlencoded encoder. The
+    // previous serializer used fixed 8KB output / 4KB per-field buffers and
+    // stopped early, silently truncating long parameter lists and long values.
+    const char* bytes = NULL;
+    size_t byte_len = 0;
+    size_t total = 0;
+    for (int64_t i = 0; i < len; i++) {
         Item entry = js_elements_get_int(entries, i);
-        Item ek = js_elements_get_int(entry, 0);
-        Item ev = js_elements_get_int(entry, 1);
-        // URL-encode key and value
-        auto url_encode = [&](Item s) {
-            if (get_type_id(s) != LMD_TYPE_STRING) return;
-            char text[4096] = {};
-            if (!item_to_cstr(s, text, sizeof(text))) return;
-            int text_len = (int)strlen(text);
-            for (int j = 0; j < text_len && pos < (int)sizeof(buf) - 4; j++) {
-                char c = text[j];
-                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                    (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '!' ||
-                    c == '~' || c == '*' || c == '\'' || c == '(' || c == ')') {
-                    buf[pos++] = c;
-                } else if (c == ' ') {
-                    buf[pos++] = '+';
-                } else {
-                    buf[pos++] = '%';
-                    buf[pos++] = hex_encode_nibble_upper((unsigned char)c >> 4);
-                    buf[pos++] = hex_encode_nibble_upper((unsigned char)c & 0x0F);
-                }
-            }
-        };
-        url_encode(ek);
+        if (i > 0) total += 1;  // '&'
+        node_url_string_view(js_elements_get_int(entry, 0), &bytes, &byte_len);
+        total += url_encode_measure(bytes, byte_len, URL_KEEP_FORM, true, NULL);
+        total += 1;             // '='
+        node_url_string_view(js_elements_get_int(entry, 1), &bytes, &byte_len);
+        total += url_encode_measure(bytes, byte_len, URL_KEEP_FORM, true, NULL);
+    }
+
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_TEMP);
+    if (!buf) return make_string_item("", 0);
+    size_t pos = 0;
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_elements_get_int(entries, i);
+        if (i > 0) buf[pos++] = '&';
+        node_url_string_view(js_elements_get_int(entry, 0), &bytes, &byte_len);
+        pos += url_encode_write(bytes, byte_len, URL_KEEP_FORM, true, buf + pos);
         buf[pos++] = '=';
-        url_encode(ev);
+        node_url_string_view(js_elements_get_int(entry, 1), &bytes, &byte_len);
+        pos += url_encode_write(bytes, byte_len, URL_KEEP_FORM, true, buf + pos);
     }
     buf[pos] = '\0';
-    return make_string_item(buf, pos);
+    Item result = make_string_item(buf, (int)pos);
+    mem_free(buf);
+    return result;
 }
 
 // URLSearchParams.prototype.forEach(callback[, thisArg])
@@ -1271,16 +1325,24 @@ extern "C" Item js_usp_size(void) {
     return (Item){.item = i2it((int)js_array_length(entries))};
 }
 
+// Defined with the namespace builders below; declared here so the instance
+// builder publishes through the same key/function rooting discipline.
+template <typename Target>
+static Item js_url_set_method(Item ns, const char* name, Target target,
+        int adapter_arity, bool constructable = false,
+        bool non_enumerable = false);
+
 // new URLSearchParams([init])
 extern "C" Item js_url_search_params_new(Item init) {
     if (!node_url_ensure_host()) return ItemNull;
     Item obj = node_url_host->script->new_object_with_class(
         JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS);
     JubeRootFrame frame = {};
-    if (!node_url_roots_begin(&frame, 2)) return obj;
+    if (!node_url_roots_begin(&frame, 3)) return obj;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* entries_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    if (!object_root || !entries_root) {
+    uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    if (!object_root || !entries_root || !key_root) {
         node_url_host->node->roots->root_frame_end(&frame);
         return obj;
     }
@@ -1290,16 +1352,21 @@ extern "C" Item js_url_search_params_new(Item init) {
     int init_type = get_type_id(init);
 
     if (init_type == LMD_TYPE_STRING) {
-        char query[4096] = {};
-        if (!item_to_cstr(init, query, sizeof(query))) {
+        // a 4096-byte stack buffer here made `new URLSearchParams(longQuery)`
+        // fail construction outright, so `new` handed back a bare object
+        size_t query_len = 0;
+        char* query = node_url_string_dup(init, &query_len);
+        if (!query || query_len > (size_t)INT_MAX) {
+            if (query) mem_free(query);
             node_url_host->node->roots->root_frame_end(&frame);
             return ItemNull;
         }
         const char* qs = query;
-        int qs_len = (int)strlen(query);
+        int qs_len = (int)query_len;
         if (qs_len > 0 && qs[0] == '?') { qs++; qs_len--; }
         entries = parse_query_entries(qs, qs_len);
         *entries_root = entries.item;
+        mem_free(query);
     } else if (init_type == LMD_TYPE_MAP) {
         entries = js_array_new(0);
         *entries_root = entries.item;
@@ -1329,20 +1396,24 @@ extern "C" Item js_url_search_params_new(Item init) {
         *entries_root = entries.item;
     }
 
-    Item entries_key = make_string_item("__entries__");
-    js_set_key_default(obj, entries_key, entries);
+    // A property key stays live only while rooted: js_set_key_default() can
+    // allocate shape storage, and a GC there frees an unrooted key and leaves a
+    // poisoned name in the instance shape.
+    *key_root = make_string_item("__entries__").item;
+    js_set_key_default(obj, node_url_root_value(key_root), entries);
     // URLSearchParams entries are an internal list; exposing the backing array
     // as enumerable makes assert deep-equality compare implementation storage.
-    js_mark_non_enumerable(obj, entries_key);
+    js_mark_non_enumerable(obj, node_url_root_value(key_root));
 
     // set methods
     auto usp_method = [&](const char* name, auto target, int adapter_arity) {
-        Item key = make_string_item(name);
-        js_set_key_default(obj, key,
-            jube_new_function(node_url_host->script, target, adapter_arity));
+        // Publishing through js_url_set_method keeps the key rooted across the
+        // function allocation. Building the key inline here let a GC inside
+        // jube_new_function() free it before the key reached the shape.
         // URLSearchParams methods live on the prototype in Node; keeping these
         // fallback own methods enumerable leaks per-instance functions.
-        js_mark_non_enumerable(obj, key);
+        js_url_set_method(obj, name, target, adapter_arity,
+            /*constructable=*/false, /*non_enumerable=*/true);
     };
     usp_method("append", js_usp_append, 2);
     usp_method("delete", js_usp_delete, 2);
@@ -1359,10 +1430,10 @@ extern "C" Item js_url_search_params_new(Item init) {
 
     // size as getter
     int64_t sz = js_array_length(entries);
-    Item size_key = make_string_item("size");
-    js_set_key_default(obj, size_key, (Item){.item = i2it((int)sz)});
+    *key_root = make_string_item("size").item;
+    js_set_key_default(obj, node_url_root_value(key_root), (Item){.item = i2it((int)sz)});
     // size is observable as state, but it is not an enumerable data field.
-    js_mark_non_enumerable(obj, size_key);
+    js_mark_non_enumerable(obj, node_url_root_value(key_root));
 
     node_url_host->node->roots->root_frame_end(&frame);
     return obj;
@@ -1374,7 +1445,7 @@ extern "C" Item js_url_search_params_new(Item init) {
 
 template <typename Target>
 static Item js_url_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
+        int adapter_arity, bool constructable, bool non_enumerable) {
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return ItemNull;
     uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
@@ -1385,10 +1456,19 @@ static Item js_url_set_method(Item ns, const char* name, Target target,
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = jube_new_function(node_url_host->script, target,
-        adapter_arity);
+    // A plain native function carries no [[Construct]] slot, so publishing the
+    // module's URL/Url/URLSearchParams entry points through jube_new_function
+    // made `new url.X()` throw "is not a constructor" while the identically
+    // targeted globals worked. Constructor exports must request the
+    // constructable binding.
+    Item fn = constructable
+        ? jube_new_constructor(node_url_host->script, target, adapter_arity)
+        : jube_new_function(node_url_host->script, target, adapter_arity);
     *function_root = fn.item;
-    js_set_key_default(ns, key, fn);
+    js_set_key_default(ns, node_url_root_value(key_root), fn);
+    if (non_enumerable) {
+        js_mark_non_enumerable(ns, node_url_root_value(key_root));
+    }
     node_url_host->node->roots->root_frame_end(&frame);
     return fn;
 }
@@ -1408,7 +1488,7 @@ Item node_url_namespace(void) {
     }
 
     // URL constructor (as a function, not class)
-    Item url_ctor = js_url_set_method(url_module_namespace, "URL", js_url_module_construct, 2);
+    Item url_ctor = js_url_set_method(url_module_namespace, "URL", js_url_module_construct, 2, true);
     *constructor_root = url_ctor.item;
     js_url_set_method(url_ctor, "createObjectURL", js_url_createObjectURL, 1);
     js_url_set_method(url_ctor, "revokeObjectURL", js_url_revokeObjectURL, 1);
@@ -1419,7 +1499,7 @@ Item node_url_namespace(void) {
     js_url_set_method(url_module_namespace, "format", js_url_format, 1);
     js_url_set_method(url_module_namespace, "resolve", js_url_resolve, 2);
     js_url_set_method(url_module_namespace, "resolveObject", js_url_resolve, 2);
-    js_url_set_method(url_module_namespace, "Url", js_url_legacy_construct, 0);
+    js_url_set_method(url_module_namespace, "Url", js_url_legacy_construct, 0, true);
 
     // file URL conversion
     js_url_set_method(url_module_namespace, "fileURLToPath", js_url_fileURLToPath, 1);
@@ -1427,7 +1507,7 @@ Item node_url_namespace(void) {
     js_url_set_method(url_module_namespace, "urlToHttpOptions", js_url_to_http_options, 1);
 
     // URLSearchParams constructor
-    js_url_set_method(url_module_namespace, "URLSearchParams", js_url_search_params_new, 1);
+    js_url_set_method(url_module_namespace, "URLSearchParams", js_url_search_params_new, 1, true);
 
     // default export
     Item default_key = make_string_item("default");

@@ -748,8 +748,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     if (!js_transpiler_parse(tp, source, source_len)) {
         log_error("js-new-function: parse failed for '%s'", source);
-        mem_free(source);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
+            js_current_runtime(), context, true);
         return js_dynamic_function_throw_syntax_error("Invalid function source");
     }
 
@@ -757,15 +757,15 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
     int early_errors = js_check_early_errors(tp, js_ast);
     if (early_errors > 0) {
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
+            js_current_runtime(), context, true);
         return js_throw_syntax_error(js_name_item("Invalid function source", 23));
     }
 
@@ -774,8 +774,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     MIR_context_t ctx = jit_init(0);
     if (!ctx) {
         log_error("js-new-function: MIR context init failed");
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
@@ -786,9 +786,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, "<new Function>", false, 16, 8, 8, "js-new-function");
     if (!mt) {
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(ctx, NULL, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
     mt->module_name_base = js_active_module_name_count();
@@ -814,19 +813,15 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     if (!transpile_js_mir_ast(mt, js_ast)) {
         log_error("js-new-function: collection/allocation failed");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-new-function: NULL labels detected");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
@@ -837,10 +832,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     if (!js_main_fn) {
         log_error("js-new-function: failed to find js_main");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
@@ -848,10 +841,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // name image before js_main can execute code that observes a property.
     if (!js_append_compiled_name_table(mt)) {
         log_error("js-new-function: failed to append NameId table");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
@@ -861,10 +852,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // Grow the shared slab before js_main can address those fixed offsets.
     if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
         log_error("js-new-function: failed to grow active module state");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        mem_free(source);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
+            js_current_runtime(), context, true);
         return ItemNull;
     }
 
@@ -1755,7 +1744,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
             Item syntax_message = js_eval_parse_error_message(tp);
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+                js_current_runtime(), context, true);
             js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
             // Dynamic eval surfaces parser diagnostics through SyntaxError;
             // the REPL uses the same location to render the source caret.
@@ -1766,19 +1756,22 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         JsAstNode* js_ast = build_js_ast_indexed(tp, root);
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemNull;
         }
 
         int early_errors = js_check_early_errors(tp, js_ast);
         if (early_errors > 0) {
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+                js_current_runtime(), context, true);
             return js_throw_syntax_error(js_name_item("Invalid eval source", 19));
         }
         if (is_direct_eval && !inherited_strict) {
             Item conflict_status = js_eval_var_conflicts_lexical_program(js_ast);
             if (item_is_error(conflict_status)) {
-                js_transpiler_destroy(tp);
+                (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+                    js_current_runtime(), context, true);
                 return conflict_status;
             }
         }
@@ -1788,7 +1781,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         MIR_context_t eval_ctx = jit_init(0);
         if (!eval_ctx) {
             log_error("js-eval: MIR context init failed");
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemNull;
         }
 
@@ -1798,8 +1792,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
         JsMirTranspiler* mt = jm_create_mir_transpiler(tp, eval_ctx, eval_filename, false, 16, 8, 8, "js-eval");
         if (!mt) {
-            MIR_finish(eval_ctx);
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(eval_ctx, NULL, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemNull;
         }
         bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
@@ -1836,17 +1830,15 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
         if (!transpile_js_mir_ast(mt, js_ast)) {
             log_error("js-eval: collection/allocation failed");
-            jm_destroy_mir_transpiler(mt);
-            MIR_finish(eval_ctx);
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemNull;
         }
 
         if (!jm_validate_mir_labels(eval_ctx)) {
             log_error("js-eval: NULL labels detected in direct script");
-            jm_destroy_mir_transpiler(mt);
-            MIR_finish(eval_ctx);
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemNull;
         }
 
@@ -1857,9 +1849,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
         if (!js_main_fn) {
             log_error("js-eval: failed to find js_main in direct script");
-            jm_destroy_mir_transpiler(mt);
-            MIR_finish(eval_ctx);
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemNull;
         }
 
@@ -1885,15 +1876,25 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         if (js_eval_fresh_module_scope) {
             js_eval_prev_module_state_id = js_get_active_module_state_id();
             if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
+                js_set_direct_new_target(prev_nt);
+                (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                    js_current_runtime(), context, true);
                 return ItemError;
             }
             if (!is_direct_eval && mt->preamble_var_count > 0 &&
                     !js_copy_module_state_var_prefix(js_eval_prev_module_state_id,
                         js_get_active_module_state_id(), (uint32_t)mt->preamble_var_count)) {
+                js_set_active_module_state_id(js_eval_prev_module_state_id);
+                js_set_direct_new_target(prev_nt);
+                (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                    js_current_runtime(), context, true);
                 return ItemError;
             }
         } else if (!js_ensure_active_module_var_capacity(
                 (uint32_t)mt->module_var_count)) {
+            js_set_direct_new_target(prev_nt);
+            (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemError;
         }
 
@@ -1903,9 +1904,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                 js_set_active_module_state_id(js_eval_prev_module_state_id);
             }
             js_set_direct_new_target(prev_nt);
-            jm_destroy_mir_transpiler(mt);
-            MIR_finish(eval_ctx);
-            js_transpiler_destroy(tp);
+            (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
+                js_current_runtime(), context, true);
             return ItemError;
         }
 

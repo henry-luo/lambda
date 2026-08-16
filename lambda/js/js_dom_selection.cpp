@@ -1153,7 +1153,7 @@ extern "C" Item js_global_get_selection(void) {
 }
 
 static Item js_bound_document_get_selection(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     DomDocument* doc = env ? (DomDocument*)(uintptr_t)env[0].item : nullptr;
     if (!doc || !js_doc_has_browsing_context(doc)) return ItemNull;
     void* prev = js_dom_swap_active_document(doc);

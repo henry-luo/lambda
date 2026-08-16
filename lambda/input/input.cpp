@@ -73,15 +73,6 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     return shape_entry;
 }
 
-static bool js_shape_transitions_enabled() {
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char* flag = getenv("LAMBDA_JS_SHAPE_TRANSITIONS");
-        enabled = (!flag || strcmp(flag, "0") != 0) ? 1 : 0;
-    }
-    return enabled != 0;
-}
-
 static bool map_key_is_array_index_name(String* key) {
     if (!key || key->len <= 0 || key->len > 10) return false;
     if (key->len > 1 && key->chars[0] == '0') return false;
@@ -522,7 +513,7 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         value = values[0];
     } else if (typemap_is_shared_shape(map_type)) {
         if (key && !property_key_requires_identity(key) &&
-                mp->map_kind == MAP_KIND_PLAIN && js_shape_transitions_enabled()) {
+                mp->map_kind == MAP_KIND_PLAIN) {
             ShapeEntry* transition_entry = NULL;
             TypeMap* transition_type = map_transition_target_for_add(map_type, key,
                 type_id, input, &transition_entry);

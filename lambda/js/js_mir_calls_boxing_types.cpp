@@ -111,10 +111,16 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         FN_RETURN_HOME_NORMAL, false, true};
     FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_BOXED_BODY);
-    MIR_reg_t result = em_call_direct(&mt->em, callee->body_name,
+    MirCallResult direct = em_call_direct(&mt->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
-        &options).normal.reg;
-    return jm_publish_call_result(mt, result);
+        &options);
+    if (direct.normal.maybe_pending) {
+        // direct boxed bodies share the lazy shape-2 transport with Lambda;
+        // publish only after resolving the companion so JS cannot execute a
+        // pending tag as an ordinary Item (D5.2.1v2, D5.2.2v2).
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+    }
+    return jm_publish_call_result(mt, direct.normal.reg);
 }
 
 static bool jm_args_are_prerooted(JsMirTranspiler* mt, MIR_op_t args,
@@ -207,9 +213,15 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     FnVariantAnalysis* native = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_NATIVE_BODY);
     MirCallOptions options = {{MIR_FRAME_REF_NONE, 0}, 0u, false, true};
-    MIR_reg_t result = em_call_direct(&mt->em, callee->name,
+    MirCallResult direct = em_call_direct(&mt->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
-        &options).normal.reg;
+        &options);
+    if (direct.normal.maybe_pending) {
+        // native entries may still use the boxed shape for a dynamic result;
+        // resolve that pair before handing the register to later lowering.
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+    }
+    MIR_reg_t result = direct.normal.reg;
     mt->last_call_result_reg = 0;
     return result;
 }
@@ -340,7 +352,7 @@ MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     jm_emit_jmp(mt, l_end);
 
     jm_emit_label(mt, l_cold);
-    MIR_reg_t boxed = jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
+    MIR_reg_t boxed = jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
         MIR_new_reg_op(mt->ctx, d_reg));
     jm_emit_mov(mt, result, boxed);
 
@@ -881,7 +893,7 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     MIR_label_t l_inline = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
     jm_emit_branch(mt, MIR_BT, l_inline, in_band);
-    MIR_reg_t cold = jm_callr_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, item);
+    MIR_reg_t cold = jm_callr_1(mt, "it2d", MIR_T_D, item);
     jm_emit_dmov(mt, result, cold);
     jm_emit_jmp(mt, l_end);
     jm_emit_label(mt, l_inline);
@@ -926,7 +938,7 @@ MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_ty
     }
     // boxed Item of unknown type → call it2i for safe conversion
     // (handles INT, FLOAT, INT64, BOOL items correctly)
-    return jm_callr_1(mt, JS_PROFILED_IT2I_NAME, MIR_T_I64, reg);
+    return jm_callr_1(mt, "it2i", MIR_T_I64, reg);
 }
 
 // Ensure a register is native double, converting from int or boxed if needed

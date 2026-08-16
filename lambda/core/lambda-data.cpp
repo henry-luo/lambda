@@ -10,7 +10,6 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/checked_math.hpp"
 #include "../../lib/arena.h"  // for arena_owns() and arena_realloc()
-#include "../js/js_exec_profile_weak.h"
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;

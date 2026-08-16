@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Action C error-lane boundary: the checked native scalar path carries value and ItemNull/error separately and does not resolve a pending pair.",
+  "checks": [
+    {
+      "in_func": "_checked_double_#",
+      "expect": [
+        "func	d, i64, p:runtime",
+        "ret\t"
+      ],
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "in_func": "_checked_double_b_#",
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    }
+  ]
+}

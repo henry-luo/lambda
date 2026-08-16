@@ -1324,7 +1324,25 @@ Item js_new_native_payload_function(JsNativeCallBody call_body,
                                Item* env, int env_size);
 JS_NATIVE_CLOSURE_ARITIES(JS_DECLARE_NATIVE_CLOSURE)
 #undef JS_DECLARE_NATIVE_CLOSURE
+#define JS_DECLARE_NATIVE_ENV_SCHEDULER(arity) \
+    void js_schedule_native_env(void (*schedule)(Item), JsNativeP##arity target, \
+        int adapter_arity, const Item* values, int count); \
+    Item js_schedule_native_env_timeout(JsNativeP##arity target, \
+        int adapter_arity, Item delay, const Item* values, int count);
+JS_NATIVE_CLOSURE_ARITIES(JS_DECLARE_NATIVE_ENV_SCHEDULER)
+#undef JS_DECLARE_NATIVE_ENV_SCHEDULER
 #undef JS_NATIVE_CLOSURE_ARITIES
 #undef JS_NATIVE_REST_ARITIES
 #undef JS_NATIVE_FIXED_ARITIES
+
+// C3.4: native async callbacks all carry their captured values in one traced
+// environment. Keep allocation, population, closure attachment, and enqueue
+// in one path so a scheduler cannot observe a partially initialized closure.
+#define JS_ENV_UNPACK(name, env_item) \
+    Item* name = (Item*)(uintptr_t)(env_item).item
+
+#define JS_TICK_N(target, adapter_arity, values, count) \
+    js_schedule_native_env(js_next_tick_enqueue, target, adapter_arity, values, count)
+#define JS_TIMEOUT_N(target, adapter_arity, delay, values, count) \
+    js_schedule_native_env_timeout(target, adapter_arity, delay, values, count)
 #endif

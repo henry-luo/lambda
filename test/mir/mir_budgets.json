@@ -6,7 +6,7 @@
       "name": "lambda_scalar_home_donation",
       "script": "test/mir/lambda/scalar_home_donation.ls",
       "language": "lambda",
-      "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function. v5 re-baseline: i64 int arithmetic emits an overflow-aware multiply and band admission before boxing.",
+      "description": "v2 caller-donated home and v3 companion transports. The v3 public-slot wrapper must not induce a caller scalar-home allocation; the main frame is ratcheted at zero.",
       "budgets": {
         "default": {
           "module_insns": 251,
@@ -39,13 +39,13 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 245,
+          "module_insns": 216,
           "functions": {
             "_twice_#": {
               "insns": 69
             },
             "main": {
-              "insns": 79
+              "insns": 50
             }
           },
           "frames": [
@@ -62,7 +62,7 @@
               "name": "main",
               "roots": 2,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
               "safepoints": 4
             }
@@ -74,7 +74,7 @@
       "name": "lambda_scalar_home_tail_forward",
       "script": "test/mir/lambda/scalar_home_tail_forward.ls",
       "language": "lambda",
-      "description": "Tail-home forwarding, including the recursive body's root reservation, its reviewed Phase 3 clean-return firewall, and v5 i64 int arithmetic admission.",
+      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. The v3 caller frame owns no scalar home.",
       "budgets": {
         "default": {
           "module_insns": 252,
@@ -101,6 +101,36 @@
               "roots": 2,
               "root_stores": 0,
               "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 3
+            }
+          ]
+        },
+        "darwin-debug-v3": {
+          "module_insns": 239,
+          "functions": {
+            "_accumulate_#": {
+              "insns": 109
+            },
+            "main": {
+              "insns": 44
+            }
+          },
+          "frames": [
+            {
+              "name": "_accumulate_#",
+              "occurrence": 0,
+              "roots": 7,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 5
+            },
+            {
+              "name": "main",
+              "roots": 2,
+              "root_stores": 0,
+              "scalar_homes": 0,
               "number_scratch": 0,
               "safepoints": 3
             }

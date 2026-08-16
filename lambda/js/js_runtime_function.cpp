@@ -808,6 +808,36 @@ JS_NATIVE_CLOSURE_ARITIES(JS_DEFINE_NATIVE_CLOSURE_FACTORY)
 #undef JS_NATIVE_CLOSURE_ARITIES
 #undef JS_NATIVE_REST_ARITIES
 #undef JS_NATIVE_FIXED_ARITIES
+
+#define JS_NATIVE_ENV_ARITIES(M) \
+    M(JsNativeP1) M(JsNativeP2) M(JsNativeP3) M(JsNativeP4) M(JsNativeP5)
+
+#define JS_DEFINE_NATIVE_ENV_SCHEDULER(type) \
+    void js_schedule_native_env(void (*schedule)(Item), type target, \
+            int adapter_arity, const Item* values, int count) { \
+        if (!schedule || !target || count < 0 || (count > 0 && !values)) return; \
+        Item* env = js_alloc_env(count); \
+        if (count > 0 && !env) return; \
+        for (int i = 0; i < count; i++) env[i] = values[i]; \
+        Item callback = js_new_native_closure(target, adapter_arity, env, count); \
+        if (!item_is_error(callback)) schedule(callback); \
+    } \
+    Item js_schedule_native_env_timeout(type target, int adapter_arity, \
+            Item delay, const Item* values, int count) { \
+        if (!target || count < 0 || (count > 0 && !values)) return ItemError; \
+        Item* env = js_alloc_env(count); \
+        if (count > 0 && !env) return ItemError; \
+        for (int i = 0; i < count; i++) env[i] = values[i]; \
+        Item callback = js_new_native_closure(target, adapter_arity, env, count); \
+        if (item_is_error(callback)) return callback; \
+        return js_setTimeout(callback, delay); \
+    }
+
+JS_NATIVE_ENV_ARITIES(JS_DEFINE_NATIVE_ENV_SCHEDULER)
+
+#undef JS_DEFINE_NATIVE_ENV_SCHEDULER
+#undef JS_NATIVE_ENV_ARITIES
+
 JS_FORWARD_ITEM(js_new_function_mir, (void* func_ptr, int param_count), js_new_function_impl, (func_ptr, param_count, true))
 
 extern "C" Item js_new_distinct_function_mir(void* func_ptr, int param_count) {

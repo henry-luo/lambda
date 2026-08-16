@@ -285,6 +285,11 @@ struct NameEntry {
     int32_t slot;
     BindingStorage binding_storage;
     bool storage_assigned;
+    // Whether this binding holds a freshly-produced container, so an alias of
+    // it is an ownership boundary that must share the root before a later write
+    // (cow_bind_var). Both tiers decide it with the same rule; the JIT keeps the
+    // equivalent on MirVarEntry::cow_owned.
+    bool cow_owned;
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
@@ -598,6 +603,109 @@ typedef struct AstCompoundAssignNode : AstAssignNode {
     AstNode *key;
     AstNode *value;
 } AstCompoundAssignNode;
+
+// --- Shared AST shape helpers (promoted from transpile-mir.cpp, rule 13) ---
+// Both tiers need the same answers about an assignment target, so the walks
+// live here rather than being re-derived: the MIR lowering and the T0 walker
+// call these same functions.
+
+// `(expr)` wrappers carry no semantics; every consumer wants the inner node.
+static inline AstNode* ast_unwrap_primary(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    return node;
+}
+
+static inline bool ast_type_needs_mutable_clone(TypeId type_id) {
+    return type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_ARRAY ||
+           type_id == LMD_TYPE_ARRAY_NUM || type_id == LMD_TYPE_MAP ||
+           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT;
+}
+
+// An assignment target decomposed into its root binding plus the field/index
+// chain reaching the written slot. `count == 0` means the root itself is
+// written (`a[i] = v`), which is the only shape the T0 walker handles.
+enum { AST_COW_PATH_MAX = 32 };
+typedef struct AstCowPath {
+    AstNode* root;
+    AstNode* segment[AST_COW_PATH_MAX];
+    bool is_member[AST_COW_PATH_MAX];
+    int count;
+} AstCowPath;
+
+static inline bool ast_collect_cow_path(AstCowPath* path, AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_IDENT) {
+        path->root = node;
+        return true;
+    }
+    if (node->node_type != AST_NODE_INDEX_EXPR && node->node_type != AST_NODE_MEMBER_EXPR) {
+        return false;
+    }
+    AstFieldNode* field = (AstFieldNode*)node;
+    if (!ast_collect_cow_path(path, field->object) || !field->field ||
+            field->field->next || path->count >= AST_COW_PATH_MAX) {
+        return false;
+    }
+    path->segment[path->count] = field->field;
+    path->is_member[path->count] = node->node_type == AST_NODE_MEMBER_EXPR;
+    path->count++;
+    return true;
+}
+
+// The shape half of "does this initializer hand back a freshly-owned
+// container": literals, calls and `new` produce a new owner, while member and
+// index reads are borrows of an existing one. The IDENT case is deliberately
+// not here -- it propagates the *source binding's* own answer, which each tier
+// resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
+static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
+    if (!root_expr) return false;
+    switch (root_expr->node_type) {
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_LIST:
+    case AST_NODE_OBJECT_LITERAL:
+    case AST_NODE_NEW_EXPR:
+    case AST_NODE_CALL_EXPR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Whether a binding's initializer may hand back a container the writer would
+// share with another root — the condition that makes an alias an ownership
+// boundary (cow_bind_var).
+static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
+        TypeId target_tid) {
+    if (ast_type_needs_mutable_clone(expr_tid) && expr_tid != LMD_TYPE_ANY) return true;
+    if (expr_tid != LMD_TYPE_ANY && target_tid != LMD_TYPE_ANY) return false;
+
+    AstNode* root_expr = ast_unwrap_primary(expr);
+    if (!root_expr) return target_tid == LMD_TYPE_ANY;
+    switch (root_expr->node_type) {
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_LIST:
+    case AST_NODE_IDENT:
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_CALL_EXPR:
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM:
+        return true;
+    default:
+        // `any` arithmetic/comparison paths are scalar in practice; cloning
+        // their boxed result turns tight integer loops into runtime calls.
+        return false;
+    }
+}
 
 typedef struct AstBlockNode : AstNode {
     AstNode* statements;

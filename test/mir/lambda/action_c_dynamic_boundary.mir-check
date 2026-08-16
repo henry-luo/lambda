@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "description": "Action C dynamic-call boundary resolves the pending argument before fn_call1_into.",
+  "checks": [
+    {
+      "return_convention": 3,
+      "in_func": "_pending_item_#",
+      "expect": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "ret\t"
+      ],
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "in_func": "_apply_#",
+      "expect": [
+        "fn_call1_into"
+      ]
+    },
+    {
+      "in_func": "main",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    }
+  ]
+}

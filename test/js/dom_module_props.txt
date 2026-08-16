@@ -209,7 +209,7 @@ true
 true
 1
 /module-submit
-?q=A%20B&go=yes
+?q=A+B&go=yes
 reset
 true
 true

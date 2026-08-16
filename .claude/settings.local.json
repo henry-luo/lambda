@@ -39,7 +39,9 @@
       "Bash(rm -rf test/tier_f_chromium/*/)",
       "Bash(npx vite-node *)",
       "Bash(git -C /Users/henryluo/Projects/Lambda-opus show --stat 4a30bad79)",
-      "Bash(time ./lambda.exe run test/benchmark/awfy/cd2.ls)"
+      "Bash(time ./lambda.exe run test/benchmark/awfy/cd2.ls)",
+      "Bash(timeout 2s ./test/test_own_tagged.exe --gtest_list_tests)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

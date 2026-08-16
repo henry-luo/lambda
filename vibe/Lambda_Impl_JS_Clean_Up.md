@@ -2,7 +2,7 @@
 
 **Status:** proposed
 
-**Revision date:** 2026-08-15
+**Revision date:** 2026-08-16
 
 **Scope:** `lambda/js/` — bug fixes, hazard removal, idiom consolidation, table-driven restructuring, semantic unifications, and file splits. Execution companion to `vibe/Lambda_Impl_JS_LOC_Reduction.md` (the analysis: evidence, occurrence counts, per-workstream estimates). This document defines *what to change, in what order, and how each change is verified*. Workstream references (`WS1`–`WS12`) point into the analysis doc.
 
@@ -187,13 +187,13 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.10 `js_species_constructor`
 - [x] C2.11 join/toLocaleString kernel
 - [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 3 walkers migrated, rest are deliberately partial (see §13)
-- [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
+- [~] C3.2 compile-unit failure primitive — AST/source/module/eval/new Function failure lanes share teardown; full begin/parse/lower/link object remains
 - [~] C3.3 shared emitter — tls, http, net done; readline/fs, child_process, https, stream left (§16)
-- [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
+- [~] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` — all native closure arities supported; DNS/zlib/http/child/fs/crypto/https/DOM representative lanes migrated (D-1 decided)
 - [x] C3.5 globals tables — every item done or verified already-consolidated (see §14)
-- [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
+- [x] C3.6 DOM tables — (a)(b)(c)(d)(f)(g)(i) done; (e)(h) assessed as not worth doing
 - [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
-- [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
+- [~] C3.8 runtime tables — operation-policy bitmasks and builtin-prototype materialization table landed; full forwarder/proto/property-op migration remains (D-2 decided)
 - [ ] C4.1 unified renderer (golden-gated)
 - [ ] C4.2 deep-equal modes
 - [ ] C4.3 `js_own_keys`
@@ -385,11 +385,11 @@ Assessed, not done:
   built rects with `i2it((int64_t)v)`, truncating every coordinate to an
   integer, while the other two surfaces returned doubles.
 
-- **(d) live collections** — the remaining item.
-  `_register_live_form_collection` and `_register_live_lookup_collection`
-  share a find/pin/register skeleton but differ in entry fields *and* in how
-  the pin owner is chosen. A template needs a per-kind assign step; worth
-  doing but not mechanical.
+- **(d) live collections** — **done.** `_register_live_form_collection` and
+  `_register_live_lookup_collection` now share a traits-based find/pin/register
+  skeleton; the per-kind traits retain the distinct owner fields and pin-owner
+  rules. Form and lookup refresh registration already goes through the shared
+  refresh macro.
 - **(e) event-init stamping** — **not worth doing.** The three native event
   creators do not share a field set: mouse inserts `detail` between `composed`
   and `clientX`, pointer does not, and wheel omits `pageX`/`pageY` and
@@ -502,3 +502,25 @@ Remaining, in the plan's order: `js_readline.cpp`/`js_fs.cpp`,
 `js_child_process.cpp` (replay), `js_https.cpp`, `js_stream.cpp` (canonical,
 most hooks). Each should re-check points 2 and 3 above deliberately — the net
 migration hit neither only because they were checked for.
+
+## 17. C3.2 / C3.4 / C3.8 progress
+
+- **C3.2:** `js_mir_compile_unit_fail` is the shared ownership-ordered failure
+  primitive. The pre-built AST, source, module, direct-eval, and dynamic
+  Function paths use it for MIR initialization, AST/lowering, linking, labels,
+  and module-state failures. The remaining work is a full `JsMirCompileUnit`
+  begin/parse/lower/link object; keeping that separate avoids changing the
+  distinct success-lifetime rules for preambles, deferred modules, and returned
+  dynamic closures.
+- **C3.4:** `js_schedule_native_env` and its timeout sibling are generated for
+  `JsNativeP1` through `JsNativeP5`. They centralize traced environment
+  allocation, closure attachment, and scheduling; `JS_ENV_UNPACK` centralizes
+  the matching callback ABI. Focused Node zlib/child-process/next-tick output
+  remains identical.
+- **C3.8:** indexed intrinsic policy membership now uses operation bitmasks,
+  including the separate mutating-writeback mask that preserves `sort`'s
+  non-eager frozen-array behavior. Built-in prototype marker and primitive
+  slots use a `JsBuiltinProtoSpec` materialization table and
+  `js_define_data_prop`; the larger intrinsic forwarder and Promise/property-op
+  families remain intentionally unchanged pending a per-operation semantic
+  table rather than a mechanical macro expansion.

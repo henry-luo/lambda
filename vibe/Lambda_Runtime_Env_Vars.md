@@ -1,6 +1,7 @@
 # Lambda Runtime Environment Variables Audit
 
-Audited: 2026-07-26.  Scope is production Lambda, LambdaJS, Jube, the
+Audited: 2026-07-26; per-variable tables and classification sets
+re-verified against source 2026-08-16.  Scope is production Lambda, LambdaJS, Jube, the
 embedded Bash/Python hosts, and Radiant.  The inventory comes from direct
 `getenv()` / `shell_getenv()` reads in `lambda/`, `radiant/`, and the
 supporting `lib/` code.  Generated parsers, vendored dependencies, and
@@ -72,38 +73,23 @@ so it remains useful under `NDEBUG`.
 | `JS_MIR_INTERP` | `1`/`true`: force the MIR interpreter path for Lambda and LambdaJS. | ✓ | ✓ | ✓ | ✓ |
 | `JS_LAZY_MIR` | Non-zero: select per-function lazy MIR code generation. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_CONST_FOLD` | Default on; `0` disables JS MIR constant folding. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_LOAD_IC` | Default on; `0` disables named-property load inline caches. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_STORE_IC` | Default on; `0` disables named-property store inline caches. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_ARRAY_NAMED_IC` | Default on; `0` disables named array-property inline caches. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_SHAPE_TRANSITIONS` | Default on; `0` disables shape-transition construction. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_SHARED_CTOR_SHAPE` | Default on; `0` disables shared constructor shapes. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_FUNC_CTOR_SHAPE` | Default on; `0` disables function-constructor shape specialization. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_URI_FAST` | Default on; `0` disables fast URI implementation. | ✓ | ✓ | ✓ | ✓ |
 | `JS_TRANSPILE_TIMING` | Non-zero: print parse/AST/import/MIR/link/execute timing and AST counters. | ✓ | ✓ | ✓ | ✓ |
-| `JS_RUNTIME_TRACE` | Non-zero: enable JS runtime property-access tracing. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_INVOKE_TRACE` | Non-zero: trace JS invocation dispatch. | ✓ | ✓ | ✗ | ✗ |
-| `JS_CALL_STATS` | Non-zero: collect call-shape census; report is log-only. | ✓ | ✓ | ✗ | ✗ |
-| `JS_CALL_FORCE_GENERIC` | Non-zero: force generic JS call path for A/B diagnosis. | ✓ | ✓ | ✓ | ✓ |
-| `JS_CALL_LANE_CHECK` | Non-zero: validate specialized call-lane selection. | ✓ | ✓ | ✓ | ✓ |
-| `JS_MIR_VALIDATE_TRACE` | Presence traces MIR validation. Its only trace output is `log_debug()`, so it is debug-only. | ✓ | ✓ | ✗ | ✗ |
-| `JS_MIR_DUMP` | Legacy developer MIR dump. It is compiled only without `NDEBUG`; prefer `LAMBDA_MIR_DUMP_PATH`. | ✓ | ✓ | ✗ | ✗ |
-| `JS_MIR_GEN_TIMING` | Write JS MIR generation timing to `temp/mir_gen_timing.txt`; debug-only. | ✓ | ✓ | ✗ | ✗ |
-| `JS56_READBACK_TRACE` | Developer trace for missing JS56 closure readback entries. | ✓ | ✓ | ✗ | ✗ |
 
 ## LambdaJS counters and executable profiling
 
 | Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
 |---|---|:---:|:---:|:---:|:---:|
-| `LAMBDA_JS_DYNFUNC_STATS` | Non-zero: record dynamic-function lowering counters. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_DYNFUNC_STATS_DIR` | Output directory; default `./temp/js_dynfunc_stats`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IDENTIFIER_STATS` | Non-zero: record identifier-shape counters. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IDENTIFIER_STATS_DIR` | Output directory; default `./temp/js_identifier_stats`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_MIR_VOLUME_STATS` | Non-zero: record MIR-volume samples. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_MIR_VOLUME_STATS_DIR` | Output directory; default `./temp/js_mir_volume_stats`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_TA_SET_STATS` | Non-zero: record typed-array-set counters. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_TA_SET_STATS_DIR` | Output directory; default `./temp/js_ta_set_stats`. | ✓ | ✓ | ✓ | ✓ |
-| `JS_EXEC_PROFILE` | Non-zero/`1`: operation counts; `time`/`2`: timed profile. Requires `LAMBDA_JS_EXEC_PROFILE` at compile time. | ✗ | ✓ | ✗ | ✓ |
-| `JS_EXEC_PROFILE_OUT` | Output TSV for `JS_EXEC_PROFILE`; defaults to `temp/js_exec_profile_<pid>.tsv`. | ✗ | ✓ | ✗ | ✓ |
+| `JS_OPT_TRACE` | Truthy: record optimization hit/miss/fallback counters and dump them at exit. Requires `LAMBDA_JS_EXEC_PROFILE` at compile time. | ✓ | ✓ | ✗ | ✓ |
+| `JS_OPT_TRACE_OUT` | Output TSV for `JS_OPT_TRACE`; defaults to `temp/js_opt_trace_<pid>.tsv`. | ✓ | ✓ | ✗ | ✓ |
+
+`JS_OPT_TRACE` is the only surviving member of this group; the ten
+`JS_EXEC_PROFILE*` / `LAMBDA_JS_*_STATS*` counters that this audit previously
+listed were removed from the runtime along with the per-helper profiler.
+`test/benchmark/run_standard_benchmarks.py` detects an instrumented binary by
+scanning `strings` for opt-trace event names, which exist only under
+`LAMBDA_JS_EXEC_PROFILE` — not for `JS_OPT_TRACE` itself, whose literal is
+present in every build because `lambda/main.cpp` reads it with an ungated
+`getenv()`.
 
 ## Node-compatible runtime and process integration
 
@@ -211,9 +197,9 @@ The recommended policy has four classes:
 2. **Debug/test (34):** diagnostics, fault injection, validation, trace output,
    legacy ordering, and test automation. Compile only in `debug` and
    `debug_profile`.
-3. **Profiling (25):** timers, counters, reports, and output destinations.
+3. **Profiling (15):** timers, counters, reports, and output destinations.
    Compile only in `debug_profile` and `release_profile`.
-4. **Experimental/A-B (19):** temporary optimization and resource-strategy
+4. **Experimental/A-B (11):** temporary optimization and resource-strategy
    controls used for differential correctness tests and performance A/B runs.
    Keep in `debug`, `debug_profile`, and `release_profile` during migration,
    but compile them out of `release`. Retire each switch after its optimized
@@ -225,17 +211,22 @@ environment hook rather than carrying it into a new profile.
 
 ### Recommended counts
 
-| Profile | Current recognized | Truly needed after cleanup | Composition |
-|---|---:|---:|---|
-| debug | 106 | **83** | 30 runtime + 34 debug/test + 19 experimental |
-| debug_profile | 108 | **108** | 30 runtime + 34 debug/test + 25 profiling + 19 experimental |
-| release | 94 | **30** | 30 runtime only |
-| release_profile | 96 | **74** | 30 runtime + 25 profiling + 19 experimental |
+| Profile | Truly needed after cleanup | Composition |
+|---|---:|---|
+| debug | **69** | 30 runtime + 28 debug/test + 11 experimental |
+| debug_profile | **84** | 30 runtime + 28 debug/test + 15 profiling + 11 experimental |
+| release | **30** | 30 runtime only |
+| release_profile | **56** | 30 runtime + 15 profiling + 11 experimental |
 
-The release target therefore loses **64** environment-controlled code paths.
-The profiling-only rule removes 25 profiler variables from both non-profile
-builds. The two `JS_EXEC_PROFILE*` variables already obey this rule; the other
-23 do not yet.
+The "Truly needed" column is derived from the four classification sets below,
+each of which has been re-verified against the current source. The original
+"Current recognized" per-profile column has been dropped: it came from the
+2026-07-26 sweep and cannot be re-derived without repeating the per-site
+compiled-out analysis, so leaving stale numbers beside verified ones would be
+worse than omitting them. Re-add it with a fresh audit.
+
+The profiling-only rule removes 15 profiler variables from both non-profile
+builds; `JS_OPT_TRACE*` already obey it, the other 13 do not yet.
 
 ### Release/runtime allowlist (30)
 
@@ -261,13 +252,12 @@ remain because parent/child process and Node cluster behavior requires the
 environment as a transport. They should be described as reserved internal
 protocol variables.
 
-### Debug/test-only set (34)
+### Debug/test-only set (28)
 
 | Group | Variables |
 |---|---|
 | MIR diagnostics (2) | `LAMBDA_MIR_DUMP_PATH`, `LAMBDA_MIR_LOG_FRAME_SLOTS` |
 | GC and allocation fault diagnosis (6) | `LAMBDA_GC_FORCE_EVERY`, `LAMBDA_GC_FORCE_SEED`, `LAMBDA_GC_FORCE_ONE_IN`, `LAMBDA_GC_POISON_FREED`, `VIEW_PAUSE_BEFORE_EXIT`, `POOL_TRACE` |
-| JS traces and validation (6) | `JS_RUNTIME_TRACE`, `LAMBDA_JS_INVOKE_TRACE`, `JS_CALL_LANE_CHECK`, `JS_MIR_VALIDATE_TRACE`, `JS_MIR_DUMP`, `JS56_READBACK_TRACE` |
 | Node/Jube development (4) | `NODE_DEBUG_NATIVE`, `JUBE_DYNAMIC_MODULE`, `JUBE_DYNAMIC_ENTRY`, `JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY` |
 | Radiant diagnostics and test control (16) | `RADIANT_JS_PRELAYOUT_DEFER_BYTES`, `RADIANT_JS_EXTERNAL_SCRIPT_BYTES`, `RADIANT_JS_TOTAL_SCRIPT_BYTES`, `RADIANT_JS_LOAD_BLOCK_TIMEOUT_MS`, `RADIANT_JS_TASK_DIAGNOSTICS`, `RADIANT_SCRIPT_BEFORE_CASCADE`, `RADIANT_LAYOUT_RESOURCE_TIMEOUT_MS`, `RADIANT_VERIFY_INCREMENTAL_LAYOUT`, `RADIANT_UPDATE_STATE_DUMPS`, `LAYOUT_DEBUG`, `RADIANT_TRACE_RENDER`, `RADIANT_TRACE_TEXT`, `RADIANT_TRACE_FONT`, `LAMBDA_IMAGE_DECODE_TRACE`, `LAMBDA_AUTO_CLOSE`, `LAMBDA_HEADLESS_GLFW_WINDOW` |
 
@@ -276,26 +266,26 @@ because production dynamic modules should be resolved through the manifest and
 `JUBE_MODULE_PATH` contract. This also removes an unmanifested library-loading
 surface from release.
 
-### Profiling-only set (25)
+### Profiling-only set (15)
 
 | Group | Variables |
 |---|---|
 | Lambda/MIR phase measurement (2) | `LAMBDA_PROFILE`, `LAMBDA_DISABLE_MIR_CACHE` |
 | Memory and execution measurement (6) | `LAMBDA_GC_STATS`, `VIEW_MEM_STAGES`, `VIEW_MEM_STATS`, `POOL_STATS`, `COW_EXEC_PROFILE`, `COW_EXEC_PROFILE_OUT` |
-| JS phase/call measurement (3) | `JS_TRANSPILE_TIMING`, `JS_CALL_STATS`, `JS_MIR_GEN_TIMING` |
-| JS counter reports (10) | `LAMBDA_JS_DYNFUNC_STATS`, `LAMBDA_JS_DYNFUNC_STATS_DIR`, `LAMBDA_JS_IDENTIFIER_STATS`, `LAMBDA_JS_IDENTIFIER_STATS_DIR`, `LAMBDA_JS_MIR_VOLUME_STATS`, `LAMBDA_JS_MIR_VOLUME_STATS_DIR`, `LAMBDA_JS_TA_SET_STATS`, `LAMBDA_JS_TA_SET_STATS_DIR`, `JS_EXEC_PROFILE`, `JS_EXEC_PROFILE_OUT` |
+| JS phase/call measurement (1) | `JS_TRANSPILE_TIMING` |
+| JS counter reports (2) | `JS_OPT_TRACE`, `JS_OPT_TRACE_OUT` |
 | Radiant measurement (4) | `RADIANT_JS_TASK_TIMING`, `LAYOUT_PROFILE`, `RENDER_BATCH_MEM_REPORT`, `RENDER_BATCH_RSS_REPORT` |
 
 `LAMBDA_DISABLE_MIR_CACHE` is included here because its documented purpose is
 controlled timing comparison and emergency performance bisection, not
 application semantics.
 
-### Experimental/A-B set (19)
+### Experimental/A-B set (11)
 
 | Group | Variables |
 |---|---|
 | Memory instrumentation mode (1) | `MEMTRACK_MODE` |
-| JS execution and optimization gates (14) | `LAMBDA_JS_LARGE_INTERP`, `LAMBDA_JS_LARGE_INTERP_BYTES`, `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_MIR_INTERP`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD`, `LAMBDA_JS_LOAD_IC`, `LAMBDA_JS_STORE_IC`, `LAMBDA_JS_ARRAY_NAMED_IC`, `LAMBDA_JS_SHAPE_TRANSITIONS`, `LAMBDA_JS_SHARED_CTOR_SHAPE`, `LAMBDA_JS_FUNC_CTOR_SHAPE`, `LAMBDA_JS_URI_FAST`, `JS_CALL_FORCE_GENERIC` |
+| JS execution and optimization gates (6) | `LAMBDA_JS_LARGE_INTERP`, `LAMBDA_JS_LARGE_INTERP_BYTES`, `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_MIR_INTERP`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD` |
 | Radiant cache/render tuning (4) | `RADIANT_JS_SOURCE_CACHE`, `RADIANT_JS_SOURCE_CACHE_BYTES`, `RADIANT_TILE_STRIP_H`, `RADIANT_TILE_THRESHOLD` |
 
 These should not become a permanent configuration API. After differential
