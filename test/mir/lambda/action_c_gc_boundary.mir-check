@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Action C: array/root publication resolves a pending direct result before the collecting array builder observes it.",
+  "checks": [
+    {
+      "return_convention": 3,
+      "in_func": "_pending_item_#",
+      "expect": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "ret\t"
+      ],
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "in_func": "main",
+      "expect": [
+        "lambda_item_resolve_pending",
+        "list_end"
+      ]
+    }
+  ]
+}

@@ -1795,6 +1795,11 @@ static void materialize_pending_gc_root_stores(MirTranspiler* mt,
 
 static void store_gc_root_slot(MirTranspiler* mt, int root_slot, MIR_reg_t value) {
     if (root_slot < 0) return;
+    // Root publication is an ownership escape.  A pending first lane is not a
+    // valid GC Item until its companion has been consumed; resolving here
+    // closes helper paths that register roots without going through emit_box
+    // (D5.2.1v2, D5.2.2v2).
+    value = mir_materialize_pending_reg(mt, value);
     // G0: a value in a double register is a scalar — `int` lives there now, as
     // `float` always did — and a scalar is never a GC reference. Rooting one
     // was previously harmless only because the int lane was word-sized; it is
@@ -1848,6 +1853,9 @@ static int create_binding_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
 }
 
 static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
+    // A root slot is memory-visible immediately, so it cannot retain the
+    // register-only pending protocol across a safepoint (RV4.1).
+    value = mir_materialize_pending_reg(mt, value);
     // G0: a double register holds a scalar (`int` or `float`), never a GC
     // reference, so it takes no root slot. See store_gc_root_slot.
     if (value && MIR_reg_type(mt->ctx, value, mt->em.func) == MIR_T_D) return -1;
@@ -1977,6 +1985,7 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
 
 static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
     MIR_type_t mir_type, TypeId type_id, const char* prefix) {
+    result = mir_materialize_pending_reg(mt, result);
     if (!should_gc_root_var(mir_type, type_id)) return result;
     int root_slot = create_gc_root_slot(mt, result);
     return load_gc_root_slot(mt, root_slot, prefix);
@@ -4116,9 +4125,31 @@ static void async_save_spills(MirTranspiler* mt, int count) {
     if (count > mt->async_spill_count) count = mt->async_spill_count;
     bool saved_suppressed = mt->async_tracking_suppressed;
     mt->async_tracking_suppressed = true;
+    MIR_reg_t pending_item = mt->em.pending_live_item;
+    MIR_reg_t resolved_pending = 0;
+    if (mt->em.pending_live_companion) {
+        // The async frame stores raw words and has no second lane for the
+        // companion.  Resolve the pair before saving it, and fail closed if
+        // the producer was not registered in this suspension's live set
+        // (D5.2.1v2, RV4.1).
+        bool pending_is_live = false;
+        for (int i = 0; i < count; i++) {
+            if (mt->async_spills[i].reg == pending_item) {
+                pending_is_live = true;
+                break;
+            }
+        }
+        if (!pending_is_live) {
+            log_error("concurrency MIR: pending companion crossed suspension "
+                "without an async spill slot");
+            abort();
+        }
+        resolved_pending = mir_materialize_pending_reg(mt, pending_item);
+    }
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
-        MIR_reg_t bits = spill->reg;
+        MIR_reg_t bits = spill->reg == pending_item && resolved_pending
+            ? resolved_pending : spill->reg;
         const char* setter = "lambda_async_frame_set_word";
         if (spill->mir_type == MIR_T_D) {
             bits = emit_box_float(mt, spill->reg);
