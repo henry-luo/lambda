@@ -95,10 +95,21 @@ static inline bool interp_frame_pending(const InterpFrame* f) {
     return f->signal != EvalSignal::NORMAL;
 }
 
+// Implicit contexts (AI15): `~`, `~#` and friends are slot-backed, innermost
+// wins (S10.1.3). The values live in the pushing construct's own frame slots —
+// so they are rooted like any other operand — and this stack only holds
+// pointers to those slots, never Items of its own.
+struct InterpContext {
+    uint64_t* item;            // `~`  — current item
+    uint64_t* index;           // `~#` — current index/key
+    InterpContext* prev;
+};
+
 struct InterpState {
     EvalContext* ctx;
     Runtime*     runtime;
     InterpFrame* top;
+    InterpContext* contexts;
     EvalMode     mode;
     uint32_t     depth;          // remaining recursion budget
     uint32_t     depth_limit;

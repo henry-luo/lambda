@@ -220,6 +220,15 @@ static bool js_global_is_bigint(Item value) {
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
+// Calendar abbreviations used by Date's toString/toUTCString/toDateString and
+// by the RFC-1123 parser; one definition instead of four copies.
+static const char* const js_date_wday_names[] = {
+    "Sun","Mon","Tue","Wed","Thu","Fri","Sat"
+};
+static const char* const js_date_month_names[] = {
+    "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
+};
+
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
@@ -248,13 +257,11 @@ static char* strptime(const char* buf, const char* fmt, struct tm* tm) {
     }
     int day = 0, year = 0, hour = 0, min = 0, sec = 0;
     char mon[4] = {0}; char wday[4] = {0};
-    static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun",
-                                    "Jul","Aug","Sep","Oct","Nov","Dec"};
     if (sscanf(buf, "%3s, %d %3s %d %d:%d:%d", wday, &day, mon, &year, &hour, &min, &sec) == 7) {
         tm->tm_mday = day; tm->tm_hour = hour; tm->tm_min = min; tm->tm_sec = sec;
         tm->tm_year = year - 1900; tm->tm_mon = -1; tm->tm_isdst = 0;
         for (int i = 0; i < 12; i++) {
-            if (_strnicmp(mon, months[i], 3) == 0) { tm->tm_mon = i; break; }
+            if (_strnicmp(mon, js_date_month_names[i], 3) == 0) { tm->tm_mon = i; break; }
         }
         return (tm->tm_mon >= 0) ? (char*)(buf + strlen(buf)) : NULL;
     }
@@ -2012,13 +2019,11 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
         struct tm utc;
         gmtime_r(&secs, &utc);
         // JS-style: "Thu Jun 09 3141 02:06:53 GMT+0000"
-        static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-        static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
         char buf[64];
         char year_buf[16];
         js_date_format_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
         snprintf(buf, sizeof(buf), "%s %s %02d %s %02d:%02d:%02d GMT+0000",
-            wday[utc.tm_wday], mon[utc.tm_mon], utc.tm_mday,
+            js_date_wday_names[utc.tm_wday], js_date_month_names[utc.tm_mon], utc.tm_mday,
             year_buf, utc.tm_hour, utc.tm_min, utc.tm_sec);
         return js_name_item(buf);
     }
@@ -2265,25 +2270,21 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
         if (method_id == 45) { // toUTCString
             struct tm utc; gmtime_r(&secs, &utc);
-            static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-            static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
             char buf[64];
             char year_buf[16];
             js_date_format_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
             snprintf(buf, sizeof(buf), "%s, %02d %s %s %02d:%02d:%02d GMT",
-                wday[utc.tm_wday], utc.tm_mday, mon[utc.tm_mon],
+                js_date_wday_names[utc.tm_wday], utc.tm_mday, js_date_month_names[utc.tm_mon],
                 year_buf, utc.tm_hour, utc.tm_min, utc.tm_sec);
             return js_name_item(buf);
         }
         if (method_id == 46) { // toDateString
             struct tm tm; js_date_localtime_minute(ms, &tm);
-            static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-            static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
             char buf[32];
             char year_buf[16];
             js_date_format_year(year_buf, sizeof(year_buf), tm.tm_year + 1900);
             snprintf(buf, sizeof(buf), "%s %s %02d %s",
-                wday[tm.tm_wday], mon[tm.tm_mon], tm.tm_mday, year_buf);
+                js_date_wday_names[tm.tm_wday], js_date_month_names[tm.tm_mon], tm.tm_mday, year_buf);
             return js_name_item(buf);
         }
         if (method_id == 47) { // toTimeString

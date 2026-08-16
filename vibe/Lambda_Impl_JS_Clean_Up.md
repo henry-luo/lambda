@@ -186,13 +186,13 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.9 `js_map_own_or/_string`
 - [x] C2.10 `js_species_constructor`
 - [x] C2.11 join/toLocaleString kernel
-- [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 2 of ~40 walkers migrated
+- [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 3 walkers migrated, rest are deliberately partial (see §13)
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
-- [ ] C3.5 globals tables (Date, URI, Array.from, MessagePort, process, symbol/groupBy)
-- [ ] C3.6 DOM tables (reflection, prop-ID, walker, collections, events, interfaces, URL, enum-attrs, micro-helpers)
-- [ ] C3.7 misc (scanner, encoding, dlsym, bsearch dispatch)
+- [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
+- [~] C3.6 DOM tables — (a) reflection, (b) prop-id, (c) walker, (g) URL done; (d)(e)(f)(h)(i) pending
+- [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
 - [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
 - [ ] C4.1 unified renderer (golden-gated)
 - [ ] C4.2 deep-equal modes
@@ -285,3 +285,95 @@ whether its `default:` recurses generically or returns/breaks.
 ### Not started
 
 C3.2–C3.8, C4, C5, C6.
+
+---
+
+## 14. C3.5 / C3.7 re-check against the current tree
+
+Like the C0 root causes, several C3 estimates predate consolidation that has
+already happened. Measured before starting:
+
+**C3.5**
+- *URI/escape profiles* — already done: `js_encode_uri_common` /
+  `js_decode_uri_common` take the profile as a parameter, and there is one
+  `js_uri_hex_value`, not three.
+- *Date field spec table* — already done: Date getters/setters dispatch on a
+  `method_id` switch, not ~52 separate functions.
+- *`Array.from` kernel* — already done: decomposed into
+  `js_array_from_apply_mapper`, `js_array_from_array_like_into` and friends.
+- *`js_process_listener_op`* — not worth doing: on/once/off/removeAll/count
+  each carry distinct counter, fixed-list and IPC-ref bookkeeping, so a
+  unified entry point would be a switch with disjoint arms.
+- *Still duplicated, now fixed* — the `wday[]`/`mon[]` calendar arrays, which
+  had four copies.
+
+**C3.7**
+- *OpenSSL dlsym X-macro* — **done**. The DSA availability check had drifted:
+  it omitted eleven of its own fields. The table now drives struct, loader and
+  check from one row set, and the failure log names the missing symbol.
+- *`js_source_scan`* — two copies of the string/comment/regex state machine in
+  `js_scope.cpp`, not six. The second one rewrites the source as it scans and
+  carries an extra `ST_REGEX_CLASS` state, so a shared scanner needs a
+  mutating callback. Worth about 80 lines; not yet done.
+- *`js_encoding.{h,cpp}`* — the crypto and buffer encoding normalisers have
+  genuinely different contracts (crypto handles Map/undefined/null and reports
+  whether an encoding was supplied; buffer's is a plain lowercase copy). Only
+  the bytes→string dispatch arms overlap. Worth doing, but it needs a
+  deliberate merged contract rather than a mechanical fold.
+- *`build_js_ast.cpp` bsearch dispatch* — the 35-way statement chain and
+  66-way expression chain are real, but most arms hold inline node
+  construction, so converting to a sorted-name→enum switch buys dispatch speed
+  and clarity rather than lines. The TS-mode arms (`!tp->strict_js && ...`)
+  must fall through to the expression fallback, which a plain switch does not
+  express directly.
+
+---
+
+## 15. C3.6 progress
+
+Done:
+
+- **(a) IDL reflection table** — `JS_DOM_REFLECTED_ATTRS` states each reflected
+  attribute once (IDL name, content attribute, kind, default, element
+  bitmask). The five predicates are filtered lookups over it. This removes the
+  drift class C0.5 was an instance of; `test/js/dom_reflect_gating` locks the
+  semantics and passes unchanged.
+- **(c) `dom_walk_elements`** — one pre-order element walk replacing four
+  recursive `std::function` lambdas. `js_dom.cpp` no longer uses `std::` at
+  all, and `<functional>` is gone (rule 3). Roughly line-neutral; the win is
+  the removed duplication. The form-reset pass also gained a stated ownership
+  contract and now shares its nearest-enclosing-form lookup with the
+  radio-group validity scan.
+- **(g) URL component table** — `k_url_components` replaces the verbatim
+  nine-branch chain that document and location each carried, and unifies their
+  two spellings of the missing-value rule on the browser behaviour.
+
+Assessed, not done:
+
+- **(d) live collections** — `_register_live_form_collection` and
+  `_register_live_lookup_collection` share a find/pin/register skeleton but
+  differ in entry fields *and* in how the pin owner is chosen. A template needs
+  a per-kind assign step; worth doing but not mechanical.
+- **(f) `js_install_interface`** — the eight clipboard interface blocks share
+  a create/name/cross-link/publish skeleton, but each adds bespoke steps
+  (prototype chaining to Blob or Array, extra statics, `Symbol.toStringTag`).
+  Worth about 40 lines, with rooting subtleties across all eight blocks.
+- **(b) property-ID dispatch** — **done**, with a caveat. `JS_DOM_PROPS` names
+  all 147 dispatched properties and `js_dom_prop_id` resolves one with a
+  binary search; the 201 `strcmp(prop, ...)` tests are now integer compares.
+  `js_dom_element_operation_impl` needed nothing — it already dispatches on a
+  `JubeDomElementOperation` enum.
+
+  **The predicted performance win is not there.** Measured on release builds:
+  the `test/js` DOM suite is unchanged (20.88s vs 20.93s over 20 runs) and a
+  property-access microbenchmark gains about 2% (0.964s → 0.948s). The JS
+  execution loop dominates, not the dispatch. Success criterion 5's
+  expectation that "DOM property access ... [is] expected to improve" should
+  be struck.
+
+  It costs +195 lines, so it also works against criterion 2 on its own. It was
+  kept for the two benefits that survive the measurement: 201 scattered string
+  literals become one list, and a misspelled property name is a compile error
+  instead of a silently dead branch — the drift class C0.5 came from. It is
+  also the prerequisite for turning the chains into switches, which is where
+  (b)'s line reduction actually lives; that follow-up is now cheap.
