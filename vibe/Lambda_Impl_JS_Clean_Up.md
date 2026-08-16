@@ -188,7 +188,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.11 join/toLocaleString kernel
 - [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 3 walkers migrated, rest are deliberately partial (see §13)
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
-- [ ] C3.3 `js_node_emitter` (8 module migrations)
+- [!] C3.3 `js_node_emitter` — blocked on a design decision (see §16)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
 - [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
 - [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
@@ -399,3 +399,48 @@ Assessed, not done:
   instead of a silently dead branch — the drift class C0.5 came from. It is
   also the prerequisite for turning the chains into switches, which is where
   (b)'s line reduction actually lives; that follow-up is now cheap.
+
+---
+
+## 16. C3.3 — design fork found before starting
+
+C3.3 proposes a new `lambda/js/js_node_emitter.{hpp,cpp}` (~280 lines) with
+layout-A `{listener, once}` storage. **A full implementation of exactly that
+already exists**: `lambda/module/node_core/node_events.cpp` (1250 lines) backs
+the Node `events` module with `__events__` -> array-of-`{listener, once}`
+records and the whole surface — `js_ee_on/once/off/emit/removeAllListeners/`
+`listeners/listenerCount/eventNames/prependListener/...`. Those entry points
+are `extern "C"`, and `lambda/js/js_readline.cpp` already calls `js_ee_emit`
+directly, so it links and is callable from `lambda/js/`.
+
+Writing a second emitter would duplicate it (rule 13). But migrating the
+per-module emitters onto the existing one is **not** the mechanical change the
+plan assumes, for three reasons:
+
+1. **It is a Jube module, not a library.** Every accessor goes through
+   `node_events_state()` = `jube_node_current_module_state(...)`, which returns
+   NULL unless the events module has been attached to the current node session,
+   and the accessor macros dereference it with no null check. Calling `js_ee_*`
+   from a module that does not force an events attach is a null dereference.
+   `js_readline.cpp:799` already does this unguarded — filed separately.
+2. **Emit semantics differ.** `js_ee_emit` implements Node's `'error'` rule: no
+   listeners for `'error'` means *throw* (the raw error if it is Error-like,
+   otherwise `ERR_UNHANDLED_ERROR`). The per-module emitters silently do
+   nothing. Migrating tls/http/net makes an unhandled `'error'` throw. That is
+   more Node-correct and it is a behaviour change that deserves its own
+   decision and its own tests — not a side effect of a refactor.
+3. **Storage moves.** Modules keep listeners in `__on_<event>__`; the shared
+   emitter uses `__events__`. Every direct read has to move with the
+   registration. C0.2 already funnelled http's reads through
+   `http_listener_count/at/invoke`, and C0.1 funnelled tls's key construction,
+   so those two are ready; the others are not.
+
+**The decision needed:** adopt the existing emitter for `lambda/js/` modules —
+accepting the `'error'`-throw semantics and first making `js_ee_*` safe when
+the module is detached — or keep the per-module emitters and drop C3.3.
+
+Adopting it is the better end state and subsumes both C0.1's `once` shim and
+C0.2's array promotion. The recommended order is unchanged from the plan, but
+prerequisites come first: guard the `js_ee_*` entry points, then migrate
+`js_tls.cpp` (smallest, and `test/node/tls_socket_once.js` already locks the
+behaviour), then http, then the rest.
