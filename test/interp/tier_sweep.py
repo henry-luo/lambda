@@ -5,6 +5,7 @@ zero-fallback, output-identical set. Output goes to ./temp/ (CLAUDE rule 2).
 Usage: python3 test/interp/tier_sweep.py [--dir test/lambda] [--timeout 20]
 """
 import argparse, os, re, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor
 
 FALLBACK_RE = re.compile(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)")
 
@@ -44,6 +45,7 @@ def main():
                     help="scan one directory instead of the whole baseline corpus")
     ap.add_argument("--timeout", type=int, default=20)
     ap.add_argument("--out", default="temp/interp_tier_sweep.tsv")
+    ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) - 1))
     args = ap.parse_args()
 
     def discover(directory, procedural):
@@ -65,21 +67,32 @@ def main():
             scripts += discover(directory, True)
 
     os.makedirs("temp", exist_ok=True)
-    rows, supported, fell_back, mismatched = [], [], [], []
-    for script, procedural in scripts:
+
+    # Each script is an independent pair of subprocess runs, so the sweep
+    # parallelizes cleanly. It was serial back when almost everything fell back
+    # in milliseconds; every slice that lands converts a rejection into a full
+    # interpreted run, so the serial cost grew with coverage. These runs read
+    # only stderr — nothing here depends on the shared log.txt, which is why
+    # refresh_lists.py (which does) must stay serial.
+    def verdict_for(entry):
+        script, procedural = entry
         jit_out, _, jit_status = run(script, None, args.timeout, procedural)
         int_out, stats, int_status = run(script, "interp", args.timeout, procedural)
         executed, fallback = stats if stats else (0, 0)
         if fallback or not executed:
             verdict = "fallback"
-            fell_back.append(script)
         elif jit_out != int_out or jit_status != int_status:
             verdict = "mismatch"
-            mismatched.append(script)
         else:
             verdict = "match"
-            supported.append(script)
-        rows.append((script, verdict, jit_status, int_status, executed, fallback))
+        return (script, verdict, jit_status, int_status, executed, fallback)
+
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        rows = list(pool.map(verdict_for, scripts))
+
+    supported = [r[0] for r in rows if r[1] == "match"]
+    fell_back = [r[0] for r in rows if r[1] == "fallback"]
+    mismatched = [r[0] for r in rows if r[1] == "mismatch"]
 
     with open(args.out, "w") as f:
         f.write("# script\tverdict\tjit_status\tinterp_status\texecuted\tfallback\n")

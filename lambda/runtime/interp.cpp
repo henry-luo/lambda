@@ -544,8 +544,8 @@ static AstNode* interp_unwrap_primary(AstNode* node) {
     return node;
 }
 
-static Item eval_call(InterpFrame* f, AstCallNode* node) {
-    int argc = 0;
+static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
+    int argc = injected ? 1 : 0;
     for (AstNode* a = node->argument; a; a = a->next) argc++;
 
     if (node->interp_self_tail_call && f->fn && f->plan) {
@@ -604,6 +604,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node) {
         RootSpan arg_roots((size_t)(argc > 0 ? argc : 1));
         uint64_t* words = arg_roots.words();
         int i = 0;
+        if (injected) words[i++] = injected->item;
         for (AstNode* a = node->argument; a; a = a->next, i++) {
             words[i] = eval_expr(f, a).item;
         }
@@ -619,6 +620,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node) {
     RootSpan arg_roots((size_t)(argc > 0 ? argc : 1));
     uint64_t* words = arg_roots.words();
     int i = 0;
+    if (injected) words[i++] = injected->item;
     for (AstNode* a = node->argument; a; a = a->next, i++) {
         words[i] = eval_expr(f, a).item;
     }
@@ -845,6 +847,190 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
     return interp_ptr_item(map_fill_items(built, (const Item*)(void*)words, vi));
 }
 
+
+// RAII push/pop for an implicit-context binding, so no early return can leave
+// a stale `~` visible to an outer expression.
+class InterpContextGuard {
+    InterpState* st_;
+    InterpContext entry_;
+public:
+    InterpContextGuard(InterpState* st, uint64_t* item, uint64_t* index)
+            : st_(st), entry_{item, index, st->contexts} {
+        st_->contexts = &entry_;
+    }
+    ~InterpContextGuard() { st_->contexts = entry_.prev; }
+    InterpContextGuard(const InterpContextGuard&) = delete;
+    InterpContextGuard& operator=(const InterpContextGuard&) = delete;
+};
+
+// ---------------------------------------------------------------------------
+// Match
+// ---------------------------------------------------------------------------
+
+// One arm's pattern test. Mirrors emit_single_pattern_test: a type pattern uses
+// fn_is, a range pattern fn_in, anything else fn_eq — and a constrained pattern
+// checks its base TypeId then evaluates the `that` clause with `~` bound to the
+// scrutinee. Constrained arms remain base-plus-predicate, which is the shipped
+// behaviour S11.4.6 describes; this changes no ruling.
+static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& scrut) {
+    if (!pattern) return false;
+
+    // Union patterns (A | B) match if any alternative does.
+    if (pattern->node_type == AST_NODE_BINARY_TYPE) {
+        AstBinaryNode* bi = (AstBinaryNode*)pattern;
+        if (bi->op == OPERATOR_UNION) {
+            return interp_pattern_matches(f, bi->left, scrut) ||
+                   interp_pattern_matches(f, bi->right, scrut);
+        }
+    }
+
+    if (pattern->node_type == AST_NODE_CONSTRAINED_TYPE) {
+        AstConstrainedTypeNode* ct = (AstConstrainedTypeNode*)pattern;
+        TypeConstrained* constrained = (TypeConstrained*)ct->type;
+        if (constrained && constrained->base) {
+            if (get_type_id(scrut.get()) != constrained->base->type_id) return false;
+            // `~` is the scrutinee while the constraint runs.
+            Scratch index_slot(f);
+            index_slot.set(ItemNull);
+            InterpContextGuard bound(f->st, scrut.home(), index_slot.home());
+            Item ok = eval_expr(f, ct->constraint);
+            if (interp_frame_pending(f)) return false;
+            return is_truthy(ok) == BOOL_TRUE;
+        }
+    }
+
+    Item pattern_value = eval_expr(f, pattern);
+    if (interp_frame_pending(f)) return false;
+    Scratch pat(f);
+    pat.set(pattern_value);
+    TypeId pat_tid = get_type_id(pat.get());
+    if (pat_tid == LMD_TYPE_TYPE) return fn_is(scrut.get(), pat.get()) == BOOL_TRUE;
+    if (pat_tid == LMD_TYPE_RANGE) return fn_in(scrut.get(), pat.get()) == BOOL_TRUE;
+    return fn_eq(scrut.get(), pat.get()) == BOOL_TRUE;
+}
+
+static Item eval_match(InterpFrame* f, AstMatchNode* node) {
+    // The scrutinee is evaluated exactly once (S11.2.1) and stays `~` for every
+    // arm's pattern and body.
+    Item value = eval_expr(f, node->scrutinee);
+    if (interp_frame_pending(f)) return value;
+    Scratch scrut(f);
+    scrut.set(value);
+    Scratch index_slot(f);
+    index_slot.set(ItemNull);
+    InterpContextGuard bound(f->st, scrut.home(), index_slot.home());
+
+    for (AstNode* arm = (AstNode*)node->first_arm; arm; arm = arm->next) {
+        AstMatchArm* match_arm = (AstMatchArm*)arm;
+        if (!match_arm->pattern) return eval_expr(f, match_arm->body);   // default arm
+        if (interp_pattern_matches(f, match_arm->pattern, scrut)) {
+            return eval_expr(f, match_arm->body);
+        }
+        if (interp_frame_pending(f)) return ItemNull;
+    }
+    return ItemNull;   // no arm matched
+}
+
+// ---------------------------------------------------------------------------
+// Pipes
+// ---------------------------------------------------------------------------
+
+// build_ast already owns this question — transpile_pipe asks it the same way to
+// choose between argument injection and the mapping loop, so both tiers split
+// on one predicate.
+extern bool has_current_item_ref(AstNode* node);
+
+// Mirrors transpile_pipe: `a | b` maps b over a's members with `~`/`~#` bound,
+// `a where b` filters a by b, and a `~`-free `a | f(x)` injects a as f's first
+// argument. A scalar left operand is lifted to a one-element stream.
+static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
+    Item left_value = eval_expr(f, node->left);
+    if (interp_frame_pending(f)) return left_value;
+    Scratch left(f);
+    left.set(left_value);
+
+    if (node->op == OPERATOR_PIPE && !has_current_item_ref(node->right)) {
+        // Aggregate form: the whole left value becomes the right side's first
+        // argument — `d |> f(x)` is `f(d, x)` and `d |> sum` is `sum(d)`.
+        // Evaluating the right side on its own would call it with no receiver.
+        AstNode* target = interp_unwrap_primary(node->right);
+        Item piped = left.get();
+        if (target && target->node_type == AST_NODE_CALL_EXPR) {
+            return eval_call(f, (AstCallNode*)target, &piped);
+        }
+        if (target && target->node_type == AST_NODE_SYS_FUNC) {
+            return eval_sys_call(((AstSysFuncNode*)target)->fn_info, &piped, 1);
+        }
+        // A first-class callable on the right: apply it to the piped value.
+        Item callee = eval_expr(f, node->right);
+        if (interp_frame_pending(f)) return callee;
+        if (get_type_id(callee) != LMD_TYPE_FUNC) {
+            log_error("interp: pipe target is not callable");
+            return ItemError;
+        }
+        uint64_t home = 0;
+        List args = {};
+        args.length = 1;
+        args.items = (Item*)&piped;
+        return fn_call_into((Function*)(uintptr_t)callee.item, &args, &home);
+    }
+
+    Item source = left.get();
+    TypeId source_tid = get_type_id(source);
+    bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_ELEMENT ||
+        source_tid == LMD_TYPE_OBJECT;
+    SymbolKeyList* keys = is_map ? item_keys(source) : NULL;
+
+    int64_t len = fn_len(source);
+    // A bare scalar pipes as a one-element stream; a genuinely empty collection
+    // stays empty. Only the non-collection tags lift.
+    bool is_scalar = false;
+    if (len == 0 && source_tid != LMD_TYPE_ARRAY && source_tid != LMD_TYPE_ARRAY_NUM &&
+            source_tid != LMD_TYPE_RANGE && source_tid != LMD_TYPE_ELEMENT &&
+            source_tid != LMD_TYPE_STRING && source_tid != LMD_TYPE_NULL) {
+        len = 1;
+        is_scalar = true;
+    }
+
+    // Plain array(), not array_spreadable(): a mapping pipe yields one value,
+    // so `[1,2,3] |> ~ * 2` prints as [2, 4, 6] rather than flattening into the
+    // enclosing block. transpile_pipe allocates the same way.
+    Scratch out(f);
+    out.set(interp_ptr_item(array()));
+    Scratch item_slot(f);
+    Scratch index_slot(f);
+    {
+        InterpContextGuard bound(f->st, item_slot.home(), index_slot.home());
+        for (int64_t i = 0; i < len; i++) {
+            Item current, key;
+            if (is_map) {
+                Symbol* sym = symbol_key_list_at(keys, i);
+                current = sym ? item_attr(left.get(), sym->chars) : ItemNull;
+                key = sym ? (Item){.item = y2it(sym)} : ItemNull;
+            } else if (is_scalar) {
+                current = left.get();
+                key = (Item){.item = i2it(i)};
+            } else {
+                current = item_at(left.get(), i);
+                key = (Item){.item = i2it(i)};
+            }
+            item_slot.set(current);
+            index_slot.set(key);
+
+            Item produced = eval_expr(f, node->right);
+            if (interp_frame_pending(f)) break;
+            Array* result = (Array*)(uintptr_t)out.get().item;   // re-read: may collect
+            if (!result) break;
+            if (node->op == OPERATOR_WHERE) {
+                if (is_truthy(produced)) array_push(result, item_slot.get());
+            } else {
+                array_push(result, produced);
+            }
+        }
+    }
+    if (keys) symbol_key_list_free(keys);
+    return array_end((Array*)(uintptr_t)out.get().item);
+}
 
 // ---------------------------------------------------------------------------
 // For comprehensions
@@ -1250,6 +1436,16 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_unary(f, (AstUnaryNode*)node);
     case AST_NODE_BINARY:
         return eval_binary(f, (AstBinaryNode*)node);
+    case AST_NODE_PIPE:
+        return eval_pipe(f, (AstBinaryNode*)node);
+    case AST_NODE_MATCH_EXPR:
+        return eval_match(f, (AstMatchNode*)node);
+    case AST_NODE_CURRENT_ITEM:
+        return f->st->contexts
+            ? (Item){.item = *f->st->contexts->item} : ItemNull;
+    case AST_NODE_CURRENT_INDEX:
+        return f->st->contexts
+            ? (Item){.item = *f->st->contexts->index} : ItemNull;
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         Item cond = eval_expr(f, branch->cond);
@@ -1260,7 +1456,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
-        Item result = eval_call(f, call);
+        Item result = eval_call(f, call, NULL);
         if (call->propagate && !interp_frame_pending(f) && item_is_error(result)) {
             // '^' propagation: the error leaves through the function boundary
             // instead of flowing on as a value (the emit_return_if_item_error
@@ -1287,6 +1483,20 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         Scratch key_slot(f);
         key_slot.set(key);
+        // A Path's built-in properties are read through item_attr, which loads
+        // its metadata; fn_member does not, and would extend the path instead
+        // (transpile_member makes the same split). The runtime type is the
+        // authority here, exactly as the JIT's obj_tid check is.
+        if (field->field && field->field->node_type == AST_NODE_IDENT &&
+                get_type_id(obj.get()) == LMD_TYPE_PATH) {
+            const char* k = ((AstIdentNode*)field->field)->name->chars;
+            static const char* const kPathProps[] = {
+                "name", "is_dir", "is_file", "is_link", "size", "modified",
+                "path", "extension", "scheme", "depth", "parent", "mode"};
+            for (size_t i = 0; i < sizeof(kPathProps) / sizeof(kPathProps[0]); i++) {
+                if (strcmp(k, kPathProps[i]) == 0) return item_attr(obj.get(), k);
+            }
+        }
         // null totality (S7.1.1) comes from the helper; both operands are
         // published first because it allocates.
         return fn_member(obj.get(), key_slot.get());
@@ -1307,6 +1517,72 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_map(f, (AstMapNode*)node);
     case AST_NODE_ELEMENT:
         return eval_element(f, (AstElementNode*)node);
+
+    // ---- P1.3: paths and queries ----
+    case AST_NODE_PATH_EXPR: {
+        // path_new + one path_extend / wildcard per segment. Path* is a
+        // container pointer, so it is its own Item carrier.
+        AstPathNode* path_node = (AstPathNode*)node;
+        Pool* pool = f->st->ctx->pool;
+        Scratch acc(f);
+        acc.set(interp_ptr_item(path_new(pool, (int)path_node->scheme)));
+        for (int i = 0; i < path_node->segment_count; i++) {
+            AstPathSegment* seg = &path_node->segments[i];
+            // Re-read the accumulator: every extension allocates.
+            Path* base = (Path*)(uintptr_t)acc.get().item;
+            Path* next;
+            if (seg->type == LPATH_SEG_WILDCARD) {
+                next = path_wildcard(pool, base);
+            } else if (seg->type == LPATH_SEG_WILDCARD_REC) {
+                next = path_wildcard_recursive(pool, base);
+            } else {
+                next = path_extend(pool, base, seg->name ? seg->name->chars : "");
+            }
+            acc.set(interp_ptr_item(next));
+        }
+        return acc.get();
+    }
+    case AST_NODE_PATH_INDEX_EXPR: {
+        AstPathIndexNode* pix = (AstPathIndexNode*)node;
+        Item base_value = eval_expr(f, pix->base_path);
+        if (interp_frame_pending(f)) return base_value;
+        Scratch base(f);
+        base.set(base_value);
+        Item segment = eval_expr(f, pix->segment_expr);
+        if (interp_frame_pending(f)) return segment;
+        Scratch seg_slot(f);
+        seg_slot.set(segment);
+        const char* text = fn_to_cstr(seg_slot.get());
+        return interp_ptr_item(path_extend(f->st->ctx->pool,
+            (Path*)(uintptr_t)base.get().item, text));
+    }
+    case AST_NODE_PARENT_EXPR: {
+        // `expr..` is fn_member(expr, "parent") repeated `depth` times.
+        AstParentNode* parent = (AstParentNode*)node;
+        if (!parent->object) return ItemNull;
+        Item object = eval_expr(f, parent->object);
+        if (interp_frame_pending(f)) return object;
+        Scratch current(f);
+        current.set(object);
+        Scratch key(f);
+        key.set((Item){.item = s2it(heap_create_name("parent", 6))});
+        for (int i = 0; i < parent->depth; i++) {
+            current.set(fn_member(current.get(), key.get()));
+        }
+        return current.get();
+    }
+    case AST_NODE_QUERY_EXPR: {
+        AstQueryNode* query = (AstQueryNode*)node;
+        Item object = eval_expr(f, query->object);
+        if (interp_frame_pending(f)) return object;
+        Scratch obj(f);
+        obj.set(object);
+        Item type_value = eval_expr(f, query->query);
+        if (interp_frame_pending(f)) return type_value;
+        Scratch type_slot(f);
+        type_slot.set(type_value);
+        return fn_query(obj.get(), type_slot.get(), query->direct ? 1 : 0);
+    }
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
         // Reached as an expression, a `for` always yields its stream — the
