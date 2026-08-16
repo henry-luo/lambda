@@ -191,7 +191,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
 - [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
-- [~] C3.6 DOM tables — (a) reflection, (b) prop-id, (c) walker, (g) URL done; (d)(e)(f)(h)(i) pending
+- [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
 - [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
 - [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
 - [ ] C4.1 unified renderer (golden-gated)
@@ -350,14 +350,36 @@ Done:
 
 Assessed, not done:
 
-- **(d) live collections** — `_register_live_form_collection` and
-  `_register_live_lookup_collection` share a find/pin/register skeleton but
-  differ in entry fields *and* in how the pin owner is chosen. A template needs
-  a per-kind assign step; worth doing but not mechanical.
-- **(f) `js_install_interface`** — the eight clipboard interface blocks share
-  a create/name/cross-link/publish skeleton, but each adds bespoke steps
-  (prototype chaining to Blob or Array, extra statics, `Symbol.toStringTag`).
-  Worth about 40 lines, with rooting subtleties across all eight blocks.
+- **(f) `js_install_interface`** — **done**. `js_clipboard_install_interface`
+  covers six of the blocks; each keeps only what is specific to it. Verified
+  behaviour-identical with an interface probe (constructor identity, names,
+  prototype cross-links, method presence, `instanceof`), which prints the same
+  before and after — including several pre-existing oddities it exposes
+  (`Blob.prototype.text` is undefined, `File.prototype` is not chained to
+  `Blob.prototype`, and `DataTransfer.name` reads "Clipboard" because
+  `Clipboard` reuses `js_data_transfer_new` and native constructors are cached
+  by target). Those predate this work and are worth a separate look.
+- **(i) DOMRect builder** — **done**, and it fixed a bug: `js_dom_selection.cpp`
+  built rects with `i2it((int64_t)v)`, truncating every coordinate to an
+  integer, while the other two surfaces returned doubles.
+
+- **(d) live collections** — the remaining item.
+  `_register_live_form_collection` and `_register_live_lookup_collection`
+  share a find/pin/register skeleton but differ in entry fields *and* in how
+  the pin owner is chosen. A template needs a per-kind assign step; worth
+  doing but not mechanical.
+- **(e) event-init stamping** — **not worth doing.** The three native event
+  creators do not share a field set: mouse inserts `detail` between `composed`
+  and `clientX`, pointer does not, and wheel omits `pageX`/`pageY` and
+  `button` and puts its deltas before the modifiers. Property insertion order
+  is observable through `Object.keys`, so a shared stamp would have to be
+  parameterised per site — more lines than it saves. The `event_set_*` helpers
+  already give the uniformity a field table would.
+- **(h) `inherited_enum_attr`** — **not worth doing.** Only two of the four
+  named getters walk ancestors (`spellcheck`, `writingSuggestions`); the other
+  two (`autocapitalize`, `autocorrect`) inherit from the *form owner*, which
+  is a different rule. Sharing within each pair saves about eight lines
+  against a ten-line helper.
 - **(b) property-ID dispatch** — **done**, with a caveat. `JS_DOM_PROPS` names
   all 147 dispatched properties and `js_dom_prop_id` resolves one with a
   binary search; the 201 `strcmp(prop, ...)` tests are now integer compares.
