@@ -16424,6 +16424,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
 
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = 0;
+            MirValue direct_value = {};
             // v3 shape 4: a direct call to a native `^E` body returns its error
             // Item as a second MIR result, so the caller reads a register
             // instead of `Context::mir_return_lane`.
@@ -16445,15 +16446,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MirCallResult direct = em_call_direct(&mt->em, direct_call_name,
                     local_func, local_entry ? local_entry->variant : NULL, ai, call_types,
                     call_ops, &options);
-                result = direct.normal.reg;
+                direct_value = direct.normal;
+                result = direct_value.reg;
                 direct_error_reg = direct.error.reg;
                 scalar_home_id = direct.normal.scalar_home_id
                     ? direct.normal.scalar_home_id
                     : direct.error.scalar_home_id;
-                if (direct_env) {
-                    emit_capture_writeback(mt, fn_def, direct_env,
-                        direct_capture_count);
-                }
             } else {
                 char proto_name[160];
                 snprintf(proto_name, sizeof(proto_name), "%s_cp%d",
@@ -16619,6 +16617,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // straight into String*-taking helpers. Leaving it boxed made
                 // fn_len_s dereference a tagged Item and segfault on any
                 // `len(f())`, regardless of string length.
+                if (direct_value.maybe_pending) {
+                    // the pair remains register-only until this first Item
+                    // consumer. materialize before unboxing, root publication,
+                    // or any helper call can observe it (D5.2.1v2, RV4.1).
+                    direct_value = em_materialize_pending_value(&mt->em,
+                        direct_value);
+                    result = direct_value.reg;
+                }
                 if (!call_error_lane && !call_node->propagate &&
                         !mt->in_handler_operand && !mt->emitting_async_call &&
                         (mir_is_native_scalar_value_type(call_tid) ||
@@ -16643,6 +16649,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     result = emit_unbox_contract_lane(mt, result, call_tid,
                         call_return_contract);
                 }
+            }
+
+            if (direct_env) {
+                // capture write-back may allocate; the pending pair must be
+                // consumed before this second call can clobber its companion.
+                emit_capture_writeback(mt, fn_def, direct_env,
+                    direct_capture_count);
             }
 
             if (has_parameter_error_guard) {
@@ -21049,13 +21062,47 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     return false;
 }
 
+// a boxed result does not need the companion lane when its semantic Item can
+// never be a frame-backed scalar. This proof is deliberately weaker than the
+// native-lane proof above: a boxed int/string/container is safe even when its
+// producer is not eligible for a raw MIR lane. Unknown, union, and wide scalar
+// types stay dynamic so a stale AST annotation cannot hide a pending payload
+// across the callee watermark (D5.2.1v2).
+static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node) return false;
+
+    TypeId type_id = get_effective_type(mt, node);
+    if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE ||
+            lambda_type_id_may_be_wide_scalar(type_id)) {
+        return false;
+    }
+
+    // a non-wide static result is enough for a direct/sys call, but a computed
+    // function value has no producer descriptor to audit at this boundary.
+    // keep that case dynamic until its callee shape is known (D5.2.1v2).
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = mir_unwrap_primary(call->function);
+        if (!callee) return false;
+        if (callee->node_type == AST_NODE_SYS_FUNC) return true;
+        if (callee->node_type != AST_NODE_IDENT) return false;
+        AstIdentNode* ident = (AstIdentNode*)callee;
+        if (!ident->entry) return false;
+    }
+    return true;
+}
+
 // Prove an unannotated procedural result from all explicit success exits. The
 // top-level tail-return requirement deliberately rejects implicit fallthrough;
 // recursive calls are admitted only through the candidate lane installed by
 // infer_proc_native_return_lane, so an open call cannot become raw by shape
 // coincidence (D3.3.1, D3.3.2).
 static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
-        TypeId expected, int* return_count) {
+        TypeId expected, int* return_count, bool wide_free = false) {
     while (node) {
         AstNode* current = mir_unwrap_primary(node);
         if (!current) {
@@ -21065,6 +21112,13 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         switch (current->node_type) {
         case AST_NODE_RETURN_STAM: {
             AstReturnNode* ret = (AstReturnNode*)current;
+            if (wide_free) {
+                if (!ret->value || !mir_expr_proves_wide_free(mt, ret->value)) {
+                    return false;
+                }
+                (*return_count)++;
+                break;
+            }
             if (expected == LMD_TYPE_ANY) {
                 if (ret->value) (*return_count)++;
                 break;
@@ -21085,22 +21139,22 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         case AST_NODE_IF_EXPR: {
             AstIfNode* branch = (AstIfNode*)current;
             if (branch->then && !mir_proc_return_values_prove(mt,
-                    branch->then, expected, return_count)) return false;
+                    branch->then, expected, return_count, wide_free)) return false;
             if (branch->otherwise && !mir_proc_return_values_prove(mt,
-                    branch->otherwise, expected, return_count)) return false;
+                    branch->otherwise, expected, return_count, wide_free)) return false;
             break;
         }
         case AST_NODE_WHILE_STAM: {
             AstWhileNode* loop = (AstWhileNode*)current;
             if (loop->body && !mir_proc_return_values_prove(mt,
-                    loop->body, expected, return_count)) return false;
+                    loop->body, expected, return_count, wide_free)) return false;
             break;
         }
         case AST_NODE_FOR_EXPR:
         case AST_NODE_FOR_STAM: {
             AstForNode* loop = (AstForNode*)current;
             if (loop->then && !mir_proc_return_values_prove(mt,
-                    loop->then, expected, return_count)) return false;
+                    loop->then, expected, return_count, wide_free)) return false;
             break;
         }
         case AST_NODE_MATCH_EXPR: {
@@ -21108,7 +21162,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
             for (AstMatchArm* arm = match->first_arm; arm;
                     arm = (AstMatchArm*)arm->next) {
                 if (arm->body && !mir_proc_return_values_prove(mt,
-                        arm->body, expected, return_count)) return false;
+                        arm->body, expected, return_count, wide_free)) return false;
             }
             break;
         }
@@ -21116,7 +21170,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
         case AST_NODE_LIST: {
             AstListNode* list = (AstListNode*)current;
             if (list->item && !mir_proc_return_values_prove(mt,
-                    list->item, expected, return_count)) return false;
+                    list->item, expected, return_count, wide_free)) return false;
             break;
         }
         default:
@@ -21324,14 +21378,23 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
     AstNode* fn_as_node = (AstNode*)fn_node;
     bool is_proc = fn_as_node->node_type == AST_NODE_PROC;
     // A procedural body can exit through explicit returns after an await or
-    // a checked boundary. Its inferred result type is not a raw ABI promise;
-    // preserve the boxed Item dynamically so a wide scalar is never returned
-    // as untagged bits after the task's number frame has been restored.
+    // a checked boundary. Its inferred result type is not a raw ABI promise,
+    // but a whole-body wide-free proof can still use the one-result boxed
+    // shape without exposing an untagged payload past the watermark.
     if (is_proc) {
         if (!mir_proc_has_value_return(mt, fn_node)) {
             // A procedure with no value exit returns a plain ItemNull carrier;
             // reserving a number home for it only taxes every side-effecting
             // call (D5.2, D5.3).
+            return MIR_SCALAR_RETURN_NONE;
+        }
+        AstNode* body = mir_unwrap_primary(fn_node->body);
+        int return_count = 0;
+        if (mir_proc_return_values_prove(mt, body, LMD_TYPE_ANY,
+                &return_count, true) && return_count > 0) {
+            // shape 1 is safe only after every explicit value exit has passed
+            // the wide-free proof; unknown calls and union values remain on
+            // the dynamic companion lane (D5.2.1v2).
             return MIR_SCALAR_RETURN_NONE;
         }
         return MIR_SCALAR_RETURN_DYNAMIC;
@@ -21867,6 +21930,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MirCallResult direct = em_call_direct(&mt->em, raw_name, raw_func,
         raw_entry ? raw_entry->variant : NULL, call_arg_count,
         call_types, call_args, &options);
+    if (direct.normal.maybe_pending) {
+        // the wrapper changes the internal pair into the public slot shape;
+        // resolve at that incompatible escape boundary before it builds its
+        // own pair in the epilogue (D5.2.1v2).
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+    }
     MIR_reg_t result = direct.normal.reg;
     int scalar_home_id = direct.normal.scalar_home_id
         ? direct.normal.scalar_home_id : direct.error.scalar_home_id;
@@ -24922,6 +24991,13 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                         main_name->str, main_func,
                         entry ? entry->variant : NULL, 0, NULL, NULL,
                         &main_options);
+                    if (call.normal.maybe_pending) {
+                        // the module entry returns through its own public
+                        // result boundary; consume the pair before copying it
+                        // into the module result register (D5.2.1v2).
+                        call.normal = em_materialize_pending_value(&mt.em,
+                            call.normal);
+                    }
                     MIR_reg_t main_result = call.normal.reg;
                     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, result),
                         MIR_new_reg_op(ctx, main_result)));

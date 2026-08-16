@@ -319,6 +319,11 @@ enum ScalarPayloadProvenance {
 };
 struct MirValue {
     MIR_reg_t reg;
+    // shape-2 calls keep the raw pair in registers until the first consumer.
+    // the companion is intentionally metadata, not a second published Item:
+    // rv4.1 forbids a pending lane from entering roots or spills.
+    MIR_reg_t pending_companion;
+    bool maybe_pending;
     MIR_type_t mir_type;
     Type* contract_type;
     TypeId semantic_type;
@@ -964,6 +969,8 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
         TypeId semantic_type, ValueRep rep, JitValueClass value_class) {
     MirValue value = {};
     value.reg = reg;
+    value.pending_companion = 0;
+    value.maybe_pending = false;
     value.mir_type = mir_type;
     value.contract_type = NULL;
     value.semantic_type = semantic_type;
@@ -974,8 +981,15 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
     value.scalar_provenance = SCALAR_PROVENANCE_UNKNOWN;
     return value;
 }
+static inline MirValue em_materialize_pending_value(MirEmitter* em,
+        MirValue value);
 static inline MirValue em_require_rep(MirEmitter* em, MirValue value,
         ValueRep required) {
+    if (value.maybe_pending) {
+        // representation conversion is a first consumer: never reinterpret
+        // the pending tag or companion as an ordinary Item/native lane.
+        value = em_materialize_pending_value(em, value);
+    }
     if (value.rep == required) return value;
     if (em && em->convert_rep) {
         MirValue converted = em->convert_rep(em->call_owner, value, required);
@@ -1367,6 +1381,30 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
     // carrier must be announced to the spill tracker and the root machinery
     // exactly once, and only after this patch.
     return result;
+}
+
+// materialize a direct-call result at the first consumer/escape.  Keeping
+// this beside the pair resolver prevents callers from publishing a pending
+// Item through the spill tracker or root frame (D5.2.1v2, RV4.1).
+static inline MirValue em_materialize_pending_value(MirEmitter* em,
+        MirValue value) {
+    if (!value.maybe_pending) return value;
+    if (!value.pending_companion) {
+        log_error("mir-value: pending Item has no companion register");
+        abort();
+    }
+    value.reg = em_resolve_pending_pair(em, value.reg,
+        value.pending_companion);
+    value.pending_companion = 0;
+    value.maybe_pending = false;
+    if (em && em->after_call_result) {
+        em->after_call_result(em->call_owner, value.reg, value.mir_type);
+    }
+    if (em && em->root_call_value && mir_gc_value_needs_root(
+            value.value_class, value.mir_type)) {
+        em->root_call_value(em->call_owner, value.reg);
+    }
+    return value;
 }
 static inline int em_add_const(MirEmitter* em, void* ptr) {
     if (!em || !em->const_list || !ptr) return -1;
@@ -3757,30 +3795,26 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         call_result.error = em_value(companion, MIR_T_I64, LMD_TYPE_ERROR,
             VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
     } else if (callee_returns_pair) {
-        // RV4.2 single-live: lane 2 dies at the next call, so resolve before
-        // anything else can clobber it. This eager form is correct by
-        // construction; RV6's lazy `maybe_pending` propagation (resolve only at
-        // escape sites) is a strict refinement on top of it, not a prerequisite.
-        //
-        // Nothing between the call and this patch may spill or root the raw
-        // result — see em_publish_call_result. The pair itself is GC-safe while
-        // it lives in registers (RV5: lane 1 is tag bits, lane 2 raw non-pointer
-        // bits), so an intervening safepoint has nothing to trace.
-        result = em_resolve_pending_pair(em, result, companion);
-        em_publish_call_result(em, &metadata, result, result_type);
+        // rv6: keep the pair in registers until the first consumer. The raw
+        // lanes are GC-safe while they remain live here; publication is deferred
+        // to em_materialize_pending_value so a pending Item never reaches a
+        // root slot or spill (D5.2.1v2, RV4.1).
     } else if (em_variant_returns_slot(variant)) {
-        // RV12 slot transport: identical protocol, lane 2 read from the
-        // context cell instead of a second result register. Loaded eagerly
-        // because the slot dies at the next call (RV4.2), and resolved before
-        // publication for the same reason the register form is — a pending
-        // Item must never be spilled or rooted.
+        // rv12 slot transport: load the companion now, but defer resolution
+        // until the first consumer. A slot result is an escape boundary for a
+        // C-reachable wrapper, so callers that return or publish it must still
+        // materialize before crossing that boundary.
         MIR_reg_t slot = em_load_frame_top(em, em->frame.runtime,
             offsetof(Context, mir_companion_slot), "companion_slot");
-        result = em_resolve_pending_pair(em, result, slot);
-        em_publish_call_result(em, &metadata, result, result_type);
+        companion = slot;
     }
     call_result.normal = em_value(result, result_type, normal.semantic_type,
         normal.abi_rep, metadata.normal_result.value.value_class);
+    if ((callee_returns_pair || em_variant_returns_slot(variant)) &&
+            variant && variant->result.shape == RETURN_SHAPE_ITEM_SCALAR) {
+        call_result.normal.pending_companion = companion;
+        call_result.normal.maybe_pending = true;
+    }
     call_result.normal.scalar_home_id = scalar_home_id;
     call_result.normal.scalar_provenance = scalar_home_id
         ? SCALAR_PROVENANCE_ACTIVATION_HOME : SCALAR_PROVENANCE_NONE;
