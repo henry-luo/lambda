@@ -798,149 +798,225 @@ char* url_to_local_path(const Url* url) {
     #endif
 }
 
-// Percent-encode a string per ECMAScript encodeURIComponent rules.
-// Unreserved chars: A-Z a-z 0-9 - _ . ~ ! ' ( ) *
-char* url_encode_component(const char* str, size_t len) {
-    if (!str) return NULL;
-    static const char hex[] = "0123456789ABCDEF";
-    char* encoded = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
-    if (!encoded) return NULL;
+// ── Percent-encode cores ───────────────────────────────────────────────────
+// The keep sets and the %XX emission live here only. Callers that can afford an
+// allocation use the wrappers below; callers with their own buffer (or an
+// immutable string they would rather hand back untouched) use measure + write.
+
+// 1 = emit the byte literally, 0 = percent-encode it. Rows are 16 wide, so the
+// column is the byte's low nibble. Bytes 0x80..0xFF are always encoded, one
+// UTF-8 byte at a time, and fall in the implicit zero tail.
+const uint8_t URL_KEEP_COMPONENT[256] = {
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  // 0x00 control
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  // 0x10 control
+//  sp  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+     0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0,
+//   0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+//   @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1,
+//   `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~ DEL
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0,
+};
+
+// encodeURI: the component set plus the URI-structural bytes ; , / ? : @ & = + $ #
+const uint8_t URL_KEEP_URI[256] = {
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  // 0x00 control
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  // 0x10 control
+//  sp  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+     0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
+//   @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1,
+//   `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~ DEL
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0,
+};
+
+// WHATWG application/x-www-form-urlencoded byte set: ASCII alphanumeric plus
+// * - . _ only. Space is not kept here; pass space_as_plus so it becomes '+'.
+const uint8_t URL_KEEP_FORM[256] = {
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  // 0x00 control
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  // 0x10 control
+//  sp  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0,
+//   0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+//   @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1,
+//   `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//   p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~ DEL
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+};
+
+size_t url_encode_measure(const char* str, size_t len, const uint8_t keep[256],
+        bool space_as_plus, bool* changed) {
+    if (changed) *changed = false;
+    if (!str || !keep) return 0;
+    size_t out_len = 0;
+    bool dirty = false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        if (space_as_plus && c == ' ') { out_len += 1; dirty = true; }
+        else if (keep[c]) { out_len += 1; }
+        else { out_len += 3; dirty = true; }
+    }
+    if (changed) *changed = dirty;
+    return out_len;
+}
+
+size_t url_encode_write(const char* str, size_t len, const uint8_t keep[256],
+        bool space_as_plus, char* out) {
+    if (!str || !keep || !out) return 0;
     size_t j = 0;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)str[i];
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-            c == '.' || c == '~' || c == '!' || c == '\'' ||
-            c == '(' || c == ')' || c == '*') {
-            encoded[j++] = c;
+        if (space_as_plus && c == ' ') {
+            out[j++] = '+';
+        } else if (keep[c]) {
+            out[j++] = (char)c;
         } else {
-            encoded[j++] = '%';
-            encoded[j++] = hex[c >> 4];
-            encoded[j++] = hex[c & 0x0F];
+            out[j++] = '%';
+            out[j++] = hex_encode_nibble_upper(c >> 4);
+            out[j++] = hex_encode_nibble_upper(c & 0x0F);
         }
     }
+    return j;
+}
+
+// Shared tail for the allocating encoders: measure exactly, then write. The old
+// per-encoder `len * 3 + 1` worst-case allocation is no longer needed.
+static char* url_encode_alloc(const char* str, size_t len, const uint8_t keep[256],
+        bool space_as_plus) {
+    if (!str) return NULL;
+    size_t out_len = url_encode_measure(str, len, keep, space_as_plus, NULL);
+    char* encoded = mem_alloc(out_len + 1, MEM_CAT_TEMP);
+    if (!encoded) return NULL;
+    size_t j = url_encode_write(str, len, keep, space_as_plus, encoded);
     encoded[j] = '\0';
     return encoded;
+}
+
+// Percent-encode a string per ECMAScript encodeURIComponent rules.
+// Unreserved chars: A-Z a-z 0-9 - _ . ~ ! ' ( ) *
+char* url_encode_component(const char* str, size_t len) {
+    return url_encode_alloc(str, len, URL_KEEP_COMPONENT, false);
 }
 
 // Percent-encode a string per ECMAScript encodeURI rules.
 // Preserves URI-structural chars: ; , / ? : @ & = + $ # and the unreserved set.
 char* url_encode_uri(const char* str, size_t len) {
-    if (!str) return NULL;
-    static const char hex[] = "0123456789ABCDEF";
-    char* encoded = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
-    if (!encoded) return NULL;
-    size_t j = 0;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)str[i];
-        // unreserved: A-Z a-z 0-9 - _ . ~ ! ' ( ) *
-        // URI reserved (preserved by encodeURI): ; , / ? : @ & = + $ #
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-            c == '.' || c == '~' || c == '!' || c == '\'' ||
-            c == '(' || c == ')' || c == '*' ||
-            c == ';' || c == ',' || c == '/' || c == '?' ||
-            c == ':' || c == '@' || c == '&' || c == '=' ||
-            c == '+' || c == '$' || c == '#') {
-            encoded[j++] = c;
-        } else {
-            encoded[j++] = '%';
-            encoded[j++] = hex[c >> 4];
-            encoded[j++] = hex[c & 0x0F];
-        }
-    }
-    encoded[j] = '\0';
-    return encoded;
+    return url_encode_alloc(str, len, URL_KEEP_URI, false);
 }
 
-// Percent-decode a string per ECMAScript decodeURI rules.
-// Does NOT decode escape sequences for reserved URI characters.
-char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
+// ── Strict percent-decode core ─────────────────────────────────────────────
+// One implementation behind decodeURI, decodeURIComponent, and callers that
+// decode into their own buffer. Decoding never grows its input: a kept reserved
+// escape stays 3 bytes and every other %XX shrinks to 1, so `out` needs `len`.
+
+// Bytes whose escapes decodeURI must leave encoded (the URI reserved set).
+static inline bool url_decode_reserved_byte(unsigned char c) {
+    return c == '#' || c == '$' || c == '&' || c == '+' || c == ',' ||
+           c == '/' || c == ':' || c == ';' || c == '=' || c == '?' || c == '@';
+}
+
+bool url_decode_strict(const char* str, size_t len, bool component,
+        char* out, size_t* out_len) {
+    if (!str || !out) return false;
+    size_t i = 0, j = 0;
+    while (i < len) {
+        unsigned char ch = (unsigned char)str[i];
+        if (ch != '%') { out[j++] = (char)ch; i++; continue; }
+        if (i + 2 >= len) return false;
+        int high = url_hex_to_int(str[i + 1]);
+        int low  = url_hex_to_int(str[i + 2]);
+        if (high < 0 || low < 0) return false;
+        unsigned char lead = (unsigned char)((high << 4) | low);
+        if (!component && url_decode_reserved_byte(lead)) {
+            // decodeURI republishes the escape verbatim, original hex case included
+            out[j++] = str[i];  out[j++] = str[i + 1];  out[j++] = str[i + 2];
+            i += 3;
+            continue;
+        }
+        out[j++] = (char)lead;
+        i += 3;
+        if (lead < 0x80) continue;
+
+        int expected;
+        if ((lead & 0xE0) == 0xC0) expected = 1;
+        else if ((lead & 0xF0) == 0xE0) expected = 2;
+        else if ((lead & 0xF8) == 0xF0) expected = 3;
+        else return false;  // continuation or 5+ byte lead is never a valid start
+
+        unsigned char cont[3];
+        for (int k = 0; k < expected; k++) {
+            // bounds first: `i` may already sit at `len` after the previous unit
+            if (i + 2 >= len || str[i] != '%') return false;
+            int h2 = url_hex_to_int(str[i + 1]);
+            int l2 = url_hex_to_int(str[i + 2]);
+            if (h2 < 0 || l2 < 0) return false;
+            cont[k] = (unsigned char)((h2 << 4) | l2);
+            if ((cont[k] & 0xC0) != 0x80) return false;
+            out[j++] = (char)cont[k];
+            i += 3;
+        }
+
+        // reject overlong forms, UTF-16 surrogates, and out-of-range code points
+        unsigned int cp;
+        if (expected == 1) {
+            cp = ((unsigned)(lead & 0x1F) << 6) | (unsigned)(cont[0] & 0x3F);
+            if (cp < 0x80) return false;
+        } else if (expected == 2) {
+            cp = ((unsigned)(lead & 0x0F) << 12) | ((unsigned)(cont[0] & 0x3F) << 6) |
+                 (unsigned)(cont[1] & 0x3F);
+            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+        } else {
+            cp = ((unsigned)(lead & 0x07) << 18) | ((unsigned)(cont[0] & 0x3F) << 12) |
+                 ((unsigned)(cont[1] & 0x3F) << 6) | (unsigned)(cont[2] & 0x3F);
+            if (cp < 0x10000 || cp > 0x10FFFF) return false;
+        }
+    }
+    if (out_len) *out_len = j;
+    return true;
+}
+
+// Shared tail for the allocating strict decoders.
+static char* url_decode_strict_alloc(const char* str, size_t len, bool component,
+        size_t* out_len) {
     if (!str) return NULL;
     char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!decoded) return NULL;
-    // reserved chars that decodeURI must NOT decode
-    static const char reserved[] = "#$&+,/:;=?@";
-    size_t i = 0, j = 0;
-    while (i < len) {
-        if (str[i] == '%') {
-            if (i + 2 >= len) { mem_free(decoded); return NULL; }
-            int high = url_hex_to_int(str[i + 1]);
-            int low  = url_hex_to_int(str[i + 2]);
-            if (high < 0 || low < 0) { mem_free(decoded); return NULL; }
-            unsigned char lead = (unsigned char)((high << 4) | low);
-            // check if this is a reserved char — if so, keep encoded
-            int is_reserved = 0;
-            for (const char* r = reserved; *r; r++) {
-                if ((char)lead == *r) { is_reserved = 1; break; }
-            }
-            if (is_reserved) {
-                decoded[j++] = str[i];
-                decoded[j++] = str[i + 1];
-                decoded[j++] = str[i + 2];
-                i += 3;
-                continue;
-            }
-            decoded[j++] = (char)lead;
-            i += 3;
-            // validate UTF-8 multi-byte sequences
-            if (lead >= 0x80) {
-                int expected = 0;
-                if ((lead & 0xE0) == 0xC0) expected = 1;
-                else if ((lead & 0xF0) == 0xE0) expected = 2;
-                else if ((lead & 0xF8) == 0xF0) expected = 3;
-                else { mem_free(decoded); return NULL; }
-                for (int k = 0; k < expected; k++) {
-                    if (i >= len || str[i] != '%') { mem_free(decoded); return NULL; }
-                    if (i + 2 >= len) { mem_free(decoded); return NULL; }
-                    int h2 = url_hex_to_int(str[i + 1]);
-                    int l2 = url_hex_to_int(str[i + 2]);
-                    if (h2 < 0 || l2 < 0) { mem_free(decoded); return NULL; }
-                    unsigned char cont = (unsigned char)((h2 << 4) | l2);
-                    if ((cont & 0xC0) != 0x80) { mem_free(decoded); return NULL; }
-                    decoded[j++] = (char)cont;
-                    i += 3;
-                }
-                // check for overlong encodings and invalid code points
-                unsigned int cp = 0;
-                if (expected == 1) {
-                    cp = ((lead & 0x1F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x80) { mem_free(decoded); return NULL; }
-                } else if (expected == 2) {
-                    cp = ((lead & 0x0F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { mem_free(decoded); return NULL; }
-                } else if (expected == 3) {
-                    cp = ((lead & 0x07) << 18) | ((decoded[j - 3] & 0x3F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x10000 || cp > 0x10FFFF) { mem_free(decoded); return NULL; }
-                }
-            }
-            continue;
-        }
-        decoded[j++] = str[i++];
+    size_t j = 0;
+    if (!url_decode_strict(str, len, component, decoded, &j)) {
+        mem_free(decoded);
+        return NULL;
     }
     decoded[j] = '\0';
     if (out_len) *out_len = j;
     return decoded;
 }
 
+// Percent-decode a string per ECMAScript decodeURI rules.
+// Does NOT decode escape sequences for reserved URI characters.
+char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
+    return url_decode_strict_alloc(str, len, false, out_len);
+}
+
 // Percent-encode using a caller-supplied 256-entry "keep" table.
 char* url_encode_with_table(const char* str, size_t len, const uint8_t keep[256]) {
-    if (!str || !keep) return NULL;
-    char* encoded = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
-    if (!encoded) return NULL;
-    size_t j = 0;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)str[i];
-        if (keep[c]) {
-            encoded[j++] = (char)c;
-        } else {
-            encoded[j++] = '%';
-            encoded[j++] = hex_encode_nibble_upper(c >> 4);
-            encoded[j++] = hex_encode_nibble_upper(c & 0x0F);
-        }
-    }
-    encoded[j] = '\0';
-    return encoded;
+    if (!keep) return NULL;
+    return url_encode_alloc(str, len, keep, false);
 }
 
 // Percent-decode with application/x-www-form-urlencoded semantics: %XX -> byte,
@@ -1035,57 +1111,7 @@ char* url_from_local_path(const char* abs_path) {
     return result;
 }
 
-// Percent-decode a string: %XX -> byte.
+// Percent-decode a string: %XX -> byte, with strict UTF-8 validation.
 char* url_decode_component(const char* str, size_t len, size_t* out_len) {
-    if (!str) return NULL;
-    char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);
-    if (!decoded) return NULL;
-    size_t i = 0, j = 0;
-    while (i < len) {
-        if (str[i] == '%') {
-            if (i + 2 >= len) { mem_free(decoded); return NULL; }
-            int high = url_hex_to_int(str[i + 1]);
-            int low  = url_hex_to_int(str[i + 2]);
-            if (high < 0 || low < 0) { mem_free(decoded); return NULL; }
-            unsigned char lead = (unsigned char)((high << 4) | low);
-            decoded[j++] = (char)lead;
-            i += 3;
-            // validate UTF-8 multi-byte sequences
-            if (lead >= 0x80) {
-                int expected = 0;
-                if ((lead & 0xE0) == 0xC0) expected = 1;
-                else if ((lead & 0xF0) == 0xE0) expected = 2;
-                else if ((lead & 0xF8) == 0xF0) expected = 3;
-                else { mem_free(decoded); return NULL; }
-                for (int k = 0; k < expected; k++) {
-                    if (i >= len || str[i] != '%') { mem_free(decoded); return NULL; }
-                    if (i + 2 >= len) { mem_free(decoded); return NULL; }
-                    int h2 = url_hex_to_int(str[i + 1]);
-                    int l2 = url_hex_to_int(str[i + 2]);
-                    if (h2 < 0 || l2 < 0) { mem_free(decoded); return NULL; }
-                    unsigned char cont = (unsigned char)((h2 << 4) | l2);
-                    if ((cont & 0xC0) != 0x80) { mem_free(decoded); return NULL; }
-                    decoded[j++] = (char)cont;
-                    i += 3;
-                }
-                // check for overlong encodings and invalid code points
-                unsigned int cp = 0;
-                if (expected == 1) {
-                    cp = ((lead & 0x1F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x80) { mem_free(decoded); return NULL; }
-                } else if (expected == 2) {
-                    cp = ((lead & 0x0F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { mem_free(decoded); return NULL; }
-                } else if (expected == 3) {
-                    cp = ((lead & 0x07) << 18) | ((decoded[j - 3] & 0x3F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x10000 || cp > 0x10FFFF) { mem_free(decoded); return NULL; }
-                }
-            }
-            continue;
-        }
-        decoded[j++] = str[i++];
-    }
-    decoded[j] = '\0';
-    if (out_len) *out_len = j;
-    return decoded;
+    return url_decode_strict_alloc(str, len, true, out_len);
 }

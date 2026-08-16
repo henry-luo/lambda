@@ -197,6 +197,38 @@ size_t url_decode_inplace(char* buf, bool form);
 // (uppercase hex). Returns a newly allocated string. Caller must free.
 char* url_encode_with_table(const char* str, size_t len, const uint8_t keep[256]);
 
+// ── Percent-encode / decode cores ──────────────────────────────────────────
+// One implementation backs encodeURI/encodeURIComponent, the form-urlencoded
+// serializers, and callers that want to write into their own buffer instead of
+// paying an allocation per call.
+
+// Canonical 256-entry "keep" tables for the encode helpers below.
+extern const uint8_t URL_KEEP_COMPONENT[256];  // encodeURIComponent: A-Za-z0-9 - _ . ~ ! ' ( ) *
+extern const uint8_t URL_KEEP_URI[256];        // encodeURI: the above plus ; , / ? : @ & = + $ #
+extern const uint8_t URL_KEEP_FORM[256];       // x-www-form-urlencoded; ' ' is handled by space_as_plus
+
+// Measure the encoded length of `str[0..len)` under `keep` without writing.
+// When space_as_plus, ' ' costs one byte (emitted as '+') rather than three.
+// Sets *changed (may be NULL) to false only when every byte is emitted
+// literally, so a caller holding an immutable string can hand it back instead
+// of copying. Returns the exact byte count url_encode_write will produce.
+size_t url_encode_measure(const char* str, size_t len, const uint8_t keep[256],
+                          bool space_as_plus, bool* changed);
+
+// Encode `str[0..len)` under `keep` into `out`, which must have room for the
+// matching url_encode_measure() result. No NUL is written. Returns bytes written.
+size_t url_encode_write(const char* str, size_t len, const uint8_t keep[256],
+                        bool space_as_plus, char* out);
+
+// Strict ECMAScript percent-decode of `str[0..len)` into `out`, which must have
+// room for `len` bytes — decoding never grows its input. `component` selects
+// decodeURIComponent semantics; false is decodeURI, which leaves escapes for the
+// reserved set (#$&+,/:;=?@) percent-encoded. Returns false on malformed hex or
+// malformed UTF-8 (bad continuation, overlong form, surrogate range, > U+10FFFF),
+// in which case *out_len and the contents of `out` are unspecified.
+bool url_decode_strict(const char* str, size_t len, bool component,
+                       char* out, size_t* out_len);
+
 // Percent-encode a string per ECMAScript encodeURI rules.
 // Preserves URI-structural chars: ; , / ? : @ & = + $ # and unreserved chars.
 // Returns a newly allocated string. Caller must free.

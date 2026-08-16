@@ -1298,8 +1298,10 @@ P5 direct TypeMap transitions are implemented as of 2026-06-25:
   as the new field offset. This avoids deriving offsets from the current last
   entry type, which may have retagged from pointer-sized `null` to a smaller
   storage type such as `bool`.
-- the feature is runtime-gated by `LAMBDA_JS_SHAPE_TRANSITIONS=0` for
-  comparison or emergency disable.
+- the feature was runtime-gated by `LAMBDA_JS_SHAPE_TRANSITIONS=0` during this
+  tune for comparison or emergency disable. That gate has since been retired and
+  shape-transition construction is unconditional; the measurements below record
+  the A/B as it stood when the flag existed.
 
 Correctness result:
 

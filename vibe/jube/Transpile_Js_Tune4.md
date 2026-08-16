@@ -219,6 +219,10 @@ LAMBDA_JS_URI_FAST=0/1
 ```
 
 Remove or default-enable the gate only after the full release baseline passes.
+The gate has since been retired: the fast path was merged into `lib/url.c`
+(`url_decode_strict` / `url_encode_measure` / `url_encode_write`), so there is no
+longer a second implementation to switch between. The measurements below record
+the A/B as it stood while the flag existed.
 
 ## T4-P2: TypedArray Raw View and Bulk Operations
 
