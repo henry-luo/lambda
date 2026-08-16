@@ -24745,6 +24745,10 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.ctx = ctx;
     mt.em.ctx = ctx;  // emitter caches the immutable MIR context handle
     mt.em.call_owner = &mt;
+    // RV14: Lambda's caller does not rehome a helper's wide result — it rides
+    // the number stack for the activation. LambdaJS keeps the v2 behaviour
+    // until P2.5, so the flag stays set there.
+    mt.em.helper_results_skip_rehome = true;
     mt.em.after_may_gc_call = lambda_after_may_gc_call;
     mt.em.root_call_value = lambda_call_root_value;
     mt.em.after_call_result = lambda_after_call_result;

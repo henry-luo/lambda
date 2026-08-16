@@ -2053,3 +2053,198 @@ This also retires `fn_floor`'s adopt, the last one flagged as "genuinely
 wide-capable" in the census, as a *consequence* rather than by special-casing
 it. Remaining adopt sources are `pn_push` ×4, `pn_splice` ×2, `fn_slice3` ×2 —
 all container-only, so all candidates for the `fn_fill` row treatment.
+
+### 2026-08-15 — helper-call adopts: 417 → 335 (user rulings 1 & 2)
+
+Ruling (1) *"change sys func signature, if possible, to eliminate helper
+adopts"*; ruling (2) *"C helpers and sys funcs use the number stack for wide
+returns"*. Ruling (2) is already the shipped behaviour (RV14) — what it
+licenses is deleting the rehome wherever a helper's result **cannot** be wide.
+
+**Census first, because the AWFY number was misleading.** Over 119 corpus
+scripts there are **417 adopt sites from ~60 helpers**, not the 9 AWFY
+exercises. Statically, **153 of 221** sys funcs have metadata permitting an
+adopt (151 declared `TYPE_ANY`, 2 `TYPE_FLOAT`). The AWFY "under 1% of emitted
+MIR" figure measures benchmark coverage, not the population.
+
+**The signature route was tried first, and failed instructively.**
+`SysFuncInfo.success_type` exists for exactly this — it describes the
+*successful* result, so a non-wide success type proves the whole result
+non-wide (the error arm is an error Item, never wide). `jit_import_get_metadata`
+now consults it, which is a strict generalization: identical behaviour whenever
+`success_type` is unset. That part is kept.
+
+Populating it for the container builders was the failure. `&TYPE_LIST` is the
+array singleton under a legacy name — `{.type_id = LMD_TYPE_ARRAY}` — but
+consumers of an ARRAY-typed `Type*` **cast it to `TypeArray*` and read
+`->nested`, past the end of the global**. ASan: global-buffer-overflow,
+16 structurizr tests aborting. *An array success type needs a real `TypeArray`
+instance, not the singleton* — recorded as a comment at the extern block so the
+next attempt doesn't repeat it.
+
+A second, separate lesson from the same attempt: setting `may_return_error =
+true` alongside it made inference wrap the result as `array | error` — a
+union, whose `type_id` **is** `LMD_TYPE_TYPE` — producing "if condition has
+container type type". That field changes the language surface; it is not a
+free annotation.
+
+**Shipped instead: explicit `jit_runtime_imports` rows**, the `fn_fill`
+mechanism — JIT-only, no inference impact, no `Type*` object involved. Ten
+helpers whose every return path was read and is a container or error Item:
+`fn_take`, `fn_drop`, `fn_unique`, `fn_reverse`, `fn_reshape`, `fn_sort1`,
+`fn_sort2`, `fn_slice3`, `pn_push`, `pn_splice`. Effects deliberately
+conservative — MAY_GC (they allocate), REENTRY_UNKNOWN (sort can call a user
+comparator); only the `RESULT_SCALAR_STABLE` bit is claimed.
+
+| | sites |
+|---|---|
+| session start | 417 |
+| after `fn_fill` | 409 |
+| after the ten container rows | 335 |
+| after the thirteen string/binary rows | **309** |
+
+Remaining population, by class: **~200 legitimate** — the explicit wide boxers
+(`box_int64_value` 61, `box_int64_result_or_error` 25) and numeric aggregates
+(`fn_avg1` 39, `fn_sum1` 37, `fn_max1` 21, `fn_min1` 18, `fn_math_*`), which
+really can return a frame-backed float or int64; **38** `owned_item_slot_read`,
+a runtime slot read that can legitimately hold anything; and the string-builder tail, since read and claimed (below).
+
+Gate **3888/3890**; both failures pre-existing (`test_interp_gtest`
+`ExcludedScriptsAreCountedNotInterpreted` fails on a clean tree;
+`side_stack_frame_gc` passes standalone — parallel-load flake).
+
+**Next, per the user's sequencing**: the loop- or statement-level reclaim,
+which is what would let the *legitimate* ~200 drop their rehome too. RVO11's
+container half is already verified clear (`array_set` copies into array-owned
+cells); the bindings half remains.
+
+### 2026-08-15 — string/binary builders claimed too: 335 → 309
+
+The tail I had declined to claim on a name is now read. Thirteen more, each
+verified by following every return path — several through one or two levels of
+delegation, which is why the grep-level check earlier was inconclusive:
+
+| helper | returns |
+|---|---|
+| `trim` / `trim_start` / `trim_end` / `lower` / `upper` | `ItemError` \| `ItemNull` \| **`str_item`** (the input Item) \| `s2it` \| `y2it` — string/symbol POINTERS |
+| `join2` | `ItemError` \| `s2it` |
+| `find3` | → `fn_find_impl`: `ItemError` \| `{.array}` |
+| `replace3` / `replace4` | → `fn_replace_impl`: `ItemError` \| `ItemNull` \| `str_item` \| `s2it` \| `y2it` |
+| `split2` | `ItemError` \| → `fn_array_split` (`ItemError` \| `{.array}`) \| `{.array}` |
+| `binary` | the input when already BINARY \| `ItemError` \| `x2it(bin)` \| → `binary_from_typed_array` / `_dataview` (`ItemError` \| `ItemNull` \| `x2it`) |
+| `argmin` / `argmax` | → `vector_arg_extreme`: `ItemError` \| `ItemNull` \| **`i2it`** — inline int boxing, an index, not a number home |
+
+None can produce a number-home-backed value. Two details that only reading
+caught: the trim/case family returns **its own input Item** unchanged on the
+no-op path (a string pointer, so still fine), and `argmin`/`argmax` box through
+`i2it`, which is inline — an index could plausibly have been a wide int64, and
+isn't.
+
+**Aliased JIT names matter here**: `fn_replace3` → `FPTR(fn_replace)` and
+`fn_split2` → `FPTR(fn_split)`. The `jit_runtime_imports` key is the JIT-visible
+name, not the C symbol; pairing them from the `sys_func_defs` rows rather than
+guessing is what makes the row take effect.
+
+**Deliberately NOT claimed: `fn_string_ascii_at`.** Its non-string path falls
+back to `item_at()`, which can hand back any element — wide included. One
+site; not worth a wrong claim.
+
+Gate **3889/3890** — the single failure is `test_interp_gtest`
+`ExcludedScriptsAreCountedNotInterpreted`, confirmed failing on a clean tree.
+
+**Cumulative: 417 → 309 (−26%).** What remains is essentially all genuine:
+`box_int64_value` 61, `fn_avg1` 39, `owned_item_slot_read` 38, `fn_sum1` 37,
+`box_int64_result_or_error` 25, `fn_max1` 21, `fn_min1` 18, `fn_float` 12 —
+wide boxers, numeric aggregates, and a runtime slot read. Metadata has taken
+this as far as proof allows; the rest needs the reclaim.
+
+### 2026-08-15 — RV14 implemented: helper-call adopts 309 → 0 (Lambda)
+
+The caller no longer rehomes a C helper's wide result. Per RV14 the helper owns
+no number-frame watermark, so the payload rides the number stack and the Item
+pointing at it is already caller-homed; it stays valid until the caller's own
+epilogue restores to `number_base`.
+
+**Corpus-wide the adopt count is now 0** (was 417 at session start, 309 after
+the metadata work). AWFY home share: deltablue 0.5%, havlak 0.2%, json and
+richards 0.0%.
+
+**One real issue, and it is not uniform — worth stating because it decides how
+urgent the reclaim is.** Dropping the rehome drops the eager watermark restore
+with it, so space goes from peak-liveness to total-allocations-per-activation:
+
+- **float results leak essentially nothing.** `push_d` → `flt2it` boxes
+  INLINE for zero and for any double carrying `ITEM_DBL_MASK`; only tiny and
+  subnormal doubles reach `box_float_number_stack`. avg/sum/float/math_* are
+  therefore near-free.
+- **`box_int64_value` allocates on every call by construction** — its own
+  comment: *"INT64 never uses an inline Item so every transient value follows
+  the same return and ownership protocol regardless of magnitude."* 61 sites.
+
+Measured, not extrapolated: an `int64` accumulator loop runs clean at 10k,
+100k and 1M iterations (1M ≈ 8 MB of the 64 MB reserve) and at 9M returns a
+clean `error` — `lambda_side_number_alloc` fails, `box_int64_value` calls
+`lambda_stack_overflow_error` and returns `ItemError`. **The degradation is a
+reported error, never a dangling pointer**, because the payload stays valid for
+the whole activation either way.
+
+**The change is scoped to Lambda, and finding out why is the useful part.**
+The first cut edited the shared `em_call_import` unconditionally and broke
+`test/js/regression_side_stack_frame_gc.js`. LambdaJS still emits the **v2
+caller-donated-home return protocol** — stated in
+`js_mir_module_batch_lowering.cpp`: *"LJS keeps emitting v2 until P2.5"* —
+and that protocol's callee epilogue restores its own watermark, which frees a
+payload the caller never rehomed. The test is precisely targeted: its
+`Number.MIN_VALUE` is subnormal, the one float case that genuinely
+number-stacks.
+
+So the behaviour is gated per front-end by `MirEmitter.helper_results_skip_rehome`.
+**Sense matters**: the emitter is zero-initialized, so FALSE is the safe value —
+a front-end that never heard of the flag (Jube sets `call_owner` without it)
+keeps the rehome. The first version had it inverted, which would have opted
+unaudited front-ends into the risky path by default.
+
+**Two emission fixtures updated, not silenced.** `sized_int_boxing` asserted
+`lambda_item_adopt_scalar_home` ≥ 2 and `scalar_home_donation`'s `main` group
+asserted the adopt in sequence — its description even claimed that group was
+"convention-independent … which v3 does not change". RV14 falsifies that. Both
+now pin the boxing calls that remain and **forbid** the adopt, so the new
+invariant is enforced rather than merely unasserted.
+
+Gate **3889/3890** — the one failure is the pre-existing `test_interp_gtest`
+`ExcludedScriptsAreCountedNotInterpreted`, which fails on a clean tree.
+
+**Next: the reclaim** (loop or statement level), which restores the space
+bound. RVO11's container half is verified clear; the bindings half remains, and
+the int64 population above is what makes it worth doing.
+
+### 2026-08-15 — measured: does anything hit the space bound without the reclaim?
+
+Asked directly, so measured directly rather than reasoned about. A temporary
+peak probe in `lambda_side_number_alloc_for` (env-gated, ~15 lines, removed
+afterwards) recorded the highest number-stack depth reached per run.
+
+**All 31 benchmark scripts run clean** — no failures, no
+`number-side-stack` overflow. And the peak tells a stronger story than that:
+
+| corpus | result |
+|---|---|
+| AWFY, all 30 scripts | **peak = 0 slots.** Not "low" — none of them ever produces a wide scalar needing a number home |
+| 140 `test/lambda` scripts | only **7** touch the number stack at all |
+
+Deepest anywhere: `int64.ls` at **164 slots = 1,312 bytes**, which is
+**0.002%** of the 64 MB reserve — about a 50,000× margin. The rest:
+`math_random` 25 slots, `js_array_props_tail_bridge` 16, and four scripts in
+single digits.
+
+Why AWFY is exactly zero, rather than merely small: those benchmarks compute in
+normal doubles and `int`, and `flt2it` boxes both inline. Only tiny/subnormal
+doubles and `int64` reach `box_float_number_stack` / `box_int64_value`, and
+AWFY uses neither.
+
+**So the reclaim is not urgent for any workload in the tree.** It remains
+correct to build — the bound is O(allocations-per-activation) and a program
+that boxes int64 in a long loop *will* reach it (measured earlier: clean error
+at ~9M) — but nothing shipping is near it, and the failure mode is a reported
+error rather than corruption. That reprioritizes it from "needed to make RV14
+safe" to "needed to close the complexity bound".

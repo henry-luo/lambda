@@ -192,8 +192,19 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
                 // remaining helper adopts across AWFY. Wide declarations
                 // (int64/uint64/float) fall through and keep their adopt, so
                 // this narrows by proof rather than by an audit promise.
-                if (info->return_type && !lambda_type_id_may_be_wide_scalar(
-                        info->return_type->type_id)) {
+                // A sys func declared `T | error` names ANY in `return_type`
+                // to cover the error arm, which defeats the test on its own —
+                // `take`, `sort`, `slice` all return containers yet declare
+                // ANY. `success_type` describes the SUCCESSFUL result
+                // specifically, and the error arm is an error Item, never a
+                // wide scalar; so a non-wide success type proves the whole
+                // result non-wide. This still narrows by PROOF, not by an
+                // audit promise, and it is the same rule as before whenever
+                // `success_type` is unset.
+                Type* narrowing_type = info->success_type ? info->success_type
+                    : info->return_type;
+                if (narrowing_type && !lambda_type_id_may_be_wide_scalar(
+                        narrowing_type->type_id)) {
                     metadata->flags |= JIT_IMPORT_RESULT_SCALAR_STABLE;
                 }
                 break;

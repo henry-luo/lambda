@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Boundary i64/u64 literals box through box_int64_value / box_uint64_value and are adopted into caller homes; no inline 64-bit integer encoding (Stack API #25).",
+  "description": "Boundary i64/u64 literals box through box_int64_value / box_uint64_value (Stack API #25). RV14 (2026-08-15): the caller no longer adopts the result into a home \u2014 a C helper owns no watermark, so its wide payload rides the number stack for the activation. The boxing calls are the invariant; the adopt is forbidden.",
   "checks": [
     {
       "in_func": "main",
@@ -9,10 +9,16 @@
         "call\tbox_uint64_value_p"
       ],
       "count": {
-        "call\tbox_int64_value_p": { "min": 1 },
-        "call\tbox_uint64_value_p": { "min": 1 },
-        "lambda_item_adopt_scalar_home": { "min": 2 }
-      }
+        "call\tbox_int64_value_p": {
+          "min": 1
+        },
+        "call\tbox_uint64_value_p": {
+          "min": 1
+        }
+      },
+      "forbid": [
+        "lambda_item_adopt_scalar_home"
+      ]
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so the int64 argument stays native at the callsite. Return convention 2: caller-donated scalar home — the deferred int64 argument is boxed and adopted before its number watermark is restored directly, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21). Return convention 3 (RV1 shape 2): the body carries no home parameter and returns two lanes instead. The `main` group is convention-independent: argument boxing still goes through a helper-call adopt, which v3 does not change (RV12/SF6 — C helpers never speak the pair protocol).",
+  "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so the int64 argument stays native at the callsite. Return convention 2: caller-donated scalar home \u2014 the deferred int64 argument is boxed and adopted before its number watermark is restored directly, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21). Return convention 3 (RV1 shape 2): the body carries no home parameter and returns two lanes instead. The `main` group asserted a helper-call adopt on the argument boxing; RV14 (2026-08-15) retired that \u2014 a C helper owns no watermark, so its wide result stays on the number stack and the caller rehomes nothing. The group now pins the boxing and the wrapper call, and forbids the adopt.",
   "checks": [
     {
       "in_func": "_twice_#",
@@ -23,16 +23,21 @@
     {
       "in_func": "main",
       "expect_seq": [
-        { "pattern": "call\tbox_int64_result_or_error_p" },
-        { "pattern": "lambda_item_adopt_scalar_home" },
-        { "pattern": "mov\ti64:" },
-        { "pattern": "call\t_twice_b_" }
+        {
+          "pattern": "call\tbox_int64_result_or_error_p"
+        },
+        {
+          "pattern": "call\t_twice_b_"
+        }
       ],
       "count": {
         "call\tbox_int64_result_or_error_p": 1
       },
       "expect": [
         "call\t_twice_b_"
+      ],
+      "forbid": [
+        "lambda_item_adopt_scalar_home"
       ]
     }
   ]
