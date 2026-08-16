@@ -10658,19 +10658,22 @@ static void js_dom_set_number_property(Item object, const char* name,
     js_set_name_key(object, name, push_d((double)value));
 }
 
-static Item js_dom_make_rect_object(float x, float y, float width,
-                                    float height) {
+Item js_dom_make_rect(double x, double y, double width, double height) {
     Item rect = js_new_object();
-    js_dom_set_number_property(rect, "x", x);
-    js_dom_set_number_property(rect, "y", y);
-    js_dom_set_number_property(rect, "top", y);
-    js_dom_set_number_property(rect, "left", x);
-    js_dom_set_number_property(rect, "right", x + width);
-    js_dom_set_number_property(rect, "bottom", y + height);
-    js_dom_set_number_property(rect, "width", width);
-    js_dom_set_number_property(rect, "height", height);
+    js_set_name_key(rect, "x", push_d(x));
+    js_set_name_key(rect, "y", push_d(y));
+    js_set_name_key(rect, "top", push_d(y));
+    js_set_name_key(rect, "left", push_d(x));
+    js_set_name_key(rect, "right", push_d(x + width));
+    js_set_name_key(rect, "bottom", push_d(y + height));
+    js_set_name_key(rect, "width", push_d(width));
+    js_set_name_key(rect, "height", push_d(height));
     return rect;
 }
+
+JS_FORWARD_STATIC_ITEM(js_dom_make_rect_object,
+    (float x, float y, float width, float height),
+    js_dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
 
 static float js_dom_svg_number(Item value, float fallback) {
     Item numeric = js_to_number(value);
