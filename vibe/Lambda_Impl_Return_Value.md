@@ -2598,3 +2598,47 @@ Explicit non-goals for this performance slice: P2.5 LambdaJS migration,
 loop/statement number-stack reclaim, source-language type changes, C2MIR
 support, and vendored MIR changes. Those may remain valid roadmap items, but
 mixing them into P1.7 would make the Result30 attribution unreviewable.
+
+### 6.9 Lambda-v3 public-wrapper ABI audit (2026-08-17)
+
+**Landed:** the final Lambda-v3 caller-side residue found by the post-Action-C
+audit is removed. A public `_b` wrapper already declared the RV12
+`FN_COMPANION_CONTEXT_SLOT` transport, but its descriptor retained a non-zero
+legacy `scalar_home_lane_mask`. `em_call_direct` interpreted that mask as a
+physical trailing argument, allocated a number-stack home, and passed an
+undeclared pointer to the wrapper. The native ABI ignored the surplus operand,
+so this was dead work rather than a visible wrong-answer, but it left the
+scalar-home census non-zero and made the descriptor internally contradictory.
+
+The shared call lowering now derives the trailing operand, call metadata, and
+home binding exclusively from `FN_COMPANION_HOME`. Lambda's v3 public entry
+publishes a zero home mask after selecting its context-slot transport;
+LambdaJS explicitly publishes `FN_COMPANION_HOME` because P2.5 has not
+migrated its generated functions. This preserves its v2 ABI rather than
+accidentally changing it under the shared emitter. The root-cause guard is
+the v3 `scalar_home_donation` fixture plus its MT7 frame ratchet: the
+`darwin-debug-v3` `main` frame has **zero** scalar homes for both donation and
+tail-forward. The default profile retains the v2 home budget, so the fallback
+ABI remains covered instead of being silently redefined. This is a D5.2.1v2 /
+D8.4.2v2 ABI
+consistency repair, not a claim that number-stack payload ownership
+(D5.2.2v2) has disappeared.
+
+**Outstanding follow-up actions remain deliberately separated:**
+
+1. **P2.5 — LambdaJS migration.** Convert its entries and calls together to
+   result-pair/context-slot transport, then require node and Test262 gates.
+   Do not delete its explicit `FN_COMPANION_HOME` descriptor before that
+   migration; its callee epilogues still consume a donated caller home.
+2. **P2.7 / DO24 — helper-loop reclaim.** The current v3 measurement declined
+   the broad protocol change: it is structurally blocked by binding-owned
+   slots and gives a net code-size loss for the measured workloads. Reopen
+   only for an int64-heavy target with a recorded peak-side-stack problem.
+3. **P4 — documentation closure.** Keep the formal status synchronized with
+   the shipping default, then finish the Stack_Frame and overview cross-links
+   once the remaining compatibility paths have their final disposition.
+4. **P5 — deletion.** Only after P2.5 and the P2.7 disposition are settled,
+   remove the v2 selector, home-specific descriptor fields, coloring helpers,
+   imports, and compatibility ABI; re-run the complete census and ratchet at
+   zero physical caller homes. Do not confuse this P5 work with the retained
+   side-number-stack storage that D5.2.2v2 requires for live wide payloads.

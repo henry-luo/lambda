@@ -4520,6 +4520,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // for entries that can return a wide scalar.
         public_entry->result.shape = em_return_shape(false, false,
             em_scalar_return_mode_for_class(scalar_class));
+        // until P2.5 migrates LambdaJS, generated functions still
+        // declare the v2 trailing home, even while Lambda uses v3 transports.
+        public_entry->result.companion = FN_COMPANION_HOME;
         int env_param_count = fc->capture_count > 0 ? 1 : 0;
         int physical_param_count = fc->param_count + env_param_count;
         public_entry->param_count = physical_param_count + 1;
@@ -4547,6 +4550,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->result.scalar_home_lane_mask =
             scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
         body->result.shape = public_entry->result.shape;
+        // keep the descriptor aligned with the still-shipping LambdaJS v2 ABI.
+        body->result.companion = FN_COMPANION_HOME;
         body->param_count = physical_param_count;
         if (physical_param_count > 0) {
             body->params = (FnParamAnalysis*)pool_calloc(

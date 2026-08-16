@@ -21635,7 +21635,7 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         // A boxed wrapper can carry a subnormal or wide integer even when
         // static inference chose a native body, so its public ABI is dynamic.
         SCALAR_RETURN_DYNAMIC, true};
-    public_entry->result.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+    uint8_t public_scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
     // RV10 §6: the boxed public entry is the one every DYNAMIC call site
     // dispatches through, so it always speaks the universal pair shape — even
     // when the body underneath returns natively.
@@ -21645,7 +21645,15 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     // context slot (RV12), never a second MIR result.
     public_entry->result.companion = em_companion_transport(
         public_entry->result.shape, /*c_reachable=*/true,
-        public_entry->result.scalar_home_lane_mask);
+        public_scalar_home_lane_mask);
+    // the v3 slot is a context field, not a trailing pointer parameter.  Do
+    // not publish the legacy mask here: direct callers used it to pass an
+    // undeclared `_scalar_home` after the wrapper moved to the slot ABI.
+    public_entry->result.scalar_home_lane_mask =
+        public_entry->result.companion == FN_COMPANION_HOME
+            ? public_scalar_home_lane_mask : 0;
+    public_entry->result.normal.may_need_caller_scalar_home =
+        public_entry->result.scalar_home_lane_mask != 0;
     public_entry->param_count = param_count;
 
     FnVariantAnalysis* body = analysis

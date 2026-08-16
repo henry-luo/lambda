@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so the int64 argument stays native at the callsite. Return convention 2: caller-donated scalar home \u2014 the deferred int64 argument is boxed and adopted before its number watermark is restored directly, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21). Return convention 3 (RV1 shape 2): the body carries no home parameter and returns two lanes instead. The `main` group asserted a helper-call adopt on the argument boxing; RV14 (2026-08-15) retired that \u2014 a C helper owns no watermark, so its wide result stays on the number stack and the caller rehomes nothing. The group now pins the boxing and the wrapper call, and forbids the adopt.",
+  "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so the int64 argument stays native at the callsite. Return convention 2: caller-donated scalar home \u2014 the deferred int64 argument is boxed and adopted before its number watermark is restored directly, then enters the boxed companion required by the inferred exact-shape plan (Stack API #15/#16/#19/#21). Return convention 3 (RV1 shape 2): the body carries no home parameter and returns two lanes instead. Its public `_b` wrapper uses the RV12 context slot, so its direct caller must also carry no trailing home; the MT7 frame budget pins that physical ABI. The `main` group asserted a helper-call adopt on the argument boxing; RV14 (2026-08-15) retired that \u2014 a C helper owns no watermark, so its wide result stays on the number stack and the caller rehomes nothing. The group now pins the boxing and the wrapper call, and forbids the adopt.",
   "checks": [
     {
       "in_func": "_twice_#",
@@ -33,6 +33,16 @@
       "count": {
         "call\tbox_int64_result_or_error_p": 1
       },
+      "expect": [
+        "call\t_twice_b_"
+      ],
+      "forbid": [
+        "lambda_item_adopt_scalar_home"
+      ]
+    },
+    {
+      "in_func": "main",
+      "return_convention": 3,
       "expect": [
         "call\t_twice_b_"
       ],

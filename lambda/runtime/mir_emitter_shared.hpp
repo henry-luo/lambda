@@ -847,13 +847,11 @@ static inline FnReturnShape em_return_shape(bool native_return, bool can_raise,
 
 // Is this entry's lane 2 physically a second MIR result?
 //
-// Two transports can carry a shape-2 return, and the existing descriptor fields
-// already tell them apart: a non-zero `scalar_home_lane_mask` means the v2
-// trailing caller-donated home, zero means the v3 register pair. Entries that
-// must stay callable from C (the public `_b` wrappers reached through the
-// boxed-call trampolines and `fn->invoke`) therefore keep the home transport
-// while internal bodies move to pairs, with no mixed-convention ambiguity —
-// the call site reads the callee's descriptor, never its own locals (RV10).
+// a scalar-home mask describes which lane would use a v2 home; it does not by
+// itself describe the physical ABI.  The transport does: v3 public `_b`
+// wrappers use a context slot even when their boxed result is wide-capable.
+// call sites must read the transport rather than recreating the old mask rule
+// (RV10), or they append an argument the wrapper never declared.
 //
 // Windows x86-64 hard-errors on nres > 1 (`mir-x86_64.c`), so RV12 lowers lane
 // 2 to a context slot there; that lowering lands in P3.
@@ -867,6 +865,15 @@ static inline bool em_returns_result_pair(FnCompanionTransport companion) {
 
 static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
     return variant && em_returns_result_pair(variant->result.companion);
+}
+
+// the trailing pointer exists only for the v2 caller-donated-home transport.
+// in particular, a v3 context-slot wrapper can still return a dynamic scalar
+// but has no `_scalar_home` parameter.  keeping this predicate transport-based
+// prevents direct calls from silently growing a stale extra ABI argument.
+static inline bool em_variant_accepts_scalar_home(
+        const FnVariantAnalysis* variant) {
+    return variant && variant->result.companion == FN_COMPANION_HOME;
 }
 
 // RV9 — the ONE definition of how lane 2 spells "no error", for both sides.
@@ -3630,8 +3637,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         const MirCallOptions* options = NULL) {
     MirCallResult call_result = {};
     if (!em || !target || source_nargs < 0) return call_result;
-    bool accepts_scalar_home = variant &&
-        variant->result.scalar_home_lane_mask != 0;
+    bool accepts_scalar_home = em_variant_accepts_scalar_home(variant);
     // Context-aware generated entries carry EvalContext in a call register.
     // The option keeps JS on its current ABI until its full entry/call graph is
     // migrated as one unit.
@@ -3745,20 +3751,20 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     metadata.normal_result.transport = JIT_RETURN_MIR_RESULT;
     metadata.normal_result.scalar_class = normal.scalar_class;
     metadata.normal_result.may_use_scalar_return_home =
-        normal.may_need_caller_scalar_home;
+        accepts_scalar_home && normal.may_need_caller_scalar_home;
     if (variant && variant->result.error_lane == FN_ERROR_LANE_CONTEXT_ITEM) {
         metadata.error_result.value = {JIT_ABI_ITEM, JIT_VALUE_BOXED_ITEM};
         metadata.error_result.transport = JIT_RETURN_CONTEXT_ERROR;
         metadata.error_result.scalar_class =
             variant->result.error.scalar_class;
         metadata.error_result.may_use_scalar_return_home =
-            variant->result.error.may_need_caller_scalar_home;
+            accepts_scalar_home && variant->result.error.may_need_caller_scalar_home;
     }
     metadata.abi_args = abi_args;
     metadata.abi_arg_count = (uint16_t)nargs;
     metadata.source_arg_count = (uint16_t)source_nargs;
     metadata.scalar_return_home_arg_index = (int16_t)scalar_home_arg_index;
-    metadata.scalar_home_lane_mask = variant
+    metadata.scalar_home_lane_mask = accepts_scalar_home
         ? variant->result.scalar_home_lane_mask : 0;
     // RV10: read the callee's shape, never derive one here. An unknown callee
     // is assumed to speak the universal pair shape (§6).
