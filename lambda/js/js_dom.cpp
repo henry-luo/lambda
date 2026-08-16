@@ -2080,6 +2080,9 @@ static void js_dom_register_live_collection(Item collection, DomDocument* doc,
 
 static void _register_live_form_collection(Item collection, DomDocument* doc,
                                            DomElement* owner, int kind) {
+    // The generic helper receives state-owned table pointers by value; initialize
+    // the realm state before those arguments are evaluated (D5.2).
+    if (!js_dom_collection_runtime_state_ensure()) return;
     js_dom_register_live_collection(collection, doc, owner, kind,
         s_live_form_collections, &s_live_form_collection_count,
         LIVE_FORM_COLLECTION_CACHE_SIZE);
@@ -2110,6 +2113,9 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
     if (!query) return;
     if (!doc && root) doc = root->doc;
     if (!doc && !root) return;
+    // The generic helper receives state-owned table pointers by value; initialize
+    // the realm state before those arguments are evaluated (D5.2).
+    if (!js_dom_collection_runtime_state_ensure()) return;
     String* query_name = heap_create_name(query);
     js_dom_register_live_collection(collection, doc, root, kind,
         s_live_lookup_collections, &s_live_lookup_collection_count,
@@ -2302,19 +2308,27 @@ static void _refresh_live_lookup_collection(Item collection, LiveLookupCollectio
 static Item _new_live_lookup_collection(DomDocument* doc, DomElement* root,
                                         int kind, bool include_root,
                                         Item query_item, const char* ctor_name) {
-    const char* query = js_dom_to_dom_string_cstr(query_item);
+    // Collection registration allocates realm state and wraps matching nodes;
+    // keep both the query and newly allocated array rooted across those GC
+    // boundaries (S6.4, D5.2). Without this, the weak cache can retain a
+    // reclaimed array while the refresh walk is still populating it.
+    JS_ROOTS(roots,
+        query_root, query_item,
+        collection_root, js_array_new(0));
+    const char* query = js_dom_to_dom_string_cstr(query_root.get());
     if (!query) return ItemNull;
-    Item collection = js_array_new(0);
+    Item collection = collection_root.get();
     _register_live_lookup_collection(collection, doc, root, kind, include_root, query);
     LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
     _refresh_live_lookup_collection(collection, entry);
     if (ctor_name) _decorate_dom_collection(collection, ctor_name);
-    return collection;
+    return collection_root.get();
 }
 
 extern "C" Item js_dom_live_child_collection_bridge(void* elem_ptr, bool elements_only) {
     DomElement* elem = (DomElement*)elem_ptr;
-    Item collection = js_array_new(0);
+    JS_ROOTS(roots, collection_root, js_array_new(0));
+    Item collection = collection_root.get();
     if (!elem) return collection;
     int kind = elements_only ? LIVE_CHILD_COLLECTION_CHILDREN : LIVE_CHILD_COLLECTION_CHILD_NODES;
     _register_live_child_collection(collection, elem, kind);
@@ -2322,29 +2336,31 @@ extern "C" Item js_dom_live_child_collection_bridge(void* elem_ptr, bool element
     // DOM child collections are live; registering the owner lets the array
     // refresh before script reads instead of freezing a stale mutation snapshot.
     if (elements_only) _decorate_dom_collection(collection, "HTMLCollection");
-    return collection;
+    return collection_root.get();
 }
 
 extern "C" Item js_dom_live_document_forms_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    Item collection = js_array_new(0);
+    JS_ROOTS(roots, collection_root, js_array_new(0));
+    Item collection = collection_root.get();
     if (!doc) return collection;
     _register_live_form_collection(collection, doc, nullptr, LIVE_FORM_COLLECTION_DOCUMENT_FORMS);
     LiveFormCollectionEntry* entry = _live_form_collection_entry(collection);
     _refresh_live_form_collection(collection, entry);
     _decorate_dom_collection(collection, "HTMLCollection");
-    return collection;
+    return collection_root.get();
 }
 
 extern "C" Item js_dom_live_form_elements_bridge(void* elem_ptr) {
     DomElement* form = (DomElement*)elem_ptr;
-    Item collection = js_array_new(0);
+    JS_ROOTS(roots, collection_root, js_array_new(0));
+    Item collection = collection_root.get();
     if (!form) return collection;
     _register_live_form_collection(collection, form->doc, form, LIVE_FORM_COLLECTION_FORM_ELEMENTS);
     LiveFormCollectionEntry* entry = _live_form_collection_entry(collection);
     _refresh_live_form_collection(collection, entry);
     _decorate_dom_collection(collection, "HTMLFormControlsCollection");
-    return collection;
+    return collection_root.get();
 }
 
 #define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, ctor_name) \
