@@ -5522,6 +5522,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-mir: module: failed to create transpiler for '%s'", filename);
+        // keep the TLA depth balanced when parser construction fails before a
+        // compile unit exists; otherwise later modules inherit a stale depth.
+        js_tla_exit_module();
         return ItemNull;
     }
     jm_track_active_js_transpile(tp, NULL, NULL);
@@ -5533,8 +5536,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         // probes (async_required check), which SEGV when the heap was never
         // initialized for this test.
         log_error("js-mir: module: parse failed for '%s'", filename);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+            runtime, context, true);
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -5543,8 +5546,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+            runtime, context, true);
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -5556,8 +5559,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     int p7b_early_errors = js_check_early_errors(tp, js_ast);
     if (p7b_early_errors > 0) {
         log_error("js-mir: module: %d early error(s) for '%s'", p7b_early_errors, filename);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+            runtime, context, true);
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -5594,16 +5597,15 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: module: MIR context init failed for '%s'", filename);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+            runtime, context, true);
         return ItemNull;
     }
 
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, true, 64, 32, 16, "js-mir: module");
     if (!mt) {
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
+            runtime, context, true);
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
@@ -5616,11 +5618,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     if (!transpile_js_mir_ast(mt, js_ast)) {
         log_error("js-mir: module: collection/allocation failed for '%s'", filename);
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, context, true);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -5630,11 +5629,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!js_prelink_compiled_name_table(mt)) {
         log_error("js-mir: module: failed to prelink property-name table for '%s'",
             filename ? filename : "<module>");
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, context, true);
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -5645,11 +5641,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!js_activate_runtime_name_pool()) {
         log_error("js-mir: module: failed to activate dynamic NamePool for '%s'",
             filename ? filename : "<module>");
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, context, true);
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
     }
@@ -5666,22 +5659,16 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         // the failed graph into a successful empty namespace.
         log_debug("js-mir: module '%s' dependency evaluation failed",
             filename ? filename : "<module>");
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, context, true);
         js_tla_exit_module();
         return js_throw_value(imported_error.get());
     }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: module: NULL labels detected for '%s'", filename);
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, context, true);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -5692,11 +5679,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     if (!js_main) {
         log_error("js-mir: module: failed to find js_main for '%s'", filename);
-        jm_clear_active_js_transpile(NULL, mt, NULL);
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
+        (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, context, true);
         return ItemNull;
     }
 

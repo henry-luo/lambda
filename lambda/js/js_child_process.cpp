@@ -867,16 +867,14 @@ static void spawn_emit_or_queue_cluster_online(Item obj) {
 }
 
 static Item spawn_emit_cluster_online_later(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (env) spawn_emit_event(env[0], "online", NULL, 0);
     return make_js_undefined();
 }
 
 static void spawn_schedule_cluster_online(Item obj) {
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
-    Item callback = js_new_native_closure(spawn_emit_cluster_online_later, 0, env, 1);
-    js_next_tick_enqueue(callback);
+    Item values[1] = { obj };
+    JS_TICK_N(spawn_emit_cluster_online_later, 0, values, 1);
 }
 
 static void spawn_flush_cluster_online(Item obj) {
@@ -892,7 +890,7 @@ static void spawn_flush_cluster_online(Item obj) {
 JS_FORWARD_STATIC_VOID( js_child_process_emit_or_queue_cluster_online, (Item obj), spawn_emit_or_queue_cluster_online, (obj))
 
 static Item spawn_emit_error_later(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     Item obj = env[0];
     Item err = env[1];
     spawn_emit_event(obj, "error", &err, 1);
@@ -900,7 +898,7 @@ static Item spawn_emit_error_later(Item env_item) {
 }
 
 static Item spawn_emit_spawn_later(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     Item obj = env[0];
     spawn_emit_event(obj, "spawn", NULL, 0);
     return make_js_undefined();
@@ -925,18 +923,14 @@ static Item spawn_send_callback_later(Item env_item) {
 }
 
 static void schedule_spawn_error(Item obj, Item err) {
-    Item* env = js_alloc_env(2);
-    env[0] = obj;
-    env[1] = err;
-    Item callback = js_new_native_closure(spawn_emit_error_later, 0, env, 2);
-    js_setTimeout(callback, (Item){.item = i2it(0)});
+    Item values[2] = { obj, err };
+    (void)JS_TIMEOUT_N(spawn_emit_error_later, 0,
+        (Item){.item = i2it(0)}, values, 2);
 }
 
 static void schedule_spawn_event(Item obj) {
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
-    Item callback = js_new_native_closure(spawn_emit_spawn_later, 0, env, 1);
-    js_next_tick_enqueue(callback);
+    Item values[1] = { obj };
+    JS_TICK_N(spawn_emit_spawn_later, 0, values, 1);
 }
 
 static Item make_ipc_channel_closed_error(void) {

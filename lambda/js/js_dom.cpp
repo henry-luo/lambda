@@ -1999,48 +1999,90 @@ static DomElement* _live_child_collection_owner(Item collection, int* out_kind) 
         s_live_child_collection_count, collection, out_kind);
 }
 
-static void _register_live_form_collection(Item collection, DomDocument* doc,
-                                           DomElement* owner, int kind) {
+template <typename Entry>
+struct JsDomLiveCollectionTraits;
+
+template <>
+struct JsDomLiveCollectionTraits<LiveFormCollectionEntry> {
+    static DomDocument* doc(LiveFormCollectionEntry* entry) { return entry->doc; }
+    static DomElement* subject(LiveFormCollectionEntry* entry) { return entry->owner; }
+    static DomNodeRef* pin_ref(LiveFormCollectionEntry* entry) {
+        return &entry->owner_ref;
+    }
+    static void assign(LiveFormCollectionEntry* entry, DomDocument* doc,
+            DomElement* subject, int kind) {
+        entry->doc = doc;
+        entry->owner = subject;
+        entry->kind = kind;
+    }
+};
+
+template <>
+struct JsDomLiveCollectionTraits<LiveLookupCollectionEntry> {
+    static DomDocument* doc(LiveLookupCollectionEntry* entry) { return entry->doc; }
+    static DomElement* subject(LiveLookupCollectionEntry* entry) { return entry->root; }
+    static DomNodeRef* pin_ref(LiveLookupCollectionEntry* entry) {
+        return &entry->root_ref;
+    }
+    static void assign(LiveLookupCollectionEntry* entry, DomDocument* doc,
+            DomElement* subject, int kind) {
+        entry->doc = doc;
+        entry->root = subject;
+        entry->kind = kind;
+    }
+};
+
+template <typename Entry>
+static void js_dom_register_live_collection(Item collection, DomDocument* doc,
+        DomElement* subject, int kind, Entry* entries, int* count, int capacity) {
     if (!js_dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return;
-    if (!doc && owner) doc = owner->doc;
-    if (!doc && !owner) return;
-    for (int i = 0; i < s_live_form_collection_count; i++) {
-        if (s_live_form_collections[i].array == collection.array) {
-            DomElement* pin_owner = owner ? owner : doc->root;
-            DomElement* old_owner = s_live_form_collections[i].owner
-                ? s_live_form_collections[i].owner : s_live_form_collections[i].doc->root;
-            if (old_owner != pin_owner || s_live_form_collections[i].doc != doc) {
-                live_collection_unpin(s_live_form_collections[i].doc,
-                                      &s_live_form_collections[i].owner_ref);
-                if (!live_collection_pin(doc, pin_owner,
-                        &s_live_form_collections[i].owner_ref)) return;
-            }
-            s_live_form_collections[i].doc = doc;
-            s_live_form_collections[i].owner = owner;
-            s_live_form_collections[i].kind = kind;
-            return;
+    if (!doc && subject) doc = subject->doc;
+    if (!doc && !subject) return;
+    DomElement* pin_owner = subject ? subject : doc->root;
+    for (int i = 0; i < *count; i++) {
+        Entry* entry = &entries[i];
+        if (entry->array != collection.array) continue;
+        DomElement* old_pin_owner = JsDomLiveCollectionTraits<Entry>::subject(entry);
+        if (!old_pin_owner) {
+            DomDocument* old_doc = JsDomLiveCollectionTraits<Entry>::doc(entry);
+            old_pin_owner = old_doc ? old_doc->root : nullptr;
         }
+        if (old_pin_owner != pin_owner || JsDomLiveCollectionTraits<Entry>::doc(entry) != doc) {
+            live_collection_unpin(JsDomLiveCollectionTraits<Entry>::doc(entry),
+                JsDomLiveCollectionTraits<Entry>::pin_ref(entry));
+            if (!live_collection_pin(doc, pin_owner,
+                    JsDomLiveCollectionTraits<Entry>::pin_ref(entry))) return;
+        }
+        JsDomLiveCollectionTraits<Entry>::assign(entry, doc, subject, kind);
+        return;
     }
-    int entry_index = s_live_form_collection_count;
-    for (int i = 0; i < s_live_form_collection_count; i++) {
-        if (!s_live_form_collections[i].array) {
-            live_collection_unpin(s_live_form_collections[i].doc,
-                                  &s_live_form_collections[i].owner_ref);
+    int entry_index = *count;
+    for (int i = 0; i < *count; i++) {
+        Entry* entry = &entries[i];
+        if (!entry->array) {
+            live_collection_unpin(JsDomLiveCollectionTraits<Entry>::doc(entry),
+                JsDomLiveCollectionTraits<Entry>::pin_ref(entry));
             entry_index = i;
             break;
         }
     }
-    if (entry_index >= LIVE_FORM_COLLECTION_CACHE_SIZE) return;
-    LiveFormCollectionEntry* entry = &s_live_form_collections[entry_index];
-    DomElement* pin_owner = owner ? owner : doc->root;
-    if (!live_collection_pin(doc, pin_owner, &entry->owner_ref)) return;
+    if (entry_index >= capacity) return;
+    Entry* entry = &entries[entry_index];
+    if (!live_collection_pin(doc, pin_owner,
+            JsDomLiveCollectionTraits<Entry>::pin_ref(entry))) return;
     entry->array = collection.array;
-    entry->doc = doc;
-    entry->owner = owner;
-    entry->kind = kind;
+    JsDomLiveCollectionTraits<Entry>::assign(entry, doc, subject, kind);
+    // the cache is a weak observer; the array must not keep its own slot alive.
     heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
-    if (entry_index == s_live_form_collection_count) s_live_form_collection_count++;
+    if (entry_index == *count) (*count)++;
+}
+
+static void _register_live_form_collection(Item collection, DomDocument* doc,
+                                           DomElement* owner, int kind) {
+    js_dom_register_live_collection(collection, doc, owner, kind,
+        s_live_form_collections, &s_live_form_collection_count,
+        LIVE_FORM_COLLECTION_CACHE_SIZE);
 }
 
 template <typename Entry>
@@ -2060,54 +2102,22 @@ static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
         s_live_form_collection_count, collection);
 }
 
+static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection);
+
 static void _register_live_lookup_collection(Item collection, DomDocument* doc,
                                              DomElement* root, int kind,
                                              bool include_root, const char* query) {
-    if (!js_dom_collection_runtime_state_ensure()) return;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !query) return;
+    if (!query) return;
     if (!doc && root) doc = root->doc;
     if (!doc && !root) return;
     String* query_name = heap_create_name(query);
-    for (int i = 0; i < s_live_lookup_collection_count; i++) {
-        if (s_live_lookup_collections[i].array == collection.array) {
-            DomElement* pin_root = root ? root : doc->root;
-            DomElement* old_root = s_live_lookup_collections[i].root
-                ? s_live_lookup_collections[i].root : s_live_lookup_collections[i].doc->root;
-            if (old_root != pin_root || s_live_lookup_collections[i].doc != doc) {
-                live_collection_unpin(s_live_lookup_collections[i].doc,
-                                      &s_live_lookup_collections[i].root_ref);
-                if (!live_collection_pin(doc, pin_root,
-                        &s_live_lookup_collections[i].root_ref)) return;
-            }
-            s_live_lookup_collections[i].doc = doc;
-            s_live_lookup_collections[i].root = root;
-            s_live_lookup_collections[i].query = query_name;
-            s_live_lookup_collections[i].kind = kind;
-            s_live_lookup_collections[i].include_root = include_root;
-            return;
-        }
-    }
-    int entry_index = s_live_lookup_collection_count;
-    for (int i = 0; i < s_live_lookup_collection_count; i++) {
-        if (!s_live_lookup_collections[i].array) {
-            live_collection_unpin(s_live_lookup_collections[i].doc,
-                                  &s_live_lookup_collections[i].root_ref);
-            entry_index = i;
-            break;
-        }
-    }
-    if (entry_index >= LIVE_LOOKUP_COLLECTION_CACHE_SIZE) return;
-    LiveLookupCollectionEntry* entry = &s_live_lookup_collections[entry_index];
-    DomElement* pin_root = root ? root : doc->root;
-    if (!live_collection_pin(doc, pin_root, &entry->root_ref)) return;
-    entry->array = collection.array;
-    entry->doc = doc;
-    entry->root = root;
+    js_dom_register_live_collection(collection, doc, root, kind,
+        s_live_lookup_collections, &s_live_lookup_collection_count,
+        LIVE_LOOKUP_COLLECTION_CACHE_SIZE);
+    LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
+    if (!entry) return;
     entry->query = query_name;
-    entry->kind = kind;
     entry->include_root = include_root;
-    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
-    if (entry_index == s_live_lookup_collection_count) s_live_lookup_collection_count++;
 }
 
 static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {

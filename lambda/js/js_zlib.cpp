@@ -191,7 +191,7 @@ JS_FORWARD_STATIC_ITEM(throw_zlib_error, (const char* method, int zret, const ch
 JS_FORWARD_ITEM(js_zlib_throw_error_status, (const char* method, int status), throw_zlib_error, (method, status, NULL))
 
 static Item js_zlib_emit_callback(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (!env) return make_js_undefined();
 
     Item callback = env[0];
@@ -210,11 +210,8 @@ static Item js_zlib_emit_callback(Item env_item) {
 }
 
 static void js_zlib_schedule_callback(Item callback, Item err, Item result) {
-    Item* env = js_alloc_env(3);
-    env[0] = callback;
-    env[1] = err;
-    env[2] = result;
-    js_next_tick_enqueue(js_new_native_closure(js_zlib_emit_callback, 0, env, 3));
+    Item values[3] = { callback, err, result };
+    JS_TICK_N(js_zlib_emit_callback, 0, values, 3);
 }
 
 static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
