@@ -21,5 +21,4 @@
     X(js_decimal_to_percent_hex_string) \
     X(js_test262_build_string) \
     X(js_test262_decimal_to_percent_hex_string) \
-    X(js_test262_concat_percent_hex) \
-    X(js_validate_native_function_source)
+    X(js_test262_concat_percent_hex)

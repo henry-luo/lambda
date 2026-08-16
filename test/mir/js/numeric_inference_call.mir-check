@@ -9,8 +9,7 @@
       ],
       "forbid": [
         "it2d",
-        "d2i",
-        "js_profiled_it2d"
+        "d2i"
       ]
     }
   ]

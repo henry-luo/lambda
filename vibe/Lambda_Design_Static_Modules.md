@@ -249,7 +249,7 @@ The rev-4 full-tree scan found **56 violating includes in ~24 files** under the 
 
 Findings that adjust earlier sections:
 
-- `emit_sexpr.cpp` is the AST s-expression emitter (formal-semantics bridge) — reclassified **rt**, removed from the §9.1 core list; `print.cpp`'s `print_ast_node` follows it. `lambda/js/js_exec_profile_weak.h` is rt instrumentation and remains rt; lower code must not include it after the data/GC split. `lambda-number-runtime.hpp` is rt by its scalar-home/boxing role; extract any representation-only definitions needed by core into a core number header rather than moving the runtime header wholesale.
+- `emit_sexpr.cpp` is the AST s-expression emitter (formal-semantics bridge) — reclassified **rt**, removed from the §9.1 core list; `print.cpp`'s `print_ast_node` follows it. `lambda-number-runtime.hpp` is rt by its scalar-home/boxing role; extract any representation-only definitions needed by core into a core number header rather than moving the runtime header wholesale.
 - Even rule 1 (`lib` self-contained) is not clean today: six lib files need the §8.2 outcomes.
 - The core→rt heap seam is currently papered over by **multiple weak-symbol fallbacks**: `heap_alloc` in `lambda-decimal.cpp`, and data-zone/root/weak/overflow fallbacks in `lambda-data.cpp`. P1 removes them by splitting runtime behavior upward rather than replacing them with an optional core heap service (§9.2–§9.3). Weak definitions hide missing-registration errors and neutralize the tier-2 no-undefined check.
 - The include audit cannot see **extern-declared** upward calls (`heap_alloc` core→rt [SM6]; `dispatch_emit` rt→radiant, `counter_format`/`resolve_symbol*` io→radiant [SM8/SM9]) — catching those is exactly the tier-2 link build's job.
@@ -266,7 +266,7 @@ Per-file inventory from the audit with decided resolutions — the concrete migr
 | `lambda/name_pool.hpp`, `shape_pool.hpp`, `shape_builder.hpp`, `utf_string.h`, `binary.h` | mixed legacy/active `lambda.h` | migrate active code to the core value header; rt declarations move to `lambda-runtime.h`; frozen C2MIR compatibility surfaces are not edited (SM14) |
 | `lambda/lambda-error.cpp` | mixed `lambda.h` | include the active core value header; any runtime behavior in the TU moves rt |
 | `lambda/print.cpp` | `ast.hpp` | `TypeType` already core (`lambda-data.hpp:623`); extract `print_ast_node` (:936) → rt |
-| `lambda/lambda-data.cpp` | `ast.hpp`, `js/js_exec_profile_weak.h`, `lambda-number-runtime.hpp`, rt `Context`/roots/heap calls | split the TU by behavior (§9.2–§9.3): representation and pool/arena operations → core; safepoint/rooting/scalar-home/runtime boxing → `lambda-data-runtime.cpp` or another rt TU |
+| `lambda/lambda-data.cpp` | `ast.hpp`, `lambda-number-runtime.hpp`, rt `Context`/roots/heap calls | split the TU by behavior (§9.2–§9.3): representation and pool/arena operations → core; safepoint/rooting/scalar-home/runtime boxing → `lambda-data-runtime.cpp` or another rt TU |
 | `lambda/emit_sexpr.cpp` | `transpiler.hpp` | file reclassified → rt |
 
 **io → rt (P1)** — the full detail:
