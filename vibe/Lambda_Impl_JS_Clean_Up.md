@@ -191,7 +191,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
 - [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
-- [~] C3.6 DOM tables — (a) reflection table, (c) element walker + std:: removal, (g) URL component table done; (b)(d)(e)(f)(h)(i) pending
+- [~] C3.6 DOM tables — (a) reflection, (b) prop-id, (c) walker, (g) URL done; (d)(e)(f)(h)(i) pending
 - [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
 - [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
 - [ ] C4.1 unified renderer (golden-gated)
@@ -358,5 +358,22 @@ Assessed, not done:
   a create/name/cross-link/publish skeleton, but each adds bespoke steps
   (prototype chaining to Blob or Array, extra statics, `Symbol.toStringTag`).
   Worth about 40 lines, with rooting subtleties across all eight blocks.
-- **(b) property-ID dispatch** — the largest remaining piece, and the one the
-  plan expects to *improve* performance. Not started.
+- **(b) property-ID dispatch** — **done**, with a caveat. `JS_DOM_PROPS` names
+  all 147 dispatched properties and `js_dom_prop_id` resolves one with a
+  binary search; the 201 `strcmp(prop, ...)` tests are now integer compares.
+  `js_dom_element_operation_impl` needed nothing — it already dispatches on a
+  `JubeDomElementOperation` enum.
+
+  **The predicted performance win is not there.** Measured on release builds:
+  the `test/js` DOM suite is unchanged (20.88s vs 20.93s over 20 runs) and a
+  property-access microbenchmark gains about 2% (0.964s → 0.948s). The JS
+  execution loop dominates, not the dispatch. Success criterion 5's
+  expectation that "DOM property access ... [is] expected to improve" should
+  be struck.
+
+  It costs +195 lines, so it also works against criterion 2 on its own. It was
+  kept for the two benefits that survive the measurement: 201 scattered string
+  literals become one list, and a misspelled property name is a compile error
+  instead of a silently dead branch — the drift class C0.5 came from. It is
+  also the prerequisite for turning the chains into switches, which is where
+  (b)'s line reduction actually lives; that follow-up is now cheap.
