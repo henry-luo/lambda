@@ -852,6 +852,19 @@ design until the consumer work lands; what changed is that the type now says
 
 ### 2026-08-15 — RV9 un-deopt LANDED on the float lane
 
+> ⛔ **SCOPE SUPERSEDED THE SAME DAY — read this entry as history, not as state.**
+> Every "FLOAT only" / "INT stays boxed" claim below was overtaken hours later by
+> **[RVO12 CLOSED: shape 4 on ALL lanes](#2026-08-15--rvo12-closed-shape-4-on-all-lanes-inti64-join-float)**,
+> which landed int and i64 via RV17 → RV18 → the operator gate. The *mechanism*
+> described here (the missing discriminator, the join carrier lie, the consumer
+> surface) is accurate and worth reading; the *scope* is not.
+>
+> This banner exists because its absence had a cost: the RVO12 entry named only
+> the RV17/RV18 sections as superseded, so the 2026-08-16 Result30 review read
+> this entry as current and concluded the INT un-deopt had never landed. Full
+> correction and the four genuinely-open items:
+> [`Lambda_Issue_Int_Return_Undeopt.md`](Lambda_Issue_Int_Return_Undeopt.md).
+
 With the union in place the un-deopt became tractable, and it is now done for
 `float^`: a `^E` fn whose body types as `float | error` **returns natively**.
 Under v3 those functions are exactly **shape 4** — `func d, i64` — the first
@@ -865,7 +878,13 @@ raise arms exit through `emit_function_error_return` on the error lane and
 contribute nothing to the value lane, whose type the union records precisely.
 This is the same reasoning that already admits a tail-raise proc.
 
-**FLOAT only, deliberately.** The `d` return lane has a universal `it2d` fixup
+~~**FLOAT only, deliberately.**~~ **Superseded same day by the RVO12 closure —
+int/i64 landed.** Two corrections to the paragraph that follows: the blocker was
+a missing **discriminator**, not a missing conversion (`it2l` exists and
+`emit_unbox` already handles every int type), and RV18 supplied it by having the
+producer publish its carrier. `twice(x: int) int^` no longer stays boxed — the
+regression test now pins it as **native**, on both the int and i64 lanes.
+The `d` return lane has a universal `it2d` fixup
 for a boxed value arm (the if-merge is boxed — the union's `type_id` is
 `LMD_TYPE_TYPE`), so a boxed success arm still lands correctly on the lane.
 The INT-family native lanes have **no** boxed-to-lane conversion at the return
@@ -892,16 +911,23 @@ destructure / `or` / arithmetic-on-recovered consumers, plus the int case that
 must stay boxed. A regression shows up as `nan`, not as a crash, which is why
 the test asserts values rather than merely running.
 
-**Gates: both flag states green.** What remains of the original deopt is the
+**Gates: both flag states green.** ~~What remains of the original deopt is the
 INT-family lane, blocked on the return-boundary conversion above — that part
-of the earlier "not a small change" conclusion still stands. It touches AST typing, the native-admission proof, and
+of the earlier "not a small change" conclusion still stands.~~ *(Superseded:
+nothing of the original deopt remains — RVO12 closed the INT-family lane the
+same day. The "not a small change" assessment was right about the blast radius,
+which is why it took three changes: RV17 → RV18 → the operator gate.)*
+It touches AST typing, the native-admission proof, and
 every consumer boundary that reopens a scalar lane, and its acceptance gate is
 typed-AWFY timing with the `pnpoly` canary. Both reverts are clean and the
 tree is green; the two attempt records above are the value delivered — they
 convert "un-deopt `can_raise`" from a one-line-sounding plan item into a
 scoped piece of work with its blast radius mapped.
 
-**Deliberately not implemented in this session.** The remaining change lives in the
+~~**Deliberately not implemented in this session.**~~ *(Superseded — it WAS
+implemented later the same session; see the RVO12 entry. The reasoning below
+still explains why it was deferred at this point in the day.)* The remaining
+change lives in the
 native-admission proof, which is precisely where R26's per-call check taxes
 came from, and the plan gates it on typed-AWFY timing with `pnpoly` as the
 named canary plus a fresh `make release` (test runs clobber `lambda.exe` with
@@ -1156,8 +1182,10 @@ rather than the deletion removing it.
 - [x] P1.6 async/yield audit + test — **RVO4 closed**; found and fixed a real
       spill/root publication defect in P1.3
 - [~] P1.7 gate: baseline green both ways + emission fixtures cover both
-      conventions; STILL OPEN — census re-run, MT7 re-ratchet, AWFY stdout
-      diff, release timing/R26 canaries, RVO8/RVO9 measurements
+      conventions; Action B and the first RV6 lazy slice are landed, but the
+      41-pair interleaved canary, full pair census, MT7 re-ratchet, AWFY stdout
+      diff, and RVO8/RVO9 measurements remain open; the Result30 evidence and
+      ordered closure plan are in §6
 - [x] **P2 native lanes + error lane (shape 4)** — *landed + gated
       2026-08-15: 3720/3720 both configurations.* The outage was a
       simplify-level interaction (value-numbered identical constants in the
@@ -1508,7 +1536,9 @@ them; the file's own convention is that each platform re-baselines its own.
 ### 2026-08-15 — RVO12 CLOSED: shape 4 on ALL lanes (int/i64 join float)
 
 *(Later same day; supersedes the "int stays boxed" scope notes in the RV17/
-RV18 sections above.)*
+RV18 sections above **and — added 2026-08-16 — in the "RV9 un-deopt LANDED on
+the float lane" entry above, which was the omission that let a later review
+read FLOAT-only as current state**.)*
 
 The `or`-containment failure that forced the int-widening revert is diagnosed
 and fixed at the root. The caller merge was correct; the abort came from
@@ -2248,3 +2278,262 @@ that boxes int64 in a long loop *will* reach it (measured earlier: clean error
 at ~9M) — but nothing shipping is near it, and the failure mode is a reported
 error rather than corruption. That reprioritizes it from "needed to make RV14
 safe" to "needed to close the complexity bound".
+
+---
+
+## 6. Result30 performance review and ordered follow-up actions (2026-08-16)
+
+This section closes the interpretation gap in P1.7 and turns the Result30
+evidence into an implementation sequence. The important distinction is between
+the two independent questions:
+
+1. did Result30 regress relative to Result29; and
+2. did removing scalar-home traffic make shape-2 calls cheaper?
+
+The answer to the first is **no, not broadly**. The answer to the second is
+**only slightly, because the eliminated home work is cold in these workloads
+while the replacement pair protocol executes on every conservatively-shaped
+call**.
+
+### 6.1 Evidence classification and current conclusion
+
+The published Result29/Result30 reports are separate machine captures. Their
+`/Node` columns are not a valid attribution measure here: Node itself improved
+by **11.6%** between captures, more than either Lambda column. Comparing the
+absolute Lambda timings gives the opposite result from the headline ratios.
+
+| comparison | MIR untyped Result30/29 | MIR typed Result30/29 | interpretation |
+|---|---:|---:|---|
+| published 59-row absolute geomean | **0.9437x** | **0.9403x** | Result30 is 5.6% / 6.0% faster |
+| published Node absolute geomean | **0.8840x** | — | the moving denominator explains the worse `/Node` ratios |
+| same-host, interleaved archived binaries, full AWFY | **0.9845x** | **0.9826x** | Result30 is 1.55% / 1.74% faster on a matched host |
+
+The separate captures also show obvious environment drift: Result30's
+Test262 async phase took 95.9s versus Result29's 25.5s, while later benchmark
+suites and Node moved sharply in the other direction. Therefore the published
+per-row deltas are leads to replay, not causal evidence.
+
+Interleaved replay removes nearly all of the apparent regressions. Untyped
+`fibfp`, `bounce`, `nbody`, `mandelbrot`, `list`, and `sieve` replay between
+-3.9% and +1.7%; there is **no confirmed material untyped regression**. Typed
+`nbody`, `fibfp`, `mandelbrot`, and `fannkuch` also disappear. Two rows remain
+useful:
+
+| typed canary | archived Result30/29 replay | same-tree v3/v2 | disposition |
+|---|---:|---:|---|
+| `jetstream/crypto_sha1` | **1.037x** (41 alternating pairs) | **1.030x** | confirmed companion-lane regression |
+| `awfy/json` | not a published regression | **1.038x** | protocol-sensitive secondary canary |
+
+Typed `awfy/bounce` replayed at +3.1%, but its sub-millisecond body is too
+startup- and frequency-sensitive to use as a primary gate. Typed `fannkuch`
+must not be used as a return-ABI canary: its clocked `_main_251` body is the
+same 1,102-instruction MIR under v2 and v3, and archived Result29/30 replay is
+neutral. Its large one-off same-tree delta is binary-layout/startup noise, not
+evidence about scalar homes.
+
+### 6.2 Why scalar-home simplification has limited benchmark benefit
+
+The v3 MIR is substantially smaller, but static instruction deletion is not
+the same as removal of dynamically hot work:
+
+| typed canary | v2 MIR | v3 MIR | v2 home protocol | v3 protocol |
+|---|---:|---:|---:|---|
+| `crypto_sha1` | 3,997 insns | 3,898 insns | 16 adopts; 333 home insns | 6 pair bodies; 13 eager resolves |
+| `json` | 10,765 insns | 10,384 insns | 84 adopts; 1,785 home insns | 37 pair bodies; 105 eager resolves |
+
+Four facts explain why those deletions do not translate into a proportional
+speedup:
+
+1. **AWFY does not exercise wide scalar homes.** Its measured peak number
+   stack is exactly zero. Normal `int` values and ordinary doubles box inline;
+   only int64 and out-of-band floats need a payload home. The removed payload
+   copies, allocations, and slow adoption arms therefore were not hot.
+2. **The old classify is replaced by two common-path checks.** A shape-2
+   callee runs `em_build_pending_pair` even when its result is an ordinary
+   Item, and the caller immediately runs `em_resolve_pending_pair`. The slow
+   pending arms are cold, but the tag arithmetic, branches, second result, and
+   extra live registers execute for every pair call.
+3. **Shape selection is overly conservative.** `infer_boxed_return_mode`
+   currently assigns `MIR_SCALAR_RETURN_DYNAMIC` to every procedure with a
+   value return. Procedures that can only return inline integers, booleans,
+   containers, strings, null, or errors consequently pay for shape 2 even
+   though no exit can produce a wide payload. `crypto_sha1`'s hot `sha1_ft`
+   and `sha1_kt` calls are examples.
+4. **Resolution is eager, not the normative protocol.** The direct-call path
+   resolves immediately after the call. D5.2.1v2 requires classification at a
+   wide value's birth site, resolution at first consume, patching only on
+   escape, and free tail forwarding. The current implementation is the safe
+   P1.3 form recorded in the checklist, but not the RV6 end state. A possible
+   additional cost from MIR multi-result GVN/register allocation remains RVO8;
+   it is plausible, not yet proven.
+
+D5.2.3 remains the reason helper results may stay in the caller's number
+extent without rehoming. That ownership simplification is correct and removes
+real machinery, but it cannot accelerate AWFY's ordinary inline numbers. The
+loop/statement reclaim should therefore remain a **space-bound correctness
+task**, not be presented as the Result30 performance fix.
+
+### 6.3 Action A — freeze causal performance gates before changing emission
+
+- [ ] Add a repeatable interleaved A/B runner for two release binaries. Run
+      each pair in alternating order; record raw samples, ratio of medians,
+      winner count, commit, binary hash, power state, and stdout equality.
+      Keep run artifacts under `temp/`; copy only the summarized evidence into
+      this document.
+- [ ] Make typed `jetstream/crypto_sha1` the primary P1.7 canary and typed
+      `awfy/json` the secondary structural canary. Use at least 41 alternating
+      pairs for a final canary decision. Do not gate on `fannkuch` or a single
+      sub-millisecond row.
+- [ ] Run the entire AWFY typed and untyped set with at least 9 alternating
+      samples per binary. A standalone ResultN snapshot remains useful for
+      publication, but never substitutes for this matched-host gate.
+- [ ] Capture optimized post-simplify MIR, not only pre-simplify emission, for
+      both canaries. Record function instruction counts, pair-returning bodies,
+      pair call sites, eager resolve sites, calls, branches, and spill/reload
+      traffic. This is the RVO8/RVO9 baseline.
+
+Baseline acceptance: the new runner must reproduce the archived Result30/29
+direction for `crypto_sha1` and show stable stdout before it is used to judge an
+implementation change. If it cannot, stop and fix the measurement; do not tune
+against an unstable row.
+
+### 6.4 Action B — narrow shape 2 with a conservative wide-result proof
+
+This is the smallest likely win and should land independently of lazy pending
+propagation.
+
+- [x] Extend return analysis to classify every reachable value exit as
+      **wide-capable**, **wide-free**, or **unknown**. A function is wide-free
+      only when all value exits are proven to produce scalar-stable Items.
+      `ANY`, unresolved structured types, dynamic calls, and incomplete exit
+      analysis remain unknown and retain shape 2.
+- [x] Select `RETURN_SHAPE_ITEM` / `MIR_SCALAR_RETURN_NONE` for a proven
+      wide-free boxed result. Do not infer this merely from `pn` versus `fn`,
+      and do not change source-level type inference or error containment.
+- [x] Classify at the producer/birth site as required by D5.2.1v2. Reuse the
+      existing return descriptor as the single ABI source; do not add a second
+      shape oracle at call boundaries.
+- [~] Add MIR fixtures proving `sha1_ft` and `sha1_kt` have one result and no
+      pending classify/resolve, plus negative fixtures for int64,
+      out-of-band float, `ANY`, unions capable of carrying a wide scalar, and
+      procedural early returns after checked/await boundaries. The first
+      checked fixture is `test/mir/lambda/return_shape_item.*`; benchmark
+      helper-specific fixtures remain to be added with the census.
+- [ ] Re-run the pair census. Every removed pair must have an explicit
+      wide-free proof; zero false negatives is more important than the total
+      number removed.
+
+Acceptance: both canaries must be no slower than v2 within the paired gate,
+typed and untyped AWFY geomeans must not regress by more than 1%, and all
+correctness/emission gates in §6.7 must pass. If shape narrowing alone closes
+the `crypto_sha1` loss, land it before considering the more invasive Action C.
+
+### 6.5 Action C — complete RV6 lazy `maybe_pending` propagation
+
+For calls that genuinely remain shape 2, implement the D5.2.1v2 lifecycle on
+the existing `MirValue`; do not create a parallel value abstraction.
+
+- [x] Return `{item, companion, maybe_pending}` from the direct-call lowering
+      without immediately calling `em_resolve_pending_pair`. Publish neither
+      lane as an ordinary boxed Item while it may still be pending.
+- [~] Resolve at the first consumer that needs an ordinary Item. Fold the
+      pending arm into existing tag dispatch for arithmetic, comparison,
+      truthiness, type inspection, and unboxing so the non-pending path adds no
+      separate boundary check. The current slice covers the direct-call
+      ordinary-Item/unbox boundary; arithmetic and truthiness folding remain.
+- [x] Patch before every escape: memory store, argument to an unknown or C
+      boundary, root/spill publication, dynamic dispatch, suspension, or
+      return through an incompatible shape. D5.2.2v2's destination-owned
+      scalar storage remains the ownership endpoint. The wrapper, module-main,
+      and root publication paths now materialize at their named escape.
+- [ ] Tail-forward both lanes when caller and callee shapes agree. Resolve
+      only when a tail boundary changes shape; this is the free forwarding
+      required by D5.2.1v2.
+- [ ] Enforce RV4.2 mechanically: at most one pending companion is live; a
+      second call, safepoint, spill, or root publication is illegal until the
+      first value is consumed, forwarded, or patched. Keep the current eager
+      path as a fail-closed fallback for consumers not yet proven safe.
+- [~] Extend forced-GC, async/yield, dynamic-call, error-lane, and slot-wrapper
+      fixtures so a pending Item cannot cross a memory or suspension boundary.
+      The full baseline and Test262 gates cover the existing boundary suite;
+      dedicated pending-crossing fixtures are still pending.
+
+Acceptance: the two canary dumps must no longer contain an eager resolve
+immediately after every pair call; every remaining resolve must be attributable
+to a named consume or escape. The paired timing gate must show no regression
+from Action B. MIR-size reduction alone is not a performance acceptance result.
+
+### 6.6 Action D — close RVO8/RVO9 with native evidence
+
+- [ ] Diff optimized MIR and native disassembly for the hot typed loops before
+      and after Actions B/C. Count physical spills/reloads and identify whether
+      two-result calls prevent value numbering, copy propagation, or call-site
+      register reuse.
+- [ ] If the second lane is live but no wide value is ever produced, fix the
+      shape proof (Action B), not the allocator. If a genuinely shape-2 call
+      still suffers, first try shortening the companion live range or copying
+      the first result out of the call result immediately.
+- [ ] Do not patch vendored MIR. If the evidence points to an optimizer defect,
+      keep the Lambda-side emission workaround principled and shape-driven, or
+      stop for an upstream decision.
+- [ ] Record RVO8 and RVO9 as **confirmed**, **rejected**, or **not measurable**
+      with the dump/disassembly evidence. Do not close either from timing alone.
+
+### 6.7 Landing order, gates, and rollback rules
+
+Land as two independently reversible slices: **B (shape narrowing)**, then
+**C (lazy propagation)**. Action D is measurement attached to both, not a third
+semantic change.
+
+For each slice:
+
+1. run focused return-shape, MIR-emission, ratchet, int64/out-of-band-float,
+   raise/error-lane, dynamic-call, async/yield, and forced-GC tests;
+2. run `make test-lambda-baseline` and `make test262-baseline` because the MIR
+   emitter is shared even though LambdaJS still uses its v2 protocol;
+3. rebuild with `make release` after tests, then run the interleaved canaries
+   and full AWFY gate from §6.3;
+4. require byte-identical benchmark stdout and zero new pending-Item tripwire,
+   root, or number-stack failures;
+5. update the P1.7 checklist, census, RVO8/RVO9 disposition, and this Result30
+   table with the new measured ratios.
+
+Rollback the slice if correctness changes, a pending Item can reach memory, or
+typed/untyped AWFY regresses by more than 1% on the matched-host gate. If a
+canary moves by less than 1%, report it as neutral. A larger movement must
+repeat in a second interleaved run before being called a win or regression.
+
+### 6.8 Implementation checkpoint (2026-08-16)
+
+Action B and the first safe RV6 slice are implemented in
+`lambda/runtime/transpile-mir.cpp` and
+`lambda/runtime/mir_emitter_shared.hpp`.
+
+- The wide-free proof is producer-side and rejects `ANY`, structured unknowns,
+  dynamic function values, and wide-capable scalar types. The new
+  `return_shape_item` fixture covers a wide-free checked return, a wide
+  `int64` return, and an `ANY` return under both return-convention checks.
+- `MirValue` now carries `pending_companion` and `maybe_pending`. Shape-2
+  direct calls keep both lanes in registers; `em_materialize_pending_value`
+  resolves only at the first ordinary-Item consumer or an incompatible wrapper
+  / module-return escape. The producer bodies contain no resolver call.
+- Focused and full MIR-emission gates pass: **39/39**. The fixture executes as
+  `stable`, `4`, `5` under the release binary.
+- `make test-lambda-baseline`: **4031/4031** combined input/runtime tests.
+  `make test262-baseline`: **40261/40261**, zero retries and zero regressions.
+- A post-C three-run release snapshot is not a paired causal gate. Its typed
+  `crypto_sha1` was **30.09 ms** versus **29.60 ms** for the same-tree v2
+  control, and typed `awfy/json` was **2.616 ms** versus **2.572 ms**. These
+  are small, unpaired movements and are recorded as **not measurable**, not as
+  a claimed win or regression. The required 41-pair interleaved canary remains
+  before declaring C performance-complete.
+
+Remaining implementation work is deliberately narrow: propagate the pending
+metadata through arithmetic/truthiness/type-dispatch consumers, add the
+forced-GC/async/dynamic/slot crossing fixtures, enforce the one-live-companion
+rule mechanically, and complete the RVO8/RVO9 optimized-MIR/disassembly census.
+
+Explicit non-goals for this performance slice: P2.5 LambdaJS migration,
+loop/statement number-stack reclaim, source-language type changes, C2MIR
+support, and vendored MIR changes. Those may remain valid roadmap items, but
+mixing them into P1.7 would make the Result30 attribution unreviewable.
