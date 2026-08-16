@@ -191,7 +191,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
 - [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
-- [ ] C3.6 DOM tables (reflection, prop-ID, walker, collections, events, interfaces, URL, enum-attrs, micro-helpers)
+- [~] C3.6 DOM tables — (a) reflection table, (c) element walker + std:: removal, (g) URL component table done; (b)(d)(e)(f)(h)(i) pending
 - [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
 - [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
 - [ ] C4.1 unified renderer (golden-gated)
@@ -326,3 +326,37 @@ already happened. Measured before starting:
   and clarity rather than lines. The TS-mode arms (`!tp->strict_js && ...`)
   must fall through to the expression fallback, which a plain switch does not
   express directly.
+
+---
+
+## 15. C3.6 progress
+
+Done:
+
+- **(a) IDL reflection table** — `JS_DOM_REFLECTED_ATTRS` states each reflected
+  attribute once (IDL name, content attribute, kind, default, element
+  bitmask). The five predicates are filtered lookups over it. This removes the
+  drift class C0.5 was an instance of; `test/js/dom_reflect_gating` locks the
+  semantics and passes unchanged.
+- **(c) `dom_walk_elements`** — one pre-order element walk replacing four
+  recursive `std::function` lambdas. `js_dom.cpp` no longer uses `std::` at
+  all, and `<functional>` is gone (rule 3). Roughly line-neutral; the win is
+  the removed duplication. The form-reset pass also gained a stated ownership
+  contract and now shares its nearest-enclosing-form lookup with the
+  radio-group validity scan.
+- **(g) URL component table** — `k_url_components` replaces the verbatim
+  nine-branch chain that document and location each carried, and unifies their
+  two spellings of the missing-value rule on the browser behaviour.
+
+Assessed, not done:
+
+- **(d) live collections** — `_register_live_form_collection` and
+  `_register_live_lookup_collection` share a find/pin/register skeleton but
+  differ in entry fields *and* in how the pin owner is chosen. A template needs
+  a per-kind assign step; worth doing but not mechanical.
+- **(f) `js_install_interface`** — the eight clipboard interface blocks share
+  a create/name/cross-link/publish skeleton, but each adds bespoke steps
+  (prototype chaining to Blob or Array, extra statics, `Symbol.toStringTag`).
+  Worth about 40 lines, with rooting subtleties across all eight blocks.
+- **(b) property-ID dispatch** — the largest remaining piece, and the one the
+  plan expects to *improve* performance. Not started.
