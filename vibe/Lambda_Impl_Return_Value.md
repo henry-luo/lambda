@@ -2465,13 +2465,16 @@ the existing `MirValue`; do not create a parallel value abstraction.
       propagation: `jm_call_direct_boxed` and `jm_call_direct_native` now
       materialize a pending pair before publishing or handing the register to
       later lowering. This protects the same D5.2.1v2/D5.2.2v2 invariant for
-      the shared emitter; the remaining open work is dedicated cross-boundary
-      fixture coverage rather than a second LambdaJS value abstraction.
-- [~] Extend forced-GC, async/yield, dynamic-call, error-lane, and slot-wrapper
+      the shared emitter without introducing a second LambdaJS value
+      abstraction.
+- [x] Extend forced-GC, async/yield, dynamic-call, error-lane, and slot-wrapper
       fixtures so a pending Item cannot cross a memory or suspension boundary.
-      The full baseline and Test262 gates cover the existing boundary suite;
-      dedicated forced-GC, async/yield, dynamic-call, error-lane, and
-      slot-wrapper pending-crossing fixtures are still pending.
+      `action_c_gc_boundary`, `action_c_async_boundary`,
+      `action_c_dynamic_boundary`, and `action_c_error_lane` cover the new
+      crossings; the existing `closure_scalar_rehome` fixture covers the
+      C-reachable slot-wrapper path. Root publication and async spill saving
+      now resolve a live pair centrally, so these boundaries cannot bypass the
+      RV4.1 check through a helper-specific path.
 
 Acceptance: the two canary dumps must no longer contain an eager resolve
 immediately after every pair call; every remaining resolve must be attributable
@@ -2536,27 +2539,30 @@ Action B and the current safe RV6 slice are implemented in
   a direct tail branch could leave the shared epilogue returning registers from
   a different branch. RV6 forwarding is therefore limited to single-return,
   non-raising bodies, with `action_c_multi_return` as the regression fixture.
-- Focused MIR-emission gates pass: **42/42**. The Action C fixtures execute as
-  `8, 1, 1, int64, 1, 0`, `7`, and `0, 7` under the release binary.
-- The fresh `make test-lambda-baseline` run reached **4032/4035**: all
+- Focused MIR-emission gates pass: **46/46**. The Action C fixtures execute as
+  `8, 1, 1, int64, 1, 0`, `7`, `0, 7`, `7,9`, `7,null`, and `7` under the
+  release binary.
+- The fresh `make test-lambda-baseline` run reached **4042/4045**: all
   Lambda/MIR, forced-GC, interpreter, and input tests passed; three
   `test_js_gtest` cases (`dom_jquery_fx`, `dom_jquery_lib`, and
   `lib_flatpickr`) still exit 139 before producing output. The fresh
   `make test262-baseline` gate is **40261/40261**, with zero retries and zero
   regressions.
-- Two repeated 41-pair release canaries against
-  `temp/action_b_v3_lambda.exe` measured typed `crypto_sha1` at **1.0488x**
-  and **1.0556x** candidate/control, with **7/41** and **1/41** candidate
-  wins; stdout matched on every pair. A same-binary 41-pair control/copy run
-  measured **0.9997x**, so the runner noise was small. The candidate and
+- After the root/async boundary enforcement, the refreshed 41-pair release
+  canary against `temp/action_b_v3_lambda.exe` measured typed `crypto_sha1` at
+  **0.9615x** candidate/control, with **36/41** candidate wins and equal
+  stdout. A same-binary 41-pair control/copy run measured **1.0170x**, so this
+  small canary movement remains host/layout-sensitive. The candidate and
   Action B optimized MIR streams are byte-identical after address/register
-  normalization, so this is a binary-lineage/layout movement, not an emitted
-  Action C optimization; performance acceptance is **not closed**.
+  normalization, so the timing is not an emitted Action C optimization claim.
 - The 14-row AWFY gate completed **252/252 valid pairs** with equal stdout;
-  geomeans were **0.9997x** untyped and **1.0115x** typed. The typed mean is
-  just above the 1% acceptance threshold, and because the optimized MIR is
-  unchanged it remains an Action D measurement item rather than a claimed
-  semantic regression from lazy propagation.
+  the refreshed boundary-enforcement build geomeans were **1.0009x** untyped
+  and **0.9788x** typed. The typed movement is an apparent improvement, but
+  because the optimized MIR is unchanged and the same-binary noise is about
+  1.7%, it remains an Action D measurement rather than a claimed emitted
+  optimization from lazy propagation. The exact release binary lineage is
+  recorded in `temp/action_c_awfy_9pairs_b_vs_c_final3.json` and
+  `temp/action_c_crypto_typed_b_vs_c_final4.json`.
 - Action A's final release rerun used `temp/action_b_v3_lambda.exe` as
   control and the final `lambda.exe` as candidate. Two repeated 41-pair
   typed `jetstream/crypto_sha1` runs completed **41/41 valid pairs**, with
@@ -2572,21 +2578,21 @@ Action B and the current safe RV6 slice are implemented in
   close Action C: the current and Action B optimized MIR opcode streams remain
   identical, so the canary movement is recorded as a causal measurement only,
   not as evidence of a new emitted optimization.
-- The post-guard focused MIR gate is now **42/42** with the Action C consumer
-  and multi-return fixtures included. The three DOM failures
+- The post-guard focused MIR gate is now **46/46** with the Action C consumer,
+  multi-return, GC-boundary, async-boundary, dynamic-boundary, and error-lane
+  fixtures included. The three DOM failures
   are reproducible in the filtered rerun. A direct archived-control run of
   `dom_jquery_lib` passes, while the current source exits 139 and both
   binaries emit byte-identical MIR for that module; this remains a separate
   JS/runtime baseline blocker, not evidence that the live-pair guard changed
   Lambda emission.
 
-Remaining implementation work is deliberately narrow: add the forced-GC,
-async/yield, dynamic-call, error-lane, and slot-wrapper crossing fixtures,
-enforce the one-live-companion rule mechanically across suspension and spill
-paths, and complete the RVO8/RVO9 optimized-MIR/disassembly census. The paired
-timing gate must then be repeated after any code-size/layout adjustment; the
-current Action C slice is correctness-complete for its covered consumers but
-not performance-complete.
+Remaining implementation work is deliberately narrow: complete the RVO8/RVO9
+optimized-MIR/disassembly census and repeat the paired timing gate after this
+code-size/layout adjustment. The Action C slice is now correctness-complete
+for the covered Lambda and LambdaJS boundaries, but it is not performance-
+complete because the optimized MIR streams are unchanged and the measured
+timing movement remains layout-sensitive.
 
 Explicit non-goals for this performance slice: P2.5 LambdaJS migration,
 loop/statement number-stack reclaim, source-language type changes, C2MIR
