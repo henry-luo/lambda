@@ -671,6 +671,66 @@ static AstFuncNode* mir_direct_call_function(AstCallNode* call) {
     return (AstFuncNode*)node;
 }
 
+// A forwarded pair is published from fixed MIR registers at the shared
+// epilogue. Multiple source returns cannot safely share those registers: one
+// branch may produce an ordinary Item while another branch captured a pending
+// companion, leaving the epilogue with the latter branch's stale lane pair.
+// Count explicit returns so RV6 tail forwarding is limited to a single-return
+// body (D5.2.1v2, RV4.2).
+static int mir_explicit_return_count(AstNode* node) {
+    int count = 0;
+    while (node) {
+        AstNode* current = mir_unwrap_primary(node);
+        if (!current) {
+            node = node->next;
+            continue;
+        }
+        switch (current->node_type) {
+        case AST_NODE_RETURN_STAM:
+            count++;
+            break;
+        case AST_NODE_FUNC:
+        case AST_NODE_PROC:
+        case AST_NODE_FUNC_EXPR:
+            break;
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* branch = (AstIfNode*)current;
+            count += mir_explicit_return_count(branch->then);
+            count += mir_explicit_return_count(branch->otherwise);
+            break;
+        }
+        case AST_NODE_WHILE_STAM:
+        case AST_NODE_DO_WHILE_STAM:
+            count += mir_explicit_return_count(((AstWhileNode*)current)->body);
+            break;
+        case AST_NODE_FOR_EXPR:
+            count += mir_explicit_return_count(((AstForNode*)current)->then);
+            break;
+        case AST_NODE_FOR_STAM: {
+            AstForStmtNode* loop = (AstForStmtNode*)current;
+            count += mir_explicit_return_count(loop->body);
+            break;
+        }
+        case AST_NODE_MATCH_EXPR: {
+            AstMatchNode* match = (AstMatchNode*)current;
+            for (AstMatchArm* arm = match->first_arm; arm;
+                    arm = (AstMatchArm*)arm->next) {
+                count += mir_explicit_return_count(arm->body);
+            }
+            break;
+        }
+        case AST_NODE_CONTENT:
+        case AST_NODE_LIST:
+            count += mir_explicit_return_count(((AstListNode*)current)->item);
+            break;
+        default:
+            break;
+        }
+        node = node->next;
+    }
+    return count;
+}
+
 static bool mir_region_scalar_expr(AstNode* node) {
     if (node && node->node_type == AST_NODE_PRIMARY &&
             !((AstPrimaryNode*)node)->expr) {
@@ -1147,6 +1207,21 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
     return r;
 }
 
+// A direct shape-2 call crosses the expression API as a first-lane register,
+// while MirEmitter retains the companion ownership fact.  Recover that fact at
+// the first ordinary-Item consumer instead of teaching every AST helper a
+// second value abstraction (D5.2.1v2, D5.2.2v2).
+static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
+        MIR_reg_t value) {
+    if (!mt || !value || mt->em.pending_live_item != value ||
+            !mt->em.pending_live_companion) return value;
+    MirValue pending = em_value(value, MIR_T_I64, LMD_TYPE_ANY,
+        VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
+    pending.pending_companion = mt->em.pending_live_companion;
+    pending.maybe_pending = true;
+    return em_materialize_pending_value(&mt->em, pending).reg;
+}
+
 #define emit_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, false)
 #define emit_call_1(mt, fn, ret, ...) em_call_1(&(mt)->em, fn, ret, __VA_ARGS__, false)
 #define emit_call_2(mt, fn, ret, ...) em_call_2(&(mt)->em, fn, ret, __VA_ARGS__, false)
@@ -1392,8 +1467,11 @@ static void finish_function_epilogue(MirTranspiler* mt) {
     // boundary. Tail forwarding is a separate explicit path; until then every
     // producer must have consumed or patched its pending Item (D5.2.1v2,
     // D5.2.2v2).
-    if (mt->em.pending_live_companion) {
-        log_error("mir: pending companion reached function epilogue");
+    if (mt->em.pending_live_companion &&
+            !mt->em.frame.pending_return_companion) {
+        log_error("mir: pending companion reached function epilogue in %s",
+            mt->em.frame.plan.debug_name ? mt->em.frame.plan.debug_name :
+                "<unnamed>");
         abort();
     }
     emit_label(mt, mt->em.frame.return_label);
@@ -1420,9 +1498,12 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         // copying it into a caller-donated home. The pair MUST be built before
         // the watermark restore below — the payload lives in the extent that
         // restore reclaims.
-        MIR_reg_t pair_item = 0, pair_companion = 0;
-        em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
-            &pair_item, &pair_companion);
+        MIR_reg_t pair_item = mt->em.frame.pending_return_item;
+        MIR_reg_t pair_companion = mt->em.frame.pending_return_companion;
+        if (!pair_companion) {
+            em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
+                &pair_item, &pair_companion);
+        }
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_number_top), mt->em.frame.number_base);
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2,
@@ -2585,6 +2666,7 @@ static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg)
 }
 
 static MIR_reg_t emit_item_tag(MirTranspiler* mt, MIR_reg_t item_reg) {
+    item_reg = mir_materialize_pending_reg(mt, item_reg);
     MIR_reg_t tag = new_reg(mt, "item_tag", MIR_T_I64);
     // Error Items are always self-tagged; checking their high byte inline
     // avoids a safepoint before the dispatcher has rooted or rejected a value.
@@ -3022,6 +3104,7 @@ static MIR_reg_t emit_unbox_container(MirTranspiler* mt, MIR_reg_t item_reg) {
 
 // Unbox Item -> native type
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id) {
+    item_reg = mir_materialize_pending_reg(mt, item_reg);
     switch (type_id) {
     case LMD_TYPE_INT:
         // v5: unboxing an int yields its LANE value (i64), so poison arrives as
@@ -3376,6 +3459,9 @@ static MirValue lambda_convert_rep(void* owner, MirValue value,
 
 static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg,
         TypeId type_id) {
+    // Boxing is an ordinary-Item/escape boundary.  Resolve a live companion
+    // before the value can enter a root, container, helper, or wrapper ABI.
+    val_reg = mir_materialize_pending_reg(mt, val_reg);
     if (type_id == LMD_TYPE_FLOAT &&
             MIR_reg_type(mt->ctx, val_reg, mt->em.func) != MIR_T_D) {
         // A float-typed expression can take the generic Item path after a
@@ -8298,6 +8384,10 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     mt->in_tail_position = false;
 
     MIR_reg_t cond = transpile_expr(mt, if_node->cond);
+    // A dynamic boxed condition may still be the first lane of a pending
+    // shape-2 call even when inference says bool. Truthiness is a consumer,
+    // so resolve before the branch reads the pending tag (D5.2.1v2).
+    cond = mir_materialize_pending_reg(mt, cond);
 
     // Restore tail position for branches
     mt->in_tail_position = saved_tail;
@@ -16370,6 +16460,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 options.observed_return_lane_mask =
                     (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR);
                 options.has_hidden_context = true;
+                // The caller's return epilogue can forward a register pair
+                // only when this direct edge itself is the tail expression.
+                // Shape-1/shape-4 entries keep their existing call protocol.
+                options.is_tail_call = mt->in_tail_position && local_entry &&
+                    local_entry->variant &&
+                    local_entry->variant->result.shape ==
+                        RETURN_SHAPE_ITEM_SCALAR &&
+                    em_returns_result_pair(mt->em.frame.plan.companion);
                 if (direct_env) {
                     options.has_hidden_env = true;
                     options.hidden_env = direct_env;
@@ -16548,7 +16646,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // straight into String*-taking helpers. Leaving it boxed made
                 // fn_len_s dereference a tagged Item and segfault on any
                 // `len(f())`, regardless of string length.
-                if (direct_value.maybe_pending) {
+                bool can_forward_pending = mt->in_tail_position &&
+                    em_returns_result_pair(mt->em.frame.plan.companion) &&
+                    !direct_env && !has_parameter_error_guard &&
+                    !region_callsite && native_consumer_tid == LMD_TYPE_ANY;
+                if (direct_value.maybe_pending && !can_forward_pending) {
                     // the pair remains register-only until this first Item
                     // consumer. materialize before unboxing, root publication,
                     // or any helper call can observe it (D5.2.1v2, RV4.1).
@@ -16556,7 +16658,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                         direct_value);
                     result = direct_value.reg;
                 }
-                if (!call_error_lane && !call_node->propagate &&
+                if (!can_forward_pending && !call_error_lane && !call_node->propagate &&
                         !mt->in_handler_operand && !mt->emitting_async_call &&
                         (mir_is_native_scalar_value_type(call_tid) ||
                          call_tid == LMD_TYPE_STRING)) {
@@ -16587,6 +16689,17 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // consumed before this second call can clobber its companion.
                 emit_capture_writeback(mt, fn_def, direct_env,
                     direct_capture_count);
+            }
+
+            if (direct_value.maybe_pending &&
+                    !(mt->in_tail_position &&
+                      em_returns_result_pair(mt->em.frame.plan.companion))) {
+                // Capture/region/guard paths are incompatible with carrying
+                // an unresolved pair past this point. They are escape or
+                // second-call boundaries, so resolve before entering them.
+                direct_value = em_materialize_pending_value(&mt->em,
+                    direct_value);
+                result = direct_value.reg;
             }
 
             if (has_parameter_error_guard) {
@@ -16633,6 +16746,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
 
             if (entry_name_buf) strbuf_free(entry_name_buf);
             if (name_buf) strbuf_free(name_buf);
+            if (direct_value.maybe_pending && mt->in_tail_position &&
+                    em_returns_result_pair(mt->em.frame.plan.companion) &&
+                    mt->em.pending_live_item == direct_value.reg &&
+                    mt->em.pending_live_companion) {
+                // The return epilogue owns publication of a forwarded pair;
+                // rooting this first lane here would violate RV4.1.
+                return result;
+            }
             result = root_gc_result_if_needed(mt, result, ret_type, call_tid, "call_rv");
             return result;
         }
@@ -17269,7 +17390,18 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     // TCO: return value is in tail position — if this is a recursive call,
     // it can be converted to a goto jump instead of a function call.
     bool saved_tail = mt->in_tail_position;
-    if (mt->tco_func) {
+    AstNode* return_expr = ret_node && ret_node->value
+        ? mir_unwrap_primary(ret_node->value) : NULL;
+    bool pair_return_frame = mt->em.frame.return_lane_kind == RETURN_LANE_SCALAR &&
+        em_returns_result_pair(mt->em.frame.plan.companion) &&
+        !mt->in_async_proc;
+    // A direct call in a pair-returning function is eligible for RV6 tail
+    // forwarding. Other return expressions remain ordinary consumers and must
+    // resolve before the return firewall.
+    bool pending_tail_candidate = pair_return_frame && !mt->current_func_can_raise &&
+        mir_explicit_return_count(mt->func_body) == 1 && return_expr &&
+        return_expr->node_type == AST_NODE_CALL_EXPR;
+    if (mt->tco_func || pending_tail_candidate) {
         mt->in_tail_position = true;
     }
 
@@ -17307,6 +17439,25 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // If TCO converted the inner call to a goto, block_returned is already set.
         // Skip the boxing/ret — it's dead code and would emit after a JMP.
         if (mt->block_returned) {
+            mt->in_tail_position = saved_tail;
+            return val;
+        }
+
+        if (pending_tail_candidate && mt->em.pending_live_companion &&
+                mt->em.pending_live_item == val) {
+            // Same-shape direct returns forward the raw pair.  Clearing the
+            // live marker records that the value has crossed into this frame's
+            // return publication state, so cleanup calls cannot be mistaken for
+            // a second unresolved pair (D5.2.1v2, RV4.2).
+            mt->em.frame.pending_return_item = mt->em.pending_live_item;
+            mt->em.frame.pending_return_companion =
+                mt->em.pending_live_companion;
+            mt->em.pending_live_item = 0;
+            mt->em.pending_live_companion = 0;
+            emit_vargs_restore();
+            transpile_task_scope_unwind(mt, false);
+            async_complete_frame(mt);
+            emit_function_return(mt, MIR_new_reg_op(mt->ctx, val));
             mt->in_tail_position = saved_tail;
             return val;
         }
@@ -18026,6 +18177,11 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     }
     MIR_reg_t val = transpile_expr(mt, node);
     mt->preserve_proc_if_result = saved_preserve_proc_if_result;
+
+    // `transpile_box_item` is itself an ordinary-Item consumer.  This covers
+    // dynamic/type-dispatch paths whose static type is ANY and therefore return
+    // before the type-specific boxing cases below (D5.2.1v2).
+    val = mir_materialize_pending_reg(mt, val);
 
     // If the expression already emitted a return (e.g. RETURN_STAM in a proc),
     // the val is a dummy register and any further boxing would be dead code.

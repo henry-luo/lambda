@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Action C multi-return guard: a direct pending return resolves instead of poisoning the shared pair epilogue.",
+  "checks": [
+    {
+      "return_convention": 3,
+      "in_func": "_pending_item_#",
+      "expect": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "ret\t"
+      ],
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "return_convention": 3,
+      "in_func": "_maybe_pending_#",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    }
+  ]
+}

@@ -424,6 +424,16 @@ struct MirFrameState {
     MIR_label_t anchor;
     MIR_label_t return_label;
     MIR_reg_t return_reg;
+    // rv6 tail forwarding keeps the pair returned by a same-shape callee in
+    // these registers until this frame's publication boundary. The pair is
+    // never written to a root slot or scalar home (D5.2.1v2).
+    MIR_reg_t pending_return_item;
+    MIR_reg_t pending_return_companion;
+    // rv4.2 ownership is frame-local. Nested function emission suspends the
+    // outer frame, so the live pair must be restored with that frame rather
+    // than leaking into the nested body (D5.2.1v2).
+    MIR_reg_t pending_live_item;
+    MIR_reg_t pending_live_companion;
     MIR_reg_t error_return_reg;
     MIR_reg_t incoming_scalar_home;
     int return_lane_kind;
@@ -599,6 +609,8 @@ static inline void em_frame_dispose(MirEmitter* em) {
     if (frame->scalar_home_bindings) mem_free(frame->scalar_home_bindings);
     if (frame->scalar_home_fixups) mem_free(frame->scalar_home_fixups);
     memset(frame, 0, sizeof(*frame));
+    em->pending_live_item = 0;
+    em->pending_live_companion = 0;
 }
 
 // Detach the complete frame: partial saves leaked new facts across nested
@@ -607,6 +619,10 @@ static inline MirFrameState em_frame_suspend(MirEmitter* em) {
     MirFrameState saved = {};
     if (!em) return saved;
     saved = em->frame;
+    saved.pending_live_item = em->pending_live_item;
+    saved.pending_live_companion = em->pending_live_companion;
+    em->pending_live_item = 0;
+    em->pending_live_companion = 0;
     memset(&em->frame, 0, sizeof(em->frame));
     return saved;
 }
@@ -615,6 +631,8 @@ static inline void em_frame_restore(MirEmitter* em, MirFrameState saved) {
     if (!em) return;
     em_frame_dispose(em);
     em->frame = saved;
+    em->pending_live_item = saved.pending_live_item;
+    em->pending_live_companion = saved.pending_live_companion;
 }
 
 static inline bool em_root_ensure_index_map(int** map, int* capacity,

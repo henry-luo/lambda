@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "description": "Action C: the shared pending pair resolves at arithmetic, truthiness, and type-inspection consumers; the producer stays pair-only.",
+  "checks": [
+    {
+      "return_convention": 3,
+      "in_func": "_pending_item_#",
+      "expect": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "ret\t"
+      ],
+      "forbid": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "return_convention": 3,
+      "in_func": "_consume_arithmetic_#",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "return_convention": 3,
+      "in_func": "_consume_truth_#",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "return_convention": 3,
+      "in_func": "_consume_type_#",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    },
+    {
+      "return_convention": 3,
+      "in_func": "_consume_compare_#",
+      "expect": [
+        "lambda_item_resolve_pending"
+      ]
+    }
+  ]
+}
