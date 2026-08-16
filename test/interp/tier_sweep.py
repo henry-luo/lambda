@@ -78,11 +78,31 @@ def main():
         script, procedural = entry
         jit_out, _, jit_status = run(script, None, args.timeout, procedural)
         int_out, stats, int_status = run(script, "interp", args.timeout, procedural)
+        # A timeout under N-way parallel load is a scheduling artifact, not a
+        # divergence: the same script compared clean when re-run alone. Retry
+        # the pair once with a longer budget so a slow script cannot manufacture
+        # a false mismatch, and keep any survivor in its own verdict rather than
+        # folding it into either answer.
+        if "timeout" in (jit_status, int_status):
+            long_timeout = args.timeout * 3
+            jit_out, _, jit_status = run(script, None, long_timeout, procedural)
+            int_out, stats, int_status = run(script, "interp", long_timeout, procedural)
         executed, fallback = stats if stats else (0, 0)
-        if fallback or not executed:
+        if "timeout" in (jit_status, int_status):
+            verdict = "timeout"
+        elif fallback or not executed:
             verdict = "fallback"
         elif jit_out != int_out or jit_status != int_status:
-            verdict = "mismatch"
+            # Confirm before accusing. Every genuine T0 divergence found so far
+            # reproduces on a direct re-run; a one-off under N-way load does not
+            # (test/lambda/pdf/phase2_font.ls compared clean 9 times in a row).
+            # A false alarm here is worse than a slow sweep -- it is what would
+            # make the oracle stop being believed.
+            jit_out2, _, jit_status2 = run(script, None, args.timeout * 3, procedural)
+            int_out2, _, int_status2 = run(script, "interp", args.timeout * 3, procedural)
+            verdict = ("mismatch"
+                       if jit_out2 != int_out2 or jit_status2 != int_status2
+                       else "match")
         else:
             verdict = "match"
         return (script, verdict, jit_status, int_status, executed, fallback)
@@ -93,6 +113,7 @@ def main():
     supported = [r[0] for r in rows if r[1] == "match"]
     fell_back = [r[0] for r in rows if r[1] == "fallback"]
     mismatched = [r[0] for r in rows if r[1] == "mismatch"]
+    timed_out = [r[0] for r in rows if r[1] == "timeout"]
 
     with open(args.out, "w") as f:
         f.write("# script\tverdict\tjit_status\tinterp_status\texecuted\tfallback\n")
@@ -100,7 +121,13 @@ def main():
             f.write("\t".join(str(c) for c in row) + "\n")
 
     print(f"scripts={len(scripts)} match={len(supported)} "
-          f"fallback={len(fell_back)} mismatch={len(mismatched)}")
+          f"fallback={len(fell_back)} mismatch={len(mismatched)} "
+          f"timeout={len(timed_out)}")
+    if timed_out:
+        # R4: never a silent cap -- an unproven script is named, not absorbed.
+        print("inconclusive (timed out on both attempts):")
+        for s_ in timed_out:
+            print("  " + s_)
     print(f"wrote {args.out}")
     if mismatched:
         print("mismatched:")

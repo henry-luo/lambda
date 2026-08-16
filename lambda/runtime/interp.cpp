@@ -449,6 +449,9 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_TO:        return fn_to(left, right);
     case OPERATOR_UNION:     return fn_union(left, right);
     case OPERATOR_IS:        return (Item){.item = b2it(fn_is(left, right))};
+    // `expr is nan` lowers to a one-operand fn_is_nan call (transpile-mir.cpp);
+    // the parsed `nan` on the right is a marker, not a compared value.
+    case OPERATOR_IS_NAN:    return (Item){.item = b2it(fn_is_nan(left))};
     case OPERATOR_IN:        return (Item){.item = b2it(fn_in(left, right))};
     case OPERATOR_AT:        return (Item){.item = b2it(fn_at(left, right))};
     default:
@@ -608,8 +611,26 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         for (AstNode* a = node->argument; a; a = a->next, i++) {
             words[i] = eval_expr(f, a).item;
         }
-        return eval_sys_call(((AstSysFuncNode*)callee)->fn_info,
-            (const Item*)(void*)words, argc);
+        SysFuncInfo* sinfo = ((AstSysFuncNode*)callee)->fn_info;
+        // `map()` / `map([k, v, …])` carry no boxed entry point: lowering emits
+        // vmap_new / vmap_from_array directly (transpile-mir.cpp), so the walker
+        // calls the same two helpers rather than going through the dispatch.
+        if (sinfo && sinfo->fn == SYSFUNC_VMAP_NEW) {
+            return argc == 0 ? vmap_new() : vmap_from_array((Item){.item = words[0]});
+        }
+        Item sresult = eval_sys_call(sinfo, (const Item*)(void*)words, argc);
+        // floor/ceil/round/trunc/abs preserve their argument's lane: the boxed
+        // helper always yields float, while lowering unboxes that result by the
+        // *call node's* static type (POST_PROCESS_UNBOX, transpile-mir.cpp), so
+        // `trunc(n:int)` stays an int. Re-narrowing on the same static type
+        // reproduces the choice without duplicating type inference.
+        if (sinfo && sinfo->native_c_name && sinfo->native_func_ptr &&
+                !sysfunc_native_math_always_float(sinfo->fn) &&
+                node->type && node->type->type_id == LMD_TYPE_INT &&
+                get_type_id(sresult) == LMD_TYPE_FLOAT) {
+            sresult = (Item){.item = i2it((int32_t)it2d(sresult))};
+        }
+        return sresult;
     }
 
     Item callee_value = eval_expr(f, node->function);
@@ -753,7 +774,42 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
     }
 }
 
+// Fills an N-D literal's leaves in row-major order, mirroring
+// mir_emit_ndim_leaves.
+static void interp_fill_ndim(InterpFrame* f, AstNode* node, Scratch& arr, int* flat) {
+    node = interp_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_ARRAY) return;
+    AstArrayNode* a = (AstArrayNode*)node;
+    TypeArray* type = (TypeArray*)a->type;
+    bool nested = type && type->nested && type->nested->type_id == LMD_TYPE_ARRAY;
+    for (AstNode* item = a->item; item; item = item->next) {
+        if (nested) { interp_fill_ndim(f, item, arr, flat); continue; }
+        Item value = eval_expr(f, item);
+        if (interp_frame_pending(f)) return;
+        // Re-read: element evaluation is a safepoint.
+        array_num_set_item((ArrayNum*)(uintptr_t)arr.get().item, (*flat)++, value);
+    }
+}
+
 static Item eval_array(InterpFrame* f, AstArrayNode* node) {
+    // Nested numeric literals fold into one shaped ArrayNum rather than an
+    // array of arrays; detect_ndim_literal is lowering's own detector.
+    int64_t shape[32];
+    ArrayNumElemType nd_elem;
+    bool nd_pipe_spread = false;
+    if (!interp_array_has_spread(node, &nd_pipe_spread) && !nd_pipe_spread) {
+        int ndim = detect_ndim_literal((AstNode*)node, shape, 32, &nd_elem, true);
+        if (ndim >= 2) {
+            int64_t total = 1;
+            for (int i = 0; i < ndim; i++) total *= shape[i];
+            Scratch acc(f);
+            acc.set(interp_ptr_item(array_num_new_ndim(nd_elem, total, ndim, shape)));
+            int flat = 0;
+            interp_fill_ndim(f, (AstNode*)node, acc, &flat);
+            return acc.get();
+        }
+    }
+
     ArrayNumElemType sized_elem = ELEM_INT;
     InterpArrayKind kind = interp_array_kind(node, &sized_elem);
     int count = 0;
@@ -1372,6 +1428,19 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
             AstNamedNode* named = (AstNamedNode*)decl;
             Item value = eval_expr(f, named->as);
             if (interp_frame_pending(f)) return;
+            // A declared `float` binding is a coercion boundary (S7.7.2):
+            // lowering stores the initializer in a double lane, so
+            // `let x: float = 7 div 2` observes 3.0, not the int 3. Only the
+            // lanes whose boxed form already agrees reach here (interp_plan.cpp
+            // gates the rest), so this one conversion closes the gap.
+            Type* decl_type = named->declared_type;
+            if (decl_type && decl_type->type_id == LMD_TYPE_FLOAT &&
+                    get_type_id(value) != LMD_TYPE_FLOAT) {
+                TypeId vt = get_type_id(value);
+                if (vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64) {
+                    value = push_d((double)it2l(value));
+                }
+            }
             interp_write_binding(f, named->entry, value);
         }
         break;
@@ -1434,6 +1503,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     case AST_NODE_UNARY:
         return eval_unary(f, (AstUnaryNode*)node);
+    case AST_NODE_SPREAD:
+        // `*expr` marks its operand spreadable; the collection builders flatten
+        // it from there (transpile_spread is this same one call).
+        return item_spread(eval_expr(f, ((AstSpreadNode*)node)->argument));
     case AST_NODE_BINARY:
         return eval_binary(f, (AstBinaryNode*)node);
     case AST_NODE_PIPE:
@@ -1910,7 +1983,13 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     // makes its result the script result — the same scan and zero-arg call the
     // generated module entry emits under Context::run_main.
     if (run_main) {
-        for (AstNode* item = root->child; item; item = item->next) {
+        // A top-level `pn main` is reachable through two root children — it is
+        // linked both as a root statement and inside the content node's item
+        // list — so the scan must stop at the first call, not merely leave the
+        // inner loop. Calling it twice ran the whole procedure twice
+        // (test/lambda/pdf/phase2_font.ls printed its result twice).
+        bool called_main = false;
+        for (AstNode* item = root->child; item && !called_main; item = item->next) {
             AstNode* stmt = item;
             if (stmt->node_type == AST_NODE_CONTENT) stmt = ((AstListNode*)stmt)->item;
             for (; stmt; stmt = stmt->next) {
@@ -1929,6 +2008,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
                 uint64_t result_home = 0;
                 tail.set(fn_call_into((Function*)(uintptr_t)callee.item, NULL,
                     &result_home));
+                called_main = true;
                 break;
             }
             if (interp_frame_pending(frame)) break;
