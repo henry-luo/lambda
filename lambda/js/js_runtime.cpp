@@ -13726,40 +13726,32 @@ extern "C" bool lambda_side_root_contains_span(const void* span, size_t item_cou
     return end <= top;
 }
 
-// Calls and constructors borrow the same ABI argument span; one adapter owns
-// the copy whenever the caller has not already placed that span in side roots.
-struct JsOwnedArgumentSpan {
-    RootSpan owned_roots;
-    Item* items;
-    bool valid;
-
-    JsOwnedArgumentSpan(Item* source, int count, bool prerooted, const char* label)
-        : owned_roots(!prerooted && count > 0 ? (size_t)count : 0),
-          items(source), valid(true) {
-        if (prerooted && count > 0 &&
-            !lambda_side_root_contains_span(source, (size_t)count)) {
-            log_error("%s: argument span is outside the live side-root range", label);
-            valid = false;
-            return;
-        }
-        if (!prerooted && count > 0) {
-            Item* rooted = js_root_span_items(owned_roots);
-            if (!rooted) {
-                valid = false;
-                return;
-            }
-            items = rooted;
-            for (int i = 0; i < count; i++) items[i] = source ? source[i] : ItemNull;
-        }
+// prepare one exact argument span for a call or constructor. The RootSpan is
+// owned by the caller so its LIFO lifetime covers the complete nested callback.
+static bool js_prepare_owned_argument_span(Item*& args, int count,
+        bool& args_prerooted, RootSpan& owned_roots, const char* label) {
+    if (args_prerooted && count > 0 &&
+        !lambda_side_root_contains_span(args, (size_t)count)) {
+        log_error("%s: argument span is outside the live side-root range", label);
+        return false;
     }
-};
+    if (!args_prerooted && count > 0) {
+        Item* source = args;
+        Item* rooted = js_root_span_items(owned_roots);
+        if (!rooted) return false;
+        for (int i = 0; i < count; i++) rooted[i] = source ? source[i] : ItemNull;
+        args = rooted;
+        args_prerooted = true;
+    }
+    return true;
+}
 
 Item js_construct_entry_ordinary(Item func_item, Item* args, int arg_count,
         Item new_target, uint64_t* result_home, bool args_prerooted) {
-    JsOwnedArgumentSpan owned_args(args, arg_count, args_prerooted,
-        "js-construct-ordinary");
-    if (!owned_args.valid) return ItemError;
-    args = owned_args.items;
+    RootSpan owned_args((!args_prerooted && arg_count > 0)
+        ? (size_t)arg_count : 0);
+    if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+            owned_args, "js-construct-ordinary")) return ItemError;
     RootFrame roots(3);
     Rooted<Item> callee_root(roots, func_item);
     Rooted<Item> target_root(roots,
@@ -13778,10 +13770,10 @@ Item js_construct_entry_ordinary(Item func_item, Item* args, int arg_count,
 
 Item js_construct_entry_native(Item func_item, Item* args, int arg_count,
         Item new_target, uint64_t* result_home, bool args_prerooted) {
-    JsOwnedArgumentSpan owned_args(args, arg_count, args_prerooted,
-        "js-construct-native");
-    if (!owned_args.valid) return ItemError;
-    args = owned_args.items;
+    RootSpan owned_args((!args_prerooted && arg_count > 0)
+        ? (size_t)arg_count : 0);
+    if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+            owned_args, "js-construct-native")) return ItemError;
     JS_ROOTS(roots, callee_root, func_item, target_root, new_target.item ? new_target : func_item);
     JsFunction* fn = get_type_id(callee_root.get()) == LMD_TYPE_FUNC
         ? (JsFunction*)callee_root.get().function : NULL;
@@ -13882,20 +13874,10 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
 extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
         Item new_target, uint64_t* result_home, bool args_prerooted) {
     if (arg_count < 0) return js_throw_type_error("invalid constructor argument count");
-    if (args_prerooted && arg_count > 0 &&
-        !lambda_side_root_contains_span(args, (size_t)arg_count)) {
-        log_error("js-construct-value: argument span is outside the live side-root range");
-        return ItemError;
-    }
     RootSpan owned_args((!args_prerooted && arg_count > 0)
         ? (size_t)arg_count : 0);
-    if (!args_prerooted && arg_count > 0) {
-        Item* source = args;
-        args = js_root_span_items(owned_args);
-        if (!args) return ItemError;
-        for (int i = 0; i < arg_count; i++) args[i] = source ? source[i] : ItemNull;
-        args_prerooted = true;
-    }
+    if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+            owned_args, "js-construct-value")) return ItemError;
     JS_ROOTS(roots, callee_root, callee, target_root, new_target.item ? new_target : callee);
     TypeId type = get_type_id(callee_root.get());
     if (type == LMD_TYPE_FUNC) {
@@ -13946,11 +13928,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         // recursion builds thousands of unhandled rejected promises.
         return js_throw_range_error("Maximum call stack size exceeded");
     }
-    JsOwnedArgumentSpan owned_args(args, arg_count, args_prerooted,
-        "js-call-prerooted");
-    if (!owned_args.valid) return ItemError;
-    args = owned_args.items;
-    if (!args_prerooted && arg_count > 0) args_prerooted = true;
+    // keep the exact argument span rooted through nested callbacks and their
+    // collections; event listeners can re-enter the call kernel before return
+    // (D6.2.2v2).
+    RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
+        ? (size_t)arg_count : 0);
+    if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+            call_arg_roots, "js-call-prerooted")) return ItemError;
     RootFrame call_roots(7);
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
@@ -19861,9 +19845,8 @@ static Item js_typed_array_callback_algorithm(Item obj, Item* args, int argc,
 // Join and toLocaleString differ only in the separator and in how each
 // element is stringified; the walk, the error lane and the null/undefined
 // skip are identical.
-static Item js_array_like_join_kernel(Item obj, bool typed_array,
+static Item js_array_like_join_kernel(Item obj, bool typed_array, int64_t length,
         const char* separator, int separator_len, bool locale) {
-    int length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     StrBuf* buffer = strbuf_new();
     Item locale_key = locale ? js_name_item("toLocaleString", 14) : ItemNull;
     for (int i = 0; i < length; i++) {
@@ -19912,8 +19895,9 @@ static Item js_array_like_join_kernel(Item obj, bool typed_array,
 }
 
 static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array) {
-    // ES Join snapshots the length before separator coercion; a separator
-    // valueOf/toString may resize the receiver, but cannot change iteration.
+    // ES Join snapshots the length before separator coercion; retaining this
+    // value prevents separator ToString from changing the iteration count.
+    int64_t length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     const char* separator = ",";
     int separator_len = 1;
     if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED &&
@@ -19925,13 +19909,13 @@ static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array)
             separator_len = (int)separator_string->len;
         }
     }
-    return js_array_like_join_kernel(obj, typed_array, separator, separator_len, false);
+    return js_array_like_join_kernel(obj, typed_array, length, separator, separator_len, false);
 }
 
 static Item js_array_like_to_locale_string(Item obj, bool typed_array) {
-    int length = typed_array ? js_typed_array_length(obj) : obj.array->length;
+    int64_t length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     if (length <= 0) return js_name_item("", 0);
-    return js_array_like_join_kernel(obj, typed_array, ",", 1, true);
+    return js_array_like_join_kernel(obj, typed_array, length, ",", 1, true);
 }
 
 static Item js_indexed_intrinsic_algorithm(Item obj,

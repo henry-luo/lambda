@@ -34,6 +34,10 @@
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_readable_new_with_class(Item opts, int class_id);
 extern "C" Item js_readable_push(Item self, Item chunk);
+extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener);
+extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener);
+extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
+extern "C" Item js_ee_listeners(Item emitter, Item event_name);
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_net_createConnection(Item rest_args);
@@ -757,77 +761,45 @@ typedef struct HttpResponseWriteReq {
 // =============================================================================
 
 // -----------------------------------------------------------------------
-// listener slots
+// listeners
 //
-// A "__on_<event>__" slot holds a bare callable, or an array of callables
-// once a second listener is registered for the same event. C0.2: on() used
-// to js_set_key_default() the callback unconditionally, so every earlier
-// listener for that event was silently dropped.
+// http listeners live in the shared Node emitter. C0.2 first funnelled every
+// registration and read through these helpers when the storage was still a
+// per-module "__on_<event>__" slot; they now forward to js_ee_*, so the array
+// promotion C0.2 added is the emitter's own storage.
 // -----------------------------------------------------------------------
 
-static Item http_listener_key_bytes(const char* event, int len) {
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%.*s__", len, event);
-    return make_string_item(key);
-}
-JS_FORWARD_STATIC_ITEM(http_listener_key_cstr, (const char* event),
-    http_listener_key_bytes, (event, (int)strlen(event)))
-JS_FORWARD_STATIC_ITEM(http_listener_key, (Item event_item),
-    http_listener_key_bytes, (it2s(event_item)->chars, (int)it2s(event_item)->len))
-
-// number of listeners in a slot; snapshot this before dispatching so a
-// listener registered mid-emit only runs on the next emit (Node's
-// copy-then-dispatch order).
-static int http_listener_count(Item listeners) {
-    if (get_type_id(listeners) == LMD_TYPE_ARRAY) return (int)js_array_length(listeners);
-    return js_is_callable(listeners) ? 1 : 0;
+// snapshot of the listeners registered for `event`, in registration order
+static Item http_listener_list(Item obj, const char* event) {
+    if (obj.item == 0 || !event) return js_array_new(0);
+    return js_ee_listeners(obj, make_string_item(event));
 }
 
-static Item http_listener_at(Item listeners, int index) {
-    if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
-        return js_elements_get_int(listeners, index);
-    }
-    return index == 0 ? listeners : make_js_undefined();
+// js_ee_listenerCount returns a JS number (double-backed), so ask for the
+// listener array and measure it rather than type-testing the count.
+static bool http_has_listener_event(Item obj, const char* event) {
+    if (obj.item == 0 || !event) return false;
+    return js_array_length(js_ee_listeners(obj, make_string_item(event))) > 0;
 }
 
-JS_FORWARD_STATIC_EXPRESSION(bool, http_has_listener, (Item listeners),
-    http_listener_count(listeners) > 0)
-
-// call every listener in the slot; returns true if at least one ran
-static bool http_listener_invoke(Item listeners, Item this_val, Item* args, int argc) {
-    int count = http_listener_count(listeners);
-    bool called = false;
-    for (int i = 0; i < count; i++) {
-        Item cb = http_listener_at(listeners, i);
-        if (!js_is_callable(cb)) continue;
-        js_call_function(cb, this_val, args, argc);
-        called = true;
-    }
-    return called;
+// call every listener for `event`; returns true if at least one ran
+static bool http_emit_event(Item obj, const char* event, Item* args, int argc) {
+    if (obj.item == 0 || !event) return false;
+    if (!http_has_listener_event(obj, event)) return false;
+    RootFrame roots(2);
+    Rooted<Item> obj_root(roots, obj);
+    Rooted<Item> args_root(roots, js_array_new(0));
+    for (int i = 0; i < argc; i++) js_array_push(args_root.get(), args[i]);
+    js_ee_emit(obj_root.get(), make_string_item(event), args_root.get());
+    return true;
 }
 
-static void http_listener_add(Item obj, Item key_item, Item callback) {
-    JS_ROOTS(roots,
-        obj_root, obj,
-        key_root, key_item,
-        callback_root, callback,
-        existing_root, js_get_key_default(obj, key_item));
-    if (js_is_callable(existing_root.get())) {
-        RootFrame arr_roots(1);
-        Rooted<Item> arr_root(arr_roots, js_array_new(0));
-        js_array_push(arr_root.get(), existing_root.get());
-        js_array_push(arr_root.get(), callback_root.get());
-        js_set_key_default(obj_root.get(), key_root.get(), arr_root.get());
-    } else if (get_type_id(existing_root.get()) == LMD_TYPE_ARRAY) {
-        js_array_push(existing_root.get(), callback_root.get());
-    } else {
-        js_set_key_default(obj_root.get(), key_root.get(), callback_root.get());
-    }
+static void http_listener_add(Item obj, Item event_item, Item callback) {
+    js_ee_on(obj, event_item, callback);
 }
 
 static void http_response_emit(Item self, const char* event, Item* args, int argc, bool flush_tasks) {
-    if (http_listener_invoke(js_get_key_default(self, http_listener_key_cstr(event)),
-            self, args, argc) && flush_tasks) {
+    if (http_emit_event(self, event, args, argc) && flush_tasks) {
         js_microtask_flush();
     }
 }
@@ -1853,8 +1825,6 @@ static void http_response_flush(Item self) {
     if (output_body_len > 0) memcpy(full + pos, output_body, output_body_len);
     if (chunked_body && output_body) mem_free(output_body);
 
-    uv_buf_t buf = uv_buf_init(full, (unsigned int)total);
-    uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
     HttpResponseWriteReq* write_req =
         (HttpResponseWriteReq*)mem_calloc(1, sizeof(HttpResponseWriteReq), MEM_CAT_JS_RUNTIME);
     write_req->conn = conn;
@@ -2141,7 +2111,7 @@ static Item js_http_res_inst_on(Item maybe_self, Item event_item, Item callback)
     }
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
     String* ev = it2s(event_item);
-    http_listener_add(self, http_listener_key(event_item), callback);
+    http_listener_add(self, event_item, callback);
     if (ev->len == 6 && memcmp(ev->chars, "finish", 6) == 0 &&
         http_response_bool_prop(self, "writableFinished") &&
         js_is_callable(callback)) {
@@ -2393,8 +2363,7 @@ static void http_server_maybe_finish_close(JsHttpServer* srv) {
     // otherwise late socket close/read callbacks can touch freed server state.
     if (!srv->close_event_emitted) {
         srv->close_event_emitted = true;
-        Item on_close = js_get_key_cstr(srv->js_object, "__on_close__");
-        http_listener_invoke(on_close, srv->js_object, NULL, 0);
+        http_emit_event(srv->js_object, "close", NULL, 0);
     }
     mem_free(srv);
 }
@@ -2419,8 +2388,7 @@ static Item http_server_error_tick(Item env_item) {
     if (get_type_id(env[2]) == LMD_TYPE_INT) {
         failed_srv = (JsHttpServer*)(uintptr_t)it2i(env[2]);
     }
-    Item on_err = js_get_key_cstr(self, "__on_error__");
-    if (http_listener_invoke(on_err, self, &err, 1)) js_microtask_flush();
+    if (http_emit_event(self, "error", &err, 1)) js_microtask_flush();
     if (failed_srv) {
         http_server_close_failed_listen(failed_srv, self);
     }
@@ -2630,9 +2598,8 @@ static Item js_http_conn_socket_destroy(Item maybe_self) {
 
 static void http_conn_socket_emit(JsHttpConn* conn, const char* event) {
     if (!conn || conn->socket_object.item == 0 || !event) return;
-    Item listeners = js_get_key_default(conn->socket_object, http_listener_key_cstr(event));
     Item socket = conn->socket_object;
-    if (http_listener_invoke(listeners, conn->socket_object, &socket, 1)) {
+    if (http_emit_event(conn->socket_object, event, &socket, 1)) {
         js_microtask_flush();
     }
 }
@@ -2678,18 +2645,17 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
     }
     if (response_event_target.item != 0 &&
         get_type_id(response_event_target) != LMD_TYPE_UNDEFINED) {
-        Item res_timeout = js_get_key_cstr(response_event_target, "__on_timeout__");
-        if (http_listener_invoke(res_timeout, response_event_target, &socket, 1)) {
+        if (http_emit_event(response_event_target, "timeout", &socket, 1)) {
             js_microtask_flush();
         }
     }
     http_conn_socket_emit(conn, "timeout");
     if (conn->server) {
         Item server_cb = conn->server->timeout_callback;
-        if (!js_is_callable(server_cb)) {
-            server_cb = js_get_key_cstr(conn->server->js_object, "__on_timeout__");
-        }
-        if (http_listener_invoke(server_cb, conn->server->js_object, &socket, 1)) {
+        if (js_is_callable(server_cb)) {
+            js_call_function(server_cb, conn->server->js_object, &socket, 1);
+            js_microtask_flush();
+        } else if (http_emit_event(conn->server->js_object, "timeout", &socket, 1)) {
             js_microtask_flush();
         }
     }
@@ -2716,7 +2682,7 @@ static Item js_http_conn_socket_on(Item maybe_self, Item event_item, Item callba
     Item actual_event = self.item == maybe_self.item ? event_item : maybe_self;
     Item actual_callback = self.item == maybe_self.item ? callback_item : event_item;
     if (get_type_id(actual_event) != LMD_TYPE_STRING) return self;
-    http_listener_add(self, http_listener_key(actual_event), actual_callback);
+    http_listener_add(self, actual_event, actual_callback);
     return self;
 }
 
@@ -2884,8 +2850,7 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
 static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
                                           const char* message, int bytes_parsed) {
     if (!conn || !conn->server) return false;
-    Item handler = js_get_key_cstr(conn->server->js_object, "__on_clientError__");
-    if (!http_has_listener(handler)) return false;
+    if (!http_has_listener_event(conn->server->js_object, "clientError")) return false;
 
     Item err = js_new_error(make_string_item(message));
     js_set_key_cstr(err, "code", make_string_item(code));
@@ -2893,7 +2858,7 @@ static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
     js_set_key_cstr(err, "rawPacket", js_buffer_from_bytes(conn->recv_buf, conn->recv_len));
     Item socket = http_conn_socket_object(conn);
     Item args[2] = { err, socket };
-    http_listener_invoke(handler, conn->server->js_object, args, 2);
+    http_emit_event(conn->server->js_object, "clientError", args, 2);
     js_microtask_flush();
     return true;
 }
@@ -2986,19 +2951,23 @@ static void http_server_send_expectation_failed(JsHttpConn* conn, ParsedRequest*
     http_response_flush(res_obj);
 }
 
-// run a request-lane listener slot inside the connection's async resource,
-// skipping `skip` when it is callable
+// run one request-lane listener inside the connection's async resource
+static void http_dispatch_one(JsHttpConn* conn, Item listener, Item* args) {
+    if (!js_is_callable(listener)) return;
+    Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+    js_call_function(listener, conn->server->js_object, args, 2);
+    js_async_hooks_restore_resource(previous_resource);
+    js_microtask_flush();
+}
+
+// run a snapshot of request-lane listeners, skipping `skip` when it is callable
 static void http_dispatch_listeners(JsHttpConn* conn, Item listeners, Item skip,
         Item* args) {
-    int count = http_listener_count(listeners);
-    for (int i = 0; i < count; i++) {
-        Item cb = http_listener_at(listeners, i);
-        if (!js_is_callable(cb)) continue;
+    int64_t count = js_array_length(listeners);
+    for (int64_t i = 0; i < count; i++) {
+        Item cb = js_elements_get_int(listeners, i);
         if (js_is_callable(skip) && cb.item == skip.item) continue;
-        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-        js_call_function(cb, conn->server->js_object, args, 2);
-        js_async_hooks_restore_resource(previous_resource);
-        js_microtask_flush();
+        http_dispatch_one(conn, cb, args);
     }
 }
 
@@ -3026,7 +2995,7 @@ static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
         http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
     }
     if (has_handler) {
-        http_dispatch_listeners(conn, srv->request_handler, ItemNull, args);
+        http_dispatch_one(conn, srv->request_handler, args);
     }
     if (has_request_event) {
         // createServer()'s handler is mirrored into srv->request_handler and
@@ -3050,15 +3019,14 @@ static void http_server_process_parsed_request(JsHttpConn* conn,
             return;
         }
     }
-    Item on_req = js_get_key_cstr(srv->js_object, "__on_request__");
-    Item on_expect = expect_continue ?
-        js_get_key_cstr(srv->js_object, "__on_checkContinue__") :
-        (expect_unknown ?
-         js_get_key_cstr(srv->js_object, "__on_checkExpectation__") :
-         make_js_undefined());
+    Item on_req = http_listener_list(srv->js_object, "request");
+    Item on_expect = expect_continue
+        ? http_listener_list(srv->js_object, "checkContinue")
+        : (expect_unknown ? http_listener_list(srv->js_object, "checkExpectation")
+                          : js_array_new(0));
     bool has_handler = js_is_callable(srv->request_handler);
-    bool has_request_event = http_has_listener(on_req);
-    bool has_expect_handler = http_has_listener(on_expect);
+    bool has_request_event = js_array_length(on_req) > 0;
+    bool has_expect_handler = js_array_length(on_expect) > 0;
     if (expect_unknown && !has_expect_handler) {
         // both buffered and EOF requests answer unknown Expect headers here.
         http_server_send_expectation_failed(conn, req, has_buffered_request);
@@ -3250,8 +3218,7 @@ static Item js_http_server_listening_tick(Item env_item) {
 
     Item self = env[0];
     Item callback = env[1];
-    Item on_listening = js_get_key_cstr(self, "__on_listening__");
-    http_listener_invoke(on_listening, self, NULL, 0);
+    http_emit_event(self, "listening", NULL, 0);
     js_cluster_notify_worker_listening();
     if (js_is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
@@ -3448,7 +3415,7 @@ extern "C" Item js_http_server_on(Item self, Item event_item, Item callback) {
     // srv->request_handler stays reserved for createServer()'s handler; a
     // 'request' listener registered here is dispatched from the listener slot
     // so a second one is not dropped and both keep registration order.
-    http_listener_add(self, http_listener_key(event_item), callback);
+    http_listener_add(self, event_item, callback);
     return self;
 }
 
@@ -3681,8 +3648,7 @@ JS_FORWARD_STATIC_ITEM(js_http_client_getHeaderNames, (Item self), http_headers_
 JS_FORWARD_STATIC_ITEM(js_http_client_getRawHeaderNames, (Item self), http_headers_get_names, (self, true))
 
 static void http_client_emit(Item req_obj, const char* event) {
-    if (http_listener_invoke(js_get_key_default(req_obj, http_listener_key_cstr(event)),
-            req_obj, NULL, 0)) {
+    if (http_emit_event(req_obj, event, NULL, 0)) {
         js_microtask_flush();
     }
 }
@@ -3977,8 +3943,7 @@ static Item js_http_client_abort_scheduled(Item env_item) {
     creq->destroyed = true;
     js_set_key_cstr(req_obj, "destroyed", (Item){.item = b2it(true)});
 
-    Item on_err = js_get_key_cstr(req_obj, "__on_error__");
-    if (http_listener_invoke(on_err, req_obj, &err, 1)) js_microtask_flush();
+    if (http_emit_event(req_obj, "error", &err, 1)) js_microtask_flush();
     js_http_close_client_req(creq);
     return make_js_undefined();
 }
@@ -4081,11 +4046,8 @@ extern "C" Item js_http_agent_socket_error_tick(Item req_obj, Item err) {
     creq->destroyed = true;
     js_set_key_cstr(req_obj, "destroyed", (Item){.item = b2it(true)});
 
-    Item on_err = js_get_key_cstr(req_obj, "__on_error__");
-    if (http_listener_invoke(on_err, req_obj, &err, 1)) js_microtask_flush();
-
-    Item on_close = js_get_key_cstr(req_obj, "__on_close__");
-    if (http_listener_invoke(on_close, req_obj, NULL, 0)) js_microtask_flush();
+    if (http_emit_event(req_obj, "error", &err, 1)) js_microtask_flush();
+    if (http_emit_event(req_obj, "close", NULL, 0)) js_microtask_flush();
 
     js_http_close_client_req(creq);
     return make_js_undefined();
@@ -4108,14 +4070,14 @@ extern "C" Item js_http_agent_socket_cb(Item req_obj, Item err, Item socket) {
 static void js_http_emit_client_response(JsHttpClientReq* creq, Item res) {
     if (!creq || creq->response_emitted) return;
     creq->response_emitted = true;
-    Item on_response = js_get_key_cstr(creq->js_object, "__on_response__");
+    Item on_response = http_listener_list(creq->js_object, "response");
     if (js_is_callable(creq->callback)) {
         js_als_context_call(creq->als_context, creq->callback, creq->js_object, res, 1);
         js_microtask_flush();
     }
-    int count = http_listener_count(on_response);
-    for (int i = 0; i < count; i++) {
-        Item cb = http_listener_at(on_response, i);
+    int64_t count = js_array_length(on_response);
+    for (int64_t i = 0; i < count; i++) {
+        Item cb = js_elements_get_int(on_response, i);
         if (!js_is_callable(cb)) continue;
         js_als_context_call(creq->als_context, cb, creq->js_object, res, 1);
         js_microtask_flush();
@@ -4416,8 +4378,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             // A closed socket before response headers is a request failure,
             // not a quiet EOF; server-side req.destroy() relies on this.
             Item err = js_http_econnreset_error(make_js_undefined());
-            Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
-            if (http_listener_invoke(on_err, creq->js_object, &err, 1)) {
+            if (http_emit_event(creq->js_object, "error", &err, 1)) {
                 js_microtask_flush();
             }
         }
@@ -4660,8 +4621,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
     if (status != 0) {
         if (creq) {
             Item err = js_new_error(make_string_item(uv_strerror(status)));
-            Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
-            http_listener_invoke(on_err, creq->js_object, &err, 1);
+            http_emit_event(creq->js_object, "error", &err, 1);
             creq->destroyed = true;
             js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
@@ -4692,8 +4652,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
             JsNodeUvError spec;
             spec.status = r; spec.code = "EPIPE"; spec.message = "write EPIPE";
             Item err = js_node_uv_error(spec);
-            Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
-            http_listener_invoke(on_err, creq->js_object, &err, 1);
+            http_emit_event(creq->js_object, "error", &err, 1);
             creq->destroyed = true;
             js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
@@ -4842,7 +4801,7 @@ JS_FORWARD_ITEM(js_http_client_end, (Item self, Item data_item), http_client_end
 // ClientRequest.on(event, callback)
 extern "C" Item js_http_client_on(Item self, Item event_item, Item callback) {
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    http_listener_add(self, http_listener_key(event_item), callback);
+    http_listener_add(self, event_item, callback);
     return self;
 }
 
@@ -4855,8 +4814,7 @@ extern "C" Item js_http_client_destroy(Item self, Item err_item) {
     creq->destroyed = true;
     js_http_client_remove_abort_listener(creq);
     Item err = js_http_econnreset_error(err_item);
-    Item on_err = js_get_key_cstr(self, "__on_error__");
-    http_listener_invoke(on_err, self, &err, 1);
+    http_emit_event(self, "error", &err, 1);
     if (creq->response.item != 0) {
         js_stream_destroy(creq->response, err);
     }

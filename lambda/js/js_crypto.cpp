@@ -4383,21 +4383,81 @@ static bool crypto_detect_ed_key_material(const uint8_t* key, int key_len,
     return ok;
 }
 
+// OpenSSL is loaded lazily through dlsym so the build never links libcrypto.
+// One row per symbol drives the struct field, the dlsym call and the
+// availability check, which used to be three hand-maintained lists.
+//   X(field, return type, parameter list, "SYMBOL", required)
+// A row with required = 0 is optional: its absence does not disable the
+// backend, and each call site null-checks it.
+#define CRYPTO_OPENSSL_ED_SYMBOLS(X) \
+    X(md_ctx_new, void*, (void), "EVP_MD_CTX_new", 1) \
+    X(md_ctx_free, void, (void*), "EVP_MD_CTX_free", 1) \
+    X(pkey_new_raw_private_key_ex, void*, (void*, const char*, const char*, const unsigned char*, size_t), "EVP_PKEY_new_raw_private_key_ex", 1) \
+    X(pkey_new_raw_public_key_ex, void*, (void*, const char*, const char*, const unsigned char*, size_t), "EVP_PKEY_new_raw_public_key_ex", 1) \
+    X(pkey_free, void, (void*), "EVP_PKEY_free", 1) \
+    X(digest_sign_init, int, (void*, void**, const void*, void*, void*), "EVP_DigestSignInit", 1) \
+    X(digest_sign, int, (void*, unsigned char*, size_t*, const unsigned char*, size_t), "EVP_DigestSign", 1) \
+    X(digest_verify_init, int, (void*, void**, const void*, void*, void*), "EVP_DigestVerifyInit", 1) \
+    X(digest_verify, int, (void*, const unsigned char*, size_t, const unsigned char*, size_t), "EVP_DigestVerify", 1)
+
+#define CRYPTO_OPENSSL_DSA_SYMBOLS(X) \
+    X(bio_new, void*, (const void*), "BIO_new", 1) \
+    X(bio_s_mem, const void*, (void), "BIO_s_mem", 1) \
+    X(bio_new_mem_buf, void*, (const void*, int), "BIO_new_mem_buf", 1) \
+    X(bio_free, int, (void*), "BIO_free", 1) \
+    X(bio_ctrl, long, (void*, int, long, void*), "BIO_ctrl", 1) \
+    X(bio_read, int, (void*, void*, int), "BIO_read", 1) \
+    X(pem_read_bio_private_key, void*, (void*, void*, void*, void*), "PEM_read_bio_PrivateKey", 1) \
+    X(pem_read_bio_pubkey, void*, (void*, void*, void*, void*), "PEM_read_bio_PUBKEY", 1) \
+    X(pem_write_bio_private_key, int, (void*, void*, const void*, const unsigned char*, int, void*, void*), "PEM_write_bio_PrivateKey", 1) \
+    X(pem_write_bio_pubkey, int, (void*, void*), "PEM_write_bio_PUBKEY", 1) \
+    X(i2d_pkcs8_private_key_bio, int, (void*, void*, const void*, char*, int, void*, void*), "i2d_PKCS8PrivateKey_bio", 0) \
+    X(d2i_auto_private_key, void*, (void**, const unsigned char**, long), "d2i_AutoPrivateKey", 1) \
+    X(d2i_pubkey, void*, (void**, const unsigned char**, long), "d2i_PUBKEY", 1) \
+    X(i2d_private_key, int, (void*, unsigned char**), "i2d_PrivateKey", 1) \
+    X(i2d_pubkey, int, (void*, unsigned char**), "i2d_PUBKEY", 1) \
+    X(pkey_free, void, (void*), "EVP_PKEY_free", 1) \
+    X(get_digestbyname, const void*, (const char*), "EVP_get_digestbyname", 1) \
+    X(md_ctx_new, void*, (void), "EVP_MD_CTX_new", 1) \
+    X(md_ctx_free, void, (void*), "EVP_MD_CTX_free", 1) \
+    X(digest_sign_init, int, (void*, void**, const void*, void*, void*), "EVP_DigestSignInit", 1) \
+    X(digest_sign_update, int, (void*, const void*, size_t), "EVP_DigestSignUpdate", 1) \
+    X(digest_sign_final, int, (void*, unsigned char*, size_t*), "EVP_DigestSignFinal", 1) \
+    X(digest_verify_init, int, (void*, void**, const void*, void*, void*), "EVP_DigestVerifyInit", 1) \
+    X(digest_verify_update, int, (void*, const void*, size_t), "EVP_DigestVerifyUpdate", 1) \
+    X(digest_verify_final, int, (void*, const unsigned char*, size_t), "EVP_DigestVerifyFinal", 1) \
+    X(pkey_get_bn_param, int, (void*, const char*, void**), "EVP_PKEY_get_bn_param", 1) \
+    X(bn_num_bits, int, (const void*), "BN_num_bits", 1) \
+    X(bn_free, void, (void*), "BN_free", 1) \
+    X(bn_new, void*, (void), "BN_new", 0) \
+    X(bn_set_word, int, (void*, unsigned long), "BN_set_word", 0) \
+    X(pkey_ctx_new_from_name, void*, (void*, const char*, const char*), "EVP_PKEY_CTX_new_from_name", 0) \
+    X(pkey_ctx_new, void*, (void*, void*), "EVP_PKEY_CTX_new", 0) \
+    X(pkey_ctx_free, void, (void*), "EVP_PKEY_CTX_free", 0) \
+    X(pkey_paramgen_init, int, (void*), "EVP_PKEY_paramgen_init", 0) \
+    X(pkey_ctx_set_dsa_paramgen_bits, int, (void*, int), "EVP_PKEY_CTX_set_dsa_paramgen_bits", 0) \
+    X(pkey_ctx_set_dsa_paramgen_q_bits, int, (void*, int), "EVP_PKEY_CTX_set_dsa_paramgen_q_bits", 0) \
+    X(pkey_paramgen, int, (void*, void**), "EVP_PKEY_paramgen", 0) \
+    X(pkey_keygen_init, int, (void*), "EVP_PKEY_keygen_init", 0) \
+    X(pkey_keygen, int, (void*, void**), "EVP_PKEY_keygen", 0) \
+    X(rsa_new, void*, (void), "RSA_new", 0) \
+    X(rsa_generate_key_ex, int, (void*, int, void*, void*), "RSA_generate_key_ex", 0) \
+    X(rsa_free, void, (void*), "RSA_free", 0) \
+    X(pem_write_bio_rsa_private_key, int, (void*, void*, const void*, const unsigned char*, int, void*, void*), "PEM_write_bio_RSAPrivateKey", 0) \
+    X(pem_write_bio_rsa_pubkey, int, (void*, void*), "PEM_write_bio_RSA_PUBKEY", 0)
+
+#define CRYPTO_OPENSSL_DECLARE_FIELD(field, ret, params, symbol, required) \
+    ret (*field) params;
+#define CRYPTO_OPENSSL_LOAD_FIELD(field, ret, params, symbol, required) \
+    b->field = (ret (*) params)crypto_dlsym_required(b->handle, symbol);
+#define CRYPTO_OPENSSL_CHECK_FIELD(field, ret, params, symbol, required) \
+    if (required && !b->field) missing = symbol;
+
 struct CryptoOpenSslEdBackend {
     bool tried;
     bool available;
     void* handle;
-    void* (*md_ctx_new)(void);
-    void (*md_ctx_free)(void*);
-    void* (*pkey_new_raw_private_key_ex)(void*, const char*, const char*,
-                                         const unsigned char*, size_t);
-    void* (*pkey_new_raw_public_key_ex)(void*, const char*, const char*,
-                                        const unsigned char*, size_t);
-    void (*pkey_free)(void*);
-    int (*digest_sign_init)(void*, void**, const void*, void*, void*);
-    int (*digest_sign)(void*, unsigned char*, size_t*, const unsigned char*, size_t);
-    int (*digest_verify_init)(void*, void**, const void*, void*, void*);
-    int (*digest_verify)(void*, const unsigned char*, size_t, const unsigned char*, size_t);
+    CRYPTO_OPENSSL_ED_SYMBOLS(CRYPTO_OPENSSL_DECLARE_FIELD)
 };
 
 static CryptoOpenSslEdBackend crypto_openssl_ed_backend;
@@ -4416,52 +4476,7 @@ struct CryptoOpenSslDsaBackend {
     bool tried;
     bool available;
     void* handle;
-    void* (*bio_new)(const void*);
-    const void* (*bio_s_mem)(void);
-    void* (*bio_new_mem_buf)(const void*, int);
-    int (*bio_free)(void*);
-    long (*bio_ctrl)(void*, int, long, void*);
-    int (*bio_read)(void*, void*, int);
-    void* (*pem_read_bio_private_key)(void*, void*, void*, void*);
-    void* (*pem_read_bio_pubkey)(void*, void*, void*, void*);
-    int (*pem_write_bio_private_key)(void*, void*, const void*, const unsigned char*,
-                                     int, void*, void*);
-    int (*pem_write_bio_pubkey)(void*, void*);
-    int (*i2d_pkcs8_private_key_bio)(void*, void*, const void*, char*, int, void*, void*);
-    void* (*d2i_auto_private_key)(void**, const unsigned char**, long);
-    void* (*d2i_pubkey)(void**, const unsigned char**, long);
-    int (*i2d_private_key)(void*, unsigned char**);
-    int (*i2d_pubkey)(void*, unsigned char**);
-    void (*pkey_free)(void*);
-    const void* (*get_digestbyname)(const char*);
-    void* (*md_ctx_new)(void);
-    void (*md_ctx_free)(void*);
-    int (*digest_sign_init)(void*, void**, const void*, void*, void*);
-    int (*digest_sign_update)(void*, const void*, size_t);
-    int (*digest_sign_final)(void*, unsigned char*, size_t*);
-    int (*digest_verify_init)(void*, void**, const void*, void*, void*);
-    int (*digest_verify_update)(void*, const void*, size_t);
-    int (*digest_verify_final)(void*, const unsigned char*, size_t);
-    int (*pkey_get_bn_param)(void*, const char*, void**);
-    int (*bn_num_bits)(const void*);
-    void (*bn_free)(void*);
-    void* (*bn_new)(void);
-    int (*bn_set_word)(void*, unsigned long);
-    void* (*pkey_ctx_new_from_name)(void*, const char*, const char*);
-    void* (*pkey_ctx_new)(void*, void*);
-    void (*pkey_ctx_free)(void*);
-    int (*pkey_paramgen_init)(void*);
-    int (*pkey_ctx_set_dsa_paramgen_bits)(void*, int);
-    int (*pkey_ctx_set_dsa_paramgen_q_bits)(void*, int);
-    int (*pkey_paramgen)(void*, void**);
-    int (*pkey_keygen_init)(void*);
-    int (*pkey_keygen)(void*, void**);
-    void* (*rsa_new)(void);
-    int (*rsa_generate_key_ex)(void*, int, void*, void*);
-    void (*rsa_free)(void*);
-    int (*pem_write_bio_rsa_private_key)(void*, void*, const void*, const unsigned char*,
-                                         int, void*, void*);
-    int (*pem_write_bio_rsa_pubkey)(void*, void*);
+    CRYPTO_OPENSSL_DSA_SYMBOLS(CRYPTO_OPENSSL_DECLARE_FIELD)
 };
 
 static CryptoOpenSslDsaBackend crypto_openssl_dsa_backend;
@@ -4500,111 +4515,13 @@ static bool crypto_openssl_dsa_load(void) {
     b->handle = crypto_openssl_open_library("DSA");
     if (!b->handle) return false;
 
-    b->bio_new_mem_buf = (void* (*)(const void*, int))
-        crypto_dlsym_required(b->handle, "BIO_new_mem_buf");
-    b->bio_new = (void* (*)(const void*))
-        crypto_dlsym_required(b->handle, "BIO_new");
-    b->bio_s_mem = (const void* (*)(void))
-        crypto_dlsym_required(b->handle, "BIO_s_mem");
-    b->bio_free = (int (*)(void*))
-        crypto_dlsym_required(b->handle, "BIO_free");
-    b->bio_ctrl = (long (*)(void*, int, long, void*))
-        crypto_dlsym_required(b->handle, "BIO_ctrl");
-    b->bio_read = (int (*)(void*, void*, int))
-        crypto_dlsym_required(b->handle, "BIO_read");
-    b->pem_read_bio_private_key = (void* (*)(void*, void*, void*, void*))
-        crypto_dlsym_required(b->handle, "PEM_read_bio_PrivateKey");
-    b->pem_read_bio_pubkey = (void* (*)(void*, void*, void*, void*))
-        crypto_dlsym_required(b->handle, "PEM_read_bio_PUBKEY");
-    b->pem_write_bio_private_key =
-        (int (*)(void*, void*, const void*, const unsigned char*, int, void*, void*))
-        crypto_dlsym_required(b->handle, "PEM_write_bio_PrivateKey");
-    b->pem_write_bio_pubkey = (int (*)(void*, void*))
-        crypto_dlsym_required(b->handle, "PEM_write_bio_PUBKEY");
-    b->i2d_pkcs8_private_key_bio =
-        (int (*)(void*, void*, const void*, char*, int, void*, void*))
-        crypto_dlsym_required(b->handle, "i2d_PKCS8PrivateKey_bio");
-    b->d2i_auto_private_key = (void* (*)(void**, const unsigned char**, long))
-        crypto_dlsym_required(b->handle, "d2i_AutoPrivateKey");
-    b->d2i_pubkey = (void* (*)(void**, const unsigned char**, long))
-        crypto_dlsym_required(b->handle, "d2i_PUBKEY");
-    b->i2d_private_key = (int (*)(void*, unsigned char**))
-        crypto_dlsym_required(b->handle, "i2d_PrivateKey");
-    b->i2d_pubkey = (int (*)(void*, unsigned char**))
-        crypto_dlsym_required(b->handle, "i2d_PUBKEY");
-    b->pkey_free = (void (*)(void*))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_free");
-    b->get_digestbyname = (const void* (*)(const char*))
-        crypto_dlsym_required(b->handle, "EVP_get_digestbyname");
-    b->md_ctx_new = (void* (*)(void))
-        crypto_dlsym_required(b->handle, "EVP_MD_CTX_new");
-    b->md_ctx_free = (void (*)(void*))
-        crypto_dlsym_required(b->handle, "EVP_MD_CTX_free");
-    b->digest_sign_init = (int (*)(void*, void**, const void*, void*, void*))
-        crypto_dlsym_required(b->handle, "EVP_DigestSignInit");
-    b->digest_sign_update = (int (*)(void*, const void*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_DigestSignUpdate");
-    b->digest_sign_final = (int (*)(void*, unsigned char*, size_t*))
-        crypto_dlsym_required(b->handle, "EVP_DigestSignFinal");
-    b->digest_verify_init = (int (*)(void*, void**, const void*, void*, void*))
-        crypto_dlsym_required(b->handle, "EVP_DigestVerifyInit");
-    b->digest_verify_update = (int (*)(void*, const void*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_DigestVerifyUpdate");
-    b->digest_verify_final = (int (*)(void*, const unsigned char*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_DigestVerifyFinal");
-    b->pkey_get_bn_param = (int (*)(void*, const char*, void**))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_get_bn_param");
-    b->bn_num_bits = (int (*)(const void*))
-        crypto_dlsym_required(b->handle, "BN_num_bits");
-    b->bn_free = (void (*)(void*))
-        crypto_dlsym_required(b->handle, "BN_free");
-    b->bn_new = (void* (*)(void))
-        crypto_dlsym_required(b->handle, "BN_new");
-    b->bn_set_word = (int (*)(void*, unsigned long))
-        crypto_dlsym_required(b->handle, "BN_set_word");
-    b->pkey_ctx_new_from_name = (void* (*)(void*, const char*, const char*))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_CTX_new_from_name");
-    b->pkey_ctx_new = (void* (*)(void*, void*))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_CTX_new");
-    b->pkey_ctx_free = (void (*)(void*))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_CTX_free");
-    b->pkey_paramgen_init = (int (*)(void*))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_paramgen_init");
-    b->pkey_ctx_set_dsa_paramgen_bits = (int (*)(void*, int))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_CTX_set_dsa_paramgen_bits");
-    b->pkey_ctx_set_dsa_paramgen_q_bits = (int (*)(void*, int))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_CTX_set_dsa_paramgen_q_bits");
-    b->pkey_paramgen = (int (*)(void*, void**))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_paramgen");
-    b->pkey_keygen_init = (int (*)(void*))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_keygen_init");
-    b->pkey_keygen = (int (*)(void*, void**))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_keygen");
-    b->rsa_new = (void* (*)(void))
-        crypto_dlsym_required(b->handle, "RSA_new");
-    b->rsa_generate_key_ex = (int (*)(void*, int, void*, void*))
-        crypto_dlsym_required(b->handle, "RSA_generate_key_ex");
-    b->rsa_free = (void (*)(void*))
-        crypto_dlsym_required(b->handle, "RSA_free");
-    b->pem_write_bio_rsa_private_key =
-        (int (*)(void*, void*, const void*, const unsigned char*, int, void*, void*))
-        crypto_dlsym_required(b->handle, "PEM_write_bio_RSAPrivateKey");
-    b->pem_write_bio_rsa_pubkey = (int (*)(void*, void*))
-        crypto_dlsym_required(b->handle, "PEM_write_bio_RSA_PUBKEY");
+    CRYPTO_OPENSSL_DSA_SYMBOLS(CRYPTO_OPENSSL_LOAD_FIELD)
 
-    b->available = b->bio_new && b->bio_s_mem && b->bio_new_mem_buf &&
-        b->bio_free && b->bio_ctrl && b->bio_read &&
-        b->pem_read_bio_private_key && b->pem_read_bio_pubkey &&
-        b->pem_write_bio_private_key && b->pem_write_bio_pubkey &&
-        b->d2i_auto_private_key && b->d2i_pubkey && b->i2d_private_key &&
-        b->i2d_pubkey && b->pkey_free && b->get_digestbyname &&
-        b->md_ctx_new && b->md_ctx_free && b->digest_sign_init &&
-        b->digest_sign_update && b->digest_sign_final &&
-        b->digest_verify_init && b->digest_verify_update &&
-        b->digest_verify_final && b->pkey_get_bn_param &&
-        b->bn_num_bits && b->bn_free;
+    const char* missing = NULL;
+    CRYPTO_OPENSSL_DSA_SYMBOLS(CRYPTO_OPENSSL_CHECK_FIELD)
+    b->available = missing == NULL;
     if (!b->available) {
-        log_debug("crypto: OpenSSL DSA backend unavailable: required EVP symbols missing");
+        log_debug("crypto: OpenSSL DSA backend unavailable: %s missing", missing);
     }
     return b->available;
 }
@@ -5172,34 +5089,13 @@ static bool crypto_openssl_ed_load(void) {
     b->handle = crypto_openssl_open_library("EdDSA");
     if (!b->handle) return false;
 
-    b->md_ctx_new = (void* (*)(void))crypto_dlsym_required(b->handle, "EVP_MD_CTX_new");
-    b->md_ctx_free = (void (*)(void*))crypto_dlsym_required(b->handle, "EVP_MD_CTX_free");
-    b->pkey_new_raw_private_key_ex =
-        (void* (*)(void*, const char*, const char*, const unsigned char*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_new_raw_private_key_ex");
-    b->pkey_new_raw_public_key_ex =
-        (void* (*)(void*, const char*, const char*, const unsigned char*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_PKEY_new_raw_public_key_ex");
-    b->pkey_free = (void (*)(void*))crypto_dlsym_required(b->handle, "EVP_PKEY_free");
-    b->digest_sign_init =
-        (int (*)(void*, void**, const void*, void*, void*))
-        crypto_dlsym_required(b->handle, "EVP_DigestSignInit");
-    b->digest_sign =
-        (int (*)(void*, unsigned char*, size_t*, const unsigned char*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_DigestSign");
-    b->digest_verify_init =
-        (int (*)(void*, void**, const void*, void*, void*))
-        crypto_dlsym_required(b->handle, "EVP_DigestVerifyInit");
-    b->digest_verify =
-        (int (*)(void*, const unsigned char*, size_t, const unsigned char*, size_t))
-        crypto_dlsym_required(b->handle, "EVP_DigestVerify");
+    CRYPTO_OPENSSL_ED_SYMBOLS(CRYPTO_OPENSSL_LOAD_FIELD)
 
-    b->available = b->md_ctx_new && b->md_ctx_free &&
-        b->pkey_new_raw_private_key_ex && b->pkey_new_raw_public_key_ex &&
-        b->pkey_free && b->digest_sign_init && b->digest_sign &&
-        b->digest_verify_init && b->digest_verify;
+    const char* missing = NULL;
+    CRYPTO_OPENSSL_ED_SYMBOLS(CRYPTO_OPENSSL_CHECK_FIELD)
+    b->available = missing == NULL;
     if (!b->available) {
-        log_debug("crypto: OpenSSL EdDSA backend unavailable: EVP symbols missing");
+        log_debug("crypto: OpenSSL EdDSA backend unavailable: %s missing", missing);
     }
     return b->available;
 }

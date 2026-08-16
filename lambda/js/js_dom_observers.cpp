@@ -677,18 +677,9 @@ static Item observer_rect(Item target_item, float* x, float* y, float* width, fl
     return rect;
 }
 
-static Item observer_make_rect(float x, float y, float width, float height) {
-    Item rect = js_new_object();
-    js_set_key_default(rect, observer_key("x"), js_make_number(x));
-    js_set_key_default(rect, observer_key("y"), js_make_number(y));
-    js_set_key_default(rect, observer_key("top"), js_make_number(y));
-    js_set_key_default(rect, observer_key("left"), js_make_number(x));
-    js_set_key_default(rect, observer_key("right"), js_make_number(x + width));
-    js_set_key_default(rect, observer_key("bottom"), js_make_number(y + height));
-    js_set_key_default(rect, observer_key("width"), js_make_number(width));
-    js_set_key_default(rect, observer_key("height"), js_make_number(height));
-    return rect;
-}
+JS_FORWARD_STATIC_ITEM(observer_make_rect,
+    (float x, float y, float width, float height),
+    js_dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
 
 static float observer_resolve_margin(JsObserverState* observer, int side,
                                      float root_width, float root_height) {

@@ -1659,6 +1659,26 @@ extern "C" Item js_lambda_clipboard_get_perm(Item name_item) {
 // Registration entry point — called from js_globals.cpp during init.
 // =============================================================================
 
+// Every global interface installed below is a native constructor with a fresh
+// prototype object, cross-linked and published on globalThis under its own
+// name. The prototype is written through `out_proto` before this frame ends —
+// the callers' g_*_proto slots are registered GC roots — so a caller can go on
+// adding methods to it or chaining it.
+template <typename Ctor>
+static Item js_clipboard_install_interface(Item global, const char* name,
+                                           Ctor constructor, Item* out_proto) {
+    JS_ROOTS(roots,
+        ctor_root, js_new_native_constructor(constructor),
+        proto_root, ItemNull);
+    js_set_function_name(ctor_root.get(), make_str(name));
+    proto_root.set(js_new_object());
+    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+    js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
+    if (out_proto) *out_proto = proto_root.get();
+    js_set_key_cstr(global, name, ctor_root.get());
+    return ctor_root.get();
+}
+
 extern "C" void js_register_clipboard_globals(Item global_this) {
     if (!clipboard_ensure_roots()) return;
 #define JS_CLIPBOARD_BLOB_METHODS(M) \
@@ -1670,45 +1690,24 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     RootFrame global_roots(1);
     Rooted<Item> global_root(global_roots, global_this);
     // ---- Blob -------------------------------------------------------------
-    {
-        JS_ROOTS(roots, ctor_root, js_new_native_constructor(js_blob_new), proto_root, ItemNull);
-        js_set_function_name(ctor_root.get(), make_str("Blob"));
-        proto_root.set(js_new_object());
-        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-        JS_CLIPBOARD_BLOB_METHODS(JS_CLIPBOARD_INSTALL_PROTO_METHOD)
-        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-        g_blob_proto = proto_root.get();
-        js_set_key_cstr(global_root.get(), "Blob", ctor_root.get());
-    }
+    js_clipboard_install_interface(global_root.get(), "Blob", js_blob_new, &g_blob_proto);
+#define JS_CLIPBOARD_INSTALL_BLOB_METHOD(name, target) \
+    js_clipboard_set_method(g_blob_proto, name, target);
+    JS_CLIPBOARD_BLOB_METHODS(JS_CLIPBOARD_INSTALL_BLOB_METHOD)
+#undef JS_CLIPBOARD_INSTALL_BLOB_METHOD
 
     // ---- File -------------------------------------------------------------
-    {
-        JS_ROOTS(roots, ctor_root, js_new_native_constructor(js_file_new), proto_root, ItemNull);
-        js_set_function_name(ctor_root.get(), make_str("File"));
-        proto_root.set(js_new_object());
-        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-        if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) {
-            js_set_prototype(proto_root.get(), g_blob_proto);
-        }
-        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-        g_file_proto = proto_root.get();
-        js_set_key_cstr(global_root.get(), "File", ctor_root.get());
+    js_clipboard_install_interface(global_root.get(), "File", js_file_new, &g_file_proto);
+    if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(g_file_proto, g_blob_proto);
     }
 
     // ---- ClipboardItem ---------------------------------------------------
     {
-        RootFrame roots(2);
-        Rooted<Item> ctor_root(roots,
-            js_new_native_constructor(js_clipboard_item_new));
-        Rooted<Item> proto_root(roots, ItemNull);
-        js_set_function_name(ctor_root.get(), make_str("ClipboardItem"));
-        proto_root.set(js_new_object());
-        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-        js_clipboard_set_method(proto_root.get(), "getType", js_clipboard_item_get_type);
-        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-        js_clipboard_set_method(ctor_root.get(), "supports", js_clipboard_item_supports);
-        g_clipboard_item_proto = proto_root.get();
-        js_set_key_cstr(global_root.get(), "ClipboardItem", ctor_root.get());
+        Item ctor = js_clipboard_install_interface(global_root.get(), "ClipboardItem",
+            js_clipboard_item_new, &g_clipboard_item_proto);
+        js_clipboard_set_method(g_clipboard_item_proto, "getType", js_clipboard_item_get_type);
+        js_clipboard_set_method(ctor, "supports", js_clipboard_item_supports);
     }
 
     // ---- FileList --------------------------------------------------------
@@ -1741,32 +1740,12 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     }
 
     // ---- ClipboardEvent --------------------------------------------------
-    {
-        RootFrame roots(2);
-        Rooted<Item> ctor_root(roots,
-            js_new_native_constructor(js_clipboard_event_new));
-        Rooted<Item> proto_root(roots, ItemNull);
-        js_set_function_name(ctor_root.get(), make_str("ClipboardEvent"));
-        proto_root.set(js_new_object());
-        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-        g_clipboard_event_proto = proto_root.get();
-        js_set_key_cstr(global_root.get(), "ClipboardEvent", ctor_root.get());
-    }
+    js_clipboard_install_interface(global_root.get(), "ClipboardEvent",
+        js_clipboard_event_new, &g_clipboard_event_proto);
 
     // ---- DataTransfer ----------------------------------------------------
-    {
-        RootFrame roots(2);
-        Rooted<Item> ctor_root(roots,
-            js_new_native_constructor(js_data_transfer_new));
-        Rooted<Item> proto_root(roots, ItemNull);
-        js_set_function_name(ctor_root.get(), make_str("DataTransfer"));
-        proto_root.set(js_new_object());
-        js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-        js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-        g_data_transfer_proto = proto_root.get();
-        js_set_key_cstr(global_root.get(), "DataTransfer", ctor_root.get());
-    }
+    js_clipboard_install_interface(global_root.get(), "DataTransfer",
+        js_data_transfer_new, &g_data_transfer_proto);
 
     // ---- Clipboard (instanceof + prototype) -----------------------------
     // Real Web platform exposes `Clipboard` as a class. We register a
@@ -1775,18 +1754,16 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     RootFrame clipboard_roots(1);
     Rooted<Item> clipboard_proto_root(clipboard_roots, ItemNull);
     {
-        RootFrame roots(1);
-        Rooted<Item> ctor_root(roots,
-            js_new_native_constructor(js_data_transfer_new)); // dummy ctor
-        js_set_function_name(ctor_root.get(), make_str("Clipboard"));
-        clipboard_proto_root.set(js_new_object());
-        js_set_key_cstr(clipboard_proto_root.get(), "constructor", ctor_root.get());
+        Item clipboard_proto = ItemNull;
+        // js_data_transfer_new is a placeholder body: Clipboard is exposed for
+        // instanceof and prototype observability, never constructed directly.
+        js_clipboard_install_interface(global_root.get(), "Clipboard",
+            js_data_transfer_new, &clipboard_proto);
+        clipboard_proto_root.set(clipboard_proto);
         js_clipboard_set_method(clipboard_proto_root.get(), "writeText", js_clipboard_write_text);
         js_clipboard_set_method(clipboard_proto_root.get(), "readText", js_clipboard_read_text);
         js_clipboard_set_method(clipboard_proto_root.get(), "write", js_clipboard_write);
         js_clipboard_set_method(clipboard_proto_root.get(), "read", js_clipboard_read);
-        js_set_key_cstr(ctor_root.get(), "prototype", clipboard_proto_root.get());
-        js_set_key_cstr(global_root.get(), "Clipboard", ctor_root.get());
     }
 
     // ---- navigator -------------------------------------------------------

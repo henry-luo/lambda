@@ -220,6 +220,15 @@ static bool js_global_is_bigint(Item value) {
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
+// Calendar abbreviations used by Date's toString/toUTCString/toDateString and
+// by the RFC-1123 parser; one definition instead of four copies.
+static const char* const js_date_wday_names[] = {
+    "Sun","Mon","Tue","Wed","Thu","Fri","Sat"
+};
+static const char* const js_date_month_names[] = {
+    "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
+};
+
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
@@ -248,13 +257,11 @@ static char* strptime(const char* buf, const char* fmt, struct tm* tm) {
     }
     int day = 0, year = 0, hour = 0, min = 0, sec = 0;
     char mon[4] = {0}; char wday[4] = {0};
-    static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun",
-                                    "Jul","Aug","Sep","Oct","Nov","Dec"};
     if (sscanf(buf, "%3s, %d %3s %d %d:%d:%d", wday, &day, mon, &year, &hour, &min, &sec) == 7) {
         tm->tm_mday = day; tm->tm_hour = hour; tm->tm_min = min; tm->tm_sec = sec;
         tm->tm_year = year - 1900; tm->tm_mon = -1; tm->tm_isdst = 0;
         for (int i = 0; i < 12; i++) {
-            if (_strnicmp(mon, months[i], 3) == 0) { tm->tm_mon = i; break; }
+            if (_strnicmp(mon, js_date_month_names[i], 3) == 0) { tm->tm_mon = i; break; }
         }
         return (tm->tm_mon >= 0) ? (char*)(buf + strlen(buf)) : NULL;
     }
@@ -2012,13 +2019,11 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
         struct tm utc;
         gmtime_r(&secs, &utc);
         // JS-style: "Thu Jun 09 3141 02:06:53 GMT+0000"
-        static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-        static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
         char buf[64];
         char year_buf[16];
         js_date_format_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
         snprintf(buf, sizeof(buf), "%s %s %02d %s %02d:%02d:%02d GMT+0000",
-            wday[utc.tm_wday], mon[utc.tm_mon], utc.tm_mday,
+            js_date_wday_names[utc.tm_wday], js_date_month_names[utc.tm_mon], utc.tm_mday,
             year_buf, utc.tm_hour, utc.tm_min, utc.tm_sec);
         return js_name_item(buf);
     }
@@ -2265,25 +2270,21 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
         if (method_id == 45) { // toUTCString
             struct tm utc; gmtime_r(&secs, &utc);
-            static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-            static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
             char buf[64];
             char year_buf[16];
             js_date_format_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
             snprintf(buf, sizeof(buf), "%s, %02d %s %s %02d:%02d:%02d GMT",
-                wday[utc.tm_wday], utc.tm_mday, mon[utc.tm_mon],
+                js_date_wday_names[utc.tm_wday], utc.tm_mday, js_date_month_names[utc.tm_mon],
                 year_buf, utc.tm_hour, utc.tm_min, utc.tm_sec);
             return js_name_item(buf);
         }
         if (method_id == 46) { // toDateString
             struct tm tm; js_date_localtime_minute(ms, &tm);
-            static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-            static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
             char buf[32];
             char year_buf[16];
             js_date_format_year(year_buf, sizeof(year_buf), tm.tm_year + 1900);
             snprintf(buf, sizeof(buf), "%s %s %02d %s",
-                wday[tm.tm_wday], mon[tm.tm_mon], tm.tm_mday, year_buf);
+                js_date_wday_names[tm.tm_wday], js_date_month_names[tm.tm_mon], tm.tm_mday, year_buf);
             return js_name_item(buf);
         }
         if (method_id == 47) { // toTimeString
@@ -9132,70 +9133,81 @@ extern "C" Item js_object_from_entries(Item iterable) {
 // =============================================================================
 
 
-extern "C" Item js_object_group_by(Item items, Item callback) {
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("groupBy callback is not a function");
-    }
-    // Convert iterable to array first
+// Object.groupBy and Map.groupBy walk the iterable identically and differ only
+// in how a group is addressed: Object keys through ToPropertyKey into a
+// null-prototype object, Map uses the callback's key value as-is.
+typedef struct JsGroupByOps {
+    // find the existing group array for `key`, or ItemNull
+    Item (*find)(Item result, Item key);
+    // publish a freshly created group array under `key`
+    Item (*put)(Item result, Item key, Item group);
+    // normalise the callback's return into the container's key form
+    Item (*key_of)(Item raw_key);
+} JsGroupByOps;
+
+static Item js_group_by_kernel(Item items, Item callback, Item result,
+        const JsGroupByOps* ops, const char* callback_error) {
+    if (!js_is_callable(callback)) return js_throw_type_error(callback_error);
     JS_ASSIGN_OR_RETURN(arr, js_iterable_to_array(items));
-    // Create null-prototype object per spec
-    Item result = js_object_create(ItemNull);
     int64_t len = js_array_length(arr);
     for (int64_t i = 0; i < len; i++) {
         Item elem = js_elements_get(arr, (Item){.item = i2it(i)});
-        Item idx_item = {.item = i2it(i)};
-        Item fn_args[2] = {elem, idx_item};
-        JS_ASSIGN_OR_RETURN(key, js_call_function(callback, make_js_undefined(), fn_args, 2));
-        // Stage A1: ToPropertyKey per spec — Symbol callback returns must yield
-        // a property key (__sym_N), not throw via js_to_string.
-        JS_ASSIGN_OR_RETURN(key_str, js_to_property_key(key));
-        if (get_type_id(key_str) != LMD_TYPE_STRING) return ItemNull;
-        // get or create array for this group
-        String* ks = it2s(key_str);
-        if (!ks) return ItemNull;
-        bool found = false;
-        Item group = js_map_shape_lookup_ext(result.map, ks->chars, (int)ks->len, &found);
-        if (!found) {
+        Item fn_args[2] = {elem, (Item){.item = i2it(i)}};
+        JS_ASSIGN_OR_RETURN(raw_key, js_call_function(callback, make_js_undefined(), fn_args, 2));
+        JS_ASSIGN_OR_RETURN(key, ops->key_of(raw_key));
+        Item group = ops->find(result, key);
+        if (group.item == ItemNull.item) {
             group = js_array_new(0);
-            JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(result, key_str, group));
+            JS_ASSIGN_OR_RETURN(put_result, ops->put(result, key, group));
         }
         js_array_push(group, elem);
     }
     return result;
 }
 
-// =============================================================================
-// Map.groupBy(items, callbackFn) — groups items into a Map by key
-// =============================================================================
+static Item js_group_by_object_find(Item result, Item key) {
+    String* ks = it2s(key);
+    if (!ks) return ItemNull;
+    bool found = false;
+    Item group = js_map_shape_lookup_ext(result.map, ks->chars, (int)ks->len, &found);
+    return found ? group : ItemNull;
+}
+JS_FORWARD_STATIC_ITEM(js_group_by_object_put, (Item result, Item key, Item group),
+    js_set_key_default, (result, key, group))
 
+// Stage A1: ToPropertyKey per spec — a Symbol returned by the callback must
+// yield a property key (__sym_N), not throw via js_to_string.
+static Item js_group_by_object_key(Item raw_key) {
+    JS_ASSIGN_OR_RETURN(key, js_to_property_key(raw_key));
+    return get_type_id(key) == LMD_TYPE_STRING ? key : ItemNull;
+}
+
+extern "C" Item js_object_group_by(Item items, Item callback) {
+    static const JsGroupByOps ops = {
+        js_group_by_object_find, js_group_by_object_put, js_group_by_object_key
+    };
+    // null-prototype result object per spec
+    return js_group_by_kernel(items, callback, js_object_create(ItemNull), &ops,
+                              "groupBy callback is not a function");
+}
+
+// Map.groupBy addresses groups through the collection methods: 2=has, 1=get,
+// 0=set.
+static Item js_group_by_map_find(Item result, Item key) {
+    JS_ASSIGN_OR_RETURN(has, js_collection_method(result, 2, key, ItemNull));
+    if (!it2b(has)) return ItemNull;
+    return js_collection_method(result, 1, key, ItemNull);
+}
+JS_FORWARD_STATIC_ITEM(js_group_by_map_put, (Item result, Item key, Item group),
+    js_collection_method, (result, 0, key, group))
+static Item js_group_by_map_key(Item raw_key) { return raw_key; }
 
 extern "C" Item js_map_group_by(Item items, Item callback) {
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("Map.groupBy callback is not a function");
-    }
-    Item result = js_map_collection_new();
-    // Convert iterable to array first
-    JS_ASSIGN_OR_RETURN(arr, js_iterable_to_array(items));
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item elem = js_elements_get(arr, (Item){.item = i2it(i)});
-        Item idx_item = {.item = i2it(i)};
-        Item fn_args[2] = {elem, idx_item};
-        JS_ASSIGN_OR_RETURN(key, js_call_function(callback, make_js_undefined(), fn_args, 2));
-        // has(key) -> method_id=2
-        JS_ASSIGN_OR_RETURN(has, js_collection_method(result, 2, key, ItemNull));
-        if (it2b(has)) {
-            // get(key) -> method_id=1, then push elem
-            JS_ASSIGN_OR_RETURN(group, js_collection_method(result, 1, key, ItemNull));
-            js_array_push(group, elem);
-        } else {
-            Item group = js_array_new(0);
-            js_array_push(group, elem);
-            // set(key, group) -> method_id=0
-            JS_ASSIGN_OR_RETURN(set_result, js_collection_method(result, 0, key, group));
-        }
-    }
-    return result;
+    static const JsGroupByOps ops = {
+        js_group_by_map_find, js_group_by_map_put, js_group_by_map_key
+    };
+    return js_group_by_kernel(items, callback, js_map_collection_new(), &ops,
+                              "Map.groupBy callback is not a function");
 }
 
 // =============================================================================
@@ -13441,16 +13453,36 @@ extern "C" Item js_worker_is_marked_as_untransferable(Item value) {
 JS_FORWARD_STATIC_EXPRESSION(bool, js_message_port_is_port, (Item value),
     js_message_port_is_object(value) && js_class_id(value) == JS_CLASS_MESSAGE_PORT)
 
-static const char* js_message_port_listener_key(Item event) {
-    if (js_message_port_event_name_matches(event, "message")) return "__message_listeners__";
-    if (js_message_port_event_name_matches(event, "close")) return "__close_listeners__";
+// message and close are the only MessagePort events. Each has an on* listener
+// list and a separate addEventListener list; one row keeps the two spellings
+// from drifting apart.
+static const struct JsMessagePortEventSpec {
+    const char* event;
+    const char* listener_key;
+    const char* event_listener_key;
+} js_message_port_events[] = {
+    { "message", "__message_listeners__", "__message_event_listeners__" },
+    { "close",   "__close_listeners__",   "__close_event_listeners__" },
+};
+
+static const JsMessagePortEventSpec* js_message_port_event_spec(Item event) {
+    for (size_t i = 0; i < sizeof(js_message_port_events) /
+            sizeof(js_message_port_events[0]); i++) {
+        if (js_message_port_event_name_matches(event, js_message_port_events[i].event)) {
+            return &js_message_port_events[i];
+        }
+    }
     return NULL;
 }
 
+static const char* js_message_port_listener_key(Item event) {
+    const JsMessagePortEventSpec* spec = js_message_port_event_spec(event);
+    return spec ? spec->listener_key : NULL;
+}
+
 static const char* js_message_port_event_listener_key(Item event) {
-    if (js_message_port_event_name_matches(event, "message")) return "__message_event_listeners__";
-    if (js_message_port_event_name_matches(event, "close")) return "__close_event_listeners__";
-    return NULL;
+    const JsMessagePortEventSpec* spec = js_message_port_event_spec(event);
+    return spec ? spec->event_listener_key : NULL;
 }
 
 static void js_message_port_remove_listener_from_key(Item port, const char* key, Item handler) {

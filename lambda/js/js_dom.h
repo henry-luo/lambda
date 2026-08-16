@@ -57,6 +57,11 @@ bool js_dom_is_host_driven_loop(void);
  */
 bool js_dom_collection_has_live_property_state(Item collection);
 
+// DOMRect-shaped object: x/y/top/left/right/bottom/width/height as doubles,
+// on interned keys. js_dom.cpp, js_dom_observers.cpp and js_dom_selection.cpp
+// each built this themselves.
+Item js_dom_make_rect(double x, double y, double width, double height);
+
 /**
  * Return whether the document has a committed geometry snapshot.
  * This predicate never performs style resolution or layout.

@@ -475,6 +475,18 @@ struct MirEmitter {
     struct hashmap* import_cache; // name -> import (proto+import) memo
     void (*note_mir_call)(const char* name); // optional per-language call telemetry hook
     void* call_owner;
+    // RV14: may this front-end SKIP rehoming a helper's wide result?
+    //
+    // Lambda may: under v3 the payload rides the number stack for the whole
+    // activation. LambdaJS may NOT — it still emits the v2 caller-donated-home
+    // return protocol until P2.5, and that protocol's callee epilogue restores
+    // its own watermark, which would free a payload the caller never rehomed
+    // (caught by test/js/regression_side_stack_frame_gc.js, whose
+    // `Number.MIN_VALUE` is subnormal and therefore genuinely number-stacked).
+    //
+    // Sense matters: the emitter is zero-initialized, so FALSE must be the
+    // safe value. A front-end that never heard of this flag keeps the rehome.
+    bool helper_results_skip_rehome;
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg);
@@ -3445,12 +3457,31 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
     // makes an untruthful row degrade safely: an allocation nobody reclaims
     // simply lives to the frame epilogue, so the returned Item stays valid
     // and the cost is space, not a dangling pointer.
+    // RV14: a C helper or sys func owns no number-frame watermark, so a wide
+    // scalar it returns rides the number stack directly and the Item that
+    // points there is already caller-homed. The caller therefore does NOT
+    // rehome it — the classify-and-rehome cluster this used to emit was a
+    // 20-instruction tax on every wide-capable helper call, paid whether or
+    // not a wide value actually occurred.
+    //
+    // Dropping the rehome drops the eager watermark restore with it (the
+    // restore is what made the rehome necessary), so the space bound moves
+    // from peak-liveness to total-allocations-in-the-frame. That is RV15's
+    // trade, and the loop/statement reclaim is its answer. Until that lands
+    // the exposure is NOT uniform, which is worth knowing:
+    //   * float results (`push_d` -> `flt2it`) box INLINE except for tiny and
+    //     subnormal doubles, so avg/sum/float/math_* leak essentially nothing;
+    //   * `box_int64_value` allocates on EVERY call by construction ("INT64
+    //     never uses an inline Item"), so int64-heavy loops do grow.
+    // Exhaustion degrades to a clean `lambda_stack_overflow_error`, not a
+    // dangling pointer — the payload stays valid for the whole activation.
     bool callee_preserves_watermark =
         resolved.call.effects.number_stack == JIT_NUMBER_STACK_PRESERVES;
     MIR_reg_t source_base = 0;
     MIR_reg_t scalar_home = 0;
     int scalar_home_id = 0;
-    if (scalar_mode != MIR_SCALAR_RETURN_NONE && !callee_preserves_watermark &&
+    if (!em->helper_results_skip_rehome &&
+            scalar_mode != MIR_SCALAR_RETURN_NONE && !callee_preserves_watermark &&
             em->frame.active && em->frame.number_base) {
         scalar_home_id = em_scalar_home_new(em);
         scalar_home = em_materialize_frame_ref(em,

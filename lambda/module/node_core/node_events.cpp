@@ -32,9 +32,34 @@ struct NodeEventsSessionState {
     Item cached_ee_prototype;
 };
 
+void node_events_runtime_attach(void* session);
+
+// The session slot is normally allocated when this module is attached. The
+// js_ee_* entry points are also reached from the host modules (js_tls.cpp,
+// js_http.cpp), which resolve through the host-namespace table and so never
+// trigger that attach — the slot would be NULL and every accessor macro below
+// would dereference it. Attach on demand instead: the slot allocation is
+// idempotent, so this runs at most once per session.
 static NodeEventsSessionState* node_events_state(void) {
+    NodeEventsSessionState* state = (NodeEventsSessionState*)
+        jube_node_current_module_state(JUBE_NODE_MODULE_STATE_EVENTS);
+    if (state) return state;
+    void* session = jube_node_runtime_current_session();
+    if (!session) return NULL;
+    node_events_runtime_attach(session);
     return (NodeEventsSessionState*)jube_node_current_module_state(
         JUBE_NODE_MODULE_STATE_EVENTS);
+}
+
+
+// The session state below is allocated when this module is attached. The
+// js_ee_* entry points are extern "C" and are called from outside the module
+// (lambda/js/js_readline.cpp), where nothing guarantees an attach has
+// happened: jube_node_current_module_state then returns NULL and every
+// accessor macro would dereference it. Each entry point fails closed with the
+// same value it already returns for a missing emitter.
+static bool node_events_attached(void) {
+    return node_events_host != NULL && node_events_state() != NULL;
 }
 
 #define node_events_session (node_events_state()->session)
@@ -424,7 +449,7 @@ static void emit_remove_listener(Item emitter, Item event_name, Item listener) {
 // ─── emitter.on(event, listener) ─────────────────────────────────────────────
 // Adds listener to end of listeners array. Returns emitter for chaining.
 extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
-    if (emitter.item == 0) return ItemNull;
+    if (emitter.item == 0 || !node_events_attached()) return ItemNull;
     if (!node_events_require_listener(listener)) return ItemNull;
     JubeRootFrame frame = {};
     if (!node_events_roots_begin(&frame, 5)) return ItemNull;
@@ -468,7 +493,7 @@ extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
 // ─── emitter.once(event, listener) ───────────────────────────────────────────
 // Adds a one-time listener. Returns emitter for chaining.
 extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener) {
-    if (emitter.item == 0) return ItemNull;
+    if (emitter.item == 0 || !node_events_attached()) return ItemNull;
     if (!node_events_require_listener(listener)) return ItemNull;
     JubeRootFrame frame = {};
     if (!node_events_roots_begin(&frame, 6)) return ItemNull;
@@ -522,7 +547,7 @@ extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener) {
 // ─── emitter.off(event, listener) / removeListener ──────────────────────────
 // Removes most-recently added instance of listener. Returns emitter.
 extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
-    if (emitter.item == 0) return ItemNull;
+    if (emitter.item == 0 || !node_events_attached()) return ItemNull;
     if (!node_events_require_listener(listener)) return ItemNull;
     Item map = get_events_map(emitter);
     Item arr = js_get_key_default(map, event_name);
@@ -551,7 +576,7 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
 // ─── emitter.emit(event, ...args) ───────────────────────────────────────────
 // Calls each listener with args. Returns true if had listeners.
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
-    if (emitter.item == 0) return (Item){.item = b2it(false)};
+    if (emitter.item == 0 || !node_events_attached()) return (Item){.item = b2it(false)};
     Item map = get_events_map(emitter);
     Item arr = js_get_key_default(map, event_name);
 
@@ -659,7 +684,7 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
 
 // ─── emitter.removeAllListeners(event?) ─────────────────────────────────────
 extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
-    if (emitter.item == 0) return emitter;
+    if (emitter.item == 0 || !node_events_attached()) return emitter;
     Item map = get_events_map(emitter);
     if (event_name.item == 0 || get_type_id(event_name) == LMD_TYPE_UNDEFINED) {
         // remove all events
@@ -686,7 +711,7 @@ extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
 // ─── emitter.listeners(event) ───────────────────────────────────────────────
 // Returns a copy of the listeners array for event.
 extern "C" Item js_ee_listeners(Item emitter, Item event_name) {
-    if (emitter.item == 0) return js_array_new(0);
+    if (emitter.item == 0 || !node_events_attached()) return js_array_new(0);
     Item map = get_events_map(emitter);
     Item arr = js_get_key_default(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
@@ -732,7 +757,7 @@ static Item event_target_listener_count(Item emitter, Item event_name, Item list
 }
 
 extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener) {
-    if (emitter.item == 0) return node_events_number(0);
+    if (emitter.item == 0 || !node_events_attached()) return node_events_number(0);
     Item map = get_events_map(emitter);
     Item arr = js_get_key_default(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
@@ -754,7 +779,7 @@ extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener
 
 // ─── emitter.eventNames() ──────────────────────────────────────────────────
 extern "C" Item js_ee_eventNames(Item emitter) {
-    if (emitter.item == 0) return js_array_new(0);
+    if (emitter.item == 0 || !node_events_attached()) return js_array_new(0);
     Item map = get_events_map(emitter);
     Item all_keys = js_object_keys(map);
     // filter out event names with 0 listeners
@@ -772,7 +797,7 @@ extern "C" Item js_ee_eventNames(Item emitter) {
 
 // ─── emitter.setMaxListeners(n) ─────────────────────────────────────────────
 extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
-    if (emitter.item == 0) return emitter;
+    if (emitter.item == 0 || !node_events_attached()) return emitter;
     ensure_keys();
     js_set_key_default(emitter, max_listeners_key, n);
     return emitter;
@@ -785,7 +810,7 @@ extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
 
 // ─── emitter.getMaxListeners() ──────────────────────────────────────────────
 extern "C" Item js_ee_getMaxListeners(Item emitter) {
-    if (emitter.item == 0) return node_events_number(10);
+    if (emitter.item == 0 || !node_events_attached()) return node_events_number(10);
     ensure_keys();
     Item val = js_get_key_default(emitter, max_listeners_key);
     if (val.item == 0 || get_type_id(val) == LMD_TYPE_UNDEFINED) {
@@ -797,7 +822,7 @@ extern "C" Item js_ee_getMaxListeners(Item emitter) {
 // ─── emitter.prependListener(event, listener) ───────────────────────────────
 // Adds listener to beginning of listeners array.
 extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listener) {
-    if (emitter.item == 0) return ItemNull;
+    if (emitter.item == 0 || !node_events_attached()) return ItemNull;
     if (!node_events_require_listener(listener)) return ItemNull;
     emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
@@ -817,7 +842,7 @@ extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listen
 
 // ─── emitter.prependOnceListener(event, listener) ───────────────────────────
 extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item listener) {
-    if (emitter.item == 0) return ItemNull;
+    if (emitter.item == 0 || !node_events_attached()) return ItemNull;
     if (!node_events_require_listener(listener)) return ItemNull;
     emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
@@ -885,6 +910,7 @@ static Item js_ee_inst_prependOnceListener(Item event_name, Item listener) {
 
 // ─── new EventEmitter() constructor ─────────────────────────────────────────
 extern "C" Item js_ee_constructor(void) {
+    if (!node_events_attached()) return ItemNull;
     ensure_keys();
     JubeRootFrame frame = {};
     if (!node_events_roots_begin(&frame, 3)) return ItemNull;
