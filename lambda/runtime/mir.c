@@ -391,6 +391,9 @@ size_t jit_release_generated_ir(MIR_context_t ctx) {
             released++;
         }
     }
+    // log_info compiles to ((void)0) at higher log levels, which leaves `bytes`
+    // set-but-unused and fails the release build's -Werror.
+    (void)bytes;
     if (released) log_info("mir-release-ir: freed %zu KB of insns across %zu generated functions"
         " (reg tables freed additionally)", bytes / 1024, released);
     return released;
