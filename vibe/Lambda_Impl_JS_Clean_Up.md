@@ -188,7 +188,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.11 join/toLocaleString kernel
 - [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 3 walkers migrated, rest are deliberately partial (see §13)
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
-- [!] C3.3 `js_node_emitter` — blocked on a design decision (see §16)
+- [~] C3.3 shared emitter — decision taken (adopt); guard + tls + http done, 5 modules left (§16)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
 - [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
 - [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
@@ -444,3 +444,31 @@ C0.2's array promotion. The recommended order is unchanged from the plan, but
 prerequisites come first: guard the `js_ee_*` entry points, then migrate
 `js_tls.cpp` (smallest, and `test/node/tls_socket_once.js` already locks the
 behaviour), then http, then the rest.
+
+### C3.3 decision taken: adopt the existing emitter
+
+No new `js_node_emitter.{hpp,cpp}`. The modules move onto
+`node_core/node_events.cpp` via `js_ee_on/once/emit/listeners`.
+
+Landed: the prerequisite guard, then `js_tls.cpp` (−104, deletes C0.1's once
+shim) and `js_http.cpp` (C0.2's helpers stay as the seam but forward to
+`js_ee_*`). Both regression tests stay green unchanged, which is what they
+were written for.
+
+Three things the migration exposed, all fixed:
+
+1. **Attachment, not guarding, was the real requirement.** The events module
+   attaches only through its own Jube attach path, and `require('http')` never
+   takes it — so the fail-closed guard turned a would-be crash into *silently
+   dropped listeners*. `node_events_state()` now attaches on demand. Any
+   further migration depends on this.
+2. **`js_ee_listenerCount` returns a JS number**, double-backed, so testing it
+   for `LMD_TYPE_INT` is always false. Measure `js_ee_listeners` instead.
+3. **`http_dispatch_listeners` took two shapes** — an emitter snapshot and
+   `createServer()`'s bare handler. Splitting `http_dispatch_one` out restores
+   the constructor-handler path.
+
+Remaining modules, in the plan's order: `js_net.cpp` (two intra-file clones,
+the largest), `js_readline.cpp`/`js_fs.cpp`, `js_child_process.cpp` (replay),
+`js_https.cpp`, `js_stream.cpp` (canonical, most hooks). Each should re-check
+points 2 and 3 above: they are easy to reproduce.
