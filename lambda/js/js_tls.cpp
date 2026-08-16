@@ -31,7 +31,7 @@
 extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener);
 extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener);
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
-extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener);
+extern "C" Item js_ee_listeners(Item emitter, Item event_name);
 extern "C" Item js_get_net_namespace(void);
 extern "C" Item js_tls_socket_getSession(void);
 extern "C" uv_tcp_t* js_net_socket_adopt_for_tls(Item socket_obj, Item tls_obj);
@@ -781,11 +781,11 @@ static void tls_socket_emit(Item obj, const char* event, Item* args, int argc) {
     js_microtask_flush();
 }
 
-// does this emitter have at least one listener for `event`?
+// does this emitter have at least one listener for `event`? js_ee_listenerCount
+// returns a JS number (double-backed), so measure the listener array instead.
 static bool tls_has_listener(Item obj, const char* event) {
     if (obj.item == 0) return false;
-    Item count = js_ee_listenerCount(obj, make_string_item(event), make_js_undefined());
-    return get_type_id(count) == LMD_TYPE_INT && it2i(count) > 0;
+    return js_array_length(js_ee_listeners(obj, make_string_item(event))) > 0;
 }
 
 JS_FORWARD_STATIC_ITEM(tls_server_session_id_item, (void), js_buffer_from_bytes, ("lambda-tls-session-id", 21))

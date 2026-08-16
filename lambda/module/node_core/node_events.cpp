@@ -32,7 +32,21 @@ struct NodeEventsSessionState {
     Item cached_ee_prototype;
 };
 
+void node_events_runtime_attach(void* session);
+
+// The session slot is normally allocated when this module is attached. The
+// js_ee_* entry points are also reached from the host modules (js_tls.cpp,
+// js_http.cpp), which resolve through the host-namespace table and so never
+// trigger that attach — the slot would be NULL and every accessor macro below
+// would dereference it. Attach on demand instead: the slot allocation is
+// idempotent, so this runs at most once per session.
 static NodeEventsSessionState* node_events_state(void) {
+    NodeEventsSessionState* state = (NodeEventsSessionState*)
+        jube_node_current_module_state(JUBE_NODE_MODULE_STATE_EVENTS);
+    if (state) return state;
+    void* session = jube_node_runtime_current_session();
+    if (!session) return NULL;
+    node_events_runtime_attach(session);
     return (NodeEventsSessionState*)jube_node_current_module_state(
         JUBE_NODE_MODULE_STATE_EVENTS);
 }
