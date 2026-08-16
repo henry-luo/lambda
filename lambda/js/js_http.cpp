@@ -821,7 +821,7 @@ static Item http_error_from_uv(int status) {
 }
 
 static Item http_response_error_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (!env) return make_js_undefined();
     Item res = env[0];
     Item err = env[1];
@@ -830,11 +830,8 @@ static Item http_response_error_tick(Item env_item) {
 }
 
 static void http_response_schedule_error(Item res, Item err) {
-    Item* env = js_alloc_env(2);
-    env[0] = res;
-    env[1] = err;
-    Item tick = js_new_native_closure(http_response_error_tick, 0, env, 2);
-    js_next_tick_enqueue(tick);
+    Item values[2] = { res, err };
+    JS_TICK_N(http_response_error_tick, 0, values, 2);
 }
 
 static Item http_encode_write_chunk(Item chunk_item, Item encoding_item) {
@@ -2380,7 +2377,7 @@ static void http_server_note_conn_closed(JsHttpConn* conn) {
 static void http_server_close_failed_listen(JsHttpServer* srv, Item self);
 
 static Item http_server_error_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (!env) return make_js_undefined();
     Item self = env[0];
     Item err = env[1];
@@ -2396,12 +2393,12 @@ static Item http_server_error_tick(Item env_item) {
 }
 
 static void http_server_schedule_error(Item self, Item err, JsHttpServer* failed_srv) {
-    Item* env = js_alloc_env(3);
-    env[0] = self;
-    env[1] = err;
-    env[2] = failed_srv ? (Item){.item = i2it((int64_t)(uintptr_t)failed_srv)} : make_js_undefined();
-    Item tick = js_new_native_closure(http_server_error_tick, 0, env, 3);
-    js_next_tick_enqueue(tick);
+    Item values[3] = {
+        self,
+        err,
+        failed_srv ? (Item){.item = i2it((int64_t)(uintptr_t)failed_srv)} : make_js_undefined()
+    };
+    JS_TICK_N(http_server_error_tick, 0, values, 3);
 }
 
 static void http_server_schedule_after_stack(Item callback) {

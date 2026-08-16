@@ -276,7 +276,7 @@ static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
     }
 }
 
-static Item js_mir_compile_failure_cleanup(MIR_context_t ctx,
+Item js_mir_compile_unit_fail(MIR_context_t ctx,
         JsMirTranspiler* mt, JsTranspiler* tp, char* owned_source,
         Runtime* runtime, EvalContext* js_context, bool reusing_context) {
     // MIR failures must release the active transpiler before its context and source;
@@ -354,16 +354,15 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir-ast: MIR context init failed");
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
+            runtime, js_context, reusing_context);
     }
 
     // set up MIR transpiler
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir-ast");
     if (!mt) {
-        MIR_finish(ctx);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
+            runtime, js_context, reusing_context);
     }
     mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
 
@@ -372,11 +371,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // transpile AST to MIR
     if (!transpile_js_mir_ast(mt, ast)) {
         log_error("js-mir-ast: collection/allocation failed");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
     }
 
     // This alternate entry point executes the same generated property-key
@@ -385,11 +381,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // compile-time spellings into per-session dynamic names.
     if (!js_prelink_compiled_name_table(mt)) {
         log_error("js-mir-ast: failed to prelink property-name table");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
     }
 
     // Canonical finalized artifact (MT2); see the JS path above.
@@ -402,11 +395,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir-ast: NULL labels detected");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_transpiler_destroy(tp);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
     }
 
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
@@ -416,25 +406,35 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     if (!js_main) {
         log_error("js-mir-ast: failed to find js_main");
-        jm_destroy_mir_transpiler(mt);
-        MIR_finish(ctx);
-        js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
     }
     if (g_jm_preamble_out) {
         g_jm_preamble_out->entry_func = (void*)js_main;
         g_jm_preamble_out->owns_compiled_state = true;
         if (!js_capture_compiled_name_table(mt, g_jm_preamble_out)) {
             log_error("js-mir-ast: failed to retain property-name table");
-            return (Item){.item = ITEM_ERROR};
+            g_jm_preamble_out->entry_func = NULL;
+            g_jm_preamble_out->owns_compiled_state = false;
+            return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+                runtime, js_context, reusing_context);
         }
     }
 
     // execute
     log_debug("js-mir-ast: executing JIT compiled code");
-    if (!js_activate_runtime_name_pool()) return (Item){.item = ITEM_ERROR};
-    if (!js_activate_module_state((uint32_t)mt->module_var_count)) return (Item){.item = ITEM_ERROR};
-    if (!js_link_compiled_name_table(mt)) return (Item){.item = ITEM_ERROR};
+    if (!js_activate_runtime_name_pool()) {
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
+    }
+    if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
+    }
+    if (!js_link_compiled_name_table(mt)) {
+        return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
+            runtime, js_context, reusing_context);
+    }
     Item result = js_main((Context*)context);
     log_debug("js-mir-ast: execution returned (type=%d)", get_type_id(result));
 
@@ -448,6 +448,9 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // cleanup
     jm_destroy_mir_transpiler(mt);
     MIR_finish(ctx);
+    // the AST entry point owns the parser after delegation; its TypeScript
+    // caller must not destroy the same Tree-sitter objects a second time.
+    js_transpiler_destroy(tp);
 
     // stash ephemeral GC heap on Runtime for caller cleanup
     if (runtime) {
@@ -700,11 +703,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     long phase_start = js_mir_phase_now_us();
     if (!js_transpiler_parse(tp, js_source, js_source_len)) {
         log_error("js-mir: parse failed");
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
+            runtime, NULL, true);
     }
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ts_parsed");
@@ -716,11 +716,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
+            runtime, NULL, true);
     }
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_built");
@@ -730,11 +727,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     int early_errors = js_check_early_errors(tp, js_ast);
     if (early_errors > 0) {
         log_error("js-mir: %d early error(s) detected", early_errors);
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        return (Item){.item = ITEM_ERROR};
+        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
+            runtime, NULL, true);
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
 
@@ -743,12 +737,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     EvalContext* js_context = NULL;
     bool reusing_context = false;
     if (!js_mir_prepare_eval_context(runtime, false, &js_context, &reusing_context)) {
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
         log_error("js-mir: Runtime context differs from eval-thread owner");
-        return ItemError;
+        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
+            runtime, NULL, true);
     }
     if (runtime->dom_ui_context) {
         // The stack worker binds a distinct execution realm. Carry the host's
@@ -781,7 +772,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
-        return js_mir_compile_failure_cleanup(NULL, NULL, tp, owned_source,
+        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, js_context, reusing_context);
     }
     g_active_mir_ctx = ctx;  // track for batch timeout recovery
@@ -794,7 +785,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Set up the compact MIR transpiler; source-sized collection storage is allocated after parsing.
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
     if (!mt) {
-        return js_mir_compile_failure_cleanup(ctx, NULL, tp, owned_source,
+        return js_mir_compile_unit_fail(ctx, NULL, tp, owned_source,
             runtime, js_context, reusing_context);
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
@@ -819,7 +810,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     if (!transpile_ok) {
         log_error("js-mir: collection/allocation failed for '%s'",
             filename ? filename : "<string>");
-        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+        return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
             runtime, js_context, reusing_context);
     }
 
@@ -828,7 +819,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // property-key image; imported modules contribute theirs in precompile.
     if (!js_prelink_compiled_name_table(mt)) {
         log_error("js-mir: failed to prelink main property-name table");
-        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+        return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
             runtime, js_context, reusing_context);
     }
 
@@ -836,7 +827,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         phase_start = js_mir_phase_now_us();
         if (!js_activate_runtime_name_pool()) {
             log_error("js-mir: failed to activate dynamic NamePool");
-            return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+            return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
                 runtime, js_context, reusing_context);
         }
         // Realm construction is runtime work: it must occur only after static
@@ -864,7 +855,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Pre-link validation: abort gracefully if NULL labels found
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: NULL labels detected, aborting link for '%s'", filename ? filename : "<string>");
-        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+        return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
             runtime, js_context, reusing_context);
     }
 
@@ -960,7 +951,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         context->debug_info = previous_debug_info;
         context->current_file = previous_current_file;
         if (js_debug_info) free_debug_info_table(js_debug_info);
-        return js_mir_compile_failure_cleanup(ctx, mt, tp, owned_source,
+        return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
             runtime, js_context, reusing_context);
     }
     if (g_jm_preamble_out) {

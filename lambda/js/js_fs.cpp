@@ -2897,7 +2897,7 @@ static Item fs_make_invalid_signal_error(void) {
 }
 
 static Item fs_readFile_promise_deferred(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     Item path = env[0];
     Item opts = env[1];
     Item signal = env[2];
@@ -2958,14 +2958,8 @@ extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
         Item promise = js_get_key_cstr(capability, "promise");
         Item resolve_fn = js_get_key_cstr(capability, "resolve");
         Item reject_fn = js_get_key_cstr(capability, "reject");
-        Item* env = js_alloc_env(5);
-        env[0] = path;
-        env[1] = opts;
-        env[2] = signal;
-        env[3] = resolve_fn;
-        env[4] = reject_fn;
-        Item callback = js_new_native_closure(fs_readFile_promise_deferred, 0, env, 5);
-        js_next_tick_enqueue(callback);
+        Item values[5] = {path, opts, signal, resolve_fn, reject_fn};
+        JS_TICK_N(fs_readFile_promise_deferred, 0, values, 5);
         return promise;
     }
 

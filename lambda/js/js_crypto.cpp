@@ -2501,7 +2501,7 @@ JS_CRYPTO_SIGN_VERIFY_WRAPPER(js_crypto_createVerify, true)
 #undef JS_CRYPTO_SIGN_VERIFY_WRAPPER
 
 static Item js_crypto_callback_result_emit(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (!env) return make_js_undefined_crypto();
     Item callback = env[0];
     Item result = env[1];
@@ -2511,11 +2511,8 @@ static Item js_crypto_callback_result_emit(Item env_item) {
 }
 
 static Item js_crypto_schedule_callback(Item callback, Item result) {
-    Item* env = js_alloc_env(2);
-    env[0] = callback;
-    env[1] = result;
-    Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-    js_next_tick_enqueue(fn);
+    Item values[2] = {callback, result};
+    JS_TICK_N(js_crypto_callback_result_emit, 0, values, 2);
     return make_js_undefined_crypto();
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, crypto_alg_is_eddsa_default, (Item alg_item), (crypto_item_is_undefined(alg_item) || get_type_id(alg_item) == LMD_TYPE_NULL))
@@ -6304,7 +6301,7 @@ extern "C" Item js_crypto_generateKeySync(Item type_item, Item options_item) {
 }
 
 static Item js_crypto_generateKeyPair_emit(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     if (!env) return make_js_undefined_crypto();
     Item callback = env[0];
     Item public_key = env[1];
@@ -6324,12 +6321,8 @@ extern "C" Item js_crypto_generateKeyPair(Item type_item, Item options_item, Ite
 
     Item public_key = js_get_key_cstr(result, "publicKey");
     Item private_key = js_get_key_cstr(result, "privateKey");
-    Item* env = js_alloc_env(3);
-    env[0] = callback_item;
-    env[1] = public_key;
-    env[2] = private_key;
-    Item fn = js_new_native_closure(js_crypto_generateKeyPair_emit, 0, env, 3);
-    js_next_tick_enqueue(fn);
+    Item values[3] = {callback_item, public_key, private_key};
+    JS_TICK_N(js_crypto_generateKeyPair_emit, 0, values, 3);
     return make_js_undefined_crypto();
 }
 
@@ -6341,11 +6334,8 @@ extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item ca
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
-    Item* env = js_alloc_env(2);
-    env[0] = callback_item;
-    env[1] = result;
-    Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-    js_next_tick_enqueue(fn);
+    Item values[2] = {callback_item, result};
+    JS_TICK_N(js_crypto_callback_result_emit, 0, values, 2);
     return make_js_undefined_crypto();
 }
 
@@ -7088,11 +7078,8 @@ extern "C" Item js_crypto_hkdf(Item digest_item, Item ikm_item, Item salt_item,
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
-    Item* env = js_alloc_env(2);
-    env[0] = callback_item;
-    env[1] = result;
-    Item fn = js_new_native_closure(js_crypto_callback_result_emit, 0, env, 2);
-    js_next_tick_enqueue(fn);
+    Item values[2] = {callback_item, result};
+    JS_TICK_N(js_crypto_callback_result_emit, 0, values, 2);
     return make_js_undefined_crypto();
 }
 

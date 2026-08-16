@@ -301,7 +301,7 @@ static void https_call_event_listeners(Item self, const char* key_name, Item* ar
 }
 
 static Item https_agent_secure_connect_bridge(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
+    JS_ENV_UNPACK(env, env_item);
     Item self = js_get_this();
     Item callback = env ? env[0] : make_js_undefined();
 

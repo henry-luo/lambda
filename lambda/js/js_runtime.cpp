@@ -4653,6 +4653,76 @@ static bool js_intrinsic_name_in(const char* name, int len,
     return false;
 }
 
+enum JsBuiltinProtoValueKind {
+    JS_PROTO_VALUE_TRUE,
+    JS_PROTO_VALUE_FALSE,
+    JS_PROTO_VALUE_ZERO,
+    JS_PROTO_VALUE_EMPTY_STRING,
+};
+
+enum JsBuiltinProtoPropertyFlags {
+    JS_PROTO_PROP_NON_ENUMERABLE = 1u << 0,
+    JS_PROTO_PROP_NON_WRITABLE = 1u << 1,
+    JS_PROTO_PROP_NON_CONFIGURABLE = 1u << 2,
+};
+
+struct JsBuiltinProtoSpec {
+    const char* constructor_name;
+    const char* property_name;
+    JsBuiltinProtoValueKind value_kind;
+    uint8_t flags;
+};
+
+static const JsBuiltinProtoSpec k_builtin_proto_specs[] = {
+    {NULL, "__is_proto__", JS_PROTO_VALUE_TRUE, 0},
+    {"Boolean", "__primitiveValue__", JS_PROTO_VALUE_FALSE, 0},
+    {"Number", "__primitiveValue__", JS_PROTO_VALUE_ZERO, 0},
+    {"String", "__primitiveValue__", JS_PROTO_VALUE_EMPTY_STRING, 0},
+};
+
+static void js_define_data_prop(Item object, const char* name, int name_len,
+        Item value, uint8_t flags) {
+    Item key = js_name_item(name, name_len);
+    js_set_key_default(object, key, value);
+    if (flags & JS_PROTO_PROP_NON_ENUMERABLE) {
+        js_mark_non_enumerable(object, key);
+    }
+    if (flags & JS_PROTO_PROP_NON_WRITABLE) {
+        js_mark_non_writable(object, key);
+    }
+    if (flags & JS_PROTO_PROP_NON_CONFIGURABLE) {
+        js_mark_non_configurable(object, key);
+    }
+}
+
+static void js_materialize_builtin_proto_specs(Item prototype,
+        const char* constructor_name, int constructor_len) {
+    for (size_t i = 0; i < sizeof(k_builtin_proto_specs) /
+            sizeof(k_builtin_proto_specs[0]); i++) {
+        const JsBuiltinProtoSpec* spec = &k_builtin_proto_specs[i];
+        if (spec->constructor_name &&
+                !js_intrinsic_name_is(constructor_name, constructor_len,
+                    spec->constructor_name)) continue;
+        Item value = ItemNull;
+        switch (spec->value_kind) {
+        case JS_PROTO_VALUE_TRUE:
+            value = (Item){.item = b2it(true)};
+            break;
+        case JS_PROTO_VALUE_FALSE:
+            value = (Item){.item = b2it(false)};
+            break;
+        case JS_PROTO_VALUE_ZERO:
+            value = js_make_number(0);
+            break;
+        case JS_PROTO_VALUE_EMPTY_STRING:
+            value = js_name_item("", 0);
+            break;
+        }
+        js_define_data_prop(prototype, spec->property_name,
+            (int)strlen(spec->property_name), value, spec->flags);
+    }
+}
+
 extern "C" int js_is_window_event_global_property(Item object, Item key);
 extern "C" Item js_get_window_event_global_value(void);
 extern "C" int radiant_dom_window_get_property(Item object, Item key, Item* out);
@@ -5376,8 +5446,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         JsClass cls = (JsClass)fn->intrinsic_class;
                         const char* nm = js_class_to_name(cls);
                         int nl = (int)strlen(nm);
-                        Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
-                        js_set_key_default(fn->prototype, ipk, (Item){.item = b2it(true)});
+                        js_materialize_builtin_proto_specs(fn->prototype, nm, nl);
                         // Array.prototype.length = 0 (per spec, Array.prototype is an Array exotic object)
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
                             Item lk = (Item){.item = s2it(heap_create_name("length", 6))};
@@ -5403,21 +5472,6 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             js_set_key_default(fn->prototype, us_k, unscopal_val);
                             js_mark_non_enumerable(fn->prototype, us_k);
                             js_mark_non_writable(fn->prototype, us_k);
-                        }
-                        // Boolean.prototype.[[BooleanData]] = false (ES spec 20.3.4)
-                        if (nl == 7 && strncmp(nm, "Boolean", 7) == 0) {
-                            Item pvk = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-                            js_set_key_default(fn->prototype, pvk, (Item){.item = b2it(false)});
-                        }
-                        // Number.prototype.[[NumberData]] = 0 (ES spec 21.1.4)
-                        if (nl == 6 && strncmp(nm, "Number", 6) == 0) {
-                            Item pvk = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-                            js_set_key_default(fn->prototype, pvk, js_make_number(0));
-                        }
-                        // String.prototype.[[StringData]] = "" (ES spec 22.1.4)
-                        if (nl == 6 && strncmp(nm, "String", 6) == 0) {
-                            Item pvk = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-                            js_set_key_default(fn->prototype, pvk, (Item){.item = s2it(heap_create_name("", 0))});
                         }
                         // Annex B Object.prototype.__proto__ accessor.
                         if (nl == 6 && strncmp(nm, "Object", 6) == 0) {
@@ -10210,7 +10264,52 @@ enum JsIndexedIntrinsicOp : int {
     JS_SET_INTRINSIC_IS_SUBSET,
     JS_SET_INTRINSIC_IS_SUPERSET,
     JS_SET_INTRINSIC_IS_DISJOINT,
+    JS_INDEXED_INTRINSIC_OP_COUNT,
 };
+
+#define JS_OP_BIT(op) (UINT64_C(1) << (op))
+static const uint64_t JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE =
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_PUSH) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_POP) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_SHIFT) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_UNSHIFT) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_SPLICE);
+static const uint64_t JS_OP_FLAG_ARRAYLIKE_GENERIC =
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_INDEX_OF) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_LAST_INDEX_OF) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_INCLUDES) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_MAP) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FILTER) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_REDUCE) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_REDUCE_RIGHT) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FOR_EACH) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_SOME) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_EVERY) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND_INDEX) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND_LAST) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND_LAST_INDEX) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_JOIN) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FLAT) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FLAT_MAP) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_KEYS) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_VALUES) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_ENTRIES) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_AT) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_ITEM) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_SORT);
+static const uint64_t JS_OP_FLAG_WRITEBACK =
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FILL) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_COPY_WITHIN) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_SORT) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_REVERSE);
+static const uint64_t JS_OP_FLAG_MUTATING_WRITEBACK =
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_FILL) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_COPY_WITHIN) |
+    JS_OP_BIT(JS_ARRAY_INTRINSIC_REVERSE);
+#undef JS_OP_BIT
+#define JS_OP_HAS(op, flag) \
+    ((unsigned)(op) < 64U && (((flag) & (UINT64_C(1) << (unsigned)(op))) != 0))
 
 static Item js_indexed_intrinsic_algorithm(Item obj,
         JsIndexedIntrinsicOp operation,
@@ -10407,10 +10506,7 @@ static Item js_intrinsic_array_prototype(JsIndexedIntrinsicOp op,
             // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
             // write the temp_arr contents back to the original receiver and return
             // the original receiver (per ES spec — these methods return O).
-            bool is_writeback = (op == JS_ARRAY_INTRINSIC_FILL ||
-                                 op == JS_ARRAY_INTRINSIC_COPY_WITHIN ||
-                                 op == JS_ARRAY_INTRINSIC_SORT ||
-                                 op == JS_ARRAY_INTRINSIC_REVERSE);
+            bool is_writeback = JS_OP_HAS(op, JS_OP_FLAG_WRITEBACK);
             Item result = js_array_intrinsic_algorithm(
                 temp_arr, this_val, op, args, arg_count);
             if (item_is_error(result)) return result;
@@ -10432,14 +10528,8 @@ static Item js_intrinsic_array_prototype(JsIndexedIntrinsicOp op,
             // J39-7: mutating methods on a primitive String receiver throw TypeError —
             // String has non-writable "length" so Set(O, "length", n, true) fails per spec.
             // (Boolean/Number wrappers tolerate empty-no-op cases — don't throw eagerly.)
-            bool is_mutating = (op == JS_ARRAY_INTRINSIC_PUSH ||
-                                op == JS_ARRAY_INTRINSIC_POP ||
-                                op == JS_ARRAY_INTRINSIC_SHIFT ||
-                                op == JS_ARRAY_INTRINSIC_UNSHIFT ||
-                                op == JS_ARRAY_INTRINSIC_SPLICE ||
-                                op == JS_ARRAY_INTRINSIC_REVERSE ||
-                                op == JS_ARRAY_INTRINSIC_FILL ||
-                                op == JS_ARRAY_INTRINSIC_COPY_WITHIN);
+            bool is_mutating = JS_OP_HAS(op, JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE) ||
+                JS_OP_HAS(op, JS_OP_FLAG_MUTATING_WRITEBACK);
             if (is_mutating && this_type == LMD_TYPE_STRING) {
                 return js_throw_type_error("Cannot assign to read only property of primitive value");
             }
@@ -25037,12 +25127,7 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
     // sort/reverse/fill/copyWithin are no-ops on small/empty arrays so do NOT
     // throw eagerly here (spec only fails when an actual write occurs).
     if (arr_type == LMD_TYPE_ARRAY) {
-        bool is_mut =
-            operation == JS_ARRAY_INTRINSIC_PUSH ||
-            operation == JS_ARRAY_INTRINSIC_POP ||
-            operation == JS_ARRAY_INTRINSIC_SHIFT ||
-            operation == JS_ARRAY_INTRINSIC_UNSHIFT ||
-            operation == JS_ARRAY_INTRINSIC_SPLICE;
+        bool is_mut = JS_OP_HAS(operation, JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE);
         if (is_mut) {
             if (it2b(js_object_is_frozen(arr))) {
                 return js_throw_type_error("Cannot modify frozen array");
@@ -25069,30 +25154,7 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
         if (operation == JS_ARRAY_INTRINSIC_SLICE) {
             return js_array_generic_slice(arr, args, argc);
         }
-        bool is_generic =
-            operation == JS_ARRAY_INTRINSIC_INDEX_OF ||
-            operation == JS_ARRAY_INTRINSIC_LAST_INDEX_OF ||
-            operation == JS_ARRAY_INTRINSIC_INCLUDES ||
-            operation == JS_ARRAY_INTRINSIC_MAP ||
-            operation == JS_ARRAY_INTRINSIC_FILTER ||
-            operation == JS_ARRAY_INTRINSIC_REDUCE ||
-            operation == JS_ARRAY_INTRINSIC_REDUCE_RIGHT ||
-            operation == JS_ARRAY_INTRINSIC_FOR_EACH ||
-            operation == JS_ARRAY_INTRINSIC_SOME ||
-            operation == JS_ARRAY_INTRINSIC_EVERY ||
-            operation == JS_ARRAY_INTRINSIC_FIND ||
-            operation == JS_ARRAY_INTRINSIC_FIND_INDEX ||
-            operation == JS_ARRAY_INTRINSIC_FIND_LAST ||
-            operation == JS_ARRAY_INTRINSIC_FIND_LAST_INDEX ||
-            operation == JS_ARRAY_INTRINSIC_JOIN ||
-            operation == JS_ARRAY_INTRINSIC_FLAT ||
-            operation == JS_ARRAY_INTRINSIC_FLAT_MAP ||
-            operation == JS_ARRAY_INTRINSIC_KEYS ||
-            operation == JS_ARRAY_INTRINSIC_VALUES ||
-            operation == JS_ARRAY_INTRINSIC_ENTRIES ||
-            operation == JS_ARRAY_INTRINSIC_AT ||
-            operation == JS_ARRAY_INTRINSIC_ITEM ||
-            operation == JS_ARRAY_INTRINSIC_SORT;
+        bool is_generic = JS_OP_HAS(operation, JS_OP_FLAG_ARRAYLIKE_GENERIC);
         if (is_generic) {
             // Note: slice/map/filter length validation per ArraySpeciesCreate is done
             // up-front by the typed intrinsic body before reaching here.
