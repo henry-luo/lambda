@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "The wide-lane gate declines every join that is not the classifier's wrapping i64/u64 result cell. Each function below must still reach its runtime helper: `i64 + int` joins in the unbounded `integer` tower where wrapping would be a wrong answer, `i64 * i32` has an i64 result cell but a packed NUM_SIZED operand the lane emitter does not sign-extend, and div/mod are excluded from the sized-integer cell entirely. A helper call disappearing here means the gate widened (D2.2.3, D2.4.1).",
+  "checks": [
+    {
+      "in_func": "_tower_join_#",
+      "expect": [
+        "call\tfn_add_p, fn_add"
+      ]
+    },
+    {
+      "in_func": "_narrow_join_#",
+      "expect": [
+        "call\tfn_mul_p, fn_mul",
+        "call\tcoerce_num_sized_p, coerce_num_sized"
+      ]
+    },
+    {
+      "in_func": "_wide_div_#",
+      "expect": [
+        "call\tfn_idiv_p, fn_idiv"
+      ]
+    }
+  ]
+}

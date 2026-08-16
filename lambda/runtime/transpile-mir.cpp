@@ -17836,6 +17836,14 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)var->num_type));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
                 MIR_new_reg_op(mt->ctx, coerced)));
+        } else if (var_tid == LMD_TYPE_UINT64 && val_tid == LMD_TYPE_UINT64) {
+            // Same identity as the declaration path: coerce_uint64 is
+            // box_uint64_value(item_to_uint64_value(v)), so a u64 source gets
+            // back the payload it handed in. Reassignment is where it hurt
+            // most — a loop-carried `acc` re-acquired a number home every
+            // iteration and never gave it back (D2.2.3, D5.2.3).
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, val)));
         } else if (var_tid == LMD_TYPE_UINT64) {
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
             MIR_reg_t coerced = emit_call_1(mt, "coerce_uint64", MIR_T_I64,

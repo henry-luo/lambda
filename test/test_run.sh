@@ -249,7 +249,6 @@ get_c_test_display_name() {
         "test_css_style_node") echo "🎨 CSS Style Node & Cascade Tests (GTest)" ;;
         "test_avl_tree") echo "🌲 AVL Tree Implementation Tests (GTest)" ;;
         "test_mir") echo "⚡ MIR JIT Tests" ;;
-        "test_num_stack") echo "🔢 Number Stack Tests" ;;
         "test_strbuf") echo "📝 String Buffer Tests" ;;
         "test_strview") echo "👀 String View Tests" ;;
         "test_url_extra") echo "🌐 URL Extra Tests" ;;

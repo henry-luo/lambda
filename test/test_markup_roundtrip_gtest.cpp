@@ -9,7 +9,6 @@
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"  // This includes the Input struct definition
 #include "../lib/arraylist.h"
-#include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
 #include "../lib/mempool.h"
 #include "../lib/url.h"  // Use new URL parser instead of lexbor
