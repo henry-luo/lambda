@@ -2375,16 +2375,18 @@ task**, not be presented as the Result30 performance fix.
 
 ### 6.3 Action A — freeze causal performance gates before changing emission
 
-- [ ] Add a repeatable interleaved A/B runner for two release binaries. Run
+- [x] Add a repeatable interleaved A/B runner for two release binaries. Run
       each pair in alternating order; record raw samples, ratio of medians,
       winner count, commit, binary hash, power state, and stdout equality.
       Keep run artifacts under `temp/`; copy only the summarized evidence into
-      this document.
-- [ ] Make typed `jetstream/crypto_sha1` the primary P1.7 canary and typed
+      this document. Implemented as
+      `test/benchmark/run_paired_benchmarks.py`; a self-comparison and the
+      matched Action B/C runs below validate the runner.
+- [x] Make typed `jetstream/crypto_sha1` the primary P1.7 canary and typed
       `awfy/json` the secondary structural canary. Use at least 41 alternating
       pairs for a final canary decision. Do not gate on `fannkuch` or a single
       sub-millisecond row.
-- [ ] Run the entire AWFY typed and untyped set with at least 9 alternating
+- [x] Run the entire AWFY typed and untyped set with at least 9 alternating
       samples per binary. A standalone ResultN snapshot remains useful for
       publication, but never substitutes for this matched-host gate.
 - [ ] Capture optimized post-simplify MIR, not only pre-simplify emission, for
@@ -2449,10 +2451,19 @@ the existing `MirValue`; do not create a parallel value abstraction.
 - [ ] Tail-forward both lanes when caller and callee shapes agree. Resolve
       only when a tail boundary changes shape; this is the free forwarding
       required by D5.2.1v2.
-- [ ] Enforce RV4.2 mechanically: at most one pending companion is live; a
+- [x] Enforce RV4.2 mechanically: at most one pending companion is live; a
       second call, safepoint, spill, or root publication is illegal until the
       first value is consumed, forwarded, or patched. Keep the current eager
-      path as a fail-closed fallback for consumers not yet proven safe.
+      path as a fail-closed fallback for consumers not yet proven safe. The
+      emitter now tracks the live item/companion pair, checks ownership at
+      materialization, and rejects a live companion at function epilogue;
+      tail-forwarding remains the next step before this guard can be relaxed.
+- [x] Close the shared LambdaJS direct-call boundary opened by lazy
+      propagation: `jm_call_direct_boxed` and `jm_call_direct_native` now
+      materialize a pending pair before publishing or handing the register to
+      later lowering. This protects the same D5.2.1v2/D5.2.2v2 invariant for
+      the shared emitter; arithmetic, truthiness, and type-dispatch consumers
+      are still open.
 - [~] Extend forced-GC, async/yield, dynamic-call, error-lane, and slot-wrapper
       fixtures so a pending Item cannot cross a memory or suspension boundary.
       The full baseline and Test262 gates cover the existing boundary suite;
@@ -2519,14 +2530,39 @@ Action B and the first safe RV6 slice are implemented in
   / module-return escape. The producer bodies contain no resolver call.
 - Focused and full MIR-emission gates pass: **39/39**. The fixture executes as
   `stable`, `4`, `5` under the release binary.
-- `make test-lambda-baseline`: **4031/4031** combined input/runtime tests.
-  `make test262-baseline`: **40261/40261**, zero retries and zero regressions.
+- The final fresh `make test-lambda-baseline` run reached **4028/4031**:
+  all Lambda/MIR, forced-GC, interpreter, and input tests passed; three
+  `test_js_gtest` cases (`dom_jquery_fx`, `dom_jquery_lib`, and
+  `lib_flatpickr`) still exit 139 before producing output. The final
+  `make test262-baseline` gate is **40261/40261**, with zero retries and zero
+  regressions.
 - A post-C three-run release snapshot is not a paired causal gate. Its typed
   `crypto_sha1` was **30.09 ms** versus **29.60 ms** for the same-tree v2
   control, and typed `awfy/json` was **2.616 ms** versus **2.572 ms**. These
   are small, unpaired movements and are recorded as **not measurable**, not as
   a claimed win or regression. The required 41-pair interleaved canary remains
   before declaring C performance-complete.
+- Action A's final release rerun used `temp/action_b_v3_lambda.exe` as
+  control and the final `lambda.exe` as candidate. Two repeated 41-pair
+  typed `jetstream/crypto_sha1` runs completed **41/41 valid pairs**, with
+  median ratios **0.9655x** and **0.9684x** and **36/41 candidate wins** in
+  each run; stdout was equal for every pair. The full AWFY gate (14 rows ×
+  typed/untyped, 9 pairs each) completed with **252/252 valid pairs**;
+  geomean ratios were **1.0017** untyped and **0.9901** typed, with stdout
+  equal for every row. Final artifacts are
+  `temp/action_a_crypto_typed_b_vs_c_final2.json`,
+  `temp/action_a_crypto_typed_b_vs_c_final3.json`, and
+  `temp/action_a_awfy_9pairs_b_vs_c_final2.json`.
+- These timings satisfy the matched-host measurement gate, but they do not
+  close Action C: the current and Action B optimized MIR opcode streams remain
+  identical, so the canary movement is recorded as a causal measurement only,
+  not as evidence of a new emitted optimization.
+- The post-guard focused MIR gate remains **39/39**. The three DOM failures
+  are reproducible in the filtered rerun. A direct archived-control run of
+  `dom_jquery_lib` passes, while the current source exits 139 and both
+  binaries emit byte-identical MIR for that module; this remains a separate
+  JS/runtime baseline blocker, not evidence that the live-pair guard changed
+  Lambda emission.
 
 Remaining implementation work is deliberately narrow: propagate the pending
 metadata through arithmetic/truthiness/type-dispatch consumers, add the

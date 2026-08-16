@@ -111,10 +111,16 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         FN_RETURN_HOME_NORMAL, false, true};
     FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_BOXED_BODY);
-    MIR_reg_t result = em_call_direct(&mt->em, callee->body_name,
+    MirCallResult direct = em_call_direct(&mt->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
-        &options).normal.reg;
-    return jm_publish_call_result(mt, result);
+        &options);
+    if (direct.normal.maybe_pending) {
+        // direct boxed bodies share the lazy shape-2 transport with Lambda;
+        // publish only after resolving the companion so JS cannot execute a
+        // pending tag as an ordinary Item (D5.2.1v2, D5.2.2v2).
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+    }
+    return jm_publish_call_result(mt, direct.normal.reg);
 }
 
 static bool jm_args_are_prerooted(JsMirTranspiler* mt, MIR_op_t args,
@@ -207,9 +213,15 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     FnVariantAnalysis* native = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_NATIVE_BODY);
     MirCallOptions options = {{MIR_FRAME_REF_NONE, 0}, 0u, false, true};
-    MIR_reg_t result = em_call_direct(&mt->em, callee->name,
+    MirCallResult direct = em_call_direct(&mt->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
-        &options).normal.reg;
+        &options);
+    if (direct.normal.maybe_pending) {
+        // native entries may still use the boxed shape for a dynamic result;
+        // resolve that pair before handing the register to later lowering.
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+    }
+    MIR_reg_t result = direct.normal.reg;
     mt->last_call_result_reg = 0;
     return result;
 }
