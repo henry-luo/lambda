@@ -53,6 +53,19 @@ extern "C" Item js_dom_check_validity_bridge(Item elem_item);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
+// Append `text` to `sb` using the HTML application/x-www-form-urlencoded
+// serializer. Encoding straight into the buffer avoids the allocate-copy-free
+// round trip the per-field url_encode_component() calls used to pay. This is
+// also the spec's serializer, which encodes U+0020 as '+' — encodeURIComponent
+// rules (%20, and ! ~ ' ( ) left literal) are not what a form submission emits.
+static void js_dom_append_form_encoded(StrBuf* sb, const char* text, size_t len) {
+    if (!sb || !text || len == 0) return;
+    size_t need = url_encode_measure(text, len, URL_KEEP_FORM, true, NULL);
+    if (!strbuf_ensure_cap(sb, sb->length + need + 1)) return;
+    sb->length += url_encode_write(text, len, URL_KEEP_FORM, true, sb->str + sb->length);
+    sb->str[sb->length] = '\0';
+}
+
 static char* js_dom_build_submit_query(Item entries) {
     if (get_type_id(entries) != LMD_TYPE_ARRAY) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
@@ -69,14 +82,10 @@ static char* js_dom_build_submit_query(Item entries) {
         if (!key) continue;
         if (!val) val = "";
 
-        char* key_enc = url_encode_component(key, strlen(key));
-        char* val_enc = url_encode_component(val, strlen(val));
         if (sb->length > 0) strbuf_append_char(sb, '&');
-        if (key_enc) strbuf_append_str(sb, key_enc);
+        js_dom_append_form_encoded(sb, key, strlen(key));
         strbuf_append_char(sb, '=');
-        if (val_enc) strbuf_append_str(sb, val_enc);
-        if (key_enc) mem_free(key_enc);
-        if (val_enc) mem_free(val_enc);
+        js_dom_append_form_encoded(sb, val, strlen(val));
     }
 
     char* query = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);

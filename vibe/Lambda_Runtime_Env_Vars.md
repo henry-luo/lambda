@@ -75,10 +75,8 @@ so it remains useful under `NDEBUG`.
 | `LAMBDA_JS_LOAD_IC` | Default on; `0` disables named-property load inline caches. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_STORE_IC` | Default on; `0` disables named-property store inline caches. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_ARRAY_NAMED_IC` | Default on; `0` disables named array-property inline caches. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_SHAPE_TRANSITIONS` | Default on; `0` disables shape-transition construction. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_SHARED_CTOR_SHAPE` | Default on; `0` disables shared constructor shapes. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_FUNC_CTOR_SHAPE` | Default on; `0` disables function-constructor shape specialization. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_URI_FAST` | Default on; `0` disables fast URI implementation. | ✓ | ✓ | ✓ | ✓ |
 | `JS_TRANSPILE_TIMING` | Non-zero: print parse/AST/import/MIR/link/execute timing and AST counters. | ✓ | ✓ | ✓ | ✓ |
 | `JS_RUNTIME_TRACE` | Non-zero: enable JS runtime property-access tracing. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_INVOKE_TRACE` | Non-zero: trace JS invocation dispatch. | ✓ | ✓ | ✗ | ✗ |
@@ -213,7 +211,7 @@ The recommended policy has four classes:
    `debug_profile`.
 3. **Profiling (25):** timers, counters, reports, and output destinations.
    Compile only in `debug_profile` and `release_profile`.
-4. **Experimental/A-B (19):** temporary optimization and resource-strategy
+4. **Experimental/A-B (17):** temporary optimization and resource-strategy
    controls used for differential correctness tests and performance A/B runs.
    Keep in `debug`, `debug_profile`, and `release_profile` during migration,
    but compile them out of `release`. Retire each switch after its optimized
@@ -227,12 +225,12 @@ environment hook rather than carrying it into a new profile.
 
 | Profile | Current recognized | Truly needed after cleanup | Composition |
 |---|---:|---:|---|
-| debug | 106 | **83** | 30 runtime + 34 debug/test + 19 experimental |
-| debug_profile | 108 | **108** | 30 runtime + 34 debug/test + 25 profiling + 19 experimental |
-| release | 94 | **30** | 30 runtime only |
-| release_profile | 96 | **74** | 30 runtime + 25 profiling + 19 experimental |
+| debug | 104 | **81** | 30 runtime + 34 debug/test + 17 experimental |
+| debug_profile | 106 | **106** | 30 runtime + 34 debug/test + 25 profiling + 17 experimental |
+| release | 92 | **30** | 30 runtime only |
+| release_profile | 94 | **72** | 30 runtime + 25 profiling + 17 experimental |
 
-The release target therefore loses **64** environment-controlled code paths.
+The release target therefore loses **62** environment-controlled code paths.
 The profiling-only rule removes 25 profiler variables from both non-profile
 builds. The two `JS_EXEC_PROFILE*` variables already obey this rule; the other
 23 do not yet.
@@ -290,12 +288,12 @@ surface from release.
 controlled timing comparison and emergency performance bisection, not
 application semantics.
 
-### Experimental/A-B set (19)
+### Experimental/A-B set (17)
 
 | Group | Variables |
 |---|---|
 | Memory instrumentation mode (1) | `MEMTRACK_MODE` |
-| JS execution and optimization gates (14) | `LAMBDA_JS_LARGE_INTERP`, `LAMBDA_JS_LARGE_INTERP_BYTES`, `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_MIR_INTERP`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD`, `LAMBDA_JS_LOAD_IC`, `LAMBDA_JS_STORE_IC`, `LAMBDA_JS_ARRAY_NAMED_IC`, `LAMBDA_JS_SHAPE_TRANSITIONS`, `LAMBDA_JS_SHARED_CTOR_SHAPE`, `LAMBDA_JS_FUNC_CTOR_SHAPE`, `LAMBDA_JS_URI_FAST`, `JS_CALL_FORCE_GENERIC` |
+| JS execution and optimization gates (12) | `LAMBDA_JS_LARGE_INTERP`, `LAMBDA_JS_LARGE_INTERP_BYTES`, `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_MIR_INTERP`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD`, `LAMBDA_JS_LOAD_IC`, `LAMBDA_JS_STORE_IC`, `LAMBDA_JS_ARRAY_NAMED_IC`, `LAMBDA_JS_SHARED_CTOR_SHAPE`, `LAMBDA_JS_FUNC_CTOR_SHAPE`, `JS_CALL_FORCE_GENERIC` |
 | Radiant cache/render tuning (4) | `RADIANT_JS_SOURCE_CACHE`, `RADIANT_JS_SOURCE_CACHE_BYTES`, `RADIANT_TILE_STRIP_H`, `RADIANT_TILE_THRESHOLD` |
 
 These should not become a permanent configuration API. After differential

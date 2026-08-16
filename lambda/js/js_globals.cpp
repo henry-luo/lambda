@@ -12525,186 +12525,58 @@ static Item js_throw_uri_error(const char* msg) {
     return js_throw_value(js_new_error_with_name(tn, m));
 }
 
-static bool js_uri_fast_enabled(void) {
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char* flag = getenv("LAMBDA_JS_URI_FAST");
-        enabled = (!flag || strcmp(flag, "0") != 0) ? 1 : 0;
-    }
-    return enabled != 0;
-}
+// Percent-encode / decode straight into a stack buffer where the string fits.
+// The byte-level rules (keep sets, %XX emission, strict UTF-8 validation) live
+// in lib/url.c; what stays here is Item/String boxing and the identity
+// short-circuit, which only the JS value model can express.
+#define JS_URI_DECODE_STACK_BYTES 512
+#define JS_URI_ENCODE_STACK_BYTES 768
 
-static inline int js_uri_hex_value(unsigned char c) {
-    static const signed char table[256] = {
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-         0, 1, 2, 3, 4, 5, 6, 7, 8, 9,-1,-1,-1,-1,-1,-1,
-        -1,10,11,12,13,14,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,10,11,12,13,14,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
-    return table[c];
-}
-
-static inline bool js_uri_decode_reserved(unsigned char c) {
-    return c == '#' || c == '$' || c == '&' || c == '+' || c == ',' ||
-           c == '/' || c == ':' || c == ';' || c == '=' || c == '?' || c == '@';
-}
-
-static bool js_uri_fast_decode_bytes(String* s, bool component, char* out, size_t* out_len) {
-    size_t i = 0;
-    size_t j = 0;
-    size_t len = (size_t)s->len;
-    while (i < len) {
-        unsigned char ch = (unsigned char)s->chars[i];
-        if (ch != '%') {
-            out[j++] = (char)ch;
-            i++;
-            continue;
-        }
-        if (i + 2 >= len) return false;
-        int high = js_uri_hex_value((unsigned char)s->chars[i + 1]);
-        int low = js_uri_hex_value((unsigned char)s->chars[i + 2]);
-        if (high < 0 || low < 0) return false;
-        unsigned char lead = (unsigned char)((high << 4) | low);
-        if (!component && js_uri_decode_reserved(lead)) {
-            out[j++] = s->chars[i++];
-            out[j++] = s->chars[i++];
-            out[j++] = s->chars[i++];
-            continue;
-        }
-        out[j++] = (char)lead;
-        i += 3;
-        if (lead < 0x80) continue;
-
-        int expected = 0;
-        if ((lead & 0xE0) == 0xC0) expected = 1;
-        else if ((lead & 0xF0) == 0xE0) expected = 2;
-        else if ((lead & 0xF8) == 0xF0) expected = 3;
-        else return false;
-
-        unsigned char cont[3];
-        for (int k = 0; k < expected; k++) {
-            if (i + 2 >= len || s->chars[i] != '%') return false;
-            int h2 = js_uri_hex_value((unsigned char)s->chars[i + 1]);
-            int l2 = js_uri_hex_value((unsigned char)s->chars[i + 2]);
-            if (h2 < 0 || l2 < 0) return false;
-            cont[k] = (unsigned char)((h2 << 4) | l2);
-            if ((cont[k] & 0xC0) != 0x80) return false;
-            out[j++] = (char)cont[k];
-            i += 3;
-        }
-
-        unsigned int cp = 0;
-        if (expected == 1) {
-            cp = ((lead & 0x1F) << 6) | (cont[0] & 0x3F);
-            if (cp < 0x80) return false;
-        } else if (expected == 2) {
-            cp = ((lead & 0x0F) << 12) | ((cont[0] & 0x3F) << 6) | (cont[1] & 0x3F);
-            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
-        } else {
-            cp = ((lead & 0x07) << 18) | ((cont[0] & 0x3F) << 12) |
-                 ((cont[1] & 0x3F) << 6) | (cont[2] & 0x3F);
-            if (cp < 0x10000 || cp > 0x10FFFF) return false;
-        }
-    }
-    *out_len = j;
-    return true;
-}
-
-static bool js_uri_try_fast_decode(String* s, bool component, Item* result) {
-    if (!js_uri_fast_enabled() || !s || s->len <= 0) return false;
-    char stack_buf[512];
+// Decode into `result`. Returns false only when the input is malformed, which
+// is the caller's cue to raise URIError — there is no second decoder to retry
+// with, so a rejected string is parsed exactly once.
+static bool js_uri_decode_to_item(String* s, bool component, Item* result) {
+    if (!s || s->len <= 0) return false;
+    char stack_buf[JS_URI_DECODE_STACK_BYTES];
     char* out = stack_buf;
     bool heap_out = false;
+    // percent-decoding never grows its input, so s->len bytes always suffice
     if ((size_t)s->len > sizeof(stack_buf)) {
         out = (char*)mem_alloc((size_t)s->len + 1, MEM_CAT_TEMP);
         if (!out) return false;
         heap_out = true;
     }
     size_t out_len = 0;
-    bool ok = js_uri_fast_decode_bytes(s, component, out, &out_len);
-    if (!ok) {
-        if (heap_out) mem_free(out);
-        return false;
-    }
-    out[out_len] = '\0';
-    String* decoded = heap_create_name(out, out_len);
+    bool ok = url_decode_strict(s->chars, (size_t)s->len, component, out, &out_len);
+    if (ok) *result = (Item){.item = s2it(heap_create_name(out, out_len))};
     if (heap_out) mem_free(out);
-    *result = (Item){.item = s2it(decoded)};
-    return true;
+    return ok;
 }
 
-static inline bool js_uri_component_encode_keep(unsigned char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-           (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-           c == '.' || c == '~' || c == '!' || c == '\'' ||
-           c == '(' || c == ')' || c == '*';
-}
-
-static inline bool js_uri_encode_keep(unsigned char c, bool component) {
-    if (js_uri_component_encode_keep(c)) return true;
-    return !component && (c == ';' || c == ',' || c == '/' || c == '?' ||
-           c == ':' || c == '@' || c == '&' || c == '=' ||
-           c == '+' || c == '$' || c == '#');
-}
-
-static bool js_uri_try_fast_encode(Item str_val, String* s, bool component, Item* result) {
-    if (!js_uri_fast_enabled() || !s || s->len <= 0) return false;
-    size_t len = (size_t)s->len;
+// Encode cannot fail: the lone-surrogate URIError check runs before this.
+static Item js_uri_encode_to_item(Item str_val, String* s, bool component) {
+    const uint8_t* keep = component ? URL_KEEP_COMPONENT : URL_KEEP_URI;
     bool changed = false;
-    size_t out_len = 0;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s->chars[i];
-        if (js_uri_encode_keep(c, component)) out_len++;
-        else { out_len += 3; changed = true; }
-    }
-    if (!changed) {
-        *result = str_val;
-        return true;
-    }
+    size_t out_len = url_encode_measure(s->chars, (size_t)s->len, keep, false, &changed);
+    // nothing needed escaping: hand back the original immutable string uncopied
+    if (!changed) return str_val;
 
-    char stack_buf[768];
+    char stack_buf[JS_URI_ENCODE_STACK_BYTES];
     char* out = stack_buf;
     bool heap_out = false;
-    if (out_len >= sizeof(stack_buf)) {
+    if (out_len > sizeof(stack_buf)) {
         out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
-        if (!out) return false;
+        // parity with the previous allocating encoder, which also degraded to ""
+        if (!out) return js_name_item("", 0);
         heap_out = true;
     }
-    static const char hex[] = "0123456789ABCDEF";
-    size_t j = 0;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s->chars[i];
-        if (js_uri_encode_keep(c, component)) {
-            out[j++] = (char)c;
-        } else {
-            out[j++] = '%';
-            out[j++] = hex[c >> 4];
-            out[j++] = hex[c & 0x0F];
-        }
-    }
-    out[j] = '\0';
+    size_t j = url_encode_write(s->chars, (size_t)s->len, keep, false, out);
     String* encoded = heap_create_name(out, j);
     if (heap_out) mem_free(out);
-    *result = (Item){.item = s2it(encoded)};
-    return true;
+    return (Item){.item = s2it(encoded)};
 }
 
-typedef char* (*JsUriEncoder)(const char*, size_t);
-
-static Item js_encode_uri_common(Item str_item, bool component,
-                                  JsUriEncoder encoder) {
+static Item js_encode_uri_common(Item str_item, bool component) {
     JS_ASSIGN_OR_RETURN(str_val, js_to_string(str_item));
     String* s = it2s(str_val);
     if (!s || s->len == 0) return js_name_item("", 0);
@@ -12712,15 +12584,9 @@ static Item js_encode_uri_common(Item str_item, bool component,
     if (js_has_lone_surrogate(s->chars, s->len)) {
         return js_throw_uri_error("URI malformed");
     }
-    Item fast_result = ItemNull;
-    if (js_uri_try_fast_encode(str_val, s, component, &fast_result)) return fast_result;
-    char* encoded = encoder(s->chars, s->len);
-    if (!encoded) return js_name_item("", 0);
-    String* result = heap_create_name(encoded, strlen(encoded));
-    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
-    return (Item){.item = s2it(result)};
+    return js_uri_encode_to_item(str_val, s, component);
 }
-JS_FORWARD_ITEM(js_encodeURIComponent, (Item str_item), js_encode_uri_common, (str_item, true, url_encode_component))
+JS_FORWARD_ITEM(js_encodeURIComponent, (Item str_item), js_encode_uri_common, (str_item, true))
 
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
@@ -12785,11 +12651,8 @@ static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
     return result;
 }
 
-typedef char* (*JsUriDecoder)(const char*, size_t, size_t*);
-
 static Item js_decode_uri_common(Item str_item, bool component,
-                                  JsUriDecoder decoder, Item* error_cache,
-                                  uint64_t* error_epoch) {
+                                  Item* error_cache, uint64_t* error_epoch) {
     bool cache_rooted = js_global_string_caches_ensure_roots();
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
@@ -12797,36 +12660,32 @@ static Item js_decode_uri_common(Item str_item, bool component,
     if (!js_string_has_percent(s)) return str_val;
     int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
-    Item fast_result = ItemNull;
-    if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
-    if (js_uri_try_fast_decode(s, component, &fast_result)) return fast_result;
-    size_t decoded_len = 0;
-    char* decoded = decoder(s->chars, s->len, &decoded_len);
-    if (!decoded) {
-        if (!cache_rooted) return js_throw_named_error_text("URIError", "URI malformed");
-        bool cache_hit = error_cache->item &&
-            *error_epoch == js_get_heap_epoch();
-        js_opt_trace_record(cache_hit ? JS_OPT_URI_ERROR_CACHE_HIT :
-            JS_OPT_URI_ERROR_CACHE_MISS, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-        // Cache URIError object per-epoch to avoid expensive error creation
-        // in hot loops (e.g., test262 tests that iterate 65000+ code points).
-        if (!cache_hit) {
-            // D5.3.3: the canonical constructor roots name and message across
-            // both allocations; two local heap_create_name calls did not.
-            *error_cache = js_new_named_error("URIError", "URI malformed");
-            *error_epoch = js_get_heap_epoch();
-        }
-        return js_throw_value(*error_cache);
+    Item decoded_result = ItemNull;
+    if (js_uri_try_decode_four_byte_escape(s, &decoded_result)) return decoded_result;
+    if (js_uri_decode_to_item(s, component, &decoded_result)) return decoded_result;
+
+    // the decode core already rejected this string; malformed input reaches the
+    // URIError path without a second parse by a fallback decoder
+    if (!cache_rooted) return js_throw_named_error_text("URIError", "URI malformed");
+    bool cache_hit = error_cache->item &&
+        *error_epoch == js_get_heap_epoch();
+    js_opt_trace_record(cache_hit ? JS_OPT_URI_ERROR_CACHE_HIT :
+        JS_OPT_URI_ERROR_CACHE_MISS, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    // Cache URIError object per-epoch to avoid expensive error creation
+    // in hot loops (e.g., test262 tests that iterate 65000+ code points).
+    if (!cache_hit) {
+        // D5.3.3: the canonical constructor roots name and message across
+        // both allocations; two local heap_create_name calls did not.
+        *error_cache = js_new_named_error("URIError", "URI malformed");
+        *error_epoch = js_get_heap_epoch();
     }
-    String* result = heap_create_name(decoded, decoded_len);
-    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
-    return (Item){.item = s2it(result)};
+    return js_throw_value(*error_cache);
 }
-JS_FORWARD_ITEM(js_decodeURIComponent, (Item str_item), js_decode_uri_common, (str_item, true, url_decode_component, &js_decode_uri_component_error, &js_decode_uri_component_error_epoch))
+JS_FORWARD_ITEM(js_decodeURIComponent, (Item str_item), js_decode_uri_common, (str_item, true, &js_decode_uri_component_error, &js_decode_uri_component_error_epoch))
 
 // v20: encodeURI / decodeURI (non-Component variants preserving URI structural chars)
-JS_FORWARD_ITEM(js_encodeURI, (Item str_item), js_encode_uri_common, (str_item, false, url_encode_uri))
-JS_FORWARD_ITEM(js_decodeURI, (Item str_item), js_decode_uri_common, (str_item, false, url_decode_uri, &js_decode_uri_error, &js_decode_uri_error_epoch))
+JS_FORWARD_ITEM(js_encodeURI, (Item str_item), js_encode_uri_common, (str_item, false))
+JS_FORWARD_ITEM(js_decodeURI, (Item str_item), js_decode_uri_common, (str_item, false, &js_decode_uri_error, &js_decode_uri_error_epoch))
 
 // =============================================================================
 // unescape(string) — legacy percent-decoding (%XX and %uXXXX)
