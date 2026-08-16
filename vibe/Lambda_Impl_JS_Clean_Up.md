@@ -190,7 +190,7 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
 - [~] C3.3 shared emitter — tls, http, net done; readline/fs, child_process, https, stream left (§16)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
-- [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
+- [x] C3.5 globals tables — every item done or verified already-consolidated (see §14)
 - [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
 - [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
 - [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
@@ -306,6 +306,28 @@ already happened. Measured before starting:
   unified entry point would be a switch with disjoint arms.
 - *Still duplicated, now fixed* — the `wday[]`/`mon[]` calendar arrays, which
   had four copies.
+- *`groupBy` kernels* — **done.** `Object.groupBy` and `Map.groupBy` walked the
+  iterable identically and differed only in how a group is addressed. They now
+  share `js_group_by_kernel` behind a three-function accessor set. Both error
+  messages, both key models (ToPropertyKey into a null-prototype object vs the
+  raw key through the collection methods) and the null-prototype result are
+  unchanged.
+- *MessagePort event-spec table* — **done.** The two listener-key mappers
+  become one row per event, so an event's `on*` list and its
+  `addEventListener` list can no longer drift apart.
+- *Symbol-description lookup* — already consolidated:
+  `js_symbol_get_description` is a single three-tier lookup over the existing
+  `js_well_known_symbol_specs` table, and `js_intrinsic_symbol_description`
+  just delegates to it.
+- *`js_process_listener_op`* — re-measured and confirmed not worth doing. The
+  six ops have disjoint bodies: `on` flushes and re-refs IPC,
+  `removeAllListeners` clears the fixed lists and re-inits roots, `once`
+  wraps, `removeListener` unwraps once-wrappers. Only `listenerCount` and
+  `listeners` share anything — a three-line preamble — which is less than a
+  helper would cost.
+
+**C3.5 is complete**: every item is either implemented or verified as already
+consolidated in this tree.
 
 **C3.7**
 - *OpenSSL dlsym X-macro* — **done**. The DSA availability check had drifted:
