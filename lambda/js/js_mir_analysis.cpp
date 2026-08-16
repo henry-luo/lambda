@@ -594,6 +594,20 @@ void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs) {
 }
 
 // Collect all identifier references in a function body (excluding nested function bodies)
+typedef struct JmBodyRefsCtx {
+    struct hashmap* refs;
+    uint32_t body_start;
+    uint32_t body_end;
+} JmBodyRefsCtx;
+
+static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
+                                      uint32_t body_start, uint32_t body_end);
+
+static void jm_collect_body_refs_child(JsAstNode* child, void* ctx) {
+    JmBodyRefsCtx* state = (JmBodyRefsCtx*)ctx;
+    jm_collect_body_refs_impl(child, state->refs, state->body_start, state->body_end);
+}
+
 static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
                                       uint32_t body_start, uint32_t body_end) {
     if (!node) return;
@@ -625,41 +639,10 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
         }
         break;
     }
-
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_collect_body_refs_impl(s, refs, body_start, body_end); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
-        JsAstNode* d = v->declarations;
-        while (d) { jm_collect_body_refs_impl(d, refs, body_start, body_end); d = d->next; }
-        break;
-    }
     case JS_AST_NODE_VARIABLE_DECLARATOR: {
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
         // Recurse into init (may reference outer vars)
         if (d->init) jm_collect_body_refs_impl(d->init, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        jm_collect_body_refs_impl(bin->left, refs, body_start, body_end);
-        jm_collect_body_refs_impl(bin->right, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        jm_collect_body_refs_impl(un->operand, refs, body_start, body_end);
-        break;
-    }
-    // Note: JS_AST_NODE_UNARY_EXPRESSION covers both unary ops and update (++/--)
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* a = (JsAssignmentNode*)node;
-        jm_collect_body_refs_impl(a->left, refs, body_start, body_end);
-        jm_collect_body_refs_impl(a->right, refs, body_start, body_end);
         break;
     }
     case JS_AST_NODE_CALL_EXPRESSION:
@@ -696,114 +679,10 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
         if (m->computed) jm_collect_body_refs_impl(m->property, refs, body_start, body_end);
         break;
     }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* r = (JsReturnNode*)node;
-        jm_collect_body_refs_impl(r->argument, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
-        jm_collect_body_refs_impl(es->expression, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_collect_body_refs_impl(ifn->test, refs, body_start, body_end);
-        jm_collect_body_refs_impl(ifn->consequent, refs, body_start, body_end);
-        jm_collect_body_refs_impl(ifn->alternate, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        jm_collect_body_refs_impl(f->init, refs, body_start, body_end);
-        jm_collect_body_refs_impl(f->test, refs, body_start, body_end);
-        jm_collect_body_refs_impl(f->update, refs, body_start, body_end);
-        jm_collect_body_refs_impl(f->body, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        jm_collect_body_refs_impl(w->test, refs, body_start, body_end);
-        jm_collect_body_refs_impl(w->body, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* cond = (JsConditionalNode*)node;
-        jm_collect_body_refs_impl(cond->test, refs, body_start, body_end);
-        jm_collect_body_refs_impl(cond->consequent, refs, body_start, body_end);
-        jm_collect_body_refs_impl(cond->alternate, refs, body_start, body_end);
-        break;
-    }
-    // Note: logical expressions use JS_AST_NODE_BINARY_EXPRESSION (already handled above)
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* arr = (JsArrayNode*)node;
-        JsAstNode* el = arr->elements;
-        while (el) { jm_collect_body_refs_impl(el, refs, body_start, body_end); el = el->next; }
-        break;
-    }
-    case JS_AST_NODE_OBJECT_EXPRESSION: {
-        JsObjectNode* obj = (JsObjectNode*)node;
-        JsAstNode* prop = obj->properties;
-        while (prop) { jm_collect_body_refs_impl(prop, refs, body_start, body_end); prop = prop->next; }
-        break;
-    }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* p = (JsPropertyNode*)node;
         if (p->computed) jm_collect_body_refs_impl(p->key, refs, body_start, body_end);
         jm_collect_body_refs_impl(p->value, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_TEMPLATE_LITERAL: {
-        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
-        JsAstNode* expr = tl->expressions;
-        while (expr) { jm_collect_body_refs_impl(expr, refs, body_start, body_end); expr = expr->next; }
-        break;
-    }
-    case JS_AST_NODE_TAGGED_TEMPLATE: {
-        JsTaggedTemplateNode* tt = (JsTaggedTemplateNode*)node;
-        jm_collect_body_refs_impl(tt->tag, refs, body_start, body_end);
-        if (tt->quasi) { JsAstNode* e = tt->quasi->expressions; while (e) { jm_collect_body_refs_impl(e, refs, body_start, body_end); e = e->next; } }
-        break;
-    }
-    case JS_AST_NODE_SPREAD_ELEMENT: {
-        JsSpreadElementNode* spread = (JsSpreadElementNode*)node;
-        jm_collect_body_refs_impl(spread->argument, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_YIELD_EXPRESSION: {
-        JsYieldNode* yield_node = (JsYieldNode*)node;
-        jm_collect_body_refs_impl(yield_node->argument, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_AWAIT_EXPRESSION: {
-        JsAwaitNode* await_node = (JsAwaitNode*)node;
-        jm_collect_body_refs_impl(await_node->argument, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        JsAstNode* child = seq->expressions;
-        while (child) { jm_collect_body_refs_impl(child, refs, body_start, body_end); child = child->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        jm_collect_body_refs_impl(sw->discriminant, refs, body_start, body_end);
-        JsAstNode* c = sw->cases;
-        while (c) { jm_collect_body_refs_impl(c, refs, body_start, body_end); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        jm_collect_body_refs_impl(sc->test, refs, body_start, body_end);
-        JsAstNode* s = sc->consequent;
-        while (s) { jm_collect_body_refs_impl(s, refs, body_start, body_end); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        jm_collect_body_refs_impl(dw->test, refs, body_start, body_end);
-        jm_collect_body_refs_impl(dw->body, refs, body_start, body_end);
         break;
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:
@@ -838,27 +717,10 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
         hashmap_free(loop_head_lexicals);
         break;
     }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        jm_collect_body_refs_impl(t->block, refs, body_start, body_end);
-        if (t->handler) jm_collect_body_refs_impl(t->handler, refs, body_start, body_end);
-        if (t->finalizer) jm_collect_body_refs_impl(t->finalizer, refs, body_start, body_end);
-        break;
-    }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* cc = (JsCatchNode*)node;
         // Note: cc->param is a DECLARATION (catch parameter), not a reference — don't add to refs
         jm_collect_body_refs_impl(cc->body, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_THROW_STATEMENT: {
-        JsThrowNode* th = (JsThrowNode*)node;
-        jm_collect_body_refs_impl(th->argument, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
-        jm_collect_body_refs_impl(ls->body, refs, body_start, body_end);
         break;
     }
     case JS_AST_NODE_WITH_STATEMENT: {
@@ -866,10 +728,29 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
         jm_collect_body_refs_impl(ws->body, refs, body_start, body_end);
         break;
     }
-    default:
-        // For unhandled node types, we may miss some references
-        // but that's OK — we'll just not capture those variables
+    // Patterns and class members are declaration sites, not reference sites,
+    // and program/import/export never reach this walker. Not descending is
+    // deliberate, so it is stated here rather than left to the child table.
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_OBJECT_PATTERN:
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+    case JS_AST_NODE_FIELD_DEFINITION:
+    case JS_AST_NODE_METHOD_DEFINITION:
+    case JS_AST_NODE_STATIC_BLOCK:
+    case JS_AST_NODE_PROGRAM:
+    case JS_AST_NODE_IMPORT_DECLARATION:
+    case JS_AST_NODE_EXPORT_DECLARATION:
         break;
+    default: {
+        // every remaining kind just scans all of its children
+        JmBodyRefsCtx state = { refs, body_start, body_end };
+        js_ast_visit_children(node, jm_collect_body_refs_child, &state);
+        break;
+    }
     }
 }
 
