@@ -2438,36 +2438,40 @@ the existing `MirValue`; do not create a parallel value abstraction.
 - [x] Return `{item, companion, maybe_pending}` from the direct-call lowering
       without immediately calling `em_resolve_pending_pair`. Publish neither
       lane as an ordinary boxed Item while it may still be pending.
-- [~] Resolve at the first consumer that needs an ordinary Item. Fold the
-      pending arm into existing tag dispatch for arithmetic, comparison,
-      truthiness, type inspection, and unboxing so the non-pending path adds no
-      separate boundary check. The current slice covers the direct-call
-      ordinary-Item/unbox boundary; arithmetic and truthiness folding remain.
+- [x] Resolve at the first consumer that needs an ordinary Item. The shared
+      materialization hook now feeds arithmetic, comparison, truthiness, type
+      inspection, and unboxing; the non-pending path remains unchanged. The
+      focused `action_c_lazy_consumers` fixture covers arithmetic, comparison,
+      truthiness, type inspection, and the producer's resolver-free pair.
 - [x] Patch before every escape: memory store, argument to an unknown or C
       boundary, root/spill publication, dynamic dispatch, suspension, or
       return through an incompatible shape. D5.2.2v2's destination-owned
       scalar storage remains the ownership endpoint. The wrapper, module-main,
       and root publication paths now materialize at their named escape.
-- [ ] Tail-forward both lanes when caller and callee shapes agree. Resolve
-      only when a tail boundary changes shape; this is the free forwarding
-      required by D5.2.1v2.
+- [x] Tail-forward both lanes when caller and callee shapes agree. A direct
+      shape-2 call in a single-return, non-raising pair body forwards both
+      registers; multi-return bodies resolve at the return firewall instead.
+      `action_c_tail_forward` covers the free path and `action_c_multi_return`
+      prevents a shared epilogue from publishing stale lanes.
 - [x] Enforce RV4.2 mechanically: at most one pending companion is live; a
       second call, safepoint, spill, or root publication is illegal until the
       first value is consumed, forwarded, or patched. Keep the current eager
       path as a fail-closed fallback for consumers not yet proven safe. The
       emitter now tracks the live item/companion pair, checks ownership at
       materialization, and rejects a live companion at function epilogue;
-      tail-forwarding remains the next step before this guard can be relaxed.
+      single-return tail forwarding is now explicit; the multi-return guard
+      keeps the fail-closed path for incompatible control flow.
 - [x] Close the shared LambdaJS direct-call boundary opened by lazy
       propagation: `jm_call_direct_boxed` and `jm_call_direct_native` now
       materialize a pending pair before publishing or handing the register to
       later lowering. This protects the same D5.2.1v2/D5.2.2v2 invariant for
-      the shared emitter; arithmetic, truthiness, and type-dispatch consumers
-      are still open.
+      the shared emitter; the remaining open work is dedicated cross-boundary
+      fixture coverage rather than a second LambdaJS value abstraction.
 - [~] Extend forced-GC, async/yield, dynamic-call, error-lane, and slot-wrapper
       fixtures so a pending Item cannot cross a memory or suspension boundary.
       The full baseline and Test262 gates cover the existing boundary suite;
-      dedicated pending-crossing fixtures are still pending.
+      dedicated forced-GC, async/yield, dynamic-call, error-lane, and
+      slot-wrapper pending-crossing fixtures are still pending.
 
 Acceptance: the two canary dumps must no longer contain an eager resolve
 immediately after every pair call; every remaining resolve must be attributable
@@ -2516,7 +2520,7 @@ repeat in a second interleaved run before being called a win or regression.
 
 ### 6.8 Implementation checkpoint (2026-08-16)
 
-Action B and the first safe RV6 slice are implemented in
+Action B and the current safe RV6 slice are implemented in
 `lambda/runtime/transpile-mir.cpp` and
 `lambda/runtime/mir_emitter_shared.hpp`.
 
@@ -2528,20 +2532,31 @@ Action B and the first safe RV6 slice are implemented in
   direct calls keep both lanes in registers; `em_materialize_pending_value`
   resolves only at the first ordinary-Item consumer or an incompatible wrapper
   / module-return escape. The producer bodies contain no resolver call.
-- Focused and full MIR-emission gates pass: **39/39**. The fixture executes as
-  `stable`, `4`, `5` under the release binary.
-- The final fresh `make test-lambda-baseline` run reached **4028/4031**:
-  all Lambda/MIR, forced-GC, interpreter, and input tests passed; three
+- The first implementation exposed a stale-lane bug in multi-return bodies:
+  a direct tail branch could leave the shared epilogue returning registers from
+  a different branch. RV6 forwarding is therefore limited to single-return,
+  non-raising bodies, with `action_c_multi_return` as the regression fixture.
+- Focused MIR-emission gates pass: **42/42**. The Action C fixtures execute as
+  `8, 1, 1, int64, 1, 0`, `7`, and `0, 7` under the release binary.
+- The fresh `make test-lambda-baseline` run reached **4032/4035**: all
+  Lambda/MIR, forced-GC, interpreter, and input tests passed; three
   `test_js_gtest` cases (`dom_jquery_fx`, `dom_jquery_lib`, and
-  `lib_flatpickr`) still exit 139 before producing output. The final
+  `lib_flatpickr`) still exit 139 before producing output. The fresh
   `make test262-baseline` gate is **40261/40261**, with zero retries and zero
   regressions.
-- A post-C three-run release snapshot is not a paired causal gate. Its typed
-  `crypto_sha1` was **30.09 ms** versus **29.60 ms** for the same-tree v2
-  control, and typed `awfy/json` was **2.616 ms** versus **2.572 ms**. These
-  are small, unpaired movements and are recorded as **not measurable**, not as
-  a claimed win or regression. The required 41-pair interleaved canary remains
-  before declaring C performance-complete.
+- Two repeated 41-pair release canaries against
+  `temp/action_b_v3_lambda.exe` measured typed `crypto_sha1` at **1.0488x**
+  and **1.0556x** candidate/control, with **7/41** and **1/41** candidate
+  wins; stdout matched on every pair. A same-binary 41-pair control/copy run
+  measured **0.9997x**, so the runner noise was small. The candidate and
+  Action B optimized MIR streams are byte-identical after address/register
+  normalization, so this is a binary-lineage/layout movement, not an emitted
+  Action C optimization; performance acceptance is **not closed**.
+- The 14-row AWFY gate completed **252/252 valid pairs** with equal stdout;
+  geomeans were **0.9997x** untyped and **1.0115x** typed. The typed mean is
+  just above the 1% acceptance threshold, and because the optimized MIR is
+  unchanged it remains an Action D measurement item rather than a claimed
+  semantic regression from lazy propagation.
 - Action A's final release rerun used `temp/action_b_v3_lambda.exe` as
   control and the final `lambda.exe` as candidate. Two repeated 41-pair
   typed `jetstream/crypto_sha1` runs completed **41/41 valid pairs**, with
@@ -2557,17 +2572,21 @@ Action B and the first safe RV6 slice are implemented in
   close Action C: the current and Action B optimized MIR opcode streams remain
   identical, so the canary movement is recorded as a causal measurement only,
   not as evidence of a new emitted optimization.
-- The post-guard focused MIR gate remains **39/39**. The three DOM failures
+- The post-guard focused MIR gate is now **42/42** with the Action C consumer
+  and multi-return fixtures included. The three DOM failures
   are reproducible in the filtered rerun. A direct archived-control run of
   `dom_jquery_lib` passes, while the current source exits 139 and both
   binaries emit byte-identical MIR for that module; this remains a separate
   JS/runtime baseline blocker, not evidence that the live-pair guard changed
   Lambda emission.
 
-Remaining implementation work is deliberately narrow: propagate the pending
-metadata through arithmetic/truthiness/type-dispatch consumers, add the
-forced-GC/async/dynamic/slot crossing fixtures, enforce the one-live-companion
-rule mechanically, and complete the RVO8/RVO9 optimized-MIR/disassembly census.
+Remaining implementation work is deliberately narrow: add the forced-GC,
+async/yield, dynamic-call, error-lane, and slot-wrapper crossing fixtures,
+enforce the one-live-companion rule mechanically across suspension and spill
+paths, and complete the RVO8/RVO9 optimized-MIR/disassembly census. The paired
+timing gate must then be repeated after any code-size/layout adjustment; the
+current Action C slice is correctness-complete for its covered consumers but
+not performance-complete.
 
 Explicit non-goals for this performance slice: P2.5 LambdaJS migration,
 loop/statement number-stack reclaim, source-language type changes, C2MIR
