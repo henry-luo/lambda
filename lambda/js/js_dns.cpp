@@ -5,6 +5,8 @@
  * Registered as built-in module 'dns' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_error_codes.h"
@@ -26,7 +28,6 @@
 
 extern "C" Item js_internal_binding(Item name);
 
-static bool dns_is_object_like(Item item);
 
 JS_FORWARD_STATIC_EXPRESSION(bool, is_symbol_item, (Item value), (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE))
 
@@ -120,16 +121,10 @@ static Item make_node_error(const char* name, const char* code, const char* mess
 static Item make_dns_error_with_syscall(int status, const char* hostname,
                                         const char* syscall) {
     const char* code = uv_err_name(status);
-    const char* msg = uv_strerror(status);
-    if (!code) code = "UNKNOWN";
-    if (!msg) msg = "unknown error";
-
-    Item error = js_new_error(make_string_item(msg));
-    js_set_key_cstr(error, "code", make_string_item(code));
-    js_set_key_cstr(error, "errno", (Item){.item = i2it(status)});
-    js_set_key_cstr(error, "syscall", make_string_item(syscall));
-    if (hostname) js_set_key_cstr(error, "hostname", make_string_item(hostname));
-    return error;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = syscall; spec.hostname = hostname;
+    spec.code = code ? code : "UNKNOWN";
+    return js_node_uv_error(spec);
 }
 JS_FORWARD_STATIC_ITEM(make_dns_error, (int status, const char* hostname), make_dns_error_with_syscall, (status, hostname, "getaddrinfo"))
 JS_FORWARD_STATIC_ITEM(make_dns_resolve_error, (int status, const char* hostname, const char* syscall), make_dns_error_with_syscall, (status, hostname, syscall))
@@ -189,9 +184,7 @@ static Item throw_invalid_local_address_value(Item address_item) {
         memcpy(value, s->chars, (size_t)len);
         value[len] = '\0';
     }
-    char msg[192];
-    snprintf(msg, sizeof(msg), "Invalid IP address: %s", value);
-    return js_throw_type_error_code("ERR_INVALID_IP_ADDRESS", msg);
+    return js_throw_type_error_codef("ERR_INVALID_IP_ADDRESS", "Invalid IP address: %s", value);
 }
 
 typedef struct DnsLookupOptions {
@@ -495,11 +488,8 @@ static Item validate_family_value(Item value, bool object_form, int* out_family)
     if (family != 0 && family != 4 && family != 6) {
         if (object_form) return js_throw_value(make_invalid_family_error(value));
         else {
-            char msg[128];
-            snprintf(msg, sizeof(msg),
-                "The argument 'family' must be one of: 0, 4, 6. Received %lld",
-                (long long)family);
-            return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE, msg);
+            return js_throw_type_error_codef(JS_ERR_INVALID_ARG_VALUE, 
+                "The argument 'family' must be one of: 0, 4, 6. Received %lld", (long long)family);
         }
     }
     *out_family = (int)family;
@@ -793,7 +783,7 @@ static void dns_ensure_cares_channelwrap(void) {
     }
 
     Item proto = js_get_key_cstr(ctor, "prototype");
-    if (!dns_is_object_like(proto)) {
+    if (!js_node_is_property_carrier(proto)) {
         proto = js_new_object();
         js_set_key_cstr(ctor, "prototype", proto);
     }
@@ -932,9 +922,9 @@ static bool dns_call_cares_query_hook(const DnsResolveOptions* options,
     if (get_type_id(cares) != LMD_TYPE_MAP) return false;
 
     Item ctor = js_get_key_cstr(cares, "ChannelWrap");
-    Item proto = dns_is_object_like(ctor) ?
+    Item proto = js_node_is_property_carrier(ctor) ?
         js_get_key_cstr(ctor, "prototype") : make_js_undefined();
-    if (!dns_is_object_like(proto)) return false;
+    if (!js_node_is_property_carrier(proto)) return false;
 
     Item fn = js_get_key_default(proto, make_string_item(options->syscall));
     if (!is_callable(fn)) return false;
@@ -1349,7 +1339,7 @@ static Item dns_validated_servers_copy(Item servers_item) {
 }
 
 static Item dns_receiver_servers(Item receiver) {
-    if (dns_is_object_like(receiver)) {
+    if (js_node_is_property_carrier(receiver)) {
         Item servers = js_get_key_cstr(receiver, "__dns_servers__");
         if (get_type_id(servers) == LMD_TYPE_ARRAY) return servers;
     }
@@ -1358,16 +1348,16 @@ static Item dns_receiver_servers(Item receiver) {
 
 extern "C" Item js_dns_resolver_handle_getServers(void) {
     Item handle = js_get_this();
-    Item owner = dns_is_object_like(handle) ?
+    Item owner = js_node_is_property_carrier(handle) ?
         js_get_key_cstr(handle, "__dns_owner__") : make_js_undefined();
     return dns_array_copy(dns_receiver_servers(owner));
 }
 
 extern "C" Item js_dns_getServers(void) {
     Item receiver = js_get_this();
-    if (dns_is_object_like(receiver)) {
+    if (js_node_is_property_carrier(receiver)) {
         Item handle = js_get_key_cstr(receiver, "_handle");
-        if (dns_is_object_like(handle)) {
+        if (js_node_is_property_carrier(handle)) {
             Item get_servers = js_get_key_cstr(handle, "getServers");
             if (is_callable(get_servers)) {
                 Item result = js_call_function(get_servers, handle, NULL, 0);
@@ -1385,7 +1375,7 @@ extern "C" Item js_dns_setServers(Item servers_item) {
     Item receiver = js_get_this();
     if (receiver.item == dns_namespace.item ||
         receiver.item == dns_promises_namespace.item ||
-        !dns_is_object_like(receiver)) {
+        !js_node_is_property_carrier(receiver)) {
         dns_default_servers = copy;
         if (dns_namespace.item != 0) {
             js_set_key_cstr(dns_namespace, "__dns_servers__", copy);
@@ -1443,7 +1433,7 @@ extern "C" Item js_dns_setLocalAddress(Item ipv4_item, Item ipv6_item) {
     }
 
     Item receiver = js_get_this();
-    if (dns_is_object_like(receiver)) {
+    if (js_node_is_property_carrier(receiver)) {
         if (first_family == 4) {
             js_set_key_cstr(receiver, "__dns_local_address_ipv4__", make_string_item(first));
             if (second_family == 6) {
@@ -1514,17 +1504,11 @@ static void dns_set_constants(Item ns) {
     dns_set_constant(ns, "CANCELLED", "ECANCELLED");
 }
 
-static bool dns_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_FUNC;
-}
-
 static bool dns_called_as_constructor(void) {
     Item new_target = js_get_new_target();
     TypeId type = get_type_id(new_target);
     return new_target.item != 0 && new_target.item != ItemNull.item &&
-        type != LMD_TYPE_UNDEFINED && dns_is_object_like(new_target);
+        type != LMD_TYPE_UNDEFINED && js_node_is_property_carrier(new_target);
 }
 
 static Item dns_get_resolver_prototype(bool promise_mode) {
@@ -1547,7 +1531,7 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
 }
 
 static void dns_init_resolver_state(Item resolver) {
-    if (!dns_is_object_like(resolver)) return;
+    if (!js_node_is_property_carrier(resolver)) return;
     js_set_key_cstr(resolver, "__dns_servers__", dns_array_copy(dns_get_default_servers()));
 
     Item handle = js_new_object();
@@ -1559,7 +1543,7 @@ static void dns_init_resolver_state(Item resolver) {
 static Item dns_create_resolver(bool promise_mode) {
     Item self = js_get_this();
     Item proto = dns_get_resolver_prototype(promise_mode);
-    if (dns_called_as_constructor() && dns_is_object_like(self)) {
+    if (dns_called_as_constructor() && js_node_is_property_carrier(self)) {
         js_set_prototype(self, proto);
         dns_init_resolver_state(self);
         return self;

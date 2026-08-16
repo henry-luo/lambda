@@ -83,11 +83,11 @@ static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
     if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
-    RootFrame roots(4);
-    Rooted<Item> callback_root(roots, cb);
-    Rooted<Item> resource_root(roots, js_async_hooks_get_current_resource());
-    Rooted<Item> als_root(roots, js_als_capture_context());
-    Rooted<Item> domain_root(roots, js_domain_capture_async_stack());
+    JS_ROOTS(roots,
+        callback_root, cb,
+        resource_root, js_async_hooks_get_current_resource(),
+        als_root, js_als_capture_context(),
+        domain_root, js_domain_capture_async_stack());
     Item record[4] = {callback_root.get(), resource_root.get(),
         als_root.get(), domain_root.get()};
     return runtime_async_deque_push(queue, record);
@@ -536,10 +536,10 @@ static void timer_fire_cb(uv_timer_t *handle) {
     // D5.3/D5.4.3: the timer callback may collect before the saved async
     // context is restored, so callback results and prior context snapshots
     // must remain exact roots across the callback boundary.
-    RootFrame roots(3);
-    Rooted<Item> callback_result_root(roots, ItemNull);
-    Rooted<Item> previous_resource_root(roots, ItemNull);
-    Rooted<Item> previous_domain_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        callback_result_root, ItemNull,
+        previous_resource_root, ItemNull,
+        previous_domain_root, ItemNull);
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         previous_resource_root.set(js_async_hooks_enter_resource(th->async_resource));
@@ -608,10 +608,10 @@ static void timer_emit_duration_warning(const char* name, const char* first_line
     if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
 
     Item warning = js_new_object();
-    js_set_key_cstr(warning, "name", (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))});
-    js_set_key_cstr(warning, "message", (Item){.item = s2it(heap_create_name(message, len))});
+    js_set_key_cstr(warning, "name", js_name_item(name, (int)strlen(name)));
+    js_set_key_cstr(warning, "message", js_name_item(message, len));
     js_process_emit(
-        (Item){.item = s2it(heap_create_name("warning", 7))},
+        js_name_item("warning", 7),
         warning);
 }
 
@@ -1023,9 +1023,9 @@ JS_TIMER_FORWARD_ARGS(js_setInterval_args, true)
 // helper: create an AbortError for promise rejection
 static Item make_abort_error(Item signal) {
     Item err = js_new_object_with_class(JS_CLASS_ABORT_ERROR);
-    js_set_key_cstr(err, "name", (Item){.item = s2it(heap_create_name("AbortError", 10))});
-    js_set_key_cstr(err, "code", (Item){.item = s2it(heap_create_name("ABORT_ERR", 9))});
-    js_set_key_cstr(err, "message", (Item){.item = s2it(heap_create_name("The operation was aborted", 25))});
+    js_set_key_cstr(err, "name", js_name_item("AbortError", 10));
+    js_set_key_cstr(err, "code", js_name_item("ABORT_ERR", 9));
+    js_set_key_cstr(err, "message", js_name_item("The operation was aborted", 25));
     // propagate cause from signal.reason if available
     if (get_type_id(signal) == LMD_TYPE_MAP) {
     Item reason = js_get_key_cstr(signal, "reason");
@@ -1162,8 +1162,7 @@ static Item js_mock_scheduler_wait(Item delay, Item options) {
         return promise;
     }
 
-    return js_promise_reject(js_new_error(
-        (Item){.item = s2it(heap_create_name("Mock scheduler wait queue full", 35))}));
+    return js_promise_reject(js_new_error(js_name_item("Mock scheduler wait queue full", 35)));
 }
 
 static void mock_scheduler_register_gc_roots(void) {
@@ -1188,9 +1187,9 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
     if (opt_rc != 0) return reject_out;
 
     Item resolvers = js_promise_with_resolvers();
-    Item k_promise = (Item){.item = s2it(heap_create_name("promise", 7))};
-    Item k_resolve = (Item){.item = s2it(heap_create_name("resolve", 7))};
-    Item k_reject = (Item){.item = s2it(heap_create_name("reject", 6))};
+    Item k_promise = js_name_item("promise", 7);
+    Item k_resolve = js_name_item("resolve", 7);
+    Item k_reject = js_name_item("reject", 6);
     Item promise = js_get_key_default(resolvers, k_promise);
     Item resolve_fn = js_get_key_default(resolvers, k_resolve);
     Item reject_fn = js_get_key_default(resolvers, k_reject);
@@ -1232,7 +1231,7 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
             if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
                 // store reject_fn and timer_id in the abort entry for manual dispatch
                 Item entry = js_new_object();
-                js_set_key_cstr(entry, "type", (Item){.item = s2it(heap_create_name("abort", 5))});
+                js_set_key_cstr(entry, "type", js_name_item("abort", 5));
                 js_set_key_cstr(entry, "__timer_reject__", reject_fn);
                 js_set_key_cstr(entry, "__timer_id__", timer_id_item);
                 js_set_key_cstr(entry, "__timer_signal__", signal);

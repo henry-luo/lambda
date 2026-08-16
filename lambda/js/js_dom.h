@@ -164,7 +164,6 @@ bool js_is_dom_node(Item item);
  * @param item  Item to test
  * @return true if item is the document proxy
  */
-bool js_is_document_proxy(Item item);
 
 /**
  * Get the document proxy object for bare 'document' identifier resolution.

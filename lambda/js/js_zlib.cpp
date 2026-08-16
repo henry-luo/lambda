@@ -357,21 +357,15 @@ static Item zlib_throw_property_type_error(const char* name, const char* expecte
 static Item zlib_throw_property_range_error(const char* name, const char* range, Item actual) {
     char actual_buf[64];
     zlib_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"%s\" is out of range. It must be %s. Received %s",
-        name, range, actual_buf);
-    return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+    return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+        "The value of \"%s\" is out of range. It must be %s. Received %s", name, range, actual_buf);
 }
 
 static Item zlib_throw_uint32_range_error(const char* range, Item actual) {
     char actual_buf[64];
     zlib_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"value\" is out of range. It must be %s. Received %s",
-        range, actual_buf);
-    return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+    return js_throw_range_error_codef("ERR_OUT_OF_RANGE", 
+        "The value of \"value\" is out of range. It must be %s. Received %s", range, actual_buf);
 }
 
 static Item zlib_crc32_seed_value(Item value, uint32_t* out_value) {
@@ -898,13 +892,13 @@ extern "C" Item js_get_zlib_namespace(void) {
     if (zlib_namespace.item != 0) return zlib_namespace;
 
     zlib_namespace = js_new_object();
-    RootFrame roots(6);
-    Rooted<Item> ns_root(roots, zlib_namespace);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> transform_ctor_root(roots, ItemNull);
-    Rooted<Item> transform_proto_root(roots, ItemNull);
-    Rooted<Item> constants_root(roots, ItemNull);
-    Rooted<Item> codes_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        ns_root, zlib_namespace,
+        stream_root, ItemNull,
+        transform_ctor_root, ItemNull,
+        transform_proto_root, ItemNull,
+        constants_root, ItemNull,
+        codes_root, ItemNull);
     // The namespace is persistent, while stream-derived prototypes and the
     // two frozen tables remain unpublished during allocating initialization.
 

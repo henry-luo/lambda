@@ -300,21 +300,20 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
     js_function_finalize_capabilities(fn);
     Item result = (Item){.function = (Function*)fn};
     if (spec->builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
-        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item length_key = js_name_item("length", 6);
         js_func_init_property(result, length_key, (Item){.item = i2it(0)});
         js_attr_set_writable(result, "length", 6, false);
         js_attr_set_enumerable(result, "length", 6, false);
         js_attr_set_configurable(result, "length", 6, false);
-        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-        js_func_init_property(result, name_key,
-            (Item){.item = s2it(heap_create_name("", 0))});
+        Item name_key = js_name_item("name", 4);
+        js_func_init_property(result, name_key, js_name_item("", 0));
         js_attr_set_writable(result, "name", 4, false);
         js_attr_set_enumerable(result, "name", 4, false);
         js_attr_set_configurable(result, "name", 4, false);
-        Item non_ext_key = (Item){.item = s2it(heap_create_name(
-            "__non_extensible__", 17))};
+        Item non_ext_key = js_name_item(
+            "__non_extensible__", 17);
         js_func_init_property(result, non_ext_key, (Item){.item = b2it(true)});
-        Item frozen_key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
+        Item frozen_key = js_name_item("__frozen__", 10);
         js_func_init_property(result, frozen_key, (Item){.item = b2it(true)});
     }
     js_builtin_cache[identity_slot] = result;
@@ -338,7 +337,7 @@ static void js_install_builtin_method_specs_to(Item object, JsBuiltinOwner owner
     for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
         const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
         if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_METHOD) continue;
-        Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
+        Item key = js_name_item(spec->name, spec->len);
         if (function_target && skip_existing && fn->properties_map.item != 0 &&
             get_type_id(fn->properties_map) == LMD_TYPE_MAP &&
             map_get(fn->properties_map.map, key).item != ItemNull.item) {
@@ -366,7 +365,7 @@ void js_install_builtin_accessor_specs(Item object, JsBuiltinOwner owner) {
         const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
         if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_ACCESSOR) continue;
         Item getter = js_create_builtin_function_from_spec(spec);
-        Item prop_name = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
+        Item prop_name = js_name_item(spec->name, spec->len);
         js_install_native_accessor(object, prop_name, getter, ItemNull, JSPD_NON_ENUMERABLE);
     }
 }
@@ -445,7 +444,7 @@ extern "C" Item js_symbol_builtin_method(int which) {
 // and static methods on the %TypedArray% constructor.
 extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // Register constructor
-    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    Item ctor_key = js_name_item("constructor", 11);
     js_set_key_default(proto, ctor_key, base_ctor);
     js_mark_non_enumerable(proto, ctor_key);
 
@@ -454,7 +453,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 
     // %TypedArray%.prototype.toString is exactly Array.prototype.toString.
     {
-        Item to_string_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+        Item to_string_key = js_name_item("toString", 8);
         Item array_to_string = js_intrinsic_binding_get(
             JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, "toString", 8);
         js_set_key_default(proto, to_string_key, array_to_string);
@@ -467,8 +466,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // Symbol.iterator = values (same function object as TypedArray.prototype.values per spec)
     {
         Item si_key = js_well_known_symbol_key(1);
-        Item values_key = (Item){.item = s2it(heap_create_name("values", 6))};
-        Item values_fn = js_get_key_default(proto, values_key);
+        Item values_fn = js_get_name_key(proto, "values", 6);
         js_set_key_default(proto, si_key, values_fn);
         js_mark_non_enumerable(proto, si_key);
     }

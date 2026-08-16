@@ -454,7 +454,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
         return true;
     }
 
-    Item name_item = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+    Item name_item = js_name_item(name, (size_t)name_len);
     Item slot_value = (Item){.item = ITEM_JS_UNDEFINED};
     bool slot_found = false;
     if (get_type_id(target) == LMD_TYPE_MAP) {
@@ -622,12 +622,12 @@ static Item js_store_accessor_pair_slot(Item obj, Item name, Item pair) {
 extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
                                            Item setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
-    RootFrame roots(5);
-    Rooted<Item> obj_root(roots, obj);
-    Rooted<Item> name_root(roots, name);
-    Rooted<Item> getter_root(roots, getter);
-    Rooted<Item> setter_root(roots, setter);
-    Rooted<Item> pair_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        obj_root, obj,
+        name_root, name,
+        getter_root, getter,
+        setter_root, setter,
+        pair_root, ItemNull);
 
     String* ns = it2s(name_root.get());
     if (!ns || ns->len == 0) return;
@@ -705,13 +705,13 @@ static bool js_accessor_half_same(Item left, Item right) {
 
 extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
-    RootFrame roots(6);
-    Rooted<Item> obj_root(roots, obj);
-    Rooted<Item> name_root(roots, name);
-    Rooted<Item> fn_root(roots, fn);
-    Rooted<Item> pair_root(roots, ItemNull);
-    Rooted<Item> getter_root(roots, ItemNull);
-    Rooted<Item> setter_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        obj_root, obj,
+        name_root, name,
+        fn_root, fn,
+        pair_root, ItemNull,
+        getter_root, ItemNull,
+        setter_root, ItemNull);
     obj = obj_root.get();
     name = name_root.get();
     fn = fn_root.get();
@@ -799,10 +799,7 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
 // can drop the result on the floor without needing a void-returning helper.
 extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
                                           int is_setter) {
-    RootFrame roots(3);
-    Rooted<Item> obj_root(roots, obj);
-    Rooted<Item> name_root(roots, name);
-    Rooted<Item> fn_root(roots, fn);
+    JS_ROOTS(roots, obj_root, obj, name_root, name, fn_root, fn);
     // Canonicalize the property key per ES §7.1.14 ToPropertyKey: numeric/bool
     // literal keys (e.g. `{ get [1]() {} }`) must be converted to their string
     // form before the chokepoint stores under that name.

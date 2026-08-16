@@ -664,7 +664,7 @@ extern "C" Item js_to_string(Item value) {
                 return js_throw_type_error("@@toPrimitive is not a function");
             }
             if (tp_present) {
-                Item hint = (Item){.item = s2it(heap_create_name("string", 6))};
+                Item hint = js_name_item("string", 6);
                 Item args[1] = { hint };
                 JS_ASSIGN_OR_RETURN(result, js_call_function(to_prim, value, args, 1));
                 if (get_type_id(result) == LMD_TYPE_STRING) return result;
@@ -1318,7 +1318,7 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
         char buf[2];
         buf[0] = '%';
         buf[1] = right_ch;
-        js_percent_prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
+        js_percent_prefix_cache[right_value] = js_name_item(buf, 2);
         return js_percent_prefix_cache[right_value];
     }
     int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
@@ -1329,7 +1329,7 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
         buf[0] = '%';
         buf[1] = left->chars[1];
         buf[2] = right_ch;
-        js_percent_byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
+        js_percent_byte_cache[byte_value] = js_name_item(buf, 3);
         return js_percent_byte_cache[byte_value];
     }
     return ItemNull;
@@ -1367,11 +1367,11 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
 JS_FORWARD_ITEM(js_string_concat, (Item left, Item right), js_concat_strings_fast, (it2s(left), it2s(right)))
 
 extern "C" Item js_add(Item left, Item right) {
-    RootFrame roots(4);
-    Rooted<Item> left_root(roots, left);
-    Rooted<Item> right_root(roots, right);
-    Rooted<Item> left_string_root(roots, ItemNull);
-    Rooted<Item> right_string_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        left_root, left,
+        right_root, right,
+        left_string_root, ItemNull,
+        right_string_root, ItemNull);
     TypeId left_type = get_type_id(left_root.get());
     TypeId right_type = get_type_id(right_root.get());
 
@@ -1920,7 +1920,7 @@ extern "C" Item js_bigint_constructor(Item value) {
             Item bi = bigint_from_string(s->chars, s->len);
             if (bi.item != ItemError.item) return bi;
         }
-        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot convert string to a BigInt"))});
+        return js_throw_syntax_error(js_name_item("Cannot convert string to a BigInt"));
     }
     // Number: must be an integer (no fraction)
     if (vt == LMD_TYPE_FLOAT) {
@@ -1957,7 +1957,7 @@ static Item js_to_bigint_for_bigint_op(Item value) {
             Item bi = bigint_from_string(s->chars, s->len);
             if (bi.item != ItemError.item) return bi;
         }
-        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot convert string to a BigInt"))});
+        return js_throw_syntax_error(js_name_item("Cannot convert string to a BigInt"));
     }
     return js_throw_type_error("Cannot convert value to a BigInt");
 }
@@ -2088,5 +2088,5 @@ extern "C" Item js_typeof(Item value) {
         break;
     }
 done:
-    return (Item){.item = s2it(heap_create_name(result))};
+    return js_name_item(result);
 }

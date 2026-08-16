@@ -380,11 +380,8 @@ extern "C" Item js_internal_assert_myersDiff(Item actual, Item expected, Item ch
     if (expected_len < 0) expected_len = 0;
     int64_t max = actual_len + expected_len;
     if (max > 2147483647LL) {
-        char msg[256];
-        snprintf(msg, sizeof(msg),
-            "The value of \"myersDiff input size\" is out of range. It must be < 2^31. Received %lld",
-            (long long)max);
-        return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+        return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+            "The value of \"myersDiff input size\" is out of range. It must be < 2^31. Received %lld", (long long)max);
     }
 
     Item diff = js_array_new(0);
@@ -638,11 +635,8 @@ static Item js_assert_resolve_user_message(Item message, Item actual, Item expec
 static Item js_assert_throw_invalid_fn_arg(Item actual) {
     char received[160];
     js_assert_append_value_type(received, sizeof(received), actual);
-    char msg[384];
-    snprintf(msg, sizeof(msg),
-        "The \"fn\" argument must be of type function. Received %s",
-        received);
-    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
+    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
+        "The \"fn\" argument must be of type function. Received %s", received);
 }
 
 typedef enum {
@@ -2942,11 +2936,8 @@ static Item js_assert_throws_missing_error(Item error_expected, Item message) {
 static Item js_assert_throw_invalid_throws_expected(Item error_expected) {
     char received[160];
     js_assert_append_value_type(received, sizeof(received), error_expected);
-    char msg[384];
-    snprintf(msg, sizeof(msg),
-        "The \"error\" argument must be of type function or an instance of Error, RegExp, or Object. Received %s",
-        received);
-    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
+    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
+        "The \"error\" argument must be of type function or an instance of Error, RegExp, or Object. Received %s", received);
 }
 
 #define js_assert_is_vm_context_error js_is_vm_context_error
@@ -3484,11 +3475,8 @@ static bool js_assert_expected_error_matches(Item thrown, Item error_expected) {
 static Item js_assert_throw_invalid_does_not_throw_expected(Item expected) {
     char received[160];
     js_assert_append_value_type(received, sizeof(received), expected);
-    char msg[384];
-    snprintf(msg, sizeof(msg),
-        "The \"expected\" argument must be of type function or an instance of RegExp. Received %s",
-        received);
-    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
+    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
+        "The \"expected\" argument must be of type function or an instance of RegExp. Received %s", received);
 }
 
 static void js_assert_append_does_not_throw_user_message(StrBuf* sb, Item message) {
@@ -3632,11 +3620,8 @@ static Item js_assert_throw_invalid_assert_arg_type(const char* arg_name,
                                                     Item actual) {
     char received[160];
     js_assert_append_value_type(received, sizeof(received), actual);
-    char msg[384];
-    snprintf(msg, sizeof(msg),
-        "The \"%s\" argument must be %s. Received %s",
-        arg_name, expected, received);
-    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
+    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
+        "The \"%s\" argument must be %s. Received %s", arg_name, expected, received);
 }
 
 static Item js_assert_throw_ambiguous_assert_message(Item message) {
@@ -4984,11 +4969,8 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
         // primitives hides caller mistakes and breaks Node's validation contract.
         char received[160];
         js_assert_append_value_type(received, sizeof(received), options);
-        char msg[384];
-        snprintf(msg, sizeof(msg),
-            "The \"options\" argument must be of type object. Received %s",
-            received);
-        return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
+        return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
+            "The \"options\" argument must be of type object. Received %s", received);
     }
     Item msg_item = ItemNull;
     Item op_item = make_js_undefined();

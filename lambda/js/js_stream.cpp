@@ -15,6 +15,7 @@
  * - pipeline(src, ...transforms, dst, cb) — pipe chain with error handling
  */
 #include "js_runtime.h"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "js_property_attrs.h"
@@ -559,10 +560,10 @@ static Item js_stream_listener_context(Item value) {
 }
 
 static Item js_stream_make_listener_record(Item listener) {
-    RootFrame roots(3);
-    Rooted<Item> record_root(roots, js_new_object());
-    Rooted<Item> listener_root(roots, listener);
-    Rooted<Item> context_root(roots, js_als_capture_context());
+    JS_ROOTS(roots,
+        record_root, js_new_object(),
+        listener_root, listener,
+        context_root, js_als_capture_context());
     js_set_key_default(record_root.get(), key_listener_fn, listener_root.get());
     js_set_key_default(record_root.get(), key_listener_context, context_root.get());
     return record_root.get();
@@ -636,10 +637,7 @@ static bool js_state_get_bool(Item state, const char* name) {
 static Item js_writable_state_getBuffer(void);
 
 static Item js_create_readable_state(void) {
-    RootFrame roots(3);
-    Rooted<Item> state_root(roots, js_new_object());
-    Rooted<Item> pipes_root(roots, ItemNull);
-    Rooted<Item> encoding_root(roots, ItemNull);
+    JS_ROOTS(roots, state_root, js_new_object(), pipes_root, ItemNull, encoding_root, ItemNull);
     // property allocation can collect while the state is only partially built;
     // retain its map and compound fields until construction is complete.
     js_state_set_bool(state_root.get(), "ended", false);
@@ -1874,12 +1872,12 @@ static void js_stream_coalesce_readable_buffer_for_encoding(Item self, Item enco
 }
 
 static void js_stream_flush_buffered_data(Item self) {
-    RootFrame roots(5);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> buffer_root(roots, ItemNull);
-    Rooted<Item> chunk_root(roots, ItemNull);
-    Rooted<Item> next_buffer_root(roots, ItemNull);
-    Rooted<Item> emitted_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        self_root, self,
+        buffer_root, ItemNull,
+        chunk_root, ItemNull,
+        next_buffer_root, ItemNull,
+        emitted_root, ItemNull);
     self = self_root.get();
     for (;;) {
         buffer_root.set(js_get_key_default(self, key_buffer));
@@ -1950,10 +1948,10 @@ static Item js_stream_flush_data_tick(Item self) {
 JS_STREAM_ENV_UNARY_CLOSURE(js_stream_flush_data_tick_closure, js_stream_flush_data_tick)
 
 static void js_stream_schedule_data_flush(Item self) {
-    RootFrame roots(3);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> state_root(roots, js_get_key_default(self_root.get(), key_readable_state));
-    Rooted<Item> tick_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        self_root, self,
+        state_root, js_get_key_default(self_root.get(), key_readable_state),
+        tick_root, ItemNull);
     if (js_state_get_bool(state_root.get(), "resumeScheduled")) return;
     js_state_set_bool(state_root.get(), "resumeScheduled", true);
     Item* env = js_alloc_env(1);
@@ -2002,10 +2000,7 @@ extern "C" void js_stream_flush_data_if_flowing(Item self) {
 
 // on(event, listener)
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
-    RootFrame roots(3);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> event_root(roots, event_item);
-    Rooted<Item> listener_root(roots, listener);
+    JS_ROOTS(roots, self_root, self, event_root, event_item, listener_root, listener);
     self = self_root.get();
     event_item = event_root.get();
     listener = listener_root.get();
@@ -2233,10 +2228,7 @@ extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1) {
 
 // push(chunk[, encoding]) — add data to readable stream
 static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
-    RootFrame roots(3);
-    Rooted<Item> self_root(roots, self);
-    Rooted<Item> chunk_root(roots, chunk);
-    Rooted<Item> encoding_root(roots, encoding);
+    JS_ROOTS(roots, self_root, self, chunk_root, chunk, encoding_root, encoding);
     self = self_root.get();
     chunk = chunk_root.get();
     encoding = encoding_root.get();
@@ -5801,34 +5793,26 @@ static bool js_stream_item_is_nan_number(Item item) {
 
 static Item js_stream_validate_hwm_option(const char* name, Item value) {
     if (!js_stream_item_is_nan_number(value)) return js_status_ok();
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-             "The property 'options.%s' is invalid. Received NaN", name);
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The property 'options.%s' is invalid. Received NaN", name);
 }
 JS_FORWARD_STATIC_VOID( js_stream_define_bool, (Item obj, const char* name, bool value), js_create_data_property, (obj, make_string_item(name), js_bool_item(value)))
-
-static bool js_stream_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-           type == LMD_TYPE_ELEMENT || type == LMD_TYPE_FUNC;
-}
 
 static bool js_stream_called_as_constructor(void) {
     Item new_target = js_get_new_target();
     TypeId type = get_type_id(new_target);
     return new_target.item != 0 && new_target.item != ItemNull.item &&
-           type != LMD_TYPE_UNDEFINED && js_stream_is_object_like(new_target);
+           type != LMD_TYPE_UNDEFINED && js_node_is_property_carrier(new_target);
 }
 
 static Item js_stream_create_instance(Item prototype, JsClass class_id) {
     Item self = js_get_this();
-    if (js_stream_called_as_constructor() && js_stream_is_object_like(self)) {
+    if (js_stream_called_as_constructor() && js_node_is_property_carrier(self)) {
         return self;
     }
 
     Item obj = js_new_object_with_class(class_id);
-    if (js_stream_is_object_like(prototype)) {
+    if (js_node_is_property_carrier(prototype)) {
         js_set_prototype(obj, prototype);
     }
     return obj;
@@ -6076,11 +6060,11 @@ JS_STREAM_THIS2(js_readable_inst_compose, js_readable_compose)
 JS_STREAM_THIS0(js_stream_inst_asyncIterator, js_stream_async_iterator)
 
 static void js_stream_install_async_iterator(Item obj) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> iterator_root(roots, js_new_native_function(js_stream_inst_asyncIterator));
-    Rooted<Item> async_key_root(roots, js_well_known_symbol_key(5));
-    Rooted<Item> iter_key_root(roots, js_well_known_symbol_key(1));
+    JS_ROOTS(roots,
+        object_root, obj,
+        iterator_root, js_new_native_function(js_stream_inst_asyncIterator),
+        async_key_root, js_well_known_symbol_key(5),
+        iter_key_root, js_well_known_symbol_key(1));
     js_set_key_default(object_root.get(), async_key_root.get(), iterator_root.get());
     js_set_key_default(object_root.get(), iter_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(object_root.get(), async_key_root.get());
@@ -6140,10 +6124,7 @@ static void js_stream_set_named_method(Item object, const char* name,
 
 // Readable constructor
 static Item js_readable_new_internal(Item opts, JsClass class_id) {
-    RootFrame roots(3);
-    Rooted<Item> options_root(roots, opts);
-    Rooted<Item> readable_root(roots, ItemNull);
-    Rooted<Item> listeners_root(roots, ItemNull);
+    JS_ROOTS(roots, options_root, opts, readable_root, ItemNull, listeners_root, ItemNull);
     ensure_keys();
     readable_root.set(js_stream_create_instance(stream_readable_prototype,
         class_id));
@@ -6514,9 +6495,7 @@ extern "C" Item js_writable_uncork(Item self) {
 }
 
 static void js_stream_install_event_methods(Item obj) {
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, obj);
-    Rooted<Item> off_root(roots, js_new_native_function(js_stream_inst_off));
+    JS_ROOTS(roots, object_root, obj, off_root, js_new_native_function(js_stream_inst_off));
 #define JS_STREAM_EVENT_METHODS(M) \
     M("removeAllListeners", js_stream_inst_removeAllListeners) M("emit", js_stream_inst_emit) \
     M("eventNames", js_stream_inst_eventNames) M("listeners", js_stream_inst_listeners) \
@@ -7267,7 +7246,7 @@ extern "C" Item js_passthrough_transform(Item chunk, Item encoding, Item callbac
 
 extern "C" Item js_passthrough_new(Item opts) {
     Item obj = js_transform_new_internal(opts, JS_CLASS_PASS_THROUGH);
-    if (!js_stream_called_as_constructor() && js_stream_is_object_like(stream_passthrough_prototype)) {
+    if (!js_stream_called_as_constructor() && js_node_is_property_carrier(stream_passthrough_prototype)) {
         js_set_prototype(obj, stream_passthrough_prototype);
     }
     // set default _transform for pass-through behavior
@@ -9207,10 +9186,10 @@ extern "C" Item js_get_stream_namespace(void) {
     Item stream_base = js_new_native_constructor(js_stream_base_constructor);
     Item stream_base_proto = js_new_object();
     Item events_proto = js_get_key_cstr(events_ctor, "prototype");
-    if (js_stream_is_object_like(events_proto)) {
+    if (js_node_is_property_carrier(events_proto)) {
         js_set_prototype(stream_base_proto, events_proto);
     }
-    if (js_stream_is_object_like(events_ctor)) {
+    if (js_node_is_property_carrier(events_ctor)) {
         js_set_prototype(stream_base, events_ctor);
     }
     js_set_native_key(stream_base_proto, key_pipe, js_readable_inst_pipe);

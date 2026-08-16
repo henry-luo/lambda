@@ -140,11 +140,10 @@ static int64_t js_dataview_to_integer_value(double value) {
 }
 
 static void js_dataview_link_prototype(Item view) {
-    Item ctor_name = (Item){.item = s2it(heap_create_name("DataView"))};
+    Item ctor_name = js_name_item("DataView");
     Item ctor = js_get_constructor(ctor_name);
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
-    Item proto_key = (Item){.item = s2it(heap_create_name("prototype"))};
-    Item proto = js_get_key_default(ctor, proto_key);
+    Item proto = js_get_name_key(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
 }
 
@@ -892,8 +891,7 @@ JS_FORWARD_STATIC_EXPRESSION(Item, js_atomics_wait_result, (const char* value, i
 
 static bool js_atomics_host_can_suspend() {
     Item global = js_get_global_this();
-    Item key = (Item){.item = s2it(heap_create_name("__lambda_can_block"))};
-    Item flag = js_get_key_default(global, key);
+    Item flag = js_get_name_key(global, "__lambda_can_block");
     if (get_type_id(flag) == LMD_TYPE_BOOL) return it2b(flag);
     return true;
 }
@@ -1428,7 +1426,7 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     RootFrame roots(3);
     Rooted<Item> buffer_root(roots, buffer_item);
     Rooted<Item> ctor_root(roots, js_get_constructor(
-        (Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))}));
+        js_name_item(is_shared ? "SharedArrayBuffer" : "ArrayBuffer")));
     Rooted<Item> proto_root(roots, ItemNull);
     if (get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) return;
     proto_root.set(js_get_key_cstr(ctor_root.get(), "prototype"));
@@ -1493,8 +1491,7 @@ static Item js_arraybuffer_parse_construct_options(Item length_arg,
     out->max_byte_length = out->byte_length;
     out->resizable = false;
     if (get_type_id(options_arg) == LMD_TYPE_MAP) {
-        Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
-        JS_ASSIGN_OR_RETURN(max_item, js_get_key_default(options_arg, max_key));
+        JS_ASSIGN_OR_RETURN(max_item, js_get_name_key(options_arg, "maxByteLength"));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
             JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_i64(
                 max_item, &out->max_byte_length, max_error));
@@ -1548,9 +1545,7 @@ static Item js_arraybuffer_allocate_constructed(
 
 static Item js_construct_arraybuffer_from_options(Item length_arg, Item options_arg,
         bool shared) {
-    RootFrame roots(2);
-    Rooted<Item> length_root(roots, length_arg);
-    Rooted<Item> options_root(roots, options_arg);
+    JS_ROOTS(roots, length_root, length_arg, options_root, options_arg);
     JsArrayBufferConstructOptions options = {0, 0, false};
     JS_ASSIGN_OR_RETURN(validation, js_arraybuffer_parse_construct_options(
         length_root.get(), options_root.get(), "Invalid array buffer length",
@@ -1564,11 +1559,11 @@ JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options, (Item length_arg, I
 
 static Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
         Item new_target, bool shared) {
-    RootFrame roots(4);
-    Rooted<Item> length_root(roots, length_arg);
-    Rooted<Item> options_root(roots, options_arg);
-    Rooted<Item> target_root(roots, new_target);
-    Rooted<Item> prototype_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        length_root, length_arg,
+        options_root, options_arg,
+        target_root, new_target,
+        prototype_root, ItemNull);
     JsArrayBufferConstructOptions options = {0, 0, false};
     // ToIndex precedes AllocateArrayBuffer, but its object creation precedes
     // the fallible backing-store allocation. Keep those two phases separate.
@@ -1767,18 +1762,14 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
         int begin, int new_len, bool shared) {
     const char* type_name = shared ? "SharedArrayBuffer" : "ArrayBuffer";
     Item result_item = ItemNull;
-    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-    JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(source, ctor_key));
+    JS_ASSIGN_OR_RETURN(ctor, js_get_name_key(source, "constructor"));
 
     bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
     if (!use_default_ctor) {
         TypeId ctor_type = get_type_id(ctor);
         if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
                 ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
-            char message[96];
-            snprintf(message, sizeof(message),
-                "%s species constructor must be an object", type_name);
-            return js_throw_type_error(message);
+            return js_throw_type_errorf("%s species constructor must be an object", type_name);
         }
         Item species_key = js_well_known_symbol_key(6);
         JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
@@ -1803,23 +1794,16 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
     bool correct_type = shared ? js_is_sharedarraybuffer(result_item)
         : js_is_arraybuffer(result_item) && !js_is_sharedarraybuffer(result_item);
     if (!correct_type) {
-        char message[128];
-        snprintf(message, sizeof(message),
+        return js_throw_type_errorf(
             "%s species constructor did not return a %s", type_name, type_name);
-        return js_throw_type_error(message);
     }
     if (result_item.item == source.item) {
-        char message[128];
-        snprintf(message, sizeof(message),
-            "%s species constructor returned the same buffer", type_name);
-        return js_throw_type_error(message);
+        return js_throw_type_errorf("%s species constructor returned the same buffer", type_name);
     }
     JsArrayBuffer* result_buffer = js_get_arraybuffer_ptr(result_item.map);
     if (!result_buffer || js_arraybuffer_length(result_buffer) < new_len) {
-        char message[128];
-        snprintf(message, sizeof(message),
+        return js_throw_type_errorf(
             "%s species constructor returned a buffer that is too small", type_name);
-        return js_throw_type_error(message);
     }
     if (new_len > 0) {
         memcpy(js_arraybuffer_prepare_write(result_buffer),
@@ -2179,9 +2163,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
 // Create a typed array from another array (copy)
 extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
-    RootFrame roots(2);
-    Rooted<Item> source_root(roots, source);
-    Rooted<Item> result_root(roots, ItemNull);
+    JS_ROOTS(roots, source_root, source, result_root, ItemNull);
     source = source_root.get();
     TypeId src_type = get_type_id(source);
 
@@ -2341,8 +2323,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             return js_typed_array_new_from_array(type_id, values);
         }
 
-        Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-        JS_ASSIGN_OR_RETURN(length_value, js_get_key_default(arg_root.get(), length_key));
+        JS_ASSIGN_OR_RETURN(length_value, js_get_name_key(arg_root.get(), "length"));
         int len = 0;
         JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(length_value, &len));
         Item result = js_typed_array_new(type_id, len);
@@ -2587,6 +2568,30 @@ extern "C" bool js_item_bytes(Item item, const char** data, int* len) {
         *len = byte_len;
         return true;
     }
+    // ArrayBuffer / DataView sources: Node accepts these anywhere a chunk is
+    // expected. A detached buffer yields an empty, successful read rather than
+    // a type failure, matching child_process's sync input handling.
+    if (js_is_arraybuffer(item)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(item);
+        if (!ab || js_arraybuffer_detached(ab)) return true;
+        *data = (const char*)js_arraybuffer_data_const(ab);
+        *len = js_arraybuffer_length(ab) > 0 ? js_arraybuffer_length(ab) : 0;
+        return true;
+    }
+    if (js_is_dataview(item)) {
+        JsDataView* dv = js_get_dataview_ptr(item);
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return true;
+        int buffer_length = js_arraybuffer_length(dv->buffer);
+        int byte_len = dv->length_tracking ? buffer_length - dv->byte_offset : dv->byte_length;
+        if (byte_len < 0 || dv->byte_offset < 0 ||
+                dv->byte_offset > buffer_length ||
+                dv->byte_offset + byte_len > buffer_length) {
+            return true;
+        }
+        *data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
+        *len = byte_len > 0 ? byte_len : 0;
+        return true;
+    }
     return false;
 }
 
@@ -2744,8 +2749,7 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     }
     JS_ASSIGN_OR_RETURN(src_obj, js_to_object(source));
 
-    Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-    JS_ASSIGN_OR_RETURN(length_item, js_get_key_default(src_obj, length_key));
+    JS_ASSIGN_OR_RETURN(length_item, js_get_name_key(src_obj, "length"));
     JS_ASSIGN_OR_RETURN(length_num, js_to_number(length_item));
     double length_double = js_get_number(length_num);
     int64_t src_len = 0;
@@ -2912,11 +2916,11 @@ extern "C" JsDataView* js_get_dataview_ptr(Item val) {
 
 static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
         Item new_target) {
-    RootFrame roots(4);
-    Rooted<Item> buffer_root(roots, buffer);
-    Rooted<Item> new_target_root(roots, new_target);
-    Rooted<Item> prototype_root(roots, ItemNull);
-    Rooted<Item> view_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        buffer_root, buffer,
+        new_target_root, new_target,
+        prototype_root, ItemNull,
+        view_root, ItemNull);
     buffer = buffer_root.get();
     if (!js_is_arraybuffer(buffer)) {
         return js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");

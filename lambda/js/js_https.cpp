@@ -7,6 +7,8 @@
  * Registered as built-in module 'https' via js_module_get().
  */
 #include "js_runtime.h"
+#include "../../lib/strbuf.h"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
@@ -44,43 +46,55 @@ static bool is_missing_value(Item value) {
     return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
 }
 
-static int append_bytes(char* out, int pos, int cap, const char* data, int len) {
-    if (!out || cap <= 0 || pos >= cap - 1 || !data || len <= 0) return pos;
-    int room = cap - 1 - pos;
-    int n = len < room ? len : room;
-    memcpy(out + pos, data, (size_t)n);
-    pos += n;
-    out[pos] = '\0';
-    return pos;
-}
-
-static int append_cstr(char* out, int pos, int cap, const char* data) {
-    return append_bytes(out, pos, cap, data, data ? (int)strlen(data) : 0);
-}
-
-static int append_item_string(char* out, int pos, int cap, Item value) {
-    if (is_missing_value(value)) return pos;
-
+// Agent cache-key builder. StrBuf grows on demand; the previous fixed
+// char[] silently truncated a long option set, which collided cache keys.
+static void agent_key_append_item(StrBuf* sb, Item value) {
+    if (is_missing_value(value)) return;
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_STRING) {
         String* s = it2s(value);
-        return append_bytes(out, pos, cap, s->chars, (int)s->len);
+        strbuf_append_str_n(sb, s->chars, s->len);
+        return;
     }
     if (type == LMD_TYPE_BOOL) {
-        return append_cstr(out, pos, cap, it2b(value) ? "true" : "false");
+        strbuf_append_str(sb, it2b(value) ? "true" : "false");
+        return;
     }
     if (type == LMD_TYPE_INT) {
-        char num[32];
-        snprintf(num, sizeof(num), "%lld", (long long)it2i(value));
-        return append_cstr(out, pos, cap, num);
+        strbuf_append_int64(sb, it2i(value));
+        return;
     }
-
     Item str = js_to_string_val(value);
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
-        return append_bytes(out, pos, cap, s->chars, (int)s->len);
+        strbuf_append_str_n(sb, s->chars, s->len);
     }
-    return pos;
+}
+
+static Item agent_key_option(Item options, const char* name) {
+    if (get_type_id(options) != LMD_TYPE_MAP) return ItemNull;
+    return js_get_key_default(options, make_string_item(name));
+}
+
+static void agent_key_segment(StrBuf* sb, Item options, const char* name) {
+    strbuf_append_char(sb, ':');
+    agent_key_append_item(sb, agent_key_option(options, name));
+}
+
+static void agent_key_segment_if_present(StrBuf* sb, Item options, const char* name) {
+    strbuf_append_char(sb, ':');
+    Item value = agent_key_option(options, name);
+    if (!is_missing_value(value)) agent_key_append_item(sb, value);
+}
+
+static void agent_key_json_string_segment(StrBuf* sb, Item options, const char* name) {
+    strbuf_append_char(sb, ':');
+    Item value = agent_key_option(options, name);
+    if (is_missing_value(value)) return;
+    bool quote = get_type_id(value) == LMD_TYPE_STRING;
+    if (quote) strbuf_append_char(sb, '"');
+    agent_key_append_item(sb, value);
+    if (quote) strbuf_append_char(sb, '"');
 }
 
 static bool https_item_to_int64(Item value, int64_t* out) {
@@ -104,38 +118,6 @@ static bool https_item_to_int64(Item value, int64_t* out) {
     return false;
 }
 
-static int append_option_value(char* out, int pos, int cap, Item options, const char* name) {
-    if (get_type_id(options) != LMD_TYPE_MAP) return pos;
-    Item value = js_get_key_default(options, make_string_item(name));
-    return append_item_string(out, pos, cap, value);
-}
-
-static int append_option_segment(char* out, int pos, int cap, Item options, const char* name) {
-    pos = append_cstr(out, pos, cap, ":");
-    return append_option_value(out, pos, cap, options, name);
-}
-
-static int append_option_segment_if_present(char* out, int pos, int cap, Item options, const char* name) {
-    pos = append_cstr(out, pos, cap, ":");
-    if (get_type_id(options) != LMD_TYPE_MAP) return pos;
-    Item value = js_get_key_default(options, make_string_item(name));
-    if (is_missing_value(value)) return pos;
-    return append_item_string(out, pos, cap, value);
-}
-
-static int append_json_string_segment(char* out, int pos, int cap, Item options, const char* name) {
-    pos = append_cstr(out, pos, cap, ":");
-    if (get_type_id(options) != LMD_TYPE_MAP) return pos;
-    Item value = js_get_key_default(options, make_string_item(name));
-    if (is_missing_value(value)) return pos;
-    if (get_type_id(value) == LMD_TYPE_STRING) {
-        pos = append_cstr(out, pos, cap, "\"");
-        pos = append_item_string(out, pos, cap, value);
-        return append_cstr(out, pos, cap, "\"");
-    }
-    return append_item_string(out, pos, cap, value);
-}
-
 static Item make_decoded_url_string_item(const char* str, int len) {
     if (!str || len < 0) return ItemNull;
     size_t decoded_len = 0;
@@ -147,9 +129,6 @@ static Item make_decoded_url_string_item(const char* str, int len) {
 }
 
 extern "C" Item js_https_agent_getName(Item options) {
-    char result[4096];
-    int pos = 0;
-
     char host[256] = "localhost";
     char port[32] = "";
     char local_addr[256] = "";
@@ -187,34 +166,37 @@ extern "C" Item js_https_agent_getName(Item options) {
 
     }
 
-    pos = append_cstr(result, pos, sizeof(result), host);
-    pos = append_cstr(result, pos, sizeof(result), ":");
-    pos = append_cstr(result, pos, sizeof(result), port);
-    pos = append_cstr(result, pos, sizeof(result), ":");
-    pos = append_cstr(result, pos, sizeof(result), local_addr);
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, host);
+    strbuf_append_char(sb, ':');
+    strbuf_append_str(sb, port);
+    strbuf_append_char(sb, ':');
+    strbuf_append_str(sb, local_addr);
 
-    pos = append_option_segment(result, pos, sizeof(result), options, "ca");
-    pos = append_option_segment(result, pos, sizeof(result), options, "cert");
-    pos = append_option_segment(result, pos, sizeof(result), options, "clientCertEngine");
-    pos = append_option_segment(result, pos, sizeof(result), options, "ciphers");
-    pos = append_option_segment(result, pos, sizeof(result), options, "key");
-    pos = append_option_segment(result, pos, sizeof(result), options, "pfx");
-    pos = append_option_segment_if_present(result, pos, sizeof(result), options, "rejectUnauthorized");
-    pos = append_option_segment(result, pos, sizeof(result), options, "servername");
-    pos = append_option_segment(result, pos, sizeof(result), options, "minVersion");
-    pos = append_option_segment(result, pos, sizeof(result), options, "maxVersion");
-    pos = append_option_segment(result, pos, sizeof(result), options, "secureProtocol");
-    pos = append_option_segment(result, pos, sizeof(result), options, "crl");
-    pos = append_option_segment_if_present(result, pos, sizeof(result), options, "honorCipherOrder");
-    pos = append_option_segment(result, pos, sizeof(result), options, "ecdhCurve");
-    pos = append_option_segment(result, pos, sizeof(result), options, "dhparam");
-    pos = append_option_segment_if_present(result, pos, sizeof(result), options, "secureOptions");
-    pos = append_option_segment(result, pos, sizeof(result), options, "sessionIdContext");
-    pos = append_json_string_segment(result, pos, sizeof(result), options, "sigalgs");
-    pos = append_option_segment(result, pos, sizeof(result), options, "privateKeyIdentifier");
-    pos = append_option_segment(result, pos, sizeof(result), options, "privateKeyEngine");
+    agent_key_segment(sb, options, "ca");
+    agent_key_segment(sb, options, "cert");
+    agent_key_segment(sb, options, "clientCertEngine");
+    agent_key_segment(sb, options, "ciphers");
+    agent_key_segment(sb, options, "key");
+    agent_key_segment(sb, options, "pfx");
+    agent_key_segment_if_present(sb, options, "rejectUnauthorized");
+    agent_key_segment(sb, options, "servername");
+    agent_key_segment(sb, options, "minVersion");
+    agent_key_segment(sb, options, "maxVersion");
+    agent_key_segment(sb, options, "secureProtocol");
+    agent_key_segment(sb, options, "crl");
+    agent_key_segment_if_present(sb, options, "honorCipherOrder");
+    agent_key_segment(sb, options, "ecdhCurve");
+    agent_key_segment(sb, options, "dhparam");
+    agent_key_segment_if_present(sb, options, "secureOptions");
+    agent_key_segment(sb, options, "sessionIdContext");
+    agent_key_json_string_segment(sb, options, "sigalgs");
+    agent_key_segment(sb, options, "privateKeyIdentifier");
+    agent_key_segment(sb, options, "privateKeyEngine");
 
-    return make_string_item(result);
+    Item key = make_string_item(sb->str, (int)sb->length);
+    strbuf_free(sb);
+    return key;
 }
 
 static bool https_has_usable_port(Item options_item) {
@@ -265,14 +247,9 @@ static void https_apply_url_parts(Item target, Item url_item) {
     https_copy_property_if_absent(target, url_item, "password", "password");
 }
 
-static bool https_is_object_like(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
-}
-
 static Item https_clone_options_object(Item source) {
     Item result = js_new_object();
-    if (!https_is_object_like(source)) return result;
+    if (!js_node_is_plain_object(source)) return result;
 
     Item keys = js_object_keys(source);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return result;
@@ -357,18 +334,18 @@ extern "C" Item js_https_agent_createConnection(Item rest_args) {
     Item port = make_js_undefined();
     Item host = make_js_undefined();
 
-    if (https_is_object_like(arg0)) {
+    if (js_node_is_plain_object(arg0)) {
         options = https_clone_options_object(arg0);
     } else {
         port = arg0;
         if (argc > 1 && get_type_id(arg1) == LMD_TYPE_STRING) {
             host = arg1;
-            if (argc > 2 && https_is_object_like(arg2)) options = https_clone_options_object(arg2);
-        } else if (argc > 1 && https_is_object_like(arg1)) {
+            if (argc > 2 && js_node_is_plain_object(arg2)) options = https_clone_options_object(arg2);
+        } else if (argc > 1 && js_node_is_plain_object(arg1)) {
             options = https_clone_options_object(arg1);
-        } else if (argc > 2 && https_is_object_like(arg2)) {
+        } else if (argc > 2 && js_node_is_plain_object(arg2)) {
             options = https_clone_options_object(arg2);
-        } else if (argc > 3 && https_is_object_like(arg3)) {
+        } else if (argc > 3 && js_node_is_plain_object(arg3)) {
             options = https_clone_options_object(arg3);
         }
     }
@@ -382,7 +359,7 @@ extern "C" Item js_https_agent_createConnection(Item rest_args) {
     js_array_push(tls_args, options);
     Item socket = js_tls_connect(tls_args);
 
-    if (https_is_object_like(socket)) {
+    if (js_node_is_plain_object(socket)) {
         Item* env = js_alloc_env(1);
         env[0] = callback;
         Item bridge = js_new_native_closure(https_agent_secure_connect_bridge, 0, env, 1);
@@ -474,11 +451,12 @@ static Item https_parse_url_string(Item url_item) {
 
     if (path_start < path_end) {
         if (*path_start == '?') {
-            char path_buf[4096];
-            int pos = append_cstr(path_buf, 0, (int)sizeof(path_buf), "/");
-            append_bytes(path_buf, pos, (int)sizeof(path_buf),
-                         path_start, (int)(path_end - path_start));
-            js_set_key_cstr(options, "path", make_string_item(path_buf));
+            StrBuf* path_sb = strbuf_new();
+            strbuf_append_char(path_sb, '/');
+            strbuf_append_str_n(path_sb, path_start, (int)(path_end - path_start));
+            js_set_key_cstr(options, "path",
+                make_string_item(path_sb->str, (int)path_sb->length));
+            strbuf_free(path_sb);
         } else {
             js_set_key_cstr(options, "path", make_string_item(path_start, (int)(path_end - path_start)));
         }

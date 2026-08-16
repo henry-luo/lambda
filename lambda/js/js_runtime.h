@@ -674,6 +674,13 @@ Item js_throw_named_error(int64_t kind, Item message);
 /** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
 Item js_throw_type_error_code(const char* code, const char* message);
 Item js_throw_range_error_code(const char* code, const char* message);
+// printf-style variants: format into a bounded buffer and throw. They replace
+// the `char msg[N]; snprintf(...); throw(msg)` stanza at the call sites.
+Item js_throw_type_errorf(const char* format, ...);
+Item js_throw_range_errorf(const char* format, ...);
+Item js_throw_type_error_codef(const char* code, const char* format, ...);
+Item js_throw_range_error_codef(const char* code, const char* format, ...);
+Item js_throw_named_error_textf(const char* type_name, const char* format, ...);
 Item js_throw_error_with_code(const char* code, const char* message);
 
 /**
@@ -1256,6 +1263,16 @@ void js_private_field_init_end(void);
 
 Item make_string_item(const char* str, int len);
 Item make_string_item(const char* str);
+// Interned property keys. These go through the name pool, so they keep name
+// identity and need no RootFrame — unlike make_string_item / js_get_key_cstr,
+// which heap-copy. Interning is semantics here, not style: do not "simplify"
+// a converted site onto the copying forms.
+Item js_name_item(const char* name, int len);
+Item js_name_item(const char* name);
+Item js_get_name_key(Item object, const char* name, int len);
+Item js_get_name_key(Item object, const char* name);
+Item js_set_name_key(Item object, const char* name, int len, Item value);
+Item js_set_name_key(Item object, const char* name, Item value);
 bool js_store_typed_value(void* field_ptr, TypeId value_type, Item value);
 // Native adapters are one overload family; keep declarations in lockstep with
 // the arity-generated implementations in js_runtime_function.cpp.

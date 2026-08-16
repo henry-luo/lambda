@@ -86,7 +86,7 @@ static JsPermissionPolicy* js_permission_policy_mutable() {
 
 static Item js_perm_string_item(const char* str) {
     if (!str) str = "";
-    return (Item){.item = s2it(heap_create_name(str, strlen(str)))};
+    return js_name_item(str, strlen(str));
 }
 
 #define js_perm_item_to_cstr(value, buf, buf_size) \

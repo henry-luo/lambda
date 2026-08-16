@@ -10,6 +10,8 @@
  * Registered as built-in module 'http' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
@@ -60,13 +62,8 @@ JS_FORWARD_STATIC_EXPRESSION(bool, http_ensure_roots, (void), (js_active_runtime
 
 #define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
-static bool js_http_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
-}
-
 static bool js_http_object_has_key(Item obj, const char* key) {
-    if (!js_http_is_object_like(obj) || !key) return false;
+    if (!js_node_is_plain_object(obj) || !key) return false;
     Item keys = js_object_keys(obj);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return false;
     int64_t len = js_array_length(keys);
@@ -698,7 +695,6 @@ static void http_conn_maybe_close_for_server_close(JsHttpConn* conn);
 static Item http_conn_socket_object(JsHttpConn* conn);
 static void http_response_close_request(Item res);
 static bool http_response_flush_partial(Item self);
-static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 
 static void http_conn_update_socket_counters(JsHttpConn* conn) {
@@ -725,7 +721,7 @@ static void http_conn_resume_read_after_backpressure(JsHttpConn* conn) {
     uv_stream_t* stream = http_conn_stream(conn);
     if (!stream || uv_is_closing((uv_handle_t*)stream)) return;
     conn->read_paused_for_backpressure = false;
-    uv_read_start(stream, http_server_alloc_cb, http_server_read_cb);
+    uv_read_start(stream, js_node_alloc_cb, http_server_read_cb);
 }
 
 static bool http_conn_note_write_queued(JsHttpConn* conn, int len) {
@@ -748,7 +744,7 @@ static void http_conn_note_write_done(JsHttpConn* conn, int len) {
 }
 
 typedef struct HttpResponseWriteReq {
-    char* data;
+    struct JsHttpConn* conn;
     Item  response;
     Item  callback;
     int   len;
@@ -760,13 +756,79 @@ typedef struct HttpResponseWriteReq {
 // ServerResponse — writable response object
 // =============================================================================
 
-static void http_response_emit(Item self, const char* event, Item* args, int argc, bool flush_tasks) {
+// -----------------------------------------------------------------------
+// listener slots
+//
+// A "__on_<event>__" slot holds a bare callable, or an array of callables
+// once a second listener is registered for the same event. C0.2: on() used
+// to js_set_key_default() the callback unconditionally, so every earlier
+// listener for that event was silently dropped.
+// -----------------------------------------------------------------------
+
+static Item http_listener_key_bytes(const char* event, int len) {
     char key[64];
-    snprintf(key, sizeof(key), "__on_%s__", event);
-    Item cb = js_get_key_default(self, make_string_item(key));
-    if (js_is_callable(cb)) {
-        js_call_function(cb, self, args, argc);
-        if (flush_tasks) js_microtask_flush();
+    snprintf(key, sizeof(key), "__on_%.*s__", len, event);
+    return make_string_item(key);
+}
+JS_FORWARD_STATIC_ITEM(http_listener_key_cstr, (const char* event),
+    http_listener_key_bytes, (event, (int)strlen(event)))
+JS_FORWARD_STATIC_ITEM(http_listener_key, (Item event_item),
+    http_listener_key_bytes, (it2s(event_item)->chars, (int)it2s(event_item)->len))
+
+// number of listeners in a slot; snapshot this before dispatching so a
+// listener registered mid-emit only runs on the next emit (Node's
+// copy-then-dispatch order).
+static int http_listener_count(Item listeners) {
+    if (get_type_id(listeners) == LMD_TYPE_ARRAY) return (int)js_array_length(listeners);
+    return js_is_callable(listeners) ? 1 : 0;
+}
+
+static Item http_listener_at(Item listeners, int index) {
+    if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
+        return js_elements_get_int(listeners, index);
+    }
+    return index == 0 ? listeners : make_js_undefined();
+}
+
+JS_FORWARD_STATIC_EXPRESSION(bool, http_has_listener, (Item listeners),
+    http_listener_count(listeners) > 0)
+
+// call every listener in the slot; returns true if at least one ran
+static bool http_listener_invoke(Item listeners, Item this_val, Item* args, int argc) {
+    int count = http_listener_count(listeners);
+    bool called = false;
+    for (int i = 0; i < count; i++) {
+        Item cb = http_listener_at(listeners, i);
+        if (!js_is_callable(cb)) continue;
+        js_call_function(cb, this_val, args, argc);
+        called = true;
+    }
+    return called;
+}
+
+static void http_listener_add(Item obj, Item key_item, Item callback) {
+    JS_ROOTS(roots,
+        obj_root, obj,
+        key_root, key_item,
+        callback_root, callback,
+        existing_root, js_get_key_default(obj, key_item));
+    if (js_is_callable(existing_root.get())) {
+        RootFrame arr_roots(1);
+        Rooted<Item> arr_root(arr_roots, js_array_new(0));
+        js_array_push(arr_root.get(), existing_root.get());
+        js_array_push(arr_root.get(), callback_root.get());
+        js_set_key_default(obj_root.get(), key_root.get(), arr_root.get());
+    } else if (get_type_id(existing_root.get()) == LMD_TYPE_ARRAY) {
+        js_array_push(existing_root.get(), callback_root.get());
+    } else {
+        js_set_key_default(obj_root.get(), key_root.get(), callback_root.get());
+    }
+}
+
+static void http_response_emit(Item self, const char* event, Item* args, int argc, bool flush_tasks) {
+    if (http_listener_invoke(js_get_key_default(self, http_listener_key_cstr(event)),
+            self, args, argc) && flush_tasks) {
+        js_microtask_flush();
     }
 }
 
@@ -779,14 +841,11 @@ static Item http_error_with_code(const char* code, const char* message) {
 }
 
 static Item http_error_from_uv(int status) {
-    Item err = js_new_error(make_string_item(uv_strerror(status)));
-    const char* code = uv_err_name(status);
-    if (code) {
-        // Node tests branch on err.code before cleanup; missing uv codes can
-        // skip close handlers and leave server handles alive until drain.
-        js_set_key_cstr(err, "code", make_string_item(code));
-    }
-    return err;
+    // Node tests branch on err.code before cleanup; missing uv codes can skip
+    // close handlers and leave server handles alive until drain.
+    JsNodeUvError spec;
+    spec.status = status;
+    return js_node_uv_error(spec);
 }
 
 static Item http_response_error_tick(Item env_item) {
@@ -1491,6 +1550,26 @@ extern "C" Item js_http_res_send_internal(Item self, Item chunk_item) {
 }
 
 // helper: serialize headers + body to HTTP response bytes, write to socket
+// One completion for a response write. The connection is reached through the
+// request wrapper rather than the uv handle so a rejected submission — which
+// never touches libuv — settles identically.
+static void http_response_write_settled(void* ud, int status, const char* data,
+        size_t len) {
+    (void)status; (void)data; (void)len;
+    HttpResponseWriteReq* write_req = (HttpResponseWriteReq*)ud;
+    if (!write_req) return;
+    JsHttpConn* c = write_req->conn;
+    if (c && c->pending_response_writes > 0) c->pending_response_writes--;
+    bool close_after = write_req->close_after;
+    http_conn_note_write_done(c, write_req->len);
+    mem_free(write_req);
+    if (close_after && c && !c->destroyed) {
+        c->close_after_response_writes = true;
+        http_conn_maybe_close_after_response_writes(c);
+    }
+    if (c && !c->destroyed) http_conn_maybe_close_for_server_close(c);
+}
+
 static void http_response_flush(Item self) {
     Item handle_item = js_get_key_cstr(self, "__conn__");
     if (handle_item.item == 0) return;
@@ -1778,43 +1857,23 @@ static void http_response_flush(Item self) {
     uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
     HttpResponseWriteReq* write_req =
         (HttpResponseWriteReq*)mem_calloc(1, sizeof(HttpResponseWriteReq), MEM_CAT_JS_RUNTIME);
-    write_req->data = full;
+    write_req->conn = conn;
     write_req->response = self;
     write_req->callback = js_get_key_cstr(self, "__end_callback__");
     write_req->len = total;
     write_req->close_after = close_after;
     write_req->final = true;
-    wreq->data = write_req;
+    Item end_callback = write_req->callback;
     conn->pending_response_writes++;
     conn->bytes_written += total;
     // HTTP accepted sockets share net.Socket counters; update when bytes are
     // queued so response callbacks can observe bytesWritten before flush.
     http_conn_update_socket_counters(conn);
 
-    int write_status = uv_write(wreq, http_conn_stream(conn), &buf, 1,
-        [](uv_write_t* req, int status) {
-            HttpResponseWriteReq* write_req = (HttpResponseWriteReq*)req->data;
-            bool close_after = false;
-            JsHttpConn* c = req && req->handle ? (JsHttpConn*)((uv_stream_t*)req->handle)->data : NULL;
-            if (c && c->pending_response_writes > 0) {
-                c->pending_response_writes--;
-            }
-            if (write_req) {
-                (void)status;
-                close_after = write_req->close_after;
-                http_conn_note_write_done(c, write_req->len);
-                if (write_req->data) mem_free(write_req->data);
-                mem_free(write_req);
-            }
-            if (close_after && c && !c->destroyed) {
-                c->close_after_response_writes = true;
-                http_conn_maybe_close_after_response_writes(c);
-            }
-            if (c && !c->destroyed) {
-                http_conn_maybe_close_for_server_close(c);
-            }
-            mem_free(req);
-        });
+    // C2.8: the shared helper adopts `full` and settles once on either path;
+    // the branch-specific bookkeeping below stays at the call site.
+    int write_status = js_node_stream_write_owned(http_conn_stream(conn), full,
+        (size_t)total, http_response_write_settled, write_req);
     if (write_status != 0) {
         if (conn->pending_response_writes > 0) conn->pending_response_writes--;
         conn->bytes_written -= total;
@@ -1828,13 +1887,10 @@ static void http_response_flush(Item self) {
         js_set_key_cstr(self, "writableFinished", (Item){.item = b2it(true)});
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        if (js_is_callable(write_req->callback)) {
-            js_call_function(write_req->callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback)) {
+            js_call_function(end_callback, make_js_undefined(), NULL, 0);
         }
         js_microtask_flush();
-        if (write_req->data) mem_free(write_req->data);
-        mem_free(write_req);
-        mem_free(wreq);
         if (close_after && conn && !conn->destroyed) {
             conn->close_after_response_writes = true;
             http_conn_maybe_close_after_response_writes(conn);
@@ -1848,11 +1904,9 @@ static void http_response_flush(Item self) {
         http_response_mark_sent(self, true);
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        if (js_is_callable(write_req->callback)) {
-            js_call_function(write_req->callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback)) {
+            js_call_function(end_callback, make_js_undefined(), NULL, 0);
         }
-        write_req->response = make_js_undefined();
-        write_req->callback = make_js_undefined();
         js_microtask_flush();
     }
 
@@ -2087,9 +2141,7 @@ static Item js_http_res_inst_on(Item maybe_self, Item event_item, Item callback)
     }
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
     String* ev = it2s(event_item);
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
-    js_set_key_default(self, make_string_item(key), callback);
+    http_listener_add(self, http_listener_key(event_item), callback);
     if (ev->len == 6 && memcmp(ev->chars, "finish", 6) == 0 &&
         http_response_bool_prop(self, "writableFinished") &&
         js_is_callable(callback)) {
@@ -2342,9 +2394,7 @@ static void http_server_maybe_finish_close(JsHttpServer* srv) {
     if (!srv->close_event_emitted) {
         srv->close_event_emitted = true;
         Item on_close = js_get_key_cstr(srv->js_object, "__on_close__");
-        if (js_is_callable(on_close)) {
-            js_call_function(on_close, srv->js_object, NULL, 0);
-        }
+        http_listener_invoke(on_close, srv->js_object, NULL, 0);
     }
     mem_free(srv);
 }
@@ -2370,10 +2420,7 @@ static Item http_server_error_tick(Item env_item) {
         failed_srv = (JsHttpServer*)(uintptr_t)it2i(env[2]);
     }
     Item on_err = js_get_key_cstr(self, "__on_error__");
-    if (js_is_callable(on_err)) {
-        js_call_function(on_err, self, &err, 1);
-        js_microtask_flush();
-    }
+    if (http_listener_invoke(on_err, self, &err, 1)) js_microtask_flush();
     if (failed_srv) {
         http_server_close_failed_listen(failed_srv, self);
     }
@@ -2509,7 +2556,7 @@ static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn) {
 }
 
 typedef struct HttpConnWriteReq {
-    char* data;
+    JsHttpConn* conn;
     int   len;
     bool  close_after;
 } HttpConnWriteReq;
@@ -2520,43 +2567,28 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
     int len = 0;
     if (!js_item_bytes(data_item, &data, &len)) return false;
 
+    // C2.8: js_node_stream_write owns the request wrapper and the byte copy on
+    // both the accepted and the rejected path, so there is one free either way.
     HttpConnWriteReq* write_req =
         (HttpConnWriteReq*)mem_calloc(1, sizeof(HttpConnWriteReq), MEM_CAT_JS_RUNTIME);
-    uv_write_t* req = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
-    char* copy = NULL;
-    if (len > 0) {
-        copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
-        memcpy(copy, data, (size_t)len);
-    }
-    write_req->data = copy;
+    if (!write_req) return false;
+    write_req->conn = conn;
     write_req->len = len;
     write_req->close_after = close_after;
-    req->data = write_req;
-
-    uv_buf_t buf = uv_buf_init(copy ? copy : (char*)"", (unsigned int)len);
-    int r = uv_write(req, http_conn_stream(conn), &buf, 1,
-        [](uv_write_t* req, int status) {
-            HttpConnWriteReq* write_req = (HttpConnWriteReq*)req->data;
-            bool close_after = false;
-            JsHttpConn* c = req && req->handle ? (JsHttpConn*)((uv_stream_t*)req->handle)->data : NULL;
-            if (write_req) {
-                close_after = write_req->close_after;
-                http_conn_note_write_done(c, write_req->len);
-                if (write_req->data) mem_free(write_req->data);
-                mem_free(write_req);
-            }
-            if (close_after && c && !c->destroyed) {
+    int r = js_node_stream_write(http_conn_stream(conn), data, (size_t)len,
+        [](void* ud, int status, const char* bytes, size_t byte_len) {
+            (void)bytes; (void)byte_len;
+            HttpConnWriteReq* wr = (HttpConnWriteReq*)ud;
+            JsHttpConn* c = wr->conn;
+            if (status == 0) {
+                http_conn_note_write_done(c, wr->len);
+                if (wr->close_after && c && !c->destroyed) http_conn_close_now(c);
+            } else if (wr->close_after && c && !c->destroyed) {
                 http_conn_close_now(c);
             }
-            mem_free(req);
-        });
-    if (r != 0) {
-        if (copy) mem_free(copy);
-        mem_free(write_req);
-        mem_free(req);
-        if (close_after) http_conn_close_now(conn);
-        return false;
-    }
+            mem_free(wr);
+        }, write_req);
+    if (r != 0) return false;
     conn->bytes_written += len;
     http_conn_update_socket_counters(conn);
     return http_conn_note_write_queued(conn, len);
@@ -2598,12 +2630,9 @@ static Item js_http_conn_socket_destroy(Item maybe_self) {
 
 static void http_conn_socket_emit(JsHttpConn* conn, const char* event) {
     if (!conn || conn->socket_object.item == 0 || !event) return;
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%s__", event);
-    Item cb = js_get_key_default(conn->socket_object, make_string_item(key));
-    if (js_is_callable(cb)) {
-        Item socket = conn->socket_object;
-        js_call_function(cb, conn->socket_object, &socket, 1);
+    Item listeners = js_get_key_default(conn->socket_object, http_listener_key_cstr(event));
+    Item socket = conn->socket_object;
+    if (http_listener_invoke(listeners, conn->socket_object, &socket, 1)) {
         js_microtask_flush();
     }
 }
@@ -2650,8 +2679,7 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
     if (response_event_target.item != 0 &&
         get_type_id(response_event_target) != LMD_TYPE_UNDEFINED) {
         Item res_timeout = js_get_key_cstr(response_event_target, "__on_timeout__");
-        if (js_is_callable(res_timeout)) {
-            js_call_function(res_timeout, response_event_target, &socket, 1);
+        if (http_listener_invoke(res_timeout, response_event_target, &socket, 1)) {
             js_microtask_flush();
         }
     }
@@ -2661,8 +2689,7 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
         if (!js_is_callable(server_cb)) {
             server_cb = js_get_key_cstr(conn->server->js_object, "__on_timeout__");
         }
-        if (js_is_callable(server_cb)) {
-            js_call_function(server_cb, conn->server->js_object, &socket, 1);
+        if (http_listener_invoke(server_cb, conn->server->js_object, &socket, 1)) {
             js_microtask_flush();
         }
     }
@@ -2689,10 +2716,7 @@ static Item js_http_conn_socket_on(Item maybe_self, Item event_item, Item callba
     Item actual_event = self.item == maybe_self.item ? event_item : maybe_self;
     Item actual_callback = self.item == maybe_self.item ? callback_item : event_item;
     if (get_type_id(actual_event) != LMD_TYPE_STRING) return self;
-    String* ev = it2s(actual_event);
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
-    js_set_key_default(self, make_string_item(key), actual_callback);
+    http_listener_add(self, http_listener_key(actual_event), actual_callback);
     return self;
 }
 
@@ -2861,7 +2885,7 @@ static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
                                           const char* message, int bytes_parsed) {
     if (!conn || !conn->server) return false;
     Item handler = js_get_key_cstr(conn->server->js_object, "__on_clientError__");
-    if (!js_is_callable(handler)) return false;
+    if (!http_has_listener(handler)) return false;
 
     Item err = js_new_error(make_string_item(message));
     js_set_key_cstr(err, "code", make_string_item(code));
@@ -2869,7 +2893,7 @@ static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
     js_set_key_cstr(err, "rawPacket", js_buffer_from_bytes(conn->recv_buf, conn->recv_len));
     Item socket = http_conn_socket_object(conn);
     Item args[2] = { err, socket };
-    js_call_function(handler, conn->server->js_object, args, 2);
+    http_listener_invoke(handler, conn->server->js_object, args, 2);
     js_microtask_flush();
     return true;
 }
@@ -2962,6 +2986,22 @@ static void http_server_send_expectation_failed(JsHttpConn* conn, ParsedRequest*
     http_response_flush(res_obj);
 }
 
+// run a request-lane listener slot inside the connection's async resource,
+// skipping `skip` when it is callable
+static void http_dispatch_listeners(JsHttpConn* conn, Item listeners, Item skip,
+        Item* args) {
+    int count = http_listener_count(listeners);
+    for (int i = 0; i < count; i++) {
+        Item cb = http_listener_at(listeners, i);
+        if (!js_is_callable(cb)) continue;
+        if (js_is_callable(skip) && cb.item == skip.item) continue;
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(cb, conn->server->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+    }
+}
+
 static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
         Item on_req, Item on_expect, bool has_handler, bool has_request_event,
         bool has_expect_handler, bool expect_continue, bool response_at_eof,
@@ -2979,26 +3019,21 @@ static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
 
     Item args[2] = { req_obj, res_obj };
     if (has_expect_handler) {
-        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-        js_call_function(on_expect, srv->js_object, args, 2);
-        js_async_hooks_restore_resource(previous_resource);
-        js_microtask_flush();
+        http_dispatch_listeners(conn, on_expect, ItemNull, args);
         return;
     }
     if (expect_continue) {
         http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
     }
     if (has_handler) {
-        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-        js_call_function(srv->request_handler, srv->js_object, args, 2);
-        js_async_hooks_restore_resource(previous_resource);
-        js_microtask_flush();
+        http_dispatch_listeners(conn, srv->request_handler, ItemNull, args);
     }
-    if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-        js_call_function(on_req, srv->js_object, args, 2);
-        js_async_hooks_restore_resource(previous_resource);
-        js_microtask_flush();
+    if (has_request_event) {
+        // createServer()'s handler is mirrored into srv->request_handler and
+        // already ran above; skip that one entry so a second 'request'
+        // listener still fires exactly once.
+        http_dispatch_listeners(conn, on_req,
+            has_handler ? srv->request_handler : ItemNull, args);
     }
 }
 
@@ -3022,8 +3057,8 @@ static void http_server_process_parsed_request(JsHttpConn* conn,
          js_get_key_cstr(srv->js_object, "__on_checkExpectation__") :
          make_js_undefined());
     bool has_handler = js_is_callable(srv->request_handler);
-    bool has_request_event = js_is_callable(on_req);
-    bool has_expect_handler = js_is_callable(on_expect);
+    bool has_request_event = http_has_listener(on_req);
+    bool has_expect_handler = http_has_listener(on_expect);
     if (expect_unknown && !has_expect_handler) {
         // both buffered and EOF requests answer unknown Expect headers here.
         http_server_send_expectation_failed(conn, req, has_buffered_request);
@@ -3036,11 +3071,6 @@ static void http_server_process_parsed_request(JsHttpConn* conn,
     http_server_dispatch_request(conn, req, on_req, on_expect,
         has_handler, has_request_event, has_expect_handler,
         expect_continue, response_at_eof, has_buffered_request);
-}
-
-static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
 }
 
 static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
@@ -3204,7 +3234,7 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
         srv->connection_count++;
         http_server_link_conn(srv, conn);
         if (srv->timeout_msecs > 0) http_conn_start_timeout(conn, srv->timeout_msecs);
-        uv_read_start(http_conn_stream(conn), http_server_alloc_cb, http_server_read_cb);
+        uv_read_start(http_conn_stream(conn), js_node_alloc_cb, http_server_read_cb);
     } else {
         mem_free(conn->recv_buf);
         uv_close((uv_handle_t*)http_conn_stream(conn), [](uv_handle_t* h) {
@@ -3221,9 +3251,7 @@ static Item js_http_server_listening_tick(Item env_item) {
     Item self = env[0];
     Item callback = env[1];
     Item on_listening = js_get_key_cstr(self, "__on_listening__");
-    if (js_is_callable(on_listening)) {
-        js_call_function(on_listening, self, NULL, 0);
-    }
+    http_listener_invoke(on_listening, self, NULL, 0);
     js_cluster_notify_worker_listening();
     if (js_is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
@@ -3272,7 +3300,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         host_buf[len] = '\0';
     }
 
-    if (js_http_is_object_like(port_item) && js_http_object_has_key(port_item, "fd")) {
+    if (js_node_is_plain_object(port_item) && js_http_object_has_key(port_item, "fd")) {
         Item fd_item = js_get_key_cstr(port_item, "fd");
         bool valid_fd_number = false;
         int64_t fd_value = 0;
@@ -3417,18 +3445,10 @@ extern "C" Item js_http_server_getConnections(Item self, Item callback) {
 // server.on(event, callback)
 extern "C" Item js_http_server_on(Item self, Item event_item, Item callback) {
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    String* ev = it2s(event_item);
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
-    js_set_key_default(self, make_string_item(key), callback);
-    if (ev->len == 7 && memcmp(ev->chars, "request", 7) == 0 &&
-        js_is_callable(callback)) {
-        Item handle_item = js_get_key_cstr(self, "__server__");
-        if (get_type_id(handle_item) == LMD_TYPE_INT) {
-            JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
-            if (srv) srv->request_handler = callback;
-        }
-    }
+    // srv->request_handler stays reserved for createServer()'s handler; a
+    // 'request' listener registered here is dispatched from the listener slot
+    // so a second one is not dropped and both keep registration order.
+    http_listener_add(self, http_listener_key(event_item), callback);
     return self;
 }
 
@@ -3661,11 +3681,8 @@ JS_FORWARD_STATIC_ITEM(js_http_client_getHeaderNames, (Item self), http_headers_
 JS_FORWARD_STATIC_ITEM(js_http_client_getRawHeaderNames, (Item self), http_headers_get_names, (self, true))
 
 static void http_client_emit(Item req_obj, const char* event) {
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%s__", event);
-    Item cb = js_get_key_default(req_obj, make_string_item(key));
-    if (js_is_callable(cb)) {
-        js_call_function(cb, req_obj, NULL, 0);
+    if (http_listener_invoke(js_get_key_default(req_obj, http_listener_key_cstr(event)),
+            req_obj, NULL, 0)) {
         js_microtask_flush();
     }
 }
@@ -3758,11 +3775,6 @@ static void http_client_mark_socket_idle(JsHttpClientReq* creq) {
     // the old handle id dead until a fresh async resource is assigned.
     js_async_hooks_emit_destroy_resource(creq->async_resource);
     http_client_stamp_socket_async_ids(socket, -1, -1);
-}
-
-static void http_client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
 }
 
 // parse HTTP response status line + headers from raw bytes
@@ -3966,10 +3978,7 @@ static Item js_http_client_abort_scheduled(Item env_item) {
     js_set_key_cstr(req_obj, "destroyed", (Item){.item = b2it(true)});
 
     Item on_err = js_get_key_cstr(req_obj, "__on_error__");
-    if (js_is_callable(on_err)) {
-        js_call_function(on_err, req_obj, &err, 1);
-        js_microtask_flush();
-    }
+    if (http_listener_invoke(on_err, req_obj, &err, 1)) js_microtask_flush();
     js_http_close_client_req(creq);
     return make_js_undefined();
 }
@@ -4073,16 +4082,10 @@ extern "C" Item js_http_agent_socket_error_tick(Item req_obj, Item err) {
     js_set_key_cstr(req_obj, "destroyed", (Item){.item = b2it(true)});
 
     Item on_err = js_get_key_cstr(req_obj, "__on_error__");
-    if (js_is_callable(on_err)) {
-        js_call_function(on_err, req_obj, &err, 1);
-        js_microtask_flush();
-    }
+    if (http_listener_invoke(on_err, req_obj, &err, 1)) js_microtask_flush();
 
     Item on_close = js_get_key_cstr(req_obj, "__on_close__");
-    if (js_is_callable(on_close)) {
-        js_call_function(on_close, req_obj, NULL, 0);
-        js_microtask_flush();
-    }
+    if (http_listener_invoke(on_close, req_obj, NULL, 0)) js_microtask_flush();
 
     js_http_close_client_req(creq);
     return make_js_undefined();
@@ -4110,8 +4113,11 @@ static void js_http_emit_client_response(JsHttpClientReq* creq, Item res) {
         js_als_context_call(creq->als_context, creq->callback, creq->js_object, res, 1);
         js_microtask_flush();
     }
-    if (js_is_callable(on_response)) {
-        js_als_context_call(creq->als_context, on_response, creq->js_object, res, 1);
+    int count = http_listener_count(on_response);
+    for (int i = 0; i < count; i++) {
+        Item cb = http_listener_at(on_response, i);
+        if (!js_is_callable(cb)) continue;
+        js_als_context_call(creq->als_context, cb, creq->js_object, res, 1);
         js_microtask_flush();
     }
 }
@@ -4411,8 +4417,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             // not a quiet EOF; server-side req.destroy() relies on this.
             Item err = js_http_econnreset_error(make_js_undefined());
             Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
-            if (js_is_callable(on_err)) {
-                js_call_function(on_err, creq->js_object, &err, 1);
+            if (http_listener_invoke(on_err, creq->js_object, &err, 1)) {
                 js_microtask_flush();
             }
         }
@@ -4429,17 +4434,17 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 }
 
 typedef struct HttpClientWriteReq {
-    char* data;
     JsHttpClientReq* creq;
     Item  callback;
 } HttpClientWriteReq;
 
-static void http_client_write_cb(uv_write_t* req, int status) {
-    HttpClientWriteReq* write_req = (HttpClientWriteReq*)req->data;
+static void http_client_write_settled(void* ud, int status, const char* bytes,
+        size_t byte_len) {
+    (void)bytes; (void)byte_len;
+    HttpClientWriteReq* write_req = (HttpClientWriteReq*)ud;
     JsHttpClientReq* creq = write_req ? write_req->creq : NULL;
     if (write_req) {
         http_call_write_callback(write_req->callback);
-        if (write_req->data) mem_free(write_req->data);
         mem_free(write_req);
     }
     if (creq && creq->close_after_send && !creq->destroyed) {
@@ -4448,7 +4453,6 @@ static void http_client_write_cb(uv_write_t* req, int status) {
         js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
         js_http_close_client_req(creq);
     }
-    mem_free(req);
 }
 
 static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int len, Item callback) {
@@ -4456,17 +4460,15 @@ static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int
         http_call_write_callback(callback);
         return;
     }
-    char* copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
-    memcpy(copy, data, (size_t)len);
-    uv_buf_t buf = uv_buf_init(copy, (unsigned int)len);
-    uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
     HttpClientWriteReq* write_req =
         (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
-    write_req->data = copy;
+    if (!write_req) { http_call_write_callback(callback); return; }
     write_req->creq = creq;
     write_req->callback = callback;
-    wreq->data = write_req;
-    uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb);
+    // C2.8: the shared helper settles exactly once whether or not libuv
+    // accepted the submission, so the caller's write callback always runs.
+    js_node_stream_write(http_client_stream(creq), data, (size_t)len,
+        http_client_write_settled, write_req);
 }
 
 static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk, Item callback) {
@@ -4659,9 +4661,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
         if (creq) {
             Item err = js_new_error(make_string_item(uv_strerror(status)));
             Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
-            if (js_is_callable(on_err)) {
-                js_call_function(on_err, creq->js_object, &err, 1);
-            }
+            http_listener_invoke(on_err, creq->js_object, &err, 1);
             creq->destroyed = true;
             js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
@@ -4673,21 +4673,36 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
 
     // send the HTTP request
     if (creq->send_buf && creq->send_len > 0) {
-        uv_buf_t buf = uv_buf_init(creq->send_buf, (unsigned int)creq->send_len);
-        uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
         HttpClientWriteReq* write_req =
             (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
-        write_req->data = creq->send_buf;
+        if (!write_req) return;
         write_req->creq = creq;
         write_req->callback = make_js_undefined();
-        wreq->data = write_req;
-        creq->send_buf = NULL; // ownership transferred
         creq->sent = true;
-        uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb);
+        // C2.8: js_node_stream_write copies and owns the bytes, so the request
+        // send buffer is released here rather than being handed to libuv.
+        int r = js_node_stream_write(http_client_stream(creq), creq->send_buf,
+            (size_t)creq->send_len, http_client_write_settled, write_req);
+        mem_free(creq->send_buf);
+        creq->send_buf = NULL;
+        if (r != 0) {
+            // a rejected submission leaves a connected request that can never
+            // complete; surface it as EPIPE instead.
+            creq->sent = false;
+            JsNodeUvError spec;
+            spec.status = r; spec.code = "EPIPE"; spec.message = "write EPIPE";
+            Item err = js_node_uv_error(spec);
+            Item on_err = js_get_key_cstr(creq->js_object, "__on_error__");
+            http_listener_invoke(on_err, creq->js_object, &err, 1);
+            creq->destroyed = true;
+            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+            js_http_close_client_req(creq);
+            return;
+        }
     }
 
     // start reading response
-    uv_read_start(http_client_stream(creq), http_client_alloc_cb, http_client_read_cb);
+    uv_read_start(http_client_stream(creq), js_node_alloc_cb, http_client_read_cb);
 }
 
 static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {
@@ -4827,10 +4842,7 @@ JS_FORWARD_ITEM(js_http_client_end, (Item self, Item data_item), http_client_end
 // ClientRequest.on(event, callback)
 extern "C" Item js_http_client_on(Item self, Item event_item, Item callback) {
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    String* ev = it2s(event_item);
-    char key[64];
-    snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
-    js_set_key_default(self, make_string_item(key), callback);
+    http_listener_add(self, http_listener_key(event_item), callback);
     return self;
 }
 
@@ -4844,9 +4856,7 @@ extern "C" Item js_http_client_destroy(Item self, Item err_item) {
     js_http_client_remove_abort_listener(creq);
     Item err = js_http_econnreset_error(err_item);
     Item on_err = js_get_key_cstr(self, "__on_error__");
-    if (js_is_callable(on_err)) {
-        js_call_function(on_err, self, &err, 1);
-    }
+    http_listener_invoke(on_err, self, &err, 1);
     if (creq->response.item != 0) {
         js_stream_destroy(creq->response, err);
     }
@@ -5679,17 +5689,17 @@ static void js_http_agent_assign_socket(Item request, Item socket) {
 // Agent.addRequest(req, options[, port[, localAddress]])
 extern "C" Item js_http_agent_addRequest(Item request, Item options,
                                            Item port, Item local_address) {
-    RootFrame roots(10);
-    Rooted<Item> agent_root(roots, js_get_this());
-    Rooted<Item> request_root(roots, request);
-    Rooted<Item> options_root(roots, options);
-    Rooted<Item> port_root(roots, port);
-    Rooted<Item> local_address_root(roots, local_address);
-    Rooted<Item> normalized_root(roots, js_new_object());
-    Rooted<Item> name_root(roots, ItemNull);
-    Rooted<Item> sockets_root(roots, ItemNull);
-    Rooted<Item> socket_root(roots, ItemNull);
-    Rooted<Item> agent_options_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        agent_root, js_get_this(),
+        request_root, request,
+        options_root, options,
+        port_root, port,
+        local_address_root, local_address,
+        normalized_root, js_new_object(),
+        name_root, ItemNull,
+        sockets_root, ItemNull,
+        socket_root, ItemNull,
+        agent_options_root, ItemNull);
 
     if (get_type_id(options_root.get()) == LMD_TYPE_STRING) {
         js_set_key_cstr(normalized_root.get(), "host", options_root.get());

@@ -5,6 +5,7 @@
  * Registered as built-in module 'fs' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_typed_array.h"
@@ -45,7 +46,6 @@ extern "C" Item bigint_from_string(const char* str, int len);
 extern Item js_make_number(double d);
 extern __thread EvalContext* context;
 
-#define item_to_cstr js_item_to_cstr
 
 static bool fs_string_has_nul(String* s) {
     if (!s) return false;
@@ -106,7 +106,7 @@ static FsPathResult fs_path_to_cstr(Item value, const char* name, char* buf, int
             }
         }
     }
-    return {item_to_cstr(value, buf, buf_size), js_status_ok()};
+    return {js_item_to_cstr(value, buf, buf_size), js_status_ok()};
 }
 
 #define FS_PATH_OR_RETURN(var, value, name, buf, size) \
@@ -127,11 +127,8 @@ static Item fs_validate_encoding_item(Item encoding_item) {
     if (type != LMD_TYPE_STRING) return js_status_ok();
     String* s = it2s(encoding_item);
     if (fs_is_valid_encoding(s)) return js_status_ok();
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-             "The argument 'encoding' is invalid encoding. Received '%.*s'",
-             (int)s->len, s->chars);
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The argument 'encoding' is invalid encoding. Received '%.*s'", (int)s->len, s->chars);
 }
 
 static Item fs_permission_callback_error(Item callback, const char* permission, const char* path, const char* message) {
@@ -430,11 +427,8 @@ static JsTypedArray* fs_get_typed_array(Item buffer_item) {
 }
 
 static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-             "The argument 'buffer' is empty and cannot be written. Received %s(0) []",
-             fs_typed_array_name(ta));
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The argument 'buffer' is empty and cannot be written. Received %s(0) []", fs_typed_array_name(ta));
 }
 
 // =============================================================================
@@ -773,12 +767,12 @@ static Item js_fs_readstream_close(Item callback_item) {
 }
 
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
-    RootFrame roots(5);
-    Rooted<Item> path_root(roots, path_item);
-    Rooted<Item> options_root(roots, options_item);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> chunk_root(roots, ItemNull);
-    Rooted<Item> error_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        path_root, path_item,
+        options_root, options_item,
+        stream_root, ItemNull,
+        chunk_root, ItemNull,
+        error_root, ItemNull);
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_root.get()));
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_root.get(), "path", path_buf, sizeof(path_buf));
@@ -1081,13 +1075,13 @@ static Item js_fs_writestream_on(Item event_item, Item callback_item) {
 }
 
 extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
-    RootFrame roots(6);
-    Rooted<Item> path_root(roots, path_item);
-    Rooted<Item> options_root(roots, options_item);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> flags_root(roots, ItemNull);
-    Rooted<Item> mode_root(roots, make_js_undefined());
-    Rooted<Item> fd_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        path_root, path_item,
+        options_root, options_item,
+        stream_root, ItemNull,
+        flags_root, ItemNull,
+        mode_root, make_js_undefined(),
+        fd_root, ItemNull);
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_root.get()));
     stream_root.set(js_new_object());
     // A write stream receives many own properties before it escapes. Keep the
@@ -1217,7 +1211,7 @@ extern "C" Item js_fs_existsSync(Item path_item) {
         return (Item){.item = b2it(false)};
     }
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    const char* path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return (Item){.item = b2it(false)};
 
     uv_fs_t req;
@@ -1751,7 +1745,7 @@ JS_FORWARD_ITEM(js_fs_lstatSync, (Item path_item, Item options_item), js_fs_stat
 // Asynchronous File Operations (callback-style)
 // =============================================================================
 
-static Item make_fs_error(int uv_err, const char* path);
+static Item make_fs_error(int uv_err, const char* syscall, const char* path);
 
 typedef struct JsFsReq {
     uv_fs_t req;
@@ -1910,7 +1904,7 @@ static void fs_read_file_complete(void* user, int status) {
     JsFsReq* fsreq = (JsFsReq*)user;
     if (!fsreq) return;
     if (status < 0 || fsreq->fd < 0) {
-        Item err = make_fs_error(status < 0 ? status : fsreq->fd, fsreq->path);
+        Item err = make_fs_error(status < 0 ? status : fsreq->fd, "open", fsreq->path);
         Item args[2] = {err, ItemNull};
         fs_req_call_callback(fsreq, args, 2);
         return;
@@ -1993,7 +1987,7 @@ static void fs_write_file_complete(void* user, int status) {
     JsFsReq* fsreq = (JsFsReq*)user;
     if (!fsreq) return;
     if (status < 0 || fsreq->fd < 0) {
-        Item err = make_fs_error(status < 0 ? status : fsreq->fd, fsreq->path);
+        Item err = make_fs_error(status < 0 ? status : fsreq->fd, "open", fsreq->path);
         Item args[1] = {err};
         fs_req_call_callback(fsreq, args, 1);
         return;
@@ -2352,9 +2346,7 @@ static Item fs_get_filehandle_constructor(void) {
 }
 
 static Item fs_create_filehandle(Item fd) {
-    RootFrame roots(2);
-    Rooted<Item> fd_root(roots, fd);
-    Rooted<Item> handle_root(roots, js_new_object());
+    JS_ROOTS(roots, fd_root, fd, handle_root, js_new_object());
     js_set_prototype(handle_root.get(), fs_get_filehandle_prototype());
     js_set_key_cstr(handle_root.get(), "__fd", fd_root.get());
     return handle_root.get();
@@ -2576,9 +2568,11 @@ extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item) {
 // =============================================================================
 
 // helper: create an error object with code property
-static Item make_fs_error(int uv_err, const char* path) {
-    const char* msg = uv_strerror(uv_err);
-    Item err = js_new_error(make_string_item(msg));
+// C0.3: the syscall name used to be hardcoded to "access" for every caller,
+// so an fs error never identified the operation that actually failed.
+static Item make_fs_error(int uv_err, const char* syscall, const char* path) {
+    // fs keeps its own code table: unmapped errnos report ERR_FS rather than
+    // the raw uv name.
     const char* code = "ERR_FS";
     if (uv_err == UV_ENOENT) code = "ENOENT";
     else if (uv_err == UV_EACCES) code = "EACCES";
@@ -2587,13 +2581,10 @@ static Item make_fs_error(int uv_err, const char* path) {
     else if (uv_err == UV_ENOTDIR) code = "ENOTDIR";
     else if (uv_err == UV_EPERM) code = "EPERM";
     else if (uv_err == UV_EBADF) code = "EBADF";
-    js_set_key_cstr(err, "code", make_string_item(code));
-    if (path) {
-        js_set_key_cstr(err, "path", make_string_item(path));
-    }
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(uv_err)});
-    js_set_key_cstr(err, "syscall", make_string_item("access"));
-    return err;
+    JsNodeUvError spec;
+    spec.status = uv_err; spec.code = code; spec.path = path;
+    spec.syscall = syscall ? syscall : "fs";
+    return js_node_uv_error(spec);
 }
 
 // fs.access(path[, mode], callback)
@@ -2629,7 +2620,7 @@ static Item js_fs_access_async(Item path_item, Item mode_or_cb, Item callback_it
     int r = uv_fs_access(NULL, &req, path, mode, NULL);
     uv_fs_req_cleanup(&req);
     if (r < 0) {
-        Item err = make_fs_error(r, path);
+        Item err = make_fs_error(r, "access", path);
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
     } else {
@@ -2664,7 +2655,7 @@ static Item js_fs_stat_like_async(Item path_item, Item opts_or_cb, Item callback
         : uv_fs_stat(NULL, &req, path, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&req);
-        Item err = make_fs_error(r, path);
+        Item err = make_fs_error(r, use_lstat ? "lstat" : "stat", path);
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
         return make_js_undefined();
@@ -2677,10 +2668,10 @@ static Item js_fs_stat_like_async(Item path_item, Item opts_or_cb, Item callback
 }
 
 static void js_fs_async_value_callback(Item callback, Item result,
-        int error_code, const char* path) {
+        int error_code, const char* syscall, const char* path) {
     if (!js_is_callable(callback)) return;
     if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
-        Item err = make_fs_error(error_code, path);
+        Item err = make_fs_error(error_code, syscall, path);
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
     } else {
@@ -2722,8 +2713,8 @@ static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, I
     }
     JS_ASSIGN_OR_RETURN(fd, js_fs_openSync(path_item, flags_item, mode_item));
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    js_fs_async_value_callback(callback, fd, UV_ENOENT, path);
+    const char* path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    js_fs_async_value_callback(callback, fd, UV_ENOENT, "open", path);
     return make_js_undefined();
 }
 
@@ -2758,7 +2749,7 @@ static Item js_fs_unlink_async(Item path_item, Item callback) {
     uv_fs_req_cleanup(&req);
     if (js_is_callable(callback)) {
         if (r < 0) {
-            Item err = make_fs_error(r, path);
+            Item err = make_fs_error(r, "unlink", path);
             Item args[1] = {err};
             js_call_function(callback, ItemNull, args, 1);
         } else {
@@ -2775,7 +2766,7 @@ static Item js_fs_exists_async(Item path_item, Item callback) {
     char path_buf[1024];
     const char* path = NULL;
     if (!(get_type_id(path_item) == LMD_TYPE_STRING && fs_string_has_nul(it2s(path_item)))) {
-        path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+        path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
     }
     bool exists = false;
     if (path) {
@@ -2809,8 +2800,8 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
     }
     JS_ASSIGN_OR_RETURN(result, js_fs_readdirSync(path_item, opts_or_cb));
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    js_fs_async_value_callback(callback, result, UV_ENOENT, path);
+    const char* path = js_item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    js_fs_async_value_callback(callback, result, UV_ENOENT, "scandir", path);
     return make_js_undefined();
 }
 
@@ -2823,7 +2814,7 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
         options = make_js_undefined();
     }
     Item result = js_fs_fstatSync(fd_item, options);
-    js_fs_async_value_callback(callback, result, UV_EBADF, NULL);
+    js_fs_async_value_callback(callback, result, UV_EBADF, "fstat", NULL);
     return make_js_undefined();
 }
 
@@ -2835,10 +2826,7 @@ template <typename Target>
 JS_FORWARD_STATIC_ITEM(js_fs_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
-    RootFrame roots(3);
-    Rooted<Item> fn_root(roots, fn);
-    Rooted<Item> names_root(roots, js_array_new(0));
-    Rooted<Item> symbol_root(roots, ItemNull);
+    JS_ROOTS(roots, fn_root, fn, names_root, js_array_new(0), symbol_root, ItemNull);
     js_array_push(names_root.get(), make_string_item(name1));
     if (name2) js_array_push(names_root.get(), make_string_item(name2));
     symbol_root.set(js_util_custom_promisify_args_symbol());
@@ -3065,7 +3053,7 @@ static Item js_fs_rmdir_async(Item path_item, Item callback) {
     int r = uv_fs_rmdir(NULL, &req, path, NULL);
     uv_fs_req_cleanup(&req);
     if (js_is_callable(callback)) {
-        Item args[1] = { r < 0 ? make_fs_error(r, path) : ItemNull };
+        Item args[1] = { r < 0 ? make_fs_error(r, "rmdir", path) : ItemNull };
         js_call_function(callback, ItemNull, args, 1);
     }
     return make_js_undefined();
@@ -3087,13 +3075,13 @@ static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb
 }
 
 static void js_fs_callback_string_result(Item cb, Item result, int error_code,
-        Item this_arg) {
+        const char* syscall, Item this_arg) {
     if (!js_is_callable(cb)) return;
     if (get_type_id(result) == LMD_TYPE_STRING) {
         Item args[2] = {ItemNull, result};
         js_call_function(cb, this_arg, args, 2);
     } else {
-        Item err = make_fs_error(error_code, NULL);
+        Item err = make_fs_error(error_code, syscall, NULL);
         Item args[1] = {err};
         js_call_function(cb, this_arg, args, 1);
     }
@@ -3124,20 +3112,20 @@ static Item js_fs_async_success_3(JsFsSync3 sync_fn, Item first, Item second,
     return make_js_undefined();
 }
 
-#define JS_FS_ASYNC_STRING_RESULT(name, sync_fn, error_code, this_arg) \
+#define JS_FS_ASYNC_STRING_RESULT(name, sync_fn, error_code, syscall, this_arg) \
 static Item name(Item path_item, Item opts_or_cb, Item callback) { \
     Item cb = js_is_callable(opts_or_cb) ? opts_or_cb : callback; \
     Item result = sync_fn(path_item, opts_or_cb); \
     if (fs_callback_failed(result)) return result; \
-    js_fs_callback_string_result(cb, result, error_code, this_arg); \
+    js_fs_callback_string_result(cb, result, error_code, syscall, this_arg); \
     return make_js_undefined(); \
 }
 JS_FS_ASYNC_STRING_RESULT(js_fs_realpath_async, js_fs_realpathSync,
-    UV_ENOENT, make_js_undefined())
+    UV_ENOENT, "lstat", make_js_undefined())
 JS_FS_ASYNC_STRING_RESULT(js_fs_mkdtemp_async, js_fs_mkdtempSync,
-    UV_EINVAL, ItemNull)
+    UV_EINVAL, "mkdtemp", ItemNull)
 JS_FS_ASYNC_STRING_RESULT(js_fs_readlink_async, js_fs_readlinkSync,
-    UV_EINVAL, ItemNull)
+    UV_EINVAL, "readlink", ItemNull)
 #undef JS_FS_ASYNC_STRING_RESULT
 
 static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_cb, Item callback) {
@@ -3316,10 +3304,7 @@ extern "C" Item js_get_fs_namespace(void) {
 
     fs_namespace = js_new_object();
 
-    RootFrame roots(3);
-    Rooted<Item> constants_root(roots, ItemNull);
-    Rooted<Item> promises_root(roots, ItemNull);
-    Rooted<Item> default_key_root(roots, ItemNull);
+    JS_ROOTS(roots, constants_root, ItemNull, promises_root, ItemNull, default_key_root, ItemNull);
 
 #define JS_FS_INSTALL_METHOD(name, target, arity) \
     js_fs_set_method(fs_namespace, name, target, arity);

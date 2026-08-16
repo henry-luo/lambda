@@ -164,6 +164,16 @@ int js_module_const_cmp(const void *a, const void *b, void *udata);
 uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1);
 const char* jm_persist_name(const char* name);
 const char* jm_format_name(const char* format, ...);
+// MIR-level name of a JS variable ("_js_<source name>").
+const char* jm_var_name(const char* name, int len);
+static inline const char* jm_var_name(const String* name) {
+    return name ? jm_var_name(name->chars, (int)name->len) : NULL;
+}
+// Module-const table lookup: the entry for `name` in `consts`, or NULL.
+JsModuleConstEntry* jm_find_module_const_in(struct hashmap* consts, const char* name);
+static inline JsModuleConstEntry* jm_find_module_const(JsMirTranspiler* mt, const char* name) {
+    return mt ? jm_find_module_const_in(mt->module_consts, name) : NULL;
+}
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
@@ -176,6 +186,12 @@ bool jm_build_property_key_image(const PropertyKeySpec* inherited,
     uint32_t inherited_count, uint32_t inherited_bytes_size,
     const ArrayList* local_names, PropertyKeySpec** out_specs,
     uint32_t* out_count, uint32_t* out_bytes_size);
+// Strictness of the code currently being lowered: the top-level directive, an
+// ES module (always strict), or the enclosing function's own directive.
+static inline bool jm_strict_put(JsMirTranspiler* mt) {
+    return mt && (mt->is_global_strict || mt->is_module ||
+        (mt->current_fc && mt->current_fc->is_strict));
+}
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
@@ -219,6 +235,18 @@ static inline void jm_emit_reg_op_binary(JsMirTranspiler* mt, MIR_insn_code_t op
         MIR_reg_t target, MIR_op_t left, MIR_reg_t right) {
     jm_emit(mt, MIR_new_insn(mt->ctx, opcode,
         MIR_new_reg_op(mt->ctx, target), left, MIR_new_reg_op(mt->ctx, right)));
+}
+// conditional branch to `label` on a single register operand (MIR_BT/MIR_BF)
+static inline void jm_emit_branch(JsMirTranspiler* mt, MIR_insn_code_t code,
+        MIR_label_t label, MIR_reg_t reg) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, code,
+        MIR_new_label_op(mt->ctx, label), MIR_new_reg_op(mt->ctx, reg)));
+}
+static inline void jm_emit_jmp(JsMirTranspiler* mt, MIR_label_t label) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, label)));
+}
+static inline void jm_emit_ret(JsMirTranspiler* mt, MIR_reg_t reg) {
+    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, reg)));
 }
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLaneTrack state);
@@ -432,6 +460,40 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true))
 #define jm_call_void_6(mt, fn, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->em, fn, __VA_ARGS__, true))
+
+// Register-operand call shorthand. The overwhelming majority of helper calls
+// pass every argument as an I64 register; jm_callr_N spells that directly
+// instead of repeating `MIR_T_I64, MIR_new_reg_op(mt->ctx, x)` per argument.
+// Mixed sites keep the explicit jm_call_N form.
+#define JM_REG(mt, r) MIR_T_I64, MIR_new_reg_op((mt)->ctx, (r))
+#define jm_callr_1(mt, fn, ret, a1) jm_call_1(mt, fn, ret, JM_REG(mt, a1))
+#define jm_callr_2(mt, fn, ret, a1, a2) \
+    jm_call_2(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2))
+#define jm_callr_3(mt, fn, ret, a1, a2, a3) \
+    jm_call_3(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3))
+#define jm_callr_4(mt, fn, ret, a1, a2, a3, a4) \
+    jm_call_4(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4))
+#define jm_callr_5(mt, fn, ret, a1, a2, a3, a4, a5) \
+    jm_call_5(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5))
+#define jm_callr_6(mt, fn, ret, a1, a2, a3, a4, a5, a6) \
+    jm_call_6(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5), JM_REG(mt, a6))
+#define jm_callr_void_1(mt, fn, a1) jm_call_void_1(mt, fn, JM_REG(mt, a1))
+#define jm_callr_void_2(mt, fn, a1, a2) \
+    jm_call_void_2(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2))
+#define jm_callr_void_3(mt, fn, a1, a2, a3) \
+    jm_call_void_3(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3))
+#define jm_callr_void_4(mt, fn, a1, a2, a3, a4) \
+    jm_call_void_4(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4))
+#define jm_callr_void_5(mt, fn, a1, a2, a3, a4, a5) \
+    jm_call_void_5(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5))
+#define jm_callr_void_6(mt, fn, a1, a2, a3, a4, a5, a6) \
+    jm_call_void_6(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
+        JM_REG(mt, a4), JM_REG(mt, a5), JM_REG(mt, a6))
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,

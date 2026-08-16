@@ -165,28 +165,28 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 
 ## 10. Tracking checklist
 
-- [ ] C0.1 TLS `once()` fix + `test/node/tls_socket_once.{js,txt}`
-- [ ] C0.2 HTTP multi-listener fix + `test/node/http_multiple_listeners.{js,txt}`
-- [ ] C0.3 fs `syscall` fix + `test/node/fs_error_syscall.{js,txt}`
-- [ ] C0.4 HTTP write-error ownership fix + ASAN verification
-- [ ] C0.5 DOM reflection gating fix + `test/js/dom_reflect_gating.{js,html,txt}`
-- [ ] C1.1 rename `jm_emit_class_static_field_value_simple`
-- [ ] C1.2 delete duplicate op table (`expression_lowering:4575`)
-- [ ] C1.3 DOM dead code (formdata shim, 2 zero-caller fns)
-- [ ] C1.4 globals orphan decls + duplicate includes
-- [ ] C1.5 `jm_strict_put`
-- [ ] C2.1 name-key helpers (runtime → globals → DOM batches)
-- [ ] C2.2 `JS_ROOTS` (runtime → globals batches)
-- [ ] C2.3 `jm_callr_N` (per MIR file)
-- [ ] C2.4 `jm_emit_branch/jmp/ret`
-- [ ] C2.5 `jm_find_module_const` + `jm_var_name`
-- [ ] C2.6 `js_throw_*_errorf` + `js_throw_delete_rejected`
-- [ ] C2.7 `js_node_common.hpp` micro-clones
-- [ ] C2.8 `js_node_uv.cpp` write + error factory
-- [ ] C2.9 `js_map_own_or/_string`
-- [ ] C2.10 `js_species_constructor`
-- [ ] C2.11 join/toLocaleString kernel
-- [ ] C3.1 `JS_AST_CHILDREN` visitor (6 file migrations)
+- [x] C0.1 TLS `once()` fix + `test/node/tls_socket_once.{js,txt}`
+- [x] C0.2 HTTP multi-listener fix + `test/node/http_multiple_listeners.{js,txt}`
+- [x] C0.3 fs `syscall` fix + `test/node/fs_error_syscall.{js,txt}`
+- [x] C0.4 HTTP write-error ownership fix + ASAN verification
+- [x] C0.5 DOM reflection gating fix + `test/js/dom_reflect_gating.{js,html,txt}`
+- [x] C1.1 rename `jm_emit_class_static_field_value_simple`
+- [x] C1.2 delete duplicate op table (`expression_lowering:4575`)
+- [x] C1.3 DOM dead code (formdata shim, 2 zero-caller fns)
+- [x] C1.4 globals orphan decls + duplicate includes
+- [x] C1.5 `jm_strict_put`
+- [x] C2.1 name-key helpers (runtime → globals → DOM batches)
+- [x] C2.2 `JS_ROOTS` (runtime → globals batches)
+- [x] C2.3 `jm_callr_N` (per MIR file)
+- [x] C2.4 `jm_emit_branch/jmp/ret`
+- [x] C2.5 `jm_find_module_const` + `jm_var_name`
+- [x] C2.6 `js_throw_*_errorf` + `js_throw_delete_rejected`
+- [x] C2.7 `js_node_common.hpp` micro-clones
+- [x] C2.8 `js_node_uv.cpp` write + error factory
+- [x] C2.9 `js_map_own_or/_string`
+- [x] C2.10 `js_species_constructor`
+- [x] C2.11 join/toLocaleString kernel
+- [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 2 of ~40 walkers migrated
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
 - [ ] C3.3 `js_node_emitter` (8 module migrations)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
@@ -213,3 +213,75 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 4. `std::` usage in `lambda/js/` strictly decreases (regex wrapper, DOM lambdas, runtime islands); zero new occurrences (enforceable by grep at stage gates).
 5. No perf regressions on `test/js_runtime_bench` (release build); DOM property access and AST build dispatch are expected to *improve* (strcmp chains → id switch / bsearch).
 6. Every deleted "duplicate" is deleted, not orphaned: stage-end grep confirms no remaining references to removed statics/aliases.
+
+---
+
+## 12. Implementation findings (recorded during execution)
+
+Three root causes in this plan did not match the tree and were re-derived
+against it before fixing:
+
+- **C0.3** `make_fs_error` (`js_fs.cpp`) is shadowed: `require('fs')` resolves
+  through the Jube `node_fs` native module, whose error factory already names
+  most syscalls correctly, so the hardcoded `"access"` was not observable.
+  `make_fs_error` was still fixed (it is live wherever `node_fs` is not
+  loaded, and its `(status, syscall, path)` shape seeds C2.8). The two wrong
+  names in the live path — `readdir` and `realpath` — were fixed to Node's
+  `scandir`/`lstat`.
+- **C0.4** The named site (`http_conn_write_bytes`) already obeyed the
+  single-owner rule, as do `js_net.cpp` and `js_child_process.cpp`. The real
+  defect is the opposite: the two http *client* `uv_write` sites ignored the
+  return value, leaking the wrapper and dropping the caller's write callback.
+- **C0.5** The asymmetry runs the other way: the *setter* applied the
+  `_idl_to_attr_name` mapping ungated on any element while the getter gates
+  every pair by tag, so unsupported pairs wrote an attribute that could not be
+  read back. The gate was added on the setter side.
+- **C1.3** `js_dom_collection_has_live_property_state` is not dead — it has a
+  live caller in `js_runtime.cpp`. Only `js_is_document_proxy` was deleted.
+
+**Open, not yet done (needs a decision):** C0.3's stated acceptance test also
+asserts `err.path`. The live `node_fs` error factory reaches the host through
+`JubeHostNodeErrorAPI::throw_system_error(session, syscall, error_number)`
+(`lambda/jube/jube.h`), which has no `path` parameter, so no fs error carries
+`err.path` today. Adding it means widening that versioned host ABI
+(`JUBE_HOST_API_VERSION`) and threading a path through ~23 `node_fs_sync_error`
+call sites. Deferred pending approval.
+
+---
+
+## 13. Status at end of the first implementation pass
+
+Landed and gated (18 commits, `test-lambda-baseline` 3870/3870 and the
+`test/node` set delta-free at every commit):
+
+- **C0** — all five bug fixes, four with committed regression tests.
+- **C1** — all five items.
+- **C2** — all eleven items (C2.4 landed before C2.1–C2.3).
+- **C3.1** — the shared child table (`lambda/js/js_ast_children.cpp`),
+  `js_ast_visit_children` / `js_ast_any_child`, and two walker migrations:
+  `jm_collect_enclosing_lexicals_for_target` (146 → 34) and
+  `jm_count_suspensions` (157 → 31).
+
+Net so far: **−1,530 lines** across `lambda/`.
+
+### Revised expectation for the rest of C3.1
+
+The 1,500-line estimate assumed the walkers are *complete* traversals whose
+`default:` can simply delegate. Many are not: `jm_node_has_direct_eval_call`,
+for example, returns false for for/while/try/switch/object/array and every
+other unlisted kind, so delegating would newly descend into them. Under the
+correctness rule those kinds must become explicit skip cases, which costs back
+most of what the table saves.
+
+The split to expect:
+
+- **Complete walkers** (the one migrated is representative): ~75% reduction.
+- **Deliberately partial walkers**: little or no reduction; they should keep
+  their allow-list shape, and the table is not the right tool for them.
+
+Before migrating each remaining walker, classify it first. A useful signal is
+whether its `default:` recurses generically or returns/breaks.
+
+### Not started
+
+C3.2–C3.8, C4, C5, C6.

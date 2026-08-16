@@ -110,6 +110,19 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
 
 Map* js_resolve_object_prototype();
 Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_found = nullptr);
+// Own-property lookup that folds the "was it present?" flag into the result.
+// js_map_own_or yields `fallback` for an absent property; js_map_own_flag
+// coerces to boolean, yielding `dflt` when absent.
+static inline Item js_map_own_or(Map* m, const char* key_str, int key_len, Item fallback) {
+    bool found = false;
+    Item value = js_map_shape_lookup(m, key_str, key_len, &found);
+    return found ? value : fallback;
+}
+static inline bool js_map_own_flag(Map* m, const char* key_str, int key_len, bool dflt) {
+    bool found = false;
+    Item value = js_map_shape_lookup(m, key_str, key_len, &found);
+    return found ? it2b(js_to_boolean(value)) : dflt;
+}
 Item js_check_array_sym_iterator();
 extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
 void js_regex_cache_reset();

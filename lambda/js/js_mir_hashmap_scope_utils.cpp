@@ -27,6 +27,17 @@ const char* jm_persist_name(const char* name) {
     return stable ? stable->chars : name;
 }
 
+JsModuleConstEntry* jm_find_module_const_in(struct hashmap* consts, const char* name) {
+    if (!consts || !name) return NULL;
+    JsModuleConstEntry lookup;
+    lookup.name = jm_persist_name(name);
+    return (JsModuleConstEntry*)hashmap_get(consts, &lookup);
+}
+
+const char* jm_var_name(const char* name, int len) {
+    return jm_format_name("_js_%.*s", len, name);
+}
+
 const char* jm_format_name(const char* format, ...) {
     if (!format) return NULL;
     NamePool* pool = jm_active_name_pool();
@@ -142,11 +153,7 @@ uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) 
 
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
     if (!mt || !capture || !mt->module_consts || capture->force_env_capture) return false;
-    JsModuleConstEntry lookup;
-    memset(&lookup, 0, sizeof(lookup));
-    lookup.name = jm_persist_name(capture->name);
-    JsModuleConstEntry* entry =
-        (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+    JsModuleConstEntry* entry = jm_find_module_const(mt, capture->name);
     return entry && entry->const_type == MCONST_MODVAR;
 }
 

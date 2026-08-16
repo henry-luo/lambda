@@ -118,13 +118,13 @@ static void xhr_clear_response(XhrState* xhr) {
 // ============================================================================
 
 static void xhr_set_str(Item obj, const char* key, const char* value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    Item v = value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
+    Item k = js_name_item(key);
+    Item v = value ? js_name_item(value) : ItemNull;
     js_set_key_default(obj, k, v);
 }
 
 static void xhr_set_int(Item obj, const char* key, int value) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
+    Item k = js_name_item(key);
     Item v = (Item){.item = i2it(value)};
     js_set_key_default(obj, k, v);
 }
@@ -139,13 +139,11 @@ static void xhr_define_status_accessor(Item obj) {
     js_set_key_cstr(descriptor, "get", js_new_native_function(js_xhr_get_status));
     js_set_key_cstr(descriptor, "enumerable", (Item){.item = ITEM_TRUE});
     js_set_key_cstr(descriptor, "configurable", (Item){.item = ITEM_TRUE});
-    js_object_define_property(obj,
-        (Item){.item = s2it(heap_create_name("status"))}, descriptor);
+    js_object_define_property(obj, js_name_item("status"), descriptor);
 }
 
 static Item xhr_get_prop(Item obj, const char* key) {
-    Item k = (Item){.item = s2it(heap_create_name(key))};
-    return js_get_key_default(obj, k);
+    return js_get_name_key(obj, key);
 }
 
 static int xhr_id_from_this() {
@@ -741,7 +739,7 @@ extern "C" Item js_xhr_get_response_header(Item name_arg) {
         if (strncasecmp(h, name, name_len) == 0 && h[name_len] == ':') {
             const char* val = h + name_len + 1;
             while (*val == ' ') val++;
-            return (Item){.item = s2it(heap_create_name(val))};
+            return js_name_item(val);
         }
     }
     return ItemNull;
@@ -749,7 +747,7 @@ extern "C" Item js_xhr_get_response_header(Item name_arg) {
 
 extern "C" Item js_xhr_get_all_response_headers(void) {
     XhrState* xhr = xhr_state_from_this();
-    if (!xhr || xhr->ready_state < 2) return (Item){.item = s2it(heap_create_name(""))};
+    if (!xhr || xhr->ready_state < 2) return js_name_item("");
 
     // concatenate all headers with \r\n
     size_t total = 0;
@@ -757,7 +755,7 @@ extern "C" Item js_xhr_get_all_response_headers(void) {
         total += strlen(xhr->resp_headers[i]) + 2; // \r\n
     }
 
-    if (total == 0) return (Item){.item = s2it(heap_create_name(""))};
+    if (total == 0) return js_name_item("");
 
     char* buf = (char*)mem_calloc(1, total + 1, MEM_CAT_JS_RUNTIME);
     char* p = buf;
@@ -770,7 +768,7 @@ extern "C" Item js_xhr_get_all_response_headers(void) {
     }
     *p = '\0';
 
-    Item result = (Item){.item = s2it(heap_create_name(buf))};
+    Item result = js_name_item(buf);
     mem_free(buf);
     return result;
 }

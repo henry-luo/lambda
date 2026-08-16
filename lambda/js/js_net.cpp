@@ -5,6 +5,8 @@
  * Registered as built-in module 'net' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_uv.hpp"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_host_hooks.h"
@@ -168,8 +170,6 @@ struct JsBoundSocket {
 };
 
 typedef struct SocketWriteReq {
-    uv_write_t req;
-    char*      data;
     size_t     len;
     JsSocket*  sock;
     Item       callback;
@@ -205,14 +205,8 @@ static JsSocket* socket_from_object(Item self) {
 
 static void socket_sync_no_half_open_listener(Item obj);
 
-static bool net_is_object_like(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP ||
-           type == LMD_TYPE_ELEMENT;
-}
-
 static bool net_object_has_key(Item obj, const char* key) {
-    if (!net_is_object_like(obj) || !key) return false;
+    if (!js_node_is_object_like(obj) || !key) return false;
     Item keys = js_object_keys(obj);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return false;
     int64_t len = js_array_length(keys);
@@ -234,21 +228,21 @@ static Item socket_make_listener_record(Item listener, bool once) {
 }
 
 static Item socket_listener_fn(Item record) {
-    if (net_is_object_like(record)) {
+    if (js_node_is_object_like(record)) {
         return js_get_key_cstr(record, "listener");
     }
     return record;
 }
 
 static bool socket_listener_once(Item record) {
-    if (!net_is_object_like(record)) return false;
+    if (!js_node_is_object_like(record)) return false;
     Item once = js_get_key_cstr(record, "once");
     return get_type_id(once) == LMD_TYPE_BOOL && it2b(once);
 }
 
 static Item socket_listener_map(Item self, bool create) {
     Item listeners = js_get_key_cstr(self, "__socket_listeners__");
-    if (!net_is_object_like(listeners)) {
+    if (!js_node_is_object_like(listeners)) {
         if (!create) return make_undefined_item();
         listeners = js_new_object();
         js_set_key_cstr(self, "__socket_listeners__", listeners);
@@ -275,7 +269,7 @@ static void socket_add_listener_cstr(Item self, const char* event, Item callback
 static int64_t socket_listener_count_item(Item self, Item event_item) {
     if (get_type_id(event_item) != LMD_TYPE_STRING) return 0;
     Item listeners = socket_listener_map(self, false);
-    if (!net_is_object_like(listeners)) return 0;
+    if (!js_node_is_object_like(listeners)) return 0;
     Item arr = js_get_key_default(listeners, event_item);
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return 0;
     return js_array_length(arr);
@@ -285,7 +279,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, socket_has_listener, (Item self, const char* 
 static void socket_remove_listener_item(Item self, Item event_item, Item callback) {
     if (get_type_id(event_item) != LMD_TYPE_STRING || !is_callable(callback)) return;
     Item listeners = socket_listener_map(self, false);
-    if (!net_is_object_like(listeners)) return;
+    if (!js_node_is_object_like(listeners)) return;
     Item arr = js_get_key_default(listeners, event_item);
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return;
 
@@ -306,7 +300,7 @@ static void socket_remove_listener_item(Item self, Item event_item, Item callbac
 
 static void socket_remove_all_listeners(Item self, Item event_item) {
     Item listeners = socket_listener_map(self, false);
-    if (!net_is_object_like(listeners)) return;
+    if (!js_node_is_object_like(listeners)) return;
     if (is_undefined_item(event_item)) {
         js_set_key_cstr(self, "__socket_listeners__", js_new_object());
         socket_sync_no_half_open_listener(self);
@@ -503,7 +497,7 @@ static void socket_update_address_properties(JsSocket* sock) {
 // emit event on socket JS object
 static void socket_emit(Item obj, const char* event, Item* args, int argc) {
     Item listeners = socket_listener_map(obj, false);
-    if (!net_is_object_like(listeners)) return;
+    if (!js_node_is_object_like(listeners)) return;
 
     Item event_item = make_string_item(event);
     Item arr = js_get_key_default(listeners, event_item);
@@ -573,24 +567,6 @@ static void socket_finish_on_remote_end(JsSocket* sock) {
     socket_shutdown_writes(sock, make_undefined_item());
 }
 
-static bool socket_get_write_bytes(Item item, const char** out_data, size_t* out_len) {
-    if (get_type_id(item) == LMD_TYPE_STRING) {
-        String* s = it2s(item);
-        *out_data = s->chars;
-        *out_len = s->len;
-        return true;
-    }
-    if (js_is_typed_array(item)) {
-        if (js_typed_array_is_out_of_bounds_item(item)) return false;
-        int byte_len = js_typed_array_byte_length(item);
-        void* data = js_typed_array_current_data_ptr(item);
-        if (byte_len > 0 && !data) return false;
-        *out_data = (const char*)data;
-        *out_len = (size_t)byte_len;
-        return true;
-    }
-    return false;
-}
 
 static bool socket_uses_utf8_encoding(JsSocket* sock) {
     if (!sock || !sock->js_object.item) return false;
@@ -742,7 +718,7 @@ extern "C" Item js_socket_listeners(Item event_item) {
     Item result = js_array_new(0);
     if (get_type_id(event_item) != LMD_TYPE_STRING) return result;
     Item listeners = socket_listener_map(self, false);
-    if (!net_is_object_like(listeners)) return result;
+    if (!js_node_is_object_like(listeners)) return result;
     Item arr = js_get_key_default(listeners, event_item);
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return result;
     int64_t len = js_array_length(arr);
@@ -927,15 +903,45 @@ static void socket_handle_remote_eof(JsSocket* sock) {
     socket_close_now(sock);
 }
 
+// One completion for a socket write, whether libuv accepted the submission or
+// rejected it: a rejected write also un-counts the bytes it never sent.
+static void socket_write_settled(void* ud, int status, const char* data, size_t len) {
+    (void)data; (void)len;
+    SocketWriteReq* wreq = (SocketWriteReq*)ud;
+    if (!wreq) return;
+    JsSocket* sock = wreq->sock;
+    if (sock) {
+        sock->buffer_size -= (int64_t)wreq->len;
+        if (sock->buffer_size < 0) sock->buffer_size = 0;
+        if (status != 0) {
+            sock->bytes_written -= (int64_t)wreq->len;
+            if (sock->bytes_written < 0) sock->bytes_written = 0;
+        }
+        socket_update_io_counters(sock);
+    }
+    if (is_callable(wreq->callback)) {
+        if (status == 0) {
+            js_call_function(wreq->callback, make_undefined_item(), NULL, 0);
+        } else {
+            Item err = make_uv_error(status, "write", NULL, -1);
+            js_call_function(wreq->callback, make_undefined_item(), &err, 1);
+        }
+        js_microtask_flush();
+    }
+    if (status == 0) {
+        socket_maybe_emit_drain(sock);
+        socket_maybe_close_after_drain(sock);
+    }
+    mem_free(wreq);
+}
+
 static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
                                 Item callback, bool counted_before) {
     SocketWriteReq* wreq = (SocketWriteReq*)mem_calloc(1, sizeof(SocketWriteReq), MEM_CAT_JS_RUNTIME);
-    uv_buf_t buf = uv_buf_init(copy, (unsigned int)data_len);
-    wreq->data = copy;
+    if (!wreq) { mem_free(copy); return (Item){.item = b2it(false)}; }
     wreq->len = data_len;
     wreq->sock = sock;
     wreq->callback = callback;
-    wreq->req.data = wreq;
 
     if (!counted_before) {
         sock->bytes_written += (int64_t)data_len;
@@ -943,43 +949,10 @@ static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
         socket_update_io_counters(sock);
     }
 
-    int r = uv_write(&wreq->req, (uv_stream_t*)&sock->tcp, &buf, 1,
-        [](uv_write_t* req, int status) {
-            SocketWriteReq* wreq = (SocketWriteReq*)req->data;
-            if (!wreq) return;
-            if (wreq->sock) {
-                wreq->sock->buffer_size -= (int64_t)wreq->len;
-                if (wreq->sock->buffer_size < 0) wreq->sock->buffer_size = 0;
-                socket_update_io_counters(wreq->sock);
-            }
-            if (is_callable(wreq->callback)) {
-                if (status == 0) {
-                    js_call_function(wreq->callback, make_undefined_item(), NULL, 0);
-                } else {
-                    Item err = make_uv_error(status, "write", NULL, -1);
-                    js_call_function(wreq->callback, make_undefined_item(), &err, 1);
-                }
-                js_microtask_flush();
-            }
-            socket_maybe_emit_drain(wreq->sock);
-            socket_maybe_close_after_drain(wreq->sock);
-            if (wreq->data) mem_free(wreq->data);
-            mem_free(wreq);
-        });
-
-    if (r != 0) {
-        sock->bytes_written -= (int64_t)data_len;
-        sock->buffer_size -= (int64_t)data_len;
-        if (sock->bytes_written < 0) sock->bytes_written = 0;
-        if (sock->buffer_size < 0) sock->buffer_size = 0;
-        socket_update_io_counters(sock);
-        if (is_callable(callback)) {
-            Item err = make_uv_error(r, "write", NULL, -1);
-            js_call_function(callback, make_undefined_item(), &err, 1);
-            js_microtask_flush();
-        }
-        mem_free(copy);
-        mem_free(wreq);
+    // C2.8: the shared helper adopts `copy` and settles exactly once, so the
+    // rejected-submission path can no longer double- or under-free.
+    if (js_node_stream_write_owned((uv_stream_t*)&sock->tcp, copy, data_len,
+            socket_write_settled, wreq) != 0) {
         return (Item){.item = b2it(false)};
     }
 
@@ -1185,7 +1158,7 @@ static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item ca
 
     const char* data = NULL;
     size_t data_len = 0;
-    if (!socket_get_write_bytes(data_item, &data, &data_len)) {
+    if (!js_item_bytes(data_item, &data, &data_len)) {
         if (data_item.item == ITEM_NULL || get_type_id(data_item) == LMD_TYPE_NULL) {
             return js_throw_type_error_code(
                 "ERR_STREAM_NULL_VALUES",
@@ -1528,7 +1501,7 @@ static Item js_socket_setKeepAlive(Item rest_args) {
     Item interval = argc > 2 ? js_elements_get_int(rest_args, 2) : make_undefined_item();
     Item count = argc > 3 ? js_elements_get_int(rest_args, 3) : make_undefined_item();
 
-    bool options_object = net_is_object_like(first);
+    bool options_object = js_node_is_object_like(first);
     bool enable_bool = false;
     if (options_object) {
         Item opt_enable = js_get_key_cstr(first, "enable");
@@ -1741,7 +1714,7 @@ static Item js_socket_pipe(Item dest) {
 static bool socket_has_js_read_handle(JsSocket* sock, Item* out_handle) {
     if (!sock || !sock->js_object.item) return false;
     Item handle = js_get_key_cstr(sock->js_object, "_handle");
-    if (!net_is_object_like(handle)) return false;
+    if (!js_node_is_object_like(handle)) return false;
     Item native_handle = js_get_key_cstr(handle, "__socket_handle__");
     if (get_type_id(native_handle) == LMD_TYPE_INT) return false;
     Item read_start = js_get_key_cstr(handle, "readStart");
@@ -1791,7 +1764,6 @@ static Item js_socket_js_handle_onread(void) {
 
 static void client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 static void client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
-static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 static void server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 
 static bool socket_start_read(JsSocket* sock) {
@@ -1807,7 +1779,7 @@ static bool socket_start_read(JsSocket* sock) {
     }
     if (uv_is_closing((uv_handle_t*)&sock->tcp)) return false;
 
-    uv_alloc_cb alloc_cb = sock->is_server_side ? server_alloc_cb : client_alloc_cb;
+    uv_alloc_cb alloc_cb = sock->is_server_side ? js_node_alloc_cb : client_alloc_cb;
     uv_read_cb read_cb = sock->is_server_side ? server_client_read_cb : client_read_cb;
     int r = uv_read_start((uv_stream_t*)&sock->tcp, alloc_cb, read_cb);
     if (r == 0) sock->reading = true;
@@ -1954,11 +1926,11 @@ static Item make_socket_handle_object(JsSocket* sock) {
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     if (sock->high_water_mark < 0) sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
-    RootFrame roots(4);
-    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_SOCKET));
-    Rooted<Item> hwm_root(roots, ItemNull);
-    Rooted<Item> readable_state_root(roots, ItemNull);
-    Rooted<Item> writable_state_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        obj_root, js_new_object_with_class(JS_CLASS_SOCKET),
+        hwm_root, ItemNull,
+        readable_state_root, ItemNull,
+        writable_state_root, ItemNull);
     if (get_type_id(net_socket_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(obj_root.get(), net_socket_prototype);
     }
@@ -2185,10 +2157,7 @@ typedef struct NetResolveReq {
 static void client_connect_cb(uv_connect_t* req, int status);
 
 static Item make_uv_error(int status, const char* syscall, const char* host, int port) {
-    const char* code = uv_err_name(status);
-    if (strcmp(syscall, "getaddrinfo") == 0 && strcmp(code, "EAI_NONAME") == 0) {
-        code = "ENOTFOUND";
-    }
+    const char* code = js_node_uv_code(status, syscall);
     char msg[512];
     if (strcmp(syscall, "getaddrinfo") == 0) {
         snprintf(msg, sizeof(msg), "%s %s %s", syscall, code, host ? host : "");
@@ -2197,26 +2166,20 @@ static Item make_uv_error(int status, const char* syscall, const char* host, int
     } else {
         snprintf(msg, sizeof(msg), "%s %s", syscall, code);
     }
-
-    Item err = js_new_error(make_string_item(msg));
-    js_set_key_cstr(err, "code", make_string_item(code));
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(status)});
-    js_set_key_cstr(err, "syscall", make_string_item(syscall));
-    if (host) js_set_key_cstr(err, "address", make_string_item(host));
-    if (port >= 0) js_set_key_cstr(err, "port", (Item){.item = i2it(port)});
-    return err;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = syscall; spec.message = msg;
+    spec.code = code; spec.address = host; spec.port = port;
+    return js_node_uv_error(spec);
 }
 
 static Item make_path_connect_error(int status, const char* path) {
-    const char* code = uv_err_name(status);
+    const char* code = js_node_uv_code(status, "connect");
     char msg[512];
     snprintf(msg, sizeof(msg), "connect %s %s", code, path ? path : "");
-    Item err = js_new_error(make_string_item(msg));
-    js_set_key_cstr(err, "code", make_string_item(code));
-    js_set_key_cstr(err, "errno", (Item){.item = i2it(status)});
-    js_set_key_cstr(err, "syscall", make_string_item("connect"));
-    if (path) js_set_key_cstr(err, "path", make_string_item(path));
-    return err;
+    JsNodeUvError spec;
+    spec.status = status; spec.syscall = "connect"; spec.message = msg;
+    spec.code = code; spec.path = path;
+    return js_node_uv_error(spec);
 }
 
 static Item make_invalid_ip_address_error(Item address) {
@@ -2244,9 +2207,7 @@ static Item throw_invalid_ip_address(Item address) {
         memcpy(value, s->chars, (size_t)len);
         value[len] = '\0';
     }
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Invalid IP address: %s", value);
-    return js_throw_type_error_code("ERR_INVALID_IP_ADDRESS", msg);
+    return js_throw_type_error_codef("ERR_INVALID_IP_ADDRESS", "Invalid IP address: %s", value);
 }
 
 static Item make_invalid_address_family_error(int family, const char* host, int port) {
@@ -2349,16 +2310,14 @@ static bool string_item_has_nul(Item value) {
 
 static Item validate_host_string(Item value, const char* name) {
     if (string_item_has_nul(value)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg),
-                 "The property '%s' must be a string without null bytes.", name);
-        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+        return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+            "The property '%s' must be a string without null bytes.", name);
     }
     return js_status_ok();
 }
 
 static JsBoundSocket* bound_socket_from_item(Item self) {
-    if (!net_is_object_like(self)) return NULL;
+    if (!js_node_is_object_like(self)) return NULL;
     Item handle_item = js_get_key_cstr(self, "__bound_socket_handle__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsBoundSocket*)(uintptr_t)it2i(handle_item);
@@ -2403,7 +2362,7 @@ static int bound_socket_dup_fd(JsBoundSocket* bound) {
 }
 
 static bool bound_socket_jube_resource_id(Item self, uint32_t* out_resource_id) {
-    if (!net_is_object_like(self)) return false;
+    if (!js_node_is_object_like(self)) return false;
     Item resource_item = js_get_key_cstr(self, "__jube_bound_socket_resource_id__");
     int64_t resource_id = 0;
     if (!net_item_to_integral_int64(resource_item, &resource_id) || resource_id <= 0 ||
@@ -2411,8 +2370,8 @@ static bool bound_socket_jube_resource_id(Item self, uint32_t* out_resource_id) 
     if (out_resource_id) *out_resource_id = (uint32_t)resource_id;
     return true;
 }
-JS_FORWARD_STATIC_RETURN(bool, bound_socket_is_jube_object, (Item self), net_is_object_like, (self) && js_is_truthy(js_get_key_cstr(self, "__jube_bound_socket__")))
-JS_FORWARD_STATIC_RETURN(bool, bound_socket_jube_is_adopted, (Item self), net_is_object_like, (self) && js_is_truthy(js_get_key_cstr(self, "__jube_bound_socket_adopted__")))
+JS_FORWARD_STATIC_RETURN(bool, bound_socket_is_jube_object, (Item self), js_node_is_object_like, (self) && js_is_truthy(js_get_key_cstr(self, "__jube_bound_socket__")))
+JS_FORWARD_STATIC_RETURN(bool, bound_socket_jube_is_adopted, (Item self), js_node_is_object_like, (self) && js_is_truthy(js_get_key_cstr(self, "__jube_bound_socket_adopted__")))
 
 static int bound_socket_item_dup_fd(Item self) {
     JsBoundSocket* bound = bound_socket_from_item(self);
@@ -2482,7 +2441,7 @@ extern "C" Item js_net_BoundSocket(Item options) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return ItemNull;
 
-    if (!is_undefined_item(options) && options.item != ITEM_NULL && !net_is_object_like(options)) {
+    if (!is_undefined_item(options) && options.item != ITEM_NULL && !js_node_is_object_like(options)) {
         return js_throw_invalid_arg_type("options", "Object", options);
     }
 
@@ -2491,7 +2450,7 @@ extern "C" Item js_net_BoundSocket(Item options) {
     bool ipv6_only = false;
     bool reuse_port = false;
 
-    if (net_is_object_like(options)) {
+    if (js_node_is_object_like(options)) {
         Item host = js_get_key_cstr(options, "host");
         if (!is_undefined_item(host) && host.item != ITEM_NULL) {
             if (!copy_string_item(host, host_buf, (int)sizeof(host_buf))) {
@@ -4080,11 +4039,6 @@ static void socket_note_closed(JsSocket* sock) {
     server_maybe_finish_close(srv);
 }
 
-static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
-}
-
 static void server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSocket* sock = (JsSocket*)stream->data;
     if (nread > 0 && sock) {
@@ -4165,14 +4119,14 @@ static void server_capture_connection_rejection(Item result, Item client_obj) {
 static Item make_server_handle_object(JsServer* srv);
 
 static JsServer* server_from_handle_object(Item self) {
-    if (!net_is_object_like(self)) return NULL;
+    if (!js_node_is_object_like(self)) return NULL;
     Item handle_item = js_get_key_cstr(self, "__server_handle__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsServer*)(uintptr_t)it2i(handle_item);
 }
 
 static void server_apply_accepted_handle_options(JsServer* srv, JsSocket* client, Item client_handle) {
-    if (!srv || !client || !net_is_object_like(client_handle)) return;
+    if (!srv || !client || !js_node_is_object_like(client_handle)) return;
     if (srv->keep_alive) {
         client->keep_alive_requested = true;
         client->keep_alive_delay_secs = srv->keep_alive_initial_delay_ms > 0
@@ -4206,7 +4160,7 @@ static Item server_accept_client(JsServer* srv, JsSocket* client, Item client_ha
     server_apply_accepted_handle_options(srv, client, client_handle);
 
     Item client_obj = make_socket_object(client, false);
-    if (net_is_object_like(client_handle)) {
+    if (js_node_is_object_like(client_handle)) {
         js_set_key_cstr(client_obj, "_handle", client_handle);
         client->handle_exposed = true;
     } else {
@@ -4264,7 +4218,7 @@ static int net_dup_uv_fd(const uv_handle_t* handle) {
 }
 
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item) {
-    if (!net_is_object_like(handle_item)) return -1;
+    if (!js_node_is_object_like(handle_item)) return -1;
     JsServer* srv = server_from_handle_object(handle_item);
     if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
         return net_dup_uv_fd((const uv_handle_t*)&srv->tcp);
@@ -4275,7 +4229,7 @@ extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item) {
     }
 
     Item inner = js_get_key_cstr(handle_item, "_handle");
-    if (net_is_object_like(inner) && inner.item != handle_item.item) {
+    if (js_node_is_object_like(inner) && inner.item != handle_item.item) {
         // node stdio arrays receive public socket/server objects as well as
         // their internal _handle objects; unwrap once to preserve fd ownership.
         return js_net_dup_ipc_stdio_fd(inner);
@@ -4284,7 +4238,7 @@ extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item) {
 }
 
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
-    if (!net_is_object_like(handle_item)) return NULL;
+    if (!js_node_is_object_like(handle_item)) return NULL;
     JsServer* srv = server_from_handle_object(handle_item);
     if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
         return (uv_stream_t*)&srv->tcp;
@@ -4295,7 +4249,7 @@ extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
     }
 
     Item inner = js_get_key_cstr(handle_item, "_handle");
-    if (net_is_object_like(inner) && inner.item != handle_item.item) {
+    if (js_node_is_object_like(inner) && inner.item != handle_item.item) {
         // sendHandle normally receives a net.Socket; unwrap its public object
         // to the native TCP handle used by uv_write2 descriptor passing.
         return js_net_stream_from_ipc_send_handle(inner);
@@ -4517,7 +4471,7 @@ static void server_update_connection_key(Item self, JsServer* srv, int requested
 }
 
 static bool server_signal_is_aborted(Item signal) {
-    if (!net_is_object_like(signal)) return false;
+    if (!js_node_is_object_like(signal)) return false;
     Item aborted = js_get_key_cstr(signal, "aborted");
     return get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted);
 }
@@ -4537,7 +4491,7 @@ static Item js_server_abort_signal_event(Item env_item) {
 static Item server_configure_listen_signal(Item self, Item signal, bool* out_aborted) {
     if (out_aborted) *out_aborted = false;
     if (is_undefined_item(signal) || signal.item == ITEM_NULL) return js_status_ok();
-    if (!net_is_object_like(signal)) {
+    if (!js_node_is_object_like(signal)) {
         return js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
     }
     if (out_aborted) *out_aborted = server_signal_is_aborted(signal);
@@ -4963,7 +4917,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
         handler = rest_args;
     }
 
-    if (!is_undefined_item(options) && options.item != ITEM_NULL && !net_is_object_like(options)) {
+    if (!is_undefined_item(options) && options.item != ITEM_NULL && !js_node_is_object_like(options)) {
         return js_throw_invalid_arg_type("options", "Object", options);
     }
 
@@ -5406,14 +5360,14 @@ extern "C" Item js_get_net_namespace(void) {
     net_namespace = js_new_object();
     // The namespace is process-cached; register its root before any exported
     // constructor allocation so forced collection cannot reclaim the cache.
-    RootFrame roots(7);
-    Rooted<Item> namespace_root(roots, net_namespace);
-    Rooted<Item> create_server_root(roots, ItemNull);
-    Rooted<Item> socket_root(roots, ItemNull);
-    Rooted<Item> block_list_root(roots, ItemNull);
-    Rooted<Item> bound_socket_root(roots, ItemNull);
-    Rooted<Item> stream_root(roots, ItemNull);
-    Rooted<Item> server_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        namespace_root, net_namespace,
+        create_server_root, ItemNull,
+        socket_root, ItemNull,
+        block_list_root, ItemNull,
+        bound_socket_root, ItemNull,
+        stream_root, ItemNull,
+        server_root, ItemNull);
 
     create_server_root.set(net_set_method(namespace_root.get(), "createServer", js_net_createServer, -1));
     net_set_method(namespace_root.get(), "createConnection", js_net_createConnection, -1);

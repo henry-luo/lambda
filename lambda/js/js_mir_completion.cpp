@@ -332,8 +332,7 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
     case JS_ERROR_LANE_SET: {
         jm_capture_routed_error_lane(mt, route_context);
         jm_clear_active_arg_frames(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, target)));
+        jm_emit_jmp(mt, target);
         // An unconditional ERROR-lane jump leaves no fallthrough path. Keep
         // later lowering unreachable until the handler label supplies its
         // explicit lane state; otherwise dead statements after `throw` can
@@ -348,9 +347,7 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
     MIR_reg_t exception = jm_emit_error_lane_test(mt);
     if (jm_has_active_arg_frame(mt)) {
         MIR_label_t clean_path = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-            MIR_new_label_op(mt->ctx, clean_path),
-            MIR_new_reg_op(mt->ctx, exception)));
+        jm_emit_branch(mt, MIR_BF, clean_path, exception);
         // Capture only on the exceptional edge. Emitting the carrier creation
         // before this branch would allocate a synthetic null exception on
         // every normal call and contaminate the merged lane.
@@ -358,19 +355,15 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
         // Fixed argument slots stay inside the function frame, but their
         // call-expression lifetime still ends on a caught exceptional edge.
         jm_clear_active_arg_frames(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, target)));
+        jm_emit_jmp(mt, target);
         jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
     } else {
         MIR_label_t clean_path = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-            MIR_new_label_op(mt->ctx, clean_path),
-            MIR_new_reg_op(mt->ctx, exception)));
+        jm_emit_branch(mt, MIR_BF, clean_path, exception);
         // Capture only after the tag test proves this edge exceptional; the
         // normal path must not manufacture a discarded ERROR carrier.
         jm_capture_routed_error_lane(mt, route_context);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, target)));
+        jm_emit_jmp(mt, target);
         jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
     }
 }
@@ -383,8 +376,7 @@ void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target) {
     case JS_ERROR_LANE_UNREACHABLE:
         return;
     case JS_ERROR_LANE_SET:
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, target)));
+        jm_emit_jmp(mt, target);
         // the unconditional completion edge consumes the current path; the
         // target label restores the handler's explicit lane state (D8.4.3).
         jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
@@ -394,9 +386,7 @@ void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target) {
         break;
     }
     MIR_reg_t exception = jm_emit_error_lane_test(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, target),
-        MIR_new_reg_op(mt->ctx, exception)));
+    jm_emit_branch(mt, MIR_BT, target, exception);
     jm_error_lane_set_state(mt, JS_ERROR_LANE_CLEAN);
 }
 
@@ -423,8 +413,7 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     }
     jm_emit_mov(mt, context->return_val_reg, value);
     jm_emit_reg_op(mt, MIR_MOV, context->has_return_reg, MIR_new_int_op(mt->ctx, 1));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, target)));
+    jm_emit_jmp(mt, target);
     return true;
 }
 
@@ -440,8 +429,7 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value) {
 static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
         JsTryContext* forced_context, bool force_finally) {
     if (!mt) return;
-    MIR_reg_t thrown = jm_call_1(mt, "js_throw_value", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    MIR_reg_t thrown = jm_callr_1(mt, "js_throw_value", MIR_T_I64, value);
     JsTryContext* context = forced_context ? forced_context :
         jm_find_completion_context(mt, JS_MIR_COMPLETION_THROW);
     MIR_label_t target;
@@ -457,11 +445,11 @@ static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
     }
     if (target) {
         jm_capture_routed_error_lane(mt, context);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, target)));
+        jm_emit_jmp(mt, target);
         return;
     }
     MIR_reg_t native_value = jm_native_return_reg(mt, thrown);
-    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, native_value)));
+    jm_emit_ret(mt, native_value);
 }
 
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value) {
@@ -523,16 +511,14 @@ void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk) {
                 loop->label_name_len == brk->label_len &&
                 memcmp(loop->label_name, brk->label, brk->label_len) == 0) {
                 jm_emit_close_intervening_iterators(mt, i);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                    MIR_new_label_op(mt->ctx, loop->break_label)));
+                jm_emit_jmp(mt, loop->break_label);
                 break;
             }
         }
     } else if (mt->loop_depth > 0) {
         JsLoopLabels* loop = jm_loop_label_at(mt, mt->loop_depth - 1);
         if (loop) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                MIR_new_label_op(mt->ctx, loop->break_label)));
+            jm_emit_jmp(mt, loop->break_label);
         }
     }
 }
@@ -547,8 +533,7 @@ void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont)
                 memcmp(loop->label_name, cont->label, cont->label_len) == 0) {
                 if (loop->continue_label) {
                     jm_emit_close_intervening_iterators(mt, i);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, loop->continue_label)));
+                    jm_emit_jmp(mt, loop->continue_label);
                 }
                 break;
             }
@@ -557,8 +542,7 @@ void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont)
         for (int i = mt->loop_depth - 1; i >= 0; i--) {
             JsLoopLabels* loop = jm_loop_label_at(mt, i);
             if (loop && loop->continue_label) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                    MIR_new_label_op(mt->ctx, loop->continue_label)));
+                jm_emit_jmp(mt, loop->continue_label);
                 break;
             }
         }

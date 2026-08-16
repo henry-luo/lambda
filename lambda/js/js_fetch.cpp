@@ -22,7 +22,6 @@
 #include "../../lib/mem.h"
 
 #define MAX_FETCH_RESPONSES 256
-#define item_to_cstr js_item_to_cstr
 
 // --document is parsed before its EvalContext exists. This is bootstrap input
 // only: the first context copies it into its fetch capsule and clears it.
@@ -475,7 +474,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
             "fetch: no active execution context")));
     }
     char url_buf[2048];
-    const char* url = item_to_cstr(url_item, url_buf, sizeof(url_buf));
+    const char* url = js_item_to_cstr(url_item, url_buf, sizeof(url_buf));
     if (!url) {
         return js_promise_reject(js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
     }

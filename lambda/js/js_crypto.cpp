@@ -575,11 +575,8 @@ static void crypto_format_invalid_received(Item actual, char* out, int out_size)
 static Item crypto_throw_size_out_of_range(Item actual) {
     char actual_buf[64];
     crypto_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
-    char msg[192];
-    snprintf(msg, sizeof(msg),
-        "The value of \"size\" is out of range. It must be >= 0 && <= %lld. Received %s",
-        (long long)CRYPTO_BUFFER_MAX_LENGTH, actual_buf);
-    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+        "The value of \"size\" is out of range. It must be >= 0 && <= %lld. Received %s", (long long)CRYPTO_BUFFER_MAX_LENGTH, actual_buf);
 }
 
 static Item crypto_size_to_int(Item size_item, int* out_size) {
@@ -645,19 +642,13 @@ extern "C" Item js_crypto_pseudoRandomBytes(Item size_item, Item callback_item) 
 static Item crypto_throw_fill_out_of_range(const char* name, int max_value, Item actual) {
     char actual_buf[64];
     crypto_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
-    char msg[192];
-    snprintf(msg, sizeof(msg),
-        "The value of \"%s\" is out of range. It must be >= 0 && <= %d. Received %s",
-        name, max_value, actual_buf);
-    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+        "The value of \"%s\" is out of range. It must be >= 0 && <= %d. Received %s", name, max_value, actual_buf);
 }
 
 static Item crypto_throw_size_offset_out_of_range(int max_value, int64_t received) {
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-        "The value of \"size + offset\" is out of range. It must be <= %d. Received %lld",
-        max_value, (long long)received);
-    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+        "The value of \"size + offset\" is out of range. It must be <= %d. Received %lld", max_value, (long long)received);
 }
 
 static Item crypto_to_int_index(Item item, int default_value, int max_value, int* out_value, const char* name) {
@@ -927,10 +918,8 @@ static void crypto_format_int64_separated(int64_t value, char* out, int out_size
 static Item crypto_throw_random_int_safe_integer(const char* name, Item actual) {
     char suffix[192];
     crypto_format_invalid_received(actual, suffix, sizeof(suffix));
-    char msg[320];
-    snprintf(msg, sizeof(msg),
+    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
         "The \"%s\" argument must be a safe integer.%s", name, suffix);
-    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
 }
 
 static bool crypto_item_to_safe_int(Item item, const char* name, int64_t* out_value) {
@@ -972,11 +961,8 @@ static bool crypto_item_to_safe_int(Item item, const char* name, int64_t* out_va
 }
 
 static Item crypto_throw_random_int_max_greater(int64_t min_val, int64_t max_val) {
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"max\" is out of range. It must be greater than the value of \"min\" (%lld). Received %lld",
-        (long long)min_val, (long long)max_val);
-    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+        "The value of \"max\" is out of range. It must be greater than the value of \"min\" (%lld). Received %lld", (long long)min_val, (long long)max_val);
 }
 
 static Item crypto_throw_random_int_max_bound(int64_t max_val) {
@@ -984,11 +970,8 @@ static Item crypto_throw_random_int_max_bound(int64_t max_val) {
     char actual_buf[64];
     snprintf(max_buf, sizeof(max_buf), "%lld", (long long)CRYPTO_RANDOM_INT_MAX_RANGE);
     crypto_format_int64_separated(max_val, actual_buf, sizeof(actual_buf));
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"max\" is out of range. It must be <= %s. Received %s",
-        max_buf, actual_buf);
-    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+        "The value of \"max\" is out of range. It must be <= %s. Received %s", max_buf, actual_buf);
 }
 
 static Item crypto_throw_random_int_range_bound(int64_t range) {
@@ -996,11 +979,8 @@ static Item crypto_throw_random_int_range_bound(int64_t range) {
     char range_buf[64];
     snprintf(max_buf, sizeof(max_buf), "%lld", (long long)CRYPTO_RANDOM_INT_MAX_RANGE);
     crypto_format_int64_separated(range, range_buf, sizeof(range_buf));
-    char msg[256];
-    snprintf(msg, sizeof(msg),
-        "The value of \"max - min\" is out of range. It must be <= %s. Received %s",
-        max_buf, range_buf);
-    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+        "The value of \"max - min\" is out of range. It must be <= %s. Received %s", max_buf, range_buf);
 }
 
 extern "C" Item js_crypto_randomInt(Item min_item, Item max_item, Item callback_item) {
@@ -1765,11 +1745,8 @@ static Item crypto_hash_output_length_from_options(const char* alg, Item options
         return js_throw_out_of_range("options.outputLength", ">= 0", output_len_item);
     }
     if (!crypto_digest_is_xof(alg) && parsed_len != default_len) {
-        char msg[160];
-        snprintf(msg, sizeof(msg),
-            "Output length %d is invalid for %s, which does not support XOF",
-            parsed_len, alg ? alg : "");
-        return js_throw_type_error(msg);
+        return js_throw_type_errorf(
+            "Output length %d is invalid for %s, which does not support XOF", parsed_len, alg ? alg : "");
     }
     *out_len = parsed_len;
     *has_output_len = true;
@@ -3379,9 +3356,8 @@ static void crypto_format_ecdh_format_value(Item item, char* out, int out_size) 
 static Item crypto_throw_ecdh_invalid_format(Item format_item) {
     char value[64];
     crypto_format_ecdh_format_value(format_item, value, sizeof(value));
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Invalid ECDH format: %s", value);
-    return js_throw_type_error_code("ERR_CRYPTO_ECDH_INVALID_FORMAT", msg);
+    return js_throw_type_error_codef("ERR_CRYPTO_ECDH_INVALID_FORMAT", 
+        "Invalid ECDH format: %s", value);
 }
 
 static Item crypto_ecdh_parse_format(Item format_item, int* out_format) {
@@ -3902,12 +3878,12 @@ JS_FORWARD_STATIC_ITEM(crypto_throw_invalid_initialization_vector, (void), js_th
 
 static Item crypto_throw_openssl_cipher_error(const char* code, const char* message,
                                               const char* library, const char* reason) {
-    Item type_name = (Item){.item = s2it(heap_create_name("Error"))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item type_name = js_name_item("Error");
+    Item msg_item = js_name_item(message, strlen(message));
     Item error = js_new_error_with_name(type_name, msg_item);
-    js_set_key_cstr(error, "code", (Item){.item = s2it(heap_create_name(code, strlen(code)))});
-    js_set_key_cstr(error, "library", (Item){.item = s2it(heap_create_name(library, strlen(library)))});
-    js_set_key_cstr(error, "reason", (Item){.item = s2it(heap_create_name(reason, strlen(reason)))});
+    js_set_key_cstr(error, "code", js_name_item(code, strlen(code)));
+    js_set_key_cstr(error, "library", js_name_item(library, strlen(library)));
+    js_set_key_cstr(error, "reason", js_name_item(reason, strlen(reason)));
     return js_throw_value(error);
 }
 JS_FORWARD_STATIC_ITEM(crypto_throw_wrong_final_block_length, (void), crypto_throw_openssl_cipher_error, ("ERR_OSSL_EVP_WRONG_FINAL_BLOCK_LENGTH", "wrong final block length", "Cipher functions", "wrong final block length"))
@@ -4039,9 +4015,8 @@ static bool crypto_is_known_output_encoding(const char* enc) {
 }
 
 static Item crypto_throw_unknown_encoding(const char* enc) {
-    char msg[96];
-    snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc ? enc : "");
-    return js_throw_type_error_code(JS_ERR_UNKNOWN_ENCODING, msg);
+    return js_throw_type_error_codef(JS_ERR_UNKNOWN_ENCODING, 
+        "Unknown encoding: %s", enc ? enc : "");
 }
 
 static Item cipher_normalize_output_encoding(Item encoding_item, char* out, int out_size, bool* has_encoding) {
@@ -6177,15 +6152,13 @@ static bool crypto_string_equals(Item item, const char* expected) {
 }
 
 static Item crypto_throw_invalid_property_type(const char* prop, const char* expected) {
-    char msg[256];
-    snprintf(msg, sizeof(msg), "The \"%s\" property must be of type %s.", prop, expected);
-    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_TYPE", 
+        "The \"%s\" property must be of type %s.", prop, expected);
 }
 
 static Item crypto_throw_invalid_property_value(const char* prop, const char* expected) {
-    char msg[256];
-    snprintf(msg, sizeof(msg), "The property '%s' must be one of: %s", prop, expected);
-    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return js_throw_type_error_codef("ERR_INVALID_ARG_VALUE", 
+        "The property '%s' must be one of: %s", prop, expected);
 }
 
 static Item crypto_keygen_length(Item options_item, int* out_bits) {
@@ -6962,11 +6935,8 @@ static Item crypto_pbkdf2_positive_int(Item value_item, const char* name, int* o
         } else {
             snprintf(received, sizeof(received), "%g", value);
         }
-        char msg[160];
-        snprintf(msg, sizeof(msg),
-            "The value of \"%s\" is out of range. It must be an integer. Received %s",
-            name, received);
-        return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+        return js_throw_range_error_codef(JS_ERR_OUT_OF_RANGE, 
+            "The value of \"%s\" is out of range. It must be an integer. Received %s", name, received);
     }
 
     *out_value = (int)value;
@@ -6991,9 +6961,8 @@ static Item crypto_pbkdf2_digest_name(Item digest_item, char* out, int out_cap) 
 }
 
 static Item crypto_pbkdf2_invalid_digest(const char* digest) {
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Invalid digest: %s", digest ? digest : "");
-    return js_throw_type_error_code(JS_ERR_CRYPTO_INVALID_DIGEST, msg);
+    return js_throw_type_error_codef(JS_ERR_CRYPTO_INVALID_DIGEST, 
+        "Invalid digest: %s", digest ? digest : "");
 }
 
 extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_item,
@@ -7827,10 +7796,10 @@ JS_SUBTLE_CIPHER_WRAPPER(js_subtle_decrypt, false)
 template <typename Target>
 static void crypto_set_method(Item ns, const char* name, Target target,
         int adapter_arity, bool hidden = false) {
-    RootFrame roots(3);
-    Rooted<Item> ns_root(roots, ns);
-    Rooted<Item> key_root(roots, make_string_item_crypto(name));
-    Rooted<Item> fn_root(roots, js_new_native_function(target, adapter_arity));
+    JS_ROOTS(roots,
+        ns_root, ns,
+        key_root, make_string_item_crypto(name),
+        fn_root, js_new_native_function(target, adapter_arity));
     js_set_key_default(ns_root.get(), key_root.get(), fn_root.get());
     if (hidden) js_mark_non_enumerable(ns_root.get(), key_root.get());
 }
@@ -7844,14 +7813,14 @@ extern "C" Item js_get_crypto_namespace(void) {
     heap_register_gc_root(&crypto_namespace.item);
     crypto_namespace = js_new_object();
 
-    RootFrame roots(7);
-    Rooted<Item> subtle_root(roots, ItemNull);
-    Rooted<Item> constants_root(roots, ItemNull);
-    Rooted<Item> ecdh_ctor_root(roots, ItemNull);
-    Rooted<Item> keyobject_ctor_root(roots, ItemNull);
-    Rooted<Item> keyobject_proto_root(roots, ItemNull);
-    Rooted<Item> default_key_root(roots, ItemNull);
-    Rooted<Item> temporary_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        subtle_root, ItemNull,
+        constants_root, ItemNull,
+        ecdh_ctor_root, ItemNull,
+        keyobject_ctor_root, ItemNull,
+        keyobject_proto_root, ItemNull,
+        default_key_root, ItemNull,
+        temporary_root, ItemNull);
 
 #define JS_CRYPTO_METHODS(M) \
     M("createHash", js_crypto_createHash, 2, false) M("hash", js_crypto_hash, 3, false) \

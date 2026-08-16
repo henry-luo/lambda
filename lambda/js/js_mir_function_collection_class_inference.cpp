@@ -331,7 +331,7 @@ JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node) {
 const char* jm_get_param_name(JsAstNode* param_node, int index) {
     JsIdentifierNode* pid = jm_get_param_identifier(param_node);
     if (pid && pid->name) {
-        return jm_format_name("_js_%.*s", (int)pid->name->len, pid->name->chars);
+        return jm_var_name(pid->name);
     }
     return jm_format_name("_js_p%d", index);
 }
@@ -1553,7 +1553,7 @@ void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
         // Check if this is a recursive call — args passed to self propagate evidence
         if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-            const char* cname = jm_format_name("_js_%.*s", (int)cid->name->len, cid->name->chars);
+            const char* cname = jm_var_name(cid->name);
             if (strncmp(cname, self_name, strlen(self_name)) == 0) {
                 // Recursive call: pass-through params are type-consistent
                 // but only reinforce if there's already arithmetic evidence
@@ -1822,7 +1822,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     // Build self-name for recursive call detection
     const char* self_name = NULL;
     if (fn->name) {
-        self_name = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
+        self_name = jm_var_name(fn->name);
     }
 
     // Accumulate evidence
@@ -2025,7 +2025,7 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             JsCallNode* call = (JsCallNode*)expr;
             if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-                const char* cn = jm_format_name("_js_%.*s", (int)cid->name->len, cid->name->chars);
+                const char* cn = jm_var_name(cid->name);
                 if (strncmp(cn, self_name, strlen(self_name)) == 0) {
                     t = LMD_TYPE_FLOAT; // recursive JS Number calls return binary64
                 }
@@ -2110,7 +2110,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
 
     const char* self_name = NULL;
     if (fn->name) {
-        self_name = jm_format_name("_js_%.*s", (int)fn->name->len, fn->name->chars);
+        self_name = jm_var_name(fn->name);
     }
 
     // For expression-body arrow functions: infer from the expression directly
@@ -2676,12 +2676,10 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
             // Convert any iterable to array first
-            MIR_reg_t src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, src_raw));
+            MIR_reg_t src = jm_callr_1(mt, "js_iterable_to_array", MIR_T_I64, src_raw);
             jm_emit_error_lane_propagate_check(mt);
             // Get length
-            MIR_reg_t src_len = jm_call_1(mt, "js_array_length", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
+            MIR_reg_t src_len = jm_callr_1(mt, "js_array_length", MIR_T_I64, src);
             jm_emit_error_lane_propagate_check(mt);
             // Loop: push each element
             MIR_reg_t i_reg = jm_new_reg(mt, "spai", MIR_T_I64);
@@ -2691,21 +2689,16 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             jm_emit_label(mt, l_check);
             MIR_reg_t cmp = jm_new_reg(mt, "spacmp", MIR_T_I64);
             jm_emit_reg_binary(mt, MIR_LTS, cmp, i_reg, src_len);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-                MIR_new_reg_op(mt->ctx, cmp)));
+            jm_emit_branch(mt, MIR_BF, l_end, cmp);
             // Box through the funnel: an int Item is not a tagged payload, so
             // OR-ing the tag onto a raw index no longer produces that index.
             MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
-            MIR_reg_t elem = jm_call_2(mt, "js_elements_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+            MIR_reg_t elem = jm_callr_2(mt, "js_elements_get", MIR_T_I64, src, idx_boxed);
             jm_emit_error_lane_propagate_check(mt);
-            jm_call_2(mt, "js_array_push", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, elem));
+            jm_callr_2(mt, "js_array_push", MIR_T_I64, array, elem);
             jm_emit_error_lane_propagate_check(mt);
             jm_emit_reg_binary_op(mt, MIR_ADD, i_reg, i_reg, MIR_new_int_op(mt->ctx, 1));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_check)));
+            jm_emit_jmp(mt, l_check);
             jm_emit_label(mt, l_end);
         } else {
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
@@ -2714,9 +2707,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             if (arr_spill_slot >= 0 && jm_has_yield(arg)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
-            jm_call_2(mt, "js_array_push", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            jm_callr_2(mt, "js_array_push", MIR_T_I64, array, val);
             jm_emit_error_lane_propagate_check(mt);
         }
         arg = arg->next;

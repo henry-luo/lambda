@@ -645,7 +645,7 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
                         (int)filename->len, filename->chars, display_line, display_col);
         if (pos < 0) pos = 0;
         if (pos > total) pos = total;
-        Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+        Item result = js_name_item(buf, pos);
         mem_free(buf);
         return result;
     }
@@ -675,7 +675,7 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
                     (int)filename->len, filename->chars, display_line, display_col);
     if (pos < 0) pos = 0;
     if (pos > total) pos = total;
-    Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+    Item result = js_name_item(buf, pos);
     mem_free(buf);
     return result;
 }
@@ -719,16 +719,16 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
-    RootFrame roots(4);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> name_root(roots, name);
-    Rooted<Item> desc_root(roots, ItemNull);
-    Rooted<Item> enum_key_root(roots, ItemNull);
+    JS_ROOTS(roots,
+        object_root, object,
+        name_root, name,
+        desc_root, ItemNull,
+        enum_key_root, ItemNull);
     // The descriptor is fresh and property construction allocates; keep every
     // borrowed argument exact until defineProperty has consumed the object.
     desc_root.set(js_new_object());
     js_set_prototype(desc_root.get(), ItemNull);
-    enum_key_root.set((Item){.item = s2it(heap_create_name("enumerable", 10))});
+    enum_key_root.set(js_name_item("enumerable", 10));
     js_set_key_default(desc_root.get(), enum_key_root.get(), (Item){.item = b2it(false)});
     js_object_define_property(object_root.get(), name_root.get(), desc_root.get());
 }
@@ -813,11 +813,9 @@ extern "C" Item js_to_property_key(Item key) {
         return result;
     }
     if (key.item == 0 || kt == LMD_TYPE_NULL)
-        return js_canonical_property_string(
-            (Item){.item = s2it(heap_create_name("null", 4))});
+        return js_canonical_property_string(js_name_item("null", 4));
     if (kt == LMD_TYPE_UNDEFINED)
-        return js_canonical_property_string(
-            (Item){.item = s2it(heap_create_name("undefined", 9))});
+        return js_canonical_property_string(js_name_item("undefined", 9));
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
@@ -826,11 +824,9 @@ extern "C" Item js_to_property_key(Item key) {
             return js_canonical_property_string(key);
         }
         if (key.item == 0 || kt == LMD_TYPE_NULL)
-            return js_canonical_property_string(
-                (Item){.item = s2it(heap_create_name("null", 4))});
+            return js_canonical_property_string(js_name_item("null", 4));
         if (kt == LMD_TYPE_UNDEFINED)
-            return js_canonical_property_string(
-                (Item){.item = s2it(heap_create_name("undefined", 9))});
+            return js_canonical_property_string(js_name_item("undefined", 9));
     }
     Item string_value = js_to_string(key);
     return item_is_error(string_value) ? string_value
@@ -954,9 +950,7 @@ extern "C" Item js_require_object_coercible(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Cannot destructure '%s' as it is %s.", type_str, type_str);
-        return js_throw_type_error(msg);
+        return js_throw_type_errorf("Cannot destructure '%s' as it is %s.", type_str, type_str);
     }
     return value;
 }
@@ -1209,10 +1203,8 @@ JS_FORWARD_ITEM(js_new_error, (Item message), js_new_error_with_stack, (message,
 
 extern "C" Item js_new_named_error(const char* type_name, const char* message) {
     RootFrame roots(2);
-    Rooted<Item> name_root(roots,
-        (Item){.item = s2it(heap_create_name(type_name ? type_name : "Error"))});
-    Rooted<Item> text_root(roots,
-        (Item){.item = s2it(heap_create_name(message ? message : ""))});
+    Rooted<Item> name_root(roots, js_name_item(type_name ? type_name : "Error"));
+    Rooted<Item> text_root(roots, js_name_item(message ? message : ""));
     if (!roots.valid()) return ItemError;
     // D5.3.3: constructing the message and Error object can collect; an
     // unrooted name/text pair produced anonymous [object Object] exceptions.
@@ -1222,12 +1214,12 @@ JS_FORWARD_ITEM(js_throw_named_error_text, (const char* type_name, const char* m
 
 // AggregateError(errors, message): Error subclass with .errors array
 extern "C" Item js_new_aggregate_error(Item errors, Item message) {
-    RootFrame roots(4);
-    Rooted<Item> errors_root(roots, errors);
-    Rooted<Item> message_root(roots, message);
-    Rooted<Item> err_root(roots, ItemNull);
-    Rooted<Item> errors_array_root(roots, ItemNull);
-    Item err_name = (Item){.item = s2it(heap_create_name("AggregateError", 14))};
+    JS_ROOTS(roots,
+        errors_root, errors,
+        message_root, message,
+        err_root, ItemNull,
+        errors_array_root, ItemNull);
+    Item err_name = js_name_item("AggregateError", 14);
     if (get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED &&
             message_root.get().item != ITEM_JS_UNDEFINED) {
         // AggregateError performs ToString(message) before publishing the
@@ -1265,7 +1257,7 @@ static Item js_error_default_stack_string(Item error_name, Item message) {
         : snprintf(buf, sizeof(buf), "%.*s", name_len, name_str);
     if (len < 0) len = 0;
     if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-    return (Item){.item = s2it(heap_create_name(buf, len))};
+    return js_name_item(buf, len);
 }
 
 static bool js_stack_raw_name_visible(const char* raw) {
@@ -1324,7 +1316,7 @@ static bool js_stack_function_name_matches(Item fn_item, StackFrame* frame) {
 
 static int js_error_stack_trace_limit(void) {
     if (!context || !context->debug_info) return 0;
-    Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+    Item error_ctor = js_get_constructor(js_name_item("Error", 5));
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return 10;
     Item limit = js_get_key_cstr(error_ctor, "stackTraceLimit");
     TypeId limit_type = get_type_id(limit);
@@ -1386,7 +1378,7 @@ static Item js_stack_frame_string(StackFrame* frame) {
         strbuf_free(sb);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    Item result = (Item){.item = s2it(heap_create_name(sb->str, sb->length))};
+    Item result = js_name_item(sb->str, sb->length);
     strbuf_free(sb);
     return result;
 }
@@ -1438,7 +1430,7 @@ static Item js_error_stack_string_from_trace(Item error_name, Item message,
     int frame_count = js_error_append_stack_frames(sb, trace,
         (Item){.item = ITEM_JS_UNDEFINED});
     Item result = frame_count > 0
-        ? (Item){.item = s2it(heap_create_name(sb->str, sb->length))}
+        ? js_name_item(sb->str, sb->length)
         : (Item){.item = ITEM_JS_UNDEFINED};
     strbuf_free(sb);
     return result;
@@ -1460,7 +1452,7 @@ static Item js_error_native_stack_string(Item error_name, Item message, Item sta
     int frame_count = js_error_append_stack_frames(sb, trace, stack_start_fn);
 
     Item result = frame_count > 0
-        ? (Item){.item = s2it(heap_create_name(sb->str, sb->length))}
+        ? js_name_item(sb->str, sb->length)
         : (Item){.item = ITEM_JS_UNDEFINED};
     strbuf_free(sb);
     err_free_stack_trace(trace);
@@ -1468,11 +1460,10 @@ static Item js_error_native_stack_string(Item error_name, Item message, Item sta
 }
 
 static Item js_error_prepare_stack_trace_with_trace(Item error_obj, StackFrame* trace) {
-    Item error_name = (Item){.item = s2it(heap_create_name("Error", 5))};
+    Item error_name = js_name_item("Error", 5);
     Item error_ctor = js_get_constructor(error_name);
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
-    Item prepare_key = (Item){.item = s2it(heap_create_name("prepareStackTrace", 17))};
-    Item prepare = js_get_key_default(error_ctor, prepare_key);
+    Item prepare = js_get_name_key(error_ctor, "prepareStackTrace", 17);
     if (!js_is_callable(prepare)) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item frames = js_array_new(0);
@@ -1543,7 +1534,7 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     // Keep one error-construction path: the canonical implementation owns the
     // exact native roots needed while descriptor, prototype, and stack helpers allocate.
-    Item error_name = (Item){.item = s2it(heap_create_name("Error"))};
+    Item error_name = js_name_item("Error");
     return js_new_error_with_name_stack(error_name, message, stack_str);
 }
 
@@ -1576,7 +1567,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
             ? message_root.get() : js_to_string(message_root.get()));
         if (item_is_error(message_string_root.get())) return message_string_root.get();
     } else {
-        message_string_root.set((Item){.item = s2it(heap_create_name("", 0))});
+        message_string_root.set(js_name_item("", 0));
     }
     String* message_string = it2s(message_string_root.get());
     const char* message_chars = message_string ? message_string->chars : "";
@@ -1586,7 +1577,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     error->js_class_id = (uint8_t)error_class;
     error->js_name_item = name_string
         ? error_name_root.get().item
-        : (Item){.item = s2it(heap_create_name("Error", 5))}.item;
+        : js_name_item("Error", 5).item;
     if (message_root.get().item != ITEM_JS_UNDEFINED &&
             get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED) {
         error->js_message_item = message_string_root.get().item;
@@ -1614,7 +1605,7 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
         opt_type != LMD_TYPE_FUNC && opt_type != LMD_TYPE_ELEMENT) {
         return error;
     }
-    Item cause_key = (Item){.item = s2it(heap_create_name("cause"))};
+    Item cause_key = js_name_item("cause");
     JS_ASSIGN_OR_RETURN(has_cause, js_in(cause_key, options));
     if (js_is_truthy(has_cause)) {
         JS_ASSIGN_OR_RETURN(cause_val, js_get_key_default(options, cause_key));
@@ -1630,10 +1621,10 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
 // named function so Node's stackStartFn wrappers do not leak into .stack.
 extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
     if (get_type_id(target) == LMD_TYPE_MAP) {
-        Item stack_key = (Item){.item = s2it(heap_create_name("stack", 5))};
+        Item stack_key = js_name_item("stack", 5);
         Item name = js_get_key_cstr(target, "name");
         if (get_type_id(name) != LMD_TYPE_STRING) {
-            name = (Item){.item = s2it(heap_create_name("Error", 5))};
+            name = js_name_item("Error", 5);
         }
         Item message = js_get_key_cstr(target, "message");
         if (get_type_id(message) != LMD_TYPE_STRING) {
@@ -1798,17 +1789,17 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
 
 
 extern "C" Item js_build_arguments_object() {
-    RootFrame roots(10);
-    Rooted<Item> arr_root(roots, ItemNull);
-    Rooted<Item> companion_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> descriptor_root(roots, ItemNull);
-    Rooted<Item> tag_key_root(roots, ItemNull);
-    Rooted<Item> iterator_key_root(roots, ItemNull);
-    Rooted<Item> iterator_root(roots, ItemNull);
-    Rooted<Item> thrower_root(roots, ItemNull);
-    Rooted<Item> callee_key_root(roots, ItemNull);
-    Rooted<Item> callee_root(roots, js_pending_args_callee);
+    JS_ROOTS(roots,
+        arr_root, ItemNull,
+        companion_root, ItemNull,
+        key_root, ItemNull,
+        descriptor_root, ItemNull,
+        tag_key_root, ItemNull,
+        iterator_key_root, ItemNull,
+        iterator_root, ItemNull,
+        thrower_root, ItemNull,
+        callee_key_root, ItemNull,
+        callee_root, js_pending_args_callee);
     int argc = js_pending_call_argc;
     Item* args = js_pending_call_args;
     int is_strict = js_pending_args_is_strict;
@@ -1826,7 +1817,7 @@ extern "C" Item js_build_arguments_object() {
     companion_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
     js_elements_set_props(arr_root.get().array, companion_root.get().map);
 
-    key_root.set((Item){.item = s2it(heap_create_name("length", 6))});
+    key_root.set(js_name_item("length", 6));
     descriptor_root.set(js_new_object());
     js_set_prototype(descriptor_root.get(), ItemNull);
     js_set_key_cstr(descriptor_root.get(), "value", (Item){.item = i2it(argc)});
@@ -1836,8 +1827,7 @@ extern "C" Item js_build_arguments_object() {
     js_object_define_property(companion_root.get(), key_root.get(), descriptor_root.get());
 
     tag_key_root.set(js_well_known_symbol_key(4));
-    js_set_key_default(companion_root.get(), tag_key_root.get(),
-                    (Item){.item = s2it(heap_create_name("Arguments", 9))});
+    js_set_key_default(companion_root.get(), tag_key_root.get(), js_name_item("Arguments", 9));
     js_mark_non_enumerable(companion_root.get(), tag_key_root.get());
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
@@ -1851,7 +1841,7 @@ extern "C" Item js_build_arguments_object() {
     if (is_strict) {
         thrower_root.set(js_intrinsic_binding_get(
             JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "ThrowTypeError", 14));
-        callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
+        callee_key_root.set(js_name_item("callee", 6));
         js_install_native_accessor(companion_root.get(), callee_key_root.get(),
                                    thrower_root.get(), thrower_root.get(),
                                    JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
@@ -1859,7 +1849,7 @@ extern "C" Item js_build_arguments_object() {
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
         if (callee_root.get().item != 0) {
-            callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
+            callee_key_root.set(js_name_item("callee", 6));
             descriptor_root.set(js_new_object());
             js_set_prototype(descriptor_root.get(), ItemNull);
             js_set_key_cstr(descriptor_root.get(), "value", callee_root.get());

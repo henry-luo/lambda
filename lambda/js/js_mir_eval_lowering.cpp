@@ -156,7 +156,7 @@ static bool js_dynamic_function_param_has_invalid_html_close_comment(const char*
 static bool js_eval_at_line_terminator(const char* source, size_t len, size_t pos, size_t* width);
 
 static Item js_dynamic_function_throw_syntax_error(const char* message) {
-    return js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
+    return js_throw_syntax_error(js_name_item(message, (int)strlen(message)));
 }
 
 static int js_dynfunc_kind_from_prefix(const char* parse_prefix) {
@@ -524,7 +524,7 @@ extern "C" void js_dynfunc_cache_reset(void) {
 
 static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int argc, const char* source_prefix) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    Item anon_name = (Item){.item = s2it(heap_create_name("anonymous", 9))};
+    Item anon_name = js_name_item("anonymous", 9);
     js_set_function_name(fn_item, anon_name);
 
     StrBuf* src_buf = strbuf_new_cap(256);
@@ -766,7 +766,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     if (early_errors > 0) {
         js_transpiler_destroy(tp);
         mem_free(source);
-        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid function source", 23))});
+        return js_throw_syntax_error(js_name_item("Invalid function source", 23));
     }
 
     // Use optimize level 0 for dynamic code (eval/new Function) — small snippets
@@ -1216,16 +1216,16 @@ static Item js_eval_initializer_early_error(String* code_str, bool is_direct_eva
     JsEvalInitializerScan scan = js_eval_scan_initializer_source(code_str->chars, code_str->len);
     if ((is_direct_eval && scan.contains_arguments) || (!is_direct_eval && scan.contains_new_target) ||
         scan.contains_super_call || (!is_direct_eval && scan.contains_super_property)) {
-        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval in class field initializer", 39))});
+        return js_throw_syntax_error(js_name_item("Invalid eval in class field initializer", 39));
     }
     return js_status_ok();
 }
 
 static Item js_eval_var_conflicts_lexical_name(String* name) {
     if (!name || name->len <= 0) return js_status_ok();
-    Item key = (Item){.item = s2it(heap_create_name(name->chars, name->len))};
+    Item key = js_name_item(name->chars, name->len);
     if (!js_eval_local_has_lexical_binding(key)) return js_status_ok();
-    return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Eval var conflicts with lexical declaration", 43))});
+    return js_throw_syntax_error(js_name_item("Eval var conflicts with lexical declaration", 43));
 }
 
 static Item js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
@@ -1352,7 +1352,7 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
             assigns = (after + 1 >= len || (source[after + 1] != '=' && source[after + 1] != '>'));
         }
         if (assigns) {
-            Item key = (Item){.item = s2it(heap_create_name(source + start, pos - start))};
+            Item key = js_name_item(source + start, pos - start);
             if (js_eval_local_has_immutable_binding(key)) return true;
         }
     }
@@ -1461,9 +1461,9 @@ static Item js_eval_parse_error_message(const JsTranspiler* tp) {
     message[0] = '\0';
     if (!js_transpiler_parse_error_get(tp, NULL, NULL, message, sizeof(message)) ||
         message[0] == '\0') {
-        return (Item){.item = s2it(heap_create_name("Invalid eval source", 19))};
+        return js_name_item("Invalid eval source", 19);
     }
-    return (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    return js_name_item(message, strlen(message));
 }
 
 
@@ -1586,7 +1586,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         return js_throw_type_error("Assignment to constant variable");
     }
     if (is_direct_eval && inherited_strict && js_eval_strict_assigns_restricted_name(code_str)) {
-        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid strict eval assignment", 30))});
+        return js_throw_syntax_error(js_name_item("Invalid strict eval assignment", 30));
     }
 
     // v37: Phase A — try expression form for single-expression eval code.
@@ -1714,7 +1714,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             memcpy(body + plen + code_len, suffix, slen2);
             body[total - 1] = '\0';
 
-            Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
+            Item body_item = js_name_item(body, total - 1);
             mem_free(body);
             fn_item = js_new_function_from_string_kind(&body_item, 1,
                 "function", "function anonymous", is_direct_eval);
@@ -1773,7 +1773,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         int early_errors = js_check_early_errors(tp, js_ast);
         if (early_errors > 0) {
             js_transpiler_destroy(tp);
-            return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
+            return js_throw_syntax_error(js_name_item("Invalid eval source", 19));
         }
         if (is_direct_eval && !inherited_strict) {
             Item conflict_status = js_eval_var_conflicts_lexical_program(js_ast);
@@ -1909,9 +1909,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemError;
         }
 
-        RootFrame eval_this_roots(2);
-        Rooted<Item> previous_this(eval_this_roots, js_get_this());
-        Rooted<Item> global_this(eval_this_roots, js_get_global_this());
+        JS_ROOTS(eval_this_roots, previous_this, js_get_this(), global_this, js_get_global_this());
         if (!is_direct_eval) {
             // An indirect eval executes as global script code even when its
             // source has a strict directive. Leaving the intrinsic call's
