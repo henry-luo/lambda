@@ -5892,6 +5892,198 @@ static bool js_url_component_item(const Url* url, const char* prop, Item* out) {
 }
 
 static bool js_dom_form_named_getter_reserved_name(const char* prop);
+// ----------------------------------------------------------------------
+// DOM property identity
+//
+// The property-dispatch functions used to test a name with a chain of up to
+// 138 strcmp calls. This table names every dispatched property once and
+// resolves a name to an id with a single binary search; the chains become
+// switches over the id.
+//
+// Rows are in ASCII order of the property name, which strcmp-based bsearch
+// relies on; js_dom_prop_id_selftest() checks that in debug builds.
+// ----------------------------------------------------------------------
+#define JS_DOM_PROPS(X) \
+    X(RANGE,                     "Range") \
+    X(SELECTION,                 "Selection") \
+    X(URL,                       "URL") \
+    X(__PROTO__,                 "__proto__") \
+    X(ACCEPT,                    "accept") \
+    X(ACCEPT_CHARSET,            "acceptCharset") \
+    X(ACTION,                    "action") \
+    X(ACTIVE_ELEMENT,            "activeElement") \
+    X(ATTRIBUTES,                "attributes") \
+    X(AUTOCAPITALIZE,            "autocapitalize") \
+    X(AUTOCOMPLETE,              "autocomplete") \
+    X(AUTOCORRECT,               "autocorrect") \
+    X(AUTOFOCUS,                 "autofocus") \
+    X(BODY,                      "body") \
+    X(CHARACTER_SET,             "characterSet") \
+    X(CHARSET,                   "charset") \
+    X(CHECKED,                   "checked") \
+    X(CHILD_ELEMENT_COUNT,       "childElementCount") \
+    X(CHILD_NODES,               "childNodes") \
+    X(CHILDREN,                  "children") \
+    X(CLASS_LIST,                "classList") \
+    X(CLASS_NAME,                "className") \
+    X(CLIENT_HEIGHT,             "clientHeight") \
+    X(CLIENT_WIDTH,              "clientWidth") \
+    X(COLS,                      "cols") \
+    X(COMPAT_MODE,               "compatMode") \
+    X(CONTENT,                   "content") \
+    X(CONTENT_DOCUMENT,          "contentDocument") \
+    X(CONTENT_EDITABLE,          "contentEditable") \
+    X(CONTENT_TYPE,              "contentType") \
+    X(CONTENT_WINDOW,            "contentWindow") \
+    X(DATA,                      "data") \
+    X(DATASET,                   "dataset") \
+    X(DEFAULT_CHECKED,           "defaultChecked") \
+    X(DEFAULT_SELECTED,          "defaultSelected") \
+    X(DEFAULT_VALUE,             "defaultValue") \
+    X(DEFAULT_VIEW,              "defaultView") \
+    X(DESIGN_MODE,               "designMode") \
+    X(DISABLED,                  "disabled") \
+    X(DOCTYPE,                   "doctype") \
+    X(DOCUMENT,                  "document") \
+    X(DOCUMENT_ELEMENT,          "documentElement") \
+    X(ELEMENTS,                  "elements") \
+    X(ENCODING,                  "encoding") \
+    X(ENCTYPE,                   "enctype") \
+    X(ENTER_KEY_HINT,            "enterKeyHint") \
+    X(FIRST_CHILD,               "firstChild") \
+    X(FIRST_ELEMENT_CHILD,       "firstElementChild") \
+    X(FONTS,                     "fonts") \
+    X(FORM,                      "form") \
+    X(FORM_ACTION,               "formAction") \
+    X(FORM_ENCTYPE,              "formEnctype") \
+    X(FORM_METHOD,               "formMethod") \
+    X(FORM_NO_VALIDATE,          "formNoValidate") \
+    X(FORM_TARGET,               "formTarget") \
+    X(FORMS,                     "forms") \
+    X(HASH,                      "hash") \
+    X(HEAD,                      "head") \
+    X(HEIGHT,                    "height") \
+    X(HREF,                      "href") \
+    X(HTML_FOR,                  "htmlFor") \
+    X(ID,                        "id") \
+    X(IMPLEMENTATION,            "implementation") \
+    X(INDEX,                     "index") \
+    X(INNER_HTML,                "innerHTML") \
+    X(INNER_TEXT,                "innerText") \
+    X(INPUT_MODE,                "inputMode") \
+    X(IS_CONNECTED,              "isConnected") \
+    X(IS_CONTENT_EDITABLE,       "isContentEditable") \
+    X(LABEL,                     "label") \
+    X(LAST_CHILD,                "lastChild") \
+    X(LAST_ELEMENT_CHILD,        "lastElementChild") \
+    X(LENGTH,                    "length") \
+    X(LOCAL_NAME,                "localName") \
+    X(LOCATION,                  "location") \
+    X(MAX,                       "max") \
+    X(MAX_LENGTH,                "maxLength") \
+    X(METHOD,                    "method") \
+    X(MIN,                       "min") \
+    X(MIN_LENGTH,                "minLength") \
+    X(MULTIPLE,                  "multiple") \
+    X(NAME,                      "name") \
+    X(NAMESPACE_URI,             "namespaceURI") \
+    X(NEXT_ELEMENT_SIBLING,      "nextElementSibling") \
+    X(NEXT_SIBLING,              "nextSibling") \
+    X(NO_VALIDATE,               "noValidate") \
+    X(NODE_NAME,                 "nodeName") \
+    X(NODE_TYPE,                 "nodeType") \
+    X(NODE_VALUE,                "nodeValue") \
+    X(OFFSET_HEIGHT,             "offsetHeight") \
+    X(OFFSET_LEFT,               "offsetLeft") \
+    X(OFFSET_PARENT,             "offsetParent") \
+    X(OFFSET_TOP,                "offsetTop") \
+    X(OFFSET_WIDTH,              "offsetWidth") \
+    X(OPEN,                      "open") \
+    X(OPTIONS,                   "options") \
+    X(OUTER_HTML,                "outerHTML") \
+    X(OWNER_DOCUMENT,            "ownerDocument") \
+    X(OWNER_SVGELEMENT,          "ownerSVGElement") \
+    X(PARENT_ELEMENT,            "parentElement") \
+    X(PARENT_NODE,               "parentNode") \
+    X(PATTERN,                   "pattern") \
+    X(PLACEHOLDER,               "placeholder") \
+    X(PREFIX,                    "prefix") \
+    X(PREVIOUS_ELEMENT_SIBLING,  "previousElementSibling") \
+    X(PREVIOUS_SIBLING,          "previousSibling") \
+    X(READ_ONLY,                 "readOnly") \
+    X(READONLY,                  "readonly") \
+    X(READY_STATE,               "readyState") \
+    X(REQUIRED,                  "required") \
+    X(ROWS,                      "rows") \
+    X(SCROLL_HEIGHT,             "scrollHeight") \
+    X(SCROLL_LEFT,               "scrollLeft") \
+    X(SCROLL_TOP,                "scrollTop") \
+    X(SCROLL_WIDTH,              "scrollWidth") \
+    X(SELECT,                    "select") \
+    X(SELECTED,                  "selected") \
+    X(SELECTED_INDEX,            "selectedIndex") \
+    X(SELECTED_OPTIONS,          "selectedOptions") \
+    X(SELECTION_DIRECTION,       "selectionDirection") \
+    X(SELECTION_END,             "selectionEnd") \
+    X(SELECTION_START,           "selectionStart") \
+    X(SET_RANGE_TEXT,            "setRangeText") \
+    X(SET_SELECTION_RANGE,       "setSelectionRange") \
+    X(SHEET,                     "sheet") \
+    X(SIZE,                      "size") \
+    X(SPELLCHECK,                "spellcheck") \
+    X(SRCDOC,                    "srcdoc") \
+    X(STEP,                      "step") \
+    X(STYLE,                     "style") \
+    X(STYLE_SHEETS,              "styleSheets") \
+    X(TAB_INDEX,                 "tabIndex") \
+    X(TAG_NAME,                  "tagName") \
+    X(TARGET,                    "target") \
+    X(TEXT,                      "text") \
+    X(TEXT_CONTENT,              "textContent") \
+    X(TEXT_LENGTH,               "textLength") \
+    X(TITLE,                     "title") \
+    X(TRANSFORM,                 "transform") \
+    X(TYPE,                      "type") \
+    X(VALIDATION_MESSAGE,        "validationMessage") \
+    X(VALIDITY,                  "validity") \
+    X(VALUE,                     "value") \
+    X(WIDTH,                     "width") \
+    X(WILL_VALIDATE,             "willValidate") \
+    X(WRAP,                      "wrap") \
+    X(WRITING_SUGGESTIONS,       "writingSuggestions")
+
+typedef enum JsDomPropId {
+    JS_DOM_PROP_NONE = 0,
+#define JS_DOM_PROP_ENUM(name, text) JS_DOM_PROP_##name,
+    JS_DOM_PROPS(JS_DOM_PROP_ENUM)
+#undef JS_DOM_PROP_ENUM
+    JS_DOM_PROP_COUNT
+} JsDomPropId;
+
+typedef struct JsDomPropRow {
+    const char* name;
+    JsDomPropId id;
+} JsDomPropRow;
+
+static const JsDomPropRow k_dom_props[] = {
+#define JS_DOM_PROP_ROW(name, text) { text, JS_DOM_PROP_##name },
+    JS_DOM_PROPS(JS_DOM_PROP_ROW)
+#undef JS_DOM_PROP_ROW
+};
+
+static int js_dom_prop_row_compare(const void* key, const void* row) {
+    return strcmp((const char*)key, ((const JsDomPropRow*)row)->name);
+}
+
+// JS_DOM_PROP_NONE for any name the dispatchers do not special-case.
+static JsDomPropId js_dom_prop_id(const char* prop) {
+    if (!prop) return JS_DOM_PROP_NONE;
+    const JsDomPropRow* row = (const JsDomPropRow*)bsearch(prop, k_dom_props,
+        sizeof(k_dom_props) / sizeof(k_dom_props[0]), sizeof(k_dom_props[0]),
+        js_dom_prop_row_compare);
+    return row ? row->id : JS_DOM_PROP_NONE;
+}
+
 
 extern "C" Item js_document_get_property(Item prop_name) {
     if (!_js_current_document) {
@@ -5900,18 +6092,19 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     const char* prop = fn_to_cstr(prop_name);
+    JsDomPropId prop_id = js_dom_prop_id(prop);
     if (!prop) return ItemNull;
 
     DomDocument* doc = _js_current_document;
     DomElement* root = doc->root;  // may be NULL for foreign docs created via createDocument
 
     // documentElement — the root <html> element
-    if (strcmp(prop, "documentElement") == 0) {
+    if (prop_id == JS_DOM_PROP_DOCUMENT_ELEMENT) {
         return root ? js_dom_wrap_element(root) : ItemNull;
     }
 
     // body — the <body> element
-    if (strcmp(prop, "body") == 0) {
+    if (prop_id == JS_DOM_PROP_BODY) {
         DomNode* child = root ? root->first_child : nullptr;
         while (child) {
             if (child->is_element()) {
@@ -5926,7 +6119,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // head — the <head> element
-    if (strcmp(prop, "head") == 0) {
+    if (prop_id == JS_DOM_PROP_HEAD) {
         DomNode* child = root ? root->first_child : nullptr;
         while (child) {
             if (child->is_element()) {
@@ -5941,7 +6134,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // title — text of first <title> element
-    if (strcmp(prop, "title") == 0) {
+    if (prop_id == JS_DOM_PROP_TITLE) {
         // search in <head> first
         DomNode* child = root ? root->first_child : nullptr;
         while (child) {
@@ -5971,7 +6164,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // v12: URL — full document URL as string
-    if (strcmp(prop, "URL") == 0) {
+    if (prop_id == JS_DOM_PROP_URL) {
         Url* url = doc->url;
         if (url) {
             const char* href = url_get_href(url);
@@ -5982,7 +6175,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // location-style URL access. We model document.location and bare
     // location as aliases of the document/window proxy itself.
-    if (strcmp(prop, "location") == 0 || strcmp(prop, "document") == 0) {
+    if (prop_id == JS_DOM_PROP_LOCATION || prop_id == JS_DOM_PROP_DOCUMENT) {
         return doc_to_proxy_item(doc);
     }
     {
@@ -5992,45 +6185,45 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // readyState — legacy defaults to "complete"; the Phase 4 post-DOM
     // script scheduler updates this during modeled lifecycle transitions.
-    if (strcmp(prop, "readyState") == 0) {
+    if (prop_id == JS_DOM_PROP_READY_STATE) {
         const char* ready_state = doc->js.ready_state ? doc->js.ready_state : "complete";
         return js_name_item(ready_state);
     }
 
-    if (strcmp(prop, "fonts") == 0) {
+    if (prop_id == JS_DOM_PROP_FONTS) {
         return js_dom_document_fonts_bridge();
     }
 
     // compatMode
-    if (strcmp(prop, "compatMode") == 0) {
+    if (prop_id == JS_DOM_PROP_COMPAT_MODE) {
         return js_name_item("CSS1Compat");
     }
 
     // F-1: document.forms — array of all <form> elements in the document.
-    if (strcmp(prop, "forms") == 0) {
+    if (prop_id == JS_DOM_PROP_FORMS) {
         DomDocument* doc = _js_current_document;
         return js_dom_live_document_forms_bridge((void*)doc);
     }
 
     // characterSet / charset
-    if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
+    if (prop_id == JS_DOM_PROP_CHARACTER_SET || prop_id == JS_DOM_PROP_CHARSET) {
         return js_name_item("UTF-8");
     }
 
     // contentType
-    if (strcmp(prop, "contentType") == 0) {
+    if (prop_id == JS_DOM_PROP_CONTENT_TYPE) {
         return js_name_item("text/html");
     }
 
     // nodeType — DOCUMENT_NODE = 9
-    if (strcmp(prop, "nodeType") == 0) {
+    if (prop_id == JS_DOM_PROP_NODE_TYPE) {
         return (Item){.item = i2it(9)};
     }
 
     // childNodes — return a NodeList-like Array of the document's children
     // (synthesized doctype + documentElement). Backed by the document stub
     // so iteration works.
-    if (strcmp(prop, "childNodes") == 0) {
+    if (prop_id == JS_DOM_PROP_CHILD_NODES) {
         DomDocument* doc = _js_current_document;
         if (!doc) return ItemNull;
         void* stub_v = js_dom_get_or_create_doc_node(doc);
@@ -6050,17 +6243,17 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // nodeName
-    if (strcmp(prop, "nodeName") == 0) {
+    if (prop_id == JS_DOM_PROP_NODE_NAME) {
         return js_name_item("#document");
     }
 
     // styleSheets — collection of parsed CSSStyleSheet objects
-    if (strcmp(prop, "styleSheets") == 0) {
+    if (prop_id == JS_DOM_PROP_STYLE_SHEETS) {
         return js_dom_document_stylesheets_bridge();
     }
 
     // ownerDocument — the document itself has no owner (returns null)
-    if (strcmp(prop, "ownerDocument") == 0) {
+    if (prop_id == JS_DOM_PROP_OWNER_DOCUMENT) {
         return ItemNull;
     }
 
@@ -6068,7 +6261,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // Sizzle accesses document.defaultView for getComputedStyle.
     // Foreign documents (created via document.implementation.create*Document)
     // never have a browsing context, so defaultView must be null per HTML spec.
-    if (strcmp(prop, "defaultView") == 0) {
+    if (prop_id == JS_DOM_PROP_DEFAULT_VIEW) {
         return js_dom_document_default_view_bridge((void*)_js_current_document);
     }
 
@@ -6078,11 +6271,11 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // window-style access through `document` continues to function.
     if (_js_current_document != _js_main_document &&
         js_doc_has_browsing_context(_js_current_document)) {
-        if (strcmp(prop, "document") == 0) {
+        if (prop_id == JS_DOM_PROP_DOCUMENT) {
             Item w = lookup_foreign_doc_wrapper(_js_current_document);
             return w.item ? w : ItemNull;
         }
-        if (strcmp(prop, "Selection") == 0 || strcmp(prop, "Range") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION || prop_id == JS_DOM_PROP_RANGE) {
             Item global_ctor = js_get_global_property(prop_name);
             if (get_type_id(global_ctor) == LMD_TYPE_FUNC) return global_ctor;
             return ItemNull;
@@ -6090,7 +6283,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // implementation — DOMImplementation (createHTMLDocument, createDocument, ...)
-    if (strcmp(prop, "implementation") == 0) {
+    if (prop_id == JS_DOM_PROP_IMPLEMENTATION) {
         return js_dom_document_implementation_bridge();
     }
 
@@ -6099,7 +6292,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // (see js_dom_get_or_create_doc_node). Expose it here so JS code that
     // does `document.doctype` (and Range/Selection APIs that take it as a
     // node argument) work.
-    if (strcmp(prop, "doctype") == 0) {
+    if (prop_id == JS_DOM_PROP_DOCTYPE) {
         DomDocument* doc = _js_current_document;
         if (!doc) return ItemNull;
         void* stub = js_dom_get_or_create_doc_node(doc);
@@ -6126,12 +6319,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // designMode is the legacy whole-document edit toggle. This first cut
     // exposes the IDL state; editing-host default actions still land in the
     // command engine phases.
-    if (strcmp(prop, "designMode") == 0) {
+    if (prop_id == JS_DOM_PROP_DESIGN_MODE) {
         return js_dom_document_design_mode_bridge();
     }
 
     // activeElement — currently focused element, or <body> as default per spec.
-    if (strcmp(prop, "activeElement") == 0) {
+    if (prop_id == JS_DOM_PROP_ACTIVE_ELEMENT) {
         return js_dom_document_active_element_bridge((void*)doc);
     }
 
@@ -8459,6 +8652,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     const char* prop = fn_to_cstr(prop_name);
+    JsDomPropId prop_id = js_dom_prop_id(prop);
     if (!node) {
         log_debug("js_dom_get_property: not a DOM node");
         return ItemNull;
@@ -8528,30 +8722,30 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     if (_is_tag(elem, "a") || _is_tag(elem, "area")) {
-        if (strcmp(prop, "hash") == 0) {
+        if (prop_id == JS_DOM_PROP_HASH) {
             Item result = ItemNull;
             if (radiant_dom_anchor_hash_get(elem_item, &result)) return result;
         }
-        if (strcmp(prop, "href") == 0) {
+        if (prop_id == JS_DOM_PROP_HREF) {
             Item result = ItemNull;
             if (radiant_dom_m4b_href_get(elem_item, &result)) return result;
         }
     }
 
     // tagName (uppercased per spec)
-    if (strcmp(prop, "tagName") == 0) {
+    if (prop_id == JS_DOM_PROP_TAG_NAME) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
     }
 
     // localName (lowercased per spec; tag names are stored lowercase already).
-    if (strcmp(prop, "localName") == 0) {
+    if (prop_id == JS_DOM_PROP_LOCAL_NAME) {
         const char* tn = elem->tag_name ? elem->tag_name : "";
         return js_name_item(tn);
     }
 
     // html requires template contents to be exposed through a detached
     // DocumentFragment, so cloning does not clone the hidden template wrapper.
-    if (strcmp(prop, "content") == 0 &&
+    if (prop_id == JS_DOM_PROP_CONTENT &&
         elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
         return js_dom_template_content(elem);
     }
@@ -8559,7 +8753,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // namespaceURI. Prefer the URI recorded by createElementNS (kept as a
     // reserved internal attribute); otherwise HTML elements live in the XHTML
     // namespace. The direct createElementNS Document binding records this URI.
-    if (strcmp(prop, "namespaceURI") == 0) {
+    if (prop_id == JS_DOM_PROP_NAMESPACE_URI) {
         const char* ns = elem->get_attribute("__lambda_ns_uri");
         if (ns && ns[0] != '\0') {
             return js_name_item(ns);
@@ -8570,7 +8764,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return js_name_item("http://www.w3.org/1999/xhtml");
     }
 
-    if (strcmp(prop, "ownerSVGElement") == 0) {
+    if (prop_id == JS_DOM_PROP_OWNER_SVGELEMENT) {
         if (!js_dom_element_is_svg(elem) || strcasecmp(elem->tag_name, "svg") == 0) {
             return ItemNull;
         }
@@ -8585,7 +8779,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // prefix — HTML elements have null prefix.
-    if (strcmp(prop, "prefix") == 0) {
+    if (prop_id == JS_DOM_PROP_PREFIX) {
         return ItemNull;
     }
 
@@ -8593,49 +8787,49 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // document that backs the iframe's browsing context. Cached per element
     // so identity comparisons (===) work.
     if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0 &&
-        (strcmp(prop, "contentDocument") == 0 || strcmp(prop, "contentWindow") == 0)) {
+        (prop_id == JS_DOM_PROP_CONTENT_DOCUMENT || prop_id == JS_DOM_PROP_CONTENT_WINDOW)) {
         extern Item js_iframe_get_content_document(DomElement* iframe);
         extern Item js_iframe_get_content_window  (DomElement* iframe);
-        if (strcmp(prop, "contentDocument") == 0)
+        if (prop_id == JS_DOM_PROP_CONTENT_DOCUMENT)
             return js_iframe_get_content_document(elem);
         return js_iframe_get_content_window(elem);
     }
 
     // id
-    if (strcmp(prop, "id") == 0) {
+    if (prop_id == JS_DOM_PROP_ID) {
         return (Item){.item = elem->id ? s2it(heap_create_name(elem->id))
                                         : s2it(heap_create_name(""))};
     }
 
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "transform") == 0) {
+    if (js_dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_TRANSFORM) {
         return js_dom_svg_get_transform_list(elem);
     }
 
     // SVGAnimatedString is distinct from HTML's string-valued className.
     // Keep baseVal live so SVG libraries changing it update the actual class
     // attribute used by selector matching and rendering.
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "className") == 0) {
+    if (js_dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_CLASS_NAME) {
         return js_dom_svg_get_animated_class_name(elem);
     }
 
     // className (space-joined class list)
-    if (strcmp(prop, "className") == 0) {
+    if (prop_id == JS_DOM_PROP_CLASS_NAME) {
         return js_classlist_value_item(elem);
     }
 
-    if (strcmp(prop, "classList") == 0) {
+    if (prop_id == JS_DOM_PROP_CLASS_LIST) {
         // Nested member chains use the generic property path, so classList
         // must expose the same live owner-bound operations as the MIR fast path.
         return js_dom_get_classlist_wrapper(elem, elem_item);
     }
 
     // style — live CSSStyleDeclaration-like wrapper for inline style.
-    if (strcmp(prop, "style") == 0) {
+    if (prop_id == JS_DOM_PROP_STYLE) {
         return js_dom_get_inline_style_wrapper(elem);
     }
 
     // textContent / innerText (recursive text extraction)
-    if (strcmp(prop, "textContent") == 0 || strcmp(prop, "innerText") == 0) {
+    if (prop_id == JS_DOM_PROP_TEXT_CONTENT || prop_id == JS_DOM_PROP_INNER_TEXT) {
         StrBuf* sb = strbuf_new_cap(128);
         collect_text_content((DomNode*)elem, sb);
         String* result = heap_create_name(sb->str ? sb->str : "");
@@ -8644,7 +8838,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // innerHTML (recursive HTML serialization of children)
-    if (strcmp(prop, "innerHTML") == 0) {
+    if (prop_id == JS_DOM_PROP_INNER_HTML) {
         StrBuf* sb = strbuf_new_cap(256);
         DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
@@ -8657,7 +8851,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // v12: outerHTML (element itself + children)
-    if (strcmp(prop, "outerHTML") == 0) {
+    if (prop_id == JS_DOM_PROP_OUTER_HTML) {
         StrBuf* sb = strbuf_new_cap(256);
         collect_inner_html((DomNode*)elem, sb);
         String* result = heap_create_name(sb->str ? sb->str : "");
@@ -8666,14 +8860,14 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // nodeType
-    if (strcmp(prop, "nodeType") == 0) {
+    if (prop_id == JS_DOM_PROP_NODE_TYPE) {
         if (_is_tag(elem, "#document-fragment"))
             return (Item){.item = i2it(11)};
         return (Item){.item = i2it((int64_t)elem->node_type)};
     }
 
     // childElementCount
-    if (strcmp(prop, "childElementCount") == 0) {
+    if (prop_id == JS_DOM_PROP_CHILD_ELEMENT_COUNT) {
         int count = 0;
         DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
@@ -8684,22 +8878,22 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // children (array of child DOM elements only)
-    if (strcmp(prop, "children") == 0) {
+    if (prop_id == JS_DOM_PROP_CHILDREN) {
         return js_dom_collect_child_nodes(elem, true);
     }
 
     // parentElement
-    if (strcmp(prop, "parentElement") == 0) {
+    if (prop_id == JS_DOM_PROP_PARENT_ELEMENT) {
         return js_dom_parent_element_or_null((DomNode*)elem);
     }
 
     // parentNode (includes text nodes — returns any parent)
-    if (strcmp(prop, "parentNode") == 0) {
+    if (prop_id == JS_DOM_PROP_PARENT_NODE) {
         return js_dom_parent_node_or_null((DomNode*)elem);
     }
 
     // isConnected — true iff the shadow-inclusive root is the Document.
-    if (strcmp(prop, "isConnected") == 0) {
+    if (prop_id == JS_DOM_PROP_IS_CONNECTED) {
         return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
     }
 
@@ -8709,7 +8903,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // stale-attribute removal loop `for (i=0; i<elem.attributes.length; i++)
     // ... elem.attributes[i].name`. Internal (__lambda_*) attributes are
     // filtered so they don't leak to script.
-    if (strcmp(prop, "attributes") == 0) {
+    if (prop_id == JS_DOM_PROP_ATTRIBUTES) {
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
@@ -8739,7 +8933,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // ownerDocument — returns the document proxy for any element.
     // For elements owned by a foreign document, return that foreign-doc
     // wrapper (so identity tests like `el.ownerDocument === foreignDoc` hold).
-    if (strcmp(prop, "ownerDocument") == 0) {
+    if (prop_id == JS_DOM_PROP_OWNER_DOCUMENT) {
         DomDocument* od = elem->doc;
         if (od && od != _js_current_document) {
             Item w = lookup_foreign_doc_wrapper(od);
@@ -8749,7 +8943,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // firstChild (any node type, not just elements)
-    if (strcmp(prop, "firstChild") == 0) {
+    if (prop_id == JS_DOM_PROP_FIRST_CHILD) {
         DomNode* child = js_dom_first_script_visible_child(elem);
         if (!child) return ItemNull;
         if (child->is_element()) return js_dom_wrap_element(child->as_element());
@@ -8758,7 +8952,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // lastChild (any node type)
-    if (strcmp(prop, "lastChild") == 0) {
+    if (prop_id == JS_DOM_PROP_LAST_CHILD) {
         DomNode* child = js_dom_last_script_visible_child(elem);
         if (!child) return ItemNull;
         if (child->is_element()) return js_dom_wrap_element(child->as_element());
@@ -8766,7 +8960,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // nextSibling (any node type)
-    if (strcmp(prop, "nextSibling") == 0) {
+    if (prop_id == JS_DOM_PROP_NEXT_SIBLING) {
         DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)elem);
         if (!sib) return ItemNull;
         if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
@@ -8774,7 +8968,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // previousSibling (any node type)
-    if (strcmp(prop, "previousSibling") == 0) {
+    if (prop_id == JS_DOM_PROP_PREVIOUS_SIBLING) {
         DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)elem);
         if (!sib) return ItemNull;
         if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
@@ -8782,7 +8976,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // firstElementChild
-    if (strcmp(prop, "firstElementChild") == 0) {
+    if (prop_id == JS_DOM_PROP_FIRST_ELEMENT_CHILD) {
         DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) return js_dom_wrap_element(child->as_element());
@@ -8792,7 +8986,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // lastElementChild
-    if (strcmp(prop, "lastElementChild") == 0) {
+    if (prop_id == JS_DOM_PROP_LAST_ELEMENT_CHILD) {
         DomNode* child = js_dom_last_script_visible_child(elem);
         while (child) {
             if (child->is_element()) return js_dom_wrap_element(child->as_element());
@@ -8802,7 +8996,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // nextElementSibling
-    if (strcmp(prop, "nextElementSibling") == 0) {
+    if (prop_id == JS_DOM_PROP_NEXT_ELEMENT_SIBLING) {
         DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)elem);
         while (sib) {
             if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
@@ -8812,7 +9006,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // previousElementSibling
-    if (strcmp(prop, "previousElementSibling") == 0) {
+    if (prop_id == JS_DOM_PROP_PREVIOUS_ELEMENT_SIBLING) {
         DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)elem);
         while (sib) {
             if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
@@ -8822,12 +9016,12 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // childNodes (all children including text nodes)
-    if (strcmp(prop, "childNodes") == 0) {
+    if (prop_id == JS_DOM_PROP_CHILD_NODES) {
         return js_dom_collect_child_nodes(elem, false);
     }
 
     // children (array of child DOM elements only)
-    if (strcmp(prop, "children") == 0) {
+    if (prop_id == JS_DOM_PROP_CHILDREN) {
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
@@ -8844,7 +9038,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // length (for NodeList / HTMLCollection-like results)
-    if (strcmp(prop, "length") == 0) {
+    if (prop_id == JS_DOM_PROP_LENGTH) {
         int count = 0;
         DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
@@ -8862,15 +9056,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // =========================================================================
 
     // offsetWidth / offsetHeight — border box dimensions
-    if (strcmp(prop, "offsetWidth") == 0) {
+    if (prop_id == JS_DOM_PROP_OFFSET_WIDTH) {
         return (Item){.item = i2it(js_dom_geometry_dimension(elem, true))};
     }
-    if (strcmp(prop, "offsetHeight") == 0) {
+    if (prop_id == JS_DOM_PROP_OFFSET_HEIGHT) {
         return (Item){.item = i2it(js_dom_geometry_dimension(elem, false))};
     }
 
     // clientWidth / clientHeight — border box minus borders
-    if (strcmp(prop, "clientWidth") == 0) {
+    if (prop_id == JS_DOM_PROP_CLIENT_WIDTH) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
@@ -8878,7 +9072,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
-    if (strcmp(prop, "clientHeight") == 0) {
+    if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
@@ -8888,7 +9082,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // offsetTop / offsetLeft — position relative to offsetParent
-    if (strcmp(prop, "offsetTop") == 0) {
+    if (prop_id == JS_DOM_PROP_OFFSET_TOP) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
@@ -8896,7 +9090,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(js_dom_offset_coordinate(elem, false))};
         return (Item){.item = i2it((int64_t)elem->y)};
     }
-    if (strcmp(prop, "offsetLeft") == 0) {
+    if (prop_id == JS_DOM_PROP_OFFSET_LEFT) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
@@ -8912,20 +9106,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // offsetParent — nearest positioned ancestor (or body)
-    if (strcmp(prop, "offsetParent") == 0) {
+    if (prop_id == JS_DOM_PROP_OFFSET_PARENT) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         DomElement* parent = js_dom_offset_parent_element(elem);
         return parent ? js_dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
-    if (strcmp(prop, "scrollWidth") == 0) {
+    if (prop_id == JS_DOM_PROP_SCROLL_WIDTH) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         float cw = elem->content_width;
         float bw = elem->width;
         return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
     }
-    if (strcmp(prop, "scrollHeight") == 0) {
+    if (prop_id == JS_DOM_PROP_SCROLL_HEIGHT) {
         js_dom_has_committed_geometry_snapshot(elem->doc);
         float ch = elem->content_height;
         float bh = elem->height;
@@ -8933,7 +9127,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // scrollTop / scrollLeft — current scroll position
-    if (strcmp(prop, "scrollTop") == 0) {
+    if (prop_id == JS_DOM_PROP_SCROLL_TOP) {
         if (elem->scroller && elem->scroll()->pane) {
             return (Item){.item = i2it((int64_t)elem->scroll()->pane->v_scroll_position)};
         }
@@ -8942,7 +9136,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return (Item){.item = i2it(0)};
     }
-    if (strcmp(prop, "scrollLeft") == 0) {
+    if (prop_id == JS_DOM_PROP_SCROLL_LEFT) {
         if (elem->scroller && elem->scroll()->pane) {
             return (Item){.item = i2it((int64_t)elem->scroll()->pane->h_scroll_position)};
         }
@@ -8953,7 +9147,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // data (text node content) — check if the wrapped node is actually a DomText
-    if (strcmp(prop, "data") == 0) {
+    if (prop_id == JS_DOM_PROP_DATA) {
         DomNode* node = (DomNode*)elem;  // may be DomText wrapped as DomElement*
         if (node->is_text()) {
             DomText* text_node = node->as_text();
@@ -8967,7 +9161,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // nodeName — tag name for elements, "#text" for text nodes
-    if (strcmp(prop, "nodeName") == 0) {
+    if (prop_id == JS_DOM_PROP_NODE_NAME) {
         DomNode* node = (DomNode*)elem;
         if (node->is_text()) {
             return js_name_item("#text");
@@ -8976,7 +9170,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // HTMLStyleElement.sheet — associated CSSStyleSheet (doesn't require native_element)
-    if (strcmp(prop, "sheet") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
+    if (prop_id == JS_DOM_PROP_SHEET && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
         return js_cssom_get_style_element_sheet(elem_item);
     }
 
@@ -8984,19 +9178,19 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // F-5: HTMLSelectElement / HTMLOptionElement IDL properties
     // ------------------------------------------------------------------
     if (_is_tag(elem, "select")) {
-        if (strcmp(prop, "options") == 0) {
+        if (prop_id == JS_DOM_PROP_OPTIONS) {
             Item arr = js_array_new(0);
             _decorate_options_collection(arr);
             _register_select_options_owner(arr, elem, SELECT_COLLECTION_OPTIONS);
             _select_refresh_options_collection(arr, elem);
             return arr;
         }
-        if (strcmp(prop, "length") == 0) {
+        if (prop_id == JS_DOM_PROP_LENGTH) {
             Item arr = js_array_new(0);
             _collect_options(elem->first_child, arr);
             return (Item){.item = i2it(js_array_length(arr))};
         }
-        if (strcmp(prop, "selectedOptions") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTED_OPTIONS) {
             Item exp = expando_get_or_create_map((DomNode*)elem);
             Item cache_key = js_name_item("__selectedOptions");
             Item out = (exp.item != ITEM_NULL) ? js_get_key_default(exp, cache_key) : ItemNull;
@@ -9009,7 +9203,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             _select_refresh_selected_options_collection(out, elem);
             return out;
         }
-        if (strcmp(prop, "selectedIndex") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTED_INDEX) {
             Item arr = js_array_new(0);
             _collect_options(elem->first_child, arr);
             int64_t n = js_array_length(arr);
@@ -9032,13 +9226,13 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             }
             return (Item){.item = i2it(-1)};
         }
-        if (strcmp(prop, "value") == 0) {
+        if (prop_id == JS_DOM_PROP_VALUE) {
             char* value = _select_value(elem);
             String* result = heap_create_name(value ? value : "");
             if (value) mem_free(value);
             return (Item){.item = s2it(result)};
         }
-        if (strcmp(prop, "type") == 0) {
+        if (prop_id == JS_DOM_PROP_TYPE) {
             const char* t = elem->has_attribute("multiple")
                 ? "select-multiple" : "select-one";
             return js_name_item(t);
@@ -9047,15 +9241,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // HTMLOptionElement properties.
     if (_is_tag(elem, "option")) {
-        if (strcmp(prop, "value") == 0) {
+        if (prop_id == JS_DOM_PROP_VALUE) {
             char* v = _option_value(elem);
             String* s = heap_create_name(v ? v : "");
             mem_free(v);
             return (Item){.item = s2it(s)};
         }
-        if (strcmp(prop, "text") == 0 || strcmp(prop, "label") == 0) {
+        if (prop_id == JS_DOM_PROP_TEXT || prop_id == JS_DOM_PROP_LABEL) {
             // label IDL: returns label attribute, falling back to text.
-            if (strcmp(prop, "label") == 0) {
+            if (prop_id == JS_DOM_PROP_LABEL) {
                 const char* lab = elem->get_attribute("label");
                 if (lab && *lab) return js_name_item(lab);
             }
@@ -9064,7 +9258,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             mem_free(t);
             return (Item){.item = s2it(s)};
         }
-        if (strcmp(prop, "selected") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTED) {
             if (_get_selectedness(elem)) return (Item){.item = b2it(true)};
             // Apply default-reset rule: in a non-multiple, size<=1 select
             // with no option having selectedness, the first non-disabled
@@ -9093,10 +9287,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             DomElement* first = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, first_nd));
             return (Item){.item = b2it(first == elem)};
         }
-        if (strcmp(prop, "index") == 0) {
+        if (prop_id == JS_DOM_PROP_INDEX) {
             return (Item){.item = i2it(_option_index_in_select(elem))};
         }
-        if (strcmp(prop, "form") == 0) {
+        if (prop_id == JS_DOM_PROP_FORM) {
             DomElement* sel = _option_owner_select(elem);
             if (sel) {
                 // Walk up to find the form
@@ -9116,17 +9310,17 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Boolean IDL attributes that must be returned as real booleans
     // (HTML form-control properties used by activation behavior).
     // ------------------------------------------------------------------
-    if (strcmp(prop, "checked") == 0 && _is_tag(elem, "input")) {
+    if (prop_id == JS_DOM_PROP_CHECKED && _is_tag(elem, "input")) {
         return (Item){.item = b2it(_get_checkedness(elem))};
     }
-    if (strcmp(prop, "disabled") == 0 &&
+    if (prop_id == JS_DOM_PROP_DISABLED &&
         (_is_tag(elem, "input") || _is_tag(elem, "button") ||
          _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
          _is_tag(elem, "fieldset") || _is_tag(elem, "optgroup") ||
          _is_tag(elem, "option"))) {
         return (Item){.item = b2it(elem->has_attribute("disabled"))};
     }
-    if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+    if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         const char* v = elem->get_attribute("value");
         return js_name_item(v ? v : "");
     }
@@ -9137,14 +9331,14 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // returns the live IDL value, not the static `value` attribute.
     // ------------------------------------------------------------------
     if (tc_is_text_control_elem(elem)) {
-        if (strcmp(prop, "value") == 0) {
+        if (prop_id == JS_DOM_PROP_VALUE) {
             tc_ensure_init(elem);
             FormControlProp* f = elem->form;
             String* s = heap_strcpy(f->current_value ? f->current_value : (char*)"",
                                     (int64_t)f->current_value_len);
             return (Item){.item = s2it(s)};
         }
-        if (strcmp(prop, "defaultValue") == 0) {
+        if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
             // <input>: getAttribute("value"); <textarea>: text content of children.
             if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
                 StrBuf* sb = strbuf_new_cap(64);
@@ -9156,21 +9350,21 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             const char* v = elem->get_attribute("value");
             return js_name_item(v ? v : "");
         }
-        if (strcmp(prop, "selectionStart") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION_START) {
             tc_ensure_init(elem);
             uint32_t start = 0;
             DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
             form_control_get_selection(state, (View*)elem, &start, NULL, NULL);
             return (Item){.item = i2it((int64_t)start)};
         }
-        if (strcmp(prop, "selectionEnd") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION_END) {
             tc_ensure_init(elem);
             uint32_t end = 0;
             DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
             form_control_get_selection(state, (View*)elem, NULL, &end, NULL);
             return (Item){.item = i2it((int64_t)end)};
         }
-        if (strcmp(prop, "selectionDirection") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION_DIRECTION) {
             tc_ensure_init(elem);
             const char* d = "none";
             uint8_t direction = 0;
@@ -9180,15 +9374,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             else if (direction == 2) d = "backward";
             return js_name_item(d);
         }
-        if (strcmp(prop, "textLength") == 0) {
+        if (prop_id == JS_DOM_PROP_TEXT_LENGTH) {
             tc_ensure_init(elem);
             return (Item){.item = i2it((int64_t)elem->form->current_value_u16_len)};
         }
-        if (strcmp(prop, "setSelectionRange") == 0)
+        if (prop_id == JS_DOM_PROP_SET_SELECTION_RANGE)
             return js_new_native_function(js_text_control_set_selection_range);
-        if (strcmp(prop, "select") == 0)
+        if (prop_id == JS_DOM_PROP_SELECT)
             return js_new_native_function(js_text_control_select);
-        if (strcmp(prop, "setRangeText") == 0)
+        if (prop_id == JS_DOM_PROP_SET_RANGE_TEXT)
             return js_new_native_function(js_text_control_set_range_text);
     }
 
@@ -9197,11 +9391,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // ------------------------------------------------------------------
 
     // F-1: HTMLFormElement.elements — snapshot array of listed form controls
-    if (_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
+    if (_is_tag(elem, "form") && prop_id == JS_DOM_PROP_ELEMENTS) {
         return js_dom_live_form_elements_bridge((void*)elem);
     }
     // F-1: HTMLFormElement.length → number of listed controls
-    if (_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
+    if (_is_tag(elem, "form") && prop_id == JS_DOM_PROP_LENGTH) {
         Item arr = js_array_new(0);
         _collect_form_controls_rec(elem->first_child, arr);
         return (Item){.item = i2it(js_array_length(arr))};
@@ -9217,26 +9411,26 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     };
 
     // Boolean reflection: required, multiple, readOnly/readonly, noValidate
-    if (strcmp(prop, "required") == 0 &&
+    if (prop_id == JS_DOM_PROP_REQUIRED &&
         (_is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
         return (Item){.item = b2it(elem->has_attribute("required"))};
     }
-    if (strcmp(prop, "multiple") == 0 &&
+    if (prop_id == JS_DOM_PROP_MULTIPLE &&
         (_is_tag(elem, "input") || _is_tag(elem, "select"))) {
         return (Item){.item = b2it(elem->has_attribute("multiple"))};
     }
-    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
+    if ((prop_id == JS_DOM_PROP_READ_ONLY || prop_id == JS_DOM_PROP_READONLY) &&
         (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
         return (Item){.item = b2it(elem->has_attribute("readonly"))};
     }
-    if (strcmp(prop, "noValidate") == 0 && _is_tag(elem, "form")) {
+    if (prop_id == JS_DOM_PROP_NO_VALIDATE && _is_tag(elem, "form")) {
         return (Item){.item = b2it(elem->has_attribute("novalidate"))};
     }
-    if (strcmp(prop, "open") == 0 && _is_tag(elem, "details")) {
+    if (prop_id == JS_DOM_PROP_OPEN && _is_tag(elem, "details")) {
         return (Item){.item = b2it(elem->has_attribute("open"))};
     }
     // name attribute (all listed form controls and form/fieldset)
-    if (strcmp(prop, "name") == 0 &&
+    if (prop_id == JS_DOM_PROP_NAME &&
         (_is_tag(elem, "input") || _is_tag(elem, "button") || _is_tag(elem, "select") ||
          _is_tag(elem, "textarea") || _is_tag(elem, "form") || _is_tag(elem, "fieldset") ||
          _is_tag(elem, "output") || _is_tag(elem, "object"))) {
@@ -9244,7 +9438,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return js_name_item(v ? v : "");
     }
     // type for button (default "submit"; only valid values: "submit","reset","button")
-    if (strcmp(prop, "type") == 0 && _is_tag(elem, "button")) {
+    if (prop_id == JS_DOM_PROP_TYPE && _is_tag(elem, "button")) {
         const char* v = elem->get_attribute("type");
         if (v && (strcasecmp(v, "submit") == 0 || strcasecmp(v, "reset") == 0 || strcasecmp(v, "button") == 0)) {
             char buf[8];
@@ -9254,27 +9448,27 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return js_name_item("submit");
     }
     // placeholder (input, textarea)
-    if (strcmp(prop, "placeholder") == 0 &&
+    if (prop_id == JS_DOM_PROP_PLACEHOLDER &&
         (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
         const char* v = elem->get_attribute("placeholder");
         return js_name_item(v ? v : "");
     }
     // autocomplete (form, input, select, textarea)
-    if (strcmp(prop, "autocomplete") == 0 &&
+    if (prop_id == JS_DOM_PROP_AUTOCOMPLETE &&
         (_is_tag(elem, "form") || _is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
         const char* v = elem->get_attribute("autocomplete");
         return js_name_item(v ? v : "");
     }
     // pattern, min, max, step, accept (input only — simple string reflection)
     if (_is_tag(elem, "input") &&
-        (strcmp(prop, "pattern") == 0 || strcmp(prop, "min") == 0 || strcmp(prop, "max") == 0 ||
-         strcmp(prop, "step") == 0 || strcmp(prop, "accept") == 0)) {
+        (prop_id == JS_DOM_PROP_PATTERN || prop_id == JS_DOM_PROP_MIN || prop_id == JS_DOM_PROP_MAX ||
+         prop_id == JS_DOM_PROP_STEP || prop_id == JS_DOM_PROP_ACCEPT)) {
         const char* v = elem->get_attribute(prop);
         return js_name_item(v ? v : "");
     }
     // HTMLFormElement: action, method, enctype/encoding, acceptCharset, target
     if (_is_tag(elem, "form")) {
-        if (strcmp(prop, "action") == 0) {
+        if (prop_id == JS_DOM_PROP_ACTION) {
             const char* v = elem->get_attribute("action");
             if (v && *v) return js_name_item(v);
             // Empty/missing action falls back to document URL per HTML spec.
@@ -9286,68 +9480,68 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             }
             return js_name_item(doc_url);
         }
-        if (strcmp(prop, "target") == 0) {
+        if (prop_id == JS_DOM_PROP_TARGET) {
             const char* v = elem->get_attribute(prop);
             return js_name_item(v ? v : "");
         }
-        if (strcmp(prop, "method") == 0) {
+        if (prop_id == JS_DOM_PROP_METHOD) {
             const char* v = elem->get_attribute("method");
             return js_name_item(_normalise_method(v));
         }
-        if (strcmp(prop, "enctype") == 0 || strcmp(prop, "encoding") == 0) {
+        if (prop_id == JS_DOM_PROP_ENCTYPE || prop_id == JS_DOM_PROP_ENCODING) {
             const char* v = elem->get_attribute("enctype");
             return js_name_item(_normalise_enctype(v));
         }
-        if (strcmp(prop, "acceptCharset") == 0) {
+        if (prop_id == JS_DOM_PROP_ACCEPT_CHARSET) {
             const char* v = elem->get_attribute("accept-charset");
             return js_name_item(v ? v : "");
         }
     }
     // HTMLTextAreaElement: wrap (default "soft"), rows (default 2), cols (default 20)
     if (_is_tag(elem, "textarea")) {
-        if (strcmp(prop, "wrap") == 0) {
+        if (prop_id == JS_DOM_PROP_WRAP) {
             const char* v = elem->get_attribute("wrap");
             return js_name_item(v ? v : "soft");
         }
-        if (strcmp(prop, "rows") == 0) {
+        if (prop_id == JS_DOM_PROP_ROWS) {
             return (Item){.item = i2it(_reflect_int_attr("rows", 2))};
         }
-        if (strcmp(prop, "cols") == 0) {
+        if (prop_id == JS_DOM_PROP_COLS) {
             return (Item){.item = i2it(_reflect_int_attr("cols", 20))};
         }
-        if (strcmp(prop, "maxLength") == 0) {
+        if (prop_id == JS_DOM_PROP_MAX_LENGTH) {
             const char* v = elem->get_attribute("maxlength");
             if (!v) return (Item){.item = i2it(-1)};
             char* end = nullptr; long n = strtol(v, &end, 10);
             return (Item){.item = i2it((end != v && n >= 0) ? n : -1)};
         }
-        if (strcmp(prop, "minLength") == 0) {
+        if (prop_id == JS_DOM_PROP_MIN_LENGTH) {
             return (Item){.item = i2it(_reflect_int_attr("minlength", 0))};
         }
     }
     // HTMLInputElement: maxLength (default -1), minLength (default 0), size (default 20)
     if (_is_tag(elem, "input")) {
-        if (strcmp(prop, "width") == 0) {
+        if (prop_id == JS_DOM_PROP_WIDTH) {
             return (Item){.item = i2it(_reflect_int_attr("width", 0))};
         }
-        if (strcmp(prop, "height") == 0) {
+        if (prop_id == JS_DOM_PROP_HEIGHT) {
             return (Item){.item = i2it(_reflect_int_attr("height", 0))};
         }
-        if (strcmp(prop, "maxLength") == 0) {
+        if (prop_id == JS_DOM_PROP_MAX_LENGTH) {
             const char* v = elem->get_attribute("maxlength");
             if (!v) return (Item){.item = i2it(-1)};
             char* end = nullptr; long n = strtol(v, &end, 10);
             return (Item){.item = i2it((end != v && n >= 0) ? n : -1)};
         }
-        if (strcmp(prop, "minLength") == 0) {
+        if (prop_id == JS_DOM_PROP_MIN_LENGTH) {
             return (Item){.item = i2it(_reflect_int_attr("minlength", 0))};
         }
-        if (strcmp(prop, "size") == 0) {
+        if (prop_id == JS_DOM_PROP_SIZE) {
             return (Item){.item = i2it(_reflect_int_attr("size", 20))};
         }
     }
     // HTMLSelectElement: size (default 0 unless multiple, but 0 is spec default)
-    if (_is_tag(elem, "select") && strcmp(prop, "size") == 0) {
+    if (_is_tag(elem, "select") && prop_id == JS_DOM_PROP_SIZE) {
         return (Item){.item = i2it(_reflect_int_attr("size", 0))};
     }
     const char* string_attr = nullptr;
@@ -9357,15 +9551,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // HTMLInputElement.defaultChecked — reflects `checked` content attribute
-    if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
+    if (prop_id == JS_DOM_PROP_DEFAULT_CHECKED && _is_tag(elem, "input")) {
         return (Item){.item = b2it(elem->has_attribute("checked"))};
     }
     // HTMLOptionElement.defaultSelected — reflects `selected` content attribute
-    if (strcmp(prop, "defaultSelected") == 0 && _is_tag(elem, "option")) {
+    if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED && _is_tag(elem, "option")) {
         return (Item){.item = b2it(elem->has_attribute("selected"))};
     }
     // HTMLLabelElement.htmlFor / HTMLOutputElement.htmlFor — reflects `for`
-    if (strcmp(prop, "htmlFor") == 0 &&
+    if (prop_id == JS_DOM_PROP_HTML_FOR &&
         (_is_tag(elem, "label") || _is_tag(elem, "output"))) {
         const char* v = elem->get_attribute("for");
         return js_name_item(v ? v : "");
@@ -9374,7 +9568,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // has been set. We do not yet track an explicit override (defaultValue
     // setter), so this always returns current descendant text content. That
     // matches WPT reset-form-html behavior where defaultValue tracks textContent.
-    if (strcmp(prop, "defaultValue") == 0 && _is_tag(elem, "output")) {
+    if (prop_id == JS_DOM_PROP_DEFAULT_VALUE && _is_tag(elem, "output")) {
         StrBuf* sb = strbuf_new_cap(32);
         collect_text_content((DomNode*)elem, sb);
         String* s = heap_create_name(sb->str ? sb->str : "");
@@ -9383,7 +9577,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     // HTMLOutputElement.value — descendant text content (getter); we do not
     // track an explicit value override yet.
-    if (strcmp(prop, "value") == 0 && _is_tag(elem, "output")) {
+    if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "output")) {
         StrBuf* sb = strbuf_new_cap(32);
         collect_text_content((DomNode*)elem, sb);
         String* s = heap_create_name(sb->str ? sb->str : "");
@@ -9392,7 +9586,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     // tabIndex — reflects `tabindex` as integer, otherwise returns the HTML
     // default for elements that are naturally focusable.
-    if (strcmp(prop, "tabIndex") == 0) {
+    if (prop_id == JS_DOM_PROP_TAB_INDEX) {
         long parsed = 0;
         if (js_dom_has_valid_int_attr(elem, "tabindex", &parsed))
             return (Item){.item = i2it(parsed)};
@@ -9404,7 +9598,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // missing/unknown — matches HTML spec "reflect ... limited to known
     // values" semantics. These are hints to the IME / on-screen keyboard;
     // the focus-time forwarding stub in update_focus_state() reads them.
-    if (strcmp(prop, "inputMode") == 0) {
+    if (prop_id == JS_DOM_PROP_INPUT_MODE) {
         const char* v = elem->get_attribute("inputmode");
         if (!v) return js_name_item("");
         // Canonicalise to lowercase and validate against the spec keyword set.
@@ -9422,7 +9616,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return js_name_item(out);
     }
-    if (strcmp(prop, "enterKeyHint") == 0) {
+    if (prop_id == JS_DOM_PROP_ENTER_KEY_HINT) {
         const char* v = elem->get_attribute("enterkeyhint");
         if (!v) return js_name_item("");
         char buf[16]; size_t i = 0;
@@ -9442,7 +9636,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // contentEditable returns "true"/"false"/"plaintext-only"/"inherit".
     // isContentEditable is the computed property — walks ancestors honouring
     // inheritance and ="false" islands.
-    if (strcmp(prop, "contentEditable") == 0) {
+    if (prop_id == JS_DOM_PROP_CONTENT_EDITABLE) {
         if (!elem->has_attribute("contenteditable")) {
             return js_name_item("inherit");
         }
@@ -9450,7 +9644,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             elem->get_attribute("contenteditable"));
         return js_name_item(out ? out : "inherit");
     }
-    if (strcmp(prop, "isContentEditable") == 0) {
+    if (prop_id == JS_DOM_PROP_IS_CONTENT_EDITABLE) {
         // Walk ancestors. Editable iff the nearest ce-bearing ancestor has
         // value true|""|plaintext-only AND we are not inside a ce="false"
         // subtree below that host.
@@ -9474,23 +9668,23 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return (Item){.item = ITEM_FALSE};
     }
-    if (strcmp(prop, "autocapitalize") == 0) {
+    if (prop_id == JS_DOM_PROP_AUTOCAPITALIZE) {
         return js_name_item(js_dom_get_autocapitalize(elem));
     }
-    if (strcmp(prop, "autocorrect") == 0) {
+    if (prop_id == JS_DOM_PROP_AUTOCORRECT) {
         return (Item){.item = b2it(js_dom_get_autocorrect(elem))};
     }
-    if (strcmp(prop, "spellcheck") == 0) {
+    if (prop_id == JS_DOM_PROP_SPELLCHECK) {
         return (Item){.item = b2it(js_dom_get_spellcheck(elem))};
     }
-    if (strcmp(prop, "writingSuggestions") == 0) {
+    if (prop_id == JS_DOM_PROP_WRITING_SUGGESTIONS) {
         return js_name_item(js_dom_get_writing_suggestions(elem));
     }
-    if (strcmp(prop, "dataset") == 0) {
+    if (prop_id == JS_DOM_PROP_DATASET) {
         return js_dom_dataset_property(elem_item);
     }
     // autofocus boolean reflection (HTML global attribute).
-    if (strcmp(prop, "autofocus") == 0) {
+    if (prop_id == JS_DOM_PROP_AUTOFOCUS) {
         return (Item){.item = b2it(elem->has_attribute("autofocus"))};
     }
 
@@ -9498,7 +9692,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // (HTMLButtonElement and HTMLInputElement). Per spec, `formAction` getter
     // returns the document's URL when the attribute is missing or empty.
     if (_is_tag(elem, "input") || _is_tag(elem, "button")) {
-        if (strcmp(prop, "formAction") == 0) {
+        if (prop_id == JS_DOM_PROP_FORM_ACTION) {
             const char* v = elem->get_attribute("formaction");
             if (v && *v) return js_name_item(v);
             // fall back to document URL
@@ -9510,19 +9704,19 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             }
             return js_name_item(doc_url);
         }
-        if (strcmp(prop, "formMethod") == 0) {
+        if (prop_id == JS_DOM_PROP_FORM_METHOD) {
             const char* v = elem->get_attribute("formmethod");
             return js_name_item(_normalise_method(v));
         }
-        if (strcmp(prop, "formEnctype") == 0) {
+        if (prop_id == JS_DOM_PROP_FORM_ENCTYPE) {
             const char* v = elem->get_attribute("formenctype");
             return js_name_item(_normalise_enctype(v));
         }
-        if (strcmp(prop, "formTarget") == 0) {
+        if (prop_id == JS_DOM_PROP_FORM_TARGET) {
             const char* v = elem->get_attribute("formtarget");
             return js_name_item(v ? v : "");
         }
-        if (strcmp(prop, "formNoValidate") == 0) {
+        if (prop_id == JS_DOM_PROP_FORM_NO_VALIDATE) {
             return (Item){.item = b2it(elem->has_attribute("formnovalidate"))};
         }
     }
@@ -9531,7 +9725,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // F-4: Constraint Validation API property getters
     // ------------------------------------------------------------------
     // willValidate: true if element is a candidate for constraint validation
-    if (strcmp(prop, "willValidate") == 0) {
+    if (prop_id == JS_DOM_PROP_WILL_VALIDATE) {
         bool is_form_ctrl = elem->tag_name && (
             strcasecmp(elem->tag_name, "input") == 0 ||
             strcasecmp(elem->tag_name, "select") == 0 ||
@@ -9541,11 +9735,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = b2it(!_elem_is_barred(elem))};
     }
     // validity: returns a ValidityState object
-    if (strcmp(prop, "validity") == 0) {
+    if (prop_id == JS_DOM_PROP_VALIDITY) {
         return _build_validity_state(elem);
     }
     // validationMessage: custom validity message or empty string
-    if (strcmp(prop, "validationMessage") == 0) {
+    if (prop_id == JS_DOM_PROP_VALIDATION_MESSAGE) {
         // Barred elements (disabled, readonly, etc.) always have empty validationMessage
         bool is_form_ctrl = elem->tag_name && (
             strcasecmp(elem->tag_name, "input") == 0 ||
@@ -9621,7 +9815,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
 
-    if (strcmp(prop, "__proto__") == 0) return js_get_prototype(elem_item);
+    if (prop_id == JS_DOM_PROP___PROTO__) return js_get_prototype(elem_item);
     bool proto_found = false;
     Item proto_value = js_prototype_lookup_ex(elem_item, prop_name, &proto_found);
     if (proto_found) return proto_value;
@@ -9679,13 +9873,14 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
 
     const char* prop = fn_to_cstr(prop_name);
+    JsDomPropId prop_id = js_dom_prop_id(prop);
     if (!prop) return ItemNull;
 
     // text node CharacterData aliases
     if (node->is_text() &&
-        (strcmp(prop, "data") == 0 ||
-         strcmp(prop, "nodeValue") == 0 ||
-         strcmp(prop, "textContent") == 0)) {
+        (prop_id == JS_DOM_PROP_DATA ||
+         prop_id == JS_DOM_PROP_NODE_VALUE ||
+         prop_id == JS_DOM_PROP_TEXT_CONTENT)) {
         DomText* text_node = node->as_text();
         // CharacterData setters accept DOMString, so numeric/boolean values
         // must be converted instead of being mistaken for an absent string.
@@ -9706,7 +9901,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
     DomElement* elem = node->as_element();
 
-    if (strcmp(prop, "style") == 0) {
+    if (prop_id == JS_DOM_PROP_STYLE) {
         const char* style_text = fn_to_cstr(value);
         elem->set_attribute("style", style_text ? style_text : "");
         elem->set_styles_resolved(false);
@@ -9732,10 +9927,10 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         return 0.0f;
     };
 
-    if (strcmp(prop, "scrollTop") == 0 || strcmp(prop, "scrollLeft") == 0) {
+    if (prop_id == JS_DOM_PROP_SCROLL_TOP || prop_id == JS_DOM_PROP_SCROLL_LEFT) {
         float scroll_value = item_to_scroll_value(value);
 
-        bool is_vertical = strcmp(prop, "scrollTop") == 0;
+        bool is_vertical = prop_id == JS_DOM_PROP_SCROLL_TOP;
         bool is_root_scroll_target =
             (elem->tag_name && (strcasecmp(elem->tag_name, "html") == 0 ||
                                 strcasecmp(elem->tag_name, "body") == 0));
@@ -9796,7 +9991,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         return value;
     }
 
-    if (strcmp(prop, "srcdoc") == 0 && _is_tag(elem, "iframe")) {
+    if (prop_id == JS_DOM_PROP_SRCDOC && _is_tag(elem, "iframe")) {
         const char* srcdoc = fn_to_cstr(value);
         elem->set_attribute("srcdoc", srcdoc ? srcdoc : "");
         // srcdoc can be assigned after the browsing context was lazily cached;
@@ -9807,7 +10002,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
 
     // className
-    if (strcmp(prop, "className") == 0) {
+    if (prop_id == JS_DOM_PROP_CLASS_NAME) {
         const char* class_str = fn_to_cstr(value);
         if (class_str) {
             // set_attribute owns the pooled class cache; writing class_names
@@ -9825,7 +10020,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // "inherit" (attribute removed). Invalid values are a SyntaxError — we
     // log and ignore; the proper raise will be wired through the JS
     // DOMException machinery in a follow-up.
-    if (strcmp(prop, "contentEditable") == 0) {
+    if (prop_id == JS_DOM_PROP_CONTENT_EDITABLE) {
         const char* s = nullptr;
         if (get_type_id(value) == LMD_TYPE_BOOL) {
             s = it2b(value) ? "true" : "false";
@@ -9853,20 +10048,20 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         return value;
     }
 
-    if (strcmp(prop, "autocapitalize") == 0) {
+    if (prop_id == JS_DOM_PROP_AUTOCAPITALIZE) {
         const char* s = js_dom_to_attr_cstr(value);
         elem->set_attribute("autocapitalize", s);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
-    if (strcmp(prop, "autocorrect") == 0) {
+    if (prop_id == JS_DOM_PROP_AUTOCORRECT) {
         elem->set_attribute("autocorrect", js_is_truthy(value) ? "on" : "off");
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
-    if (strcmp(prop, "spellcheck") == 0) {
+    if (prop_id == JS_DOM_PROP_SPELLCHECK) {
         const char* s = js_is_truthy(value) ? "true" : "false";
         TypeId vt = get_type_id(value);
         if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
@@ -9878,7 +10073,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         return value;
     }
 
-    if (strcmp(prop, "writingSuggestions") == 0) {
+    if (prop_id == JS_DOM_PROP_WRITING_SUGGESTIONS) {
         const char* s = js_is_truthy(value) ? "true" : "false";
         TypeId vt = get_type_id(value);
         if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
@@ -9890,7 +10085,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
 
     // id
-    if (strcmp(prop, "id") == 0) {
+    if (prop_id == JS_DOM_PROP_ID) {
         const char* id_str = fn_to_cstr(value);
         if (id_str && elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
@@ -9907,7 +10102,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
 
     // innerText: replace children while preserving line breaks as <br> nodes.
-    if (strcmp(prop, "innerText") == 0) {
+    if (prop_id == JS_DOM_PROP_INNER_TEXT) {
         const char* text_str = fn_to_cstr(value);
         if (text_str) {
             js_dom_detach_all_children(elem);
@@ -9954,7 +10149,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
 
     // textContent
-    if (strcmp(prop, "textContent") == 0) {
+    if (prop_id == JS_DOM_PROP_TEXT_CONTENT) {
         // Node.textContent performs DOMString conversion; reactive libraries
         // routinely assign numbers directly from their data model.
         const char* text_str = value.item == ITEM_NULL
@@ -9985,7 +10180,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     }
 
     // v12b: innerHTML setter — parse HTML and replace children
-    if (strcmp(prop, "innerHTML") == 0) {
+    if (prop_id == JS_DOM_PROP_INNER_HTML) {
         const char* html_str = fn_to_cstr(value);
         if (!html_str) return ItemNull;
         js_dom_replace_inner_html(elem, html_str, true);
@@ -9997,7 +10192,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // content attribute. `checked` writes the live "checkedness" flag
     // (HTML §4.10.5.3.21).
     // ------------------------------------------------------------------
-    if (strcmp(prop, "checked") == 0 && _is_tag(elem, "input")) {
+    if (prop_id == JS_DOM_PROP_CHECKED && _is_tag(elem, "input")) {
         _set_checkedness(elem, js_is_truthy(value));
         // Mark the dirty checkedness flag so subsequent `checked` content
         // attribute changes do not override the value.
@@ -10011,7 +10206,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // input.defaultChecked setter — reflects `checked` attribute. Per spec,
     // when the dirty checkedness flag is false, current checkedness also
     // updates to match the new default.
-    if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
+    if (prop_id == JS_DOM_PROP_DEFAULT_CHECKED && _is_tag(elem, "input")) {
         bool t = js_is_truthy(value);
         if (t) elem->set_attribute("checked", "");
         else   elem->remove_attribute("checked");
@@ -10029,24 +10224,24 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // F-5: HTMLSelectElement / HTMLOptionElement IDL setters
     // ------------------------------------------------------------------
     if (_is_tag(elem, "select")) {
-        if (strcmp(prop, "value") == 0) {
+        if (prop_id == JS_DOM_PROP_VALUE) {
             const char* sv = fn_to_cstr(value);
             if (!sv) sv = "";
             js_dom_select_apply_value(elem, sv, false);
             js_dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
             return value;
         }
-        if (strcmp(prop, "selectedIndex") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTED_INDEX) {
             _select_set_selected_index(elem, _select_index_from_item(value));
             return value;
         }
-        if (strcmp(prop, "length") == 0) {
+        if (prop_id == JS_DOM_PROP_LENGTH) {
             js_dom_select_set_length_bridge((void*)elem, value);
             return value;
         }
     }
     if (_is_tag(elem, "option")) {
-        if (strcmp(prop, "selected") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTED) {
             bool selected = js_is_truthy(value);
             js_dom_apply_option_selected(elem, selected);
             return value;
@@ -10054,7 +10249,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         // option.defaultSelected setter — reflects `selected` attribute.
         // When the dirty selectedness flag is false, current selectedness
         // updates to match the new default.
-        if (strcmp(prop, "defaultSelected") == 0) {
+        if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED) {
             bool t = js_is_truthy(value);
             if (t) elem->set_attribute("selected", "");
             else   elem->remove_attribute("selected");
@@ -10071,23 +10266,23 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             }
             return value;
         }
-        if (strcmp(prop, "value") == 0) {
+        if (prop_id == JS_DOM_PROP_VALUE) {
             const char* sv = fn_to_cstr(value);
             elem->set_attribute("value", sv ? sv : "");
             return value;
         }
-        if (strcmp(prop, "text") == 0) {
+        if (prop_id == JS_DOM_PROP_TEXT) {
             const char* sv = fn_to_cstr(value);
             js_dom_set_option_text_bridge((void*)elem, sv ? sv : "");
             return value;
         }
-        if (strcmp(prop, "defaultSelected") == 0) {
+        if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED) {
             if (js_is_truthy(value)) elem->set_attribute("selected", "");
             else elem->remove_attribute("selected");
             return value;
         }
     }
-    if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+    if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         const char* s = fn_to_cstr(value);
         if (!s) s = "";
         elem->set_attribute("value", s);
@@ -10103,19 +10298,19 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // expando/attribute fallback. Per HTML §4.10.6.
     // ------------------------------------------------------------------
     if (tc_is_text_control_elem(elem)) {
-        if (strcmp(prop, "value") == 0) {
+        if (prop_id == JS_DOM_PROP_VALUE) {
             return js_dom_text_control_set_value_bridge((void*)elem, value);
         }
-        if (strcmp(prop, "selectionStart") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION_START) {
             return js_dom_text_control_set_selection_start_bridge((void*)elem, value);
         }
-        if (strcmp(prop, "selectionEnd") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION_END) {
             return js_dom_text_control_set_selection_end_bridge((void*)elem, value);
         }
-        if (strcmp(prop, "selectionDirection") == 0) {
+        if (prop_id == JS_DOM_PROP_SELECTION_DIRECTION) {
             return js_dom_text_control_set_selection_direction_bridge((void*)elem, value);
         }
-        if (strcmp(prop, "defaultValue") == 0) {
+        if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
             return js_dom_text_control_set_default_value_bridge((void*)elem, value);
         }
     }
@@ -10128,7 +10323,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     //              IDL→HTML name mapping like readOnly→readonly)
     // ------------------------------------------------------------------
     {
-        if (strcmp(prop, "tabIndex") == 0) {
+        if (prop_id == JS_DOM_PROP_TAB_INDEX) {
             long tab_index = 0;
             TypeId value_type = get_type_id(value);
             if (value_type == LMD_TYPE_INT) {
@@ -10230,7 +10425,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         }
 
         // <input>.type setter — lowercase, fall back to "text" for unknown.
-        if (strcmp(prop, "type") == 0 && _is_tag(elem, "input")) {
+        if (prop_id == JS_DOM_PROP_TYPE && _is_tag(elem, "input")) {
             const char* s = fn_to_cstr(value);
             if (s && *s) {
                 char buf[32];
