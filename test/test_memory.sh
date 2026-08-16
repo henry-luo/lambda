@@ -51,7 +51,6 @@ compile_with_asan() {
         "test_strbuf.c"
         "test_strview.c"
         "test_variable_pool.c"
-        "test_num_stack.c"
         "test_mime_detect.c"
         "test_mir.c"
         "test_validator.c"
@@ -73,9 +72,6 @@ compile_with_asan() {
                 ;;
             "test_variable_pool.c")
                 deps="../lib/mem-pool/src/variable.c ../lib/mem-pool/src/buffer.c ../lib/mem-pool/src/utils.c -I../lib/mem-pool/include"
-                ;;
-            "test_num_stack.c")
-                deps="../lib/num_stack.c"
                 ;;
             "test_mime_detect.c")
                 deps="../lib/mime-detect.c ../lib/mime-types.c"

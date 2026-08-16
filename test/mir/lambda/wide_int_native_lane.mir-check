@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "description": "i64/u64 `+ - *` lower to machine mul/add/sub on the wide lane instead of boxing through fn_add/fn_sub/fn_mul (D2.2.3). The accumulators pin the loop-carried case: at most ONE number home per function, taken at the boxed return boundary, never one per iteration — per-iteration homes are never reclaimed inside a loop body and used to exhaust the side stack around a million iterations (D5.2.3 / DO24). The u64 accumulator additionally forbids coerce_uint64, whose box/coerce/unbox round trip is the identity on a value already in the u64 lane.",
+  "checks": [
+    {
+      "in_func": "_wide_i64_#",
+      "expect": [
+        "mul\t%r",
+        "add\t%r",
+        "sub\t%r"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add",
+        "call\tfn_sub_p, fn_sub",
+        "call\tfn_mul_p, fn_mul",
+        "call\tbox_int64_value_p, box_int64_value",
+        "call\tit2l_p, it2l"
+      ]
+    },
+    {
+      "in_func": "_wide_u64_#",
+      "expect": [
+        "mul\t%r",
+        "add\t%r",
+        "sub\t%r"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add",
+        "call\tfn_sub_p, fn_sub",
+        "call\tfn_mul_p, fn_mul",
+        "call\tbox_uint64_value_p, box_uint64_value",
+        "call\tcoerce_uint64_p, coerce_uint64",
+        "call\tit2u_p, it2u"
+      ]
+    },
+    {
+      "in_func": "_accumulate_i64_#",
+      "expect": [
+        "mul\t%r",
+        "add\t%r"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add",
+        "call\tfn_mul_p, fn_mul",
+        "call\tit2l_p, it2l"
+      ],
+      "count": {
+        "call\tbox_int64_value_p, box_int64_value": {
+          "max": 1
+        }
+      }
+    },
+    {
+      "in_func": "_accumulate_u64_#",
+      "expect": [
+        "mul\t%r",
+        "add\t%r"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add",
+        "call\tfn_mul_p, fn_mul",
+        "call\tcoerce_uint64_p, coerce_uint64",
+        "call\tit2u_p, it2u"
+      ],
+      "count": {
+        "call\tbox_uint64_value_p, box_uint64_value": {
+          "max": 1
+        }
+      }
+    }
+  ]
+}
