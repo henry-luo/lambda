@@ -10,13 +10,19 @@
 > **[measured 2026-08-14]** below were revised from proposal fidelity to
 > observed behaviour once shape 2 was emitting; §1.4 corrects §1.2's site
 > split, §8 is re-costed against it, and RVO10 is new.
-> Ledger **RV1–RV18** (+ addenda RV3a, RV10a, RV14a, RV17a) + open issues
+> Ledger **RV1–RV18** (+ addenda RV3a, RV10a, RV14a, **RV15a**, RV17a) + open issues
 > **RVO1–RVO12**. **RV17/RV17a** (ruled 2026-08-15, §2.1) are what make
 > **shape 4 reachable from ordinary source**: an `if` whose arms differ joins
 > to `T | error` — the union — instead of widening to ANY, so a `T^E` body
 > finally names its value component and can be admitted to the native lane.
 > Landed for `T = float` (impl log §5). **RV18** (same day) makes the body
-> producer publish its carrier so the boundary stops inferring one. **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
+> producer publish its carrier so the boundary stops inferring one.
+> **RV14 IMPLEMENTED 2026-08-15** — helper-call adopts are gone in Lambda
+> (417 corpus sites → **0**), scoped per front-end because LambdaJS still
+> emits v2 until P2.5. **RV15a** records the space exposure that leaves
+> behind: AWFY peaks at **zero** number-stack slots, which is the measured
+> basis for scoping the reclaim.
+> **RV14/RV15/RV16** (ruled 2026-08-14, §4a) settle the C
 > boundary: a C helper or sys func returns a wide scalar by pushing it on the
 > number stack and returning an ordinary Item, because it owns no watermark
 > to tear down; the eager per-call restore that made that unsafe is retired
@@ -642,6 +648,54 @@ kills anything still living in the reclaimed region, so it is sound only when
 no loop-carried wide value lives above the loop-entry watermark. RV16 answers
 this for the case that matters; the residue is **RVO11**.
 
+#### RV15a — the measured space exposure, **[measured 2026-08-15]**
+
+RV14 shipped without the reclaim, which makes the exposure observable rather
+than hypothetical. It was measured with a temporary peak probe in
+`lambda_side_number_alloc_for` (env-gated, ~15 lines, removed after) recording
+the deepest number-stack depth per run. **This is the empirical basis for
+scoping the reclaim, and it substantially narrows it.**
+
+| corpus | peak number-stack depth |
+|---|---|
+| AWFY — all 30 scripts | **0 slots** |
+| `test/lambda` — 140 scripts | only **7** touch the number stack at all |
+| deepest anywhere (`int64.ls`) | **164 slots = 1,312 bytes = 0.002% of the 64 MB reserve** |
+
+All 31 benchmark scripts run clean: no failures, no `number-side-stack`
+overflow, ~50,000× margin at the worst point. The remaining six: `math_random`
+25 slots, `js_array_props_tail_bridge` 16, and four in single digits.
+
+**Why AWFY is exactly zero rather than merely small** — and this is the part
+that should shape the reclaim. Those benchmarks compute in normal doubles and
+`int`, and `flt2it` boxes **both inline**: zero, and any double whose bits
+carry `ITEM_DBL_MASK`, never touch the number stack. Only two producers reach
+it at all — `box_float_number_stack` (tiny/subnormal doubles only) and
+`box_int64_value`, which allocates on **every** call by construction ("INT64
+never uses an inline Item… regardless of magnitude"). AWFY uses neither.
+
+**Consequence for the reclaim's design.** RV15's motivating example —
+`for i in 1 to 1_000_000 { sum = sum + arr[i] }` over an `int64[]` — is
+mechanically correct: `int64` element reads do push, every iteration. But it
+is **not representative of any workload in the tree**. The reclaim's real
+target population is therefore narrow and nameable: *loops that box `int64`
+(or subnormal floats) per iteration*, not "loops" in general. A reclaim that
+pays its cost on every loop would be taxing a population of zero to protect a
+population the corpus does not contain.
+
+That argues for the statement-boundary form over the back-edge form on cost
+grounds as well as structural ones, and it argues for emitting the reclaim
+**only where the emitter saw an `int64`-class boxing call** — the audit bit
+RV15 already proposes, now with evidence that the bit will almost always be
+false.
+
+**Severity, also measured.** A synthetic `int64` accumulator loop runs clean
+at 1M iterations (~8 MB of the reserve) and at 9M returns a **clean
+`lambda_stack_overflow_error`**, because `box_int64_value` null-checks its
+allocation. The failure mode is a reported error, never a dangling pointer —
+the payload stays valid for the whole activation either way. So the reclaim
+closes a *complexity bound*; it is not what makes RV14 memory-safe.
+
 **RV16 — A wide-capable mutable local owns a number slot; assignment stores
 into it.** *(ruled 2026-08-14)*
 
@@ -1054,6 +1108,13 @@ numbering stays traceable.)*
   direction, and it reuses the pass RV16 would otherwise retire — so
   sequencing matters: the coloring pass must outlive RV16 long enough to
   validate the reclaims, or the check needs its own liveness.
+
+- **RVO11 priority 2026-08-15 — measured down, see RV15a (§4a).** With RV14
+  shipped the exposure is observable: AWFY peaks at **0** number-stack slots
+  across all 30 scripts, and the deepest point in 140 corpus scripts is 1,312
+  bytes (0.002% of the reserve). The reclaim RVO11 gates therefore closes a
+  complexity bound rather than a live hazard, and its target population is
+  specifically `int64`-boxing loops — not loops in general.
 
 - **RVO11 status 2026-08-15 — narrowed to ONE unverified fact.** RV16 shipped
   (P2.7.1) and the reclaim was designed against the tree. The obligation is now

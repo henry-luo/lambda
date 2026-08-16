@@ -19861,9 +19861,8 @@ static Item js_typed_array_callback_algorithm(Item obj, Item* args, int argc,
 // Join and toLocaleString differ only in the separator and in how each
 // element is stringified; the walk, the error lane and the null/undefined
 // skip are identical.
-static Item js_array_like_join_kernel(Item obj, bool typed_array,
+static Item js_array_like_join_kernel(Item obj, bool typed_array, int64_t length,
         const char* separator, int separator_len, bool locale) {
-    int length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     StrBuf* buffer = strbuf_new();
     Item locale_key = locale ? js_name_item("toLocaleString", 14) : ItemNull;
     for (int i = 0; i < length; i++) {
@@ -19912,8 +19911,9 @@ static Item js_array_like_join_kernel(Item obj, bool typed_array,
 }
 
 static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array) {
-    // ES Join snapshots the length before separator coercion; a separator
-    // valueOf/toString may resize the receiver, but cannot change iteration.
+    // ES Join snapshots the length before separator coercion; retaining this
+    // value prevents separator ToString from changing the iteration count.
+    int64_t length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     const char* separator = ",";
     int separator_len = 1;
     if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED &&
@@ -19925,13 +19925,13 @@ static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array)
             separator_len = (int)separator_string->len;
         }
     }
-    return js_array_like_join_kernel(obj, typed_array, separator, separator_len, false);
+    return js_array_like_join_kernel(obj, typed_array, length, separator, separator_len, false);
 }
 
 static Item js_array_like_to_locale_string(Item obj, bool typed_array) {
-    int length = typed_array ? js_typed_array_length(obj) : obj.array->length;
+    int64_t length = typed_array ? js_typed_array_length(obj) : obj.array->length;
     if (length <= 0) return js_name_item("", 0);
-    return js_array_like_join_kernel(obj, typed_array, ",", 1, true);
+    return js_array_like_join_kernel(obj, typed_array, length, ",", 1, true);
 }
 
 static Item js_indexed_intrinsic_algorithm(Item obj,

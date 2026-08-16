@@ -28,6 +28,11 @@
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
 extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
 extern Type TYPE_NUMBER, TYPE_DECIMAL, TYPE_BINARY;
+// NOTE: do NOT reach for `TYPE_LIST` as a success_type here. It is a bare
+// `Type` singleton ({.type_id = LMD_TYPE_ARRAY}), but consumers of an
+// ARRAY-typed Type* cast it to `TypeArray*` and read `->nested` — past the end
+// of the global. ASan catches it as a global-buffer-overflow. An array success
+// type needs a real TypeArray instance, not the singleton.
 
 // ============================================================================
 // Runtime-only declarations (not needed for dylib / AST metadata builds)
@@ -1328,6 +1333,102 @@ JitImport jit_runtime_imports[] = {
     {"int2it", FPTR(int2it),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+
+    // String/binary builders and the arg-extreme pair, declared `&TYPE_ANY`.
+    // Every return path was read:
+    //   trim/trim_start/trim_end/lower/upper -> ItemError | ItemNull |
+    //       str_item (the input string Item) | s2it | y2it  — string/symbol
+    //       POINTERS, never a number home
+    //   join2      -> ItemError | s2it
+    //   find3      -> fn_find_impl: ItemError | {.array}
+    //   replace3/4 -> fn_replace_impl: ItemError | ItemNull | str_item | s2it | y2it
+    //   split2     -> ItemError | fn_array_split (ItemError | {.array}) | {.array}
+    //   binary     -> the input when already BINARY | ItemError | x2it(bin) |
+    //       binary_from_typed_array / _dataview (ItemError | ItemNull | x2it)
+    //   argmin/max -> vector_arg_extreme: ItemError | ItemNull | i2it (INLINE
+    //       int boxing — an index, not a number-stack home)
+    //
+    // Deliberately NOT claimed: `fn_string_ascii_at`, whose non-string path
+    // falls back to `item_at()` and can hand back any element, wide included.
+    {"fn_binary", FPTR(fn_binary),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_find3", FPTR(fn_find3),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_replace3", FPTR(fn_replace),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_replace4", FPTR(fn_replace4),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_join2", FPTR(fn_join2),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_split2", FPTR(fn_split),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_trim", FPTR(fn_trim),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_trim_start", FPTR(fn_trim_start),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_trim_end", FPTR(fn_trim_end),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_lower", FPTR(fn_lower),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_upper", FPTR(fn_upper),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_argmin", FPTR(fn_argmin),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_argmax", FPTR(fn_argmax),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+
+    // Container builders declared `&TYPE_ANY`: every return path is an Array
+    // (or ArrayNum) or an error Item — verified by reading each body — so the
+    // caller's classify-and-rehome cluster is waste. Same treatment as
+    // `fn_fill` above, and the same reason the type-driven rule cannot reach
+    // them: ANY *is* wide-capable, so it correctly declines to narrow.
+    //
+    // Effects are deliberately conservative — MAY_GC because they allocate,
+    // REENTRY_UNKNOWN because `sort` can call a user comparator. Only the
+    // RESULT_SCALAR_STABLE bit is being claimed here.
+    {"fn_take", FPTR(fn_take),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_drop", FPTR(fn_drop),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_unique", FPTR(fn_unique),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_reverse", FPTR(fn_reverse),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_reshape", FPTR(fn_reshape),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_sort1", FPTR(fn_sort1),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_sort2", FPTR(fn_sort2),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_slice3", FPTR(fn_slice3),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"pn_push", FPTR(pn_push),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"pn_splice", FPTR(pn_splice),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
 
     // fn_fill's every return path is a container or an error Item — Array
     // (n == 0, and the spreadable non-numeric case) or ArrayNum (ELEM_INT /
