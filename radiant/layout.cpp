@@ -58,26 +58,46 @@ void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y) {
     }
 }
 
-void layout_shift_view_tree(View* view, float offset_x, float offset_y) {
+static void layout_shift_view_tree_internal(View* view, float offset_x, float offset_y,
+                                             bool preserve_out_of_flow_text,
+                                             bool text_rects_are_local) {
     if (!view) return;
     view->x += offset_x;
     view->y += offset_y;
     if (view->view_type == RDT_VIEW_TEXT) {
-        layout_shift_text_rects(lam::view_require<RDT_VIEW_TEXT>(view), offset_x, offset_y);
+        if (!text_rects_are_local) {
+            layout_shift_text_rects(lam::view_require<RDT_VIEW_TEXT>(view), offset_x, offset_y);
+        }
         return;
     }
     if (!view->is_group()) return;
     for (View* child = lam::view_require_element(view)->first_placed_child();
          child; child = child->next()) {
-        layout_shift_view_tree(child, offset_x, offset_y);
+        ViewBlock* child_block = lam::view_as_block(child);
+        // Positioned text rects stay in their containing-block coordinate space;
+        // the ancestor translation is applied when their visual bounds resolve.
+        bool child_text_rects_are_local = preserve_out_of_flow_text &&
+            (text_rects_are_local ||
+             (child_block && layout_block_is_out_of_flow_positioned(child_block)));
+        layout_shift_view_tree_internal(
+            child, offset_x, offset_y, preserve_out_of_flow_text,
+            child_text_rects_are_local);
     }
+}
+
+void layout_shift_view_tree(View* view, float offset_x, float offset_y) {
+    layout_shift_view_tree_internal(view, offset_x, offset_y, false, false);
 }
 
 void layout_shift_view_children(View* view, float offset_x, float offset_y) {
     if (!view || !view->is_group()) return;
     for (View* child = lam::view_require_element(view)->first_placed_child();
          child; child = child->next()) {
-        layout_shift_view_tree(child, offset_x, offset_y);
+        ViewBlock* child_block = lam::view_as_block(child);
+        bool text_rects_are_local = child_block &&
+            layout_block_is_out_of_flow_positioned(child_block);
+        layout_shift_view_tree_internal(
+            child, offset_x, offset_y, true, text_rects_are_local);
     }
 }
 
@@ -260,6 +280,20 @@ static float layout_scrollport_start(DomElement* elem, bool x_axis) {
     return value;
 }
 
+static float layout_scroll_nearest_position(float target_start, float target_size,
+                                            float current_position, float viewport_size) {
+    if (target_size <= 0.0f || viewport_size <= 0.0f) return current_position;
+    float target_end = target_start + target_size;
+    float viewport_end = current_position + viewport_size;
+    if (target_start < current_position) {
+        return target_size < viewport_size ? target_start : target_end - viewport_size;
+    }
+    if (target_end > viewport_end) {
+        return target_size < viewport_size ? target_end - viewport_size : target_start;
+    }
+    return current_position;
+}
+
 static DomElement* layout_nearest_scroll_container(DomElement* target,
                                                    DomElement* root) {
     if (!target) return nullptr;
@@ -267,6 +301,11 @@ static DomElement* layout_nearest_scroll_container(DomElement* target,
         if (!cur->is_element() || !cur->is_block()) continue;
         DomElement* ancestor = cur->as_element();
         if (ancestor == root) return nullptr;
+        if (ancestor->tag() == MARKUP_NAME_BODY && ancestor->parent == root) {
+            // CSSOM View routes document scrolling through the viewport's
+            // scrolling element; the body pane is only its layout proxy.
+            continue;
+        }
         if (ancestor->scroller && ancestor->scroll_mut()->pane) {
             return ancestor;
         }
@@ -301,6 +340,19 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
                  scroll_x, scroll_y,
                  scroll_container->tag_name ? scroll_container->tag_name : "?");
     } else {
+        float current_scroll_x = 0.0f;
+        if (root_block->scroller && root_block->scroll()->pane) {
+            DocState* state = doc->state;
+            scroll_state_get_position_for_view(
+                state, static_cast<View*>(root_block), root_block->scroll()->pane,
+                &current_scroll_x, nullptr, nullptr, nullptr);
+        }
+        float viewport_width = layout_content_size_from_border_box(
+            root_block, root_block->width, true);
+        float scrollport_origin_x = layout_scrollport_start(root_elem, true);
+        target_x = layout_scroll_nearest_position(
+            target_x - scrollport_origin_x, target->width,
+            current_scroll_x, viewport_width);
         if (target_x < 0.0f) target_x = 0.0f;
         if (target_y < 0.0f) target_y = 0.0f;
         doc->pending_viewport_scroll_x = target_x;
@@ -3309,10 +3361,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         float root_block_start_margin = body_mode == WM_VERTICAL_RL
             ? body_margin_right : body_margin_left;
         float root_block_end_margin = body_mode == WM_VERTICAL_LR
-            ? body_margin_right : trailing_child_margin;
-        // CSS Writing Modes: a vertical-lr root body uses both physical
-        // block-axis margins; the vertical-rl flow-end margin is already
-        // represented by its final in-flow child margin.
+            ? max(body_margin_right, trailing_child_margin)
+            : max(body_margin_left, trailing_child_margin);
+        // CSS Writing Modes: the final in-flow child margin contributes at the
+        // root body's block-end edge in either vertical direction.
         html->width = root_block_start_margin + content_block_size +
             root_block_end_margin;
         html->content_width = html->width;
@@ -3678,6 +3730,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         layout_finalize_static_positioned_abs_descendants(root_block);
+        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target != nullptr;
+        // CSSOM View scrollIntoView uses the target's current bounding box;
+        // viewport scroll requests must resolve first so sticky layout sees the
+        // post-scroll position instead of accumulating a pre-scroll translation.
+        if (has_scroll_into_view_target) {
+            layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
+        }
         layout_resolve_pending_scroll_into_view(doc, root_block);
         if (root_block->scroller && root_block->scroll_mut()->pane) {
             ScrollPane* pane = root_block->scroll()->pane;
