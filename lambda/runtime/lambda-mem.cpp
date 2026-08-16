@@ -11,7 +11,6 @@
 #include "lambda-error.h"
 #include "../jube/jube_registry.h"
 #include "../js/js_runtime.h"
-#include "../js/js_exec_profile_weak.h"
 #include "../js/js_typed_array.h"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-stack.h"
@@ -444,7 +443,6 @@ void heap_init() {
 // Item roots. Native C/C++ frames are never inspected.
 __attribute__((noinline))
 extern "C" void heap_gc_collect(void) {
-    JS_WEAK_PROPERTY_SET_BRANCH("heap_gc_collect");
     if (!context || !context->heap || !context->heap->gc) return;
     gc_heap_t* gc = context->heap->gc;
 
@@ -650,7 +648,6 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
 // allocate variable-size data (items[], data buffers) from the GC data zone
 // these are bump-allocated, not individually freeable — reclaimed at GC
 extern "C" void* heap_data_alloc(size_t size) {
-    JS_WEAK_PROPERTY_SET_BRANCH("heap_data_alloc");
     if (!context || !context->heap) {
         log_error("heap_data_alloc: context=%p — called before runtime init", (void*)context);
         return NULL;

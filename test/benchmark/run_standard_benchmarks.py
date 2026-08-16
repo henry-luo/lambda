@@ -15,11 +15,19 @@ import time
 
 PROJECT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 DEFAULT_ENGINES = "mir,lambdajs,quickjs,nodejs"
+# Strings emitted only by a LAMBDA_JS_EXEC_PROFILE build — these are opt-trace
+# event names from the #ifdef block in lambda/js/js_exec_profile.cpp.
+#
+# They must be names the instrumented binary really contains AND a clean build
+# does not. The previous list named the retired JS_EXEC_PROFILE profiler and
+# js_profile_property_set; neither survives in any build, so the guard matched
+# nothing and passed instrumented binaries as clean. "JS_OPT_TRACE" is not
+# usable either — lambda/main.cpp reads it with an ungated getenv(), so the
+# literal is in every build and would reject clean release binaries.
 PROFILE_MARKERS = [
-    "JS_EXEC_PROFILE",
-    "JS_EXEC_PROFILE_OUT",
-    "js_profile_property_set",
-    "gc_sweep_walked_objects",
+    "scope_lookup_cache_hit",
+    "named_fast_probe",
+    "regex_permanent_cache_hit",
 ]
 # Emitted by the debug banner in lambda/main.cpp; absent from release builds.
 DEBUG_BUILD_MARKER = "Running DEBUG build"
@@ -186,8 +194,6 @@ def run_test262_baseline(log_dir):
             f"see {prepare_log}") from None
     try:
         baseline_env = os.environ.copy()
-        baseline_env.pop("JS_EXEC_PROFILE", None)
-        baseline_env.pop("JS_EXEC_PROFILE_OUT", None)
         elapsed_s = run_command(TEST262_BASELINE_CMD, env=baseline_env, log_path=result_log)
     except subprocess.CalledProcessError as error:
         elapsed_s = getattr(error, "elapsed_s", 0.0)
@@ -437,8 +443,6 @@ def main():
     cache_info = cache_lambda_exe(results_output)
 
     env = os.environ.copy()
-    env.pop("JS_EXEC_PROFILE", None)
-    env.pop("JS_EXEC_PROFILE_OUT", None)
     env["LAMBDA_BENCH_PROFILE_CHECK"] = "passed" if not args.skip_profile_check else "skipped"
     env["LAMBDA_BENCH_POWER_CHECK"] = power_state
     env["LAMBDA_BENCH_LOG_DIR"] = log_dir

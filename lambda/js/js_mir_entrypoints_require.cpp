@@ -387,11 +387,11 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     // Canonical finalized artifact (MT2); see the JS path above.
 #ifndef NDEBUG
-    const bool ts_legacy_mir_dump = getenv("JS_MIR_DUMP") != NULL;
+    const bool ts_mir_dump_default_enabled = true;
 #else
-    const bool ts_legacy_mir_dump = false;
+    const bool ts_mir_dump_default_enabled = false;
 #endif
-    mir_dump_finalized(ctx, "temp/ts_mir_dump.txt", ts_legacy_mir_dump);
+    mir_dump_finalized(ctx, "temp/ts_mir_dump.txt", ts_mir_dump_default_enabled);
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir-ast: NULL labels detected");
@@ -841,16 +841,15 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Canonical finalized artifact (MT2): transpile_js_mir_ast has already run
     // MIR_finish_func/MIR_finish_module, so this is the finalized stage the
     // emission tests read. LAMBDA_MIR_DUMP_PATH names a private artifact and
-    // works in release builds; JS_MIR_DUMP keeps the legacy developer path.
-    // TODO: enable after MIR's post-finish operand mutation contract is
-    // verified on every backend; the volume gate currently observes the
-    // untouched finalized list.
+    // works in release builds; the default path matches transpile-mir.cpp's
+    // Lambda-side dump — debug builds write it, and mir_dump_finalized's own
+    // --no-log gate keeps test runs from emitting it.
 #ifndef NDEBUG
-    const bool js_legacy_mir_dump = getenv("JS_MIR_DUMP") != NULL;
+    const bool js_mir_dump_default_enabled = true;
 #else
-    const bool js_legacy_mir_dump = false;
+    const bool js_mir_dump_default_enabled = false;
 #endif
-    mir_dump_finalized(ctx, "temp/js_mir_dump.txt", js_legacy_mir_dump);
+    mir_dump_finalized(ctx, "temp/js_mir_dump.txt", js_mir_dump_default_enabled);
 
     // Pre-link validation: abort gracefully if NULL labels found
     if (!jm_validate_mir_labels(ctx)) {

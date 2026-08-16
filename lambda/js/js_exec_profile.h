@@ -76,20 +76,12 @@ typedef struct JsOptTraceCounter {
 } JsOptTraceCounter;
 
 #ifdef LAMBDA_JS_EXEC_PROFILE
-#define JS_PROFILED_PUSH_D_NAME "js_profiled_push_d"
-#define JS_PROFILED_IT2D_NAME "js_profiled_it2d"
-#define JS_PROFILED_IT2I_NAME "js_profiled_it2i"
-
 int js_opt_trace_is_enabled(void);
 void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
                          JsOptTraceOutcome outcome);
 void js_opt_trace_dump(void);
 
 #else
-#define JS_PROFILED_PUSH_D_NAME "push_d"
-#define JS_PROFILED_IT2D_NAME "it2d"
-#define JS_PROFILED_IT2I_NAME "it2i"
-
 #define JS_PROFILE_NOOP(name, return_type, args, body) \
     static inline return_type name args body
 JS_PROFILE_NOOP(js_opt_trace_is_enabled, int, (void), { return 0; })

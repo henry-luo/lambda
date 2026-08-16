@@ -65,22 +65,6 @@ extern Item js_get_async_iterator(Item iterable);
 extern Item js_async_iterator_step_result(Item iterator);
 extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
-#ifdef LAMBDA_JS_EXEC_PROFILE
-// keep profile aliases beside the registry imports: static archives scan
-// members once, so a later registry member must also provide these symbols.
-Item js_profiled_push_d(double dval) {
-    return push_d(dval);
-}
-
-double js_profiled_it2d(Item item) {
-    return it2d(item);
-}
-
-int64_t js_profiled_it2i(Item item) {
-    return it2i(item);
-}
-#endif
-
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
 extern Item js_check_class_heritage_constructor(Item superclass);
@@ -229,7 +213,6 @@ extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, 
 // after they made 8 decodeURI/decodeURIComponent tests batch-unstable.
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
-extern Item js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
@@ -1321,11 +1304,6 @@ JitImport jit_runtime_imports[] = {
     {"lambda_mir_bits_double", FPTR(lambda_mir_bits_double),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-#ifdef LAMBDA_JS_EXEC_PROFILE
-    {"js_profiled_push_d", FPTR(js_profiled_push_d),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-#endif
     {"box_int64_value", FPTR(box_int64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1600,16 +1578,10 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-#ifdef LAMBDA_JS_EXEC_PROFILE
-    {"js_profiled_it2d", FPTR(js_profiled_it2d), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-#endif
     {"it2i", FPTR(it2i),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-#ifdef LAMBDA_JS_EXEC_PROFILE
-    {"js_profiled_it2i", FPTR(js_profiled_it2i), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-#endif
     {"it2b", FPTR(it2b),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),

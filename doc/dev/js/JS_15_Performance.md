@@ -199,8 +199,7 @@ Still-open performance work, distilled from the logs:
 4. **Two-operand-non-string ADD inference + fixed-point return types** (§5.4) — recover native integer typing for additive/recursive numeric functions without resurrecting the string-concat unsoundness.
 5. **Destination-passing lowering** (§5.5) — the structural fix for the 66–88% MOV volume; a scoped codegen-quality project, gated on full test262 + Radiant re-validation.
 6. **De-pointered relocatable MIR + module cache** (§6) — unblock cross-compile/cross-realm artifact reuse for the repeated-vendor-JS workload.
-7. **Sys-func registry: production-only gate** (Tune8 §4) — wrap the 15 test262-only fast-path emit sites so a `JS_TEST262_FAST_PATHS=0` build actually links and drops them; currently registry-side only.
-8. **Profile large-shape and catalog construction indexes** ([JS_06 §11](JS_06_Objects_Properties_Prototypes.md)) — ordinary reads use the TypeMap hash; intrinsic catalog indexes are construction-time only and should be optimized only from release startup evidence.
+7. **Profile large-shape and catalog construction indexes** ([JS_06 §11](JS_06_Objects_Properties_Prototypes.md)) — ordinary reads use the TypeMap hash; intrinsic catalog indexes are construction-time only and should be optimized only from release startup evidence.
 
 ---
 

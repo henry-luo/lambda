@@ -4,7 +4,6 @@
 #include "../io/input-allocation-context.h"
 #include "heap_api.h"
 #include "render_map.h"
-#include "../js/js_exec_profile_weak.h"
 #include "../../lib/checked_math.hpp"
 #include "../../lib/log.h"
 #include <limits.h>
@@ -33,7 +32,6 @@ static Arena* ui_collection_arena() {
 
 void expand_list(List* list, Arena* arena) {
     if (!list) return;
-    JS_WEAK_PROPERTY_SET_BRANCH("expand_list_total");
     // Arena-owned UI elements are not GC roots. Keep their child buffers in
     // the result arena so a collection cannot reclaim a live DOM child list.
     if (!arena) {

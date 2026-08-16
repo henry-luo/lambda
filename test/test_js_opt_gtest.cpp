@@ -274,17 +274,13 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
     ensure_opt_dir();
     char script_path[512];
     char trace_path[512];
-    char profile_path[512];
     char mir_path[512];
     snprintf(script_path, sizeof(script_path), "%s/%s.js", kOptDir, name);
     snprintf(trace_path, sizeof(trace_path), "%s/%s%s.trace", kOptDir, name,
         trace_enabled ? "" : "_off");
-    snprintf(profile_path, sizeof(profile_path), "%s/%s%s.profile", kOptDir, name,
-        trace_enabled ? "" : "_off");
     snprintf(mir_path, sizeof(mir_path), "%s/%s%s.mir", kOptDir, name,
         trace_enabled ? "" : "_off");
     remove(trace_path);
-    remove(profile_path);
     remove(mir_path);
     if (!write_text(script_path, source)) return false;
 
@@ -297,9 +293,7 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
         // Keep the compilation profile mode identical in both runs. The
         // differential toggles only contract tracing; changing the profiler
         // mode would legitimately enable/disable unrelated MIR probes.
-        {"JS_EXEC_PROFILE", "1"},
         {"JS_OPT_TRACE", trace_enabled ? "1" : "0"},
-        {"JS_EXEC_PROFILE_OUT", profile_path},
         {"JS_OPT_TRACE_OUT", trace_path},
         {"LAMBDA_MIR_DUMP_PATH", mir_path},
         {NULL, NULL}
