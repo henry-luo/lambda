@@ -5586,6 +5586,13 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         ast_node->then = build_expr(tp, then_node);
     }
     if (then_is_block) {
+        // Attach the branch scope to the content node it scopes. Lowering
+        // resolves these names through its own hashmaps, so this field was
+        // left unset and the scope became unreachable from the AST — which any
+        // later pass walking scopes (the T0 frame plan) needs it to be.
+        if (ast_node->then && ast_node->then->node_type == AST_NODE_CONTENT) {
+            ((AstListNode*)ast_node->then)->vars = tp->current_scope;
+        }
         tp->current_scope = tp->current_scope->parent;  // restore scope
     }
 
@@ -5612,6 +5619,13 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         }
         ast_node->otherwise = build_expr(tp, else_node);
         if (else_is_block) {
+        // Attach the branch scope to the content node it scopes. Lowering
+            // resolves these names through its own hashmaps, so this field was
+            // left unset and the scope became unreachable from the AST — which any
+            // later pass walking scopes (the T0 frame plan) needs it to be.
+            if (ast_node->otherwise && ast_node->otherwise->node_type == AST_NODE_CONTENT) {
+                ((AstListNode*)ast_node->otherwise)->vars = tp->current_scope;
+            }
             tp->current_scope = tp->current_scope->parent;  // restore scope
         }
         // Defensive validation: if else node exists, ensure it was built successfully

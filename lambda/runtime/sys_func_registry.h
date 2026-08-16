@@ -264,6 +264,26 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     }
 }
 
+// Math entries whose result is float regardless of argument type. The rest of
+// the native-math family (floor/ceil/round/trunc/abs …) preserve their
+// argument's type instead, so their result lane depends on type inference —
+// which is why lowering only takes the raw C call for these. Shared so the T0
+// walker can tell the two groups apart without re-deriving the list.
+static inline bool sysfunc_native_math_always_float(SysFunc fn) {
+    switch (fn) {
+    case SYSFUNC_SQRT: case SYSFUNC_CBRT: case SYSFUNC_HYPOT:
+    case SYSFUNC_LOG: case SYSFUNC_LOG10: case SYSFUNC_LOG2: case SYSFUNC_LOG1P:
+    case SYSFUNC_EXP: case SYSFUNC_EXP2: case SYSFUNC_EXPM1:
+    case SYSFUNC_SIN: case SYSFUNC_COS: case SYSFUNC_TAN:
+    case SYSFUNC_ASIN: case SYSFUNC_ACOS: case SYSFUNC_ATAN: case SYSFUNC_ATAN2:
+    case SYSFUNC_SINH: case SYSFUNC_COSH: case SYSFUNC_TANH:
+    case SYSFUNC_ASINH: case SYSFUNC_ACOSH: case SYSFUNC_ATANH:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // System function definitions (AST metadata + JIT pointers)
 extern SysFuncInfo sys_func_defs[];
 extern const int sys_func_def_count;

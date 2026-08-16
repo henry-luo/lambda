@@ -287,7 +287,12 @@ static bool interp_kind_supported(AstNodeType kind) {
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
-    case AST_NODE_CONSTRAINED_TYPE:
+    // CONSTRAINED_TYPE stays rejected: lowering resolves a constrained type
+    // through const_type_with_tl(type_index), so the raw node Type* the walker
+    // publishes is a different identity and fn_is answers differently
+    // (test/lambda/constrained_type.ls). Reproducing the type-index lookup is
+    // more code than the construct is worth right now.
+    case AST_NODE_SPREAD:
     // --- P1.1: pipes and implicit contexts ---
     case AST_NODE_PIPE:
     case AST_NODE_CURRENT_ITEM:
@@ -398,19 +403,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             sc->reject = node->node_type;
             return;
         }
-        for (AstNode* item = ((AstArrayNode*)node)->item; item; item = item->next) {
-            AstNode* value = item;
-            while (value && value->node_type == AST_NODE_PRIMARY &&
-                    ((AstPrimaryNode*)value)->expr) {
-                value = ((AstPrimaryNode*)value)->expr;
-            }
-            if (!value) continue;
-            if (value->node_type == AST_NODE_ARRAY) {
-                sc->ok = false;
-                sc->reject = node->node_type;
-                return;
-            }
-        }
+        // Nested array literals are handled: a uniform numeric nest folds into
+        // one shaped ArrayNum (detect_ndim_literal), and anything else builds
+        // generically. Only the sized/u64 element widths above stay rejected.
     }
     // A compound assignment through a nested path (`a.b.c = v`) has its own
     // COW path-set lowering; only a plain binding root is covered here.
@@ -441,11 +436,12 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // symbol registration and stay on the JIT entirely.
     if (node->node_type == AST_NODE_IMPORT) {
         AstImportNode* imp = (AstImportNode*)node;
-        // An aliased import (`import alias: path`) registers *qualified* names
-        // (`alias.member`) through push_qualified_name, a second binding shape
-        // the plan pass does not resolve — test/lambda/latex/test_latex_picture.ls
-        // reads them as null. Plain `import .module` is covered.
-        if (imp->alias || imp->namespace_name || imp->default_name ||
+        // An aliased import (`import alias: path`) adds *qualified* entries
+        // (`alias.member`) via push_qualified_name, but each carries the same
+        // `node` + `import` pair as the plain entry, so plan_resolve_import
+        // binds it through the identical declaration-node match. Only the
+        // namespace/default/cross-language shapes have no walker equivalent.
+        if (imp->namespace_name || imp->default_name ||
                 imp->is_cross_lang || !imp->script || !imp->script->interp_supported) {
             sc->ok = false;
             sc->reject = node->node_type;
@@ -481,18 +477,10 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    // `{*:base, k: v}` carries the spread source as a bare, non-KEY_EXPR item;
-    // its fields merge into the literal's shape rather than filling one slot,
-    // which the P0 positional fill does not model.
-    if (node->node_type == AST_NODE_MAP || node->node_type == AST_NODE_OBJECT_LITERAL) {
-        for (AstNode* item = ((AstMapNode*)node)->item; item; item = item->next) {
-            if (item->node_type != AST_NODE_KEY_EXPR) {
-                sc->ok = false;
-                sc->reject = node->node_type;
-                return;
-            }
-        }
-    }
+    // `{*:base, k: v}` records the merge on the *shape entry* and leaves the
+    // raw value expression as the item (build_ast.cpp), so eval_map's positional
+    // fill already hands map_fill_items exactly what lowering does — the shared
+    // filler is what interprets the spread marker. No gate is needed.
     // A native-scalar type annotation on a binding is a coercion boundary:
     // lowering unboxes the initializer into the declared lane and reboxes it,
     // so `let pairs: float = 7 div 2` yields a float where the boxed walker
@@ -513,9 +501,16 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
                 tid = ((TypeArray*)declared)->nested->type_id;
             }
             switch (tid) {
-            case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_UINT64:
-            case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: case LMD_TYPE_NUM_SIZED:
-            case LMD_TYPE_BOOL: case LMD_TYPE_DECIMAL:
+            // `int`/`bool` are excluded: the declared lane and the boxed
+            // representation are the same width and the same tag, so the
+            // binding boundary is a no-op on both tiers. `float` is not —
+            // lowering's double lane turns `let x: float = 7 div 2` into a
+            // float, so the walker must coerce (interp_coerce_declared).
+            // The rest keep lane-propagating arithmetic that the boxed helpers
+            // do not reproduce, so they stay gated.
+            case LMD_TYPE_INT64: case LMD_TYPE_UINT64:
+            case LMD_TYPE_FLOAT64: case LMD_TYPE_NUM_SIZED:
+            case LMD_TYPE_DECIMAL:
                 sc->ok = false;
                 sc->reject = node->node_type;
                 return;
@@ -550,9 +545,24 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // in the int lane, while the boxed helper alone yields float
         // (test/lambda/proc/native_math_type_preserving.ls). That lane choice is
         // type-inference work, the same gap that keeps the bitwise family out.
-        if (info && info->native_c_name && info->native_func_ptr) {
+        // The type-preserving math family (floor/ceil/round/trunc/abs) is
+        // interpreted with a result re-narrowed by the call's static type
+        // (eval_call, interp.cpp), which is the same input lowering uses. Only
+        // an integer lane other than plain `int` is still gated: those carry
+        // widths the boxed helper does not model.
+        if (info && info->native_c_name && info->native_func_ptr &&
+                !sysfunc_native_math_always_float(info->fn) &&
+                node->type && node->type->type_id != LMD_TYPE_INT &&
+                node->type->type_id != LMD_TYPE_FLOAT &&
+                node->type->type_id != LMD_TYPE_ANY) {
             sc->ok = false;
             sc->reject = node->node_type;
+            return;
+        }
+        // SYSFUNC_VMAP_NEW has no boxed entry (func_ptr is NULL by design); the
+        // walker mirrors its two-call lowering directly, as lowering does.
+        if (info && info->fn == SYSFUNC_VMAP_NEW && info->arg_count <= 1) {
+            interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
         if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||

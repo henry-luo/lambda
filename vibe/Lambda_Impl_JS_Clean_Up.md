@@ -188,10 +188,10 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 - [x] C2.11 join/toLocaleString kernel
 - [~] C3.1 `JS_AST_CHILDREN` visitor — table + visitor landed; 3 walkers migrated, rest are deliberately partial (see §13)
 - [ ] C3.2 `JsMirCompileUnit` (5 pipeline migrations)
-- [ ] C3.3 `js_node_emitter` (8 module migrations)
+- [~] C3.3 shared emitter — tls, http, net done; readline/fs, child_process, https, stream left (§16)
 - [ ] C3.4 `JS_TICK_N` / `JS_ENV_UNPACK` (D-1 decided)
-- [~] C3.5 globals tables — calendar tables deduped; the rest was already consolidated in-tree (see §14)
-- [~] C3.6 DOM tables — (a) reflection, (b) prop-id, (c) walker, (g) URL done; (d)(e)(f)(h)(i) pending
+- [x] C3.5 globals tables — every item done or verified already-consolidated (see §14)
+- [~] C3.6 DOM tables — (a)(b)(c)(f)(g)(i) done; (d) pending; (e)(h) assessed as not worth doing
 - [~] C3.7 misc — OpenSSL dlsym X-macro done; scanner/encoding/bsearch assessed (see §14)
 - [ ] C3.8 runtime tables (op dispatch, builtin-proto, PropertyOps; D-2 decided)
 - [ ] C4.1 unified renderer (golden-gated)
@@ -306,6 +306,28 @@ already happened. Measured before starting:
   unified entry point would be a switch with disjoint arms.
 - *Still duplicated, now fixed* — the `wday[]`/`mon[]` calendar arrays, which
   had four copies.
+- *`groupBy` kernels* — **done.** `Object.groupBy` and `Map.groupBy` walked the
+  iterable identically and differed only in how a group is addressed. They now
+  share `js_group_by_kernel` behind a three-function accessor set. Both error
+  messages, both key models (ToPropertyKey into a null-prototype object vs the
+  raw key through the collection methods) and the null-prototype result are
+  unchanged.
+- *MessagePort event-spec table* — **done.** The two listener-key mappers
+  become one row per event, so an event's `on*` list and its
+  `addEventListener` list can no longer drift apart.
+- *Symbol-description lookup* — already consolidated:
+  `js_symbol_get_description` is a single three-tier lookup over the existing
+  `js_well_known_symbol_specs` table, and `js_intrinsic_symbol_description`
+  just delegates to it.
+- *`js_process_listener_op`* — re-measured and confirmed not worth doing. The
+  six ops have disjoint bodies: `on` flushes and re-refs IPC,
+  `removeAllListeners` clears the fixed lists and re-inits roots, `once`
+  wraps, `removeListener` unwraps once-wrappers. Only `listenerCount` and
+  `listeners` share anything — a three-line preamble — which is less than a
+  helper would cost.
+
+**C3.5 is complete**: every item is either implemented or verified as already
+consolidated in this tree.
 
 **C3.7**
 - *OpenSSL dlsym X-macro* — **done**. The DSA availability check had drifted:
@@ -350,14 +372,36 @@ Done:
 
 Assessed, not done:
 
-- **(d) live collections** — `_register_live_form_collection` and
-  `_register_live_lookup_collection` share a find/pin/register skeleton but
-  differ in entry fields *and* in how the pin owner is chosen. A template needs
-  a per-kind assign step; worth doing but not mechanical.
-- **(f) `js_install_interface`** — the eight clipboard interface blocks share
-  a create/name/cross-link/publish skeleton, but each adds bespoke steps
-  (prototype chaining to Blob or Array, extra statics, `Symbol.toStringTag`).
-  Worth about 40 lines, with rooting subtleties across all eight blocks.
+- **(f) `js_install_interface`** — **done**. `js_clipboard_install_interface`
+  covers six of the blocks; each keeps only what is specific to it. Verified
+  behaviour-identical with an interface probe (constructor identity, names,
+  prototype cross-links, method presence, `instanceof`), which prints the same
+  before and after — including several pre-existing oddities it exposes
+  (`Blob.prototype.text` is undefined, `File.prototype` is not chained to
+  `Blob.prototype`, and `DataTransfer.name` reads "Clipboard" because
+  `Clipboard` reuses `js_data_transfer_new` and native constructors are cached
+  by target). Those predate this work and are worth a separate look.
+- **(i) DOMRect builder** — **done**, and it fixed a bug: `js_dom_selection.cpp`
+  built rects with `i2it((int64_t)v)`, truncating every coordinate to an
+  integer, while the other two surfaces returned doubles.
+
+- **(d) live collections** — the remaining item.
+  `_register_live_form_collection` and `_register_live_lookup_collection`
+  share a find/pin/register skeleton but differ in entry fields *and* in how
+  the pin owner is chosen. A template needs a per-kind assign step; worth
+  doing but not mechanical.
+- **(e) event-init stamping** — **not worth doing.** The three native event
+  creators do not share a field set: mouse inserts `detail` between `composed`
+  and `clientX`, pointer does not, and wheel omits `pageX`/`pageY` and
+  `button` and puts its deltas before the modifiers. Property insertion order
+  is observable through `Object.keys`, so a shared stamp would have to be
+  parameterised per site — more lines than it saves. The `event_set_*` helpers
+  already give the uniformity a field table would.
+- **(h) `inherited_enum_attr`** — **not worth doing.** Only two of the four
+  named getters walk ancestors (`spellcheck`, `writingSuggestions`); the other
+  two (`autocapitalize`, `autocorrect`) inherit from the *form owner*, which
+  is a different rule. Sharing within each pair saves about eight lines
+  against a ten-line helper.
 - **(b) property-ID dispatch** — **done**, with a caveat. `JS_DOM_PROPS` names
   all 147 dispatched properties and `js_dom_prop_id` resolves one with a
   binary search; the 201 `strcmp(prop, ...)` tests are now integer compares.
@@ -377,3 +421,84 @@ Assessed, not done:
   instead of a silently dead branch — the drift class C0.5 came from. It is
   also the prerequisite for turning the chains into switches, which is where
   (b)'s line reduction actually lives; that follow-up is now cheap.
+
+---
+
+## 16. C3.3 — design fork found before starting
+
+C3.3 proposes a new `lambda/js/js_node_emitter.{hpp,cpp}` (~280 lines) with
+layout-A `{listener, once}` storage. **A full implementation of exactly that
+already exists**: `lambda/module/node_core/node_events.cpp` (1250 lines) backs
+the Node `events` module with `__events__` -> array-of-`{listener, once}`
+records and the whole surface — `js_ee_on/once/off/emit/removeAllListeners/`
+`listeners/listenerCount/eventNames/prependListener/...`. Those entry points
+are `extern "C"`, and `lambda/js/js_readline.cpp` already calls `js_ee_emit`
+directly, so it links and is callable from `lambda/js/`.
+
+Writing a second emitter would duplicate it (rule 13). But migrating the
+per-module emitters onto the existing one is **not** the mechanical change the
+plan assumes, for three reasons:
+
+1. **It is a Jube module, not a library.** Every accessor goes through
+   `node_events_state()` = `jube_node_current_module_state(...)`, which returns
+   NULL unless the events module has been attached to the current node session,
+   and the accessor macros dereference it with no null check. Calling `js_ee_*`
+   from a module that does not force an events attach is a null dereference.
+   `js_readline.cpp:799` already does this unguarded — filed separately.
+2. **Emit semantics differ.** `js_ee_emit` implements Node's `'error'` rule: no
+   listeners for `'error'` means *throw* (the raw error if it is Error-like,
+   otherwise `ERR_UNHANDLED_ERROR`). The per-module emitters silently do
+   nothing. Migrating tls/http/net makes an unhandled `'error'` throw. That is
+   more Node-correct and it is a behaviour change that deserves its own
+   decision and its own tests — not a side effect of a refactor.
+3. **Storage moves.** Modules keep listeners in `__on_<event>__`; the shared
+   emitter uses `__events__`. Every direct read has to move with the
+   registration. C0.2 already funnelled http's reads through
+   `http_listener_count/at/invoke`, and C0.1 funnelled tls's key construction,
+   so those two are ready; the others are not.
+
+**The decision needed:** adopt the existing emitter for `lambda/js/` modules —
+accepting the `'error'`-throw semantics and first making `js_ee_*` safe when
+the module is detached — or keep the per-module emitters and drop C3.3.
+
+Adopting it is the better end state and subsumes both C0.1's `once` shim and
+C0.2's array promotion. The recommended order is unchanged from the plan, but
+prerequisites come first: guard the `js_ee_*` entry points, then migrate
+`js_tls.cpp` (smallest, and `test/node/tls_socket_once.js` already locks the
+behaviour), then http, then the rest.
+
+### C3.3 decision taken: adopt the existing emitter
+
+No new `js_node_emitter.{hpp,cpp}`. The modules move onto
+`node_core/node_events.cpp` via `js_ee_on/once/emit/listeners`.
+
+Landed: the prerequisite guard, then `js_tls.cpp` (−104, deletes C0.1's once
+shim) and `js_http.cpp` (C0.2's helpers stay as the seam but forward to
+`js_ee_*`). Both regression tests stay green unchanged, which is what they
+were written for.
+
+Three things the migration exposed, all fixed:
+
+1. **Attachment, not guarding, was the real requirement.** The events module
+   attaches only through its own Jube attach path, and `require('http')` never
+   takes it — so the fail-closed guard turned a would-be crash into *silently
+   dropped listeners*. `node_events_state()` now attaches on demand. Any
+   further migration depends on this.
+2. **`js_ee_listenerCount` returns a JS number**, double-backed, so testing it
+   for `LMD_TYPE_INT` is always false. Measure `js_ee_listeners` instead.
+3. **`http_dispatch_listeners` took two shapes** — an emitter snapshot and
+   `createServer()`'s bare handler. Splitting `http_dispatch_one` out restores
+   the constructor-handler path.
+
+`js_net.cpp` followed (−151): it carried **two** complete emitters of its own,
+one per surface, each with its own record type and once-sweep. Both are gone
+and neither storage key remains. The `allowHalfOpen` hook survives — the one
+place net genuinely needs behaviour around registration.
+
+Running total for C3.3: −255 lines across three modules, and both C0
+regression tests still green unchanged.
+
+Remaining, in the plan's order: `js_readline.cpp`/`js_fs.cpp`,
+`js_child_process.cpp` (replay), `js_https.cpp`, `js_stream.cpp` (canonical,
+most hooks). Each should re-check points 2 and 3 above deliberately — the net
+migration hit neither only because they were checked for.

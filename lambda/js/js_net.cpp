@@ -203,6 +203,12 @@ static JsSocket* socket_from_object(Item self) {
     return (JsSocket*)(uintptr_t)it2i(handle_item);
 }
 
+extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener);
+extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener);
+extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener);
+extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
+extern "C" Item js_ee_listeners(Item emitter, Item event_name);
+extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name);
 static void socket_sync_no_half_open_listener(Item obj);
 
 static bool net_object_has_key(Item obj, const char* key) {
@@ -220,45 +226,13 @@ static bool net_object_has_key(Item obj, const char* key) {
     return false;
 }
 
-static Item socket_make_listener_record(Item listener, bool once) {
-    Item record = js_new_object();
-    js_set_key_cstr(record, "listener", listener);
-    js_set_key_cstr(record, "once", (Item){.item = b2it(once)});
-    return record;
-}
-
-static Item socket_listener_fn(Item record) {
-    if (js_node_is_object_like(record)) {
-        return js_get_key_cstr(record, "listener");
-    }
-    return record;
-}
-
-static bool socket_listener_once(Item record) {
-    if (!js_node_is_object_like(record)) return false;
-    Item once = js_get_key_cstr(record, "once");
-    return get_type_id(once) == LMD_TYPE_BOOL && it2b(once);
-}
-
-static Item socket_listener_map(Item self, bool create) {
-    Item listeners = js_get_key_cstr(self, "__socket_listeners__");
-    if (!js_node_is_object_like(listeners)) {
-        if (!create) return make_undefined_item();
-        listeners = js_new_object();
-        js_set_key_cstr(self, "__socket_listeners__", listeners);
-    }
-    return listeners;
-}
-
+// Socket listeners live in the shared Node emitter; these are the seam the
+// rest of the file uses. js_ee_listenerCount returns a JS number, so counts
+// come from measuring the listener snapshot instead.
 static void socket_add_listener_item(Item self, Item event_item, Item callback, bool once) {
     if (get_type_id(event_item) != LMD_TYPE_STRING || !is_callable(callback)) return;
-    Item listeners = socket_listener_map(self, true);
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
-        arr = js_array_new(0);
-        js_set_key_default(listeners, event_item, arr);
-    }
-    js_array_push(arr, socket_make_listener_record(callback, once));
+    if (once) js_ee_once(self, event_item, callback);
+    else js_ee_on(self, event_item, callback);
 }
 
 static void socket_add_listener_cstr(Item self, const char* event, Item callback, bool once) {
@@ -268,46 +242,25 @@ static void socket_add_listener_cstr(Item self, const char* event, Item callback
 
 static int64_t socket_listener_count_item(Item self, Item event_item) {
     if (get_type_id(event_item) != LMD_TYPE_STRING) return 0;
-    Item listeners = socket_listener_map(self, false);
-    if (!js_node_is_object_like(listeners)) return 0;
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return 0;
-    return js_array_length(arr);
+    return js_array_length(js_ee_listeners(self, event_item));
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, socket_has_listener, (Item self, const char* event), (socket_listener_count_item(self, make_string_item(event)) > 0))
 
 static void socket_remove_listener_item(Item self, Item event_item, Item callback) {
     if (get_type_id(event_item) != LMD_TYPE_STRING || !is_callable(callback)) return;
-    Item listeners = socket_listener_map(self, false);
-    if (!js_node_is_object_like(listeners)) return;
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return;
-
-    Item next = js_array_new(0);
-    int64_t len = js_array_length(arr);
-    bool removed = false;
-    for (int64_t i = 0; i < len; i++) {
-        Item record = js_elements_get_int(arr, i);
-        Item listener = socket_listener_fn(record);
-        if (!removed && listener.item == callback.item) {
-            removed = true;
-            continue;
-        }
-        js_array_push(next, record);
-    }
-    js_set_key_default(listeners, event_item, next);
+    js_ee_off(self, event_item, callback);
 }
 
 static void socket_remove_all_listeners(Item self, Item event_item) {
-    Item listeners = socket_listener_map(self, false);
-    if (!js_node_is_object_like(listeners)) return;
+    js_ee_removeAllListeners(self, event_item);
     if (is_undefined_item(event_item)) {
-        js_set_key_cstr(self, "__socket_listeners__", js_new_object());
+        // the synthetic end-listener that enforces allowHalfOpen=false went
+        // with them; re-establish it from the current allowHalfOpen state
+        js_set_key_cstr(self, "__no_half_open_listener__", make_undefined_item());
         socket_sync_no_half_open_listener(self);
         return;
     }
     if (get_type_id(event_item) != LMD_TYPE_STRING) return;
-    js_set_key_default(listeners, event_item, js_array_new(0));
     String* ev = it2s(event_item);
     if (ev && ev->len == 3 && memcmp(ev->chars, "end", 3) == 0) {
         js_set_key_cstr(self, "__no_half_open_listener__", make_undefined_item());
@@ -496,27 +449,13 @@ static void socket_update_address_properties(JsSocket* sock) {
 
 // emit event on socket JS object
 static void socket_emit(Item obj, const char* event, Item* args, int argc) {
-    Item listeners = socket_listener_map(obj, false);
-    if (!js_node_is_object_like(listeners)) return;
-
-    Item event_item = make_string_item(event);
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return;
-
-    int64_t len = js_array_length(arr);
-    if (len <= 0) return;
-    Item next = js_array_new(0);
-    for (int64_t i = 0; i < len; i++) {
-        Item record = js_elements_get_int(arr, i);
-        Item callback = socket_listener_fn(record);
-        bool once = socket_listener_once(record);
-        if (is_callable(callback)) {
-            js_call_function(callback, obj, args, argc);
-            js_microtask_flush();
-        }
-        if (!once) js_array_push(next, record);
-    }
-    js_set_key_default(listeners, event_item, next);
+    if (obj.item == 0 || !event) return;
+    RootFrame roots(2);
+    Rooted<Item> obj_root(roots, obj);
+    Rooted<Item> args_root(roots, js_array_new(0));
+    for (int i = 0; i < argc; i++) js_array_push(args_root.get(), args[i]);
+    js_ee_emit(obj_root.get(), make_string_item(event), args_root.get());
+    js_microtask_flush();
 }
 
 static void socket_pipe_data(Item obj, Item data) {
@@ -715,18 +654,8 @@ JS_FORWARD_ITEM(js_socket_once, (Item event_item, Item callback), js_socket_add_
 
 extern "C" Item js_socket_listeners(Item event_item) {
     Item self = js_get_this();
-    Item result = js_array_new(0);
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return result;
-    Item listeners = socket_listener_map(self, false);
-    if (!js_node_is_object_like(listeners)) return result;
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return result;
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item callback = socket_listener_fn(js_elements_get_int(arr, i));
-        if (is_callable(callback)) js_array_push(result, callback);
-    }
-    return result;
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return js_array_new(0);
+    return js_ee_listeners(self, event_item);
 }
 
 extern "C" Item js_socket_listenerCount(Item event_item) {
@@ -3889,80 +3818,28 @@ struct JsServer {
 
 static JsServer* server_from_object(Item self);
 
-static Item server_make_listener_record(Item listener, bool once) {
-    Item record = js_new_object();
-    js_set_key_cstr(record, "listener", listener);
-    js_set_key_cstr(record, "once", (Item){.item = b2it(once)});
-    return record;
-}
-
-static Item server_listener_fn(Item record) {
-    if (get_type_id(record) == LMD_TYPE_MAP || get_type_id(record) == LMD_TYPE_OBJECT ||
-        get_type_id(record) == LMD_TYPE_VMAP) {
-        return js_get_key_cstr(record, "listener");
-    }
-    return record;
-}
-
-static bool server_listener_once(Item record) {
-    if (get_type_id(record) != LMD_TYPE_MAP && get_type_id(record) != LMD_TYPE_OBJECT &&
-        get_type_id(record) != LMD_TYPE_VMAP) {
-        return false;
-    }
-    Item once = js_get_key_cstr(record, "once");
-    return get_type_id(once) == LMD_TYPE_BOOL && it2b(once);
-}
-
-static Item server_listener_map(Item self, bool create) {
-    Item listeners = js_get_key_cstr(self, "__server_listeners__");
-    if (get_type_id(listeners) != LMD_TYPE_MAP && get_type_id(listeners) != LMD_TYPE_OBJECT &&
-        get_type_id(listeners) != LMD_TYPE_VMAP) {
-        if (!create) return make_undefined_item();
-        listeners = js_new_object();
-        js_set_key_cstr(self, "__server_listeners__", listeners);
-    }
-    return listeners;
-}
-
+// Server listeners live in the shared Node emitter, same as sockets.
 static void server_add_listener(Item self, Item event_item, Item callback, bool once) {
     if (get_type_id(event_item) != LMD_TYPE_STRING || !is_callable(callback)) return;
-    Item listeners = server_listener_map(self, true);
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
-        arr = js_array_new(0);
-        js_set_key_default(listeners, event_item, arr);
-    }
-    js_array_push(arr, server_make_listener_record(callback, once));
+    if (once) js_ee_once(self, event_item, callback);
+    else js_ee_on(self, event_item, callback);
 }
 
+// returns whether any listener ran, which the caller uses to decide fallbacks
 static bool server_emit(Item self, const char* event, Item* args, int argc) {
-    Item listeners = server_listener_map(self, false);
-    if (get_type_id(listeners) != LMD_TYPE_MAP && get_type_id(listeners) != LMD_TYPE_OBJECT &&
-        get_type_id(listeners) != LMD_TYPE_VMAP) {
+    if (self.item == 0 || !event) return false;
+    RootFrame roots(2);
+    Rooted<Item> self_root(roots, self);
+    Rooted<Item> event_root(roots, make_string_item(event));
+    if (js_array_length(js_ee_listeners(self_root.get(), event_root.get())) <= 0) {
         return false;
     }
-
-    Item event_item = make_string_item(event);
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return false;
-
-    int64_t len = js_array_length(arr);
-    if (len <= 0) return false;
-    Item next = js_array_new(0);
-    bool emitted = false;
-    for (int64_t i = 0; i < len; i++) {
-        Item record = js_elements_get_int(arr, i);
-        Item callback = server_listener_fn(record);
-        bool once = server_listener_once(record);
-        if (is_callable(callback)) {
-            emitted = true;
-            js_call_function(callback, self, args, argc);
-            js_microtask_flush();
-        }
-        if (!once) js_array_push(next, record);
-    }
-    js_set_key_default(listeners, event_item, next);
-    return emitted;
+    RootFrame arg_roots(1);
+    Rooted<Item> args_root(arg_roots, js_array_new(0));
+    for (int i = 0; i < argc; i++) js_array_push(args_root.get(), args[i]);
+    js_ee_emit(self_root.get(), event_root.get(), args_root.get());
+    js_microtask_flush();
+    return true;
 }
 
 static void server_maybe_finish_close(JsServer* srv) {
@@ -4853,42 +4730,14 @@ JS_FORWARD_ITEM(js_server_once, (Item event_item, Item callback), js_server_add_
 
 extern "C" Item js_server_listeners(Item event_item) {
     Item self = js_get_this();
-    Item result = js_array_new(0);
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return result;
-    Item listeners = server_listener_map(self, false);
-    if (get_type_id(listeners) != LMD_TYPE_MAP && get_type_id(listeners) != LMD_TYPE_OBJECT &&
-        get_type_id(listeners) != LMD_TYPE_VMAP) {
-        return result;
-    }
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return result;
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item callback = server_listener_fn(js_elements_get_int(arr, i));
-        if (is_callable(callback)) js_array_push(result, callback);
-    }
-    return result;
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return js_array_new(0);
+    return js_ee_listeners(self, event_item);
 }
 
 extern "C" Item js_server_removeListener(Item event_item, Item callback) {
     Item self = js_get_this();
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    Item listeners = server_listener_map(self, false);
-    if (get_type_id(listeners) != LMD_TYPE_MAP && get_type_id(listeners) != LMD_TYPE_OBJECT &&
-        get_type_id(listeners) != LMD_TYPE_VMAP) {
-        return self;
-    }
-    Item arr = js_get_key_default(listeners, event_item);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return self;
-
-    Item next = js_array_new(0);
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item record = js_elements_get_int(arr, i);
-        Item listener = server_listener_fn(record);
-        if (listener.item != callback.item) js_array_push(next, record);
-    }
-    js_set_key_default(listeners, event_item, next);
+    js_ee_off(self, event_item, callback);
     return self;
 }
 

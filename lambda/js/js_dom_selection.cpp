@@ -57,7 +57,6 @@ static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
 #define make_bool(v) ((Item){.item = b2it((v) ? 1 : 0)})
 #define make_int(v) ((Item){.item = i2it(v)})
 
-#define make_number_from_float(v) ((Item){.item = i2it((int64_t)(v))})
 
 #define make_str make_string_item
 #define make_key make_string_item
@@ -485,19 +484,6 @@ struct RangeClientRectCollector {
     float right;
     float bottom;
 };
-
-static Item js_dom_make_rect(float x, float y, float w, float h) {
-    Item rect = js_new_object();
-    js_set_key_cstr(rect, "x", make_number_from_float(x));
-    js_set_key_cstr(rect, "y", make_number_from_float(y));
-    js_set_key_cstr(rect, "left", make_number_from_float(x));
-    js_set_key_cstr(rect, "top", make_number_from_float(y));
-    js_set_key_cstr(rect, "right", make_number_from_float(x + w));
-    js_set_key_cstr(rect, "bottom", make_number_from_float(y + h));
-    js_set_key_cstr(rect, "width", make_number_from_float(w));
-    js_set_key_cstr(rect, "height", make_number_from_float(h));
-    return rect;
-}
 
 static void js_range_collect_rect(float x, float y, float w, float h,
                                   void* userdata) {

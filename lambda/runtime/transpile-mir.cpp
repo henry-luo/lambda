@@ -5671,20 +5671,8 @@ static bool mir_binary_numeric_decision(
 // fn_min2_u would silently turn `abs(-5)` from int 5 into float 5.0. Omitting a
 // function here only costs an optimisation; including a type-preserving one
 // would be a semantic bug, so new entries need the push_d check above.
-static inline bool mir_native_math_always_float(SysFunc fn) {
-    switch (fn) {
-    case SYSFUNC_SQRT: case SYSFUNC_CBRT: case SYSFUNC_HYPOT:
-    case SYSFUNC_LOG: case SYSFUNC_LOG10: case SYSFUNC_LOG2: case SYSFUNC_LOG1P:
-    case SYSFUNC_EXP: case SYSFUNC_EXP2: case SYSFUNC_EXPM1:
-    case SYSFUNC_SIN: case SYSFUNC_COS: case SYSFUNC_TAN:
-    case SYSFUNC_ASIN: case SYSFUNC_ACOS: case SYSFUNC_ATAN: case SYSFUNC_ATAN2:
-    case SYSFUNC_SINH: case SYSFUNC_COSH: case SYSFUNC_TANH:
-    case SYSFUNC_ASINH: case SYSFUNC_ACOSH: case SYSFUNC_ATANH:
-        return true;
-    default:
-        return false;
-    }
-}
+// sysfunc_native_math_always_float lives in sys_func_registry.h — the T0
+// walker uses the same list to tell type-preserving math apart.
 
 // Type-preserving unary math: the result type follows the ARGUMENT's, which is
 // why these are excluded from mir_native_math_always_float. But once the
@@ -6179,7 +6167,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             // provably `push_d(...)`; retain that float witness so a typed
             // array write does not fall back to a checked boxed store per lane.
             if (info && info->native_c_name && info->native_func_ptr &&
-                    info->native_returns_float && mir_native_math_always_float(info->fn) &&
+                    info->native_returns_float && sysfunc_native_math_always_float(info->fn) &&
                     (info->native_arg_count == 1 || info->native_arg_count == 2)) {
                 AstNode* first = call->argument;
                 AstNode* second = first ? first->next : NULL;
@@ -15281,7 +15269,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         // boxed path — that exclusion is the whole safety argument here.
         if (info->native_c_name && info->native_func_ptr &&
                 info->native_returns_float && !mt->emitting_async_call &&
-                mir_native_math_always_float(info->fn) &&
+                sysfunc_native_math_always_float(info->fn) &&
                 arg_count == info->native_arg_count &&
                 (arg_count == 1 || arg_count == 2)) {
             AstNode* n1 = call_node->argument;
