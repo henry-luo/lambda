@@ -8051,55 +8051,137 @@ JS_FORWARD_ITEM(js_dom_check_validity_bridge, (Item elem_item), js_dom_check_or_
 JS_FORWARD_ITEM(js_dom_report_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, true))
 
 // ----------------------------------------------------------------------
-// F-0: IDL-name → HTML-attribute-name mapping for reflected attributes.
-// Returns nullptr when no mapping exists (caller uses prop name verbatim).
 // ----------------------------------------------------------------------
+// F-0: reflected IDL attributes.
+//
+// One row per (IDL name, content attribute) pair states which elements
+// reflect it and how the value is typed. The five predicates below are all
+// filtered lookups over this table; they used to be five hand-written
+// strcmp/strcasecmp chains that disagreed about which elements support what
+// (see C0.5).
+//   X(idl, attr, KIND, default, tags)
+// KIND is BOOL (presence), INT (non-negative integer with a default), STR
+// (string, missing value "") or MAP (name mapping only — the value handling
+// lives in a dedicated case). `tags` is a bitmask; DOM_TAG_ANY means every
+// element reflects it, as global attributes do.
+// ----------------------------------------------------------------------
+#define JS_DOM_TAGS(X) \
+    X(INPUT, "input") X(BUTTON, "button") X(SELECT, "select") \
+    X(TEXTAREA, "textarea") X(FORM, "form") X(DETAILS, "details") \
+    X(FIELDSET, "fieldset") X(OPTION, "option") X(OPTGROUP, "optgroup") \
+    X(CANVAS, "canvas") X(IMG, "img") X(SCRIPT, "script") X(IFRAME, "iframe") \
+    X(EMBED, "embed") X(SOURCE, "source") X(TRACK, "track") X(AUDIO, "audio") \
+    X(VIDEO, "video") X(A, "a") X(AREA, "area") X(LINK, "link") \
+    X(BASE, "base") X(LABEL, "label") X(OUTPUT, "output")
+
+enum {
+#define JS_DOM_TAG_BIT_ENUM(name, text) DOM_TAG_##name##_INDEX,
+    JS_DOM_TAGS(JS_DOM_TAG_BIT_ENUM)
+#undef JS_DOM_TAG_BIT_ENUM
+    DOM_TAG_COUNT
+};
+#define JS_DOM_TAG_BIT_CONST(name, text) \
+    static const uint32_t DOM_TAG_##name = 1u << DOM_TAG_##name##_INDEX;
+JS_DOM_TAGS(JS_DOM_TAG_BIT_CONST)
+#undef JS_DOM_TAG_BIT_CONST
+static const uint32_t DOM_TAG_ANY = 0xFFFFFFFFu;
+
+static uint32_t js_dom_tag_bit(const DomElement* elem) {
+    if (!elem || !elem->tag_name) return 0;
+#define JS_DOM_TAG_BIT_MATCH(name, text) \
+    if (strcasecmp(elem->tag_name, text) == 0) return DOM_TAG_##name;
+    JS_DOM_TAGS(JS_DOM_TAG_BIT_MATCH)
+#undef JS_DOM_TAG_BIT_MATCH
+    return 0;
+}
+
+typedef enum JsDomReflectKind {
+    JS_DOM_REFLECT_BOOL = 0,
+    JS_DOM_REFLECT_INT,
+    JS_DOM_REFLECT_STR,
+    JS_DOM_REFLECT_MAP,
+} JsDomReflectKind;
+
+// Rows are scanned in order, so a property reflected differently on two
+// element types (input.size defaults to 20, select.size to 0) lists the more
+// specific row first.
+#define JS_DOM_REFLECTED_ATTRS(X) \
+    X("disabled", "disabled", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON | DOM_TAG_SELECT | \
+        DOM_TAG_TEXTAREA | DOM_TAG_FIELDSET | DOM_TAG_OPTION | DOM_TAG_OPTGROUP) \
+    X("required", "required", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_SELECT | DOM_TAG_TEXTAREA) \
+    X("multiple", "multiple", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_SELECT) \
+    X("readOnly", "readonly", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
+    X("readonly", "readonly", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
+    X("noValidate", "novalidate", BOOL, 0, DOM_TAG_FORM) \
+    X("formNoValidate", "formnovalidate", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("autofocus", "autofocus", BOOL, 0, DOM_TAG_ANY) \
+    X("open", "open", BOOL, 0, DOM_TAG_DETAILS) \
+    X("defaultChecked", "checked", BOOL, 0, DOM_TAG_INPUT) \
+    X("defaultSelected", "selected", BOOL, 0, DOM_TAG_OPTION) \
+    X("maxLength", "maxlength", INT, -1, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
+    X("minLength", "minlength", INT, 0, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
+    X("size", "size", INT, 20, DOM_TAG_INPUT) \
+    X("width", "width", INT, 0, DOM_TAG_INPUT | DOM_TAG_CANVAS) \
+    X("height", "height", INT, 0, DOM_TAG_INPUT | DOM_TAG_CANVAS) \
+    X("size", "size", INT, 0, DOM_TAG_SELECT) \
+    X("rows", "rows", INT, 2, DOM_TAG_TEXTAREA) \
+    X("cols", "cols", INT, 20, DOM_TAG_TEXTAREA) \
+    X("src", "src", STR, 0, DOM_TAG_IMG | DOM_TAG_SCRIPT | DOM_TAG_IFRAME | DOM_TAG_EMBED | \
+        DOM_TAG_SOURCE | DOM_TAG_TRACK | DOM_TAG_AUDIO | DOM_TAG_VIDEO | DOM_TAG_INPUT) \
+    X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
+    X("alt", "alt", STR, 0, DOM_TAG_IMG) \
+    X("width", "width", STR, 0, DOM_TAG_IFRAME) \
+    X("height", "height", STR, 0, DOM_TAG_IFRAME) \
+    X("tabIndex", "tabindex", MAP, 0, DOM_TAG_ANY) \
+    X("inputMode", "inputmode", MAP, 0, DOM_TAG_ANY) \
+    X("enterKeyHint", "enterkeyhint", MAP, 0, DOM_TAG_ANY) \
+    X("contentEditable", "contenteditable", MAP, 0, DOM_TAG_ANY) \
+    X("acceptCharset", "accept-charset", MAP, 0, DOM_TAG_FORM) \
+    X("htmlFor", "for", MAP, 0, DOM_TAG_LABEL | DOM_TAG_OUTPUT) \
+    X("formAction", "formaction", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formMethod", "formmethod", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formEnctype", "formenctype", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formEncoding", "formenctype", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formTarget", "formtarget", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON)
+
+typedef struct JsDomReflectSpec {
+    const char* idl;
+    const char* attr;
+    JsDomReflectKind kind;
+    int default_value;
+    uint32_t tags;
+} JsDomReflectSpec;
+
+static const JsDomReflectSpec k_dom_reflected_attrs[] = {
+#define JS_DOM_REFLECT_ROW(idl, attr, kind, dflt, tags) \
+    { idl, attr, JS_DOM_REFLECT_##kind, dflt, tags },
+    JS_DOM_REFLECTED_ATTRS(JS_DOM_REFLECT_ROW)
+#undef JS_DOM_REFLECT_ROW
+};
+
+// First row whose IDL name and element type both match, or NULL.
+static const JsDomReflectSpec* js_dom_reflect_spec(const DomElement* elem,
+                                                   const char* prop,
+                                                   JsDomReflectKind kind) {
+    if (!elem || !prop) return NULL;
+    uint32_t tag = js_dom_tag_bit(elem);
+    if (!tag) return NULL;
+    for (size_t i = 0; i < sizeof(k_dom_reflected_attrs) / sizeof(k_dom_reflected_attrs[0]); i++) {
+        const JsDomReflectSpec* spec = &k_dom_reflected_attrs[i];
+        if (spec->kind != kind || (spec->tags & tag) == 0) continue;
+        if (strcmp(spec->idl, prop) == 0) return spec;
+    }
+    return NULL;
+}
+
+// IDL-name → HTML-attribute-name mapping, independent of element type.
+// Returns nullptr when the names are the same (caller uses prop verbatim).
 static const char* _idl_to_attr_name(const char* prop) {
     if (!prop) return nullptr;
-    switch (prop[0]) {
-        case 'r':
-            if (strcmp(prop, "readOnly") == 0) return "readonly";
-            break;
-        case 'n':
-            if (strcmp(prop, "noValidate") == 0) return "novalidate";
-            break;
-        case 'm':
-            if (strcmp(prop, "maxLength") == 0) return "maxlength";
-            if (strcmp(prop, "minLength") == 0) return "minlength";
-            break;
-        case 'a':
-            if (strcmp(prop, "acceptCharset") == 0) return "accept-charset";
-            break;
-        case 'd':
-            if (strcmp(prop, "defaultChecked") == 0) return "checked";
-            if (strcmp(prop, "defaultSelected") == 0) return "selected";
-            break;
-        case 'h':
-            if (strcmp(prop, "htmlFor") == 0) return "for";
-            break;
-        case 't':
-            if (strcmp(prop, "tabIndex") == 0) return "tabindex";
-            break;
-        case 'i':
-            // CE-4 (Radiant_Design_Content_Editable.md §7).
-            if (strcmp(prop, "inputMode") == 0) return "inputmode";
-            break;
-        case 'e':
-            // CE-4 (Radiant_Design_Content_Editable.md §7).
-            if (strcmp(prop, "enterKeyHint") == 0) return "enterkeyhint";
-            break;
-        case 'c':
-            // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10).
-            if (strcmp(prop, "contentEditable") == 0) return "contenteditable";
-            break;
-        case 'f':
-            if (strcmp(prop, "formAction") == 0) return "formaction";
-            if (strcmp(prop, "formMethod") == 0) return "formmethod";
-            if (strcmp(prop, "formEnctype") == 0) return "formenctype";
-            if (strcmp(prop, "formEncoding") == 0) return "formenctype";
-            if (strcmp(prop, "formTarget") == 0) return "formtarget";
-            if (strcmp(prop, "formNoValidate") == 0) return "formnovalidate";
-            break;
+    for (size_t i = 0; i < sizeof(k_dom_reflected_attrs) / sizeof(k_dom_reflected_attrs[0]); i++) {
+        const JsDomReflectSpec* spec = &k_dom_reflected_attrs[i];
+        if (strcmp(spec->idl, prop) != 0) continue;
+        return strcmp(spec->idl, spec->attr) == 0 ? nullptr : spec->attr;
     }
     return nullptr;
 }
@@ -8108,30 +8190,7 @@ static const char* _idl_to_attr_name(const char* prop) {
 // Per HTML spec, IDL boolean reflection setters do ToBoolean coercion:
 // truthy → set attribute (empty value), falsy → remove attribute.
 static bool _is_bool_reflected(DomElement* elem, const char* prop) {
-    if (!elem || !elem->tag_name) return false;
-    const char* tag = elem->tag_name;
-    bool input = strcasecmp(tag, "input") == 0;
-    bool button = strcasecmp(tag, "button") == 0;
-    bool select = strcasecmp(tag, "select") == 0;
-    bool textarea = strcasecmp(tag, "textarea") == 0;
-    bool form = strcasecmp(tag, "form") == 0;
-    bool details = strcasecmp(tag, "details") == 0;
-    bool fieldset = strcasecmp(tag, "fieldset") == 0;
-    bool option = strcasecmp(tag, "option") == 0;
-    bool optgroup = strcasecmp(tag, "optgroup") == 0;
-    if (strcmp(prop, "disabled") == 0)
-        return input || button || select || textarea || fieldset || option || optgroup;
-    if (strcmp(prop, "required") == 0) return input || select || textarea;
-    if (strcmp(prop, "multiple") == 0) return input || select;
-    if (strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0)
-        return input || textarea;
-    if (strcmp(prop, "noValidate") == 0) return form;
-    if (strcmp(prop, "formNoValidate") == 0) return input || button;
-    if (strcmp(prop, "autofocus") == 0) return true;
-    if (strcmp(prop, "open") == 0) return details;
-    if (strcmp(prop, "defaultChecked") == 0) return input;
-    if (strcmp(prop, "defaultSelected") == 0) return option;
-    return false;
+    return js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_BOOL) != NULL;
 }
 
 // True if `prop` reflects a non-negative-integer-with-default attribute.
@@ -8139,103 +8198,37 @@ static bool _is_bool_reflected(DomElement* elem, const char* prop) {
 // IDL default returned when attribute is missing or invalid.
 static bool _is_int_reflected(DomElement* elem, const char* prop,
                               const char** attr_name, int* default_val) {
-    if (!elem || !elem->tag_name || !attr_name || !default_val) return false;
-    const char* tag = elem->tag_name;
-    bool input = strcasecmp(tag, "input") == 0;
-    bool canvas = strcasecmp(tag, "canvas") == 0;
-    bool textarea = strcasecmp(tag, "textarea") == 0;
-    bool select = strcasecmp(tag, "select") == 0;
-    if (strcmp(prop, "maxLength") == 0 && (input || textarea)) {
-        *attr_name = "maxlength"; *default_val = -1; return true;
-    }
-    if (strcmp(prop, "minLength") == 0 && (input || textarea)) {
-        *attr_name = "minlength"; *default_val = 0; return true;
-    }
-    if (strcmp(prop, "size") == 0 && input) {
-        *attr_name = "size"; *default_val = 20; return true;
-    }
-    if (strcmp(prop, "width") == 0 && (input || canvas)) {
-        *attr_name = "width"; *default_val = 0; return true;
-    }
-    if (strcmp(prop, "height") == 0 && (input || canvas)) {
-        *attr_name = "height"; *default_val = 0; return true;
-    }
-    if (strcmp(prop, "size") == 0 && select) {
-        *attr_name = "size"; *default_val = 0; return true;
-    }
-    if (strcmp(prop, "rows") == 0 && textarea) {
-        *attr_name = "rows"; *default_val = 2; return true;
-    }
-    if (strcmp(prop, "cols") == 0 && textarea) {
-        *attr_name = "cols"; *default_val = 20; return true;
-    }
-    return false;
+    if (!attr_name || !default_val) return false;
+    const JsDomReflectSpec* spec = js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_INT);
+    if (!spec) return false;
+    *attr_name = spec->attr;
+    *default_val = spec->default_value;
+    return true;
 }
 
 // True if `prop` reflects a string-valued content attribute whose missing
 // value is the empty string in the DOM IDL layer.
+//
+// HTMLIFrameElement width/height are here rather than in the integer group:
+// they reflect as strings, and keeping them reflected makes IDL writes
+// trigger cascade invalidation instead of becoming inert JS expandos.
 static bool _is_string_reflected(DomElement* elem, const char* prop,
                                  const char** attr_name) {
-    if (!elem || !elem->tag_name || !prop || !attr_name) return false;
-    const char* tag = elem->tag_name;
-    if (strcmp(prop, "src") == 0) {
-        if (strcasecmp(tag, "img") == 0 || strcasecmp(tag, "script") == 0 ||
-            strcasecmp(tag, "iframe") == 0 || strcasecmp(tag, "embed") == 0 ||
-            strcasecmp(tag, "source") == 0 || strcasecmp(tag, "track") == 0 ||
-            strcasecmp(tag, "audio") == 0 || strcasecmp(tag, "video") == 0 ||
-            strcasecmp(tag, "input") == 0) {
-            *attr_name = "src";
-            return true;
-        }
-    }
-    if (strcmp(prop, "href") == 0) {
-        if (strcasecmp(tag, "a") == 0 || strcasecmp(tag, "area") == 0 ||
-            strcasecmp(tag, "link") == 0 || strcasecmp(tag, "base") == 0) {
-            *attr_name = "href";
-            return true;
-        }
-    }
-    if (strcmp(prop, "alt") == 0 && strcasecmp(tag, "img") == 0) {
-        *attr_name = "alt";
-        return true;
-    }
-    if ((strcmp(prop, "width") == 0 || strcmp(prop, "height") == 0) &&
-        strcasecmp(tag, "iframe") == 0) {
-        // HTMLIFrameElement dimensions reflect content attributes as strings;
-        // keeping this in the reflected path makes IDL writes trigger cascade
-        // invalidation instead of becoming inert JS expandos.
-        *attr_name = prop;
-        return true;
-    }
-    return false;
+    if (!attr_name) return false;
+    const JsDomReflectSpec* spec = js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_STR);
+    if (!spec) return false;
+    *attr_name = spec->attr;
+    return true;
 }
 
 // C0.5: the setter applied the _idl_to_attr_name() mapping on any element, so
 // e.g. `div.htmlFor = 'x'` wrote a `for` content attribute that the getter —
 // which gates every one of these pairs by tag — then refused to read back, and
 // `div.readOnly = true` wrote `readonly=""` instead of storing an expando.
-// This gate lists the same element/property pairs the getter accepts, for the
-// mapped names that the bool/int predicates above do not already cover.
+// The table gates the write on the same element/property pairs the getter
+// accepts.
 static bool _is_mapped_attr_reflected(DomElement* elem, const char* prop) {
-    if (!elem || !elem->tag_name || !prop) return false;
-    // global attributes: reflected by every HTML element
-    if (strcmp(prop, "tabIndex") == 0 || strcmp(prop, "inputMode") == 0 ||
-        strcmp(prop, "enterKeyHint") == 0 || strcmp(prop, "contentEditable") == 0) {
-        return true;
-    }
-    if (strcmp(prop, "acceptCharset") == 0) return _is_tag(elem, "form");
-    if (strcmp(prop, "htmlFor") == 0) {
-        return _is_tag(elem, "label") || _is_tag(elem, "output");
-    }
-    if (strcmp(prop, "formAction") == 0 || strcmp(prop, "formMethod") == 0 ||
-        strcmp(prop, "formEnctype") == 0 || strcmp(prop, "formEncoding") == 0 ||
-        strcmp(prop, "formTarget") == 0 || strcmp(prop, "formNoValidate") == 0) {
-        return _is_tag(elem, "input") || _is_tag(elem, "button");
-    }
-    // readOnly, noValidate, maxLength, minLength, defaultChecked and
-    // defaultSelected are handled by the bool/int predicates; reaching here
-    // means this element does not support them.
-    return false;
+    return js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_MAP) != NULL;
 }
 
 // Returns the lowercased input `formmethod` value or "get" default.
