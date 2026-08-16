@@ -71,7 +71,6 @@ void parse_xml(Input* input, const char* xml_string);
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <functional>
 #include "../../lib/mem.h"
 
 // JS undefined helpers (matching js_runtime.cpp encoding)
@@ -94,6 +93,23 @@ static void js_dom_refresh_select_option_collections_for_mutation(DomNode* targe
 static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
                                                                 DomNode* parent,
                                                                 DomDocument* doc);
+// Pre-order walk over `node` and its following siblings, descending into each
+// element's children. `visit` returns false to skip that element's subtree.
+// Four call sites used to spell this out with a recursive std::function
+// lambda; a plain function pointer keeps the traversal out of <functional>
+// (CLAUDE.md rule 3).
+typedef bool (*DomElementVisit)(DomElement* elem, void* ctx);
+
+static void dom_walk_elements(DomNode* node, DomElementVisit visit, void* ctx) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (visit(elem, ctx)) dom_walk_elements(elem->first_child, visit, ctx);
+        }
+        node = node->next_sibling;
+    }
+}
+
 static void _collect_document_forms_rec(DomNode* node, Item forms);
 static void _collect_form_controls_rec(DomNode* node, Item arr);
 static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
@@ -7660,6 +7676,54 @@ static void _reset_form_control(DomElement* elem) {
 // the `form="<id>"` attribute) and resets each. Caller is responsible for
 // dispatching the "reset" event before invoking; this just runs the
 // per-control reset steps.
+// Reset pass over a form's controls. The descendant pass owns any control
+// whose nearest enclosing form is this one; the associated pass, run over the
+// whole document afterwards, owns only controls that name the form through
+// their `form` attribute, and skips the form's own subtree so a control is
+// never reset twice.
+typedef struct FormResetCtx {
+    DomElement* form_elem;
+    DomElement* doc_root;
+    bool associated_only;
+} FormResetCtx;
+
+static bool _is_form_control_tag(DomElement* elem) {
+    return elem->tag_name &&
+        (strcasecmp(elem->tag_name, "input") == 0 ||
+         strcasecmp(elem->tag_name, "textarea") == 0 ||
+         strcasecmp(elem->tag_name, "select") == 0 ||
+         strcasecmp(elem->tag_name, "output") == 0);
+}
+
+// nearest ancestor <form> of `elem`, stopping at (and including) `limit`
+static DomElement* _nearest_enclosing_form(DomElement* elem, DomElement* limit) {
+    for (DomNode* p = elem->parent; p; p = p->parent) {
+        if (p == (DomNode*)limit) return limit;
+        if (!p->is_element()) continue;
+        DomElement* pe = (DomElement*)p;
+        if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) return pe;
+    }
+    return NULL;
+}
+
+static bool _form_reset_visit(DomElement* elem, void* ctx) {
+    FormResetCtx* state = (FormResetCtx*)ctx;
+    if (state->associated_only && elem == state->form_elem) return false;
+    if (!elem->tag_name) return false;
+    if (_is_form_control_tag(elem)) {
+        const char* form_attr = elem->get_attribute("form");
+        DomElement* owner = NULL;
+        if (form_attr && *form_attr) {
+            owner = state->doc_root
+                ? js_dom_find_element_by_id(state->doc_root, form_attr) : NULL;
+        } else if (!state->associated_only) {
+            owner = _nearest_enclosing_form(elem, state->form_elem);
+        }
+        if (owner == state->form_elem) _reset_form_control(elem);
+    }
+    return true;
+}
+
 static void _run_form_reset(DomElement* form_elem) {
     if (!form_elem) return;
     DomDocument* doc = _js_current_document;
@@ -7674,71 +7738,37 @@ static void _run_form_reset(DomElement* form_elem) {
         }
     }
     // First pass: descendant controls (always walk these).
-    std::function<void(DomNode*, DomElement*)> walk =
-        [&](DomNode* node, DomElement* nearest_form) {
-        while (node) {
-            if (node->is_element()) {
-                DomElement* ce = (DomElement*)node;
-                if (ce->tag_name) {
-                    bool is_ctrl =
-                        strcasecmp(ce->tag_name, "input") == 0 ||
-                        strcasecmp(ce->tag_name, "textarea") == 0 ||
-                        strcasecmp(ce->tag_name, "select") == 0 ||
-                        strcasecmp(ce->tag_name, "output") == 0;
-                    if (is_ctrl) {
-                        const char* fa = ce->get_attribute("form");
-                        DomElement* owner = nullptr;
-                        if (fa && *fa) {
-                            owner = doc_root ? js_dom_find_element_by_id(doc_root, fa) : nullptr;
-                        } else {
-                            owner = nearest_form;
-                        }
-                        if (owner == form_elem) _reset_form_control(ce);
-                    }
-                    bool is_form = strcasecmp(ce->tag_name, "form") == 0;
-                    DomElement* new_nearest = is_form ? ce : nearest_form;
-                    // Don't change nearest_form for the form_elem itself
-                    // when it appears at the top of recursion.
-                    walk(ce->first_child, new_nearest);
-                }
-            }
-            node = node->next_sibling;
-        }
-    };
-    // Walk the form's own descendants (handles detached forms too).
-    walk(form_elem->first_child, form_elem);
+    FormResetCtx reset_ctx = { form_elem, doc_root, false };
+    dom_walk_elements(form_elem->first_child, _form_reset_visit, &reset_ctx);
     // For associated controls (via `form` attribute) outside the form
     // subtree, walk the rest of the document — but skip the form_elem
     // subtree to avoid double-resetting.
     if (form_in_doc && doc_root && doc_root != form_elem) {
-        std::function<void(DomNode*)> walk_assoc = [&](DomNode* node) {
-            while (node) {
-                if (node == (DomNode*)form_elem) {
-                    node = node->next_sibling; continue;
-                }
-                if (node->is_element()) {
-                    DomElement* ce = (DomElement*)node;
-                    if (ce->tag_name) {
-                        bool is_ctrl =
-                            strcasecmp(ce->tag_name, "input") == 0 ||
-                            strcasecmp(ce->tag_name, "textarea") == 0 ||
-                            strcasecmp(ce->tag_name, "select") == 0 ||
-                            strcasecmp(ce->tag_name, "output") == 0;
-                        if (is_ctrl) {
-                            const char* fa = ce->get_attribute("form");
-                            if (fa && *fa) {
-                                DomElement* owner = js_dom_find_element_by_id(doc_root, fa);
-                                if (owner == form_elem) _reset_form_control(ce);
-                            }
-                        }
-                        walk_assoc(ce->first_child);
-                    }
-                }
-                node = node->next_sibling;
-            }
-        };
-        walk_assoc((DomNode*)doc_root);
+        reset_ctx.associated_only = true;
+        dom_walk_elements((DomNode*)doc_root, _form_reset_visit, &reset_ctx);
     }
+}
+
+// Constraint validation for a radio group: does any control with this name in
+// the same form scope carry `checked`, and does any of them carry `required`?
+typedef struct RadioGroupScanCtx {
+    const char* name;
+    DomElement* form_scope;
+    bool* any_checked;
+    bool* any_required;
+} RadioGroupScanCtx;
+
+static bool _radio_group_visit(DomElement* elem, void* ctx) {
+    RadioGroupScanCtx* state = (RadioGroupScanCtx*)ctx;
+    if (!elem->tag_name || strcasecmp(elem->tag_name, "input") != 0) return true;
+    if (strcmp(js_dom_input_type_lower(elem), "radio") != 0) return true;
+    const char* name = elem->get_attribute("name");
+    if (!name || strcmp(name, state->name) != 0) return true;
+    if (_nearest_enclosing_form(elem, NULL) == state->form_scope) {
+        if (js_dom_get_checkedness(elem)) *state->any_checked = true;
+        if (elem->has_attribute("required")) *state->any_required = true;
+    }
+    return true;
 }
 
 static Item _build_validity_state(DomElement* elem) {
@@ -7817,39 +7847,10 @@ static Item _build_validity_state(DomElement* elem) {
                         (_js_current_document ? (DomElement*)_js_current_document->root : nullptr);
                     bool any_checked = false;
                     bool any_required = own_required;
-                    std::function<void(DomNode*)> scan = [&](DomNode* n) {
-                        while (n) {
-                            if (n->is_element()) {
-                                DomElement* ce = (DomElement*)n;
-                                if (ce->tag_name && strcasecmp(ce->tag_name, "input") == 0) {
-                                    const char* tt = js_dom_input_type_lower(ce);
-                                    if (strcmp(tt, "radio") == 0) {
-                                        const char* nm = ce->get_attribute("name");
-                                        if (nm && strcmp(nm, rname) == 0) {
-                                            DomElement* ce_form = nullptr;
-                                            for (DomNode* pp = ce->parent; pp; pp = pp->parent) {
-                                                if (pp->is_element()) {
-                                                    DomElement* pe2 = (DomElement*)pp;
-                                                    if (pe2->tag_name && strcasecmp(pe2->tag_name, "form") == 0) {
-                                                        ce_form = pe2; break;
-                                                    }
-                                                }
-                                            }
-                                            if (ce_form == form_scope) {
-                                                if (js_dom_get_checkedness(ce)) any_checked = true;
-                                                if (ce->has_attribute("required")) any_required = true;
-                                            }
-                                        }
-                                    }
-                                    scan(ce->first_child);
-                                } else {
-                                    scan(ce->first_child);
-                                }
-                            }
-                            n = n->next_sibling;
-                        }
+                    RadioGroupScanCtx scan_ctx = {
+                        rname, form_scope, &any_checked, &any_required
                     };
-                    if (root) scan(root->first_child);
+                    if (root) dom_walk_elements(root->first_child, _radio_group_visit, &scan_ctx);
                     value_missing = any_required && !any_checked;
                 }
             }
@@ -8356,6 +8357,24 @@ static Item js_dom_collect_child_nodes(DomElement* elem, bool elements_only) {
         child = js_dom_next_script_visible_sibling(child);
     }
     return (Item){.array = arr};
+}
+
+// form[name] named getter: collect every listed control whose name or id
+// matches.
+typedef struct FormNamedGetterCtx {
+    const char* name;
+    Item matches;
+} FormNamedGetterCtx;
+
+static bool _form_named_getter_visit(DomElement* elem, void* ctx) {
+    FormNamedGetterCtx* state = (FormNamedGetterCtx*)ctx;
+    if (_is_listed_form_control(elem)) {
+        const char* key = _form_control_name_or_id(elem);
+        if (key && strcmp(key, state->name) == 0) {
+            js_array_push(state->matches, js_dom_wrap_element(elem));
+        }
+    }
+    return true;
 }
 
 static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
@@ -9559,22 +9578,8 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         // to avoid shadowing them.
         if (!js_dom_form_named_getter_reserved_name(prop)) {
             Item matches = js_array_new(0);
-            std::function<void(DomNode*)> walk = [&](DomNode* node) {
-                while (node) {
-                    if (node->is_element()) {
-                        DomElement* ce = (DomElement*)node;
-                        if (_is_listed_form_control(ce)) {
-                            const char* k = _form_control_name_or_id(ce);
-                            if (k && strcmp(k, prop) == 0) {
-                                js_array_push(matches, js_dom_wrap_element(ce));
-                            }
-                        }
-                        walk(ce->first_child);
-                    }
-                    node = node->next_sibling;
-                }
-            };
-            walk(elem->first_child);
+            FormNamedGetterCtx named_ctx = { prop, matches };
+            dom_walk_elements(elem->first_child, _form_named_getter_visit, &named_ctx);
             int64_t mlen = js_array_length(matches);
             if (mlen == 1) {
                 // single match — return the element itself
