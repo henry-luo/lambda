@@ -361,10 +361,22 @@ is_gtest_test() {
             ;;
     esac
 
-    # Third check: try to run with --gtest_list_tests to detect GTest at runtime
-    # This is more reliable but slower, so we do it last
+    # Third check: scan the binary for GTest's own flag strings. this is static (no
+    # exec), so it cannot be starved by machine load the way the old exec probe was:
+    # that probe gave a process launch only 2s, and under 12-way parallel execution a
+    # GTest binary could miss the budget, get misclassified as Criterion, and then be
+    # run with --json=... - a flag GTest ignores, so it exited 0 having written no
+    # JSON and the suite reported "No valid JSON output" for a test that had passed.
+    if [ -f "$test_exe" ]; then
+        if LC_ALL=C grep -qa -- "gtest_list_tests" "$test_exe" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Fourth check: last-resort runtime probe, for binaries whose flag strings are not
+    # greppable (e.g. compressed/packed). timeout is generous for the same reason.
     if [ -x "$test_exe" ]; then
-        if timeout 2s "./$test_exe" --gtest_list_tests >/dev/null 2>&1; then
+        if timeout 30s "./$test_exe" --gtest_list_tests >/dev/null 2>&1; then
             return 0
         fi
     fi
