@@ -3079,6 +3079,14 @@ static MIR_reg_t emit_coerce_boxed_to_declared(MirTranspiler* mt, MIR_reg_t boxe
 static MIR_reg_t emit_coerce_value_to_declared(MirTranspiler* mt, MIR_reg_t val,
                                                TypeId val_tid, Type* declared_type) {
     TypeId target_tid = mir_decl_type_id(declared_type);
+    if (target_tid == LMD_TYPE_UINT64 && val_tid == LMD_TYPE_UINT64) {
+        // The u64 lane is already the coercion's own output: coerce_uint64 is
+        // box_uint64_value(item_to_uint64_value(v)), which for a u64 source
+        // reads back the payload it was handed. Running it anyway cost two
+        // number homes and a call per declared-u64 binding, which is the entire
+        // per-store expense of a lane whose values need no conversion (D2.2.3).
+        return val;
+    }
     if (target_tid == LMD_TYPE_NUM_SIZED || target_tid == LMD_TYPE_UINT64) {
         MIR_reg_t boxed = emit_box(mt, val, val_tid);
         MIR_reg_t coerced = emit_coerce_boxed_to_declared(mt, boxed, declared_type);
@@ -6717,6 +6725,59 @@ static MIR_reg_t mir_emit_u32_binary(MirTranspiler* mt, AstBinaryNode* binary) {
     return result;
 }
 
+// int64/uint64 are the wide scalars with no inline Item form at any magnitude
+// (D2.2.3), so the raw carrier occupies the whole 64-bit word: unlike the u32
+// lane above there is no mask that decodes a packed Item and a raw payload
+// alike. Admit only carriers the emitter already publishes raw — the same
+// invariant transpile_box_item's default `emit_box(val, tid)` arm depends on.
+// `int64?`/`uint64?` are excluded because every bit pattern is a valid value,
+// leaving them on the ordinary Item lane with no null sentinel (D2.5.2).
+static TypeId mir_wide_lane_operand_type(MirTranspiler* mt, AstNode* node) {
+    TypeId tid = get_effective_type(mt, node);
+    if (tid != LMD_TYPE_INT64 && tid != LMD_TYPE_UINT64) return LMD_TYPE_ANY;
+    if (mir_expr_may_be_null(mt, node)) return LMD_TYPE_ANY;
+    return tid;
+}
+
+// The classifier's I64/U64 result cell: two sized integers joining at 64 bits
+// under `+ - *`, whose overflow rule is LAMBDA_NUM_OVERFLOW_SIZED_WRAP — plain
+// two's-complement wrapping, which is what the machine instruction already
+// does. Narrow sized operands stay on the runtime helper: they are packed
+// NUM_SIZED Items needing sign/zero extension, not a wide lane.
+static bool mir_binary_is_native_wide_result(MirTranspiler* mt,
+        AstBinaryNode* binary, LambdaNumericDecision* decision) {
+    if (!binary) return false;
+    if (binary->op != OPERATOR_ADD && binary->op != OPERATOR_SUB &&
+            binary->op != OPERATOR_MUL) {
+        return false;
+    }
+    if (!mir_binary_numeric_decision(binary, decision)) return false;
+    if (decision->result != LAMBDA_NUM_I64 && decision->result != LAMBDA_NUM_U64) {
+        return false;
+    }
+    return mir_wide_lane_operand_type(mt, binary->left) != LMD_TYPE_ANY &&
+        mir_wide_lane_operand_type(mt, binary->right) != LMD_TYPE_ANY;
+}
+
+// One machine instruction on two raw payloads. Signedness does not select the
+// opcode: two's-complement add/sub and the low half of a multiply are identical
+// bit patterns for I64 and U64, which is exactly what sized_integer_arithmetic
+// computes on `raw_a`/`raw_b` before masking at 64 bits. The retired path boxed
+// both operands, called fn_add/fn_sub/fn_mul, and let pack_sized_integer push a
+// third number home for a result the next instruction unboxed again — three
+// side-stack words per operation, all dead on arrival (D2.2.3, D5.2.2v2).
+static MIR_reg_t mir_emit_wide_binary(MirTranspiler* mt, AstBinaryNode* binary) {
+    log_debug("mir: wide64 lane — native op %d on raw 64-bit operands", binary->op);
+    MIR_reg_t left = transpile_expr(mt, binary->left);
+    MIR_reg_t right = transpile_expr(mt, binary->right);
+    MIR_reg_t result = new_reg(mt, "wide64", MIR_T_I64);
+    MIR_insn_code_t op = binary->op == OPERATOR_ADD ? MIR_ADD :
+        binary->op == OPERATOR_SUB ? MIR_SUB : MIR_MUL;
+    emit_insn(mt, MIR_new_insn(mt->ctx, op, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
+    return result;
+}
+
 static MIR_reg_t mir_unbox_exact_native_numeric_result(
         MirTranspiler* mt, AstBinaryNode* binary, MIR_reg_t boxed) {
     LambdaNumericDecision decision;
@@ -7616,19 +7677,22 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
     bool both_float = left_float && right_float;
     bool int_float = (left_int && right_float) || (left_float && right_int);
     // INT64 + INT or INT64 + INT64: both stored as native int64 in MIR registers.
-    // Safe for COMPARISONS only (EQ/NE/LT/LE/GT/GE) — no risk of overflow or
-    // representation mismatch. Arithmetic still goes through boxed path since
-    // transpile_expr may return inconsistent values for INT64.
+    // Comparisons need no representation agreement beyond the shared lane.
     bool int_or_int64 = (left_int || left_int64) && (right_int || right_int64);
 
     if (mir_binary_is_exact_u32_result(bi)) {
         return mir_emit_u32_binary(mt, bi);
     }
 
-    // Note: INT64 arithmetic is NOT handled natively because transpile_expr
-    // returns inconsistent values for INT64 (raw int64 from literals/fn_int64,
-    // but boxed Items from generic binary fallback). All INT64 ops go through
-    // the generic boxed path, whose result is preserved by transpile_box_item.
+    // Wide `+ - *` whose operands both own the 64-bit lane. transpile_box_item
+    // already boxes this node's result with emit_box_int64/emit_box_uint64, so
+    // the raw lane returned here is the carrier its consumers expect.
+    {
+        LambdaNumericDecision wide_decision;
+        if (mir_binary_is_native_wide_result(mt, bi, &wide_decision)) {
+            return mir_emit_wide_binary(mt, bi);
+        }
+    }
 
     if (both_int && (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
         if (mir_matches_compact_loop_sub(mt, bi) || mir_matches_compact_loop_add(mt, bi)) {
