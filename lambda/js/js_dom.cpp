@@ -5857,6 +5857,40 @@ extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
     return root ? js_dom_wrap_element(root) : ItemNull;
 }
 
+// The nine URL components that document, location and history all expose.
+// One accessor row instead of a repeated strcmp chain per surface.
+typedef const char* (*JsUrlComponentGet)(const Url*);
+typedef struct JsUrlComponent {
+    const char* name;
+    JsUrlComponentGet get;
+} JsUrlComponent;
+
+static const JsUrlComponent k_url_components[] = {
+    { "href",     url_get_href },
+    { "protocol", url_get_protocol },
+    { "hostname", url_get_hostname },
+    { "port",     url_get_port },
+    { "pathname", url_get_pathname },
+    { "search",   url_get_search },
+    { "hash",     url_get_hash },
+    { "host",     url_get_host },
+    { "origin",   url_get_origin },
+};
+
+// The component's value as a JS string, or false when `prop` is not one of
+// them. A missing URL or component reads as "", as it does in a browser for a
+// document that has not been navigated.
+static bool js_url_component_item(const Url* url, const char* prop, Item* out) {
+    if (!prop || !out) return false;
+    for (size_t i = 0; i < sizeof(k_url_components) / sizeof(k_url_components[0]); i++) {
+        if (strcmp(k_url_components[i].name, prop) != 0) continue;
+        const char* value = url ? k_url_components[i].get(url) : NULL;
+        *out = js_name_item(value ? value : "");
+        return true;
+    }
+    return false;
+}
+
 static bool js_dom_form_named_getter_reserved_name(const char* prop);
 
 extern "C" Item js_document_get_property(Item prop_name) {
@@ -5951,41 +5985,9 @@ extern "C" Item js_document_get_property(Item prop_name) {
     if (strcmp(prop, "location") == 0 || strcmp(prop, "document") == 0) {
         return doc_to_proxy_item(doc);
     }
-    if (strcmp(prop, "href") == 0) {
-        const char* href = (doc->url && url_get_href(doc->url)) ? url_get_href(doc->url) : "";
-        return js_name_item(href);
-    }
-    if (strcmp(prop, "protocol") == 0) {
-        const char* protocol = (doc->url && url_get_protocol(doc->url)) ? url_get_protocol(doc->url) : "";
-        return js_name_item(protocol);
-    }
-    if (strcmp(prop, "hostname") == 0) {
-        const char* hostname = (doc->url && url_get_hostname(doc->url)) ? url_get_hostname(doc->url) : "";
-        return js_name_item(hostname);
-    }
-    if (strcmp(prop, "port") == 0) {
-        const char* port = (doc->url && url_get_port(doc->url)) ? url_get_port(doc->url) : "";
-        return js_name_item(port);
-    }
-    if (strcmp(prop, "pathname") == 0) {
-        const char* pathname = (doc->url && url_get_pathname(doc->url)) ? url_get_pathname(doc->url) : "";
-        return js_name_item(pathname);
-    }
-    if (strcmp(prop, "search") == 0) {
-        const char* search = (doc->url && url_get_search(doc->url)) ? url_get_search(doc->url) : "";
-        return js_name_item(search);
-    }
-    if (strcmp(prop, "hash") == 0) {
-        const char* hash = (doc->url && url_get_hash(doc->url)) ? url_get_hash(doc->url) : "";
-        return js_name_item(hash);
-    }
-    if (strcmp(prop, "host") == 0) {
-        const char* host = (doc->url && url_get_host(doc->url)) ? url_get_host(doc->url) : "";
-        return js_name_item(host);
-    }
-    if (strcmp(prop, "origin") == 0) {
-        const char* origin = (doc->url && url_get_origin(doc->url)) ? url_get_origin(doc->url) : "";
-        return js_name_item(origin);
+    {
+        Item url_component = ItemNull;
+        if (js_url_component_item(doc->url, prop, &url_component)) return url_component;
     }
 
     // readyState — legacy defaults to "complete"; the Phase 4 post-DOM
@@ -14827,41 +14829,9 @@ extern "C" Item js_location_get_property(Item prop_name) {
         return js_name_item("");
     }
 
-    if (strcmp(prop, "href") == 0) {
-        const char* href = url_get_href(url);
-        return js_name_item(href ? href : "");
-    }
-    if (strcmp(prop, "protocol") == 0) {
-        const char* proto = url_get_protocol(url);
-        return js_name_item(proto ? proto : "");
-    }
-    if (strcmp(prop, "hostname") == 0) {
-        const char* hostname = url_get_hostname(url);
-        return js_name_item(hostname ? hostname : "");
-    }
-    if (strcmp(prop, "port") == 0) {
-        const char* port = url_get_port(url);
-        return js_name_item(port ? port : "");
-    }
-    if (strcmp(prop, "pathname") == 0) {
-        const char* pathname = url_get_pathname(url);
-        return js_name_item(pathname ? pathname : "");
-    }
-    if (strcmp(prop, "search") == 0) {
-        const char* search = url_get_search(url);
-        return js_name_item(search ? search : "");
-    }
-    if (strcmp(prop, "hash") == 0) {
-        const char* hash = url_get_hash(url);
-        return js_name_item(hash ? hash : "");
-    }
-    if (strcmp(prop, "host") == 0) {
-        const char* host = url_get_host(url);
-        return js_name_item(host ? host : "");
-    }
-    if (strcmp(prop, "origin") == 0) {
-        const char* origin = url_get_origin(url);
-        return js_name_item(origin ? origin : "");
+    {
+        Item url_component = ItemNull;
+        if (js_url_component_item(url, prop, &url_component)) return url_component;
     }
 
     log_debug("js_location_get_property: unknown property '%s'", prop);
