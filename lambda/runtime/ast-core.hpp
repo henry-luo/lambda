@@ -390,6 +390,11 @@ typedef struct AstCallNode : AstNode {
     bool can_raise;
     bool optional;
     bool is_proc_method;
+    // Marked by the T0 frame-plan pass when this call is a self-recursive call
+    // in tail position. The walker then rebinds parameter slots and re-enters
+    // the body instead of opening a frame, matching the loop lowering emits
+    // for the same shape (AIO1's self-tail-call slice).
+    bool interp_self_tail_call;
 } AstCallNode;
 
 // A handler keeps the operand and recovery body together so both expression

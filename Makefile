@@ -395,6 +395,9 @@ clean-mir:
 # Verify the vendored source still matches upstream + patches/. Clones pristine
 # upstream at MIR_UPSTREAM_COMMIT, applies every patch, and diffs the result
 # against lambda/mir. Run after editing lambda/mir or a MIR patch by hand.
+# diff uses --strip-trailing-cr: upstream stores some files with CRLF (e.g.
+# c2mir/x86_64/mirc_x86_64_win.h) but the vendored import was LF-normalized;
+# EOL style is not a real content difference.
 verify-mir-patches:
 	@set -e; \
 	work=build_temp/mir-verify; \
@@ -408,7 +411,7 @@ verify-mir-patches:
 	done; \
 	fail=0; \
 	for f in $$(cd $(MIR_BUILD_DIR) && find . -name '*.c' -o -name '*.h'); do \
-		if ! diff -q "$$work/upstream/$$f" "$(MIR_BUILD_DIR)/$$f" >/dev/null 2>&1; then \
+		if ! diff -q --strip-trailing-cr "$$work/upstream/$$f" "$(MIR_BUILD_DIR)/$$f" >/dev/null 2>&1; then \
 			echo "DIFFERS: $$f"; fail=1; \
 		fi; \
 	done; \
@@ -1510,8 +1513,11 @@ test-lambda-interp:
 
 # Full-corpus sweep: reports match / fallback / mismatch per script. A mismatch
 # is a T0 bug by definition (SI3); a fallback is uncovered coverage.
+# Sweep, then regenerate BOTH committed lists from that one sweep — they are a
+# partition of the corpus and refreshing either alone lets them drift.
 interp-sweep:
-	@python3 test/interp/tier_sweep.py
+	@python3 test/interp/tier_sweep.py --out temp/sweep_full.tsv
+	@python3 test/interp/refresh_lists.py --sweep temp/sweep_full.tsv
 
 # §6 turnaround + memory report. Release build only (CLAUDE rule 10).
 interp-bench:

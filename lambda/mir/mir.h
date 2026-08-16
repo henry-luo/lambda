@@ -589,6 +589,7 @@ extern void MIR_insert_insn_after (MIR_context_t ctx, MIR_item_t func, MIR_insn_
 extern void MIR_insert_insn_before (MIR_context_t ctx, MIR_item_t func, MIR_insn_t before,
                                     MIR_insn_t insn);
 extern void MIR_remove_insn (MIR_context_t ctx, MIR_item_t func, MIR_insn_t insn);
+extern void MIR_release_func_ir (MIR_context_t ctx, MIR_item_t func_item);
 
 extern void MIR_change_module_ctx (MIR_context_t old_ctx, MIR_module_t m, MIR_context_t new_ctx);
 

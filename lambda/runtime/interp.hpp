@@ -47,7 +47,14 @@ enum class EvalSignal : uint8_t {
     BROKE,
     CONTINUED,
     ERROR_SKIP,
+    // Self-tail-call: the parameter slots already hold the next iteration's
+    // arguments and interp_call should re-enter the body rather than recurse.
+    TAIL_CALL,
 };
+
+// The same iteration ceiling lowering applies to its TCO loop, so a runaway
+// tail recursion faults at the same point in either tier.
+#define LAMBDA_INTERP_TCO_MAX_ITERATIONS LAMBDA_TCO_MAX_ITERATIONS
 
 // ---------------------------------------------------------------------------
 // Frames

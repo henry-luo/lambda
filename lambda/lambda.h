@@ -2065,6 +2065,8 @@ Map* map_fill_items(Map* map, const Item* values, int value_count);
 
 typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
+// Same fill from a caller-rooted Item span; the T0 walker has no varargs.
+Element* elmt_fill_items(Element *elmt, const Item* values, int value_count);
 
 typedef struct Url Url;
 typedef struct Pool Pool;

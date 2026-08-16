@@ -169,6 +169,7 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
 void* jit_gen_func(MIR_context_t ctx, const char *func_name);
+size_t jit_release_generated_ir(MIR_context_t ctx);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_func_prefix(MIR_context_t ctx, const char *prefix);

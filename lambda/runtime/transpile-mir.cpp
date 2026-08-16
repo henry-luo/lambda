@@ -1343,7 +1343,10 @@ enum FunctionReturnLaneKind {
 // (non-zero) rather than comparing; both are one instruction, so the two
 // encodings coexist per transport rather than being unified for its own sake.
 static inline MIR_op_t mir_error_lane_no_error_op(MirTranspiler* mt) {
-    return em_returns_result_pair(mt->em.frame.plan.companion)
+    // RV9: one definition of the no-error spelling, shared with the consumer
+    // (em_error_lane_in_register). Deriving it separately on each side is the
+    // mismatch this ruling exists to prevent.
+    return em_error_lane_in_register(mt->em.frame.plan.companion)
         ? MIR_new_uint_op(mt->ctx, ITEM_NULL)
         : MIR_new_int_op(mt->ctx, 0);
 }
@@ -5681,6 +5684,38 @@ static inline bool mir_native_math_always_float(SysFunc fn) {
     default:
         return false;
     }
+}
+
+// Type-preserving unary math: the result type follows the ARGUMENT's, which is
+// why these are excluded from mir_native_math_always_float. But once the
+// argument type is known the result type is fixed too, and the boxed helper
+// becomes pure overhead — `fn_numeric_rounding` literally does `return item;`
+// for the int family (sentinels included) and `push_d(<C fn>(get_double()))`
+// for a float, so the native call is the SAME computation without the Item
+// round trip, and `fn_abs`'s float arm is `push_d(fabs(v))` likewise.
+//
+// `*int_is_identity` distinguishes the two: flooring, ceiling, rounding or
+// truncating an integer returns it unchanged, but |x| does not — abs keeps the
+// boxed helper for integer arguments, where the int lane's sentinels need real
+// handling.
+//
+// TRUNC alone had this as a hand-written special case; generalizing it beats a
+// fourth near-identical copy (rule 13).
+static inline bool mir_native_math_type_preserving(SysFunc fn,
+        bool* int_is_identity) {
+    bool identity = false;
+    bool matched = true;
+    switch (fn) {
+    case SYSFUNC_TRUNC: case SYSFUNC_FLOOR:
+    case SYSFUNC_CEIL:  case SYSFUNC_ROUND:
+        identity = true; break;
+    case SYSFUNC_ABS:
+        identity = false; break;
+    default:
+        matched = false; break;
+    }
+    if (int_is_identity) *int_is_identity = identity;
+    return matched;
 }
 
 static TypeId mir_type_preserving_sysfunc_result(MirTranspiler* mt,
@@ -14971,10 +15006,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                         transpile_native_int_expr(mt, arg), arg_tid));
             }
         }
-        if (arg_count == 1 && info->fn == SYSFUNC_TRUNC) {
+        bool math_int_is_identity = false;
+        if (arg_count == 1 && mir_native_math_type_preserving(info->fn,
+                &math_int_is_identity)) {
             arg = call_node->argument;
             TypeId arg_tid = get_effective_type(mt, arg);
-            if (arg_tid == LMD_TYPE_INT) return transpile_native_int_expr(mt, arg);
+            if (math_int_is_identity && arg_tid == LMD_TYPE_INT) {
+                return transpile_native_int_expr(mt, arg);
+            }
             if (arg_tid == LMD_TYPE_FLOAT && info->native_c_name &&
                     info->native_func_ptr) {
                 MIR_reg_t value = transpile_expr(mt, arg);
@@ -15214,6 +15253,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
 
         #define POST_PROCESS_BOOL(result) \
             if (c_ret_tid == LMD_TYPE_BOOL) { result = emit_uext8(mt, result); }
+
 
         // Helper: when a sys func returns a boxed Item (c_ret_tid=ANY) but the
         // call expression has a specific native type, unbox to native format.
@@ -16459,6 +16499,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // v3 shape 4 hands the error back in a register; v1 leaves it in
             // the context lane for the caller to load.
             bool error_lane_in_register = call_error_lane && direct_error_reg;
+            // RV9: the call site infers the transport from "did em_call_direct
+            // hand me an error register?"; the callee wrote its lane from its
+            // own descriptor. Cross-check those two derivations here.
+            if (call_error_lane && local_entry) {
+                em_assert_error_lane_agreement(direct_call_name,
+                    local_entry->variant, error_lane_in_register);
+            }
             if (call_error_lane) {
                 second_result = error_lane_in_register ? direct_error_reg
                     : new_reg(mt, "call_error", MIR_T_I64);
@@ -18378,86 +18425,17 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 // ============================================================================
 
 static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) {
-    // base_type(type_id) returns a Type* for runtime type checking
-    TypeId tid = type_node->type ? type_node->type->type_id : LMD_TYPE_ANY;
-
-    // If this is a TypeType, get the actual type and check for special cases
-    if (type_node->type && type_node->type->type_id == LMD_TYPE_TYPE) {
-        TypeType* tt = (TypeType*)type_node->type;
-        if (tt->type) {
-            // For datetime sub-types (date, time), load the specific LIT_TYPE_DATE/TIME pointer
-            // because date/time/dtime share the same type_id (LMD_TYPE_DTIME)
-            extern Type TYPE_DATE, TYPE_TIME;
-            extern TypeType LIT_TYPE_DATE, LIT_TYPE_TIME;
-            if (tt->type == &TYPE_DATE) {
-                MIR_reg_t r = new_reg(mt, "tdate", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_DATE)));
-                return r;
-            }
-            if (tt->type == &TYPE_TIME) {
-                MIR_reg_t r = new_reg(mt, "ttime", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_TIME)));
-                return r;
-            }
-            // For 'list' bare keyword: emit &LIT_TYPE_LIST directly so fn_is returns BOOL_FALSE
-            // (LMD_TYPE_LIST no longer exists; 'list' type never matches at runtime)
-            extern Type TYPE_LIST;
-            extern TypeType LIT_TYPE_LIST;
-            if (tt->type == &TYPE_LIST) {
-                MIR_reg_t r = new_reg(mt, "tlist", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_LIST)));
-                return r;
-            }
-            // `number` has no runtime TypeId; keep its TypeType singleton instead of base_type(LMD_TYPE_TYPE).
-            extern Type TYPE_NUMBER;
-            extern TypeType LIT_TYPE_NUMBER;
-            if (tt->type == &TYPE_NUMBER) {
-                MIR_reg_t r = new_reg(mt, "tnumber", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_NUMBER)));
-                return r;
-            }
-            // `integer` is an abstract numeric domain like `number`; preserve its singleton.
-            extern Type TYPE_INTEGER;
-            extern TypeType LIT_TYPE_INTEGER;
-            if (tt->type == &TYPE_INTEGER) {
-                MIR_reg_t r = new_reg(mt, "tinteger", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_INTEGER)));
-                return r;
-            }
-            // For NUM_SIZED sub-types (i8..f32), load the specific LIT_TYPE_Xxx pointer
-            // so fn_is can distinguish between different sized type checks
-            if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {
-                extern TypeType LIT_TYPE_I8, LIT_TYPE_I16, LIT_TYPE_I32;
-                extern TypeType LIT_TYPE_U8, LIT_TYPE_U16, LIT_TYPE_U32;
-                extern TypeType LIT_TYPE_F16, LIT_TYPE_F32;
-                TypeType* sized_lit = nullptr;
-                switch ((NumSizedType)tt->type->kind) {
-                    case NUM_INT8:    sized_lit = &LIT_TYPE_I8;  break;
-                    case NUM_INT16:   sized_lit = &LIT_TYPE_I16; break;
-                    case NUM_INT32:   sized_lit = &LIT_TYPE_I32; break;
-                    case NUM_UINT8:   sized_lit = &LIT_TYPE_U8;  break;
-                    case NUM_UINT16:  sized_lit = &LIT_TYPE_U16; break;
-                    case NUM_UINT32:  sized_lit = &LIT_TYPE_U32; break;
-                    case NUM_FLOAT16: sized_lit = &LIT_TYPE_F16; break;
-                    case NUM_FLOAT32: sized_lit = &LIT_TYPE_F32; break;
-                    default: break;
-                }
-                if (sized_lit) {
-                    MIR_reg_t r = new_reg(mt, "tsized", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)sized_lit)));
-                    return r;
-                }
-            }
-            tid = tt->type->type_id;
-        }
+    // base_type(type_id) returns a Type* for runtime type checking. The
+    // singleton selection (date/time, list, number/integer, sized numerics)
+    // lives in ast.hpp so the T0 walker resolves the same identity.
+    TypeId tid = LMD_TYPE_ANY;
+    TypeType* singleton = lambda_type_node_singleton(type_node->type, &tid);
+    if (singleton) {
+        MIR_reg_t r = new_reg(mt, "tlit", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)singleton)));
+        return r;
     }
-
     return emit_call_1(mt, "base_type", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, tid));
 }
 
@@ -25572,6 +25550,14 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                   script_path ? script_path : "<unknown>");
         jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         tp->jit_context = NULL;
+    }
+
+    // After the final MIR_link + jit_gen_func the machine code of every
+    // function is published and this sealed per-module ctx never links again,
+    // so the MIR IR is dead weight — release it, keeping only the executable
+    // code. MIR-interp scripts keep their IR: there it IS the executable.
+    if (tp->jit_context && tp->main_func && !use_mir_interp_for_script) {
+        jit_release_generated_ir(ctx);
     }
 
     if (out_mir_module_count) *out_mir_module_count = mir_module_count;

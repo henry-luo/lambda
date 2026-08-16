@@ -1168,8 +1168,13 @@ rather than the deletion removing it.
       operator gate; RVO12): a `T^E` body of the form
       `if (…) { raise … } else { <T> }` now returns natively on **all three
       lanes** — `func d, i64` / `func i64, i64` under v3, from ordinary
-      source. Remaining P2 items, measured/scoped but NOT implemented: RV9
-      debug assert; INT64_ERROR retirement (tracked against v5 §5.8).
+      source. **P2 residue closed 2026-08-15**: the RV9 check landed as an
+      emission-time producer/consumer agreement assert (a runtime payload
+      check is unavailable — MIR must stay build-identical), negative-tested;
+      and §5.8's INT64_ERROR gate was RUN — **not retired** (4 live compares,
+      1 emitted), with the finding that deleting them would unmask an
+      `int64(<decimal>)` crash the surviving compare currently masks. See the
+      log entry; §5.8's step order is corrected there.
 - [ ] P2.5 LambdaJS migration (node/js262 gates)
 - [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
       2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).
@@ -1185,15 +1190,22 @@ rather than the deletion removing it.
 - [x] **P2.7.0b type-driven sys-func metadata** — *landed + gated 2026-08-14:
       helper-call adopts 101 → 23 (v1: 757, −97%). deltablue −33.5% total,
       home share 38.7%→12.6%.*
-- [ ] **P2.7 C-helper convention (RV14/RV15/RV16)** — **DEPRIORITIZED**: now
-      addresses 23 of 363 remaining adopts (6%). See the 2026-08-14 log entry.
-      In order, if revived:
-  - [ ] P2.7.1 per-binding slots for wide-capable mutable locals (RV16)
-  - [ ] P2.7.2 retire the eager per-call restore + helper adopt; add the
-        back-edge reclaim
-  - [ ] P2.7.3 **close RVO11 before the reclaim ships** — positively
-        establish no unnamed wide temporary crosses a back edge
-  - [ ] peak-side-stack probes (not just correctness)
+- [ ] **P2.7 C-helper convention (RV14/RV15/RV16)** — **MEASURED UNDER v3 AND
+      DECLINED 2026-08-15**, not merely deprioritized. Prior costings were
+      flag-off and counted a population v3 deletes; under v3 the whole target
+      is **11 adopt sites across 4 AWFY benchmarks (0.3–0.9%, zero
+      `_scalar_home` params)**. The rulings stand for the 757-site population
+      they were written against.
+  - [x] P2.7.1 (RV16) implemented, gated, then **REMOVED** — its publish
+        adopt-classified a raw-lane binding as an Item (see the 2026-08-15
+        crash entry). The narrow predicate leaves nothing to publish.
+  - [ ] P2.7.2/P2.7.3 — **structurally blocked, not just unstarted**: the
+        reclaim's soundness runs through RV16, so the sound configuration is
+        broad-predicate RV16 (+600–800 insns/bench) to recover RV15's ~142.
+        Net ≈ +600. Revisit only if int64-heavy code becomes a target.
+  - [x] RVO11's container question **VERIFIED 2026-08-15**: `array_set` copies
+        wide payloads into array-owned cells and re-tags (D5.2.2); containers
+        are not a hole. Bindings remain the only population.
 - [x] **P3 slot transport (RV12)** — *landed + gated 2026-08-14: 3719/3719
       both configurations. Under v3 the `_scalar_home` parameter and every
       return-side adopt are **gone** (home share 30–39% → under 1%).
@@ -1860,3 +1872,184 @@ assignments to outer bindings inside a `for` body fail to parse
 (`s = s + 1` then `last = s` → "Unexpected syntax near '= s'"), with or
 without semicolons; the working idiom in `for_expr_content_proc.ls` declares a
 `var` first. The test was reformulated around it.
+
+### 2026-08-15 — P2 residue: RV9 assert LANDED; INT64_ERROR gate RUN (and it reordered §5.8)
+
+**RV9 debug assert — done, and it is not the assert the ruling imagined.**
+
+RV9 asks for "a debug assert that lane-2 payloads are either `ItemNull` or
+ERROR-tagged". A *runtime* payload check is unavailable here: emitted MIR must
+stay byte-identical across build configurations (the MT7 ratchet and the
+`.mir-check` fixtures compare it), so the check cannot be debug-only emission —
+and emitting it always would tax every `^E` return in release.
+
+So the check runs **in the compiler**, and it pins something stronger than the
+payload's shape: **producer and consumer must agree on how lane 2 spells "no
+error".** The two sides derived that independently — the callee wrote it from
+`mt->em.frame.plan.companion`, the call site inferred it from "did
+`em_call_direct` hand me an error register?". They agree today, and nothing
+forced them to. `ItemNull` is **not** zero, so a producer writing the register
+spelling into a consumer testing non-zero reports **every successful call as an
+error** — silent and total. That is the RV10 two-derivations class exactly.
+
+- `em_error_lane_in_register(companion)` is now the single definition; the
+  producer (`mir_error_lane_no_error_op`) keys off it.
+- `em_assert_error_lane_agreement()` cross-checks the call site's belief
+  against the callee descriptor's, the same defence
+  `em_assert_callee_result_count` gives the result *count*.
+- **Negative-tested**: inverting one side makes it abort naming both
+  ("call site reads the context-lane form, callee writes the register form"),
+  so it has teeth rather than being decorative.
+
+Gate **3859/3859**.
+
+**INT64_ERROR — §5.8's gate was RUN, and its result changes the order of that
+work.** §5.8 asks to "grep-verify zero surviving `INT64_ERROR` compares",
+because the retired sentinel *is* `INT64_MAX`, which is now the `+inf` lane
+value. Result: **not retired.** 24 mentions; 4 live compares, of which one is
+on an emitted path (`box_int64_result_or_error`, reached from `int64()`).
+
+Empirically the collision is dormant for ordinary values — a runtime `inf`
+propagates correctly through `div`/`+` (`%` gives `nan`) and never reads as an
+error, because those paths use the lane-aware helpers, not the legacy
+`fn_idiv_i`/`fn_mod_i` (which have **no emitted callers at all** — dead code
+carrying two of the sentinel returns).
+
+**But running the gate surfaced a crash, and the surviving compare is what
+hides it.** `int64(<decimal>)` SIGSEGVs — `Item::type_id()` dereferencing
+`0x64`, i.e. the value `100` used as an Item pointer:
+
+```
+pn main() { print([int64(100m)]); return 0 }     // exit 139
+pn main() { print(int64(100m));   return 0 }     // fine
+pn main() { let x = int64(100m); print([x]); return 0 }   // exit 139
+```
+
+`int64()` returns a **raw** `int64_t` while its type is `int64 | error`, which
+lowers to ANY; a consumer that trusts "ANY means already an Item" reads the raw
+payload. `transpile_box_item` special-cases the direct call, but a binding
+loses the raw-ness before any consumer sees it. Note `int64(9223372036854775807m)`
+does **not** crash — it returns `INT64_ERROR`, the surviving compare converts it
+to a proper `ItemError`, and the bug is masked. **Deleting the compare, as §5.8
+asks, would unmask this.**
+
+*A fix was implemented and reverted, which is the useful part.* Boxing the raw
+return at its own ABI boundary (a `POST_PROCESS_INT64_UNION` beside the existing
+DTIME/BOOL post-processing) fixed every crashing form — but the condition
+`call_expr_tid == ANY` is too narrow, and widening it collides with native-lane
+consumers. With the narrow form, `scalar_home_donation`'s emission switched from
+`box_int64_result_or_error` to plain `box_int64_value`, i.e. **the error channel
+was silently dropped on that path** — caught by the emission fixture, not by any
+value test. Reverted; the fixture is the reason to trust the revert.
+
+**Consequence for §5.8: its gate cannot be satisfied by deleting compares.**
+The order must be (1) give `int64()`-class sysfuncs a carrier that represents
+"raw int64 OR error" without stealing a domain value — which is precisely what
+shape 4's error lane exists for, so the answer is to route them through it —
+then (2) delete the compares. Recorded here because §5.8 currently reads as if
+step 2 were a standalone grep.
+
+### 2026-08-15 — `fn_fill` removed from the helper-call adopts (17 → 9)
+
+The v3 adopt residue was 17 sites across 7 AWFY benchmarks, and attribution by
+defining call put **8 of them on `fn_fill` alone** — the largest single source.
+Reading every return path settles it: `fn_fill` returns an **Array** (the
+`n == 0` case, and the spreadable non-numeric case), an **ArrayNum**
+(`ELEM_INT`/`UINT64`/`FLOAT`/`BOOL`, chosen from the fill value's type), its two
+explicit `ItemError`s, or **the caller's own error Item propagated by
+`GUARD_ERROR2`** — that last one is easy to miss, since the returns live inside
+the macro. A container pointer or an error tag; never a number-home-backed wide
+scalar. Its adopts were pure waste.
+
+The type-driven rule in `mir.c` cannot reach this: `fill` is declared
+`&TYPE_ANY`, which *is* wide-capable, so it correctly declines to narrow. The
+proof is in the body, so it takes an explicit `jit_runtime_imports` row — the
+mechanism the 2026-08-15 census entry declined to use because it means
+hand-writing effect bits. For `fn_fill` those are answerable from the body:
+allocates (`heap_calloc`/`array_int_new`/`array_num_new`) so **MAY_GC**, calls
+no user code so **no re-entry**, both args are Items.
+
+`NUMBER_STACK_PRESERVES` is deliberately **not** claimed. `fn_fill` pushes
+nothing today (verified: no `box_int64_value`/`push_*`/`lambda_side_number_alloc`
+in its body, and `lambda_item_to_int64_exact` is pure), but that is a stronger
+promise than this fix needs — `RESULT_SCALAR_STABLE` alone sets
+`scalar_class = SCALAR_RETURN_NONE`, which skips the whole adopt block.
+
+| | before | after |
+|---|---|---|
+| adopt sites (7 benches) | 17 | **9** |
+| richards / sieve / storage | 1 / 1 / 4 | **0 / 0 / 0** |
+| havlak | 0.7% | **0.5%** |
+
+Three benchmarks now emit **zero** adopts. Remaining: `pn_push` ×4,
+`pn_splice` ×2, `fn_slice3` ×2, `fn_floor` ×1 — of which push/splice/slice3
+were already read and are likewise container-only, so the same row treatment
+applies; `fn_floor` genuinely can return a wide double.
+
+**Value-neutrality was A/B tested, not assumed**: `fill` exercised across every
+return path (int, float, bool, string, empty, negative-count error, indexed
+reads) gives byte-identical output with and without the row. Gate **3869/3869**.
+
+*Found while testing, unrelated and NOT fixed:* an `int64` literal past int53
+in an array literal reads back as garbage — `[9007199254740993i64, 1i64]` then
+`[0]` gives `432345568797327376`, while the bare literal prints correctly.
+`fill(3, <same value>)` gives `inf` (a defined lane sentinel) on the same input,
+so the two numeric-array paths disagree. Own repro; separate from this change.
+
+### 2026-08-15 — `trunc`'s native lowering generalized to abs/floor/ceil/round
+
+The numeric sys funcs split two ways, and the second family was
+under-implemented.
+
+**Always-float** (`mir_native_math_always_float`): sqrt, cbrt, hypot, log*,
+exp*, trig, hyperbolic. Lowered to a direct C call returning a raw double —
+no Item, so **no adopt is possible**. This is why they never appeared in the
+adopt census.
+
+**Type-preserving**: floor, ceil, round, trunc, abs, sign. Excluded from that
+whitelist for a real reason — their result type follows the *argument's*, and
+lowering to C `fabs`/`floor` (which return `double`) would turn `abs(-3)` into
+`3.0`. But that reason evaporates once the argument type is known, and
+**`trunc` already exploited it** via a hand-written special case sitting among
+unrelated one-offs (`SYSFUNC_FLOAT`, a u32 conversion, bitwise inlining). Its
+four siblings never got the same treatment.
+
+*Correcting an earlier statement in this log:* I described the split as
+principled and put `floor` "on the correct side" of it. The whitelist is
+principled; the implementation was not — `trunc` disproved the semantic
+objection for the whole family.
+
+**Generalized** rather than copied a fourth time (rule 13):
+`mir_native_math_type_preserving(fn, &int_is_identity)` names the family and
+carries the one bit that differs. `fn_numeric_rounding` literally does
+`return item;` for the int family (sentinels included), so floor/ceil/round/
+trunc are the identity on integers; `abs` is not, and keeps the boxed helper
+for integer arguments where the int lane's sentinels need real handling.
+`sign` has no `native_c_name` at all — it would need inline emission
+(compare + select), not a call — so it stays boxed everywhere.
+
+The result-type fact was already there: `mir_type_preserving_sysfunc_result`
+covers all five. Only the lowering was missing.
+
+| arg | before | after |
+|---|---|---|
+| `float` — abs/floor/ceil/round | boxed helper, **3 adopts each** | `fabs`/`floor`/`ceil`/`round`, **0 adopts** |
+| `int` — floor/ceil/round | boxed helper, 3 adopts | **no call at all** (identity) |
+| `int` — abs | boxed | boxed *(correct: |x| ≠ identity)* |
+| `sign` | boxed | boxed *(no native C function)* |
+
+**Value-neutrality A/B tested**, not assumed: restricting the predicate back to
+TRUNC alone and re-running gives byte-identical output. Semantics verified
+against hand-computed expectations — half-away-from-zero survives
+(`round(2.5)` = 3, `round(-2.5)` = -3), and type preservation holds
+(`floor(int)` → int, `floor(float)` → float, `abs(-5)` → 5 while its siblings
+stay -5). Gate **3869/3869**.
+
+Test: `test/lambda/proc/native_math_type_preserving.ls` pins the semantics the
+boxed path existed to protect — result-type-follows-argument and the rounding
+mode — plus `sign` still working on the boxed path.
+
+This also retires `fn_floor`'s adopt, the last one flagged as "genuinely
+wide-capable" in the census, as a *consequence* rather than by special-casing
+it. Remaining adopt sources are `pn_push` ×4, `pn_splice` ×2, `fn_slice3` ×2 —
+all container-only, so all candidates for the `fn_fill` row treatment.

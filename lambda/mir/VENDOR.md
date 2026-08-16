@@ -8,7 +8,7 @@ legacy `--c2mir` path.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -77,6 +77,25 @@ directions without a per-target lowering.
 ### `mir-alloca-branch-fix.patch` — `func_alloca_features` branch handling
 
 Ends the "top alloca" window at any branch, not only at a label.
+
+### `mir-release-func-ir.patch` — adds `MIR_release_func_ir`
+
+Frees a generated function's IR — its insn lists (`insns`, `original_insns`)
+and per-func register tables — while keeping the item, its thunk, and the
+published machine code callable. MIR retains the IR after `MIR_gen` (the
+generator machinizes a *duplicate* and restores the original) only for
+re-generation, link-time inlining, the MIR interpreter, and lazy generation;
+once a sealed Lambda module context has generated everything, none of those
+apply and the IR is pure dead weight (~32 + 48·nops bytes per insn).
+
+Touches `mir.h` (decl) and `mir.c`: the new API next to `remove_func_insns`, a
+NULL guard in `func_regs_finish` so `MIR_finish` stays safe after an early
+release, and `process_inlines` refusing empty bodies so a released function
+degrades to a plain call instead of being "inlined" as nothing. Used by
+`jit_release_generated_ir()` in `lambda/runtime/mir.c` after the final
+link+gen of a module (skipped for MIR-interp scripts and lazy-pending
+functions via the `func->machine_code != NULL` gate; `LAMBDA_MIR_KEEP_IR=1`
+disables it).
 
 ## Not vendored: the NULL-label workaround
 

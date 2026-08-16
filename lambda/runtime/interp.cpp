@@ -547,12 +547,57 @@ static AstNode* interp_unwrap_primary(AstNode* node) {
 static Item eval_call(InterpFrame* f, AstCallNode* node) {
     int argc = 0;
     for (AstNode* a = node->argument; a; a = a->next) argc++;
+
+    if (node->interp_self_tail_call && f->fn && f->plan) {
+        // Every argument is evaluated *before* any parameter is rebound: an
+        // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
+        // the slots as we go would feed the new n into acc.
+        uint16_t params = f->plan->param_count;
+        RootSpan next_args((size_t)(argc > 0 ? argc : 1));
+        uint64_t* words = next_args.words();
+        int i = 0;
+        for (AstNode* a = node->argument; a; a = a->next, i++) {
+            words[i] = eval_expr(f, a).item;
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+        for (int p = 0; p < (int)params; p++) {
+            f->slots[p] = p < argc ? words[p] : ITEM_NULL;
+        }
+        f->signal = EvalSignal::TAIL_CALL;
+        return ItemNull;
+    }
     if (argc > LAMBDA_MAX_FUNCTION_ARGS) {
         log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
         return ItemError;
     }
 
     AstNode* callee = interp_unwrap_primary(node->function);
+
+    // `print` is Lambda-variadic but not C-variadic: lowering emits one
+    // pn_print per argument with an explicit " " separator between them, and
+    // the whole call yields null. Mirror that shape rather than inventing a
+    // marshalling rule for a function that has none.
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
+            ((AstSysFuncNode*)callee)->fn_info &&
+            ((AstSysFuncNode*)callee)->fn_info->fn == SYSPROC_PRINT) {
+        bool first = true;
+        for (AstNode* a = node->argument; a; a = a->next) {
+            if (!first) {
+                // Keep the separator explicit, as lowering does, so a future
+                // config change has one place to land in either tier.
+                Item sep = (Item){.item = s2it(heap_strcpy(" ", 1))};
+                pn_print(sep);
+            }
+            Item value = eval_expr(f, a);
+            if (interp_frame_pending(f)) return ItemNull;
+            Scratch arg_slot(f);
+            arg_slot.set(value);
+            pn_print(arg_slot.get());
+            first = false;
+        }
+        return ItemNull;
+    }
+
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         // Arguments must all be rooted before the C entry runs: the entry may
         // allocate, and an earlier argument would otherwise be unreachable.
@@ -913,6 +958,53 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
     return result;
 }
 
+// Mirrors transpile_element: allocate the element, fill its attributes from a
+// rooted span (same order as the map literal — values first, container after),
+// then push content through list_push_spread and finalize with list_end. The
+// element pointer itself is the value; list_end only closes its content frame.
+static Item eval_element(InterpFrame* f, AstElementNode* node) {
+    TypeElmt* type = (TypeElmt*)node->type;
+    if (!type) return ItemError;
+
+    int attr_count = 0;
+    for (AstNode* a = node->item; a; a = a->next) attr_count++;
+
+    RootSpan attrs((size_t)(attr_count > 0 ? attr_count : 1));
+    uint64_t* attr_words = attrs.words();
+    int ai = 0;
+    for (AstNode* a = node->item; a; a = a->next) {
+        AstNode* value_node = a->node_type == AST_NODE_KEY_EXPR
+            ? ((AstNamedNode*)a)->as : a;
+        attr_words[ai++] = value_node ? eval_expr(f, value_node).item : ItemNull.item;
+        if (interp_frame_pending(f)) return ItemNull;
+    }
+
+    Element* fresh = elmt_with_tl(type->type_index, f->module->type_list);
+    if (!fresh) return ItemError;
+    Scratch acc(f);
+    acc.set(interp_ptr_item(fresh));
+    if (attr_count > 0) {
+        elmt_fill_items((Element*)(uintptr_t)acc.get().item,
+            (const Item*)(void*)attr_words, ai);
+    }
+
+    if (node->content) {
+        for (AstNode* c = node->content; c; c = c->next) {
+            Item value = eval_expr(f, c);
+            if (interp_frame_pending(f)) return acc.get();
+            // Re-read the element: content evaluation is a safepoint.
+            Element* owner = (Element*)(uintptr_t)acc.get().item;
+            if (!owner) return ItemError;
+            list_push_spread((List*)owner, value);
+        }
+        list_end((List*)(uintptr_t)acc.get().item);
+    } else if (node->item) {
+        // Attributes but no content still closes the element's content frame.
+        list_end((List*)(uintptr_t)acc.get().item);
+    }
+    return acc.get();
+}
+
 // ---------------------------------------------------------------------------
 // Content blocks
 // ---------------------------------------------------------------------------
@@ -921,18 +1013,58 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
 // run for effect, and the value expressions form the block's result — one
 // value passes through, several accumulate into a list.
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
+    // Procedural context, exactly as transpile_content decides it: inside a `pn`
+    // body, or any block declaring a `var`. It matters because a proc block's
+    // value is its LAST value expression only — every earlier one is a
+    // statement. Without this, `pn main() { print(a) … "done" }` accumulates
+    // each intermediate result into the block's list instead of discarding it.
+    bool is_proc = false;
+    if (f->fn) {
+        TypeFunc* signature = (TypeFunc*)((AstNode*)f->fn)->type;
+        is_proc = ((AstNode*)f->fn)->node_type == AST_NODE_PROC ||
+            (signature && signature->type_id == LMD_TYPE_FUNC && signature->is_proc);
+    }
+    if (!is_proc) {
+        for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+            if (scan->node_type == AST_NODE_VAR_STAM) { is_proc = true; break; }
+        }
+    }
+
     int value_count = 0, decl_count = 0, stam_count = 0;
     AstNode* last_value = NULL;
-    for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type)) { decl_count++; continue; }
-        if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
-        value_count++;
-        last_value = item;
+    if (is_proc) {
+        AstNode* last_executable = NULL;
+        for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+            if (!is_declaration_node(scan->node_type)) last_executable = scan;
+        }
+        for (AstNode* item = list_node->item; item; item = item->next) {
+            if (is_declaration_node(item->node_type)) { decl_count++; continue; }
+            if (is_side_effect_stam(item->node_type) ||
+                    is_proc_flow_side_effect_node(item, last_executable) ||
+                    item->node_type == AST_NODE_WHILE_STAM ||
+                    item->node_type == AST_NODE_FOR_STAM) {
+                stam_count++;
+                continue;
+            }
+            value_count++;
+            last_value = item;
+        }
+    } else {
+        for (AstNode* item = list_node->item; item; item = item->next) {
+            if (is_declaration_node(item->node_type)) { decl_count++; continue; }
+            if (is_side_effect_stam(item->node_type)) { stam_count++; continue; }
+            value_count++;
+            last_value = item;
+        }
     }
+
+    // In a proc block with several values, only the last is the block's value;
+    // the rest run for effect. That collapses to the single-value shape below.
+    if (is_proc && value_count > 1) value_count = 1;
     // transpile_content's block-expression shortcut deliberately excludes a
     // lone `for`: its result is spreadable and must go through list_push_spread
     // so the stream flattens into the block instead of nesting one level.
-    bool direct_value = value_count == 1 &&
+    bool direct_value = value_count == 1 && last_value &&
         ((decl_count == 0 && stam_count == 0) ||
          (last_value->node_type != AST_NODE_FOR_EXPR &&
           last_value->node_type != AST_NODE_FOR_STAM));
@@ -958,14 +1090,12 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                 if (!already_hoisted) exec_declaration(f, item);
             } else if (is_side_effect_stam(item->node_type)) {
                 eval_expr(f, item);
-            } else if (is_proc_flow_side_effect_node(item, last_value)) {
-                if (item->node_type == AST_NODE_FOR_STAM) {
-                    eval_for(f, (AstForNode*)item, false);
-                } else {
-                    eval_expr(f, item);
-                }
             } else if (item == last_value) {
                 result = eval_expr(f, item);
+            } else if (item->node_type == AST_NODE_FOR_STAM) {
+                eval_for(f, (AstForNode*)item, false);   // statement: stream discarded
+            } else {
+                eval_expr(f, item);                      // side effect only
             }
             // break / continue / return / error-skip abandon the rest of the
             // block; the enclosing loop or call frame consumes the signal.
@@ -1042,6 +1172,12 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
 
 static void exec_declaration(InterpFrame* f, AstNode* node) {
     switch (node->node_type) {
+    case AST_NODE_TYPE_STAM:
+        // `type T = …` binds a compile-time name. The Type* graph is already
+        // built and every use site resolves through it, so there is nothing to
+        // evaluate or store at run time — the same reason lowering emits no
+        // value for a type declaration.
+        break;
     case AST_NODE_LET_STAM:
     case AST_NODE_PUB_STAM:
     case AST_NODE_VAR_STAM: {
@@ -1092,8 +1228,24 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (pri->expr) return eval_expr(f, pri->expr);
         return eval_literal(f, node);
     }
-    case AST_NODE_IDENT:
-        return interp_read_binding(f, ((AstIdentNode*)node)->entry);
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        NameEntry* entry = ident->entry;
+        // A name bound by `type T = …` is a compile-time binding: it denotes
+        // the Type* its declaration built, not a slab slot (which a type
+        // declaration never writes). Lowering makes the same distinction in
+        // mir_is_type_value_node's IDENT arm.
+        AstNode* decl = entry ? entry->node : NULL;
+        if (decl && decl->node_type == AST_NODE_ASSIGN &&
+                ((AstNamedNode*)decl)->is_type_definition) {
+            Type* declared = decl->type;
+            TypeId tid = LMD_TYPE_ANY;
+            TypeType* singleton = lambda_type_node_singleton(declared, &tid);
+            if (singleton) return interp_ptr_item(singleton);
+            return interp_ptr_item(declared ? declared : base_type(tid));
+        }
+        return interp_read_binding(f, entry);
+    }
     case AST_NODE_UNARY:
         return eval_unary(f, (AstUnaryNode*)node);
     case AST_NODE_BINARY:
@@ -1153,6 +1305,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_array(f, (AstArrayNode*)node);
     case AST_NODE_MAP:
         return eval_map(f, (AstMapNode*)node);
+    case AST_NODE_ELEMENT:
+        return eval_element(f, (AstElementNode*)node);
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
         // Reached as an expression, a `for` always yields its stream — the
@@ -1175,6 +1329,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_LET_STAM:
     case AST_NODE_PUB_STAM:
     case AST_NODE_VAR_STAM:
+    case AST_NODE_TYPE_STAM:
         exec_declaration(f, node);
         return ItemNull;
 
@@ -1295,6 +1450,25 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         interp_signal(f, EvalSignal::RETURNED, value);
         return value;
     }
+    // A type expression evaluates to its build-time Type* as a direct-pointer
+    // Item — the same carrier fn_is/fn_query expect. The Type* graph is built
+    // by the frontend; T0 constructs no types of its own (§P1.2).
+    case AST_NODE_TYPE: {
+        TypeId tid = LMD_TYPE_ANY;
+        TypeType* singleton = lambda_type_node_singleton(node->type, &tid);
+        return interp_ptr_item(singleton ? (Type*)singleton : base_type(tid));
+    }
+    case AST_NODE_BINARY_TYPE:
+    case AST_NODE_UNARY_TYPE:
+    case AST_NODE_CONTENT_TYPE:
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE:
+    case AST_NODE_MAP_TYPE:
+    case AST_NODE_ELMT_TYPE:
+    case AST_NODE_FUNC_TYPE:
+        // Composite type expressions already carry their resolved Type* on the
+        // node; lowering emits that pointer, so the walker publishes it too.
+        return interp_ptr_item(node->type);
     case AST_NODE_SYS_FUNC:
         // A bare system-function reference outside a call is not a first-class
         // value in T0; the pre-scan lets it through only as a call callee.
@@ -1359,7 +1533,22 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
             frame->slots[index] = value.item;
         }
 
-        result = eval_expr(frame, fn_node->body);
+        uint64_t iterations = 0;
+        for (;;) {
+            result = eval_expr(frame, fn_node->body);
+            if (frame->signal != EvalSignal::TAIL_CALL) break;
+            frame->signal = EvalSignal::NORMAL;
+            // The parameter slots already hold the next iteration's arguments,
+            // and scratch is released with each body evaluation, so the frame
+            // is reused rather than re-opened — that is what keeps deep tail
+            // recursion off the native stack.
+            frame->scratch_top = frame->scratch_base;
+            if (++iterations > LAMBDA_INTERP_TCO_MAX_ITERATIONS) {
+                lambda_stack_overflow_error(fn->name ? fn->name : "<anonymous>");
+                result = ItemError;
+                break;
+            }
+        }
         // An explicit `return` unwinds to exactly this boundary and its payload
         // is the call's value; the signal never escapes the activation.
         if (frame->signal == EvalSignal::RETURNED) result = interp_signal_payload(frame);

@@ -271,6 +271,19 @@ static bool interp_kind_supported(AstNodeType kind) {
     // --- P1.5: modules ---
     case AST_NODE_IMPORT:
     case AST_NODE_PUB_STAM:
+    // --- P1.2: type expressions as values ---
+    case AST_NODE_TYPE:
+    case AST_NODE_TYPE_STAM:
+    case AST_NODE_BINARY_TYPE:
+    case AST_NODE_UNARY_TYPE:
+    case AST_NODE_CONTENT_TYPE:
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE:
+    case AST_NODE_MAP_TYPE:
+    case AST_NODE_ELMT_TYPE:
+    case AST_NODE_FUNC_TYPE:
+    // --- P1.3: documents ---
+    case AST_NODE_ELEMENT:
         return true;
     default:
         return false;
@@ -333,15 +346,6 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         if (fn->is_async || fn->is_generator ||
                 (fn->analysis && (fn->analysis->may_await ||
                                   fn->analysis->needs_task_context))) {
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
-        // Lowering turns a self-tail-call into a loop, so a tail-recursive
-        // definition never grows the native stack there. The walker recurses
-        // per call and would fault where the JIT completes — self-tail-call
-        // iteration is P1.4 (AIO1/R8), so these stay on JIT until then.
-        if (should_use_tco(fn)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -497,6 +501,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // dispatch work. Interpreting it would report `int64` where the JIT
         // reports `u32` (test/lambda/sized_numeric_bitwise_go), so the script
         // falls back until the lane is modelled.
+        // `print` is the one Lambda-variadic entry the walker implements
+        // directly (one pn_print per argument, as lowering emits); the other
+        // variadic rows still have no generic dispatch to mirror.
+        if (info && info->fn == SYSPROC_PRINT && info->func_ptr) {
+            interp_visit_children(node, interp_scan_visit, ctx);
+            return;
+        }
         if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
                 info->arg_count < 0 || info->arg_count > 4) {
             log_debug("interp: sys func '%s' unsupported (arity=%d conv=%d ptr=%p)",
@@ -736,6 +747,62 @@ static uint32_t plan_need(AstNode* node) {
 
 static void plan_walk(AstNode* node, void* ctx);
 
+// Marks self-recursive calls that sit in tail position, so the walker can turn
+// them into a loop. Tail position propagates exactly where lowering's
+// `in_tail_position` does: the body itself, the last value of a content block,
+// both arms of an `if`, and a `return` operand.
+static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node) return;
+    switch (node->node_type) {
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        // A propagating call (`f(...)^`) still has to inspect its result, so it
+        // is not a tail position even though it is syntactically last.
+        if (!call->propagate && is_recursive_call(call, fn)) {
+            call->interp_self_tail_call = true;
+        }
+        break;
+    }
+    case AST_NODE_IF_EXPR:
+        plan_mark_tail_calls(((AstIfNode*)node)->then, fn);
+        plan_mark_tail_calls(((AstIfNode*)node)->otherwise, fn);
+        break;
+    case AST_NODE_RETURN_STAM:
+        plan_mark_tail_calls(((AstReturnNode*)node)->value, fn);
+        break;
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST: {
+        // Only the block's value expression is a tail position; declarations
+        // and side-effect statements are not, and a multi-value block builds a
+        // list, so none of its items are either.
+        AstListNode* block = (AstListNode*)node;
+        AstNode* last_value = NULL;
+        int value_count = 0;
+        for (AstNode* item = block->item; item; item = item->next) {
+            if (is_declaration_node(item->node_type) ||
+                    is_side_effect_stam(item->node_type)) {
+                // A trailing `return` is a side-effect statement but still
+                // carries the function's result.
+                if (item->node_type == AST_NODE_RETURN_STAM) {
+                    plan_mark_tail_calls(item, fn);
+                }
+                continue;
+            }
+            value_count++;
+            last_value = item;
+        }
+        if (value_count == 1) plan_mark_tail_calls(last_value, fn);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 static void plan_finish(PlanCtx* pc) {
     FnFramePlan* plan = pc->plan;
     if (!plan) return;
@@ -778,6 +845,10 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     pc.param_count = (uint32_t)param_index;
 
     plan_walk(fn->body, &pc);
+    // should_use_tco is lowering's own eligibility test (named, not a closure,
+    // has a tail-recursive call), so both tiers turn the same functions into
+    // loops and a deep tail recursion cannot overflow in only one of them (R8).
+    if (should_use_tco(fn)) plan_mark_tail_calls(fn->body, fn);
     uint32_t body_need = plan_need(fn->body);
     if (body_need > pc.max_scratch) pc.max_scratch = body_need;
     plan_finish(&pc);
