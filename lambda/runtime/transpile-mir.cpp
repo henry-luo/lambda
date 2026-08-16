@@ -680,7 +680,7 @@ static AstFuncNode* mir_direct_call_function(AstCallNode* call) {
 static int mir_explicit_return_count(AstNode* node) {
     int count = 0;
     while (node) {
-        AstNode* current = mir_unwrap_primary(node);
+        AstNode* current = ast_unwrap_primary(node);
         if (!current) {
             node = node->next;
             continue;
@@ -17422,7 +17422,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     // it can be converted to a goto jump instead of a function call.
     bool saved_tail = mt->in_tail_position;
     AstNode* return_expr = ret_node && ret_node->value
-        ? mir_unwrap_primary(ret_node->value) : NULL;
+        ? ast_unwrap_primary(ret_node->value) : NULL;
     bool pair_return_frame = mt->em.frame.return_lane_kind == RETURN_LANE_SCALAR &&
         em_returns_result_pair(mt->em.frame.plan.companion) &&
         !mt->in_async_proc;
