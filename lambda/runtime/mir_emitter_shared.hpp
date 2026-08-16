@@ -508,6 +508,12 @@ struct MirEmitter {
     MirFrameState frame;           // canonical physical activation state
     MirFunctionMetadata last_function;
     MirFunctionArgumentState argument_registers;
+    // RV4.2 mechanical guard: one unresolved shape-2 pair may be live in a
+    // lowering sequence. The companion must be consumed or forwarded before
+    // another call, safepoint, spill, or publication can overwrite its lane
+    // (D5.2.1v2, D5.2.2v2).
+    MIR_reg_t pending_live_item;
+    MIR_reg_t pending_live_companion;
     // Per-function 8-byte native-stack scratch for inline double<->bits
     // reinterpretation. Keyed by func_item, not by frame lifecycle, so a
     // stale register can never leak into a different function's body.
@@ -1393,8 +1399,18 @@ static inline MirValue em_materialize_pending_value(MirEmitter* em,
         log_error("mir-value: pending Item has no companion register");
         abort();
     }
+    if (em && em->pending_live_companion &&
+            (em->pending_live_item != value.reg ||
+             em->pending_live_companion != value.pending_companion)) {
+        log_error("mir-value: pending companion ownership mismatch");
+        abort();
+    }
     value.reg = em_resolve_pending_pair(em, value.reg,
         value.pending_companion);
+    if (em) {
+        em->pending_live_item = 0;
+        em->pending_live_companion = 0;
+    }
     value.pending_companion = 0;
     value.maybe_pending = false;
     if (em && em->after_call_result) {
@@ -3814,6 +3830,15 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
             variant && variant->result.shape == RETURN_SHAPE_ITEM_SCALAR) {
         call_result.normal.pending_companion = companion;
         call_result.normal.maybe_pending = true;
+        // Keep the one-live-pair invariant explicit even while most consumers
+        // still take the fail-closed immediate-materialization path.
+        if (em->pending_live_companion) {
+            log_error("mir-direct-call: second pending companion is live at %s",
+                call_name ? call_name : "<anon>");
+            abort();
+        }
+        em->pending_live_item = result;
+        em->pending_live_companion = companion;
     }
     call_result.normal.scalar_home_id = scalar_home_id;
     call_result.normal.scalar_provenance = scalar_home_id

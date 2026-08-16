@@ -268,7 +268,8 @@ already known.
 | Need | Use | What it adds |
 |---|---|---|
 | A new comparable ResultN report | `run_standard_benchmarks.py` | AC/release/profile/Test262 gates, exact-binary cache, fresh versioned JSON, logs, and report generation |
-| A focused benchmark or an A/B archive replay | `run_benchmarks.py` | Suite, benchmark, engine, mode, and executable selection without rebuilding |
+| A focused benchmark or a publication-matrix archive replay | `run_benchmarks.py` | Suite, benchmark, engine, mode, and executable selection without rebuilding |
+| Matched-host causal A/B between two Lambda binaries | `run_paired_benchmarks.py` | Alternating control/candidate order, per-pair status/timing, binary hashes, and stdout equality |
 | Time, memory, or MIR-vs-C measurement | `run_benchmarks.py` | The three measurement modes and their runner-specific options |
 
 For example, run a new snapshot through the workflow:
@@ -286,6 +287,25 @@ LAMBDA_EXE=./test/benchmark/exe/lambda-vN-<commit> \
   python3 test/benchmark/run_benchmarks.py \
   -e lambdajs -s jetstream -b crypto_sha1 -n 5 --no-save --typed
 ```
+
+For a causal matched-host comparison of two Lambda release binaries, use the
+interleaved runner. It alternates control/candidate order on each pair, keeps
+raw per-sample timing/status records, hashes stdout after removing only the
+`__TIMING__` line, and writes the artifact under `temp/`:
+
+```bash
+python3 test/benchmark/run_paired_benchmarks.py \
+  --control temp/lambda-control-release.exe \
+  --candidate ./lambda.exe \
+  -s jetstream -b crypto_sha1 --variants typed --pairs 41 \
+  --output temp/action_a_crypto_typed.json
+```
+
+Use `--variants both` with `-s awfy --pairs 9` for the typed/untyped AWFY
+gate. Both input files must already be release binaries; this runner does not
+build or replace them. A candidate/control median ratio below `1.0` is faster,
+and every pair must have matching stdout before the result can be used as a
+performance claim.
 
 ### Archiving the binary (`test/benchmark/exe/`)
 

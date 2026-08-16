@@ -1465,6 +1465,14 @@ static void emit_number_frame_exit(MirTranspiler* mt) {
 }
 
 static void finish_function_epilogue(MirTranspiler* mt) {
+    // A shape-2 companion cannot survive the function's publication/extent
+    // boundary. Tail forwarding is a separate explicit path; until then every
+    // producer must have consumed or patched its pending Item (D5.2.1v2,
+    // D5.2.2v2).
+    if (mt->em.pending_live_companion) {
+        log_error("mir: pending companion reached function epilogue");
+        abort();
+    }
     emit_label(mt, mt->em.frame.return_label);
     MIR_reg_t error_scratch = 0;
     if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
