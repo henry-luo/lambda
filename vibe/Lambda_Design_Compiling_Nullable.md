@@ -204,6 +204,18 @@ single raw 64-bit lane has no spare null code. Their selected `N(T?)` is therefo
 be used by a typed native Array; it introduces no extra nullable sentinel, tagged pair, or
 separate array representation.
 
+This is an **accepted limitation of the lane scheme, not an open item** (D2.5.2). The practical
+cost is real: a wide optional stays boxed, pays a scalar home per value, and is excluded from the
+unboxed wide `+ - *` path, which admits only non-optional operands. Both ways to buy a null code
+back are worse. Reserving one — say `INT64_MIN` — deletes a legal member from a type whose whole
+point is the full domain, so `i64?` would no longer contain `i64`. A tagged pair adds a second
+word to every wide optional, in arrays and packed fields as well as registers, to serve a bit of
+information the `Item` lane already carries. Against that, the case is judged rare: wide integers
+show up as exact identifiers, counters, hashes, timestamps and bit patterns, and those are
+precisely the uses that do not model absence — an absent id is usually a sentinel `0` or a
+separate presence flag in the surrounding shape, not an `i64?`. Reopen this only with evidence
+that `i64?`/`u64?` are hot in real code, and reopen it as a measurement, not a symmetry argument.
+
 ### 3.4 Pointer-backed values
 
 For pointer-backed scalar and container values, the nullable carrier is already available:
