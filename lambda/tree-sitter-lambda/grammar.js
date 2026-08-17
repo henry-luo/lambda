@@ -155,6 +155,7 @@ module.exports = grammar({
   ],
 
   precedences: $ => [
+  // value expr precedences
   [
     $.fn_expr_stam,
     'propagate',
@@ -190,6 +191,7 @@ module.exports = grammar({
     $.assign_expr,
     $.assign_stam,
   ],
+  // type expr precedences
   [
     $.range_type,
     $.primary_type,
@@ -374,7 +376,6 @@ module.exports = grammar({
     // expr excluding comparison exprs (for element attributes where < > conflict with tags)
     _attr_expr: $ => choice(
       $.primary_expr,
-      $.propagate_expr,
       $.unary_expr,
       alias($.attr_binary_expr, $.binary_expr),
       $.if_expr,
@@ -420,8 +421,6 @@ module.exports = grammar({
     ),
 
     _expr: $ => choice(
-      $.handler_expr,
-      $.propagate_expr,
       $.primary_expr,
       $.unary_expr,
       $.binary_expr,
@@ -737,14 +736,14 @@ module.exports = grammar({
       // single variable assignment
       seq(
         field('name', choice($.identifier, $.symbol)),
-        optional(seq(':', field('type', $._value_type_expr))), '=', field('as', prec.dynamic(1000, choice($.propagate_expr, $._expr))),
+        optional(seq(':', field('type', $._value_type_expr))), '=', field('as', $._expr),
       ),
       // multi-variable decomposition: let a, b = expr OR let a, b at expr
       seq(
         field('name', choice($.identifier, $.symbol)),
         repeat1(seq(',', field('name', choice($.identifier, $.symbol)))),
         field('decompose', choice('=', 'at')),
-        field('as', prec.dynamic(1000, choice($.propagate_expr, $._expr))),
+        field('as', $._expr),
       ),
     )),
 
