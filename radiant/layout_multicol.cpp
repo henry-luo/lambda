@@ -138,6 +138,7 @@ struct InlineFragmentItem {
     float height;
     int line_index;
     bool is_text;
+    bool is_forced_break;
 };
 
 static float multicol_group_target_height(ViewBlock* block, float balanced_height, float group_total_height);
@@ -1053,6 +1054,8 @@ static MulticolFragmentPlacement multicol_place_fragment(
     return placement;
 }
 
+static bool multicol_view_direction_is_rtl(View* view);
+
 static bool multicol_project_fragmented_inline_descendants(
     LayoutContext* lycon,
     ViewBlock* child,
@@ -1094,6 +1097,7 @@ static bool multicol_project_fragmented_inline_descendants(
                 items[item_count].height = rect->height;
                 items[item_count].line_index = 0;
                 items[item_count].is_text = true;
+                items[item_count].is_forced_break = false;
                 item_count++;
                 rect = rect->next;
             }
@@ -1106,6 +1110,9 @@ static bool multicol_project_fragmented_inline_descendants(
             items[item_count].height = descendant->height;
             items[item_count].line_index = 0;
             items[item_count].is_text = false;
+            // CSS 2.1 §9.2.1.1: out-of-flow inline descendants do not end
+            // the line; only a BR contributes a forced line break here.
+            items[item_count].is_forced_break = descendant->view_type == RDT_VIEW_BR;
             item_count++;
         }
     });
@@ -1128,7 +1135,7 @@ static bool multicol_project_fragmented_inline_descendants(
         }
         items[i].line_index = line_index;
         items[i].line_y = current_line_y;
-        if (!items[i].is_text) {
+        if (items[i].is_forced_break) {
             forced_break_pending = true;
         }
     }
@@ -1185,13 +1192,38 @@ static bool multicol_project_fragmented_inline_descendants(
 
     float parent_pitch = parent_column_width + parent_column_gap;
     float inner_pitch = inner_column_width + inner_column_gap;
+    int forced_break_index = -1;
+    int forced_break_fragment_index = -1;
+    float forced_break_block_position = 0.0f;
+    float forced_break_source_x = 0.0f;
+    bool forced_break_source_known = false;
     for (int i = 0; i < item_count; i++) {
+        // CSS Writing Modes: a fragmented block and a nested inline can carry
+        // different directions; either RTL context affects the continuation.
+        bool fragment_direction_rtl = vertical_writing &&
+            (child->block()->direction == CSS_VALUE_RTL ||
+             multicol_view_direction_is_rtl(items[i].view));
         int inner_fragment_index = 0;
         int line_slot = 0;
+        float projected_block_position = items[i].original_x;
         if (vertical_writing && inner_column_count == 1) {
             // CSS Multi-column fragments in vertical writing progress on the
             // physical block axis (x); the inline axis (y) remains in-column.
-            float block_position = items[i].original_x;
+            float block_position = projected_block_position;
+            if (items[i].is_forced_break) {
+                // CSS 2.1 §9.2.1.1: a BR belongs to the line it terminates;
+                // its laid-out cursor is already one block line ahead in
+                // either inline direction.
+                for (int previous = i - 1; previous >= 0; previous--) {
+                    if (items[previous].is_text) {
+                        block_position = items[previous].original_x;
+                        break;
+                    }
+                }
+                forced_break_index = i;
+                forced_break_source_known = false;
+            }
+            projected_block_position = block_position;
             InitialLetterInfo initial_letter = {};
             bool is_initial_letter = items[i].is_text &&
                 layout_get_text_initial_letter_info(
@@ -1220,6 +1252,28 @@ static bool multicol_project_fragmented_inline_descendants(
                         (int)floorf(distance / fragment_height); // INT_CAST_OK: fragment index from positive block distance
                 }
             }
+            if (forced_break_index >= 0 && !items[i].is_forced_break) {
+                if (!forced_break_source_known) {
+                    forced_break_source_x = items[i].original_x;
+                    forced_break_source_known = true;
+                }
+                if (fabsf(items[i].original_x - forced_break_source_x) <= 1.0f) {
+                    if (inner_fragment_index > forced_break_fragment_index) {
+                        // CSS 2.1 §9.2.1.1 keeps the line after a forced break
+                        // in its current fragmentainer until that new line
+                        // itself overflows.
+                        inner_fragment_index = forced_break_fragment_index;
+                        projected_block_position = forced_break_block_position;
+                    }
+                } else {
+                    forced_break_index = -1;
+                    forced_break_source_known = false;
+                }
+            }
+            if (items[i].is_forced_break) {
+                forced_break_fragment_index = inner_fragment_index;
+                forced_break_block_position = items[i].original_x;
+            }
         } else {
             multicol_map_line_to_fragment(items[i].line_index,
                 first_fragment_lines, continuation_fragment_lines,
@@ -1234,9 +1288,9 @@ static bool multicol_project_fragmented_inline_descendants(
             float new_x = 0.0f;
             if (inner_fragment_index == 0) {
                 if (parent_mode == WM_VERTICAL_RL) {
-                    new_x = items[i].original_x - first_fragment_block_extent;
+                    new_x = projected_block_position - first_fragment_block_extent;
                 } else {
-                    new_x = items[i].original_x + initial_fragment_offset;
+                    new_x = projected_block_position + initial_fragment_offset;
                 }
                 InitialLetterInfo initial_letter = {};
                 bool sideways_rl = parent_block->is_element() &&
@@ -1251,25 +1305,21 @@ static bool multicol_project_fragmented_inline_descendants(
                     new_x = 0.0f;
                 }
             } else if (parent_mode == WM_VERTICAL_RL) {
-                new_x = items[i].original_x + initial_fragment_offset +
+                new_x = projected_block_position + initial_fragment_offset +
                     (inner_fragment_index - 1) * fragment_height;
             } else {
-                new_x = items[i].original_x - first_fragment_block_extent -
+                new_x = projected_block_position - first_fragment_block_extent -
                     (inner_fragment_index - 1) * fragment_height;
             }
             float new_y = items[i].original_y +
                 parent_column_index * parent_pitch +
                 parent_row_index * (fragment_height + row_gap);
-            if (!items[i].is_text) {
+            if (!items[i].is_text && items[i].is_forced_break) {
                 // CSS 2.1 §9.2.1.1: BR carries the forced-break line position;
                 // its vertical coordinate already includes the inline-column
                 // advance, so applying the parent pitch again double-counts it.
                 float break_y = items[i].original_y;
-                DomElement* break_parent = items[i].view->parent &&
-                    items[i].view->parent->is_element()
-                    ? lam::dom_require<DOM_NODE_ELEMENT>(items[i].view->parent) : nullptr;
-                bool rtl_break = break_parent && break_parent->blk &&
-                    break_parent->block()->direction == CSS_VALUE_RTL;
+                bool rtl_break = fragment_direction_rtl;
                 if (rtl_break &&
                     parent_pitch > 0.0f) {
                     // CSS Writing Modes: RTL inline progression stores the
@@ -1279,6 +1329,12 @@ static bool multicol_project_fragmented_inline_descendants(
                 }
                 new_y = break_y +
                     parent_row_index * (fragment_height + row_gap);
+                if (items[i].original_y <= 0.0f && parent_pitch > 0.0f) {
+                    // CSS 2.1 §9.2.1.1: a BR at the normalized fragment start
+                    // has not yet carried the parent inline-column advance.
+                    new_y = parent_pitch +
+                        parent_row_index * (fragment_height + row_gap);
+                }
             }
             if (items[i].is_text) {
                 items[i].rect->x = new_x;
@@ -1624,7 +1680,39 @@ static void multicol_store_layout_fragments(
     elem->set_layout_fragment_list(first);
 }
 
-static bool multicol_inline_has_direct_flow_fragment(View* view);
+static bool multicol_inline_has_in_flow_fragment(View* view);
+
+static bool multicol_vertical_inline_extent(ViewBlock* cb, float* out_extent) {
+    if (!cb || !out_extent) return false;
+    for (ViewElement* ancestor = cb; ancestor; ancestor = ancestor->parent_view()) {
+        if (!ancestor->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(ancestor);
+        if (!block->blk || block->block()->given_height < 0.0f) continue;
+        BoxMetrics box = layout_box_metrics(block);
+        *out_extent = block->block()->given_height +
+            box.padding.top + box.padding.bottom;
+        return *out_extent > 0.0f;
+    }
+    return false;
+}
+
+static bool multicol_view_direction_is_rtl(View* view) {
+    for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
+         ancestor; ancestor = ancestor->parent_view()) {
+        if (!ancestor->is_element()) continue;
+        DomElement* element = ancestor->as_element();
+        CssEnum specified = layout_specified_keyword(
+            element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+        if (specified == CSS_VALUE_LTR || specified == CSS_VALUE_RTL) {
+            return specified == CSS_VALUE_RTL;
+        }
+        if (element->blk && (element->block()->direction == CSS_VALUE_LTR ||
+                             element->block()->direction == CSS_VALUE_RTL)) {
+            return element->block()->direction == CSS_VALUE_RTL;
+        }
+    }
+    return false;
+}
 
 static void multicol_reposition_abs_children_for_fragmented_cb(View* cb_view) {
     if (!cb_view || !cb_view->is_element()) return;
@@ -1654,6 +1742,18 @@ static void multicol_reposition_abs_children_for_fragmented_cb(View* cb_view) {
         float margin_right = child_box.margin.right;
         float margin_top = child_box.margin.top;
         float margin_bottom = child_box.margin.bottom;
+        bool direct_inline_cb_child = child->parent == static_cast<DomNode*>(cb);
+        bool has_inline_cb_origin = false;
+        float inline_cb_origin_y = 0.0f;
+        if (layout_block_inline_axis_is_vertical(cb) &&
+            cb->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(static_cast<View*>(cb));
+            if (span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
+                inline_cb_origin_y = span->fragment_union(
+                    FRAGMENT_UNION_INLINE_CB)->min_y - cb->y;
+                has_inline_cb_origin = true;
+            }
+        }
         if (position->has_left && !position->has_right) {
             child->x = containing.padding_x + position->left + margin_left;
         } else if (position->has_right && !position->has_left) {
@@ -1665,13 +1765,16 @@ static void multicol_reposition_abs_children_for_fragmented_cb(View* cb_view) {
         } else if (position->has_bottom && !position->has_top) {
             bool has_fragmented_inline_end = false;
             float fragmented_inline_end = 0.0f;
-            if (multicol_inline_has_direct_flow_fragment(static_cast<View*>(cb)) &&
+            if (multicol_inline_has_in_flow_fragment(static_cast<View*>(cb)) &&
                 layout_block_inline_axis_is_vertical(cb) && cb->view_type == RDT_VIEW_INLINE) {
                 ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(static_cast<View*>(cb));
                 if (span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
                     const FragmentUnion* inline_cb =
                         span->fragment_union(FRAGMENT_UNION_INLINE_CB);
-                    has_fragmented_inline_end = inline_cb->max_y > inline_cb->min_y;
+                    // CSS Position 3 §2.1: RTL inline containing-block edges
+                    // can be reversed in physical coordinates, so ordering is
+                    // not a validity test for the end edge.
+                    has_fragmented_inline_end = true;
                     fragmented_inline_end = inline_cb->max_y;
                 }
             }
@@ -1686,79 +1789,128 @@ static void multicol_reposition_abs_children_for_fragmented_cb(View* cb_view) {
                     position->bottom - margin_bottom - child->height;
             }
         }
+        float fragmented_inline_extent = 0.0f;
+        ViewBlock* fragmentation_ancestor = layout_nearest_block_ancestor(cb);
+        bool ltr_fragmentation_context = fragmentation_ancestor &&
+            fragmentation_ancestor->block()->direction == CSS_VALUE_LTR;
+        bool has_fragmented_inline_extent =
+            layout_block_inline_axis_is_vertical(cb) && child->blk &&
+            child->block()->direction == CSS_VALUE_RTL &&
+            multicol_vertical_inline_extent(cb, &fragmented_inline_extent) &&
+            cb->height > fragmented_inline_extent &&
+            !(cb->view_type == RDT_VIEW_INLINE && direct_inline_cb_child &&
+              ltr_fragmentation_context);
+        if (has_fragmented_inline_extent) {
+            // CSS Writing Modes: RTL vertical inline positions use the
+            // definite logical inline extent, not the visual union of columns.
+            if (position->has_top && !position->has_bottom) {
+                child->y += fragmented_inline_extent;
+            } else if (position->has_bottom && !position->has_top) {
+                child->y -= fragmented_inline_extent;
+                if (layout_element_was_inline(
+                        static_cast<DomElement*>(child), false) &&
+                    has_inline_cb_origin) {
+                    // CSS Position 3 §4.1: nested inline coordinates retain
+                    // the containing block's first-fragment origin.
+                    child->y += inline_cb_origin_y;
+                }
+            }
+        }
         child = position->next_abs_sibling;
     }
 }
 
-static bool multicol_inline_fragment_edge_y(View* view, bool end_edge, float* out_y) {
-    if (!view || !out_y || layout_view_is_out_of_flow(view)) return false;
+static bool multicol_inline_fragment_bounds_y(View* view, bool first_fragment,
+                                               float* out_top, float* out_bottom) {
+    if (!view || !out_top || !out_bottom || layout_view_is_out_of_flow(view)) return false;
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
-        bool found = false;
-        float edge = 0.0f;
+        TextRect* selected = nullptr;
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->width <= 0.0f || rect->height <= 0.0f ||
                 layout_text_rect_content_kind(text, rect) ==
                     LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
                 continue;
             }
-            edge = end_edge ? rect->y + rect->height : rect->y;
-            if (!end_edge) {
-                // Inline containing blocks use the first source-order fragment;
-                // a later continuation may be projected into an earlier column.
-                *out_y = edge;
-                return true;
-            }
-            found = true;
+            selected = rect;
+            if (first_fragment) break;
         }
-        if (found) *out_y = edge;
-        return found;
+        if (!selected) return false;
+        *out_top = selected->y;
+        *out_bottom = selected->y + selected->height;
+        return true;
     }
     if (view->view_type == RDT_VIEW_BR) {
-        if (view->height > 0.0f) {
-            *out_y = end_edge ? view->y + view->height : view->y;
-            return true;
-        }
-        return false;
+        if (view->height <= 0.0f) return false;
+        *out_top = view->y;
+        *out_bottom = view->y + view->height;
+        return true;
     }
     if (view->view_type != RDT_VIEW_INLINE && view->is_block()) {
-        *out_y = end_edge ? view->y + view->height : view->y;
-        return view->height > 0.0f;
+        if (view->height <= 0.0f) return false;
+        *out_top = view->y;
+        *out_bottom = view->y + view->height;
+        return true;
     }
     if (!view->is_element()) return false;
 
-    View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
+    // Projected continuation views carry the visual fragment order required
+    // by CSS Position 3; DOM source order is not sufficient after bidi layout.
+    View* child = lam::view_require_element(view)->first_placed_child();
     bool found = false;
+    float top = 0.0f;
+    float bottom = 0.0f;
     while (child) {
-        float child_y = 0.0f;
-        if (multicol_inline_fragment_edge_y(child, end_edge, &child_y)) {
-            found = true;
-            if (!end_edge) {
-                *out_y = child_y;
+        float child_top = 0.0f;
+        float child_bottom = 0.0f;
+        if (multicol_inline_fragment_bounds_y(
+                child, first_fragment, &child_top, &child_bottom)) {
+            if (first_fragment) {
+                *out_top = child_top;
+                *out_bottom = child_bottom;
                 return true;
             }
-            *out_y = child_y;
+            found = true;
+            top = child_top;
+            bottom = child_bottom;
         }
-        child = child->next_sibling;
+        child = child->next();
+    }
+    if (found) {
+        *out_top = top;
+        *out_bottom = bottom;
     }
     return found;
 }
 
-static bool multicol_inline_has_direct_flow_fragment(View* view) {
+static bool multicol_inline_fragment_edge_y(View* view, bool end_edge, float* out_y) {
+    float top = 0.0f;
+    float bottom = 0.0f;
+    if (!multicol_inline_fragment_bounds_y(view, !end_edge, &top, &bottom)) {
+        return false;
+    }
+    *out_y = end_edge ? bottom : top;
+    return true;
+}
+
+static bool multicol_inline_has_in_flow_fragment(View* view) {
     if (!view || view->view_type != RDT_VIEW_INLINE) return false;
     View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
     while (child) {
-        if (!layout_view_is_out_of_flow(child) && child->view_type != RDT_VIEW_NONE &&
-            child->view_type != RDT_VIEW_INLINE) {
+        if (layout_view_is_out_of_flow(child) || child->view_type == RDT_VIEW_NONE) {
+            child = child->next_sibling;
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_INLINE) {
+            if (multicol_inline_has_in_flow_fragment(child)) return true;
+        } else {
+            // CSS Position 3 §4.1: nested inline fragments contribute to the
+            // containing block of an outer positioned inline.
             return true;
         }
         child = child->next_sibling;
     }
     return false;
-}
-
-static bool multicol_first_in_flow_fragment_y(View* view, float* out_y) {
-    return multicol_inline_fragment_edge_y(view, false, out_y);
 }
 
 static void multicol_reposition_fragmented_positioned_subtree(View* view) {
@@ -1781,28 +1933,72 @@ static void multicol_normalize_vertical_inline_fragment_bounds(View* view) {
             ancestor->as_element()->layout_fragments_count() > 1) {
             // CSS Position 3 §4.1: a positioned inline's containing-block
             // origin is the fragmentainer edge, not the old line cursor.
+            bool had_inline_cb = span->has_fragment_union(FRAGMENT_UNION_INLINE_CB);
             FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);
             inline_cb->min_x = span->x;
             inline_cb->max_x = span->x;
-            float first_fragment_y = 0.0f;
-            bool found_first_fragment_y = multicol_first_in_flow_fragment_y(
-                static_cast<View*>(span), &first_fragment_y);
-            if (found_first_fragment_y) {
-                inline_cb->min_y = first_fragment_y;
+            float first_fragment_top = inline_cb->min_y;
+            float first_fragment_bottom = inline_cb->max_y;
+            bool found_first_fragment = multicol_inline_fragment_bounds_y(
+                static_cast<View*>(span), true,
+                &first_fragment_top, &first_fragment_bottom);
+            float last_fragment_top = inline_cb->min_y;
+            float last_fragment_bottom = inline_cb->max_y;
+            bool found_last_fragment = multicol_inline_fragment_bounds_y(
+                static_cast<View*>(span), false,
+                &last_fragment_top, &last_fragment_bottom);
+            bool has_originally_inline_abs_child = false;
+            bool has_direct_abs_child = false;
+            if (span->position) {
+                for (ViewBlock* positioned_child = span->positionp()->first_abs_child;
+                     positioned_child;
+                     positioned_child = positioned_child->positionp()->next_abs_sibling) {
+                    if (positioned_child->parent != static_cast<DomNode*>(span)) continue;
+                    has_direct_abs_child = true;
+                    if (layout_element_was_inline(
+                            static_cast<DomElement*>(positioned_child), false)) {
+                        has_originally_inline_abs_child = true;
+                    }
+                }
             }
-            float last_fragment_end_y = 0.0f;
-            bool found_last_fragment_end_y =
-                multicol_inline_has_direct_flow_fragment(static_cast<View*>(span)) &&
-                multicol_inline_fragment_edge_y(
-                    static_cast<View*>(span), true, &last_fragment_end_y);
-            if (found_last_fragment_end_y) {
-                inline_cb->max_y = last_fragment_end_y;
-            } else if (found_first_fragment_y) {
-                inline_cb->max_y = first_fragment_y;
+            bool first_fragment_is_cb_start = !had_inline_cb ||
+                (span->has_collapsed_line_fragment_union() &&
+                 !has_originally_inline_abs_child);
+            bool use_vertical_inline_edges = layout_block_inline_axis_is_vertical(ancestor) &&
+                ancestor->block()->direction == CSS_VALUE_LTR &&
+                has_direct_abs_child;
+            if (use_vertical_inline_edges && found_first_fragment && found_last_fragment) {
+                // CSS Position 3 §2.1: fragmented inline CB edges follow the
+                // inline axis; physical ordering alone is not the edge order.
+                if (span->block()->direction == CSS_VALUE_RTL) {
+                    inline_cb->min_y = last_fragment_top;
+                    inline_cb->max_y = first_fragment_bottom;
+                } else {
+                    inline_cb->min_y = first_fragment_top;
+                    inline_cb->max_y = last_fragment_bottom;
+                }
+            } else if (first_fragment_is_cb_start && found_first_fragment) {
+                // CSS Position 3 §4.1: a collapsed-line inline uses its first
+                // generated fragment unless an inline abspos child needs the
+                // pre-fragment containing-block origin.
+                inline_cb->min_y = first_fragment_top;
+            }
+            if (!use_vertical_inline_edges) {
+                float last_fragment_end_y = 0.0f;
+                bool found_last_fragment_end_y =
+                    multicol_inline_has_in_flow_fragment(static_cast<View*>(span)) &&
+                    multicol_inline_fragment_edge_y(
+                        static_cast<View*>(span), true, &last_fragment_end_y);
+                if (found_last_fragment_end_y) {
+                    inline_cb->max_y = last_fragment_end_y;
+                } else if (found_first_fragment) {
+                    inline_cb->max_y = first_fragment_top;
+                }
             }
             if (layout_block_inline_axis_is_vertical(ancestor)) {
-                // CSS Writing Modes: a vertical inline CB's fragmented inline
-                // extent is physical height, not the horizontal wrapper width.
+                // CSS Position 3 §4.1: a fragmented inline's physical union
+                // cannot retain the pre-fragment block extent.
+                if (span->width > ancestor->width) span->width = ancestor->width;
                 if (span->height > ancestor->height) span->height = ancestor->height;
             } else if (span->width > ancestor->width) {
                 span->width = ancestor->width;

@@ -234,6 +234,7 @@ static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis);
 static Item js_dom_svg_create_matrix(void);
 static Item js_dom_svg_create_point(void);
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem);
+static bool js_dom_ensure_geometry_snapshot(DomDocument* doc);
 
 // ============================================================================
 // Thread-local DOM document context
@@ -500,9 +501,41 @@ extern "C" bool js_dom_mutation_since_affects_subtree(
 
 extern "C" bool js_dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
-    // geometry reads use the last committed layout; headless callers flush at
-    // the CSSOM View entry point without re-entering the host-driven loop.
+    // this predicate is intentionally side-effect free; geometry entry points
+    // call js_dom_ensure_geometry_snapshot before inspecting the cached boxes.
     return doc && doc->view_tree && doc->view_tree->root;
+}
+
+static thread_local bool js_dom_geometry_flush_in_progress = false;
+
+static bool js_dom_ensure_geometry_snapshot(DomDocument* doc) {
+    UiContext* uicon = _js_current_ui_context;
+    if (!doc || !uicon || !uicon->headless || _js_host_driven_loop) {
+        return js_dom_has_committed_geometry_snapshot(doc);
+    }
+    if (js_dom_geometry_flush_in_progress) {
+        return js_dom_has_committed_geometry_snapshot(doc);
+    }
+
+    DomDocument* saved_document = uicon->document;
+    uicon->document = doc;
+    js_dom_geometry_flush_in_progress = true;
+
+    // CSSOM View geometry reads synchronously flush style and layout. The
+    // initial load has no view tree yet, while later reads may have pending
+    // DOM mutations from the same script turn.
+    if (doc->view_tree && doc->view_tree->root) {
+        if (doc->js.mutation_count > 0) {
+            radiant_reconcile_js_dom_mutations(uicon, doc);
+        }
+    } else if (doc->root && radiant_document_ensure_state(
+                   doc, "js_dom_geometry_flush")) {
+        layout_html_doc(uicon, doc, false);
+    }
+
+    js_dom_geometry_flush_in_progress = false;
+    uicon->document = saved_document;
+    return js_dom_has_committed_geometry_snapshot(doc);
 }
 
 extern "C" bool js_dom_tick_headless_animation_frame(void) {
@@ -5108,7 +5141,7 @@ static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
 
 static int64_t js_dom_geometry_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
-    js_dom_has_committed_geometry_snapshot(elem->doc);
+    js_dom_ensure_geometry_snapshot(elem->doc);
     float layout_value = width_axis ? elem->width : elem->height;
     if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
     // Load-time scripts execute before the first host-loop commit. A resolved
@@ -9091,7 +9124,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // clientWidth / clientHeight — border box minus borders
     if (prop_id == JS_DOM_PROP_CLIENT_WIDTH) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
@@ -9099,7 +9132,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
     if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
@@ -9109,7 +9142,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetTop / offsetLeft — position relative to offsetParent
     if (prop_id == JS_DOM_PROP_OFFSET_TOP) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
         if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
@@ -9117,7 +9150,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (prop_id == JS_DOM_PROP_OFFSET_LEFT) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
         if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
@@ -9133,20 +9166,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetParent — nearest positioned ancestor (or body)
     if (prop_id == JS_DOM_PROP_OFFSET_PARENT) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         DomElement* parent = js_dom_offset_parent_element(elem);
         return parent ? js_dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
     if (prop_id == JS_DOM_PROP_SCROLL_WIDTH) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         float cw = elem->content_width;
         float bw = elem->width;
         return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
     }
     if (prop_id == JS_DOM_PROP_SCROLL_HEIGHT) {
-        js_dom_has_committed_geometry_snapshot(elem->doc);
+        js_dom_ensure_geometry_snapshot(elem->doc);
         float ch = elem->content_height;
         float bh = elem->height;
         return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
@@ -9940,6 +9973,11 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     auto item_to_scroll_value = [](Item scroll_value) -> float {
         TypeId value_type = get_type_id(scroll_value);
         if (value_type == LMD_TYPE_INT) return (float)it2i(scroll_value);
+        if (value_type == LMD_TYPE_INT64) {
+            // CSSOM scroll setters must preserve signed wide integers, used by
+            // JS unary-minus numeric lowering for vertical-rl scrollLeft.
+            return (float)it2l(scroll_value);
+        }
         if (value_type == LMD_TYPE_FLOAT) return (float)it2d(scroll_value);
         if (value_type == LMD_TYPE_BOOL) return it2b(scroll_value) ? 1.0f : 0.0f;
         if (value_type == LMD_TYPE_STRING) {
@@ -9977,12 +10015,6 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
         bool layout_pending = elem->doc && elem->doc->state &&
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
-        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f) {
-            // Without a committed pane there is no writing-mode-specific
-            // signed range to validate against, so a pending element scroll
-            // must retain the ordinary zero origin.
-            scroll_value = 0.0f;
-        }
         if (elem->scroller && elem->scroll()->pane && !layout_pending) {
             float current_x = 0.0f;
             float current_y = 0.0f;
@@ -12903,7 +12935,7 @@ JS_FORWARD_ITEM(js_dom_boundary_from_point_bridge, (void* elem,                 
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
-    if (elem->doc) js_dom_has_committed_geometry_snapshot(elem->doc);
+    if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
@@ -12917,7 +12949,7 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
 extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return js_array_new(0);
-    if (elem->doc) js_dom_has_committed_geometry_snapshot(elem->doc);
+    if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
 
     float abs_x = 0.0f;
     float abs_y = 0.0f;

@@ -212,13 +212,25 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     float offset_y = 0.0f;
     layout_relative_position_offset(block, &offset_x, &offset_y);
 
-    block->x += offset_x;  block->y += offset_y;
-    // so we must also offset all descendants to move with the inline box
-    if (block->view_type == RDT_VIEW_INLINE && (offset_x != 0 || offset_y != 0)) {
-        layout_shift_inline_descendants(
-            lam::view_require_element(block), offset_x, offset_y);
-    }
+    ViewBlock* coordinate_parent = layout_nearest_block_ancestor(block->parent_view());
+    bool vertical_surrogate_coordinates = coordinate_parent &&
+        layout_block_inline_axis_is_vertical(coordinate_parent);
+    WritingMode coordinate_writing_mode = vertical_surrogate_coordinates
+        ? layout_block_writing_mode(coordinate_parent) : WM_HORIZONTAL_TB;
+    float applied_x = vertical_surrogate_coordinates ? offset_y : offset_x;
+    float applied_y = vertical_surrogate_coordinates
+        ? (coordinate_writing_mode == WM_VERTICAL_RL ? -offset_x : offset_x)
+        : offset_y;
 
+    // css Writing Modes maps the surrogate inline/block coordinates to physical
+    // Y/X; vertical-rl reverses the block axis, so convert physical insets before
+    // shifting the pre-publication box.
+    block->x += applied_x;  block->y += applied_y;
+    // so we must also offset all descendants to move with the inline box
+    if (block->view_type == RDT_VIEW_INLINE && (applied_x != 0 || applied_y != 0)) {
+        layout_shift_inline_descendants(
+            lam::view_require_element(block), applied_x, applied_y);
+    }
 }
 // apply CSS Position 3 sticky constraints to the nearest scroll container.
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
@@ -259,7 +271,14 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (!scroll_ancestor) {
-        return;
+        // CSS Position 3: when no ancestor establishes a scroll container,
+        // sticky positioning is constrained by the document viewport.
+        ViewBlock* root_block = find_initial_containing_view_block(block);
+        if (root_block && root_block->doc == block->doc) {
+            scroll_ancestor = static_cast<ViewElement*>(root_block);
+        } else {
+            return;
+        }
     }
 
     ViewBlock* scroller = lam::view_require_block(scroll_ancestor);
@@ -610,12 +629,14 @@ static bool static_position_parent_uses_right_block_start(ViewElement* parent) {
 
 static bool positioned_element_is_replaced(ViewBlock* block) {
     if (!block) return false;
+    // HTML audio controls are replaced; abspos sizing must not use fallback text.
     bool is_form_control =
         block->form_control();
     return block->display.inner == RDT_DISPLAY_REPLACED ||
         block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
         block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
         (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
+        (block->tag() == MARKUP_NAME_AUDIO && block->has_attribute(MARKUP_NAME_CONTROLS)) ||
         is_form_control;
 }
 
@@ -636,7 +657,8 @@ static bool positioned_element_has_replaced_sizing(ViewBlock* block) {
     return block->display.inner == RDT_DISPLAY_REPLACED ||
         block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
         block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
-        (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data"));
+        (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
+        (block->tag() == MARKUP_NAME_AUDIO && block->has_attribute(MARKUP_NAME_CONTROLS));
 }
 
 static bool positioned_is_open_popover_object(ViewBlock* block) {
@@ -1285,6 +1307,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // CSS 2.1 §10.6.5: replaced form control with auto height → use intrinsic height
         IntrinsicSize form_size = layout_measure_form_control(lycon, block, lycon->available_space);
         content_height = form_size.max_height;
+    } else if (is_replaced) {
+        // CSS 2.1 §10.6.5: auto height of a positioned replaced object is intrinsic.
+        IntrinsicSize replaced_size = layout_measure_replaced(
+            lycon, block, lycon->available_space);
+        content_height = replaced_size.max_height;
     } else {
         content_height = 0;
     }
@@ -1616,7 +1643,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 ? pa_line->advance_x - parent->x
                 : static_direction == TD_RTL
                     ? pa_line->advance_x - pa_line->left
-                    : pa_line->advance_x - (pa_block ? pa_block->text_indent : 0.0f);
+                    : pa_line->advance_x - (pa_block ? pa_block->text_indent : 0.0f) -
+                        inline_containing_block_origin_y(cb);
             if (cb->view_type != RDT_VIEW_INLINE) {
                 block->y = pa_line->advance_x;
             }
@@ -1632,6 +1660,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 // CSS Writing Modes: an outer inline containing block keeps the
                 // parent line's RTL indent as the child's local static offset.
                 block->y = pa_line->text_indent_offset;
+            } else {
+                // css Position 3 §4.1: LTR static coordinates are local to the
+                // outer inline containing block's first fragment.
+                block->y -= inline_containing_block_origin_y(cb);
             }
         }
     }

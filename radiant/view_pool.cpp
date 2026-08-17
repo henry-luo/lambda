@@ -1369,6 +1369,26 @@ static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float
     }
 }
 
+static float text_rect_client_height(ViewText* text, TextRect* rect) {
+    if (!rect) return 0.0f;
+    float height = rect->height;
+    ViewBlock* block = text ? layout_nearest_block_ancestor(text->parent_view()) : nullptr;
+    const CssValue* line_height = block && block->blk
+        ? block->block()->line_height : nullptr;
+    bool normal_line_height = !line_height ||
+        (line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+         line_height->data.keyword == CSS_VALUE_NORMAL);
+    float normal_height = text && text->font && text->font->font_handle &&
+        normal_line_height
+        ? font_calc_normal_line_height(text->font->font_handle) : 0.0f;
+    if (normal_height > height) {
+        // CSSOM text rectangles expose the used normal line box, while the
+        // stored glyph cell remains the metric used by inline layout.
+        height = normal_height;
+    }
+    return height;
+}
+
 void view_get_visual_bounds(View* view, float* out_x, float* out_y,
                             float* out_width, float* out_height) {
     if (!view) {
@@ -1423,7 +1443,10 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     float css_x = abs_x;
     float css_y = abs_y;
     float css_width = rect ? rect->width : view->width;
-    float css_height = rect ? rect->height : view->height;
+    float css_height = rect ?
+        (view->view_type == RDT_VIEW_TEXT
+            ? text_rect_client_height(lam::view_require_text(view), rect)
+            : rect->height) : view->height;
 
     // For the root <html> element with auto height, viewport clamping sets height
     // to viewport size but browsers report the full content height.

@@ -656,11 +656,12 @@ static void resolve_logical_spacing_property(LayoutContext* lycon, ViewSpan* spa
                                              CssPropertyCode property,
                                              const CssValue* value, int64_t specificity,
                                              bool is_margin, bool inline_axis_is_vertical,
-                                             bool vertical_block_start_is_right) {
+                                             bool vertical_block_start_is_right,
+                                             bool inline_direction_rtl) {
     LayoutLogicalProperty logical = layout_logical_property(property);
     if (!logical.valid) return;
     LayoutLogicalSides sides = layout_logical_sides(
-        inline_axis_is_vertical, vertical_block_start_is_right);
+        inline_axis_is_vertical, vertical_block_start_is_right, inline_direction_rtl);
     LayoutPhysicalSides physical = layout_logical_physical_sides(logical, sides);
     resolve_spacing_sides(lycon, span, physical.first,
                           physical.pair ? physical.second : physical.first,
@@ -670,7 +671,8 @@ static void resolve_logical_spacing_property(LayoutContext* lycon, ViewSpan* spa
 static bool resolve_spacing_property(LayoutContext* lycon, ViewSpan* span,
                                      CssPropertyCode property, const CssValue* value,
                                      int64_t specificity, bool inline_axis_is_vertical,
-                                     bool vertical_block_start_is_right) {
+                                     bool vertical_block_start_is_right,
+                                     bool inline_direction_rtl) {
     if (property == CSS_PROPERTY_MARGIN || property == CSS_PROPERTY_PADDING) {
         bool is_margin = property == CSS_PROPERTY_MARGIN;
         span->ensure_boundary(lycon);
@@ -698,7 +700,8 @@ static bool resolve_spacing_property(LayoutContext* lycon, ViewSpan* span,
         bool is_margin = property <= CSS_PROPERTY_MARGIN_INLINE_END;
         resolve_logical_spacing_property(lycon, span, property, value, specificity,
                                          is_margin, inline_axis_is_vertical,
-                                         vertical_block_start_is_right);
+                                         vertical_block_start_is_right,
+                                         inline_direction_rtl);
         return true;
     }
     return false;
@@ -808,11 +811,12 @@ static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const 
 static bool resolve_logical_inset_property(LayoutContext* lycon, ViewSpan* span,
                                            CssPropertyCode property, const CssValue* value,
                                            bool inline_axis_is_vertical,
-                                           bool vertical_block_start_is_right) {
+                                           bool vertical_block_start_is_right,
+                                           bool inline_direction_rtl) {
     LayoutLogicalProperty logical = layout_logical_property(property);
     if (!logical.valid) return false;
     LayoutLogicalSides sides = layout_logical_sides(
-        inline_axis_is_vertical, vertical_block_start_is_right);
+        inline_axis_is_vertical, vertical_block_start_is_right, inline_direction_rtl);
     LayoutPhysicalSides physical_sides = layout_logical_physical_sides(
         logical, sides, true);
     CssBoxSide first = physical_sides.first;
@@ -6374,6 +6378,20 @@ static CssEnum find_inherited_block_keyword(DomElement* element,
     return fallback;
 }
 
+static CssEnum logical_inline_direction(DomElement* element) {
+    for (DomElement* parent = dom_parent_element(element); parent;
+         parent = dom_parent_element(parent)) {
+        CssEnum specified = layout_specified_keyword(
+            parent, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+        if (specified == CSS_VALUE_LTR || specified == CSS_VALUE_RTL) return specified;
+        if (parent->blk && (parent->block()->direction == CSS_VALUE_LTR ||
+                            parent->block()->direction == CSS_VALUE_RTL)) {
+            return parent->block()->direction;
+        }
+    }
+    return CSS_VALUE_LTR;
+}
+
 static CssPropertyCode css_physical_size_alias(CssPropertyCode property,
                                                 bool vertical_inline_axis) {
     static const CssPropertyCode width[] = {
@@ -6430,6 +6448,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
     ViewSpan* span = lam::view_require_element(lycon->view);
     ViewBlock* block = lam::view_as_block(span);
+    CssEnum specified_direction = layout_specified_keyword(
+        current_element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+    bool inline_direction_rtl = specified_direction == CSS_VALUE_RTL ||
+        (specified_direction != CSS_VALUE_LTR &&
+         logical_inline_direction(current_element) == CSS_VALUE_RTL);
     if (css_property_is_ignored(prop_id) ||
         resolve_common_keyword_property(lycon, span, block, prop_id, decl, value)) {
         return;
@@ -6441,7 +6464,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     }
     if (resolve_spacing_property(lycon, span, prop_id, value, specificity,
                                  inline_axis_is_vertical,
-                                 vertical_block_start_is_right)) {
+                                 vertical_block_start_is_right,
+                                 inline_direction_rtl)) {
         return;
     }
     switch (prop_id) {
@@ -6604,6 +6628,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_DIRECTION: {
             if (!block) {
                 ViewSpan* span = lycon->view->is_element() ? lam::view_require_element(lycon->view) : nullptr;
+                if (span) {
+                    // CSS direction is inherited by inline boxes; allocate the
+                    // shared block property before storing an explicit value.
+                    span->ensure_block(lycon);
+                }
                 if (span && span->blk) {
                     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                         CssEnum dir_value = value->data.keyword;
@@ -7167,7 +7196,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             LayoutLogicalProperty logical = layout_logical_property(prop_id);
             LayoutPhysicalSides physical = layout_logical_physical_sides(
                 logical, layout_logical_sides(inline_axis_is_vertical,
-                                              vertical_block_start_is_right), true);
+                                              vertical_block_start_is_right,
+                                              inline_direction_rtl), true);
             apply_border_side_shorthand(lycon, span, physical.first, value, specificity);
             if (physical.pair) {
                 apply_border_side_shorthand(lycon, span, physical.second, value, specificity);
@@ -7183,7 +7213,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             LayoutLogicalProperty logical = layout_logical_property(prop_id);
             LayoutPhysicalSides physical = layout_logical_physical_sides(
                 logical, layout_logical_sides(inline_axis_is_vertical,
-                                              vertical_block_start_is_right), true);
+                                              vertical_block_start_is_right,
+                                              inline_direction_rtl), true);
             CssBorderSidePart part = prop_id == CSS_PROPERTY_BORDER_BLOCK_COLOR ||
                 prop_id == CSS_PROPERTY_BORDER_BLOCK_START_COLOR ||
                 prop_id == CSS_PROPERTY_BORDER_BLOCK_END_COLOR
@@ -7253,7 +7284,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_INSET_BLOCK_END: {
             resolve_logical_inset_property(lycon, span, prop_id, value,
                                            inline_axis_is_vertical,
-                                           vertical_block_start_is_right);
+                                           vertical_block_start_is_right,
+                                           inline_direction_rtl);
             break;
         }
         case CSS_PROPERTY_TOP:

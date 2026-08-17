@@ -5322,14 +5322,25 @@ void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* bloc
         reverse_vertical_inline);
 }
 
+static bool layout_block_has_multicol_ancestor(ViewBlock* block) {
+    for (ViewElement* ancestor = block; ancestor; ancestor = ancestor->parent_view()) {
+        if (!ancestor->is_block()) continue;
+        ViewBlock* ancestor_block = lam::view_as_block(ancestor);
+        if (ancestor_block && is_multicol_container(ancestor_block)) return true;
+    }
+    return false;
+}
+
 void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     float content_width = lycon->block.content_width;
     float line_content_width = content_width;
-    if (layout_block_inline_axis_is_vertical(block) &&
-        block->blk && block->block()->direction == CSS_VALUE_RTL &&
+    bool rtl_vertical_block = block->blk &&
+        block->block()->direction == CSS_VALUE_RTL;
+    if ((rtl_vertical_block || layout_block_has_multicol_ancestor(block)) &&
+        layout_block_inline_axis_is_vertical(block) &&
         block->height > 0.0f) {
-        // CSS Writing Modes maps the inline axis to physical y; RTL line
-        // alignment must use that extent rather than the physical block width.
+        // CSS Writing Modes maps a vertical multicol inline axis to physical y;
+        // the physical block width lets an exact-fit line overrun its extent.
         line_content_width = layout_content_size_from_border_box(
             block, block->height, false);
     }
@@ -5706,6 +5717,36 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                     surrogate_inline_origin, physical_inline_origin,
                     surrogate_block_origin, physical_block_origin,
                     center_block_axis, use_central_baseline, reverse_inline_axis);
+            }
+            bool has_direct_positioned_child = false;
+            ViewBlock* span_parent_block = layout_nearest_block_ancestor(span->parent_view());
+            for (View* child = span->first_child; child; child = child->next()) {
+                ViewBlock* child_block = lam::view_as_block(child);
+                if (child_block && layout_block_is_out_of_flow_positioned(child_block)) {
+                    has_direct_positioned_child = true;
+                    break;
+                }
+            }
+            // css Position 3 §4.1: an RTL vertical inline containing block's
+            // static edge is reconstructed after relative positioning; fragmented
+            // spans already carry that offset in their fragment geometry.
+            if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE &&
+                has_direct_positioned_child &&
+                !inline_span_has_multiple_line_fragments(span) &&
+                span_parent_block && span_parent_block->blk &&
+                span_parent_block->block()->direction == CSS_VALUE_RTL &&
+                (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL)) {
+                float relative_y = 0.0f;
+                layout_relative_position_offset(
+                    lam::unsafe_view_block_api_span(span),
+                    nullptr, &relative_y);
+                // css Writing Modes finalizes the surrogate inline coordinate
+                // here, so preserve the physical Y relative offset after mapping.
+                if (relative_y != 0.0f) {
+                    span->y += relative_y;
+                    layout_shift_inline_descendants(
+                        lam::view_require_element(span), 0.0f, relative_y);
+                }
             }
         } else if (view->view_type == RDT_VIEW_BR) {
             float logical_x = view->x - surrogate_inline_origin + physical_inline_origin;

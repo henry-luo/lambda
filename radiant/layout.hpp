@@ -3697,10 +3697,15 @@ static inline LayoutLogicalProperty layout_logical_property(CssPropertyCode prop
 }
 
 static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
-                                                       bool block_start_right) {
+                                                       bool block_start_right,
+                                                       bool inline_direction_rtl = false) {
     LayoutLogicalSides sides = {};
-    sides.inline_start = inline_vertical ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_LEFT;
-    sides.inline_end = inline_vertical ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_RIGHT;
+    sides.inline_start = inline_vertical
+        ? (inline_direction_rtl ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_TOP)
+        : (inline_direction_rtl ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT);
+    sides.inline_end = inline_vertical
+        ? (inline_direction_rtl ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM)
+        : (inline_direction_rtl ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT);
     sides.block_start = inline_vertical
         ? (block_start_right ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT)
         : CSS_BOX_SIDE_TOP;

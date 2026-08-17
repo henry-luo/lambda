@@ -780,6 +780,29 @@ static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span,
     return true;
 }
 
+static void apply_html_q_quote_defaults(LayoutContext* lycon, DomElement* element) {
+    if (!lycon || !element || element->tag() != MARKUP_NAME_Q || !element->doc) return;
+    Pool* pool = element->doc->document_pool;
+    const PseudoStyleKind kinds[] = {PSEUDO_STYLE_BEFORE, PSEUDO_STYLE_AFTER};
+    const char* quote_names[] = {"open-quote", "close-quote"};
+    for (int i = 0; i < 2; i++) {
+        if (dom_element_get_pseudo_element_value(
+                element, CSS_PROPERTY_CONTENT, i + 1)) continue;
+        StyleTree** style_slot = element->pseudo_style_slot(kinds[i]);
+        if (!style_slot) continue;
+        if (!*style_slot) *style_slot = style_tree_create(pool);
+        if (!*style_slot) continue;
+        CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+        if (!value) continue;
+        value->type = CSS_VALUE_TYPE_CUSTOM;
+        value->data.custom_property.name = pool_strdup(pool, quote_names[i]);
+        CssSpecificity specificity = {0, 0, 0, 0, false};
+        CssDeclaration* declaration = css_declaration_create(
+            CSS_PROPERTY_CONTENT, value, specificity, CSS_ORIGIN_USER_AGENT, pool);
+        if (declaration) style_tree_apply_declaration(*style_slot, declaration);
+    }
+}
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
     // Default-style resolution runs for both block and inline elements,
@@ -817,6 +840,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 apply_html_replaced_default(lycon, elmt, block, true, true, true, false, true);
             }
         }
+    }
+    if (elmt_name == MARKUP_NAME_Q && elmt->is_element()) {
+        // HTML §4.5.11: q uses UA open/close quotes, which must participate in layout.
+        apply_html_q_quote_defaults(lycon, elmt->as_element());
     }
     if (apply_html_inline_text_default(lycon, span, elmt_name)) return;
     switch (elmt_name) {

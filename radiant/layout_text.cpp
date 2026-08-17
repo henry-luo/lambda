@@ -3142,8 +3142,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
         }
         // the candidate line width; otherwise overflow creates a false
-        bool first_word_does_not_fit = remaining > 0.0f &&
-            first_word_w + leading_space_w > remaining;
+        // CSS Text 3 §5.2: a collapsed whitespace opportunity still permits
+        // the next word to wrap when the preceding line is exactly full.
+        bool first_word_does_not_fit = first_word_w + leading_space_w > remaining &&
+            (remaining > 0.0f || lycon->line.wrap_opportunity_before_nowrap);
         if (first_word_w > 0 && (first_word_does_not_fit ||
                                  (min_content_line && remaining <= 0.0f))) {
             record_inline_box_decoration_fragment(lycon, text_node);

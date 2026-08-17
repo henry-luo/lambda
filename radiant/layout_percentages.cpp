@@ -217,7 +217,10 @@ bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
             // A percentage block size is automatic while its containing block is auto;
             // treating a provisional intrinsic height as definite feeds aspect-ratio backward.
             ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());
-            if (!containing_block ||
+            bool is_root_percentage_height = !containing_block && block->doc &&
+                block->doc->view_tree &&
+                block->doc->view_tree->root == static_cast<View*>(block);
+            if (!is_root_percentage_height &&
                 (layout_block_has_automatic_size(containing_block, false) &&
                  !layout_percentage_height_basis_is_algorithmically_definite(containing_block))) {
                 return true;
