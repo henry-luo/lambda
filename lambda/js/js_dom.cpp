@@ -10015,6 +10015,12 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
         bool layout_pending = elem->doc && elem->doc->state &&
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
+        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f) {
+            // Without a committed pane there is no writing-mode-specific
+            // signed range to validate against, so pending element scroll
+            // state must retain the ordinary non-negative origin.
+            scroll_value = 0.0f;
+        }
         if (elem->scroller && elem->scroll()->pane && !layout_pending) {
             float current_x = 0.0f;
             float current_y = 0.0f;
