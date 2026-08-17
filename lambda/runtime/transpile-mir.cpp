@@ -676,7 +676,7 @@ static AstFuncNode* mir_direct_call_function(AstCallNode* call) {
 // branch may produce an ordinary Item while another branch captured a pending
 // companion, leaving the epilogue with the latter branch's stale lane pair.
 // Count explicit returns so RV6 tail forwarding is limited to a single-return
-// body (D5.2.1v2, RV4.2).
+// body (D5.2.1v3, RV4.2).
 static int mir_explicit_return_count(AstNode* node) {
     int count = 0;
     while (node) {
@@ -1210,7 +1210,7 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
 // A direct shape-2 call crosses the expression API as a first-lane register,
 // while MirEmitter retains the companion ownership fact.  Recover that fact at
 // the first ordinary-Item consumer instead of teaching every AST helper a
-// second value abstraction (D5.2.1v2, D5.2.2v2).
+// second value abstraction (D5.2.1v3, D5.2.2v3).
 static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
         MIR_reg_t value) {
     if (!mt || !value || mt->em.pending_live_item != value ||
@@ -1360,13 +1360,13 @@ static inline bool mir_body_returns_pair(int return_lane_kind,
     if (return_lane_kind == RETURN_LANE_SCALAR &&
             scalar_mode != MIR_SCALAR_RETURN_NONE) {
         return em_returns_result_pair(em_companion_transport(
-            RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false, 0));
+            RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false));
     }
     // Shape 4 (P2/RV9): a native `^E` body returns `[native, error]`, its error
     // Item on lane 2 instead of `Context::mir_return_lane`.
     if (return_lane_kind == RETURN_LANE_ERROR) {
         return em_returns_result_pair(em_companion_transport(
-            RETURN_SHAPE_NATIVE_ERROR, /*c_reachable=*/false, 0));
+            RETURN_SHAPE_NATIVE_ERROR, /*c_reachable=*/false));
     }
     return false;
 }
@@ -1465,8 +1465,8 @@ static void emit_number_frame_exit(MirTranspiler* mt) {
 static void finish_function_epilogue(MirTranspiler* mt) {
     // A shape-2 companion cannot survive the function's publication/extent
     // boundary. Tail forwarding is a separate explicit path; until then every
-    // producer must have consumed or patched its pending Item (D5.2.1v2,
-    // D5.2.2v2).
+    // producer must have consumed or patched its pending Item (D5.2.1v3,
+    // D5.2.2v3).
     if (mt->em.pending_live_companion &&
             !mt->em.frame.pending_return_companion) {
         log_error("mir: pending companion reached function epilogue in %s",
@@ -1524,14 +1524,6 @@ static void finish_function_epilogue(MirTranspiler* mt) {
             offsetof(Context, side_number_top), mt->em.frame.number_base);
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_reg_op(mt->ctx, pair_item)));
-    } else if (mt->em.frame.return_lane_kind == RETURN_LANE_SCALAR) {
-        // Preserve scalar payloads in the caller home before extent teardown.
-        MIR_reg_t rehomed = em_adopt_scalar_item(&mt->em,
-            mt->em.frame.scalar_return_mode, mt->em.frame.return_reg,
-            mt->em.frame.runtime, offsetof(Context, side_number_top),
-            mt->em.frame.number_base, mt->em.frame.incoming_scalar_home);
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
-            MIR_new_reg_op(mt->ctx, rehomed)));
     } else if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR &&
             em_returns_result_pair(mt->em.frame.plan.companion)) {
         // v3 shape 4 (RV9): `[native, error]`. Lane 2 is a full error Item —
@@ -1558,10 +1550,10 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2,
             MIR_new_reg_op(mt->ctx, first),
             MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg)));
-    } else if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
-        MIR_reg_t adopted_error = em_adopt_scalar_item_value(&mt->em,
-            MIR_SCALAR_RETURN_DYNAMIC, mt->em.frame.error_return_reg,
-            mt->em.frame.incoming_scalar_home);
+    } else if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR &&
+            em_returns_companion_slot(mt->em.frame.plan.companion)) {
+        // Windows has no multiple MIR results.  Keep shape 4's error lane in
+        // the context companion slot, matching its shape-2 C-entry transport.
         MIR_reg_t first = new_reg(mt, "return_first_final", mt->em.frame.return_type);
         MIR_insn_code_t first_load = mt->em.frame.return_type == MIR_T_D
             ? MIR_DMOV : MIR_MOV;
@@ -1576,8 +1568,8 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_number_top), mt->em.frame.number_base);
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
-            offsetof(Context, mir_return_lane),
-            adopted_error);
+            offsetof(Context, mir_companion_slot),
+            mt->em.frame.error_return_reg);
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_reg_op(mt->ctx, first)));
     } else {
@@ -1618,13 +1610,16 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
                 : MIR_new_int_op(mt->ctx, 0);
             emit_insn(mt, MIR_new_ret_insn(mt->ctx, 2, dead_value,
                 MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
-        } else {
+        } else if (em_returns_companion_slot(mt->em.frame.plan.companion)) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    offsetof(Context, mir_return_lane),
+                    offsetof(Context, mir_companion_slot),
                     mt->em.frame.runtime, 0, 1),
                 MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
             emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, first));
+        } else {
+            log_error("mir: shape-4 function has no companion transport");
+            abort();
         }
     } else if (mt->em.frame.return_type == MIR_T_D) {
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
@@ -1721,7 +1716,7 @@ static void store_gc_root_slot(MirTranspiler* mt, int root_slot, MIR_reg_t value
     // Root publication is an ownership escape.  A pending first lane is not a
     // valid GC Item until its companion has been consumed; resolving here
     // closes helper paths that register roots without going through emit_box
-    // (D5.2.1v2, D5.2.2v2).
+    // (D5.2.1v3, D5.2.2v3).
     value = mir_materialize_pending_reg(mt, value);
     // G0: a value in a double register is a scalar — `int` lives there now, as
     // `float` always did — and a scalar is never a GC reference. Rooting one
@@ -4062,7 +4057,7 @@ static void async_save_spills(MirTranspiler* mt, int count) {
         // The async frame stores raw words and has no second lane for the
         // companion.  Resolve the pair before saving it, and fail closed if
         // the producer was not registered in this suspension's live set
-        // (D5.2.1v2, RV4.1).
+        // (D5.2.1v3, RV4.1).
         bool pending_is_live = false;
         for (int i = 0; i < count; i++) {
             if (mt->async_spills[i].reg == pending_item) {
@@ -6765,7 +6760,7 @@ static bool mir_binary_is_native_wide_result(MirTranspiler* mt,
 // computes on `raw_a`/`raw_b` before masking at 64 bits. The retired path boxed
 // both operands, called fn_add/fn_sub/fn_mul, and let pack_sized_integer push a
 // third number home for a result the next instruction unboxed again — three
-// side-stack words per operation, all dead on arrival (D2.2.3, D5.2.2v2).
+// side-stack words per operation, all dead on arrival (D2.2.3, D5.2.2v3).
 static MIR_reg_t mir_emit_wide_binary(MirTranspiler* mt, AstBinaryNode* binary) {
     log_debug("mir: wide64 lane — native op %d on raw 64-bit operands", binary->op);
     MIR_reg_t left = transpile_expr(mt, binary->left);
@@ -8481,7 +8476,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     MIR_reg_t cond = transpile_expr(mt, if_node->cond);
     // A dynamic boxed condition may still be the first lane of a pending
     // shape-2 call even when inference says bool. Truthiness is a consumer,
-    // so resolve before the branch reads the pending tag (D5.2.1v2).
+    // so resolve before the branch reads the pending tag (D5.2.1v3).
     cond = mir_materialize_pending_reg(mt, cond);
 
     // Restore tail position for branches
@@ -16551,18 +16546,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // Keep the bound ABI in that conservative case instead of
                 // falling through to the legacy Item-only MIR call below.
                 MirCallOptions options = {};
-                options.scalar_return_home = {MIR_FRAME_REF_NONE, 0};
-                options.observed_return_lane_mask =
-                    (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR);
                 options.has_hidden_context = true;
-                // The caller's return epilogue can forward a register pair
-                // only when this direct edge itself is the tail expression.
-                // Shape-1/shape-4 entries keep their existing call protocol.
-                options.is_tail_call = mt->in_tail_position && local_entry &&
-                    local_entry->variant &&
-                    local_entry->variant->result.shape ==
-                        RETURN_SHAPE_ITEM_SCALAR &&
-                    em_returns_result_pair(mt->em.frame.plan.companion);
                 if (direct_env) {
                     options.has_hidden_env = true;
                     options.hidden_env = direct_env;
@@ -16748,7 +16732,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 if (direct_value.maybe_pending && !can_forward_pending) {
                     // the pair remains register-only until this first Item
                     // consumer. materialize before unboxing, root publication,
-                    // or any helper call can observe it (D5.2.1v2, RV4.1).
+                    // or any helper call can observe it (D5.2.1v3, RV4.1).
                     direct_value = em_materialize_pending_value(&mt->em,
                         direct_value);
                     result = direct_value.reg;
@@ -16882,30 +16866,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     // resolves `fn->invoke` and calls the public wrapper — and a C prototype
     // has no portable spelling for MIR's two-result convention.
     //
-    // Under v3 that is settled by RV12 rather than by a second result: the
-    // wrapper returns a pending Item and leaves lane 2 in
-    // `Context::mir_companion_slot`, and the trampoline resolves it before
-    // returning (`fn_call_boxed_N_into`, and `LambdaDynamicNativeInvoker`
-    // for the `fn->invoke` path). Every consumer of the trailing operand is
-    // `#if !LAMBDA_RETURN_V3`, so the caller donates NOTHING here: the operand
-    // stays in the C signature — keeping one call shape across both
-    // conventions — and is passed null. Materializing a frame slot the callee
-    // never reads was the last return-side home in the emitter.
-    int dyn_scalar_home_id = 0;
+    // The public wrapper returns a pending Item and leaves lane 2 in
+    // `Context::mir_companion_slot`; the C trampoline resolves it before
+    // returning.  Its result-home parameter remains for arbitrary hosted
+    // callbacks, but compiled entries must receive null rather than a new
+    // generated-function caller home.
     MIR_reg_t dyn_scalar_home;
-#if LAMBDA_RETURN_V3
     dyn_scalar_home = new_reg(mt, "dyn_no_home", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, dyn_scalar_home), MIR_new_int_op(mt->ctx, 0)));
-#else
-    dyn_scalar_home_id = em_scalar_home_new(&mt->em);
-    dyn_scalar_home = em_materialize_frame_ref(&mt->em,
-        em_scalar_home_ref(&mt->em, dyn_scalar_home_id));
-    if (!dyn_scalar_home) {
-        log_error("mir: dynamic call has no caller-owned scalar result home");
-        abort();
-    }
-#endif
 
     if (arg_count == 0) {
         async_emit_invoke_resume_point(mt, call_node);
@@ -16994,11 +16963,6 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-    // Home identity only exists when a home was donated; under v3 the result
-    // is already resolved by the trampoline, so there is nothing to bind.
-    if (dyn_scalar_home_id) {
-        em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
-    }
     if (!call_node->propagate && !mt->emitting_async_call &&
             mir_is_native_scalar_value_type(call_tid)) {
         // A dynamic dispatcher can reject a valid Lambda signature for its
@@ -17543,7 +17507,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             // Same-shape direct returns forward the raw pair.  Clearing the
             // live marker records that the value has crossed into this frame's
             // return publication state, so cleanup calls cannot be mistaken for
-            // a second unresolved pair (D5.2.1v2, RV4.2).
+            // a second unresolved pair (D5.2.1v3, RV4.2).
             mt->em.frame.pending_return_item = mt->em.pending_live_item;
             mt->em.frame.pending_return_companion =
                 mt->em.pending_live_companion;
@@ -18283,7 +18247,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
     // `transpile_box_item` is itself an ordinary-Item consumer.  This covers
     // dynamic/type-dispatch paths whose static type is ANY and therefore return
-    // before the type-specific boxing cases below (D5.2.1v2).
+    // before the type-specific boxing cases below (D5.2.1v3).
     val = mir_materialize_pending_reg(mt, val);
 
     // If the expression already emitted a return (e.g. RETURN_STAM in a proc),
@@ -21257,7 +21221,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
 // native-lane proof above: a boxed int/string/container is safe even when its
 // producer is not eligible for a raw MIR lane. Unknown, union, and wide scalar
 // types stay dynamic so a stale AST annotation cannot hide a pending payload
-// across the callee watermark (D5.2.1v2).
+// across the callee watermark (D5.2.1v3).
 static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
     while (node && node->node_type == AST_NODE_PRIMARY &&
             ((AstPrimaryNode*)node)->expr) {
@@ -21273,7 +21237,7 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
 
     // a non-wide static result is enough for a direct/sys call, but a computed
     // function value has no producer descriptor to audit at this boundary.
-    // keep that case dynamic until its callee shape is known (D5.2.1v2).
+    // keep that case dynamic until its callee shape is known (D5.2.1v3).
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
@@ -21584,7 +21548,7 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
                 &return_count, true) && return_count > 0) {
             // shape 1 is safe only after every explicit value exit has passed
             // the wide-free proof; unknown calls and union values remain on
-            // the dynamic companion lane (D5.2.1v2).
+            // the dynamic companion lane (D5.2.1v3).
             return MIR_SCALAR_RETURN_NONE;
         }
         return MIR_SCALAR_RETURN_DYNAMIC;
@@ -21608,8 +21572,7 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
 
 static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         AstFuncNode* fn,
-        NativeFuncInfo* native_info, MirScalarReturnMode scalar_mode,
-        uint8_t lane_mask) {
+        NativeFuncInfo* native_info, MirScalarReturnMode scalar_mode) {
     if (!mt || !fn) return NULL;
     FnAnalysis* analysis = fn->analysis;
     FnVariantAnalysis* variants = NULL;
@@ -21642,8 +21605,7 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     public_entry->result.normal = {LMD_TYPE_ANY, VALUE_REP_ITEM,
         // A boxed wrapper can carry a subnormal or wide integer even when
         // static inference chose a native body, so its public ABI is dynamic.
-        SCALAR_RETURN_DYNAMIC, true};
-    uint8_t public_scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+        SCALAR_RETURN_DYNAMIC};
     // RV10 §6: the boxed public entry is the one every DYNAMIC call site
     // dispatches through, so it always speaks the universal pair shape — even
     // when the body underneath returns natively.
@@ -21652,16 +21614,7 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     // The public wrapper is the C-reachable entry, so its lane 2 rides the
     // context slot (RV12), never a second MIR result.
     public_entry->result.companion = em_companion_transport(
-        public_entry->result.shape, /*c_reachable=*/true,
-        public_scalar_home_lane_mask);
-    // the v3 slot is a context field, not a trailing pointer parameter.  Do
-    // not publish the legacy mask here: direct callers used it to pass an
-    // undeclared `_scalar_home` after the wrapper moved to the slot ABI.
-    public_entry->result.scalar_home_lane_mask =
-        public_entry->result.companion == FN_COMPANION_HOME
-            ? public_scalar_home_lane_mask : 0;
-    public_entry->result.normal.may_need_caller_scalar_home =
-        public_entry->result.scalar_home_lane_mask != 0;
+        public_entry->result.shape, /*c_reachable=*/true);
     public_entry->param_count = param_count;
 
     FnVariantAnalysis* body = analysis
@@ -21677,24 +21630,20 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         return_type);
     if (!native) scalar_class = scalar_mode == MIR_SCALAR_RETURN_DYNAMIC
         ? SCALAR_RETURN_DYNAMIC : scalar_class;
-    body->result.normal = {return_type, return_rep,
-        lane_mask & FN_RETURN_HOME_NORMAL ? scalar_class : SCALAR_RETURN_NONE,
-        (lane_mask & FN_RETURN_HOME_NORMAL) != 0};
+    body->result.normal = {return_type, return_rep, scalar_class};
     if (type && type->can_raise && native) {
         body->result.error_lane = FN_ERROR_LANE_CONTEXT_ITEM;
         body->result.error = {LMD_TYPE_ERROR, VALUE_REP_ITEM,
-            SCALAR_RETURN_DYNAMIC, (lane_mask & FN_RETURN_HOME_ERROR) != 0};
+            SCALAR_RETURN_DYNAMIC};
     }
-    body->result.scalar_home_lane_mask = lane_mask;
-    // RV1/RV2: shape from the same signature-derived facts the v2 home protocol
-    // gates on. `scalar_mode` already collapses declared-ANY/unprovable returns
-    // to DYNAMIC, so an unprovable boxed body lands on the universal shape 2.
+    // `scalar_mode` collapses declared-ANY/unprovable returns to DYNAMIC, so
+    // an unprovable boxed body lands on the universal shape 2.
     body->result.shape = em_return_shape(native,
         type && type->can_raise, scalar_mode);
     // Internal bodies are called only from generated code, so they keep the
     // register pair.
     body->result.companion = em_companion_transport(body->result.shape,
-        /*c_reachable=*/false, lane_mask);
+        /*c_reachable=*/false);
     body->param_count = param_count;
     if (native && native_info->param_count > 0) {
         // Physical MIR I64 cannot distinguish boxed Items from raw I64/U64.
@@ -21877,14 +21826,6 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     // caller-donated home disappears from the public ABI entirely — one fewer
     // argument register on every boxed call, and C callers no longer have to
     // supply a slot they cannot see.
-    bool wrapper_uses_slot = em_returns_companion_slot(
-        em_companion_transport(RETURN_SHAPE_ITEM_SCALAR,
-            /*c_reachable=*/true, FN_RETURN_HOME_NORMAL));
-    if (!wrapper_uses_slot) {
-        params[param_count] = {MIR_T_P, raw_strdup("_scalar_home"), 0}; // RAWALLOC_OK: MIR owns a copy
-        param_name_copies[param_count] = (char*)params[param_count].name;
-        param_count++;
-    }
 
     // Save outer function context
     MIR_item_t saved_func_item = mt->em.func_item;
@@ -21914,16 +21855,13 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     emit_jit_root_frame_enter(mt);
     begin_function_epilogue(mt, ret_type, RETURN_LANE_SCALAR,
         MIR_SCALAR_RETURN_DYNAMIC);
-    mt->em.frame.plan.scalar_home_lane_mask =
-        wrapper_uses_slot ? 0 : FN_RETURN_HOME_NORMAL;
-    mt->em.frame.plan.accepts_caller_scalar_home = !wrapper_uses_slot;
+    mt->em.frame.plan.scalar_home_lane_mask = 0;
+    mt->em.frame.plan.accepts_caller_scalar_home = false;
     // Universal shape: this wrapper is what dynamic dispatch calls (RV10 §6).
     mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
     mt->em.frame.plan.companion = em_companion_transport(
-        RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/true,
-        mt->em.frame.plan.scalar_home_lane_mask);
-    mt->em.frame.incoming_scalar_home = wrapper_uses_slot ? 0
-        : MIR_reg(mt->ctx, "_scalar_home", wrapper_func);
+        RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/true);
+    mt->em.frame.incoming_scalar_home = 0;
     mt->em.frame.plan.debug_name = wrapper_name->str;
     emit_number_frame_enter(mt);
     push_scope(mt);
@@ -22123,15 +22061,14 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     for (int i = 0; i < call_arg_count; i++) {
         call_types[i] = call_vars[i].type;
     }
-    MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
-        (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR), false, true};
+    MirCallOptions options = {true, false, 0};
     MirCallResult direct = em_call_direct(&mt->em, raw_name, raw_func,
         raw_entry ? raw_entry->variant : NULL, call_arg_count,
         call_types, call_args, &options);
     if (direct.normal.maybe_pending) {
         // the wrapper changes the internal pair into the public slot shape;
         // resolve at that incompatible escape boundary before it builds its
-        // own pair in the epilogue (D5.2.1v2).
+        // own pair in the epilogue (D5.2.1v3).
         direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
     }
     MIR_reg_t result = direct.normal.reg;
@@ -22420,22 +22357,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         : return_lane_kind == RETURN_LANE_SCALAR
             ? infer_boxed_return_mode(mt, fn_node)
             : MIR_SCALAR_RETURN_NONE;
-    uint8_t scalar_home_lane_mask = body_scalar_mode != MIR_SCALAR_RETURN_NONE
-        ? (return_lane_kind == RETURN_LANE_ERROR
-            ? FN_RETURN_HOME_ERROR : FN_RETURN_HOME_NORMAL)
-        : 0;
-    // v3 (RV1 shape 2): a boxed body returns its wide payload on a second MIR
-    // result instead of a caller-donated home, so it drops both the trailing
-    // `_scalar_home` parameter and the home mask. Native/`^E` bodies keep the
-    // v2 error transport until P2 gives them their own lanes.
+    // Shape-2 bodies return the payload through the companion lane.  No
+    // generated function accepts the retired trailing home parameter.
     bool body_returns_pair = mir_body_returns_pair(return_lane_kind,
         body_scalar_mode);
-    if (body_returns_pair) scalar_home_lane_mask = 0;
-    if (scalar_home_lane_mask && param_count < RAW_FUNCTION_PARAM_CAPACITY) {
-        // Only generated bodies expose the trailing caller-owned scalar home.
-        params[param_count] = {MIR_T_P, raw_strdup("_scalar_home"), 0};
-        param_count++;
-    }
 
     // Save current function context
     MIR_item_t saved_func_item = mt->em.func_item;
@@ -22558,15 +22483,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
     mt->em.frame.plan.debug_name = name_buf->str;
     mt->em.frame.plan.scalar_return_mode = body_scalar_mode;
-    mt->em.frame.plan.scalar_home_lane_mask = scalar_home_lane_mask;
-    mt->em.frame.plan.accepts_caller_scalar_home = scalar_home_lane_mask != 0;
-    mt->em.frame.incoming_scalar_home = scalar_home_lane_mask
-        ? MIR_reg(mt->ctx, "_scalar_home", func) : 0;
+    mt->em.frame.plan.accepts_caller_scalar_home = false;
+    mt->em.frame.incoming_scalar_home = 0;
     emit_number_frame_enter(mt);
 
     FnVariantAnalysis* body_variant = analyze_lambda_mir_variants(mt, fn_node,
         generate_native ? find_native_func_info(mt, name_buf->str) : NULL,
-        body_scalar_mode, scalar_home_lane_mask);
+        body_scalar_mode);
     // RV10: the emitter READS the published descriptor rather than deriving a
     // second answer from its own locals — the two answers drifting apart is the
     // v27 havlak bug class. Universal shape 2 is the safe fallback.
@@ -22575,7 +22498,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->em.frame.plan.companion = body_variant
         ? body_variant->result.companion
         : em_companion_transport(RETURN_SHAPE_ITEM_SCALAR,
-            /*c_reachable=*/false, scalar_home_lane_mask);
+            /*c_reachable=*/false);
 
     // Register as local function early (before body transpilation for recursion)
     register_local_func_contract(mt, name_buf->str, func_item, body_variant);
@@ -23998,14 +23921,8 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     : lane_kind == RETURN_LANE_SCALAR
                         ? infer_boxed_return_mode(mt, fn_node)
                         : MIR_SCALAR_RETURN_NONE;
-                uint8_t lane_mask = scalar_mode != MIR_SCALAR_RETURN_NONE
-                    ? (lane_kind == RETURN_LANE_ERROR
-                        ? FN_RETURN_HOME_ERROR : FN_RETURN_HOME_NORMAL)
-                    : 0;
-                // Must match the emitted body exactly (see mir_body_returns_pair).
-                if (mir_body_returns_pair(lane_kind, scalar_mode)) lane_mask = 0;
                 FnVariantAnalysis* variant = analyze_lambda_mir_variants(
-                    mt, fn_node, fwd_nfi, scalar_mode, lane_mask);
+                    mt, fn_node, fwd_nfi, scalar_mode);
                 register_local_func_contract(mt, name_buf->str, fwd, variant);
                 if (fn_node->name) {
                     char raw_name[128];
@@ -25182,9 +25099,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                 if (main_func) {
                     LocalFuncEntry* entry = find_local_func_entry(&mt,
                         main_name->str);
-                    MirCallOptions main_options = {{MIR_FRAME_REF_NONE, 0},
-                        (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR),
-                        false, true};
+                    MirCallOptions main_options = {true, false, 0};
                     MirCallResult call = em_call_direct(&mt.em,
                         main_name->str, main_func,
                         entry ? entry->variant : NULL, 0, NULL, NULL,
@@ -25192,7 +25107,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                     if (call.normal.maybe_pending) {
                         // the module entry returns through its own public
                         // result boundary; consume the pair before copying it
-                        // into the module result register (D5.2.1v2).
+                        // into the module result register (D5.2.1v3).
                         call.normal = em_materialize_pending_value(&mt.em,
                             call.normal);
                     }

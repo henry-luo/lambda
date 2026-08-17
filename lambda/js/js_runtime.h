@@ -329,7 +329,7 @@ enum {
     JS_FUNC_INIT_ASYNC = 1u << 2,
     JS_FUNC_INIT_ARROW = 1u << 3,
     JS_FUNC_INIT_STRICT = 1u << 4,
-    // Compiled wrappers take a trailing scalar-result home. Native builtins
+    // Compiled wrappers use the Context companion-slot ABI. Native builtins
     // retain their published signatures and do not set this marker.
     JS_FUNC_INIT_MIR_PUBLIC_ABI = 1u << 5,
     // The compiled body can leave a dynamic with scope on an early return.

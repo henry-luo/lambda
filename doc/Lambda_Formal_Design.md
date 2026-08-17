@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.24.0 (2026-08-15)
+**Spec version:** 1.25.0 (2026-08-17)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -670,7 +670,7 @@ that carries them.
 
 ### D5.2 Scalar homes
 
-- **D5.2.1v2*** Function wide-scalar returns use the **companion-lane
+- **D5.2.1v3** Function wide-scalar returns use the **companion-lane
   convention**: a may-be-wide boxed return is the pair `[item, scalar]` —
   lane 2 a raw 64-bit payload (never a pointer), live iff lane 1 is a
   **pending Item** (reserved tag `0x1E`, kind in the payload). A pending
@@ -679,10 +679,14 @@ that carries them.
   patches on escape (one branch), or forwards on tail return (free).
   Typed returns use native lanes with `^E` on a second error-Item lane.
   Classification happens at the wide value's *birth site*, statically —
-  never at boundaries. (Reinstates SF14-v1 two-lane returns; supersedes
-  v1's caller-donated canonical homes — retired-ABI record in Appendix
-  A.) [RV1–RV9, Return_Value §2–§5]
-- **D5.2.2v2*** Scalar homes are raw payload words, never GC roots, colored
+  never at boundaries. Lambda and LambdaJS generated functions have no
+  trailing caller-home parameter and no selectable v2 convention; their
+  C-reachable wrappers use `Context::mir_companion_slot`. A separately
+  versioned hosted-language ABI may still request an explicit payload-owner
+  address, but that is a native ownership boundary, not this return ABI.
+  (Reinstates SF14-v1 two-lane returns; retires v1's caller-donated canonical
+  homes — retired-ABI record in Appendix A.) [RV1–RV13, Return_Value §2–§5]
+- **D5.2.2v3** Scalar homes are raw payload words, never GC roots, colored
   in a separate slot space from root slots; fully-unobserved lanes use a
   discard home; tail calls forward the incoming home. Destination-owned
   scalar storage exists at every ownership boundary (array tails, typed
@@ -695,8 +699,10 @@ that carries them.
   immutable binding is written once. (v1 enumerated only the non-local
   boundaries; locals are added because D5.2.3's back-edge reclaim is sound
   exactly when loop-carried wide values sit below the loop-entry watermark,
-  which declaration-time allocation guarantees.) [RV16, Return_Value §4a;
-  Stack_API §15.3, inv. 20–22]
+  which declaration-time allocation guarantees.) These slots remain for
+  destination ownership and C/host result transfers; they must not be
+  characterized as a fallback generated-function return convention.
+  [RV14–RV16, Return_Value §4a; Stack_API §15.3, inv. 20–22]
 - **D5.2.3*** **Watermark ownership selects the wide-return transport.** An
   entry that establishes a number-frame watermark tears it down at return,
   so it may not return a pointer into its own extent: Lambda `fn`/`pn`
@@ -1226,9 +1232,9 @@ Status of `*`-marked rulings as of 2026-08-15.
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
-| D5.2.2v2 | v1 clauses ship; the local-binding clause added 2026-08-14 is not implemented. There is no per-source-binding scalar storage today: `MirScalarHomeBinding` associates a MIR *register* with a colored home — transient-value coloring, not binding ownership — and the `BindingStorage` classification (`REGISTER`/`SCOPE_ENV`/`MODULE`/`PERSISTENT`) has no consumer in the emitter at all. So a wide-valued mutable local is currently a register holding an Item that points at whatever home its producing expression happened to receive. Building the clause is new machinery, but it subsumes rather than adds: per-binding slots plus D5.2.3's bulk back-edge reclaim replace the interference/coloring pass in `em_finalize_scalar_homes`. Sequenced with Return_Value P2.7, which depends on it. |
+| D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
 | D5.2.3 | Decided 2026-08-14, implementation pending (Return_Value P2.7). The companion-lane half is what P0–P1.3 landed; the C-helper half is untouched — helper returns still pay the v1 ritual (per-call watermark snapshot, a 20-instruction adopt cluster, a colored home), measured at **68% of all adopt sites** across AWFY (757 of 1108), the largest single population in the census. Retiring it is blocked only on `DO24`: the back-edge reclaim that re-establishes the space bound must first be shown safe for loop-carried wide values. The bound matters — without a reclaim, an untyped million-iteration loop over `int64` storage grows the side stack by 8 bytes per iteration, so the gate for this phase measures peak side-stack usage, not just correctness. |
-| D5.2.1v2 | Decided 2026-08-14; the v3 companion-lane convention is the shipping default (Return_Value P0–P3), including context-slot public wrappers. The **v2 trailing-scalar-home ABI remains compiled only as a compatibility fallback** until P2.5/P2.7/P5 close. Record of the retired default design: every function carried a hidden trailing home address (a liveness-colored number-stack slot, `_scalar_home`); the callee classified its boxed result inline — a 20-instruction adopt cluster per site (`em_adopt_scalar_item_value`) — and copied wide payloads into the donated home; unobserved lanes used a discard home and tail calls forwarded the incoming home (the D5.2.2 discard/forward clauses lapse with the ABI at P5; D5.2.2's destination-owned scalar storage is unaffected). Retirement evidence (2026-08-14 MIR census): the ritual was 9–39% of emitted MIR across AWFY (~11–16 executed instructions per boxed return), paid signature-blind while wide scalars almost never occurred. |
+| D5.2.1v3 | LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
@@ -1242,7 +1248,7 @@ Status of `*`-marked rulings as of 2026-08-15.
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
-| D8.4.2v2 | Decided 2026-08-14 with D5.2.1v2; v3 transport is the shipping Lambda call ABI. The trailing scalar-home operand remains compiled only for v2 compatibility and LambdaJS until Return_Value P2.5/P5. |
+| D8.4.2v3 | Lambda and LambdaJS direct calls pass `Context*` and source operands only; internal shape-2 results use two MIR results and C-reachable entries use the context companion slot. The trailing scalar-home operand is deleted from generated call ABI. |
 | D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |

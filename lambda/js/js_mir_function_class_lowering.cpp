@@ -997,12 +997,10 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
         JsFuncCollected* fc, int param_count, bool has_captures) {
     MirScalarReturnMode scalar_return_mode = em_scalar_return_mode_for_class(
         fc->boxed_return_scalar_class);
-    bool needs_scalar_home = scalar_return_mode != MIR_SCALAR_RETURN_NONE;
     int call_param_count = param_count + (has_captures ? 1 : 0);
-    // Every compiled public wrapper shares the same trailing ABI operand.
-    // Only scalar lanes consume it, but callback dispatch cannot infer a
-    // function's return representation before entering its wrapper.
-    int total_params = call_param_count + 2;
+    // P2.5: C-reachable wrappers publish lane 2 through Context.  A dynamic
+    // callback therefore needs no caller-donated number-stack address.
+    int total_params = call_param_count + 1;
     MIR_var_t* params = total_params > 0
         ? LAMBDA_ALLOCA(total_params, MIR_var_t) : NULL;
     char** names = total_params > 0
@@ -1028,8 +1026,6 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     }
     int js_param_offset = has_captures ? 2 : 1;
     for (int i = js_param_offset; i <= call_param_count; i++) {
-        // The trailing ABI parameter is installed below; do not compare an
-        // uninitialized name slot while normalizing duplicate JS formals.
         for (int j = i + 1; j <= call_param_count; j++) {
             if (strcmp(names[i], names[j]) != 0) continue;
             char* renamed = LAMBDA_ALLOCA(128, char);
@@ -1039,9 +1035,6 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
             break;
         }
     }
-    names[call_param_count + 1] = LAMBDA_ALLOCA(128, char);
-    snprintf(names[call_param_count + 1], 128, "%s", "_js.public_scalar_home");
-    params[call_param_count + 1] = {MIR_T_P, names[call_param_count + 1], 0};
     MIR_type_t return_type = MIR_T_I64;
     MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, fc->name, 1,
         &return_type, total_params, params);
@@ -1053,14 +1046,13 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     jm_begin_function_frame(mt, return_type, true, scalar_return_mode,
         MIR_reg(mt->ctx, "ctx", wrapper_func), true);
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
-    if (needs_scalar_home) {
-        mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx,
-            "_js.public_scalar_home", wrapper_func);
-        mt->em.frame.plan.accepts_caller_scalar_home = true;
-        mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
-        // v3 descriptor (RV13); LJS emission migrates in P2.5.
-        mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
-    }
+    FnVariantAnalysis* public_variant = fn_analysis_variant(&fc->analysis,
+        FN_ENTRY_PUBLIC_WRAPPER);
+    mt->em.frame.plan.return_shape = public_variant
+        ? public_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
+    mt->em.frame.plan.companion = public_variant
+        ? public_variant->result.companion : em_companion_transport(
+            RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/true);
 
     MIR_reg_t* args = call_param_count > 0
         ? LAMBDA_ALLOCA(call_param_count, MIR_reg_t) : NULL;
@@ -2045,9 +2037,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // --- Generate boxed version (original or wrapper) ---
     MirScalarReturnMode body_scalar_mode = em_scalar_return_mode_for_class(
         fc->boxed_return_scalar_class);
-    bool body_needs_scalar_home = body_scalar_mode != MIR_SCALAR_RETURN_NONE;
-    int total_params = param_count + (has_captures ? 1 : 0) + 1 +
-        (body_needs_scalar_home ? 1 : 0);
+    int total_params = param_count + (has_captures ? 1 : 0) + 1;
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
     char** param_names_arr = LAMBDA_ALLOCA(total_params, char*);
     const char* closure_env_param_name = "_js.env";
@@ -2072,13 +2062,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         param_node = param_node ? param_node->next : NULL;
         pi++;
     }
-    if (body_needs_scalar_home) {
-        param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
-        snprintf(param_names_arr[pi], 128, "%s", "_js.scalar_home");
-        params[pi] = {MIR_T_P, param_names_arr[pi], 0};
-        pi++;
-    }
-
     // Handle duplicate parameter names (valid in non-strict JS): rename earlier
     // occurrences so MIR gets unique register names. Last parameter wins per spec.
     {
@@ -2098,8 +2081,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->body_name, 1,
-        &ret_type, total_params, params);
+    FnVariantAnalysis* body_variant = fn_analysis_variant(&fc->analysis,
+        FN_ENTRY_BOXED_BODY);
+    FnCompanionTransport body_companion = body_variant
+        ? body_variant->result.companion : em_companion_transport(
+            RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false);
+    MIR_type_t return_types[2] = {ret_type, MIR_T_I64};
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->body_name,
+        em_return_nres(body_companion), return_types, total_params, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     fc->body_func_item = func_item;
     jm_register_local_func(mt, fc->body_name, func_item);
@@ -2155,14 +2144,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg(mt->ctx, "ctx", func), true);
     mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
     mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
-    if (body_needs_scalar_home) {
-        mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx,
-            "_js.scalar_home", func);
-        mt->em.frame.plan.accepts_caller_scalar_home = true;
-        mt->em.frame.plan.scalar_home_lane_mask = 1u;
-        // v3 descriptor (RV13); LJS emission migrates in P2.5.
-        mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
-    }
+    mt->em.frame.plan.return_shape = body_variant
+        ? body_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
+    mt->em.frame.plan.companion = body_companion;
     if (has_captures) {
         MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
         jm_create_gc_root_slot(mt, closure_env_reg);

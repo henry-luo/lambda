@@ -1276,8 +1276,8 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 
 // ---------------------------------------------------------------------------
 // Pending Items — return-value convention v3 (RV3, see
-// `vibe/Lambda_Design_Compiling_Return_Value.md`, formal spec D5.2.1v2 /
-// D8.4.2v2).
+// `vibe/Lambda_Design_Compiling_Return_Value.md`, formal spec D5.2.1v3 /
+// D8.4.2v3).
 //
 // A shape-2 return is the pair `[item, scalar]`: lane 1 carries an ordinary
 // Item unless the returned value is a WIDE scalar (int64 / uint64 /
@@ -1302,21 +1302,11 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 // the valid TypeId range and dies loudly at the first per-tag table bound —
 // this is a guard property, not an accident.
 //
-// LAMBDA_RETURN_V3 gates emission, at WHOLE-MODULE granularity: a module is
-// compiled entirely v2 (trailing caller-donated scalar homes) or entirely v3 —
-// never mixed. Cross-module and dynamic calls always go through entries whose
-// shape descriptor says what they speak, so the flag flips emission, not
-// dispatch correctness. The L1 MIR module cache key carries the convention
-// revision so a v2-cached module can never be linked against v3 callers.
-// Return-value convention v3 (companion-lane returns). SHIPPING DEFAULT since
-// 2026-08-15: gated at exact parity with v2 on the same tree — 3715/3721 both
-// ways, identical failure lists, all six pre-existing on a clean tree. v2
-// remains buildable with -DLAMBDA_RETURN_V3=0 until P5 deletes its machinery.
-#ifndef LAMBDA_RETURN_V3
-#define LAMBDA_RETURN_V3 1
-#endif
-// Convention revision, folded into the MIR cache key (RV10).
-#define LAMBDA_RETURN_CONVENTION_REVISION (LAMBDA_RETURN_V3 ? 3 : 2)
+// Return-value convention v3 is the only generated-function ABI. Shape-2
+// payloads use a MIR pair or Context::mir_companion_slot; side-number-stack
+// addresses remain only at explicit native/host ownership boundaries
+// (D5.2.1v3, D5.2.2v3). The fixed revision rejects stale cached modules.
+#define LAMBDA_RETURN_CONVENTION_REVISION 3
 
 #define ITEM_PENDING_TAG    UINT64_C(0x1E)
 #define ITEM_PENDING        (ITEM_PENDING_TAG << 56)

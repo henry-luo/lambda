@@ -107,8 +107,7 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     // lane makes the callee's returned Item the only exception signal, so
     // suppressing the normal result also suppresses throws from direct calls.
     (void)discard_result;
-    MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
-        FN_RETURN_HOME_NORMAL, false, true};
+    MirCallOptions options = {true, false, 0};
     FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_BOXED_BODY);
     MirCallResult direct = em_call_direct(&mt->em, callee->body_name,
@@ -117,7 +116,7 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     if (direct.normal.maybe_pending) {
         // direct boxed bodies share the lazy shape-2 transport with Lambda;
         // publish only after resolving the companion so JS cannot execute a
-        // pending tag as an ordinary Item (D5.2.1v2, D5.2.2v2).
+        // pending tag as an ordinary Item (D5.2.1v3, D5.2.2v3).
         direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
     }
     return jm_publish_call_result(mt, direct.normal.reg);
@@ -212,7 +211,7 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     }
     FnVariantAnalysis* native = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_NATIVE_BODY);
-    MirCallOptions options = {{MIR_FRAME_REF_NONE, 0}, 0u, false, true};
+    MirCallOptions options = {true, false, 0};
     MirCallResult direct = em_call_direct(&mt->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
         &options);
@@ -824,9 +823,9 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     if (fc->is_class_field_initializer) {
         flags |= JS_FUNC_INIT_CLASS_FIELD_INITIALIZER;
     }
-    // Every compiled public wrapper takes the trailing ABI pointer. Only
-    // scalar-returning wrappers consume it, but one canonical call shape
-    // prevents callback dispatch from guessing a function's return type.
+    // Compiled public wrappers take Context and publish a wide return payload
+    // through its companion slot; native callbacks keep their explicit result
+    // homes because those are ownership transfers, not generated ABI lanes.
     flags |= JS_FUNC_INIT_MIR_PUBLIC_ABI;
     flags |= JS_FUNC_INIT_MIR_CONTEXT_ABI;
     // D5.4.3: no allocating operation separates callable creation from this

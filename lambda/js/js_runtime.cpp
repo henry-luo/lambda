@@ -9588,50 +9588,53 @@ struct JsMirMakeCallArgSequence<0, Indices...> {
 
 template <bool HasEnv, size_t... Indices>
 static Item js_invoke_mir_context_wrapper_impl(void* func_ptr, Context* runtime,
-        const Item* args, Item env, uint64_t* scalar_result_home,
+        const Item* args, Item env,
         JsMirCallArgSequence<Indices...>) {
     if constexpr (HasEnv) {
-        typedef Item (*Fn)(Context*, Item,
-            decltype((void)Indices, Item{})..., uint64_t*);
-        return ((Fn)func_ptr)(runtime, env, args[Indices]..., scalar_result_home);
+        typedef Item (*Fn)(Context*, Item, decltype((void)Indices, Item{})...);
+        return lambda_item_resolve_pending_slot(
+            ((Fn)func_ptr)(runtime, env, args[Indices]...));
     }
-    typedef Item (*Fn)(Context*, decltype((void)Indices, Item{})..., uint64_t*);
-    return ((Fn)func_ptr)(runtime, args[Indices]..., scalar_result_home);
+    typedef Item (*Fn)(Context*, decltype((void)Indices, Item{})...);
+    return lambda_item_resolve_pending_slot(
+        ((Fn)func_ptr)(runtime, args[Indices]...));
 }
 
 template <size_t Count, bool HasEnv>
 static Item js_invoke_mir_context_wrapper(void* func_ptr, Context* runtime,
-        const Item* args, Item env, uint64_t* scalar_result_home) {
+        const Item* args, Item env) {
     return js_invoke_mir_context_wrapper_impl<HasEnv>(func_ptr, runtime,
-        args, env, scalar_result_home,
+        args, env,
         typename JsMirMakeCallArgSequence<Count>::Type());
 }
 
 template <bool HasEnv, size_t... Indices>
 static Item js_invoke_public_wrapper_impl(void* func_ptr, const Item* args,
-        Item env, uint64_t* scalar_result_home,
+        Item env,
         JsMirCallArgSequence<Indices...>) {
     if constexpr (HasEnv) {
-        typedef Item (*Fn)(Item, decltype((void)Indices, Item{})..., uint64_t*);
-        return ((Fn)func_ptr)(env, args[Indices]..., scalar_result_home);
+        typedef Item (*Fn)(Item, decltype((void)Indices, Item{})...);
+        return lambda_item_resolve_pending_slot(
+            ((Fn)func_ptr)(env, args[Indices]...));
     }
-    typedef Item (*Fn)(decltype((void)Indices, Item{})..., uint64_t*);
-    return ((Fn)func_ptr)(args[Indices]..., scalar_result_home);
+    typedef Item (*Fn)(decltype((void)Indices, Item{})...);
+    return lambda_item_resolve_pending_slot(
+        ((Fn)func_ptr)(args[Indices]...));
 }
 
 template <size_t Count, bool HasEnv>
 static Item js_invoke_public_wrapper(void* func_ptr, const Item* args,
-        Item env, uint64_t* scalar_result_home) {
+        Item env) {
     return js_invoke_public_wrapper_impl<HasEnv>(func_ptr, args, env,
-        scalar_result_home, typename JsMirMakeCallArgSequence<Count>::Type());
+        typename JsMirMakeCallArgSequence<Count>::Type());
 }
 
 template <bool HasEnv>
 static Item js_invoke_mir_context_by_count(void* func_ptr, Context* runtime,
-        const Item* args, int count, Item env, uint64_t* scalar_result_home) {
+        const Item* args, int count, Item env) {
 #define JS_MIR_CONTEXT_DISPATCH_CASE(n) \
     case n: return js_invoke_mir_context_wrapper<n, HasEnv>(func_ptr, runtime, \
-        args, env, scalar_result_home);
+        args, env);
     switch (count) {
     JS_MIR_CALL_ARITIES_0_32(JS_MIR_CONTEXT_DISPATCH_CASE)
     default: return ItemError;
@@ -9641,10 +9644,9 @@ static Item js_invoke_mir_context_by_count(void* func_ptr, Context* runtime,
 
 template <bool HasEnv>
 static Item js_invoke_public_by_count(void* func_ptr, const Item* args,
-        int count, Item env, uint64_t* scalar_result_home) {
+        int count, Item env) {
 #define JS_MIR_PUBLIC_DISPATCH_CASE(n) \
-    case n: return js_invoke_public_wrapper<n, HasEnv>(func_ptr, args, env, \
-        scalar_result_home);
+    case n: return js_invoke_public_wrapper<n, HasEnv>(func_ptr, args, env);
     switch (count) {
     JS_MIR_CALL_ARITIES_0_15(JS_MIR_PUBLIC_DISPATCH_CASE)
     default: return ItemError;
@@ -9853,10 +9855,6 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     // was created. Dynamic dispatch is the one adaptation boundary; generated
     // direct calls already carry this same pointer in a register.
     if (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) {
-        if (!scalar_result_home) {
-            log_error("js_invoke_fn: context wrapper missing caller result home");
-            return ItemError;
-        }
         if (!fn->runtime_context) {
             log_error("js_invoke_fn: context wrapper missing context owner");
             return ItemError;
@@ -9869,23 +9867,19 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         Item env = fn->env ? (Item){.item = (uint64_t)fn->env} : ItemNull;
         return fn->env
             ? js_invoke_mir_context_by_count<true>(fn->func_ptr, runtime,
-                effective_args, effective_count, env, scalar_result_home)
+                effective_args, effective_count, env)
             : js_invoke_mir_context_by_count<false>(fn->func_ptr, runtime,
-                effective_args, effective_count, ItemNull, scalar_result_home);
+                effective_args, effective_count, ItemNull);
     }
 
     if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
-        if (!scalar_result_home) {
-            log_error("js_invoke_fn: compiled wrapper missing caller result home");
-            return ItemError;
-        }
         if (!fn->func_ptr) return make_js_undefined();
         Item env = fn->env ? (Item){.item = (uint64_t)fn->env} : ItemNull;
         return fn->env
             ? js_invoke_public_by_count<true>(fn->func_ptr, effective_args,
-                effective_count, env, scalar_result_home)
+                effective_count, env)
             : js_invoke_public_by_count<false>(fn->func_ptr, effective_args,
-                effective_count, ItemNull, scalar_result_home);
+                effective_count, ItemNull);
     }
 
     if (!fn->func_ptr) return make_js_undefined(); // stub function

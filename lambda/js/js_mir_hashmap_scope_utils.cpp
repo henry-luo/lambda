@@ -535,7 +535,14 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
         : mt->em.frame.item_return
             ? MIR_new_uint_op(mt->ctx, ITEM_NULL_VAL)
             : MIR_new_int_op(mt->ctx, 0);
-    em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 1, failure));
+    if (em_returns_result_pair(mt->em.frame.plan.companion)) {
+        // A shape-2 function must return both declared MIR results even on
+        // the overflow edge; lane 1 is resolved null, so lane 2 is unused.
+        em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 2, failure,
+            MIR_new_uint_op(mt->ctx, 0)));
+    } else {
+        em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 1, failure));
+    }
 }
 
 static void jm_finalize_write_back_roots(JsMirTranspiler* mt) {
@@ -561,30 +568,30 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_call_void_with_args(&mt->em, "js_env_rehome_scalars", 1,
             &arg_type, &arg, true);
     }
-    if (mt->em.frame.item_return) {
-        MIR_reg_t rehomed = mt->em.frame.return_reg;
-        if (mt->em.frame.incoming_scalar_home) {
-            rehomed = em_adopt_scalar_item(&mt->em,
-                mt->em.frame.scalar_return_mode, mt->em.frame.return_reg,
-                mt->em.frame.runtime, offsetof(Context, side_number_top),
-                mt->em.frame.number_base,
-                mt->em.frame.incoming_scalar_home);
-        } else {
-            if (mt->em.frame.scalar_return_mode != MIR_SCALAR_RETURN_NONE) {
-                // js_main hands its result to an outer entrypoint while this
-                // context is still alive; that boundary adopts the provided
-                // result home before restoring the module number extent.
-            } else {
-                em_store_frame_top(&mt->em, mt->em.frame.runtime,
-                    offsetof(Context, side_number_top), mt->em.frame.number_base);
-            }
-        }
-        if (rehomed != mt->em.frame.return_reg) {
-            em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg),
-                MIR_new_reg_op(mt->ctx, rehomed)));
-        }
-    } else {
+    MIR_reg_t pair_item = 0;
+    MIR_reg_t pair_companion = 0;
+    if (mt->em.frame.item_return &&
+            em_returns_result_pair(mt->em.frame.plan.companion)) {
+        // P2.5: the raw payload stays in lane 2 until the generated caller
+        // consumes it.  Build the pair before restoring this frame's number
+        // watermark because the source payload belongs to that extent.
+        em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
+            &pair_item, &pair_companion);
+        em_store_frame_top(&mt->em, mt->em.frame.runtime,
+            offsetof(Context, side_number_top), mt->em.frame.number_base);
+    } else if (mt->em.frame.item_return &&
+            em_returns_companion_slot(mt->em.frame.plan.companion)) {
+        // Dynamic C dispatch cannot receive two MIR results.  Store lane 2
+        // in Context; the dispatcher resolves a pending value into its own
+        // active side-number extent before exposing the Item to native code.
+        em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
+            &pair_item, &pair_companion);
+        em_store_frame_top(&mt->em, mt->em.frame.runtime,
+            offsetof(Context, mir_companion_slot), pair_companion);
+        em_store_frame_top(&mt->em, mt->em.frame.runtime,
+            offsetof(Context, side_number_top), mt->em.frame.number_base);
+    } else if (!mt->em.frame.item_return ||
+            mt->em.frame.scalar_return_mode == MIR_SCALAR_RETURN_NONE) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_number_top), mt->em.frame.number_base);
     }
@@ -592,8 +599,14 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_root_top), mt->em.frame.root_base);
     }
-    em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 1,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg)));
+    if (em_returns_result_pair(mt->em.frame.plan.companion)) {
+        em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 2,
+            MIR_new_reg_op(mt->ctx, pair_item),
+            MIR_new_reg_op(mt->ctx, pair_companion)));
+    } else {
+        em_emit_insn(&mt->em, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg)));
+    }
     jm_finalize_write_back_roots(mt);
     em_finalize_scalar_homes(&mt->em);
     if (mt->arg_frame_slot_count > 0) {

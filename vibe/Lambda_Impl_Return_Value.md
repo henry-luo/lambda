@@ -1,9 +1,10 @@
 # Lambda Impl Plan — Return-Value Convention v3 (Companion-Lane Returns)
 
-**Date**: 2026-08-14  **Status**: **v3 IS THE SHIPPING DEFAULT since
-2026-08-15** (`LAMBDA_RETURN_V3` default **1**; v2 still buildable with
-`-DLAMBDA_RETURN_V3=0` until P5). P0 / P1.1–P1.6 / P2 / P2.6 / P2.7.0 / P3
-LANDED; P1.7 partial; P2.5, P2.7 (protocol), P4, P5 open.
+**Date**: 2026-08-14  **Status**: **v3 is the only Lambda/LambdaJS
+generated-function convention as of 2026-08-17.** P0 / P1.1–P1.6 / P2 /
+P2.5 / P2.6 / P2.7.0 / P3 / P5a LANDED; P1.7 partial; P2.7 (protocol) and
+P4 remain open. P5a retires the v2 function ABI only; D5.2.2v3 payload-owner
+slots at native and hosted-language boundaries intentionally remain.
 Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV18 + addenda
 RV3a / RV10a / RV14a / RV17a; formal spec D5.2.1v2 / **D5.2.2v2** /
 **D5.2.3** / D2.7.2v2 / D8.4.2v2, **v1.22.0**). Open design residue: RVO8
@@ -296,16 +297,14 @@ zero emitted-code change (MT7 budgets untouched).
 nbody-typed / pnpoly-typed improve (pnpoly typed-vs-untyped inversion from
 R26 is the named canary — typed must win again); no untyped regression.
 
-### P2.5 — LambdaJS adoption *(RV13; blocks P5 deletion)*
+### P2.5 — LambdaJS adoption *(RV13; landed 2026-08-17)*
 
-- Same descriptor + shape-2 pair emission through the shared emitter for
-  the LJS function sites (§0 list); LJS `MirValue` tracking gains the same
-  `maybe_pending` bit. JS numbers make shape 2 the dominant JS shape, so
-  the census win is larger here; ICs are unaffected (LC1 — caches sit on
-  property access, not the return ABI).
-- Node/js262 gates: `make node-baseline` no regression (1492/3517
-  anchor), js262 suite stable — rule 18 applies: failures are runtime
-  bugs to fix, never test edits.
+- LambdaJS boxed bodies now return the same register pair as Lambda direct
+  bodies; public wrappers publish the companion through `Context` and
+  runtime dispatch resolves it before exposing an Item to C++. The trailing
+  JS `_scalar_home` parameter and function-pointer casts are deleted.
+- Focused gates: Lambda MIR emission **48/48**, JS MIR emission **21/21**,
+  JS suite **351/351**. This implements D5.2.1v3 / D8.4.2v3.
 
 ### P2.6 — Read the watermark effect *(RV14a; independent, land first)*
 
@@ -1121,25 +1120,21 @@ alone cannot reach. Windows CI is a consequence, not the motivation.
 - Update `Lambda_Design_Stack_Frame.md` SF14 entry with the v3
   supersession note; refresh LR/JS overview docs' return-ABI sections.
 
-### P5 — Delete v2 machinery *(gated on P1 + P2 + P2.5 + P2.7 + P3)*
+### P5a — Delete v2 generated-function machinery *(landed 2026-08-17)*
 
-Gating widened 2026-08-14. The original list assumed shape 2 alone emptied
-the home machinery; §1.4 of the design doc measures that it empties 14% of
-it. `em_scalar_home_*` and `em_finalize_scalar_homes` keep real callers until
-**P2.7** (helper side, 68%) and **P3** (C-reachable entries, 18%) have both
-landed — those are the phases that actually leave the apparatus with no
-remaining caller, and RV16's per-binding slots subsume the coloring pass
-rather than the deletion removing it.
+P5a removes the selectable v2 convention and every first-party generated
+return-ABI use of it: `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, direct-call
+home donation, generated `_scalar_home` parameters, the v2 epilogues, and
+the caller-home fields in Lambda/LambdaJS return descriptors. The formal
+record is D5.2.1v3 / D8.4.2v3.
 
-- Remove the flag (v3 becomes the only convention) and delete:
-  `em_adopt_scalar_item_value` / `em_adopt_scalar_item`, the
-  `em_scalar_home_*` family + `em_finalize_scalar_homes` coloring,
-  `lambda_item_adopt_scalar_home` + import + rehome counters,
-  `scalar_home_lane_mask` / `may_need_caller_scalar_home` fields and every
-  consumer, `_scalar_home` naming, dyn/dispatch home paths, and the v2
-  arms of the return/call lowerings.
-- Final census run: home instructions = 0; final MT7 ratchet; memory +
-  ledger sync.
+`em_scalar_home_*`, `em_finalize_scalar_homes`, and C/host `*_into`
+parameters are **not** v2 ABI residue. They provide D5.2.2v3 ownership for a
+wide payload that remains live in a caller's side-number extent, including
+C-helper returns and the separately versioned hosted-language compiler API.
+Deleting them would manufacture dangling `int64`/out-of-band-double Items.
+P2.7/DO24 remains the independent optimization question of binding ownership
+and loop reclaim, not a deletion prerequisite.
 
 ---
 
@@ -1203,7 +1198,8 @@ rather than the deletion removing it.
       1 emitted), with the finding that deleting them would unmask an
       `int64(<decimal>)` crash the surviving compare currently masks. See the
       log entry; §5.8's step order is corrected there.
-- [ ] P2.5 LambdaJS migration (node/js262 gates)
+- [x] P2.5 LambdaJS migration — landed 2026-08-17; Lambda/JS MIR emission
+      48/48 + 21/21 and JS suite 351/351.
 - [x] **P2.6 read the watermark effect (RV14a)** — *landed + gated
       2026-08-14: 3719/3719, ratchet re-baselined (24 tightenings).
       deltablue −15.1%, richards −11.0%, havlak −8.8%, js_tune6 −33%. The
@@ -1244,8 +1240,9 @@ rather than the deletion removing it.
       `em_companion_transport`.*
 - [ ] P4 formal-doc closure (footnotes → landed; SF14 note; D5.2.2v2 /
       D5.2.3 / DO24 status)
-- [ ] P5 delete v2 machinery; final census + ratchet *(now gated on P2.7 and
-      P3 as well — shape 2 alone empties only 14% of the apparatus)*
+- [x] P5a delete the v2 generated-function ABI — landed 2026-08-17. Payload
+      ownership slots remain intentionally under D5.2.2v3; P2.7 is no longer
+      a deletion gate.
 - [ ] RVO8/RVO9 measurements recorded in this doc's log section
 
 ---
@@ -1290,7 +1287,9 @@ zero emitted-code change), forced-GC sweep 67/67.
   claimed "provably wide-free"), and the Jube guest-body frame. Imports are
   pinned to `RETURN_SHAPE_ITEM`: C helpers never speak the pair protocol
   (RV12/SF6).
-- Flag `LAMBDA_RETURN_V3` (default 0) + `LAMBDA_RETURN_CONVENTION_REVISION`.
+- At the P1.1 checkpoint, flag `LAMBDA_RETURN_V3` (default 0) plus
+  `LAMBDA_RETURN_CONVENTION_REVISION`. P5a later deletes the selector and
+  fixes the revision at 3 (§6.10).
 
 **Gate: PASS** (same run as P0 above — both landed together).
 
@@ -2218,8 +2217,8 @@ clean `error` — `lambda_side_number_alloc` fails, `box_int64_value` calls
 reported error, never a dangling pointer**, because the payload stays valid for
 the whole activation either way.
 
-**The change is scoped to Lambda, and finding out why is the useful part.**
-The first cut edited the shared `em_call_import` unconditionally and broke
+**The change was initially scoped to Lambda, and finding out why was useful.**
+At this 2026-08-15 checkpoint, the first cut edited the shared `em_call_import` unconditionally and broke
 `test/js/regression_side_stack_frame_gc.js`. LambdaJS still emits the **v2
 caller-donated-home return protocol** — stated in
 `js_mir_module_batch_lowering.cpp`: *"LJS keeps emitting v2 until P2.5"* —
@@ -2599,7 +2598,7 @@ loop/statement number-stack reclaim, source-language type changes, C2MIR
 support, and vendored MIR changes. Those may remain valid roadmap items, but
 mixing them into P1.7 would make the Result30 attribution unreviewable.
 
-### 6.9 Lambda-v3 public-wrapper ABI audit (2026-08-17)
+### 6.9 Lambda-v3 public-wrapper ABI audit (2026-08-17; historical checkpoint)
 
 **Landed:** the final Lambda-v3 caller-side residue found by the post-Action-C
 audit is removed. A public `_b` wrapper already declared the RV12
@@ -2610,7 +2609,7 @@ undeclared pointer to the wrapper. The native ABI ignored the surplus operand,
 so this was dead work rather than a visible wrong-answer, but it left the
 scalar-home census non-zero and made the descriptor internally contradictory.
 
-The shared call lowering now derives the trailing operand, call metadata, and
+At this checkpoint, the shared call lowering derived the trailing operand, call metadata, and
 home binding exclusively from `FN_COMPANION_HOME`. Lambda's v3 public entry
 publishes a zero home mask after selecting its context-slot transport;
 LambdaJS explicitly publishes `FN_COMPANION_HOME` because P2.5 has not
@@ -2624,9 +2623,10 @@ D8.4.2v2 ABI
 consistency repair, not a claim that number-stack payload ownership
 (D5.2.2v2) has disappeared.
 
-**Outstanding follow-up actions remain deliberately separated:**
+**Historical follow-up list.** Section 6.10 closes P2.5 and P5a below; P2.7
+and P4 retain the stated independent scope.
 
-1. **P2.5 — LambdaJS migration.** Convert its entries and calls together to
+1. **P2.5 — LambdaJS migration (closed by §6.10).** Convert its entries and calls together to
    result-pair/context-slot transport, then require node and Test262 gates.
    Do not delete its explicit `FN_COMPANION_HOME` descriptor before that
    migration; its callee epilogues still consume a donated caller home.
@@ -2637,8 +2637,33 @@ consistency repair, not a claim that number-stack payload ownership
 3. **P4 — documentation closure.** Keep the formal status synchronized with
    the shipping default, then finish the Stack_Frame and overview cross-links
    once the remaining compatibility paths have their final disposition.
-4. **P5 — deletion.** Only after P2.5 and the P2.7 disposition are settled,
+4. **P5 — deletion (closed as P5a by §6.10).** Only after P2.5 and the P2.7 disposition are settled,
    remove the v2 selector, home-specific descriptor fields, coloring helpers,
    imports, and compatibility ABI; re-run the complete census and ratchet at
    zero physical caller homes. Do not confuse this P5 work with the retained
    side-number-stack storage that D5.2.2v2 requires for live wide payloads.
+
+### 6.10 LambdaJS P2.5 and P5a closure (2026-08-17)
+
+This entry supersedes §6.9's outstanding-action list. LambdaJS now uses the
+same two generated transports as Lambda: its internal boxed body returns
+`[Item, raw-payload]` in MIR registers, while its public callable wrapper
+stores lane 2 in `Context::mir_companion_slot`. Dynamic JS dispatch resolves a
+pending Item immediately after the wrapper returns, so the resolved wide
+value is born in the dispatcher's active side-number extent. No LambdaJS
+generated signature or C++ function-pointer cast includes a trailing scalar
+home.
+
+P5a then removes the v2 build selector and `FN_COMPANION_HOME` from the
+first-party Lambda/LambdaJS return path, as required by D5.2.1v3 and
+D8.4.2v3. The deleted concepts are the *generated-function* trailing
+parameter, caller donation, and return descriptor lane mask — not all
+number-stack storage. `em_scalar_home_*` and the `*_into` ownership
+parameters remain for C helpers and hosted languages because their returned
+wide Item must point at storage owned by the receiving activation
+(D5.2.2v3). This is an intentional payload-lifetime contract, not a v2
+fallback.
+
+Verification after the deletion: `make build`, Lambda MIR emission **48/48**,
+JS MIR emission **21/21**, and JS suite **351/351**. Full baseline and
+Test262 reruns remain the closeout gates for this broader runtime change.

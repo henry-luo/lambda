@@ -304,7 +304,6 @@ enum MirFrameRefKind {
     MIR_FRAME_REF_LOCAL_SCALAR_HOME,
     MIR_FRAME_REF_DISCARD_SCRATCH,
     MIR_FRAME_REF_FIXED_SCRATCH,
-    MIR_FRAME_REF_INCOMING_CALLER_HOME,
 };
 struct MirFrameRef {
     MirFrameRefKind kind;
@@ -343,9 +342,6 @@ enum MirValueDemand {
     MIR_VALUE_BRANCH = 1u << 4,
 };
 struct MirCallOptions {
-    MirFrameRef scalar_return_home;
-    uint8_t observed_return_lane_mask;
-    bool is_tail_call;
     bool has_hidden_context;
     // Closure entries carry their captured Item environment between the
     // explicit runtime owner and source arguments.  Keeping this in the call
@@ -383,6 +379,8 @@ struct MirFunctionPlan {
     FnEntryKind entry_kind;
     MirEntryMode entry_mode;
     MirScalarReturnMode scalar_return_mode;
+    // Foreign hosted compilers may still request an explicit result-owner
+    // slot. Generated Lambda/JS entries always leave this zero.
     uint8_t scalar_home_lane_mask;
     // v3 (RV1/RV10): the shape this body returns in. Callee-side emission reads
     // it; it must agree with the descriptor published in FnReturnAnalysis.
@@ -390,7 +388,7 @@ struct MirFunctionPlan {
     // Where this body's lane 2 travels (RV10a/RV12).
     FnCompanionTransport companion;
     int fixed_number_scratch_slots;
-    bool accepts_caller_scalar_home;
+    bool accepts_caller_scalar_home;  // foreign hosted-frame contract only
     const char* debug_name;
 };
 
@@ -426,12 +424,12 @@ struct MirFrameState {
     MIR_reg_t return_reg;
     // rv6 tail forwarding keeps the pair returned by a same-shape callee in
     // these registers until this frame's publication boundary. The pair is
-    // never written to a root slot or scalar home (D5.2.1v2).
+    // never written to a root slot or scalar home (D5.2.1v3).
     MIR_reg_t pending_return_item;
     MIR_reg_t pending_return_companion;
     // rv4.2 ownership is frame-local. Nested function emission suspends the
     // outer frame, so the live pair must be restored with that frame rather
-    // than leaking into the nested body (D5.2.1v2).
+    // than leaking into the nested body (D5.2.1v3).
     MIR_reg_t pending_live_item;
     MIR_reg_t pending_live_companion;
     MIR_reg_t error_return_reg;
@@ -521,7 +519,7 @@ struct MirEmitter {
     // RV4.2 mechanical guard: one unresolved shape-2 pair may be live in a
     // lowering sequence. The companion must be consumed or forwarded before
     // another call, safepoint, spill, or publication can overwrite its lane
-    // (D5.2.1v2, D5.2.2v2).
+    // (D5.2.1v3, D5.2.2v3).
     MIR_reg_t pending_live_item;
     MIR_reg_t pending_live_companion;
     // Per-function 8-byte native-stack scratch for inline double<->bits
@@ -867,15 +865,6 @@ static inline bool em_variant_returns_pair(const FnVariantAnalysis* variant) {
     return variant && em_returns_result_pair(variant->result.companion);
 }
 
-// the trailing pointer exists only for the v2 caller-donated-home transport.
-// in particular, a v3 context-slot wrapper can still return a dynamic scalar
-// but has no `_scalar_home` parameter.  keeping this predicate transport-based
-// prevents direct calls from silently growing a stale extra ABI argument.
-static inline bool em_variant_accepts_scalar_home(
-        const FnVariantAnalysis* variant) {
-    return variant && variant->result.companion == FN_COMPANION_HOME;
-}
-
 // RV9 — the ONE definition of how lane 2 spells "no error", for both sides.
 //
 // The register (pair) form spells it `ItemNull`, so the consumer's check is a
@@ -891,12 +880,7 @@ static inline bool em_error_lane_in_register(FnCompanionTransport companion);
 // rather than a second MIR result, because it is reachable from C. On Windows
 // every shape-2 entry takes this path, since MIR rejects nres > 1 there.
 static inline bool em_returns_companion_slot(FnCompanionTransport companion) {
-#if LAMBDA_RETURN_V3
     return companion == FN_COMPANION_CONTEXT_SLOT;
-#else
-    (void)companion;
-    return false;
-#endif
 }
 
 static inline bool em_variant_returns_slot(const FnVariantAnalysis* variant) {
@@ -936,33 +920,14 @@ static inline void em_assert_error_lane_agreement(const char* call_name,
 // `c_reachable` is true for the public `_b` wrappers (boxed-call trampolines,
 // `fn->invoke`) and for anything else a C prototype can call.
 static inline FnCompanionTransport em_companion_transport(FnReturnShape shape,
-        bool c_reachable, uint8_t scalar_home_lane_mask) {
+        bool c_reachable) {
     if (!fn_return_shape_is_pair(shape)) return FN_COMPANION_NONE;
-#if LAMBDA_RETURN_V3
-#if 0  // DIAGNOSTIC: shape 4 un-parked for root-cause work
-    // Shape 4 (P2) is PARKED on the v1 context-lane transport. The callee-side
-    // pair emission is written and verifiably correct in the dump — the body
-    // declares two results and returns `ret <value>, <error>` — but the value
-    // lane does not reach the caller at runtime for an `int64^` signature,
-    // while `int^` and `float^` both work and the error lane is read correctly
-    // in every case. Until that is understood, promising a companion the
-    // caller cannot observe would be worse than the extra context round trip.
-    // See the impl log for the diagnostics already run.
-    if (shape == RETURN_SHAPE_NATIVE_ERROR) {
-        return scalar_home_lane_mask ? FN_COMPANION_HOME : FN_COMPANION_NONE;
-    }
-#endif
     #if defined(_WIN32)
-        (void)c_reachable; (void)scalar_home_lane_mask;
+        (void)c_reachable;
         return FN_COMPANION_CONTEXT_SLOT;   // MIR rejects nres > 1 here
     #else
-        (void)scalar_home_lane_mask;
         return c_reachable ? FN_COMPANION_CONTEXT_SLOT : FN_COMPANION_RESULT_REG;
     #endif
-#else
-    (void)c_reachable;
-    return scalar_home_lane_mask ? FN_COMPANION_HOME : FN_COMPANION_NONE;
-#endif
 }
 
 // RV10's single-source-of-truth defence, enforced rather than documented.
@@ -1416,7 +1381,7 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
 
 // materialize a direct-call result at the first consumer/escape.  Keeping
 // this beside the pair resolver prevents callers from publishing a pending
-// Item through the spill tracker or root frame (D5.2.1v2, RV4.1).
+// Item through the spill tracker or root frame (D5.2.1v3, RV4.1).
 static inline MirValue em_materialize_pending_value(MirEmitter* em,
         MirValue value) {
     if (!value.maybe_pending) return value;
@@ -2875,9 +2840,6 @@ static inline MirFrameRef em_fixed_number_scratch_ref(int slot) {
 static inline MIR_reg_t em_materialize_frame_ref(MirEmitter* em,
         MirFrameRef ref) {
     if (!em) return 0;
-    if (ref.kind == MIR_FRAME_REF_INCOMING_CALLER_HOME) {
-        return em->frame.incoming_scalar_home;
-    }
     if ((ref.kind != MIR_FRAME_REF_LOCAL_SCALAR_HOME ||
             ref.logical_home_id <= 0) &&
             ref.kind != MIR_FRAME_REF_DISCARD_SCRATCH &&
@@ -3637,14 +3599,11 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         const MirCallOptions* options = NULL) {
     MirCallResult call_result = {};
     if (!em || !target || source_nargs < 0) return call_result;
-    bool accepts_scalar_home = em_variant_accepts_scalar_home(variant);
     // Context-aware generated entries carry EvalContext in a call register.
-    // The option keeps JS on its current ABI until its full entry/call graph is
-    // migrated as one unit.
     const int context_arg_count = options && options->has_hidden_context ? 1 : 0;
     const int env_arg_count = options && options->has_hidden_env ? 1 : 0;
     const int hidden_arg_count = context_arg_count + env_arg_count;
-    int nargs = hidden_arg_count + source_nargs + (accepts_scalar_home ? 1 : 0);
+    int nargs = hidden_arg_count + source_nargs;
     MIR_var_t* args = nargs > 0 ? (MIR_var_t*)mem_alloc(
         (size_t)nargs * sizeof(MIR_var_t), MEM_CAT_TEMP) : NULL;
     JitAbiArg* abi_args = nargs > 0 ? (JitAbiArg*)mem_calloc(
@@ -3674,43 +3633,8 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         physical_types[hidden_arg_count + i] = arg_types[i];
         physical_ops[hidden_arg_count + i] = arg_ops[i];
     }
-    int scalar_home_arg_index = accepts_scalar_home
-        ? hidden_arg_count + source_nargs : -1;
-    int scalar_home_id = 0;
-    if (accepts_scalar_home) {
-        uint8_t observed = options ? options->observed_return_lane_mask :
-            (FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR);
-        MirFrameRef ref = {MIR_FRAME_REF_NONE, 0};
-        if (options && options->is_tail_call) {
-            if (!em->frame.incoming_scalar_home ||
-                    (options->scalar_return_home.kind != MIR_FRAME_REF_NONE) ||
-                    (observed & variant->result.scalar_home_lane_mask) !=
-                        variant->result.scalar_home_lane_mask) {
-                log_error("mir-direct-call: invalid tail-home contract for %s",
-                    call_name);
-                abort();
-            }
-            ref = {MIR_FRAME_REF_INCOMING_CALLER_HOME, 0};
-        } else if (!(observed & variant->result.scalar_home_lane_mask)) {
-            ref = em_discard_scalar_home_ref();
-        } else if (options && options->scalar_return_home.kind !=
-                MIR_FRAME_REF_NONE) {
-            ref = options->scalar_return_home;
-        } else {
-            scalar_home_id = em_scalar_home_new(em);
-            ref = em_scalar_home_ref(em, scalar_home_id);
-        }
-        MIR_reg_t home = em_materialize_frame_ref(em, ref);
-        if (!home) {
-            log_error("mir-direct-call: unresolved scalar home for %s", call_name);
-            abort();
-        }
-        physical_types[hidden_arg_count + source_nargs] = MIR_T_P;
-        physical_ops[hidden_arg_count + source_nargs] = MIR_new_reg_op(em->ctx, home);
-    }
     for (int i = 0; i < nargs; i++) {
         args[i] = {physical_types[i], "a", 0};
-        bool home = i == scalar_home_arg_index;
         bool runtime = context_arg_count && i == 0;
         bool env = env_arg_count && i == context_arg_count;
         ValueRep param_rep = !runtime && !env && variant && variant->params &&
@@ -3723,11 +3647,11 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
                 : physical_types[i] == MIR_T_P
                     ? JIT_VALUE_RAW_GC_POINTER
                     : JIT_VALUE_BOXED_ITEM;
-        abi_args[i].value.abi_rep = (home || runtime || env) ? JIT_ABI_POINTER :
+        abi_args[i].value.abi_rep = (runtime || env) ? JIT_ABI_POINTER :
             em_abi_rep(physical_types[i], value_class, true);
-        abi_args[i].value.value_class = (home || runtime) ? JIT_VALUE_RAW_NON_GC_POINTER :
+        abi_args[i].value.value_class = runtime ? JIT_VALUE_RAW_NON_GC_POINTER :
             value_class;
-        abi_args[i].effects = (home || runtime || env) ? JIT_ARG_BORROWED
+        abi_args[i].effects = (runtime || env) ? JIT_ARG_BORROWED
             : JIT_ARG_EFFECT_UNKNOWN;
     }
     JitCallMetadata metadata = {};
@@ -3743,29 +3667,26 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         JIT_NUMBER_STACK_MAY_ALLOCATE};
     FnReturnLaneAnalysis normal = variant ? variant->result.normal
         : FnReturnLaneAnalysis{LMD_TYPE_ANY, VALUE_REP_ITEM,
-            SCALAR_RETURN_DYNAMIC, true};
+            SCALAR_RETURN_DYNAMIC};
     MIR_type_t result_type = em_mir_type_for_rep(normal.abi_rep);
     metadata.normal_result.value = {
         em_abi_rep(result_type, em_value_class_for_rep(normal.abi_rep), true),
         em_value_class_for_rep(normal.abi_rep)};
     metadata.normal_result.transport = JIT_RETURN_MIR_RESULT;
     metadata.normal_result.scalar_class = normal.scalar_class;
-    metadata.normal_result.may_use_scalar_return_home =
-        accepts_scalar_home && normal.may_need_caller_scalar_home;
+    metadata.normal_result.may_use_scalar_return_home = false;
     if (variant && variant->result.error_lane == FN_ERROR_LANE_CONTEXT_ITEM) {
         metadata.error_result.value = {JIT_ABI_ITEM, JIT_VALUE_BOXED_ITEM};
         metadata.error_result.transport = JIT_RETURN_CONTEXT_ERROR;
         metadata.error_result.scalar_class =
             variant->result.error.scalar_class;
-        metadata.error_result.may_use_scalar_return_home =
-            accepts_scalar_home && variant->result.error.may_need_caller_scalar_home;
+        metadata.error_result.may_use_scalar_return_home = false;
     }
     metadata.abi_args = abi_args;
     metadata.abi_arg_count = (uint16_t)nargs;
     metadata.source_arg_count = (uint16_t)source_nargs;
-    metadata.scalar_return_home_arg_index = (int16_t)scalar_home_arg_index;
-    metadata.scalar_home_lane_mask = accepts_scalar_home
-        ? variant->result.scalar_home_lane_mask : 0;
+    metadata.scalar_return_home_arg_index = -1;
+    metadata.scalar_home_lane_mask = 0;
     // RV10: read the callee's shape, never derive one here. An unknown callee
     // is assumed to speak the universal pair shape (§6).
     metadata.return_shape = variant ? variant->result.shape
@@ -3838,7 +3759,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         // rv6: keep the pair in registers until the first consumer. The raw
         // lanes are GC-safe while they remain live here; publication is deferred
         // to em_materialize_pending_value so a pending Item never reaches a
-        // root slot or spill (D5.2.1v2, RV4.1).
+        // root slot or spill (D5.2.1v3, RV4.1).
     } else if (em_variant_returns_slot(variant)) {
         // rv12 slot transport: load the companion now, but defer resolution
         // until the first consumer. A slot result is an escape boundary for a
@@ -3863,16 +3784,17 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         }
         em->pending_live_item = result;
         em->pending_live_companion = companion;
+    } else if (em_variant_returns_slot(variant) && variant &&
+            variant->result.shape == RETURN_SHAPE_NATIVE_ERROR) {
+        // A C-reachable shape-4 body uses the same Context slot as shape 2;
+        // unlike shape 2, lane 2 is an already-resolved ERROR Item.
+        call_result.error = em_value(companion, MIR_T_I64, LMD_TYPE_ERROR,
+            VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
     }
-    call_result.normal.scalar_home_id = scalar_home_id;
-    call_result.normal.scalar_provenance = scalar_home_id
-        ? SCALAR_PROVENANCE_ACTIVATION_HOME : SCALAR_PROVENANCE_NONE;
-    call_result.error.scalar_home_id = scalar_home_id;
+    call_result.normal.scalar_home_id = 0;
+    call_result.normal.scalar_provenance = SCALAR_PROVENANCE_NONE;
+    call_result.error.scalar_home_id = 0;
     call_result.effects = metadata.effects;
-    if (scalar_home_id &&
-            (metadata.scalar_home_lane_mask & FN_RETURN_HOME_NORMAL)) {
-        em_scalar_home_bind(em, scalar_home_id, result);
-    }
     if (args) mem_free(args);
     if (abi_args) mem_free(abi_args);
     if (physical_types) mem_free(physical_types);

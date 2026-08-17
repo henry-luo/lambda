@@ -1027,25 +1027,14 @@ struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
         // are single-result C prototypes and must never be applied to a
         // pair-returning body.
         //
-        // Under v3 the trailing result-home operand is gone: the wrapper hands
-        // lane 2 back through `Context::mir_companion_slot` instead (RV12), so
-        // `requires_scalar_result_home` is no longer part of the contract and
-        // the caller resolves after the call rather than donating storage
-        // before it.
-#if LAMBDA_RETURN_V3
+        // The compiled wrapper hands lane 2 back through
+        // `Context::mir_companion_slot` (RV12), so its result is resolved
+        // after the call rather than receiving caller-owned storage first.
         if (!fn->requires_runtime_context) {
-#else
-        if (!fn->requires_scalar_result_home || !fn->requires_runtime_context) {
-#endif
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
-                "boxed Lambda entry is missing its context/result-home ABI metadata");
+                "boxed Lambda entry is missing its context ABI metadata");
         }
-#if !LAMBDA_RETURN_V3
-        if (!result_home) {
-            return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
-                "boxed Lambda entry requires a caller-owned scalar result home");
-        }
-#endif
+        (void)result_home;
         Context* runtime = fn->runtime_context;
         if (!runtime) {
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
@@ -1055,7 +1044,6 @@ struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
                 "boxed Lambda entry belongs to a different runtime context");
         }
-#if LAMBDA_RETURN_V3
         // RV12: no trailing home operand; resolve lane 2 from the context slot
         // immediately, before anything else can clobber it (RV4.2).
         if (fn->closure_env) {
@@ -1066,15 +1054,6 @@ struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
         return lambda_item_resolve_pending_slot(
             ((Item (*)(Context*, LambdaHostedItem<indices>...))fn->ptr)(
                 runtime, args[indices]...));
-#else
-        if (fn->closure_env) {
-            return ((Item (*)(Context*, void*, LambdaHostedItem<indices>...,
-                uint64_t*))fn->ptr)(runtime, fn->closure_env, args[indices]...,
-                    result_home);
-        }
-        return ((Item (*)(Context*, LambdaHostedItem<indices>..., uint64_t*))fn->ptr)(
-            runtime, args[indices]..., result_home);
-#endif
     }
 };
 
@@ -1315,12 +1294,9 @@ Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, I
     return ((Item(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h);
 }
 
-// v3/RV12: the `_b` wrapper no longer takes a trailing home — it returns a
-// pending Item and leaves lane 2 in `Context::mir_companion_slot` — so the
-// inner cast loses that operand and the trampoline resolves before returning.
-// The trampoline's OWN signature keeps `result_home` so generated call sites
-// need no change; the argument is simply unused on this path.
-#if LAMBDA_RETURN_V3
+// RV12: the public wrapper returns a pending Item and leaves lane 2 in
+// `Context::mir_companion_slot`.  These C trampolines keep result_home because
+// they are also the explicit ownership boundary for hosted/native callbacks.
 Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
     Context* runtime = (Context*)context;
     if (!runtime) return ItemError;
@@ -1340,23 +1316,6 @@ Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
             ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params))fp)( \
                 runtime, EXPAND_BOXED_CALL_PARAMS args)); \
     }
-#else
-Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
-    Context* runtime = (Context*)context;
-    if (!runtime) return ItemError;
-    return ((Item(*)(Context*, uint64_t*))fp)(runtime, result_home);
-}
-
-#define EXPAND_BOXED_CALL_PARAMS(...) __VA_ARGS__
-#define DEFINE_BOXED_CALL_INTO(count, params, args) \
-    Item fn_call_boxed_##count##_into(void* fp, \
-            EXPAND_BOXED_CALL_PARAMS params, uint64_t* result_home) { \
-        Context* runtime = (Context*)context; \
-        if (!runtime) return ItemError; \
-        return ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params, uint64_t*))fp)( \
-            runtime, EXPAND_BOXED_CALL_PARAMS args, result_home); \
-    }
-#endif
 
 DEFINE_BOXED_CALL_INTO(1, (Item a), (a))
 DEFINE_BOXED_CALL_INTO(2, (Item a, Item b), (a, b))

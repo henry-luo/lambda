@@ -54,7 +54,7 @@ typedef enum FnErrorLane {
     FN_ERROR_LANE_PAIR,
 } FnErrorLane;
 // Return-value convention v3 (RV1, `vibe/Lambda_Design_Compiling_Return_Value.md`,
-// formal spec D5.2.1v2 / D8.4.2v2). The shape is a pure function of the
+// formal spec D5.2.1v3 / D8.4.2v3). The shape is a pure function of the
 // declared signature (RV2) — never inferred per call site, never read back from
 // MIR state — and it is the ONE descriptor every emitter, wrapper, `fn->invoke`
 // entry, interpreter bridge and cached module reads (RV10).
@@ -73,7 +73,6 @@ typedef enum FnReturnShape {
 // the register.
 typedef enum FnCompanionTransport {
     FN_COMPANION_NONE = 0,      // shape 1 / 3: there is no lane 2
-    FN_COMPANION_HOME,          // v1: trailing caller-donated `_scalar_home`
     FN_COMPANION_RESULT_REG,    // v3: second MIR result (JIT to JIT)
     FN_COMPANION_CONTEXT_SLOT,  // v3: Context::mir_companion_slot (RV12)
 } FnCompanionTransport;

@@ -923,14 +923,11 @@ typedef struct FnReturnLaneAnalysis {
     TypeId semantic_type;
     ValueRep abi_rep;
     ScalarReturnClass scalar_class;
-    bool may_need_caller_scalar_home;
 } FnReturnLaneAnalysis;
 typedef struct FnReturnAnalysis {
     FnReturnLaneAnalysis normal;
     FnReturnLaneAnalysis error;
     FnErrorLane error_lane;
-    // v2 (trailing caller-donated scalar home) — authoritative until P5 deletes it.
-    uint8_t scalar_home_lane_mask;
     // v3 (RV1/RV10): the single source of truth for how this entry returns. No
     // emitter site may recompute it locally — that divergence is the v27
     // havlak wrong-answer bug class.
