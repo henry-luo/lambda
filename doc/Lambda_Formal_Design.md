@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.25.0 (2026-08-17)
+**Spec version:** 1.25.1 (2026-08-17)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -253,7 +253,16 @@ language-visible counterparts are the semantics spec's SI ledger.
   valid → ordinary Item lane); `float?` reserves a distinct NaN payload
   (`ItemNull`'s bits are a valid finite double) — the null test is a bit
   compare, never IEEE `==`, and other NaNs canonicalize on store.
-  [Nullable §3–4]
+  **Consequence, accepted:** `i64?`/`u64?` therefore forgo the native lane
+  outright — a wide optional stays a boxed Item paying a scalar home per
+  value (D2.2.3), and never enters the unboxed wide `+ - *` path, which
+  admits only non-optional operands. Closed, not deferred: recovering a null
+  code costs either a reserved value (deleting a legal member from a
+  full-domain type) or a tagged pair (a second word on every wide optional),
+  and the case is judged rare — wide integers carry exact ids, counters,
+  hashes, and bit patterns, the uses that least often admit absence. Revisit
+  only on evidence that `i64?`/`u64?` are hot in real code. *Not every type
+  earns a lane.* [Nullable §3–4]
 - **D2.5.3** `a[i]` with an unproven index infers `T?` — not `T`, not
   `any`; flow-sensitive proofs may use the payload directly but never
   change the public inferred type. `any`, `number`, `integer`, and
