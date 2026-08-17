@@ -3159,17 +3159,55 @@ Evidence retained under `temp/`:
 | `rvo13_14_proc_novalue_jetstream.json` | no-value-procedure-only public shape-1 experiment; `crypto_sha1` 1.0628, 0/41 wins; rejected even though the body returns only `ItemNull` |
 | `rvo13_14_public_native_self_201.json` | native public shape-1 experiment 1.0146 vs the body-only candidate; rejected |
 | `rvo13_14_final_safe_crypto.mir` | one `lambda_item_resolve_pending` at the module-result escape; no wrapper resolver call in this canary |
+| `lambda-candidate-rvo13-classified-release.exe` SHA-256 `9eb45bba723b8ef1aadd983b173262f091ddafbaad9368f45bd72b6127b2e7b8` | release rebuild after resolver classification and discard-only migration; 0 errors, 279 warnings |
+| `rvo13_14_classified_{crypto,json,deltablue,havlak,json_gen}.mir` | fresh five-workload resolver census: 204 remaining sites, all reason-attributed; no `ROOT_OR_SPILL` or `SUSPEND` site reached by these workloads |
+| `rvo13_14_classified_awfy.json` | `json` 1.0053, `deltablue` 0.9959, `havlak` 0.9934; 41/41 OK and stdout-equal per row |
+| `rvo13_14_classified_kostya.json` | `json_gen` 0.9915; 41/41 OK and stdout-equal |
+| `rvo13_14_classified_jetstream.json` | `crypto_sha1` 1.0040; 41/41 OK and stdout-equal |
+| `rvo13_14_classified_awfy_repeat.json` | repeat: `json` 0.9875, `deltablue` 0.9941, `havlak` 0.9950; 41/41 OK and stdout-equal per row |
+| `rvo13_14_classified_kostya_repeat.json` | repeat: `json_gen` 0.9725; 41/41 OK and stdout-equal |
+| `rvo13_14_classified_jetstream_repeat.json` | repeat: `crypto_sha1` 1.0064; 41/41 OK and stdout-equal |
 
-This is **not `PRELIM_PASS`**. The crypto row fails the explicit 1% timing
-rule, so no Lambda, LambdaJS, Test262, Node, or broad benchmark gate has been
-started. The native public-shape experiment is also not an acceptable escape:
-its shorter wrappers changed the raw-function lowering/layout and still lost
-in the 201-pair comparison. Procedural public-shape widening was tested as a
-separate slice and rejected because the native-heavy canaries regressed. The
-raw/public record split is implemented, but the five-row gate still blocks
-the next step: classify remaining wrapper resolver sites by ownership
-boundary, then migrate only pair-safe consumers before reconsidering native
-or procedural public shape 1.
+The fresh resolver classification is intentionally semantic rather than a
+blind count of `lambda_item_resolve_pending` calls.  The first consumer after
+each resolver in the five current MIR dumps was assigned as follows (the
+`SECOND_PAIR` bucket includes the current control-flow-join fallback):
+
+| workload | `REP_CONVERSION` | `STORE` | `UNKNOWN_CALL` | `INCOMPATIBLE_RETURN` | `SECOND_PAIR` | total |
+|---|---:|---:|---:|---:|---:|---:|
+| `crypto_sha1` | 0 | 2 | 0 | 1 | 1 | 4 |
+| `awfy/json` | 1 | 9 | 0 | 1 | 0 | 11 |
+| `deltablue` | 11 | 66 | 5 | 6 | 13 | 101 |
+| `havlak` | 2 | 64 | 9 | 1 | 3 | 79 |
+| `kostya/json_gen` | 0 | 8 | 0 | 1 | 0 | 9 |
+| **total** | **14** | **149** | **14** | **10** | **17** | **204** |
+
+`STORE` covers memory-visible field/array/activation writes; `REP_CONVERSION`
+covers tag tests and native unboxing; `UNKNOWN_CALL` is a helper/callee ABI
+that accepts only an ordinary Item; `INCOMPATIBLE_RETURN` is a module/public
+or other return-ABI escape; and `SECOND_PAIR` is a join where the current
+single-live-pair corridor cannot carry a companion across another pair or
+join.  `ROOT_OR_SPILL` and `SUSPEND` remain fail-closed compiler paths, but
+neither is exercised by these five dumps.  This is the required reason enum
+from §7.2, now in the shared emitter, with no runtime branch added.
+
+The only additional pair-safe migration is `mir_discard_pending_result()`:
+content/loop/procedure expressions whose value is provably unused now drop
+both raw lanes without resolving.  Assignment/error-check paths, memory
+stores, helper calls, branches, async spills, and return boundaries still
+materialize.  Therefore none of the 204 remaining sites is an eligible
+pair-safe consumer; the already-landed body-to-wrapper and same-shape tail
+forwarders remain the active pair corridor (D5.2.1v3, D5.2.2v3).
+
+This remains **not `PRELIM_PASS`**. Both five-row batches are clean and
+stdout-equal; the repeat stays inside the 1% fence (`crypto_sha1` 1.0064 at
+its high point), while `json`/`json_gen` move from near-neutral to 1.25%/2.75%
+faster in the second batch. That variance is not a stable, resolver-correlated
+improvement, so optimized/native evidence is still required before calling the
+slice fully tuned. No Lambda, LambdaJS, Test262, Node, or broad benchmark gate
+has been started. The native and procedural public-shape experiments remain
+rejected; the raw/public record split and the pair-safe discard migration are
+the accepted current slice.
 
 ### 7.12 Post-preliminary verification gates
 

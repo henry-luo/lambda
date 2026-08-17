@@ -334,6 +334,22 @@ struct MirValue {
     int scalar_home_id;
     ScalarPayloadProvenance scalar_provenance;
 };
+
+// A resolver is emitted only when a pending pair reaches a semantic or
+// ownership boundary.  Keeping the reason at the emitter makes the census
+// auditable without adding a runtime branch (D5.2.1v3, D5.2.2v3).
+enum MirPendingMaterializeReason {
+    MIR_PENDING_REASON_REP_CONVERSION,
+    MIR_PENDING_REASON_STORE,
+    MIR_PENDING_REASON_ROOT_OR_SPILL,
+    MIR_PENDING_REASON_UNKNOWN_CALL,
+    MIR_PENDING_REASON_SUSPEND,
+    MIR_PENDING_REASON_INCOMPATIBLE_RETURN,
+    MIR_PENDING_REASON_SECOND_PAIR,
+    // Pair-safe value discard is tracked separately; it emits no resolver.
+    MIR_PENDING_REASON_DISCARD,
+    MIR_PENDING_REASON_COUNT,
+};
 enum MirValueDemand {
     MIR_VALUE_DISCARD = 1u << 0,
     MIR_VALUE_ANY = 1u << 1,
@@ -516,12 +532,19 @@ struct MirEmitter {
     // (D5.2.1v3, D5.2.2v3).
     MIR_reg_t pending_live_item;
     MIR_reg_t pending_live_companion;
+    uint32_t pending_materialize_counts[MIR_PENDING_REASON_COUNT];
     // Per-function 8-byte native-stack scratch for inline double<->bits
     // reinterpretation. Keyed by func_item, not by frame lifecycle, so a
     // stale register can never leak into a different function's body.
     MIR_item_t bitcast_slot_func;
     MIR_reg_t bitcast_slot_addr;
 };
+
+static inline void em_note_pending_materialize(MirEmitter* em,
+        MirPendingMaterializeReason reason) {
+    if (!em || reason < 0 || reason >= MIR_PENDING_REASON_COUNT) return;
+    em->pending_materialize_counts[reason]++;
+}
 
 // MIR accepts only NUL-terminated names, but backend-only symbols must not
 // inherit source identifier length or spelling limits.  The numeric suffix is
@@ -972,13 +995,15 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
     return value;
 }
 static inline MirValue em_materialize_pending_value(MirEmitter* em,
-        MirValue value);
+        MirValue value,
+        MirPendingMaterializeReason reason = MIR_PENDING_REASON_UNKNOWN_CALL);
 static inline MirValue em_require_rep(MirEmitter* em, MirValue value,
         ValueRep required) {
     if (value.maybe_pending) {
         // representation conversion is a first consumer: never reinterpret
         // the pending tag or companion as an ordinary Item/native lane.
-        value = em_materialize_pending_value(em, value);
+        value = em_materialize_pending_value(em, value,
+            MIR_PENDING_REASON_REP_CONVERSION);
     }
     if (value.rep == required) return value;
     if (em && em->convert_rep) {
@@ -1377,8 +1402,9 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
 // this beside the pair resolver prevents callers from publishing a pending
 // Item through the spill tracker or root frame (D5.2.1v3, RV4.1).
 static inline MirValue em_materialize_pending_value(MirEmitter* em,
-        MirValue value) {
+        MirValue value, MirPendingMaterializeReason reason) {
     if (!value.maybe_pending) return value;
+    em_note_pending_materialize(em, reason);
     if (!value.pending_companion) {
         log_error("mir-value: pending Item has no companion register");
         abort();

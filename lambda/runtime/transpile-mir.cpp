@@ -643,6 +643,7 @@ static bool mir_param_is_inferred_specialization(AstFuncNode* fn_node, int index
 static TypeId mir_native_param_type(const NativeFuncInfo* info, int index);
 static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node);
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object);
+static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node);
 
 static bool mir_inferred_raw_scalar_lane(TypeId type_id) {
     // inferred raw edges are scalar-only: container Items must stay visible to
@@ -1217,14 +1218,31 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
 // the first ordinary-Item consumer instead of teaching every AST helper a
 // second value abstraction (D5.2.1v3, D5.2.2v3).
 static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
-        MIR_reg_t value) {
+        MIR_reg_t value,
+        MirPendingMaterializeReason reason = MIR_PENDING_REASON_UNKNOWN_CALL) {
     if (!mt || !value || mt->em.pending_live_item != value ||
             !mt->em.pending_live_companion) return value;
     MirValue pending = em_value(value, MIR_T_I64, LMD_TYPE_ANY,
         VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
     pending.pending_companion = mt->em.pending_live_companion;
     pending.maybe_pending = true;
-    return em_materialize_pending_value(&mt->em, pending).reg;
+    return em_materialize_pending_value(&mt->em, pending, reason).reg;
+}
+
+static void mir_discard_pending_result(MirTranspiler* mt, MIR_reg_t value) {
+    if (!mt || !value || mt->em.pending_live_item != value ||
+            !mt->em.pending_live_companion) return;
+    // A semantically discarded expression has no Item, root, spill, or
+    // second call consumer. Drop both raw lanes instead of resolving a scalar
+    // home that cannot escape this lowering sequence (D5.2.1v3, D5.2.2v3).
+    em_note_pending_materialize(&mt->em, MIR_PENDING_REASON_DISCARD);
+    mt->em.pending_live_item = 0;
+    mt->em.pending_live_companion = 0;
+}
+
+static void transpile_discard_expr(MirTranspiler* mt, AstNode* node) {
+    MIR_reg_t result = transpile_expr(mt, node);
+    mir_discard_pending_result(mt, result);
 }
 
 #define emit_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, false)
@@ -1751,7 +1769,8 @@ static void store_gc_root_slot(MirTranspiler* mt, int root_slot, MIR_reg_t value
     // valid GC Item until its companion has been consumed; resolving here
     // closes helper paths that register roots without going through emit_box
     // (D5.2.1v3, D5.2.2v3).
-    value = mir_materialize_pending_reg(mt, value);
+    value = mir_materialize_pending_reg(mt, value,
+        MIR_PENDING_REASON_ROOT_OR_SPILL);
     // G0: a value in a double register is a scalar — `int` lives there now, as
     // `float` always did — and a scalar is never a GC reference. Rooting one
     // was previously harmless only because the int lane was word-sized; it is
@@ -1807,7 +1826,8 @@ static int create_binding_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
 static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
     // A root slot is memory-visible immediately, so it cannot retain the
     // register-only pending protocol across a safepoint (RV4.1).
-    value = mir_materialize_pending_reg(mt, value);
+    value = mir_materialize_pending_reg(mt, value,
+        MIR_PENDING_REASON_ROOT_OR_SPILL);
     // G0: a double register holds a scalar (`int` or `float`), never a GC
     // reference, so it takes no root slot. See store_gc_root_slot.
     if (value && MIR_reg_type(mt->ctx, value, mt->em.func) == MIR_T_D) return -1;
@@ -1937,7 +1957,8 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
 
 static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
     MIR_type_t mir_type, TypeId type_id, const char* prefix) {
-    result = mir_materialize_pending_reg(mt, result);
+    result = mir_materialize_pending_reg(mt, result,
+        MIR_PENDING_REASON_ROOT_OR_SPILL);
     if (!should_gc_root_var(mir_type, type_id)) return result;
     int root_slot = create_gc_root_slot(mt, result);
     return load_gc_root_slot(mt, root_slot, prefix);
@@ -2736,7 +2757,8 @@ static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg)
 }
 
 static MIR_reg_t emit_item_tag(MirTranspiler* mt, MIR_reg_t item_reg) {
-    item_reg = mir_materialize_pending_reg(mt, item_reg);
+    item_reg = mir_materialize_pending_reg(mt, item_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
     MIR_reg_t tag = new_reg(mt, "item_tag", MIR_T_I64);
     // Error Items are always self-tagged; checking their high byte inline
     // avoids a safepoint before the dispatcher has rooted or rejected a value.
@@ -3182,7 +3204,8 @@ static MIR_reg_t emit_unbox_container(MirTranspiler* mt, MIR_reg_t item_reg) {
 
 // Unbox Item -> native type
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id) {
-    item_reg = mir_materialize_pending_reg(mt, item_reg);
+    item_reg = mir_materialize_pending_reg(mt, item_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
     switch (type_id) {
     case LMD_TYPE_INT:
         // v5: unboxing an int yields its LANE value (i64), so poison arrives as
@@ -3539,7 +3562,8 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg,
         TypeId type_id) {
     // Boxing is an ordinary-Item/escape boundary.  Resolve a live companion
     // before the value can enter a root, container, helper, or wrapper ABI.
-    val_reg = mir_materialize_pending_reg(mt, val_reg);
+    val_reg = mir_materialize_pending_reg(mt, val_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
     if (type_id == LMD_TYPE_FLOAT &&
             MIR_reg_type(mt->ctx, val_reg, mt->em.func) != MIR_T_D) {
         // A float-typed expression can take the generic Item path after a
@@ -4136,7 +4160,8 @@ static void async_save_spills(MirTranspiler* mt, int count) {
                 "without an async spill slot");
             abort();
         }
-        resolved_pending = mir_materialize_pending_reg(mt, pending_item);
+        resolved_pending = mir_materialize_pending_reg(mt, pending_item,
+            MIR_PENDING_REASON_SUSPEND);
     }
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
@@ -8541,7 +8566,8 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     // A dynamic boxed condition may still be the first lane of a pending
     // shape-2 call even when inference says bool. Truthiness is a consumer,
     // so resolve before the branch reads the pending tag (D5.2.1v3).
-    cond = mir_materialize_pending_reg(mt, cond);
+    cond = mir_materialize_pending_reg(mt, cond,
+        MIR_PENDING_REASON_REP_CONVERSION);
 
     // Restore tail position for branches
     mt->in_tail_position = saved_tail;
@@ -9630,7 +9656,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
             // Result demand suppresses key storage, not evaluation of an
             // order expression whose procedure calls may still have effects.
             AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-            (void)transpile_expr(mt, first_spec->expr);
+            transpile_discard_expr(mt, first_spec->expr);
         }
 
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, out_idx),
@@ -10643,7 +10669,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
         MIR_new_reg_op(mt->ctx, cond_val)));
 
     // Body
-    transpile_expr(mt, while_node->body);
+    transpile_discard_expr(mt, while_node->body);
 
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
     emit_label(mt, l_end);
@@ -12153,6 +12179,8 @@ static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
     if (mt->current_func_can_raise && side_effect_result_can_error(item->node_type)) {
         // can-raise procs must not discard failed mutation/helper statements as side effects.
         emit_return_if_item_error(mt, stmt_result);
+    } else {
+        mir_discard_pending_result(mt, stmt_result);
     }
 }
 
@@ -12163,7 +12191,7 @@ static bool transpile_content_decl_or_side_effect(MirTranspiler* mt,
             item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
             transpile_let_stam(mt, (AstLetNode*)item);
         } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-            transpile_expr(mt, item); // emit method registration
+            transpile_discard_expr(mt, item); // emit method registration
         }
         return true;
     }
@@ -12279,7 +12307,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
-                    transpile_expr(mt, item);
+                    transpile_discard_expr(mt, item);
                 }
             } else if (item == last_value) {
                 // Last value expression: this is the return value
@@ -12287,10 +12315,10 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (item->node_type == AST_NODE_IF_EXPR ||
                        item->node_type == AST_NODE_WHILE_STAM ||
                        item->node_type == AST_NODE_FOR_STAM) {
-                transpile_expr(mt, item);
+                transpile_discard_expr(mt, item);
             } else {
                 // Non-last value expression in proc: side effect only
-                transpile_expr(mt, item);
+                transpile_discard_expr(mt, item);
             }
             item = item->next;
         }
@@ -12314,7 +12342,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
-                    transpile_expr(mt, item);
+                    transpile_discard_expr(mt, item);
                 }
             } else if (item == last_value) {
                 // This is the single value expression
@@ -12322,7 +12350,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
-                transpile_expr(mt, item); // proc context side effect
+                transpile_discard_expr(mt, item); // proc context side effect
             }
             item = item->next;
         }
@@ -12347,12 +12375,12 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
-                    transpile_expr(mt, item);
+                    transpile_discard_expr(mt, item);
                 }
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
-                transpile_expr(mt, item); // proc context side effect
+                transpile_discard_expr(mt, item); // proc context side effect
             }
             item = item->next;
         }
@@ -12386,7 +12414,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                 transpile_let_stam(mt, (AstLetNode*)item);
             } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-                transpile_expr(mt, item); // emit method registration
+                transpile_discard_expr(mt, item); // emit method registration
             }
             item = item->next;
             continue;
@@ -16809,7 +16837,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     // consumer. materialize before unboxing, root publication,
                     // or any helper call can observe it (D5.2.1v3, RV4.1).
                     direct_value = em_materialize_pending_value(&mt->em,
-                        direct_value);
+                        direct_value, MIR_PENDING_REASON_REP_CONVERSION);
                     result = direct_value.reg;
                 }
                 if (!can_forward_pending && !call_error_lane && !call_node->propagate &&
@@ -16855,7 +16883,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // an unresolved pair past this point. They are escape or
                 // second-call boundaries, so resolve before entering them.
                 direct_value = em_materialize_pending_value(&mt->em,
-                    direct_value);
+                    direct_value, MIR_PENDING_REASON_SECOND_PAIR);
                 result = direct_value.reg;
             }
 
@@ -18318,7 +18346,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // `transpile_box_item` is itself an ordinary-Item consumer.  This covers
     // dynamic/type-dispatch paths whose static type is ANY and therefore return
     // before the type-specific boxing cases below (D5.2.1v3).
-    val = mir_materialize_pending_reg(mt, val);
+    val = mir_materialize_pending_reg(mt, val,
+        MIR_PENDING_REASON_REP_CONVERSION);
 
     // If the expression already emitted a return (e.g. RETURN_STAM in a proc),
     // the val is a dummy register and any further boxing would be dead code.
@@ -22198,7 +22227,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         // Slow-body joins still need a pair merge. Until that merge is
         // explicit, materialize at this incompatible control-flow boundary
         // rather than letting one predecessor's lane reach every return.
-        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal,
+            MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
     }
     MIR_reg_t result = direct.normal.reg;
     int scalar_home_id = direct.normal.scalar_home_id
@@ -25239,7 +25269,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                         // result boundary; consume the pair before copying it
                         // into the module result register (D5.2.1v3).
                         call.normal = em_materialize_pending_value(&mt.em,
-                            call.normal);
+                            call.normal, MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
                     }
                     MIR_reg_t main_result = call.normal.reg;
                     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, result),
