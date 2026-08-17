@@ -39,8 +39,8 @@ fn label_box(result, spec) {
 fn segment_box(a, b) map | error => box(min([a.x, b.x]) - 1.9, min([a.y, b.y]) - 1.9,
   abs(b.x - a.x) + 3.8, abs(b.y - a.y) + 3.8)
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/annotations.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/annotations.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let node = model.nodes(graph)[0]

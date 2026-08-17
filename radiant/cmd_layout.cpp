@@ -2323,7 +2323,7 @@ static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts
     const char* opts = opts_expr ? opts_expr : "null";
     int needed = snprintf(nullptr, 0,
         "import pdf: lambda.package.pdf.pdf\n"
-        "let doc^err = input(\"%s\", 'pdf')\n"
+        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     if (needed <= 0) {
@@ -2341,7 +2341,7 @@ static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts
 
     snprintf(script_buf, (size_t)needed + 1,
         "import pdf: lambda.package.pdf.pdf\n"
-        "let doc^err = input(\"%s\", 'pdf')\n"
+        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     mem_free(escaped_pdf);
@@ -3256,7 +3256,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     char script_buf[4096];
     snprintf(script_buf, sizeof(script_buf),
         "import latex: lambda.package.latex.latex\n"
-        "let ast^err = input(\"%s\", {type: \"latex\"})\n"
+        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
         "latex.render(ast, {standalone: true})\n",
         safe_path);
 

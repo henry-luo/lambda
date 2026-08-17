@@ -6,7 +6,7 @@ pub fn children(value, wanted) => [
 ]
 
 pub fn manifest_cases(path) {
-  let manifest^manifest_error = input(path, {type: "mark"});
+  let manifest = input(path, {type: "mark"}) ^ { [] };
   [for (value in model.element_children(manifest) where model.tag(value) == "case") value]
 }
 

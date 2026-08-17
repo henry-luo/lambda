@@ -16,6 +16,13 @@ function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
 
+function qualified_name($, precedence) {
+  return prec.left(precedence, seq(
+    choice($.identifier, $.symbol),
+    repeat1(seq('.', choice($.identifier, $.symbol))),
+  ));
+}
+
 const linebreak = /\r\n|\n/;
 const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
@@ -58,14 +65,9 @@ function binary_expr($, in_attr) {
     ['div', 'binary_times'],
     ['%', 'binary_times'],
     ['**', 'binary_pow', 'right'],
-    ['==', 'binary_eq'],
-    ['!=', 'binary_eq'],
-    ['eq', 'binary_eq'],
-    ['ne', 'binary_eq'],
-    ['lt', 'binary_relation'],
-    ['le', 'binary_relation'],
-    ['ge', 'binary_relation'],
-    ['gt', 'binary_relation'],
+    [$._binary_eq_symbol_op, 'binary_eq'],
+    [$._binary_eq_word_op, 'binary_eq'],
+    [$._binary_word_relation_op, 'binary_relation'],
     // Relational operators - excluded in attr to avoid element tag conflicts
     ...(in_attr ? [] :
       [['<', 'binary_relation'],
@@ -148,45 +150,18 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$._expr, $.member_expr],
-    [$.handler_expr, $.propagate_expr],
-    [$.propagate_expr, $.handler_prefix_expr],
-    [$.handler_expr, $.call_expr],
-    [$.handler_expr, $.assign_stam],
-    [$.handler_expr, $.assign_expr],
-    [$.primary_expr, $.propagate_expr, $.handler_expr],
-    [$._expr, $.handler_expr],
-    [$._expr, $.handler_prefix_expr],
-    [$._expr, $.handler_prefix_literal_expr],
-    [$._expr, $.handler_prefix_binary_expr],
-    [$._expr, $.handler_binary_expr],
-    [$.handler_prefix_expr, $.handler_binary_expr],
-    [$.handler_prefix_expr, $.member_expr],
-    [$.handler_prefix_expr, $.query_expr],
-    [$.handler_prefix_expr, $.parent_expr],
-    [$.handler_prefix_literal_expr, $.handler_literal_expr],
-    [$.handler_prefix_expr, $.handler_expr],
-    [$.handler_prefix_binary_expr, $.handler_binary_expr],
-    [$.handler_prefix_literal_expr, $.dotted_name, $.primary_expr],
-    [$.handler_prefix_binary_expr, $.handler_literal_expr],
-    [$.handler_prefix_literal_expr, $.unary_expr],
-    [$.handler_prefix_binary_expr, $.unary_expr],
-    [$.handler_prefix_expr, $.handler_prefix_literal_expr,
-      $.handler_prefix_binary_expr, $.handler_literal_expr],
-    [$.handler_literal_expr, $.return_occurrence_type],
-    [$.handler_prefix_expr, $.handler_literal_expr],
-    [$.dotted_name, $.primary_expr],               // identifier.identifier: shift for dotted_name vs reduce to primary_expr
     [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
-    [$.let_block, $._expr],                        // (let_expr , ...) comma could be let_block or expression list
   ],
 
   precedences: $ => [
+  // value expr precedences
   [
     $.fn_expr_stam,
     'propagate',
     $.call_expr,
     $.index_expr,
-    $.member_expr,
+    'member',
     $.parent_expr,
     $.primary_expr,
     $.unary_expr,
@@ -216,6 +191,7 @@ module.exports = grammar({
     $.assign_expr,
     $.assign_stam,
   ],
+  // type expr precedences
   [
     $.range_type,
     $.primary_type,
@@ -338,10 +314,7 @@ module.exports = grammar({
 
     _content_expr: $ => choice(
       repeat1(choice($.string, $.map, $.element)),
-      alias($.handler_stam, $.handler_expr),
-      $.handler_prefix_expr,
-      alias($.handler_prefix_literal_expr, $.handler_prefix_expr),
-      alias($.handler_prefix_binary_expr, $.handler_prefix_expr),
+      $.handler_expr,
       $._attr_expr,
       $._expr_stam
     ),
@@ -386,7 +359,7 @@ module.exports = grammar({
       $.named_value,
     ),
 
-    _key: $ => choice($.dotted_name, $.symbol, $.identifier, $.base_type, $.last_index, '*'),
+    _key: $ => choice($.symbol, $.identifier, $.base_type, $.last_index, '*'),
 
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
 
@@ -403,25 +376,24 @@ module.exports = grammar({
     // expr excluding comparison exprs (for element attributes where < > conflict with tags)
     _attr_expr: $ => choice(
       $.primary_expr,
-      $.propagate_expr,
       $.unary_expr,
       alias($.attr_binary_expr, $.binary_expr),
       $.if_expr,
       $.for_expr,
     ),
 
-    // Attribute name
-    attr_name: $ => $._key,
+    // Attribute names may be qualified keys such as svg.width.
+    attr_name: $ => choice(alias($._attr_dotted_name, $.dotted_name), $._key),
+
+    _attr_dotted_name: $ => qualified_name($, 51),
 
     attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
 
     // Dotted name: arbitrary depth dotted segments
     // Each segment is an identifier or symbol: a.b.'c'.d
-    // prec(50) matches primary_expr so shift-reduce becomes a real GLR conflict
-    dotted_name: $ => prec.left(50, seq(
-      choice($.identifier, $.symbol),
-      repeat1(seq('.', choice($.identifier, $.symbol))),
-    )),
+    // Keep this below primary/member expressions in value positions; it is a
+    // qualified name for element and attribute positions, not a primary expr.
+    dotted_name: $ => qualified_name($, 49),
 
     element: $ => seq('<',
       choice($.dotted_name, $.symbol, $.identifier),
@@ -440,24 +412,17 @@ module.exports = grammar({
     // Expressions
 
     _parenthesized_expr: $ => seq(
-      '(', $._expr, ')',
-    ),
-
-    // let-block: (let x = a, let y = b, expr) — sequential let bindings returning last expr
-    let_block: $ => seq(
-      '(', repeat1(seq($.let_expr, ',')), $._expr, ')'
+      '(',
+      choice(
+        $._expr,
+        // Prefer this prefix over reducing its first `let` as a complete expr.
+        seq(repeat1(prec(1, seq($.let_expr, ','))), $._expr),
+      ),
+      ')',
     ),
 
     _expr: $ => choice(
-      $.handler_prefix_expr,
-      alias($.handler_prefix_literal_expr, $.handler_prefix_expr),
-      alias($.handler_prefix_binary_expr, $.handler_prefix_expr),
-      $.handler_literal_expr,
-      $.handler_binary_expr,
-      $.handler_expr,
-      $.propagate_expr,
       $.primary_expr,
-      $.handler_member_expr,
       $.unary_expr,
       $.binary_expr,
       $.let_expr,
@@ -490,14 +455,13 @@ module.exports = grammar({
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
       $.member_expr,
-      $.dotted_name,  // a.b, svg.rect — lower priority than member_expr
       $.parent_expr,  // expr.. for parent access shorthand
+      $.handler_expr,
       $.propagate_expr,
       $.call_expr,
       $.start_expr,
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
-      $.let_block,    // let-block: (let x = a, expr) — sequential let bindings
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_expr,   // ~ or ~# for pipe context
       $.current_error_expr, // ^ inside an active error-handler body
@@ -511,90 +475,23 @@ module.exports = grammar({
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, 'import')),
       $._arguments,
-      optional(field('propagate', '^')),
   )),
 
-    // Legacy postfix propagation remains part of a call. The separate rule
-    // also exposes it to expression positions where call parsing is nested.
-    propagate_expr: $ => prec.right('propagate', seq(
-      field('operand', $.call_expr),
+    // propagation owns its caret at the same postfix-primary tier as member
+    // access; wider operands must be parenthesized before this rule applies.
+    propagate_expr: $ => prec.left(100, seq(
+      field('operand', $.primary_expr),
       field('propagate', '^'),
     )),
 
-    // Braced call handlers consume the optional caret owned by call_expr; the
-    // binary/literal productions below cover non-call operands explicitly.
-    handler_expr: $ => prec.dynamic(1000, seq(
-      field('operand', $.call_expr),
-      '{', field('body', $.content), '}',
-    )),
-
-    handler_prefix_expr: $ => prec.dynamic(100000, seq(
+    // handlers own their caret at the same postfix-primary tier as member
+    // access. The optional `~` arm receives the non-error operand value. The
+    // complete result remains primary-like, so `.field`, indexing, calls,
+    // propagation, and another handler continue through the normal chain.
+    handler_expr: $ => prec.left(100, seq(
+      field('operand', $.primary_expr),
       '^', '{', field('body', $.content), '}',
-      field('operand', $.call_expr),
-    )),
-
-    handler_prefix_literal_expr: $ => prec.dynamic(100000, seq(
-      '^', '{', field('body', $.content), '}',
-      field('operand', choice(
-        $.named_value,
-        $.last_index,
-        $._number,
-        $.datetime,
-        $.string,
-        $.symbol,
-        $.binary,
-        $.array,
-        $.map,
-        $.element,
-        $.base_type,
-      )),
-    )),
-
-    handler_prefix_binary_expr: $ => prec.dynamic(100000, seq(
-      '^', '{', field('body', $.content), '}',
-      field('operand', $.binary_expr),
-    )),
-
-    // Binary expressions bind more tightly than the handler suffix, so the
-    // braced form covers the complete expression rather than only its final
-    // call operand.
-    handler_binary_expr: $ => prec.dynamic(10000, seq(
-      field('operand', $.binary_expr),
-      optional(field('propagate', '^')), '{', field('body', $.content), '}',
-    )),
-
-    handler_literal_expr: $ => prec.dynamic(10000, seq(
-      field('operand', choice(
-        $.named_value,
-        $.last_index,
-        $._number,
-        $.datetime,
-        $.string,
-        $.symbol,
-        $.binary,
-        $.array,
-        $.map,
-        $.element,
-        $.base_type,
-      )),
-      '^', '{', field('body', $.content), '}',
-    )),
-
-
-
-    // A statement-position handler is kept as a narrow grammar production so
-    // ordinary statement expressions (match/if/raise) cannot be truncated at
-    // the caret. The alias preserves one AST handler shape for both forms.
-    handler_stam: $ => prec.dynamic(1000, seq(
-      field('operand', $.call_expr),
-      '{', field('body', $.content), '}',
-    )),
-
-    // Postfix access on a handled value is kept as a separate expression rule
-    // so ordinary primary/member parsing does not make the handler ambiguous.
-    handler_member_expr: $ => prec.left(100, seq(
-      field('object', $.handler_expr), '.',
-      field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type)),
+      optional(seq('~', '{', field('value', $.content), '}')),
     )),
 
     // `_start` is scanned contextually so ordinary identifiers named `start`
@@ -641,10 +538,10 @@ module.exports = grammar({
       optional(field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type)))
     )),
 
-    // Member access — prec.dynamic(1) ensures GLR parser prefers member_expr
-    // over path_expr when both are viable (e.g., after a comment disrupts lookahead)
-    member_expr: $ => prec.dynamic(1, seq(
-      field('object', $.primary_expr), '.',
+    // Member access is the value form of dot syntax; dotted_name is reserved
+    // for qualified element and attribute names.
+    member_expr: $ => prec.left('member', seq(
+      field('object', choice($.primary_expr, $.member_expr)), '.',
       field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),
 
@@ -658,6 +555,12 @@ module.exports = grammar({
     // Path wildcard: * (single segment) or ** (recursive, zero or more segments)
     path_wildcard: _ => token(choice('**', '*')),
 
+    _binary_eq_symbol_op: _ => token(choice('==', '!=')),
+
+    _binary_eq_word_op: _ => token(choice('eq', 'ne')),
+
+    _binary_word_relation_op: _ => token(choice('lt', 'le', 'ge', 'gt')),
+
     binary_expr: $ => choice(
       ...binary_expr($, false),
     ),
@@ -665,20 +568,23 @@ module.exports = grammar({
     // Current item (~) or key/index (~#) reference in pipe context
     current_expr: _ => token(choice('~#', '~')),
 
-    // Current error reference.  The token is admitted by the general
-    // expression grammar so member/index parsing can reuse the normal
-    // primary rules; build_ast enforces that it occurs only in a handler
-    // body.  `^ { ... }` remains the prefix-handler opener by precedence.
-    current_error_expr: _ => prec(100, token('^')),
+    // current error reference. The token is admitted by the general expression
+    // grammar so member/index builders can compose with it; build_ast enforces
+    // that it occurs only in a handler body.
+    current_error_expr: _ => prec(0, token('^')),
 
     _at: _ => token(prec(2, 'at')),
     _into: _ => token(prec(2, 'into')),
 
-    // Unary expression: includes not, !, -, +, ^, * (spread)
-    unary_expr: $ => prec.left(seq(
-      field('operator', choice('not', '!', '-', '+', '^', '*')),
-      field('operand', $._expr),
-    )),
+    // Unary expression. Error tests use the ordinary `is error` binary form;
+    // caret is reserved for postfix propagation, handlers, and handler-local
+    // current-error access.
+    unary_expr: $ => choice(
+      prec.left(90, seq(
+        field('operator', choice('not', '!', '-', '+', '*')),
+        field('operand', $._expr),
+      )),
+    ),
 
     identifier: _ => {
       // ECMAScript 2023-compliant identifier regex:
@@ -691,17 +597,11 @@ module.exports = grammar({
       return token(seq(alpha, repeat(alphanumeric)));
     },
 
-    // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
+    // Function parameter: identifier/symbol with optional var, type, and default.
     // Supports: name, name?, name: type, name?: type, name = default, name: type = default
     parameter: $ => choice(
       seq(
-        field('var', $.var_param_marker),
-        field('name', choice($.identifier, $.symbol)),
-        optional(field('optional', '?')),  // optional marker BEFORE type
-        optional(seq(':', field('type', $._value_type_expr))),
-        optional(seq('=', field('default', $._expr))),
-      ),
-      seq(
+        optional(field('var', $.var_param_marker)),
         field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),  // optional marker BEFORE type
         optional(seq(':', field('type', $._value_type_expr))),
@@ -731,7 +631,7 @@ module.exports = grammar({
     // Syntax: view [name:] pattern [(params)] [return_type] [state k:v, ...] { body } [on event() { ... }]*
     // Pattern is required; () optional unless return type present; name: optional
     view_stam: $ => seq(
-      field('kind', choice('view', 'edit')),
+      field('kind', token(prec(1, choice('view', 'edit')))),
       // optional name: (colon disambiguates name from pattern)
       optional(seq(field('name', $.identifier), ':')),
       // model pattern — element, map, type name, or union with |
@@ -808,48 +708,38 @@ module.exports = grammar({
     ),
 
     // Anonymous Function (arrow expression)
-    // Three forms:
-    //   Typed params:   (a: int, b: string) => expr  (uses parameter nodes)
-    //   Untyped params: (a, b) => expr
-    //   No params:      () => expr                   (empty parens)
+    //
+    // The untyped branch must remain an expression list. With `parameter` here,
+    // Tree-sitter reduces `(x)` to a parenthesized expression before it sees
+    // `=>`; the distinct branch preserves the shift needed for arrow heads.
     fn_expr: $ => prec.right(choice(
-      // Typed params: (a: int, b: string) => expr
       prec.dynamic(1, seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr)
+        optional(field('type', $.return_type)), '=>', field('body', $._expr),
       )),
-      // Untyped params: (a, b) => expr — inline param list (no list rule)
       seq(
         '(', $._expr, repeat(seq(',', $._expr)), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr)
+        optional(field('type', $.return_type)), '=>', field('body', $._expr),
       ),
-      // No params: () => expr
       seq('(', ')', optional(field('type', $.return_type)), '=>', field('body', $._expr)),
     )),
 
     // use prec.right so the expression is consumed greedily
     // Single assignment: let x = expr
-    // Error destructuring: let a^err = expr
     // Positional decomposition: let a, b = expr
     // Named decomposition: let a, b at expr
     assign_expr: $ => prec.right(choice(
-      // error destructuring: let name^error_name = expr
-      seq(
-        field('name', choice($.identifier, $.symbol)),
-        '^', field('error', choice($.identifier, $.symbol)),
-        '=', field('as', prec.dynamic(1000, choice($.propagate_expr, $._expr))),
-      ),
       // single variable assignment
       seq(
         field('name', choice($.identifier, $.symbol)),
-        optional(seq(':', field('type', $._value_type_expr))), '=', field('as', prec.dynamic(1000, choice($.propagate_expr, $._expr))),
+        optional(seq(':', field('type', $._value_type_expr))), '=', field('as', $._expr),
       ),
       // multi-variable decomposition: let a, b = expr OR let a, b at expr
       seq(
         field('name', choice($.identifier, $.symbol)),
         repeat1(seq(',', field('name', choice($.identifier, $.symbol)))),
-        field('decompose', choice('=', 'at')),
-        field('as', prec.dynamic(1000, choice($.propagate_expr, $._expr))),
+        field('decompose', choice('=', $._at)),
+        field('as', $._expr),
       ),
     )),
 
@@ -1078,20 +968,19 @@ module.exports = grammar({
       seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
     )),
 
-    // Built-in types as reserved keywords
-    // _base_type_kw combines 20 keywords only used via base_type into a single token,
-    // reducing SYMBOL_COUNT by 19. Keywords also used standalone elsewhere
-    // ('error', 'type', 'string', 'symbol') remain as separate keywords.
+    // Keep type-only keywords in one token; `type` remains separate because it
+    // starts declarations, while the builder distinguishes the other spellings.
     _base_type_kw: _ => token(prec(1, choice(
       'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'complex', 'decimal', 'integer', 'number',
       'datetime', 'date', 'time', 'binary', 'range',
       'list', 'array', 'map', 'element', 'entity', 'object', 'function',
-      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32', 'f64'
+      'error', 'string', 'symbol',
+      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32'
     ))),
 
     base_type: $ => prec(1, choice(
       $._base_type_kw,
-      'error', 'type', 'string', 'symbol'
+      'type'
     )),
 
     // list_type for tuple types and pattern grouping
@@ -1235,14 +1124,15 @@ module.exports = grammar({
 
     // The opening tag is one token so `\\symbol (` cannot be mistaken for a
     // tagged island with whitespace between the tag and its delimiter.
+    _pattern_tag: _ => token(choice('\\symbol(', '\\(')),
+
     pattern_island: $ => seq(
-      field('tag', choice(token('\\symbol('), token('\\('))),
+      field('tag', $._pattern_tag),
       field('body', $._pattern_expr),
       ')'
     ),
 
-    // Character classes are reserved only inside the pattern island. Keep the
-    // spelling as a flat choice so the class namespace can grow later.
+    // Character classes are reserved only inside the pattern island.
     pattern_char_class: _ => choice(
       '...',   // any string
       'd',     // digit [0-9]

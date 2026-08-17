@@ -41,7 +41,7 @@ test/lambda/graph_transform_html.ls	node:AST_NODE_ASSIGN
 test/lambda/graph_transform_input.ls	node:AST_NODE_ASSIGN
 test/lambda/graph_transform_paint.ls	node:AST_NODE_FOR_EXPR
 test/lambda/handler_current_error.ls	node:AST_NODE_HANDLER_EXPR
-test/lambda/handler_prefix_expr.ls	node:AST_NODE_HANDLER_EXPR
+test/lambda/handler_postfix_expr.ls	node:AST_NODE_HANDLER_EXPR
 test/lambda/hex_literals.ls	node:AST_NODE_SYS_FUNC
 test/lambda/import_error_destr.ls	node:AST_NODE_IMPORT
 test/lambda/import_js.ls	node:AST_NODE_IMPORT

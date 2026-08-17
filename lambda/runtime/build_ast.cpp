@@ -62,7 +62,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 // Forward declarations for pipe expression building
 AstNode* build_current_expr(Transpiler* tp, TSNode node);
 
-// Forward declaration for let_block (uses build_let_expr defined later)
+// Forward declaration for sequential parenthesized lets (uses build_let_expr defined later)
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node);
 
 // Forward declaration for imported module resolution
@@ -1834,6 +1834,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         AstHandlerNode* handler = (AstHandlerNode*)node;
         collect_captures_from_node(tp, handler->operand, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, handler->body, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, handler->value_body, fn_scope, global_scope, captures);
         break;
     }
     case AST_NODE_START: {
@@ -2093,7 +2094,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     tp->current_scope->last = entry;
 }
 
-// let_block: (let x = a, let y = b, expr) — sequential let bindings returning last expr
+// Parenthesized lets: (let x = a, let y = b, expr) — sequential bindings returning the last expr.
 AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
     log_debug("build let_block expr");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, block_node, sizeof(AstListNode));
@@ -2652,6 +2653,18 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         ast_node->type = &TYPE_ANY;
     }
     return (AstNode*)ast_node;
+}
+
+// Left-recursive member chains place member_expr directly in object; both CST
+// entry paths must preserve the same path-versus-field interpretation.
+static AstNode* build_member_expr(Transpiler* tp, TSNode member_node) {
+    ArrayList* segments = arraylist_new(8);
+    int scheme = collect_path_segments_if_path(tp, member_node, segments);
+    AstNode* result = scheme >= 0 ?
+        build_path_expr(tp, member_node, (PathScheme)scheme, segments) :
+        build_field_expr(tp, member_node, AST_NODE_MEMBER_EXPR);
+    arraylist_free(segments);
+    return result;
 }
 
 // Forward declaration: check if AST node contains ~ (current_item) reference
@@ -3326,33 +3339,6 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         if (parameter_short_circuits_error) {
             ast_node->type = lambda_type_union_normalized(tp->pool,
                 ast_node->type, &TYPE_ERROR);
-        }
-    }
-
-    // check for '^' propagation operator on the call
-    TSNode propagate_node = ts_node_child_by_field_id(call_node, FIELD_PROPAGATE);
-    if (!ts_node_is_null(propagate_node) && !tp->building_handler_operand) {
-        ast_node->propagate = true;
-        log_debug("call has '^' propagation operator");
-        // '^' is only valid on can_raise calls
-        if (!ast_node->can_raise) {
-            const char* fn_name = is_method_call ? method_name.str : func_name.str;
-            int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
-            record_semantic_error(tp, call_node, ERR_SEMANTIC_ERROR,
-                "'^' used on '%.*s' which does not return errors",
-                fn_name_len, fn_name);
-        } else if (ast_node->function &&
-                ast_node->function->type &&
-                ast_node->function->type->type_id == LMD_TYPE_FUNC) {
-            Type* success_type = function_success_result_type(
-                (TypeFunc*)ast_node->function->type);
-            if (success_type) {
-                // Propagation returns before the enclosing expression can see
-                // an error, so its continuation has the callee's success type.
-                // Keeping the pre-propagation ANY here turned `int^` results
-                // into generic arithmetic and later failed a typed return.
-                ast_node->type = success_type;
-            }
         }
     }
 
@@ -4388,6 +4374,14 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     TSNode child = ts_node_named_child(pri_node, 0);
     if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
 
+    if (ts_node_symbol(child) == sym_let_expr &&
+            !ts_node_is_null(ts_node_next_named_sibling(child))) {
+        // `_parenthesized_expr` is inline, so its leading lets now live directly
+        // under primary_expr; preserve their shared scope instead of treating only
+        // the first binding as the expression result.
+        return build_let_block(tp, pri_node);
+    }
+
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
 
@@ -4529,19 +4523,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         arraylist_free(segments);
     }
     else if (symbol == SYM_MEMBER_EXPR) {
-        // first check if this is a path expression (file.x.y, http.x.y, etc.)
-        ArrayList* segments = arraylist_new(8);
-        int scheme = collect_path_segments_if_path(tp, child, segments);
-        if (scheme >= 0) {
-            // it's a path expression
-            ast_node->expr = build_path_expr(tp, child, (PathScheme)scheme, segments);
-            ast_node->type = ast_node->expr->type;
-        } else {
-            // regular member expression
-            ast_node->expr = build_field_expr(tp, child, AST_NODE_MEMBER_EXPR);
-            ast_node->type = ast_node->expr->type;
-        }
-        arraylist_free(segments);
+        ast_node->expr = build_member_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_INDEX_EXPR) {
         // Check if this is a path index expression (path[expr])
@@ -4693,7 +4676,6 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
     else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
-    else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_IS_ERROR; }
 
     TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
     ast_node->operand = build_expr(tp, operand_node);
@@ -4716,7 +4698,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     TypeId operand_type = ast_node->operand->type->type_id;
     TypeId type_id;
 
-    if (ast_node->op == OPERATOR_NOT || ast_node->op == OPERATOR_IS_ERROR) {
+    if (ast_node->op == OPERATOR_NOT) {
         type_id = LMD_TYPE_BOOL;
     }
     else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
@@ -5081,7 +5063,20 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     }
 
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
-    StrView op = ts_node_source(tp, op_node);
+    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
+    StrView op;
+    if (!ts_node_is_null(op_node)) {
+        op = ts_node_source(tp, op_node);
+    } else if (!ts_node_is_null(right_node)) {
+        // Grouped operator tokens are hidden from the CST; their exact spelling
+        // is the source span between the already-fielded operand boundaries.
+        uint32_t left_end = ts_node_end_byte(left_node);
+        uint32_t right_start = ts_node_start_byte(right_node);
+        op.str = tp->source + left_end;
+        op.length = right_start - left_end;
+    } else {
+        op = {nullptr, 0};
+    }
     strview_trim(&op);
     ast_node->op_str = op;
     if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
@@ -5123,7 +5118,6 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 
     // For pipe operator: check if RHS uses ~ (current_item)
     // If not, inject the left side as first argument at call lookup time
-    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
     bool pipe_inject = false;
     if (ast_node->op == OPERATOR_PIPE) {
         if (!tsnode_has_current_item_ref(tp, right_node)) {
@@ -5420,6 +5414,8 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
+        // The value arm binds its own `~`; only the operand and error arm can
+        // consume a current-item context supplied by an enclosing pipe.
         return has_current_item_ref(handler->operand) ||
             has_current_item_ref(handler->body);
     }
@@ -5672,7 +5668,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         // LMD_TYPE_TYPE, which consumers already treat as boxed/dynamic
         // ("unions retain their runtime Item tag" — the shape-storage rule),
         // and the hardened native-return admission treats it as unprovable,
-        // so the boxed error join that `^`/`^err` consumes stays intact.
+        // so the boxed error join that propagation/handler consumers use stays intact.
         //
         // Plain differing arms (no divergence) still join as ANY for now: the
         // general `T1 | T2` join is more precise but makes the E208
@@ -5909,15 +5905,6 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     StrView name_view = node_name_text(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // check for error destructuring: let a^err = expr
-    TSNode error_name_node = ts_node_child_by_field_id(asn_node, FIELD_ERROR);
-    if (!ts_node_is_null(error_name_node)) {
-        StrView err_view = node_name_text(tp, error_name_node);
-        ast_node->error_name = name_pool_create_strview(tp->name_pool, err_view);
-        log_debug("error destructuring: %.*s^%.*s", (int)name_view.length, name_view.str,
-            (int)err_view.length, err_view.str);
-    }
-
     // check if the variable name is a reserved type keyword
     if (!is_type_definition && is_type_keyword(name_view)) {
         int line = ts_node_start_point(name).row + 1;
@@ -6122,15 +6109,6 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
         push_name(tp, ast_node, NULL);
     }
 
-    // also push the error name if error destructuring is used
-    if (ast_node->error_name) {
-        AstNamedNode* err_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
-        err_var->name = ast_node->error_name;
-        err_var->type = &TYPE_ANY;  // error variable is Item type
-        err_var->as = nullptr;
-        push_name(tp, err_var, NULL);
-    }
-
     return (AstNode*)ast_node;
 }
 
@@ -6225,10 +6203,10 @@ static bool pattern_is_symbol_tag(Transpiler* tp, TSNode pattern_node) {
         pattern_node = ts_node_named_child(pattern_node, 0);
     }
     if (ts_node_is_null(pattern_node)) return false;
-    TSNode tag_node = ts_node_child_by_field_id(pattern_node, FIELD_TAG);
-    if (ts_node_is_null(tag_node)) return false;
-    StrView tag = ts_node_source(tp, tag_node);
-    return tag.length >= 8 && memcmp(tag.str, "\\symbol(", 8) == 0;
+    StrView source = ts_node_source(tp, pattern_node);
+    // The compact hidden tag token has no CST field node; its spelling remains
+    // the first bytes of the island and determines the pattern representation.
+    return source.length >= 8 && memcmp(source.str, "\\symbol(", 8) == 0;
 }
 
 static bool pattern_ts_literal_set(Transpiler* tp, TSNode node) {
@@ -6253,9 +6231,8 @@ static bool pattern_ts_literal_set(Transpiler* tp, TSNode node) {
             pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_RIGHT));
     }
     if (symbol == sym_pattern_island) {
-        TSNode tag = ts_node_child_by_field_id(node, FIELD_TAG);
-        StrView tag_source = ts_node_source(tp, tag);
-        if (tag_source.length >= 8 && memcmp(tag_source.str, "\\symbol(", 8) == 0) return false;
+        StrView source = ts_node_source(tp, node);
+        if (source.length >= 8 && memcmp(source.str, "\\symbol(", 8) == 0) return false;
         return pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_BODY));
     }
     return false;
@@ -8230,7 +8207,8 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         return join_expr_mentions_name(handler->operand, name) ||
-            join_expr_mentions_name(handler->body, name);
+            join_expr_mentions_name(handler->body, name) ||
+            join_expr_mentions_name(handler->value_body, name);
     }
     default:
         return false;
@@ -9553,7 +9531,7 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
     }
     record_semantic_error(tp, call->node, ERR_UNHANDLED_ERROR,
         "error from '%.*s' must be handled: use '%.*s(...)^' to propagate, "
-        "'let result^err = %.*s(...)' to capture, or '%.*s(...) or default' to recover",
+        "handle with '%.*s(...) ^ { ... }', or recover with '%.*s(...) or default'",
         name_length, name, name_length, name, name_length, name, name_length, name);
 }
 
@@ -9620,6 +9598,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, handler->body, false,
             return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, handler->value_body, false,
+            return_acknowledgment);
         return;
     }
     case AST_NODE_BINARY:
@@ -9661,8 +9641,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     case AST_NODE_KEY_EXPR:
     case AST_NODE_NAMED_ARG: {
         AstNamedNode* named = (AstNamedNode*)node;
-        bool binding_acknowledgment = named->error_name ||
-            (named->declared_type && lambda_type_has_proven_error(named->declared_type));
+        bool binding_acknowledgment = named->declared_type &&
+            lambda_type_has_proven_error(named->declared_type);
         validate_enforcing_calls_in_expression(tp, named->as, binding_acknowledgment,
             return_acknowledgment);
         return;
@@ -9672,10 +9652,12 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             return_acknowledgment, return_acknowledgment);
         return;
     case AST_NODE_UNARY:
-    case AST_NODE_SPREAD:
-        validate_enforcing_calls_in_expression(tp, ((AstUnaryNode*)node)->operand, false,
-            return_acknowledgment);
+    case AST_NODE_SPREAD: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        validate_enforcing_calls_in_expression(tp, unary->operand,
+            unary->op == OPERATOR_PROPAGATE, return_acknowledgment);
         return;
+    }
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
@@ -9832,7 +9814,8 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         return ast_reads_binding(handler->operand, name) ||
-            ast_reads_binding(handler->body, name);
+            ast_reads_binding(handler->body, name) ||
+            ast_reads_binding(handler->value_body, name);
     }
     case AST_NODE_MEMBER_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
@@ -9977,7 +9960,13 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             InvalidatedBindingState operand_state = *state;
             InvalidatedBindingState body_state = *state;
             scan_invalidated_bindings(&body_state, handler->body);
-            invalidated_binding_union(state, &operand_state, &body_state);
+            if (handler->value_body) {
+                InvalidatedBindingState value_state = operand_state;
+                scan_invalidated_bindings(&value_state, handler->value_body);
+                invalidated_binding_union(state, &body_state, &value_state);
+            } else {
+                invalidated_binding_union(state, &operand_state, &body_state);
+            }
             break;
         }
         case AST_NODE_BINARY:
@@ -10395,6 +10384,11 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
     if (!ts_node_is_null(kind)) {
         StrView kind_str = ts_node_source(tp, kind);
         ast_node->is_edit = strview_equal(&kind_str, "edit");
+    } else {
+        // The compact view/edit token is hidden from the CST; the declaration
+        // source starts with the keyword that selects the template behavior.
+        StrView source = ts_node_source(tp, view_node);
+        ast_node->is_edit = source.length >= 4 && memcmp(source.str, "edit", 4) == 0;
     }
     log_debug("is edit: %d", ast_node->is_edit);
 
@@ -10946,8 +10940,11 @@ AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSy
 }
 
 static bool handler_operand_is_proc(AstNode* operand) {
-    if (!operand || operand->node_type != AST_NODE_CALL_EXPR) return false;
-    AstCallNode* call = (AstCallNode*)operand;
+    // the postfix handler tier may wrap a procedure call in primary_expr;
+    // classify the effective call so statement handlers keep their context.
+    AstNode* effective_operand = boundary_unwrap_primary(operand);
+    if (!effective_operand || effective_operand->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)effective_operand;
     AstNode* callee = boundary_unwrap_primary(call->function);
     if (!callee) return false;
     if (callee->node_type == AST_NODE_SYS_FUNC) {
@@ -10986,19 +10983,6 @@ static bool handler_is_value_context(TSNode handler_node) {
     return false;
 }
 
-static bool handler_operand_has_propagate(TSNode node) {
-    if (ts_node_is_null(node)) return false;
-    if (ts_node_symbol(node) == SYM_CALL_EXPR &&
-            !ts_node_is_null(ts_node_child_by_field_id(node, FIELD_PROPAGATE))) {
-        return true;
-    }
-    uint32_t child_count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        if (handler_operand_has_propagate(ts_node_child(node, i))) return true;
-    }
-    return false;
-}
-
 static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
         bool is_statement) {
     AstHandlerNode* ast_node = (AstHandlerNode*)alloc_ast_node(tp,
@@ -11008,38 +10992,16 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
 
     TSNode operand_node = ts_node_child_by_field_id(handler_node, FIELD_OPERAND);
     TSNode body_node = ts_node_child_by_field_id(handler_node, FIELD_BODY);
-    if (ts_node_symbol(handler_node) != SYM_HANDLER_PREFIX_EXPR &&
-            ts_node_symbol(operand_node) == SYM_CALL_EXPR &&
-            ts_node_is_null(ts_node_child_by_field_id(operand_node, FIELD_PROPAGATE))) {
-        // The optional call caret is grammar-owned so legacy `call()^` can
-        // coexist with handlers; reject the otherwise indistinguishable
-        // `call() { ... }` spelling before it becomes a recovery node.
-        record_semantic_error(tp, handler_node, ERR_INVALID_CALL,
-            "braced error handler requires `^` before `{`");
-    }
-    if (ts_node_symbol(handler_node) == SYM_HANDLER_BINARY_EXPR &&
-            ts_node_is_null(ts_node_child_by_field_id(handler_node, FIELD_PROPAGATE)) &&
-            !handler_operand_has_propagate(operand_node)) {
-        // The binary production permits a nested call to own the legacy caret;
-        // reject the no-caret recovery spelling when neither level supplied it.
-        record_semantic_error(tp, handler_node, ERR_INVALID_CALL,
-            "braced error handler requires `^` before `{`");
-    }
-    bool saved_handler_operand = tp->building_handler_operand;
-    tp->building_handler_operand = true;
+    TSNode value_body_node = ts_node_child_by_field_id(handler_node, FIELD_VALUE);
     ast_node->operand = build_expr(tp, operand_node);
-    tp->building_handler_operand = saved_handler_operand;
     bool saved_handler_body = tp->building_handler_body;
     tp->building_handler_body = true;
     ast_node->body = build_expr(tp, body_node);
     tp->building_handler_body = saved_handler_body;
-
-    // The legacy postfix caret is consumed by call_expr when it is followed
-    // by a braced handler.  It marks propagation only when no handler owns
-    // the call; clear it here so the enclosing handler can inspect the error
-    // value instead of returning before its recovery body runs.
-    if (ast_node->operand && ast_node->operand->node_type == AST_NODE_CALL_EXPR) {
-        ((AstCallNode*)ast_node->operand)->propagate = false;
+    if (!ts_node_is_null(value_body_node)) {
+        // The normal arm does not own a current error. Restoring the saved
+        // lexical state keeps an enclosing handler's `^` visible when nested.
+        ast_node->value_body = build_expr(tp, value_body_node);
     }
 
     bool statement_position = is_statement || handler_is_statement_position(handler_node);
@@ -11077,34 +11039,74 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
         return (AstNode*)ast_node;
     }
 
-    Type* successful = lambda_type_remove_error(tp->pool, ast_node->operand->type);
-    if (!successful) successful = &TYPE_ANY;
     Type* body_type = ast_node->body && ast_node->body->type
         ? ast_node->body->type : &TYPE_ANY;
-    // The handled branch produces the body value; the success branch preserves
-    // the operand's non-error contract for the surrounding expression.
-    ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
+    if (ast_node->value_body) {
+        Type* value_type = ast_node->value_body->type
+            ? ast_node->value_body->type : &TYPE_ANY;
+        // An explicit value arm replaces pass-through, so only the two arm
+        // result types contribute to the handler's contextual type.
+        ast_node->type = lambda_type_union_normalized(tp->pool, body_type, value_type);
+    } else {
+        // Without a value arm, success preserves the operand's non-error contract.
+        Type* successful = lambda_type_remove_error(tp->pool, ast_node->operand->type);
+        if (!successful) successful = &TYPE_ANY;
+        ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
+    }
     return (AstNode*)ast_node;
 }
 
 static AstNode* build_propagate_expr(Transpiler* tp, TSNode propagate_node) {
     TSNode operand_node = ts_node_child_by_field_id(propagate_node, FIELD_OPERAND);
     AstNode* operand = build_expr(tp, operand_node);
-    if (operand && operand->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)operand;
+    if (!operand) return NULL;
+
+    // the postfix tier supplies a primary wrapper around some calls; inspect
+    // the effective operand so a can_raise call is not misclassified as a
+    // total value merely because the grammar wrapper is present.
+    AstNode* effective_operand = boundary_unwrap_primary(operand);
+    bool may_error = operand->type && lambda_type_accepts_error(operand->type);
+    if (effective_operand && effective_operand->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)effective_operand;
         call->propagate = true;
-        if (!call->can_raise) {
-            record_semantic_error(tp, propagate_node, ERR_SEMANTIC_ERROR,
-                "postfix `^` used on a call that does not return errors");
-        } else {
-            Type* success_type = lambda_type_remove_error(tp->pool, call->type);
+        may_error = may_error || call->can_raise;
+        if (call->can_raise && call->function && call->function->type &&
+                call->function->type->type_id == LMD_TYPE_FUNC) {
+            // Preserve the established direct-call narrowing rule: only a
+            // resolved function signature may expose a native success lane;
+            // dynamic calls must keep their boxed outcome for the tag check.
+            Type* success_type = function_success_result_type(
+                (TypeFunc*)call->function->type);
             if (success_type) call->type = success_type;
         }
-        return operand;
     }
-    record_semantic_error(tp, propagate_node, ERR_INVALID_CALL,
-        "postfix `^` propagation requires a call expression");
-    return operand;
+    if (!may_error) {
+        record_semantic_error(tp, propagate_node, ERR_SEMANTIC_ERROR,
+            "postfix `^` used on an expression that does not return errors");
+    }
+
+    Type* success_type = lambda_type_remove_error(tp->pool, operand->type);
+    if (!success_type) success_type = &TYPE_ANY;
+    if (effective_operand && effective_operand->node_type == AST_NODE_CALL_EXPR) {
+        // retain the call node for the direct-call lowering path, but publish
+        // the error-free result type so a surrounding Item boundary boxes the
+        // native success lane instead of returning raw MIR bits as the script result.
+        operand->type = success_type;
+        // keep direct-call propagation on the call node so existing lowering
+        // can route the error before any native success lane is entered.
+        effective_operand->type = success_type;
+        return effective_operand;
+    }
+
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp,
+        AST_NODE_UNARY, propagate_node, sizeof(AstUnaryNode));
+    ast_node->operand = operand;
+    ast_node->op = OPERATOR_PROPAGATE;
+    ast_node->prefix = false;
+    ast_node->type = success_type;
+    ast_node->op_str = ts_node_source(tp,
+        ts_node_child_by_field_id(propagate_node, FIELD_PROPAGATE));
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
@@ -11140,20 +11142,14 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     case SYM_PRIMARY_EXPR:
         return build_primary_expr(tp, expr_node);
+    case SYM_MEMBER_EXPR:
+        return build_member_expr(tp, expr_node);
     case SYM_CALL_EXPR:
         // `start_expr` names its call operand directly instead of routing it
         // through primary_expr, so the shared call builder must accept both.
         return build_call_expr(tp, expr_node, symbol);
     case SYM_HANDLER_EXPR:
         return build_handler(tp, expr_node, false);
-    case SYM_HANDLER_PREFIX_EXPR:
-        return build_handler(tp, expr_node, false);
-    case SYM_HANDLER_BINARY_EXPR:
-        return build_handler(tp, expr_node, false);
-    case SYM_HANDLER_LITERAL_EXPR:
-        return build_handler(tp, expr_node, false);
-    case SYM_HANDLER_MEMBER_EXPR:
-        return build_field_expr(tp, expr_node, AST_NODE_MEMBER_EXPR);
     case SYM_PROPAGATE_EXPR:
         return build_propagate_expr(tp, expr_node);
     case SYM_UNARY_EXPR:
@@ -11166,8 +11162,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_current_error_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
-    case SYM_LET_BLOCK:
-        return build_let_block(tp, expr_node);
     case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
         return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
@@ -11460,20 +11454,6 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                         push_name(tp, (AstNamedNode*)dec_node, import_node);
                     }
                     log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
-                    // also export the error variable for ^err destructuring
-                    if (dec_node->error_name) {
-                        AstNamedNode* err_var = (AstNamedNode*)pool_calloc(tp->pool, sizeof(AstNamedNode));
-                        err_var->node_type = AST_NODE_ASSIGN;
-                        err_var->name = dec_node->error_name;
-                        err_var->type = &TYPE_ANY;
-                        err_var->as = nullptr;
-                        if (has_alias) {
-                            push_qualified_name(tp, err_var, import_node, import_node->alias);
-                        } else {
-                            push_name(tp, err_var, import_node);
-                        }
-                        log_debug("got pub error var: %.*s", (int)dec_node->error_name->len, dec_node->error_name->chars);
-                    }
                     // re-register type aliases in importing script's type_list
                     if (dec_node->type && dec_node->type->type_id == LMD_TYPE_TYPE) {
                         TypeType* tt = (TypeType*)dec_node->type;
@@ -12058,6 +12038,7 @@ static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         AstHandlerNode* handler = (AstHandlerNode*)node;
         walk_lambda_ast(handler->operand, visitor, data, descend_functions);
         walk_lambda_ast(handler->body, visitor, data, descend_functions);
+        walk_lambda_ast(handler->value_body, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_START:
@@ -12379,28 +12360,6 @@ static bool validate_concurrency_node(AstNode* node, void* data) {
     return false;
 }
 
-static bool classify_error_destructure_fault_boundary_node(AstNode* node,
-        void* data) {
-    (void)data;
-    if (node->node_type != AST_NODE_LET_STAM &&
-            node->node_type != AST_NODE_VAR_STAM &&
-            node->node_type != AST_NODE_PUB_STAM) {
-        return true;
-    }
-    for (AstNode* decl = ((AstLetNode*)node)->declare; decl; decl = decl->next) {
-        if (decl->node_type != AST_NODE_ASSIGN) continue;
-        AstNamedNode* assignment = (AstNamedNode*)decl;
-        if (!assignment->error_name || !assignment->as) continue;
-        MayAwaitScan scan = {};
-        walk_lambda_ast(assignment->as, scan_may_await_node, &scan, false);
-        // The language's existing error-value destructuring remains legal
-        // across await. Only a native C14 checkpoint needs this stricter
-        // lifetime classification, because its jmp_buf cannot outlive a poll.
-        assignment->local_fault_safe = !scan.found;
-    }
-    return true;
-}
-
 typedef struct HandlerAwaitValidation {
     Transpiler* tp;
 } HandlerAwaitValidation;
@@ -12473,13 +12432,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     HandlerAwaitValidation handler_validation = {.tp = tp};
     walk_lambda_ast((AstNode*)script, validate_handler_await_node,
         &handler_validation, true);
-
-    // Resolve the may-await fixed point before classifying each `^err` RHS.
-    // A direct pn call can become suspending only after its callee's analysis
-    // settles, so an earlier classification could leave a jmp_buf live across
-    // a task poll.
-    walk_lambda_ast((AstNode*)script, classify_error_destructure_fault_boundary_node,
-        NULL, true);
 
     // A procedure that starts a child but never parks still needs a scheduler
     // task so `self()` and scoped ownership have a concrete parent. Propagate

@@ -3,16 +3,16 @@
 
 // Arithmetic with error
 fn fail_fn() int^ { raise error("fail") }
-let a^err1 = fail_fn()
-type(err1)
+let a = fail_fn() ^ { ^ }
+type(a)
 
 // Error + number
-let b^err2 = fail_fn()
-type(err2 + 10)
+let b = fail_fn() ^ { ^ }
+type(b + 10)
 
 // Error in array access
-let c^err3 = fail_fn()
-type(err3)
+let c = fail_fn() ^ { ^ }
+type(c)
 
 // Multiple chained errors
 fn step1() int^ { raise error("step1 failed") }
@@ -21,5 +21,5 @@ fn chain() int^ {
     let v = step1()^
     step2(v)^
 }
-let result^err4 = chain()
-^err4
+let result = chain() ^ { ^ }
+result is error

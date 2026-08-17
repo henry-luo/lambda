@@ -24,7 +24,7 @@ type header_pat = \(">" .*)
 
 pn main() {
     var __t0 = clock()
-    let text^err = input(INPUT_PATH, 'text')
+    let text = input(INPUT_PATH, 'text') ^ { null }
     var original_len = len(text)
 
     // step 1: remove FASTA headers and newlines to get bare sequence

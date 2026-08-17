@@ -2,7 +2,7 @@
 // must be resolved before the async frame stores its live words.
 
 pn delayed_value() {
-    sleep(0)^
+    sleep(0)
     return 7i64
 }
 

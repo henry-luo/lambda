@@ -14,6 +14,6 @@ flowchart TB
   CALLER -->|"propagates up the native call chain"| TOP["script boundary"]
 
   OK --> USE["value flows on"]
-  USE -->|"used as a condition"| TRUTHY["is_truthy: LMD_TYPE_ERROR -> BOOL_FALSE\nerrors are falsy; if (^e) tests for error"]
+  USE -->|"used as a condition"| TRUTHY["is_truthy: LMD_TYPE_ERROR -> BOOL_FALSE\nerrors are falsy; use is error to test them"]
 
-  COMPILE["Compile-time lowering (NOT runtime):\n? operator, let a^err = expr,\nERR_UNHANDLED_ERROR enforcement\nbuild_ast.cpp / transpile-mir.cpp"] -.->|"emits the guarded calls\nand the error-name binding"| CALL
+  COMPILE["Compile-time lowering (NOT runtime):\n? operator, expr ^ { ... },\nERR_UNHANDLED_ERROR enforcement\nbuild_ast.cpp / transpile-mir.cpp"] -.->|"emits the handler/propagation\nboundary"| CALL

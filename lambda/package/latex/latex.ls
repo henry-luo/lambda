@@ -20,13 +20,13 @@ import html_ser: .to_html
 
 // parse and render a LaTeX file to HTML string
 pub fn render_file_to_html(file_path) {
-    let ast^err = input(file_path, {type: "latex"})
+    let ast = input(file_path, {type: "latex"}) ^ { null }
     render_to_html(ast, null)
 }
 
 // parse and render a LaTeX string to HTML string
 pub fn render_string_to_html(latex_source) {
-    let ast^err = input(latex_source, {type: "latex", source: true})
+    let ast = input(latex_source, {type: "latex", source: true}) ^ { null }
     render_to_html(ast, null)
 }
 
@@ -72,13 +72,13 @@ pub fn render_default(ast) {
 
 // parse and render a LaTeX file
 pub fn render_file(file_path) {
-    let ast^err = input(file_path, {type: "latex"})
+    let ast = input(file_path, {type: "latex"}) ^ { null }
     render(ast, null)
 }
 
 // parse and render a LaTeX string
 pub fn render_string(latex_source) {
-    let ast^err = input(latex_source, {type: "latex", source: true})
+    let ast = input(latex_source, {type: "latex", source: true}) ^ { null }
     render(ast, null)
 }
 

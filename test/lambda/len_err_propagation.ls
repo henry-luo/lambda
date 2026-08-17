@@ -22,8 +22,8 @@ len(null)
 
 '-- containment is not propagation: an error INSIDE a collection is one item --'
 fn len_with_error_inside() {
-    let a^err = fail()
-    len([1, err, 3])
+    let a = fail() ^ { ^ }
+    len([1, a, 3])
 }
 len_with_error_inside()
 

@@ -2,6 +2,7 @@
 fn deep(n) => if (n == 0) [] else [deep(n - 1)]
 
 pn main() {
-    let value^err = deep(300) == deep(300)
-    print([value, ^err, err.code, err.message])
+    var fault = null
+    let value = (deep(300) == deep(300)) ^ { fault = ^; null }
+    print([value, fault is error, fault.code, fault.message])
 }

@@ -96,7 +96,7 @@ typedef enum LambdaErrorCode {
     ERR_BREAK_OUTSIDE_LOOP = 225,     // break used outside loop
     ERR_CONTINUE_OUTSIDE_LOOP = 226,  // continue used outside loop
     ERR_RETURN_OUTSIDE_FUNCTION = 227,// return used outside function
-    ERR_UNHANDLED_ERROR = 228,        // error-returning call not handled with ? or ^err
+    ERR_UNHANDLED_ERROR = 228,        // error-returning call not handled with ^, handler, or or
     ERR_UNSUPPORTED_DYNAMIC_ABI = 229,// valid dynamic call exceeds physical dispatch ABI
     ERR_FUNCTION_ARGUMENT_LIMIT = 230,// Core Lambda function/call exceeds LAMBDA_MAX_FUNCTION_ARGS
     ERR_INVALIDATED_BINDING = 231,     // read after a hidden cross-frame mutation

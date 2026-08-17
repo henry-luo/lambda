@@ -224,11 +224,11 @@ function renderLambda(formula, displayMode) {
 import html_ser: lambda.package.latex.to_html
 
 let formula = ${lit}
-let ast^err = parse(formula, {type: "math", flavor: "latex"})
-let result = if (^err) {
-    {formula: formula, error: string(^err), html: ""}
+let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }
+let result = if (parsed is error) {
+    {formula: formula, error: string(parsed), html: ""}
 } else {
-    let rendered = math_pkg.${fn}(ast)
+    let rendered = math_pkg.${fn}(parsed)
     let html = html_ser.to_html(rendered)
     {formula: formula, error: "no-error", html: html}
 }

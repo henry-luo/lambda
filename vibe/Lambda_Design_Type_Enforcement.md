@@ -2,18 +2,20 @@
 
 **Status:** ROUND 1 IMPLEMENTED (commit `274625d56`) — the core boundary catalog is enforced;
 round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
-firewall, E228 acknowledgment forms, `or`-narrowing, fault channel), tracked in
+firewall, `or`-narrowing, fault channel), tracked in
 [`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
 work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
-skip to the closest safe boundary) and TE-16 (the `^ { }` handler; `let a^err` and `if (^err)`
-planned separately) decided 2026-08-01; the initial handler grammar/runtime slice is landed and
-the Rev 6 grammar-conformance migration remains pending. Rev 6
+skip to the closest safe boundary) and TE-16 (the `^ { }` handler; legacy `^err` and prefix
+error tests retired) were decided 2026-08-01. The handler grammar/runtime slice and the Rev 7
+grammar-conformance/corpus migration are landed. The optional two-arm form
+`e ^ { error_arm } ~ { value_arm }` was decided and landed 2026-08-17. Rev 6
 (2026-08-12) adopts the S7.6.2v2/S7.6.3v2 postfix-primary grammar: handlers and
 propagation own their mandatory carets, prefix-handler shorthand is retired, and `call_expr`
 no longer owns an optional caret. Rev 5 (2026-08-06) assigns the handler-local error to `^`
 (`^`, `^.field`, `^[index]`) and leaves `~` under its existing current-value rules.
 **Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01;
-postfix grammar revised 2026-08-12
+postfix grammar revised 2026-08-12; legacy syntax retirement landed and two-arm handler
+syntax decided 2026-08-17
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
@@ -252,7 +254,7 @@ detached and the replacement is installed back into the owning binding or parent
 **TE-4 — Runtime mismatch produces a rich diagnostic-carrying error value.** A failed DEFERRED
 check yields a proper error object/value (decided 2026-07-30; see TE-9), naming the boundary,
 expected type, actual type/value, source location, and validator path where applicable. It flows
-like any Lambda error value — dischargeable with `let x^err = …`, postfix `^`, `or`, or
+like any Lambda error value — dischargeable with a braced handler, postfix `^`, `or`, or
 `x is error` — and a script whose uncontained result is an error fails with that diagnostic.
 Never `null`, never `0`, never pointer bits, never a silent pass-through. The earlier inline
 code-only error form is rejected: a bare code cannot satisfy this diagnostic contract.
@@ -300,7 +302,7 @@ re-represented (`float(3.0) → int` succeeds as int 3); inexact values fail wit
 error. Explicit conversion functions own lossy conversions.
 
 `any \ error` is the non-error top type. It is the success type produced when channel-agnostic
-`^err` destructuring or postfix `^` strips errors from an `any` outcome. The schema validator's
+braced handling or postfix `^` strips errors from an `any` outcome. The schema validator's
 historical `any` pattern is intentionally treated as this non-error validation pattern
 (`any \ error`): validation asks whether a value is usable data, while the core language type
 `any` remains the true top type. This validator-specific spelling is documented until the
@@ -1039,6 +1041,10 @@ canonicalization decision, are what can later make the TS-3/TS-5 fast paths safe
 
 ### TE-13 — Unified discharge surface over the two error forms (revised 2026-07-29, user)
 
+> **Historical record.** The pre-TE-16 analysis below retains the then-proposed `^err` and
+> prefix-test spellings. The landed surface is the TE-16 ruling below: braced handlers,
+> postfix propagation, and `is error`, per **S7.6.5v2**.
+
 **Two error forms, distinguished by obligation — different types, not one type.** (This
 revises the earlier draft's "one type, two provenances" identification.)
 
@@ -1068,7 +1074,7 @@ E228 guards against *unawareness*, not against deferred branching — so it is s
 the enforcing call's result is received by a context that **textually** engages the error
 possibility:
 
-1. `^err` destructuring, or postfix-`^` propagation (today's two forms);
+1. a braced handler or postfix-`^` propagation;
 2. a binding, parameter, or declared return whose explicit type admits `error` — `T | error`,
    `T^` (equivalent in value positions), or `error` itself. The binding carries the outcome as
    a union, and ordinary assignability already enforces engagement-before-plain-`T` for both
@@ -1083,6 +1089,22 @@ accept an untyped capture. The §10.7 firewall backstops the demotion path: an a
 error still cannot silently escape a declared plain-`T` interface. Implementation: one added
 condition at the existing E228 site (`build_ast.cpp:5197` — "declared type explicitly admits
 error") plus a third suggestion in the diagnostic text.
+
+#### Common binding acknowledgments
+
+For ordinary variable binding, the three common forms are:
+
+```lambda
+let value = expr ^ { ^ }       // preserve the soft error value
+let value = expr ^ { null }    // intentional fallback value
+let value: T | error = pn_call // explicit union binding
+```
+
+The third form is an acknowledgment boundary under **S7.5.1**: success binds `T`, while a
+hard raised error is captured as a soft `error` value in `value`. It neither re-raises nor
+chooses a fallback. The first form uses the handler to preserve the error; the second
+acknowledges it and replaces it with `null`, per **S7.6.1v3/S7.6.2v3**. These forms replace
+the retired `let value^err = pn_call` split under **S7.6.5v2**.
 
 **Acknowledgment tightness (DECIDED 2026-07-29, user): tight everywhere for `^` — keyed on the
 form, not on fn vs pn.** The acknowledgment must be the **immediate expression surrounding the
@@ -1471,7 +1493,7 @@ ANY-poisoning this design exists to remove), or a polled side-flag (cost on ever
   is compile-time gated at the immediate expression and therefore never reaches the skip
   machinery; TE-15 governs defects and boundary-rejected soft errors only.
 
-### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, revised 2026-08-12, user)
+### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, revised 2026-08-17, user)
 
 **Decision.** Local error handling uses one braced syntax with two
 context-selected forms:
@@ -1483,12 +1505,14 @@ pn_call() ^ {               // statement form: handle, then continue
 }
 ```
 
-The planned retirement of `let a^err = e` and the old prefix error test `if (^err)` remains a
-separate migration pass; the current implementation keeps those legacy forms for compatibility.
+The retirement of `let a^err = e` and the old prefix error test `if (^err)` is now landed: the
+grammar, AST/runtime, and active `.ls` corpus no longer accept or use those forms. The formal
+authority for this retirement is **S7.6.5v2**, alongside **S7.6.2v3/S7.6.3v2** for postfix
+handler/propagation placement.
 A bare `^`, `^.field`, or `^[index]` is now a current-error reference only inside an active
 handler body. A handler always has an operand on its left; the prefix `^ { … } e` shorthand does
 not exist. This keeps the error channel consistently spelled with `^` while leaving `~` available
-for its existing current-value contexts. The formal authority is **S7.6.2v2/S7.6.3v2**.
+for its existing current-value contexts. The formal authority is **S7.6.2v3/S7.6.3v2**.
 
 #### Why the destructure had to go
 
@@ -1558,13 +1582,67 @@ then resumes after the handled statement.
 - **Channel-agnostic**, per TE-13: `^ { }` discharges both raised (`T^E`) and soft
   (`T | error`) errors.
 
+#### Extended two-arm handler syntax — six options and decision (decided 2026-08-17, user)
+
+The one-arm handler is ideal when success should pass through unchanged, but explicit
+error-versus-value branching is common enough to warrant a compact form. The six considered
+surfaces were:
+
+| Option | Surface | Assessment |
+|---|---|---|
+| 1 | `e ^ { error_arm } { value_arm }` | Rejected: two adjacent anonymous blocks are too cryptic; the second block has no visible role marker. |
+| 2 | `e ^ { error_arm } else { value_arm }` | Rejected: `else` creates dangling/ownership ambiguity beside `if … else`, especially when the handler is the `if` body expression. |
+| 3 | `e ^ { error_arm } default { value_arm }` | Viable runner-up: explicit and aligned with `match`, but `default` describes selection indirectly rather than naming the normal-value context. |
+| 4 | `e ^ { value_arm } error { error_arm }` | Rejected: the first block reverses the established meaning of `^ { … }`; its interpretation would depend on a later suffix. |
+| 5 | `e ^ { value_arm } catch { error_arm }` | Rejected: it has the same reversal and imports `try`/exception expectations into a channel-agnostic soft-or-raised error handler. |
+| 6 | `e ^ { error_arm } ~ { value_arm }` | **Decided:** preserves the established error arm, marks the non-error arm with Lambda's current-value symbol, and needs neither a new keyword nor `else` ownership rules. |
+
+**Decision: adopt option 6, `e ^ { error_arm } ~ { value_arm }`.** The operand is evaluated
+exactly once. A soft or raised error selects the first arm and binds it to handler-local `^`;
+every non-error result, including `null` and `false`, selects the second arm and binds it to
+handler-local `~`. In the error arm, an enclosing `~` keeps its existing meaning. In the value
+arm, the new `~` is innermost and shadows an enclosing current-value context. Errors raised by
+either selected arm are fresh outcomes and are not swallowed by the same handler.
+
+```lambda
+pn_func(inner, options) ^ {
+    // error arm: ^ is the raised pn error
+    diagnostic(^)
+} ~ {
+    // value arm: ~ is the pn result
+    transform(~)
+}
+```
+
+This statement-position shape is expected to be the common `pn`-call flow: handle a directly
+raised error in the first arm, or continue with the returned value in the second. Omitting the
+`~` arm preserves the one-arm rule: success passes through unchanged. In expression position the
+result type is `type(error_arm) | type(value_arm)`; in statement position the selected arm
+executes and normal completion continues after the handler. The complete two-arm construct
+remains primary-like at the member-access/postfix tier, so, for example,
+`e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
+
+`match` remains the long-term canonical and extensible branching form; the two-arm handler is
+compact syntax for the frequent binary outcome split:
+
+```lambda
+match e {
+    case error { /* error branch; handler form exposes this value as ^ */ }
+    default { /* non-error branch; handler form exposes this value as ~ */ }
+}
+```
+
+The semantic authority is **S7.6.1v3/S7.6.2v3** (with acknowledgment under **S7.5.1**).
+The grammar, AST, MIR lowering, nested handler contexts, and expression/direct-`pn` regression
+coverage landed on 2026-08-17.
+
 #### Syntax: brace-delimited, and why
 
 The handler **must** be braced. `^` followed by `{` is the handler; `^` followed by anything
 else (or nothing) is postfix propagate. This is the lexical discriminator for both the
 expression and statement forms; the surrounding AST context selects which form applies.
 
-Per **S7.6.2v2/S7.6.3v2**, both forms are left-associative postfix-primary operations at the
+Per **S7.6.2v3/S7.6.3v2**, both forms are left-associative postfix-primary operations at the
 same logical precedence tier as member (`.`) and query (`?`) access. Their operand is a primary
 expression; parentheses explicitly widen it. The handler result is itself primary-like, so
 postfix operations continue left-to-right. The mandatory caret is owned by the handler or
@@ -1613,11 +1691,11 @@ real distinction is coalescing-without-access versus error-specific-with-access 
 
 #### Retiring `if (^err)`
 
-The migration spelling **`err is error`** is available for new code (verified 2026-08-01), while
-the legacy destructure and prefix test remain accepted until their separate retirement pass. The
-handler-local current-error atom adds a distinct scoped use of `^`: postfix propagation, braced
-handler delimitation, the type-level channel, and the handler-local current error
-remain separate contexts. Outside a handler body, a bare `^` is not a value expression.
+The migration spelling **`err is error`** is now the only error-test spelling (verified in the
+2026-08-17 corpus migration). The handler-local current-error atom adds a distinct scoped use of
+`^`: postfix propagation, braced handler delimitation, the type-level channel, and the
+handler-local current error remain separate contexts. Outside a handler body, a bare `^` is not a
+value expression.
 
 #### Acknowledgement taxonomy for the enforcing channel
 
@@ -1625,7 +1703,7 @@ A raised `T^E` must be acknowledged at the immediate expression (TE-13 tightness
 one of:
 
 1. `match` with a `case error:` arm;
-2. `e ^ { … }` — handle here;
+2. `e ^ { … }` — handle here, optionally with `~ { … }` as the explicit non-error arm;
 3. `e^` — propagate;
 4. a receiving position that textually admits error — `let x: T^ = e`, `let x: T | error = e`,
    or a declared parameter/return of that shape.
@@ -1646,14 +1724,14 @@ never reaches the skip machinery.
 
 #### Handler-protected `await` — rejected for now (decided 2026-08-06, user)
 
-The handler must inherit the old destructure's **system-fault** capture, not only its value-error
-handling (`transpile_local_fault_expression` installs a real `LambdaRecoveryFrame` with an inline
-`sigsetjmp`). That runs into a stack-lifetime conflict: the jump buffer records a machine context
-inside the *currently executing* JIT activation, and an `await` unwinds the native stack back to
-the scheduler, resuming later on a different frame. A buffer captured before the suspension
-points at stack that no longer exists. This is why `AstNamedNode.local_fault_safe` exists —
-`classify_error_destructure_fault_boundary_node` scans the RHS for a possible suspension and, on
-finding one, silently drops to plain `ItemError` destructuring with **no fault capture**.
+The handler must eventually cover the **system-fault** channel, not only value-error handling.
+The retired destructure used `transpile_local_fault_expression` with a real
+`LambdaRecoveryFrame` and inline `sigsetjmp`; that implementation path and its
+`AstNamedNode.local_fault_safe` state are gone. The remaining design constraint is unchanged:
+the jump buffer records a machine context inside the *currently executing* JIT activation, and
+an `await` unwinds the native stack back to the scheduler, resuming later on a different frame.
+A buffer captured before the suspension points at stack that no longer exists. The new handler
+lowering must use `MayAwaitScan` to reject such operands rather than silently degrading capture.
 
 **Decision: `e ^ { … }` over a possibly-suspending operand is a compile error.** Keep it simple
 first. This is the existing restriction made *loud* rather than silent, so nothing regresses, and
@@ -1678,23 +1756,15 @@ error to allowed is backward-compatible, so no code written under the rejection 
 #### Migration
 
 - Rewrite a value-producing recovery as `let a = e ^ { H }`. A legacy two-arm
-  `let a^err = e; if (^err) { H } else { B }` becomes a `match` unless `H` supplies the value
-  consumed by a common tail or leaves the scope. Rewrite a command-style capture as
-  `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
+  `let a^err = e; if (^err) { H } else { B }` becomes `e ^ { H } ~ { B }` when both branches
+  are local expressions; use `match` for wider or multi-way branching. Rewrite a command-style
+  capture as `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
 - Rewrite `if (^err)` as `if (err is error)`.
-- Grammar: in the future retirement pass, remove the legacy prefix-unary error test and old
-  destructure production; replace the split call/literal/binary/member handler productions with
-  one postfix `handler_expr` over `primary_expr`; retire every prefix-handler production; make the
-  handler result primary-like; and remove the optional caret from `call_expr` so only handler and
-  propagation constructs own it. Preserve `current_error_expr` (`^`, `^.field`, `^[index]`) with
-  handler-body scope. Run `make generate-grammar` (never hand-edit `parser.c`).
-- **E228 diagnostics advertise the retired form verbatim** — "use `d(...)^` to propagate,
-  `let result^err = d(...)` to capture, or `d(...) or default` to recover"
-  (`build_ast.cpp:5199`, `:9017`). They must be updated in the same change or they will
-  instruct users toward syntax that no longer exists.
-- Doc sweep: `doc/Lambda_Error_Handling.md` (~28 hits, including its "Error Destructuring"
-  section), `doc/Lambda_Formal_Semantics.md` §7.3/§11.4/§13, `doc/Lambda_Reference.md`,
-  `doc/Lambda_Cheatsheet.md`. Note `pub x^err = …` also disappears.
+- Grammar: the retirement is landed. `handler_expr` and `propagate_expr` are postfix-primary
+  forms over `primary_expr`; all prefix-handler and legacy destructure productions are removed;
+  `current_error_expr` remains scoped to handler bodies. Run `make generate-grammar` after grammar
+  changes (never hand-edit `parser.c`).
+- E228 now advertises only postfix propagation, braced handling, and `or` recovery.
 - **Lazy/streaming `for` bodies** — where containment materializes for deferred evaluation; KIV.
 - **Engagement-set finalization** — the exact list of skip-suppressing forms, kept aligned with
   the E228 acknowledgment forms as those settle.

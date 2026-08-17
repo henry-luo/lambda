@@ -927,8 +927,8 @@ fn is_ensuremath_text(content) =>
 
 fn render_ensuremath_text(content) {
     let inner = slice(content, 12, len(content) - 1)
-    let ast^err = parse(inner, {type: "math", flavor: "latex"})
-    if (^err) {
+    let ast = parse(inner, {type: "math", flavor: "latex"}) ^ { ^ }
+    if (ast is error) {
         box.text_box(decode_latex_text(content), css.TEXT, "mord")
     } else {
         let inner_box = render_node(ast, ctx.text_context())
@@ -964,12 +964,12 @@ fn render_text_inline_math_content(content) {
         let after = decode_latex_text(slice(content, end_pos + 1, len(content)))
         let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
         let parse_src = inline_text_math_parse_source(math_src)
-        let ast^err = parse(parse_src, {type: "math", flavor: "latex"})
+        let ast = parse(parse_src, {type: "math", flavor: "latex"}) ^ { ^ }
         // Mark inline math embedded in \text{...}: MathLive escapes `<`/`>`
         // here (text-mode semantics) rather than emitting them raw as it does
         // for top-level math relations.
         let embedded_ctx = ctx.derive(ctx.text_context(), {text_embedded: true})
-        let math_box = if (^err) box.text_box("$" ++ math_src ++ "$", css.TEXT, "mord")
+        let math_box = if (ast is error) box.text_box("$" ++ math_src ++ "$", css.TEXT, "mord")
             else render_node(ast, embedded_ctx)
         let math_gap = if (before_box != null) box.skip_box(0.17) else null
         let after_box = if (after != "") box.text_box(after, css.TEXT, "mord") else null
@@ -3270,8 +3270,8 @@ fn is_dollar_math_group(content_arg) =>
 fn render_dollar_math_group(content_arg, context) {
     let txt = plain_text(content_arg)
     let inner = trim(slice(txt, 1, len(txt) - 1))
-    let ast^err = parse(inner, {type: "math", flavor: "latex"})
-    if (^err) render_node(content_arg, context)
+    let ast = parse(inner, {type: "math", flavor: "latex"}) ^ { ^ }
+    if (ast is error) render_node(content_arg, context)
     else render_node(ast, context)
 }
 

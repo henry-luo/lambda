@@ -1,5 +1,9 @@
 // Match statement tests (procedural form with pn/main)
 
+pn raised_match_source() int^ {
+    raise error("match source")
+}
+
 pn main() {
     // Test 1: match statement with statement arms
     var result = ""
@@ -42,4 +46,11 @@ pn main() {
         default: "nonzero"
     }
     print(x)
+
+    // Test 6: a directly raised pn result is acknowledged by case error.
+    let raised = match raised_match_source() {
+        case error: 7
+        case int: 0
+    }
+    print(raised)
 }

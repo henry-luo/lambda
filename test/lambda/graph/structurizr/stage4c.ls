@@ -14,8 +14,8 @@ fn edge_pairs(graph) => [
 
 fn tags(value) => [for (tag in direct(value, "tag")) string(tag.name)]
 
-let source^err = input("test/lambda/graph/structurizr/stage4c.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/stage4c.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let c4_model = direct(workspace, "c4-model")[0]
 let all_elements = direct(c4_model, "c4-element")

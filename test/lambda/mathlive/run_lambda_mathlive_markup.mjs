@@ -286,9 +286,9 @@ ${formulaList}
 
 fn render_formula(test_case) {
     let formula = test_case.formula
-    let ast^err = parse(formula, {type: "math", flavor: "latex"})
-    if (^err) {
-        let result = {formula: formula, error: string(^err), html: ""}
+    let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }
+    if (parsed is error) {
+        let result = {formula: formula, error: string(parsed), html: ""}
         result
     }
     else {
@@ -298,7 +298,7 @@ fn render_formula(test_case) {
         // therefore display-rooted — verified: inline-golden superscripts use
         // sup1 (0.41), never sup2 (0.36). Render display-style to match the
         // ground truth.
-        let rendered = math_pkg.render_display(ast)
+        let rendered = math_pkg.render_display(parsed)
         let html = html_ser.to_html(rendered)
         let result = {formula: formula, error: "no-error", html: html}
         result

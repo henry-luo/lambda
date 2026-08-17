@@ -514,10 +514,14 @@ with the same Lambda bridge pattern used for package-driven PDF conversion.
 
 The bridge source is conceptually:
 
+The graph bridge uses the postfix handler surface required by
+**S7.6.2v2/S7.6.3v2**; the former `^err` destructuring is retired under
+**S7.6.5v2**.
+
 ```lambda
 import graph_transform: lambda.package.graph.transform
 
-let graph^err = input("diagram.mmd", {type: "mermaid"})
+let graph = input("diagram.mmd", {type: "mermaid"}) ^ { null }
 let installed = graph_transform.install()
 graph_transform.to_html(graph, {theme: "zinc-dark"})
 ```

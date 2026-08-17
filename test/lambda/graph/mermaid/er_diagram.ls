@@ -11,8 +11,8 @@ fn er_attributes(node) => [
     where model.tag(child) == "er-attribute") child
 ]
 
-let source^source_error = input(
-  "test/lambda/graph/mermaid/er_diagram.mmd", {type: "graph", flavor: "mermaid"})
+let source = (input(
+  "test/lambda/graph/mermaid/er_diagram.mmd", {type: "graph", flavor: "mermaid"})) ^ { null }
 let source_nodes = model.nodes(source)
 let source_edges = model.edges(source)
 let normalized = normalize.normalize(source)

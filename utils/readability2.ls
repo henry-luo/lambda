@@ -1534,10 +1534,10 @@ pub fn parse_file(file_path) map^ => parse(file_path)
 /// Parse and save clean content to file.
 /// NOTE: Requires procedural execution (./lambda.exe run)
 //pub pn parse_and_save(input_path, output_path) map^ {
-//    var result^err = parse(input_path)
+//    var result = parse(input_path) ^ { null }
 //    if (err != null) { raise err }
 //    if (result.content != null) {
-//        var out^out_err = output(result.content, output_path, 'html')
+//        var out = output(result.content, output_path, 'html') ^ { null }
 //        if (out_err != null) { raise out_err }
 //    }
 //    return result

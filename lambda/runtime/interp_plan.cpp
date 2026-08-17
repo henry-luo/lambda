@@ -157,6 +157,7 @@ static void interp_visit_children(AstNode* node, InterpChildFn visit, void* ctx)
     case AST_NODE_HANDLER_STAM:
         V(((AstHandlerNode*)node)->operand);
         V(((AstHandlerNode*)node)->body);
+        V(((AstHandlerNode*)node)->value_body);
         break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -503,13 +504,6 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // would keep the int. Declaration-boundary contracts are P1.4; until then
     // an annotated binding routes the whole script to the JIT.
     if (node->node_type == AST_NODE_ASSIGN) {
-        // `let a^err = …` splits a value-or-error result across two bindings;
-        // that is the error channel, which lands in P1.4.
-        if (((AstNamedNode*)node)->error_name) {
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
         Type* declared = ((AstNamedNode*)node)->declared_type;
         if (declared) {
             TypeId tid = declared->type_id;

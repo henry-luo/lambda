@@ -16,7 +16,7 @@ let vm = map(["x", 100, "y", 200])
 "x" in vm
 
 "=== Element (attr values + children) ==="
-let doc^err = parse("<item x='1' y='2'>hello</item>", "xml")
+let doc = parse("<item x='1' y='2'>hello</item>", "xml") ^ { null }
 let el = doc[0]
 "1" in el
 "hello" in el

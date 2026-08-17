@@ -10,8 +10,8 @@ pn main() {
         send(handle, index)^
         index = index + 1
     }
-    let sent^err = send(handle, 1024)
-    print(^err)
+    let sent = send(handle, 1024) ^ { ^ }
+    print(sent is error)
     cancel(handle)
-    let done^cancelled = wait(handle)
+    let done = wait(handle) ^ { null }
 }

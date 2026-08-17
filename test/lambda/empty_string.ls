@@ -39,7 +39,7 @@ let only_empty = data that (~.value == "")
 for (x in only_empty) x.name
 
 '=== data-derived empty string ==='
-let parsed^err = parse("{\"name\":\"\"}", 'json')
+let parsed = parse("{\"name\":\"\"}", 'json') ^ { null }
 parsed.name == ""
 parsed.name == null
 parsed.name is string

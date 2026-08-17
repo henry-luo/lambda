@@ -3,7 +3,7 @@ pn tick() {
     return 5
 }
 pn leaf(value) {
-    sleep(1)^
+    sleep(1)
     return value
 }
 

@@ -1,5 +1,5 @@
 // Test: Error Handling
-// Layer: 2 | Category: statement | Covers: T^E, raise, ^, let a^err, compile enforcement
+// Layer: 2 | Category: statement | Covers: T^E, raise, ^, braced handlers, compile enforcement
 
 // ===== Basic error return type =====
 fn safe_divide(a: int, b: int) int^ {
@@ -17,12 +17,12 @@ fn double_divide(a: int, b: int) int^ {
 double_divide(10, 2)
 double_divide(10, 0)
 
-// ===== Let destructuring with ^err =====
-let result^err = safe_divide(10, 0)
-err
-err.message
+// ===== Braced handler recovery =====
+let result = safe_divide(10, 0) ^ { ^ }
+result
+result.message
 
-let good^err2 = safe_divide(10, 5)
+let good = safe_divide(10, 5) ^ { null }
 good
 
 // ===== Error with code =====
@@ -32,9 +32,9 @@ fn validate_age(age: int) int^ {
     age
 }
 validate_age(25)
-let v^e = validate_age(-5)
-e.message
-e.code
+let v = validate_age(-5) ^ { ^ }
+v.message
+v.code
 
 // ===== Chained errors =====
 fn process_input(s: string) int^ {
@@ -56,10 +56,10 @@ fn get_value() int^ {
 let val = get_value() or 42
 val
 
-// ===== ^expr check =====
-let check1 = ^safe_divide(10, 2)
+// ===== expr is error check =====
+let check1 = (safe_divide(10, 2) ^ { ^ }) is error
 check1
-let check2 = ^safe_divide(10, 0)
+let check2 = (safe_divide(10, 0) ^ { ^ }) is error
 check2
 
 // ===== Multiple error returns =====

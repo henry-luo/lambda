@@ -14,6 +14,6 @@ fn may_fail(x) int^ {
     else x * 2
 }
 may_fail(5)^
-let val^err = may_fail(0)
+let val = may_fail(0) ^ { ^ }
 val
-^err
+val is error

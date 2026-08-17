@@ -175,7 +175,7 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
 - `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
 - `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
-- `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, `?` propagation, `let a^err` destructuring)
+- `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, postfix `^` propagation, `expr ^ { ... }` handlers)
 - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
 - `doc/Lambda_Validator_Guide.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet

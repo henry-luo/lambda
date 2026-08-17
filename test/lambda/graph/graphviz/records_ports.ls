@@ -12,8 +12,8 @@ fn item_by_id(items, id) {
   if (len(matches) > 0) matches[0] else null
 }
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/records_ports.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/records_ports.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let nodes = model.nodes(graph)
@@ -38,10 +38,10 @@ let result = layout.compute({
   edges: model.edges(graph), direction: "LR", directed: true
 })
 let html = transform.to_html(graph)
-let compass_source^compass_error = parse(
+let compass_source = (parse(
   "digraph Compass { p [shape=record,label=\"<n> Named|Other\"] q r " ++
     "p:n -> q r:n -> q r:se -> q }",
-  {type: "graph", flavor: "dot"})
+  {type: "graph", flavor: "dot"})) ^ { null }
 let compass_normalized = normalize.normalize(compass_source)
 let compass_graph = compass_normalized.graph
 let compass_nodes = model.nodes(compass_graph)

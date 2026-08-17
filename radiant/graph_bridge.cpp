@@ -81,13 +81,13 @@ char* build_graph_to_html_bridge_script(const char* graph_file, const char* them
     const char* opts_suffix = escaped_theme ? "\"}" : "";
     const char* graph_source_format =
         "import graph_transform: lambda.package.graph.transform\n"
-        "let graph^err = input(\"%s\", {type: \"graph\", flavor: \"%s\"})\n"
+        "let graph = input(\"%s\", {type: \"graph\", flavor: \"%s\"}) ^ { null }\n"
         "let installed = graph_transform.install()\n"
         "graph_transform.to_html(graph, %s%s%s)\n";
     const char* structurizr_source_format =
         "import graph_transform: lambda.package.graph.transform\n"
         "import structurizr: lambda.package.graph.structurizr.structurizr\n"
-        "let source^err = input(\"%s\", {type: \"graph\", flavor: \"structurizr\"})\n"
+        "let source = input(\"%s\", {type: \"graph\", flavor: \"structurizr\"}) ^ { null }\n"
         "let workspace = structurizr.normalize(source)\n"
         "let installed = graph_transform.install()\n"
         "structurizr.to_html(workspace, %s%s%s, %s%s%s)\n";

@@ -39,4 +39,4 @@ pn explicit_return() int^ {
   return risky(0 - 1)
 }
 
-[1, 2, 3, 4, 5]
+[1, 2, 3, match_acknowledgment(), 5]

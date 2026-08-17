@@ -1,4 +1,5 @@
 pn main() {
-    let value^err = io.read("test/lambda/conc/io_read_missing.txt")
+    var err = null
+    io.read("test/lambda/conc/io_read_missing.txt") ^ { err = ^ }
     print(type(err))
 }

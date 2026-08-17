@@ -9,8 +9,8 @@ fn safe_sqrt(x: float) float^ {
 fn test_float_ok1() { safe_sqrt(16.0)^ }
 fn test_float_ok2() { safe_sqrt(25.0)^ }
 fn test_float_err() {
-    let val^err = safe_sqrt(0.0 - 1.0)
-    if (^err) 99 else val
+    let val = safe_sqrt(0.0 - 1.0) ^ { ^ }
+    if (val is error) 99 else val
 }
 
 "1. float^"
@@ -25,8 +25,8 @@ fn safe_greet(name: string) string^ {
 fn test_str_ok1() { len(safe_greet("Alice")^) }
 fn test_str_ok2() { len(safe_greet("Bob")^) }
 fn test_str_err() {
-    let val^err = safe_greet("x")
-    if (^err) 99 else len(val)
+    let val = safe_greet("x") ^ { ^ }
+    if (val is error) 99 else len(val)
 }
 
 "2. string^"
@@ -41,8 +41,8 @@ fn safe_gt(a: int, b: int) bool^ {
 fn test_bool_ok1() { safe_gt(10, 5)^ }
 fn test_bool_ok2() { safe_gt(3, 7)^ }
 fn test_bool_err() {
-    let val^err = safe_gt(0, 0)
-    if (^err) 99 else val
+    let val = safe_gt(0, 0) ^ { ^ }
+    if (val is error) 99 else val
 }
 
 "3. bool^"
@@ -57,8 +57,8 @@ fn safe_div(a: int, b: int) int^ {
 fn test_int_ok1() { safe_div(10, 3)^ }
 fn test_int_ok2() { safe_div(100, 7)^ }
 fn test_int_err() {
-    let val^err = safe_div(10, 0)
-    if (^err) 99 else val
+    let val = safe_div(10, 0) ^ { ^ }
+    if (val is error) 99 else val
 }
 
 "4. int^"
@@ -72,28 +72,28 @@ fn compute_doubled_div(a: int, b: int) int^ {
 
 fn test_chain_ok() { compute_doubled_div(10, 2)^ }
 fn test_chain_err() {
-    let val^err = compute_doubled_div(10, 0)
-    if (^err) 99 else val
+    let val = compute_doubled_div(10, 0) ^ { ^ }
+    if (val is error) 99 else val
 }
 
 "5. chained"
 [test_chain_ok(), test_chain_err()]
 
-// Section 6: let^err destructuring
+// Section 6: handler-preserved error values
 fn parse_positive(x: int) int^ {
     if (x <= 0) raise error("not positive")
     else x
 }
 
 fn check_pair(a: int, b: int) {
-    let x^e1 = parse_positive(a)
-    let y^e2 = parse_positive(b)
-    if (^e1) 91
-    else if (^e2) 92
+    let x = parse_positive(a) ^ { ^ }
+    let y = parse_positive(b) ^ { ^ }
+    if (x is error) 91
+    else if (y is error) 92
     else x + y
 }
 
-"6. let^err"
+"6. handler-preserved error"
 [check_pair(3, 4), check_pair(0, 4), check_pair(3, 0)]
 
 // Section 7: or-default pattern
@@ -103,7 +103,7 @@ fn safe_val(x: int) int^ {
 }
 
 fn with_default(x: int) {
-    let val^err = safe_val(x)
+    let val = safe_val(x) ^ { null }
     val or 0
 }
 

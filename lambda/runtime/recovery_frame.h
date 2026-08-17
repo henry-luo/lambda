@@ -96,8 +96,8 @@ bool lambda_recovery_frame_prepare_fault(LambdaRecoveryFrame* frame,
 // returns false only when the current thread has no armed recovery target.
 bool lambda_recovery_frame_raise_fault(LambdaFaultReason reason,
                                        LambdaErrorCode prior_error_code);
-// Equality remains an ordinary returned error outside procedural local `^err`
-// lowering. This variant selects a local handler, unless an enclosing
+// Equality remains an ordinary returned error outside a procedural local
+// handler. This variant selects a local handler, unless an enclosing
 // transaction barrier must own the fault.
 bool lambda_recovery_frame_raise_local_fault(LambdaFaultReason reason,
                                              LambdaErrorCode prior_error_code);
@@ -115,7 +115,7 @@ uint64_t lambda_recovery_frame_static_fault_item_for(
     LambdaFaultReason reason, LambdaErrorCode prior_error_code);
 
 // Publishes that durable fault Item to the current evaluator after a restored
-// landing, then returns it for the local `^err` binding.
+// landing, then returns it for the local handler.
 Item lambda_recovery_frame_fault_item(Context* context,
                                       LambdaRecoveryFrame* frame);
 Item lambda_recovery_publish_fault_item(Context* context,

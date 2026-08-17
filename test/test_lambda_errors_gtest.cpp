@@ -1058,7 +1058,7 @@ TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
 
 TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgment) {
     ExpectErrorMessage("test/lambda/negative/semantic/unhandled_error_expression.ls",
-        "or 'risky(...) or default' to recover");
+        "handle with 'risky(...) ^ { ... }'");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ArityMismatch) {

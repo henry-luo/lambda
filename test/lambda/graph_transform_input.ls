@@ -1,7 +1,7 @@
 import transform: lambda.package.graph.transform
 
-let source^err = input("test/input/simple_flowchart.mmd",
-  {type: "graph", flavor: "mermaid"})
+let source = (input("test/input/simple_flowchart.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let graph = transform.to_html(source, {theme: "nord"})
 let nodes = [for (i in 0 to (len(graph) - 1), let child = graph[i]
   where string(name(child)) == "node") child]

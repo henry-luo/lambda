@@ -20,7 +20,7 @@ type Pat9 = \("agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "ttaccct")
 
 pn main() {
     // Load DNA data from JSON (not timed)
-    let data^err = input("./test/benchmark/jetstream/regex_dna_data.json", "json")
+    let data = input("./test/benchmark/jetstream/regex_dna_data.json", "json") ^ { null }
     var dna_raw = data.dna_raw
     var expected_output = data.expected_output
     var expected_dna = data.expected_dna

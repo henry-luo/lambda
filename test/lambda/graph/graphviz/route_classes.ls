@@ -37,8 +37,8 @@ fn routed(mode) {
     terminal_control]
 }
 
-let parsed^parse_error = input(
-  "test/lambda/graph/graphviz/route_classes.dot", {type: "graph", flavor: "dot"})
+let parsed = (input(
+  "test/lambda/graph/graphviz/route_classes.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(parsed)
 let html = transform.to_html(normalized.graph)
 let invalid = normalize.normalize(source_for("zigzag"))

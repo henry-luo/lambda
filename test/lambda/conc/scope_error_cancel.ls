@@ -8,7 +8,7 @@ pn fail() int^error {
 }
 
 pn main() {
-    let value^err = fail()
-    print(^err)
-    print(err.message)
+    let value = fail() ^ { ^ }
+    print(value is error)
+    print(value.message)
 }

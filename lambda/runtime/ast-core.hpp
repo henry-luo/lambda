@@ -149,7 +149,7 @@ typedef enum Operator {
     OPERATOR_NEG,
     OPERATOR_POS,
     OPERATOR_SPREAD,
-    OPERATOR_IS_ERROR,
+    OPERATOR_PROPAGATE,
 
     // binary
     OPERATOR_ADD,
@@ -402,11 +402,12 @@ typedef struct AstCallNode : AstNode {
     bool interp_self_tail_call;
 } AstCallNode;
 
-// A handler keeps the operand and recovery body together so both expression
-// and statement forms share the same outcome-routing semantics in the backend.
+// A handler keeps both outcome bodies together so expression and statement
+// forms share the same single-evaluation routing semantics in the backend.
 typedef struct AstHandlerNode : AstNode {
     AstNode* operand;
     AstNode* body;
+    AstNode* value_body; // optional non-error arm, with `~` bound to the operand
     bool is_statement;
 } AstHandlerNode;
 
@@ -453,12 +454,8 @@ typedef AstBinaryNode AstPipeNode;
 typedef struct AstNamedNode : AstNode {
     String* name;
     AstNode *as;
-    String* error_name;
     NameEntry* entry;
     bool is_type_definition;
-    // A `^err` RHS that can suspend keeps ordinary ItemError destructuring,
-    // but cannot retain a native setjmp target across a task poll.
-    bool local_fault_safe;
     // Kept separately from AstNode::type so a declaration can retain both its
     // source annotation and its initializer's inferred type (`as->type`).
     Type* declared_type;

@@ -15,8 +15,8 @@ fn marker_components(marker) {
     where child["data-marker-component"] != null) child["data-marker-component"]]
 }
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/content_shapes_markers.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/content_shapes_markers.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let nodes = model.nodes(graph)

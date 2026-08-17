@@ -7,11 +7,11 @@ fn property_values(value) => [
     [property.name, property.value, property.origin, property["defining-scope"]]
 ]
 
-let invalid_source^invalid_parse_error = input(
-  "test/lambda/graph/graphviz/semantic_errors.dot", {type: "graph", flavor: "dot"})
+let invalid_source = (input(
+  "test/lambda/graph/graphviz/semantic_errors.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let invalid = normalize.normalize(invalid_source)
-let strict_source^strict_parse_error = input(
-  "test/lambda/graph/graphviz/strict_undirected.dot", {type: "graph", flavor: "dot"})
+let strict_source = (input(
+  "test/lambda/graph/graphviz/strict_undirected.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let strict = normalize.normalize(strict_source)
 
 {

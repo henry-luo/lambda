@@ -1,8 +1,8 @@
 import model: lambda.package.graph.model
 import transform: lambda.package.graph.transform
 
-let graph^error = input("test/lambda/graph/mermaid/rich_labels.mmd",
-  {type: "graph", flavor: "mermaid"})
+let graph = input("test/lambda/graph/mermaid/rich_labels.mmd",
+  {type: "graph", flavor: "mermaid"}) ^ { null }
 let html = transform.to_html(graph)
 let nodes = model.nodes(graph)
 let edges = model.edges(graph)

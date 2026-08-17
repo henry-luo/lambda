@@ -1,5 +1,5 @@
 pn delayed_u64() {
-    sleep(1)^
+    sleep(1)
     return 18446744073709551614u64
 }
 

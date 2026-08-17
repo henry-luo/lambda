@@ -13,5 +13,5 @@ pn main() {
     let chosen = select(slow_handle, fast_handle, timeout: 60000)^
     print(wait(chosen)^)
     cancel(slow_handle)
-    let done^cancelled = wait(slow_handle)
+    let done = wait(slow_handle) ^ { null }
 }

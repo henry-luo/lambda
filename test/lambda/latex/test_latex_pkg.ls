@@ -45,7 +45,7 @@ This is the end.
 
 // Write source to temp file and parse from file since source: true
 // may not be supported for LaTeX
-let ast^err = input("test/input/test_input.tex", {type: "latex"})
+let ast = input("test/input/test_input.tex", {type: "latex"}) ^ { null }
 
 pn main() {
     print("=== LaTeX AST tags ===")

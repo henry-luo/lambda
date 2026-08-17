@@ -6,17 +6,15 @@ fn children(value, wanted) => [
 
 fn args(value) => [for (child in children(value, "argument")) child.value]
 
-let source^err = input("test/lambda/graph/structurizr/basic.dsl",
-  {type: "graph", flavor: "structurizr"});
-if (err) raise(err)
-else {
-  let workspace_children = model.element_children(source);
+let source = (input("test/lambda/graph/structurizr/basic.dsl",
+  {type: "graph", flavor: "structurizr"})) ^
+let workspace_children = model.element_children(source);
   let source_model = children(source, "model")[0];
   let source_views = children(source, "views")[0];
   let shop = children(source_model, "declaration")[1];
   let context = children(source_views, "view")[0];
   let styles = children(source_views, "styles")[0];
-  {
+{
     workspace: [model.tag(source), args(source), source.flavor, source["ir-stage"]],
     order: [for (child in workspace_children) model.tag(child)],
     model_order: [for (child in model.element_children(source_model)) model.tag(child)],
@@ -31,5 +29,4 @@ else {
         where model.tag(property) == "statement") [property.keyword, args(property)]],
     spans_valid: [for (child in workspace_children)
       child["source-start"] < child["source-end"]]
-  }
 }

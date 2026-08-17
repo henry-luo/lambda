@@ -8,7 +8,7 @@
 [3, 14, 99]
 "5. chained"
 [10, 99]
-"6. let^err"
+"6. handler-preserved error"
 [7, 91, 92]
 "7. or-default"
 [10, 0]

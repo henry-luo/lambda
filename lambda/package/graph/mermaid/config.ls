@@ -13,8 +13,7 @@ fn last_or(values, fallback = null) =>
 fn parsed(raw) {
   if (raw == null or trim(raw) == "") null
   else {
-    let value^err = parse(string(raw), {type: "yaml"});
-    if (value is error) null else value
+    parse(string(raw), {type: "yaml"}) ^ { null }
   }
 }
 

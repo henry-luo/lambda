@@ -5,7 +5,7 @@ import adapter: .reference.graphviz_json_adapter
 
 fn run_case(test_case) {
   let path = "test/lambda/graph/graphviz/" ++ string(test_case.source);
-  let source^source_error = input(path, {type: "graph", flavor: "dot"});
+  let source = input(path, {type: "graph", flavor: "dot"}) ^ { null }
   let result = normalize.normalize(source);
   let html = conformance.to_html(result.graph);
   {
@@ -23,8 +23,8 @@ fn run_case(test_case) {
 fn run_reference(test_case) {
   let path = "test/lambda/graph/graphviz/" ++ string(test_case.source);
   let reference_path = "test/lambda/graph/graphviz/" ++ string(test_case.reference);
-  let source^source_error = input(path, {type: "graph", flavor: "dot"});
-  let reference^reference_error = input(reference_path, {type: "json"});
+  let source = input(path, {type: "graph", flavor: "dot"}) ^ { null }
+  let reference = input(reference_path, {type: "json"}) ^ { null }
   let normalized = normalize.normalize(source);
   let expected = adapter.from_dot_json(reference, true,
     [for (edge in model.edges(normalized.graph)) edge.id]);

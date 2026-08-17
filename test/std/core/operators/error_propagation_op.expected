@@ -6,6 +6,6 @@ false
 false
 0
 100
-[true, true, "test error"]
+[false, true, "test error"]
 [42, false]
 10

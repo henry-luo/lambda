@@ -1,8 +1,8 @@
 {
-  value: type.null,
+  value: error,
   error: error
 }
 {
-  value: type.null,
+  value: error,
   error: error
 }

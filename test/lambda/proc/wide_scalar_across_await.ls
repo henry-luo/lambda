@@ -9,7 +9,7 @@ fn wide_int() { 9007199254740993i64 }
 fn wide_float() { 5.0e-320 }
 
 pn child() {
-    sleep(1)^
+    sleep(1)
     wide_int()
 }
 

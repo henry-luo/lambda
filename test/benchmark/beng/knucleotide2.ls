@@ -112,7 +112,7 @@ pn print_count(seq: string, kmer: string) any {
 
 pn main() {
     var __t0 = clock()
-    let text^err = io.read(INPUT_PATH)
+    let text = io.read(INPUT_PATH)^
     let seq: string = extract_three(text)
 
     // print frequency tables for 1-mers and 2-mers

@@ -1,5 +1,5 @@
 // Test: Error Safe Pipeline
-// Layer: 4 | Category: integration | Covers: error handling, T^E, let a^err, or default
+// Layer: 4 | Category: integration | Covers: error handling, T^E, braced handlers, or default
 
 // ===== Define fallible functions =====
 fn parse_int(s: string) int^ {
@@ -29,19 +29,19 @@ fn process(a_str: string, b_str: string) string^ {
 process("100", "5")
 
 // ===== Error at parse stage =====
-let r1^e1 = process("abc", "5")
-e1.message
-e1.code
+let r1 = process("abc", "5") ^ { ^ }
+r1.message
+r1.code
 
 // ===== Error at divide stage =====
-let r2^e2 = process("10", "0")
-e2.message
-e2.code
+let r2 = process("10", "0") ^ { ^ }
+r2.message
+r2.code
 
 // ===== Error at validate stage =====
-let r3^e3 = process("-10", "1")
+let r3 = process("-10", "1") ^ { ^ }
 // -10 / 1 = -10, which is not positive
-e3.message
+r3.message
 
 // ===== Or default pattern =====
 let safe1 = process("10", "2") or "default"
@@ -50,19 +50,19 @@ safe1
 let safe2 = process("abc", "1") or "fallback"
 safe2
 
-// ===== ^expr check =====
-^process("10", "2")
-^process("abc", "1")
+// ===== expr is error check =====
+(process("10", "2") ^ { ^ }) is error
+(process("abc", "1") ^ { ^ }) is error
 
 // ===== Error chain =====
 fn wrapped_process(a: string, b: string) string^ {
-    let result^err = process(a, b)
-    if (err) raise error("Process failed", source: err)
+    let result = process(a, b) ^ { ^ }
+    if (result) raise error("Process failed", source: result)
     result
 }
-let wr^we = wrapped_process("abc", "1")
-we.message
-we.source.message
+let wr = wrapped_process("abc", "1") ^ { ^ }
+wr.message
+wr.source.message
 
 // ===== Batch processing with error handling =====
 let inputs = [("10", "2"), ("abc", "1"), ("20", "0"), ("15", "3")]

@@ -1,6 +1,8 @@
 # LambdaJS LOC Reduction — Round 2 (Structural)
 
-**Status:** proposal. **Date:** 2026-08-15. **Scope:** `lambda/js/` (~208K lines, 105 files). **Target:** ≥5,000 net lines removed, with the codebase left *more* structured, not just smaller.
+> **SUPERSEDED — historical record only.** Every outstanding item from this analysis has been re-verified against the tree and absorbed into **`vibe/Lambda_Impl_JS_LOC_Reduction3.md`** (2026-08-17), which is self-contained and is the document to execute from. Do not plan work from the estimates below: several were materially wrong (WS5 −1,000 → −430, WS11 −500 → no-go, WS4's transport −600 → −130), and the WS2/WS4 "smaller items" bullet realized only ~30% because four of its items were absorbed by work that landed in stages C1–C3. This file is retained for the estimate-vs-actual calibration record — the ~55% structural realization rate observed here is what sets round 3's floor.
+
+**Status:** superseded (was: proposal). **Date:** 2026-08-15. **Scope:** `lambda/js/` (~208K lines, 105 files). **Target:** ≥5,000 net lines removed, with the codebase left *more* structured, not just smaller.
 
 ## 1. Goal and context
 

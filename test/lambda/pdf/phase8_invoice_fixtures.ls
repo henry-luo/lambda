@@ -8,7 +8,7 @@ import pdf: lambda.package.pdf.pdf
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn summarize(path: string) {
-    let doc^err = input(path, 'pdf')
+    let doc = input(path, 'pdf') ^ { null }
     let html = format(pdf.pdf_to_html(doc, { show_label: false }), 'html')
     return {
         pages: pdf.pdf_page_count(doc),

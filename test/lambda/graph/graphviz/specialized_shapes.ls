@@ -9,8 +9,8 @@ fn children(value, wanted) => [
 
 fn by_id(values, id) => [for (value in values where value.id == id) value][0]
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/specialized_shapes.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/specialized_shapes.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let nodes = model.nodes(graph)

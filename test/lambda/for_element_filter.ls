@@ -2,7 +2,7 @@
 // Verifies filtered iteration over element attributes and children
 
 // construct element via XML parsing
-let doc^err = parse("<item x='1' y='2'><sub>A</sub><sub>B</sub></item>", "xml")
+let doc = parse("<item x='1' y='2'><sub>A</sub><sub>B</sub></item>", "xml") ^ { null }
 let el = doc[0]
 
 "=== for k:int, v in element (children only) ==="
@@ -20,13 +20,13 @@ let el = doc[0]
 len([for (v in el) v])
 
 "=== for k:int, v on element with text children ==="
-let doc2^err2 = parse("<p>hello<b>bold</b>world</p>", "xml")
+let doc2 = parse("<p>hello<b>bold</b>world</p>", "xml") ^ { null }
 let p = doc2[0]
 [for (k:int, v in p) k]
 len(p)
 
 "=== for k:symbol, v on element with no attrs ==="
-let doc3^err3 = parse("<div>text</div>", "xml")
+let doc3 = parse("<div>text</div>", "xml") ^ { null }
 let div = doc3[0]
 [for (k:symbol, v in div) [k, v]]
 [for (k:int, v in div) [k, v]]

@@ -1,5 +1,5 @@
 pub pn worker(value) {
-    sleep(1)^
+    sleep(1)
     return value + 1
 }
 
@@ -8,5 +8,5 @@ pub pn immediate(value) {
 }
 
 pub pn fail() {
-    sleep(-1)^
+    sleep(-1)
 }

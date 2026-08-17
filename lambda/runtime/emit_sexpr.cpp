@@ -1095,8 +1095,8 @@ static void emit_expr(const char* source, AstNode* node) {
         case OPERATOR_POS:
             // unary + is a no-op for numbers, but can be a string→number cast
             emit_expr(source, un->operand); break;
-        case OPERATOR_IS_ERROR:
-            printf("(is-error "); emit_expr(source, un->operand); printf(")"); break;
+        case OPERATOR_PROPAGATE:
+            printf("(propagate "); emit_expr(source, un->operand); printf(")"); break;
         default: {
             int len; const char* src = node_src(source, node->node, &len);
             printf("(unsupported-unary \"%.*s\")", len > 60 ? 60 : len, src);
@@ -1344,6 +1344,10 @@ static void emit_expr(const char* source, AstNode* node) {
         emit_expr(source, handler->operand);
         printf(" ");
         emit_expr(source, handler->body);
+        if (handler->value_body) {
+            printf(" ");
+            emit_expr(source, handler->value_body);
+        }
         printf(")");
         break;
     }
@@ -1541,43 +1545,28 @@ static void emit_expr(const char* source, AstNode* node) {
         // emit as nested let
         AstLetNode* let_node = (AstLetNode*)node;
         AstNode* decl = let_node->declare;
-        // check if any binding has error destructuring
-        bool has_err_binding = false;
-        if (decl && decl->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* asn = (AstNamedNode*)decl;
-            if (asn->error_name) has_err_binding = true;
-        }
-        if (has_err_binding && decl->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* asn = (AstNamedNode*)decl;
-            printf("(let-err %.*s %.*s ",
-                (int)asn->name->len, asn->name->chars,
-                (int)asn->error_name->len, asn->error_name->chars);
-            emit_expr(source, asn->as);
-            printf(" null)");
-        } else {
-            printf("(let (");
-            while (decl) {
-                if (decl != let_node->declare) printf(" ");
-                if (decl->node_type == AST_NODE_ASSIGN) {
-                    AstNamedNode* asn = (AstNamedNode*)decl;
-                    printf("(%.*s ", (int)asn->name->len, asn->name->chars);
-                    emit_expr(source, asn->as);
-                    printf(")");
-                } else if (decl->node_type == AST_NODE_DECOMPOSE) {
-                    AstDecomposeNode* dec = (AstDecomposeNode*)decl;
-                    printf("(decompose (");
-                    for (int i = 0; i < dec->name_count; i++) {
-                        if (i > 0) printf(" ");
-                        printf("%.*s", (int)dec->names[i]->len, dec->names[i]->chars);
-                    }
-                    printf(") ");
-                    emit_expr(source, dec->as);
-                    printf(")");
+        printf("(let (");
+        while (decl) {
+            if (decl != let_node->declare) printf(" ");
+            if (decl->node_type == AST_NODE_ASSIGN) {
+                AstNamedNode* asn = (AstNamedNode*)decl;
+                printf("(%.*s ", (int)asn->name->len, asn->name->chars);
+                emit_expr(source, asn->as);
+                printf(")");
+            } else if (decl->node_type == AST_NODE_DECOMPOSE) {
+                AstDecomposeNode* dec = (AstDecomposeNode*)decl;
+                printf("(decompose (");
+                for (int i = 0; i < dec->name_count; i++) {
+                    if (i > 0) printf(" ");
+                    printf("%.*s", (int)dec->names[i]->len, dec->names[i]->chars);
                 }
-                decl = decl->next;
+                printf(") ");
+                emit_expr(source, dec->as);
+                printf(")");
             }
-            printf(") null)");
+            decl = decl->next;
         }
+        printf(") null)");
         break;
     }
 
@@ -1905,10 +1894,6 @@ static void emit_top_level(const char* source, AstNode* child) {
                 if (decl->node_type == AST_NODE_ASSIGN) {
                     AstNamedNode* asn = (AstNamedNode*)decl;
                     printf("(bind %.*s ", (int)asn->name->len, asn->name->chars);
-                    if (asn->error_name) {
-                        // let a^err = expr → emit with error binding info
-                        printf(":error %.*s ", (int)asn->error_name->len, asn->error_name->chars);
-                    }
                     emit_expr(source, asn->as);
                     printf(")");
                 } else if (decl->node_type == AST_NODE_DECOMPOSE) {
@@ -2302,7 +2287,6 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_NAMED_ARG: {
             AstNamedNode* named = (AstNamedNode*)node;
             emit_dump_string_field("name", named->name);
-            emit_dump_string_field("error", named->error_name);
             emit_lambda_dump_field(source, "as", named->as, indent + 1);
             break;
         }
@@ -2310,7 +2294,6 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             AstNamedNode* named = (AstNamedNode*)node;
             TypeParam* parameter = (TypeParam*)named->type;
             emit_dump_string_field("name", named->name);
-            emit_dump_string_field("error", named->error_name);
             if (parameter && parameter->contract_type) {
                 emit_dump_contract_field("contract", parameter->contract_type,
                     parameter->has_explicit_contract);
@@ -2454,6 +2437,9 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_dump_type_field("value_type", node->type);
             emit_lambda_dump_field(source, "operand", handler->operand, indent + 1);
             emit_lambda_dump_field(source, "body", handler->body, indent + 1);
+            if (handler->value_body) {
+                emit_lambda_dump_field(source, "value", handler->value_body, indent + 1);
+            }
             break;
         }
         case AST_NODE_SYS_FUNC: {

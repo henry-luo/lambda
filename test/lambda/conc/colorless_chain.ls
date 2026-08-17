@@ -1,5 +1,5 @@
 pn leaf(value) {
-    sleep(1)^
+    sleep(1)
     return value
 }
 pn level5(value) { return leaf(value) }

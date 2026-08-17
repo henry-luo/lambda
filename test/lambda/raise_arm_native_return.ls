@@ -17,24 +17,24 @@ fn wide(ok: bool) i64^ {
     if (ok) { 123456789012345i64 } else { raise error("wide") }
 }
 
-let ok^ok_err = half(8.0)
-let bad^bad_err = half(-8.0)
-let flip_ok^flip_ok_err = half_flipped(8.0)
-let flip_bad^flip_bad_err = half_flipped(-8.0)
-let int_ok^int_ok_err = twice(21)
-let int_bad^int_bad_err = twice(-21)
-let wide_ok^wide_ok_err = wide(true)
-let wide_bad^wide_bad_err = wide(false)
+let ok = half(8.0) ^ { ^ }
+let bad = half(-8.0) ^ { ^ }
+let flip_ok = half_flipped(8.0) ^ { ^ }
+let flip_bad = half_flipped(-8.0) ^ { ^ }
+let int_ok = twice(21) ^ { ^ }
+let int_bad = twice(-21) ^ { ^ }
+let wide_ok = wide(true) ^ { ^ }
+let wide_bad = wide(false) ^ { ^ }
 
 "destructure"
-[ok, type(ok_err)]
-[bad, type(bad_err)]
-[flip_ok, type(flip_ok_err)]
-[flip_bad, type(flip_bad_err)]
-[int_ok, type(int_ok_err)]
-[int_bad, type(int_bad_err)]
-[wide_ok, type(wide_ok_err)]
-[wide_bad, type(wide_bad_err)]
+[ok, ok is error]
+[bad, bad is error]
+[flip_ok, flip_ok is error]
+[flip_bad, flip_bad is error]
+[int_ok, int_ok is error]
+[int_bad, int_bad is error]
+[wide_ok, wide_ok is error]
+[wide_bad, wide_bad is error]
 "or-recovery"
 // the int error case is the one that regressed historically: the native
 // numeric operand path must not consume the error lane before `or` contains it

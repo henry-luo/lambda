@@ -1,8 +1,10 @@
 # LambdaJS Clean-Up — Implementation Plan
 
-**Status:** proposed
+> **EXECUTED AND SUPERSEDED — historical record only.** Stages C0–C2 are complete and C3 mostly so (**−1,487 net** across 41 `js-cleanup` commits). Everything still outstanding — the C3 remainders, all of C4–C6, the governing invariants (§1), the gate matrix (§9), and the execution findings in §12–§17 — has been absorbed into **`vibe/Lambda_Impl_JS_LOC_Reduction3.md`** (2026-08-17), which is self-contained. Execute from that document. This file is retained as the record of what landed and why estimates moved: C4.1 −1,000→−430, C5.2 −600→−130, C5.3 no-go, C3.8 closed as already realized, C5.1 restructured (the `/v` rewriter stays and ~250 lines of the backref lane are already dead).
 
-**Revision date:** 2026-08-16
+**Status:** executed through C3 (partial), remainder superseded by round 3.
+
+**Revision date:** 2026-08-17
 
 **Scope:** `lambda/js/` — bug fixes, hazard removal, idiom consolidation, table-driven restructuring, semantic unifications, and file splits. Execution companion to `vibe/Lambda_Impl_JS_LOC_Reduction.md` (the analysis: evidence, occurrence counts, per-workstream estimates). This document defines *what to change, in what order, and how each change is verified*. Workstream references (`WS1`–`WS12`) point into the analysis doc.
 

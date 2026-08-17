@@ -1,5 +1,5 @@
 pn child(value) {
-    sleep(1)^
+    sleep(1)
     print(value)
 }
 

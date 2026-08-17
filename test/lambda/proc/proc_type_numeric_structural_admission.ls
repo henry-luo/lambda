@@ -21,7 +21,8 @@ pn main() {
 
     var rejected: Person = {age: 1, child: {score: 2}, scores: [3], choice: "kept"}
     let rejected_snapshot = rejected
-    let ignored^write_error = reject_fractional_nested_write(rejected)
+    var write_error = null
+    reject_fractional_nested_write(rejected) ^ { write_error = ^ }
 
     print(string([
         source.age is float, source.child.score is float, source.scores[0] is float,
@@ -30,6 +31,6 @@ pn main() {
         person.choice is int,
         typed_scores[0] is int, typed_scores[1] is int,
         snapshot.child.score, updated.child.score, updated.child.score is int,
-        ^write_error, rejected.child.score, rejected_snapshot.child.score
+        write_error is error, rejected.child.score, rejected_snapshot.child.score
     ]) ++ "\n")
 }

@@ -1015,7 +1015,7 @@ static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* o
     const char* opts = opts_expr ? opts_expr : "null";
     int needed = snprintf(nullptr, 0,
         "import pdf: lambda.package.pdf.pdf\n"
-        "let doc^err = input(\"%s\", 'pdf')\n"
+        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     if (needed <= 0) {
@@ -1031,7 +1031,7 @@ static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* o
     }
     snprintf(script_buf, (size_t)needed + 1,
         "import pdf: lambda.package.pdf.pdf\n"
-        "let doc^err = input(\"%s\", 'pdf')\n"
+        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     mem_free(escaped_pdf);
@@ -1409,7 +1409,7 @@ int exec_convert(int argc, char* argv[]) {
                 }
                 snprintf(script_buf, sizeof(script_buf),
                     "import latex: .lambda.package.latex.latex\n"
-                    "let ast^err = input(\"%s\", {type: \"latex\"})\n"
+                    "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
                     "latex.render_to_html(ast%s)\n",
                     input_file, standalone_opt);
 

@@ -81,7 +81,7 @@ The concrete node structs (tag → struct → key fields, `ast.hpp` line):
 - `AST_NODE_CALL_EXPR` → `AstCallNode` (`ast.hpp:320`): `function`, `argument`, `bool pipe_inject`, `bool propagate`, `bool can_raise`.
 - `AST_NODE_PATH_EXPR` → `AstPathNode` (`ast.hpp:334`): `PathScheme scheme`, `int segment_count`, `AstPathSegment* segments`.
 - `AST_NODE_PATH_INDEX_EXPR` → `AstPathIndexNode` (`ast.hpp:342`); `AST_NODE_PARENT_EXPR` → `AstParentNode` (`ast.hpp:348`, `object` + `int depth`); `AST_NODE_SYS_FUNC` → `AstSysFuncNode` (`ast.hpp:355`, `SysFuncInfo* fn_info`).
-- `AST_NODE_ASSIGN` / `AST_NODE_KEY_EXPR` / `AST_NODE_PARAM` → `AstNamedNode` (`ast.hpp:388`): `String* name`, `AstNode* as`, `String* error_name` (for `a^err` error destructuring), `NameEntry* entry`.
+- `AST_NODE_ASSIGN` / `AST_NODE_KEY_EXPR` / `AST_NODE_PARAM` → `AstNamedNode` (`ast.hpp:388`): `String* name`, `AstNode* as`, `NameEntry* entry`. Legacy error-destructure state is not part of the AST; handlers use a separate current-error node/context.
 - `AST_NODE_LOOP` → `AstLoopNode` (`ast.hpp:403`): `name`, `index_name`, `as`, `LoopKeyFilter key_filter` (ALL/INT/SYMBOL). **Its layout deliberately differs from `AstNamedNode`** — the extra `index_name` sits before `as`, so a careless `(AstNamedNode*)` cast reads the wrong offset; the capture code casts to `AstLoopNode*` explicitly and documents the hazard (`build_ast.cpp:556`–`559`).
 - `AST_NODE_DECOMPOSE` → `AstDecomposeNode` (`ast.hpp:411`); `AST_NODE_IDENT` → `AstIdentNode` (`ast.hpp:418`, `String* name` + `NameEntry* entry`); `AST_NODE_IMPORT` → `AstImportNode` (`ast.hpp:423`, alias/module/`Script*`/relative/cross-lang flags).
 - `AST_NODE_LET_STAM` / `PUB_STAM` / `TYPE_STAM` / `VAR_STAM` → `AstLetNode` (`ast.hpp:431`): `AstNode* declare`.

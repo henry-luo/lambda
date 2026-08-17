@@ -9,12 +9,12 @@ let invalid = <graph direction: "sideways";
 >
 let invalid_result = normalize.normalize(invalid)
 
-let parsed^parse_err = input("test/lambda/graph/mermaid/edge_ids_markers.mmd",
-  {type: "graph", flavor: "mermaid"})
+let parsed = (input("test/lambda/graph/mermaid/edge_ids_markers.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let parsed_result = normalize.normalize(parsed)
 
-let chart^chart_err = input("test/lambda/graph/mermaid/chart_routing.mmd",
-  {type: "graph", flavor: "mermaid"})
+let chart = (input("test/lambda/graph/mermaid/chart_routing.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let chart_result = normalize.normalize(chart)
 
 {

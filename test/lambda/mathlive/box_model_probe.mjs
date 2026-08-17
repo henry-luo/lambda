@@ -70,11 +70,11 @@ function buildLambdaScript(opts) {
 import ctx: lambda.package.math.context
 import opt: lambda.package.math.optimize
 let formula = ${lambdaString(opts.formula)}
-let ast^err = parse(formula, {type: "math", flavor: "latex"})
-let result = if (^err) {
-    {formula: formula, error: string(^err)}
+let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }
+let result = if (parsed is error) {
+    {formula: formula, error: string(parsed)}
 } else {
-    let raw_box = render_pkg.render_node(ast, ctx.${ctxFn}())
+    let raw_box = render_pkg.render_node(parsed, ctx.${ctxFn}())
     let bx = opt.coalesce(raw_box)
     let has_height_raw = bx.height_raw != null
     let has_depth_raw = bx.depth_raw != null

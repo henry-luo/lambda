@@ -1,11 +1,11 @@
-// ER-S3: `pn` error destructuring retains ordinary ItemError behavior while
+// ER-S3: a procedural handler retains ordinary ItemError behavior while
 // the MIR body owns a local system-fault checkpoint around each RHS.
 fn fail() int^ {
     raise error("ordinary failure")
 }
 
 pn main() {
-    let value^err = fail()
-    let success^success_err = 7
-    print([value, ^err, type(err), success, ^success_err])
+    let value = fail() ^ { ^ }
+    let success = 7
+    print([value, value is error, type(value), success, success is error])
 }

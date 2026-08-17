@@ -9,30 +9,51 @@
 fn fail() int^ { raise error("boom") }
 
 '-- text and name conversions propagate; they do not render the error --'
-fn t_string() { let a^err = fail(); type(string(err)) }
+fn t_string() {
+    let a = fail() ^ { ^ }
+    type(string(a))
+}
 t_string()
-fn t_symbol() { let a^err = fail(); type(symbol(err)) }
+fn t_symbol() {
+    let a = fail() ^ { ^ }
+    type(symbol(a))
+}
 t_symbol()
-fn t_name()   { let a^err = fail(); type(name(err)) }
+fn t_name() {
+    let a = fail() ^ { ^ }
+    type(name(a))
+}
 t_name()
 
 '-- membership propagates: `in` searches one level, so `false` would mislead --'
-fn t_in() { let a^err = fail(); type(err in [1, err, 3]) }
+fn t_in() {
+    let a = fail() ^ { ^ }
+    type(a in [1, a, 3])
+}
 t_in()
-fn t_at() { let a^err = fail(); type(err at {k: 1}) }
+fn t_at() {
+    let a = fail() ^ { ^ }
+    type(a at {k: 1})
+}
 t_at()
 
 '-- len is a value function too (8.1: iterating an error yields an error) --'
-fn t_len() { let a^err = fail(); type(len(err)) }
+fn t_len() {
+    let a = fail() ^ { ^ }
+    type(len(a))
+}
 t_len()
 
 '-- but the truthy family still participates: these are the discharge surfaces --'
 fn t_truthy() {
-    let a^err = fail()
-    [if (err) "T" else "F", not err, err or "dflt", err == err]
+    let a = fail() ^ { ^ }
+    [if (a) "T" else "F", not a, a or "dflt", a == a]
 }
 t_truthy()
 
 '-- and containment is not propagation: an error inside a collection is data --'
-fn t_contain() { let a^err = fail(); len([1, err, 3]) }
+fn t_contain() {
+    let a = fail() ^ { ^ }
+    len([1, a, 3])
+}
 t_contain()

@@ -7,8 +7,8 @@ fn children(value, wanted) => [
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
-let source^err = input("test/lambda/graph/structurizr/stage4d.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/stage4d.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let source_views = children(source, "views")[0]
 let source_dynamic = children(source_views, "view")[0]
 let source_parallel = children(source_dynamic, "parallel")[0]

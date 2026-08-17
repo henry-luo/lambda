@@ -10,18 +10,18 @@ fn properties(value) => [
   for (property in children(value, "property")) [property.name, property.value]
 ]
 
-let source^err = input("test/lambda/graph/structurizr/archetypes_implied.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/archetypes_implied.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let c4_model = children(workspace, "c4-model")[0]
 let graph = structurizr.project(workspace, "Context")
-let invalid_source^invalid_err = input(
+let invalid_source = (input(
   "test/lambda/graph/structurizr/archetype_diagnostics.dsl",
-  {type: "graph", flavor: "structurizr"})
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let invalid_workspace = structurizr.normalize(invalid_source)
-let disabled_source^disabled_err = input(
+let disabled_source = (input(
   "test/lambda/graph/structurizr/implied_disabled.dsl",
-  {type: "graph", flavor: "structurizr"})
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let disabled_workspace = structurizr.normalize(disabled_source)
 let disabled_model = children(disabled_workspace, "c4-model")[0]
 

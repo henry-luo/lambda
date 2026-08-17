@@ -7,16 +7,18 @@ let cases = conformance.manifest_cases("test/lambda/graph/structurizr/manifest.m
 let references = [for (test_case in cases where test_case.reference != null) test_case]
 
 fn run(test_case) {
-  let source^source_error = input(
+  let source = input(
     "test/lambda/graph/structurizr/" ++ string(test_case.source),
-    {type: "graph", flavor: "structurizr"});
-  let reference^reference_error = input(
-    "test/lambda/graph/structurizr/" ++ string(test_case.reference), {type: "json"});
+    {type: "graph", flavor: "structurizr"}) ^ { ^ };
+  let reference = input(
+    "test/lambda/graph/structurizr/" ++ string(test_case.reference), {type: "json"}) ^ { ^ };
   let workspace = structurizr.normalize(source);
   let actual = adapter.from_canonical(workspace);
   let expected = adapter.from_json(reference);
   {
-    id: string(test_case.id), errors: [source_error, reference_error],
+    id: string(test_case.id), errors: [
+      if (source is error) source else null,
+      if (reference is error) reference else null],
     equal: actual == expected,
     sections: [actual.workspace == expected.workspace,
       actual.elements == expected.elements,

@@ -5,8 +5,8 @@ fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child
 ]
 
-let source^err = input("test/lambda/graph/structurizr/deployment_groups.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/deployment_groups.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let c4_model = children(workspace, "c4-model")[0]
 let elements = children(c4_model, "c4-element")

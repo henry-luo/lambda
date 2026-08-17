@@ -16,8 +16,8 @@ fn named_properties(value, wanted) => [
     [property.value, property.origin, property["defining-scope"]]
 ]
 
-let source^parse_error = input("test/lambda/graph/graphviz/canonical.dot",
-  {type: "graph", flavor: "dot"})
+let source = (input("test/lambda/graph/graphviz/canonical.dot",
+  {type: "graph", flavor: "dot"})) ^ { null }
 let result = normalize.normalize(source)
 let graph = result.graph
 let nodes = model.nodes(graph)

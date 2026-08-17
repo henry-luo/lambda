@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 2.0.0 (2026-08-12)
+**Spec version:** 3.0.0 (2026-08-17)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -523,7 +523,9 @@ it.* [TE-13, C14]
   answer → `null`* (or `""` for string results); present-but-invalid →
   `error()` (§S7.10). `input`/`fetch` are effectful readers — pn-family, they
   **raise** (`T^E`), though permitted in expression position; set-oriented
-  input is an explicit wrapper (`fn my_input(f) { input(f) ^ { ~ } }`).
+  input is an explicit wrapper (`fn my_input(f) { input(f) ^ { ^ } }`). The
+  handler is the acknowledgment boundary: `^ { ^ }` engages the hard raised
+  error and returns it as a soft `error` value (`T | error`).
   [C14, C14a]
 
 ### S7.5 Acknowledgment
@@ -546,28 +548,43 @@ it.* [TE-13, C14]
 
 ### S7.6 Discharge: the handler and postfix `^`
 
-- **S7.6.1v2*** **`e ^ { … ^ … }` handles the error locally and is
+- **S7.6.1v3*** **`e ^ { … ^ … }` handles the error locally and is
   channel-agnostic** — it receives soft values, raised errors, and (at `pn`
   boundaries) system faults alike, binding the error to handler-local `^`
-  (innermost-wins). It introduces no `~` binding; `~` retains the current-value
-  meaning supplied by an enclosing pipe, match, constraint, or view context.
-  Typing mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. The
-  handler produces a value of the expected type or does not complete normally
-  (`raise` / `return`); either way the binding it feeds is **statically
-  clean** — *sound by construction*, no flow analysis: *a binding's static
-  type is never a lie* (SI14). [TE-16]
-- **S7.6.2v2*** The handler is the left-associative postfix-primary form
-  `primary ^ { body }`, at the same precedence tier as member (`.`) and query
-  (`?`) access. Consequently `a + b ^ { h }` means `a + (b ^ { h })`; handling
-  the complete binary expression requires `(a + b) ^ { h }`. The handled
-  result is primary-like, so postfix operations continue left-to-right:
-  `e ^ { h }.field` means `(e ^ { h }).field`, and handler chains associate as
-  `(e ^ { h1 }) ^ { h2 }`. The handler is brace-delimited mandatorily: `^`
-  followed by `{` is the handler; `^` followed by anything else is
-  propagation (`f()^ - 1` propagates then subtracts). There is no prefix
-  `^ { h } e` shorthand. The caret belongs to the handler or propagation
-  construct, never to `call_expr`. [TE-16]
-- **S7.6.3v2*** **Postfix `e^` propagates** and occupies the same
+  (innermost-wins). In the one-arm form, the handler introduces no `~`
+  binding: `~` retains the current-value meaning supplied by an enclosing pipe,
+  match, constraint, or view context, and a non-error operand passes through
+  unchanged. Typing mirrors `or`:
+  `type(e ^ { h }) = (type(e) \ error) | type(h)`.
+
+  The optional two-arm form **`e ^ { h } ~ { v }`** evaluates `e` exactly
+  once. An error selects `h`, with `^` bound to that error and any enclosing
+  `~` left intact; every non-error value — including `null` and `false` —
+  selects `v`, with `~` bound to that value as the innermost current-value
+  context. Its type is `type(h) | type(v)`. An error raised while evaluating
+  either selected arm is a fresh outcome and is not consumed again by the
+  same handler. In statement position, the selected arm executes as a
+  statement body and normal completion continues after the handler.
+
+  In either form the selected handler result has the ordinary contextual type
+  or the arm does not complete normally (`raise` / `return`); the binding it
+  feeds is therefore **statically clean** — *sound by construction*, no flow
+  analysis: *a binding's static type is never a lie* (SI14). [TE-16]
+- **S7.6.2v3** The handler is the left-associative postfix-primary form
+  `primary ^ { error_body }`, optionally followed immediately by the normal
+  value arm `~ { value_body }`. It occupies the same precedence tier as member
+  (`.`) and query (`?`) access. Consequently `a + b ^ { h } ~ { v }` means
+  `a + (b ^ { h } ~ { v })`; handling the complete binary expression requires
+  `(a + b) ^ { h } ~ { v }`. The complete handler result is primary-like, so
+  postfix operations continue left-to-right: `e ^ { h } ~ { v }.field` means
+  `(e ^ { h } ~ { v }).field`, and handler chains associate from the left.
+  Both arms are brace-delimited; the optional `~ { … }` belongs to the handler
+  only when it immediately follows the error arm. `^` followed by anything
+  other than `{` is propagation (`f()^ - 1` propagates then subtracts). There
+  is no prefix `^ { h } e` shorthand and no `else`, `default`, `error`, or
+  `catch` spelling for the second arm. The caret belongs to the handler or
+  propagation construct, never to `call_expr`. [TE-16]
+- **S7.6.3v2** **Postfix `e^` propagates** and occupies the same
   left-associative postfix-primary tier as the handler, member access, and
   query access. Its operand is a primary expression; parentheses admit a
   wider expression. The propagation construct owns its caret — a call has no
@@ -588,15 +605,16 @@ it.* [TE-13, C14]
   postfix braced-handler delimitation, the type-level channel, and the
   handler-local current-error atom — all meaning "the error channel". There
   is no general prefix error test or prefix braced-handler shorthand.* [TE-16]
-- **S7.6.6** Division of labor: `or` catches all falsy without access;
-  `^ { }` catches errors only, with access; `e^` catches errors only,
-  propagating. `or` and `^` are *not* a soft/hard split — both work on both
-  channels; the axis is coalescing-without-access vs error-specific-with-
-  access. [TE-16]
-- **S7.6.7*** `e ^ { … }` over a possibly-suspending operand is a **compile
-  error** — a recovery frame cannot span a scheduler yield, and silently
-  splitting the capability ("same construct, two behaviours by invisible
-  context") is rejected. [TE-16, ER-D13]
+- **S7.6.6v2** Division of labor: `or` catches all falsy without access;
+  `^ { }` catches errors only, with access and normal-value pass-through;
+  `^ { } ~ { }` branches explicitly between error and non-error outcomes;
+  `e^` catches errors only, propagating. `or` and `^` are *not* a soft/hard
+  split — both work on both channels; the axis is coalescing-without-access
+  vs error-specific handling. [TE-16]
+- **S7.6.7v2*** Either handler form over a possibly-suspending operand is a
+  **compile error** — a recovery frame cannot span a scheduler yield, and
+  silently splitting the capability ("same construct, two behaviours by
+  invisible context") is rejected. [TE-16, ER-D13]
 
 ### S7.7 Containment: the declaration-boundary skip
 
@@ -1194,7 +1212,7 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-12. Conformance plans:
+Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 [`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
 [`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
 
@@ -1210,8 +1228,8 @@ Status of `*`-marked rulings as of 2026-08-12. Conformance plans:
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
-| S7.6.1–S7.6.3 | The handler/runtime slice is partially landed, but the grammar does not conform to S7.6.2v2/S7.6.3v2: `call_expr` still owns an optional caret; separate call/literal/binary/member and prefix-handler productions implement maximal-left rather than postfix-primary binding. System-fault capture remains incomplete. |
-| S7.6.5 | Grammar still contains the retired `^err` destructure and prefix `^`; ~240 occurrences across ~121 `.ls` files await migration; E228 diagnostic text still advertises the retired form. |
+| S7.6.1 | The one- and two-arm postfix handler grammar and MIR lowering conform to S7.6.1v3/S7.6.2v3/S7.6.6v2, including nested `^`/`~` scope restoration and direct raised-`pn` outcome routing. System-fault capture remains incomplete. |
+| S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. Remaining open work is system-fault capture for braced handlers (S7.6.7). |
 | S7.6.7 | May-suspend handler rejection: predicate machinery exists but silently degrades instead of diagnosing. |
 | S7.7.1–S7.7.6 | TE-18 declaration-boundary skip pending (routing, case-7 tiers, edge sites). `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |

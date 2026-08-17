@@ -1,1 +1,1 @@
-[null, true, 300, "Structural equality recursion limit exceeded"]
+[null, true, 300, "structural equality recursion too deep (> 256)"]

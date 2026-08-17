@@ -2,8 +2,8 @@ import model: lambda.package.graph.model
 import layout: lambda.package.graph.layout
 import transform: lambda.package.graph.transform
 
-let source^source_error = input(
-  "test/lambda/graph/mermaid/class_diagram.mmd", {type: "graph", flavor: "mermaid"})
+let source = input(
+  "test/lambda/graph/mermaid/class_diagram.mmd", {type: "graph", flavor: "mermaid"}) ^ { null }
 let html = transform.to_html(source)
 let geometry = layout.from_velmts(html, model.element_children(html), null)
 

@@ -575,7 +575,6 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             named->node_type = AST_NODE_ASSIGN;
             named->next = NULL;
             named->as = NULL;
-            named->error_name = NULL;
             named->type = &TYPE_ANY;
 
             // Create name in pool

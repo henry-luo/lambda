@@ -5,18 +5,18 @@ fn fail_string() string^ {
 }
 
 fn split_result(source, separator, keep) {
-    let result^err = split(source, separator, keep)
-    if (^err) "error" else "ok"
+    let result = split(source, separator, keep) ^ { ^ }
+    if (result is error) "error" else "ok"
 }
 
 fn test_split_errors() {
-    let source^source_err = fail_string()
-    let separator^separator_err = fail_string()
-    let keep^keep_err = fail_string()
+    let source = fail_string() ^ { null }
+    let separator = fail_string() ^ { null }
+    let keep = fail_string() ^ { ^ }
     [
         split_result(source_err, ",", false),
         split_result("a,b", separator_err, false),
-        split_result("a,b", ",", keep_err)
+        split_result("a,b", ",", keep)
     ]
 }
 

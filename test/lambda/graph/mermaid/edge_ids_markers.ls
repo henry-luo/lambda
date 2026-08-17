@@ -3,8 +3,8 @@ import model: lambda.package.graph.model
 import paint: lambda.package.graph.transform.paint
 import transform: lambda.package.graph.transform
 
-let source^err = input("test/lambda/graph/mermaid/edge_ids_markers.mmd",
-  {type: "graph", flavor: "mermaid"})
+let source = (input("test/lambda/graph/mermaid/edge_ids_markers.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let source_edges = model.edges(source)
 let html = transform.to_html(source)
 let html_edges = [for (i in 0 to (len(html) - 1), let child = html[i]

@@ -20,10 +20,10 @@ fn summary(scene) => {
       value.stroke, label(value)]]
 }
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/reference_semantics.dot", {type: "graph", flavor: "dot"})
-let reference^reference_error = input(
-  "test/lambda/graph/graphviz/reference/reference_semantics.dot.json", {type: "json"})
+let source = (input(
+  "test/lambda/graph/graphviz/reference_semantics.dot", {type: "graph", flavor: "dot"})) ^ { null }
+let reference = (input(
+  "test/lambda/graph/graphviz/reference/reference_semantics.dot.json", {type: "json"})) ^ { null }
 let canonical = normalize.normalize(source)
 let actual = adapter.from_canonical(canonical.graph)
 let expected = adapter.from_dot_json(reference)

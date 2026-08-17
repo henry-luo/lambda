@@ -84,8 +84,7 @@ fn sanitize_value(value) {
 
 fn parsed_label(source, label_format) {
   if (label_format == "markdown") {
-    let parsed^error = parse(source, "markdown");
-    if (^error) { null } else { parsed }
+    parse(source, "markdown") ^ { null }
   }
   else if (label_format == "html") { parse_html_fragment(source) }
   else { null }
