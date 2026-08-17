@@ -366,7 +366,7 @@ void lambda_stack_cleanup(void) {
 extern "C" void lambda_stack_overflow_error(const char* func_name) {
     (void)func_name;
     _lambda_stack_overflow_flag = true;
-    // Generated side-stack and TCO guards run below local `^err` frames. They
+    // Generated side-stack and TCO guards run below local handler frames. They
     // must transfer the pre-reserved reason, never format an ordinary error
     // after the resource invariant has already failed.
     if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_STACK_OVERFLOW, ERR_OK)) return;

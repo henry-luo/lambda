@@ -7,8 +7,8 @@ fn children(value, wanted) => [
 
 fn tags(value) => [for (tag in children(value, "tag")) tag.name]
 
-let source^err = input("test/lambda/graph/structurizr/basic.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/basic.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let c4_model = children(workspace, "c4-model")[0]
 let c4_views = children(workspace, "c4-views")[0]

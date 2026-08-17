@@ -7,7 +7,7 @@
 import pdf: lambda.package.pdf.pdf
 
 pn main() {
-    let doc^err = input("test/input/advanced_test.pdf", 'pdf')
+    let doc = input("test/input/advanced_test.pdf", 'pdf') ^ { null }
     let n = pdf.pdf_page_count(doc)
     var pages = []
     var i = 0

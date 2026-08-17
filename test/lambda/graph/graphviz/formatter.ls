@@ -25,25 +25,25 @@ fn signature(graph) => {
     members(group), property_pairs(group)]]
 }
 
-let source^source_error = input("test/lambda/graph/graphviz/canonical.dot",
-  {type: "graph", flavor: "dot"})
+let source = (input("test/lambda/graph/graphviz/canonical.dot",
+  {type: "graph", flavor: "dot"})) ^ { null }
 let canonical = normalize.normalize(source).graph
 let source_text = format(source, {type: "graph", flavor: "dot"})
 let canonical_text = format(canonical, {type: "graph", flavor: "dot"})
-let source_round^source_round_error = parse(source_text,
-  {type: "graph", flavor: "dot"})
-let canonical_round^canonical_round_error = parse(canonical_text,
-  {type: "graph", flavor: "dot"})
+let source_round = (parse(source_text,
+  {type: "graph", flavor: "dot"})) ^ { null }
+let canonical_round = (parse(canonical_text,
+  {type: "graph", flavor: "dot"})) ^ { null }
 let source_normalized = normalize.normalize(source_round)
 let canonical_normalized = normalize.normalize(canonical_round)
 let canonical_signature = signature(canonical)
 let round_signature = signature(canonical_normalized.graph)
 
-let grammar^grammar_error = input("test/lambda/graph/graphviz/grammar.dot",
-  {type: "graph", flavor: "dot"})
+let grammar = (input("test/lambda/graph/graphviz/grammar.dot",
+  {type: "graph", flavor: "dot"})) ^ { null }
 let grammar_text = format(grammar, {type: "graph", flavor: "dot"})
-let grammar_round^grammar_round_error = parse(grammar_text,
-  {type: "graph", flavor: "dot"})
+let grammar_round = (parse(grammar_text,
+  {type: "graph", flavor: "dot"})) ^ { null }
 
 {
   source: [source_normalized.valid,

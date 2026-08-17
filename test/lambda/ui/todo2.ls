@@ -270,8 +270,8 @@ on click(evt) {
 
 // Main app: edit template manages file list and active file
 edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", drag_item: null, drag_source: "" {
-  let dir_listing^err = input(data_dir)
-  let json_files = if (err != null) [] else for (f in dir_listing where ends_with(f.name, ".json")) f
+  let dir_listing = input(data_dir) ^ { ^ }
+  let json_files = if (dir_listing != null) [] else for (f in dir_listing where ends_with(f.name, ".json")) f
   let file_names = for (f in json_files) replace(f.name, ".json", "")
 
   // auto-select first file if none active
@@ -280,7 +280,7 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", 
 
   // load active file data
   let active_path = data_dir ++ eff_active ++ ".json"
-  let file_data^err2 = if (eff_active != "") input(active_path, 'json') else null
+  let file_data = (if (eff_active != "") input(active_path, 'json') else null) ^ { null }
 
   <html lang:"en"
   <head
@@ -666,7 +666,7 @@ on keydown(evt) {
       if (new_file_name != "") {
         let path = data_dir ++ new_file_name ++ ".json"
         let empty_data = {name: new_file_name, lists: [{name: "Tasks", items: []}]}
-        let _^write_err = output(empty_data, path, 'json')
+        output(empty_data, path, 'json') ^ { null }
         active_file = new_file_name
         creating_file = false
         new_file_name = ""
@@ -683,7 +683,7 @@ on select_file(evt) {
 }
 on delete_file(evt) {
   let del_path = data_dir ++ evt.name ++ ".json"
-  let _^del_err = io_delete(del_path)
+  io_delete(del_path) ^ { null }
   if (active_file == evt.name) {
     active_file = ""
   }
@@ -695,8 +695,8 @@ on begin_drag(evt) {
 on complete_drop(evt) {
   if (drag_item != null and drag_source != evt.target_list) {
     let active_path = data_dir ++ eff_active ++ ".json"
-    let data^err = input(active_path, 'json')
-    if (err == null) {
+    let data = input(active_path, 'json') ^ { ^ }
+    if (data == null) {
       // Remove item from source list, add to target list
       let new_lists = for (lst in data.lists)
         if (lst.name == drag_source) {
@@ -709,7 +709,7 @@ on complete_drop(evt) {
           lst
         }
       let new_data = {name: data.name, lists: new_lists}
-      let _^w_err = output(new_data, active_path, 'json')
+      output(new_data, active_path, 'json') ^ { null }
     }
   }
   drag_item = null

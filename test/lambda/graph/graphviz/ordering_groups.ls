@@ -46,11 +46,11 @@ fn compute_graph(graph) {
 }
 
 fn new_rank_case(enabled) {
-  let source^parse_error = parse(
+  let source = (parse(
     "digraph Rank { graph [newrank=" ++ string(enabled) ++ "] " ++
       "subgraph cluster_a { a } subgraph cluster_b { b } " ++
       "root -> b subgraph align { rank=same; a; b } }",
-    {type: "graph", flavor: "dot"});
+    {type: "graph", flavor: "dot"})) ^ { null }
   compute_graph(normalize.normalize(source).graph)
 }
 
@@ -62,8 +62,8 @@ fn invalid_source() => parse(
     "a -> b [lhead=cluster_missing] a -> b [lhead=cluster_known] }",
   {type: "graph", flavor: "dot"})
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/ordering_groups.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/ordering_groups.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let nodes = model.nodes(graph)

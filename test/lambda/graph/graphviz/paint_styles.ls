@@ -6,8 +6,8 @@ fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child
 ]
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/paint_styles.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/paint_styles.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let normalized = normalize.normalize(source)
 let graph = normalized.graph
 let nodes = model.nodes(graph)

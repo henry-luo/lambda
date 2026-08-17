@@ -631,12 +631,12 @@ static const char* kSharedModuleStressChartLine =
 
 static const char* kSharedModuleStressPdfPageCount =
     "import pdf: lambda.package.pdf.pdf\n"
-    "let doc^err = input('test/input/test.pdf', 'pdf')\n"
+    "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "pdf.pdf_page_count(doc)\n";
 
 static const char* kSharedModuleStressPdfContent =
     "import resolve: lambda.package.pdf.resolve\n"
-    "let doc^err = input('test/input/test.pdf', 'pdf')\n"
+    "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "let page = resolve.page_at(doc, 0)\n"
     "len(resolve.page_content_bytes(doc, page))\n";
 

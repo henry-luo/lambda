@@ -16,8 +16,8 @@ format(0.3)
 
 '=== depth limit raises ==='
 fn deep(n) => if (n == 0) [0] else [deep(n - 1)]
-let same^err = deep(260) == deep(260)
-^err
+let same = deep(260) == deep(260) ^ { ^ }
+same is error
 
 '=== vmap numeric hash ==='
 1 == 1n

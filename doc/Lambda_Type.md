@@ -148,7 +148,7 @@ number      // Union: all numeric value types and sized-storage types
 produces this refinement when the source success type was `any`:
 
 ```lambda
-let value = expression_returning_any() ^ { ~ }
+let value = expression_returning_any() ^ { ^ }
 // value: any (the handler returns the error as data)
 
 let clean = expression_returning_any() ^ { default }

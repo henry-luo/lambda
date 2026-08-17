@@ -9,7 +9,7 @@ import pdf: lambda.package.pdf.pdf
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn main() {
-    let doc^err = input("test/input/pdf_cpp_parity_features.pdf", 'pdf')
+    let doc = input("test/input/pdf_cpp_parity_features.pdf", 'pdf') ^ { null }
     let svg = format(pdf.pdf_to_svg(doc, 0, { show_label: false }), 'xml')
     print({
         pages: pdf.pdf_page_count(doc),

@@ -5,7 +5,7 @@ import pdf: lambda.package.pdf.pdf
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn main() {
-    let doc^err = input("test/input/invoice.pdf", 'pdf')
+    let doc = input("test/input/invoice.pdf", 'pdf') ^ { null }
     let html_default = format(pdf.pdf_to_html(doc, null), 'html')
     let html_label = format(pdf.pdf_to_html(doc, { show_label: true }), 'html')
     print({

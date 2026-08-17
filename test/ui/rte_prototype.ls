@@ -24,7 +24,7 @@ import lambda.package.editor.mod_md_schema
 import lambda.package.editor.mod_source_pos
 
 let SOURCE_PATH = './test/input/simple.md'
-let initial_doc^err = input(SOURCE_PATH, 'markdown')
+let initial_doc = input(SOURCE_PATH, 'markdown') ^ { null }
 let initial_body = initial_doc[0]
 
 fn maybe_attr(name, value) => if (value == null) { [] } else { [{name: name, value: value}] }

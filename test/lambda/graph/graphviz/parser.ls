@@ -13,14 +13,14 @@ fn property_lists(value) => [
   ]
 ]
 
-let graph^parse_error = input("test/lambda/graph/graphviz/grammar.dot",
-  {type: "graph", flavor: "dot"})
+let graph = (input("test/lambda/graph/graphviz/grammar.dot",
+  {type: "graph", flavor: "dot"})) ^ { null }
 let direct = model.element_children(graph)
 let edge = children(graph, "dot-edge-statement")[0]
-let recovered^recovery_error = input("test/lambda/graph/graphviz/recovery.dot",
-  {type: "graph", flavor: "dot"})
-let ids^ids_error = input("test/lambda/graph/graphviz/ids.dot",
-  {type: "graph", flavor: "dot"})
+let recovered = (input("test/lambda/graph/graphviz/recovery.dot",
+  {type: "graph", flavor: "dot"})) ^ { null }
+let ids = (input("test/lambda/graph/graphviz/ids.dot",
+  {type: "graph", flavor: "dot"})) ^ { null }
 let id_nodes = children(ids, "node")
 
 {

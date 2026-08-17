@@ -1542,8 +1542,7 @@ pn build_input_full_test_dyn_libs(ext_libs, platform) {
 // Enumerate .c and .cpp files in a single directory
 // Returns files in glob order: .c files first, then .cpp files
 pn enumerate_dir(dir_path) {
-    var entries^err = input(dir_path, "dir")
-    if (err) { return [] }
+    var entries = input(dir_path, "dir") ^ { return [] }
     var c_files = []
     var cpp_files = []
     var i = 0
@@ -1610,17 +1609,16 @@ pn enumerate_sources(config, platform) {
 pn main() {
     print("Lambda Premake5 Generator v2")
 
-    var config^err = input("build_lambda_config.json", "json")
-    if (err != null) {
+    var config = input("build_lambda_config.json", "json") ^ {
         print("Error: Failed to load config")
         return 1
     }
 
     // Parse platform from PLATFORM env var or detect automatically
     // Usage: PLATFORM=macos ./lambda.exe run utils/generate_premake_v2.ls
-    var env_plat^env_err = cmd("printenv", ["PLATFORM"])
+    var env_plat = cmd("printenv", ["PLATFORM"]) ^ { null }
     var platform = ""
-    if (env_err == null and env_plat != null) {
+    if (env_plat != null) {
         // trim trailing newline from printenv output
         var ep = string(env_plat)
         if (ends_with(ep, "\n")) {

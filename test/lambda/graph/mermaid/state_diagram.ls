@@ -16,8 +16,8 @@ fn annotation_for(values, id) => [
   for (value in values where value["owner-id"] == id) value
 ][0]
 
-let source^source_error = input(
-  "test/lambda/graph/mermaid/state_diagram.mmd", {type: "graph", flavor: "mermaid"})
+let source = (input(
+  "test/lambda/graph/mermaid/state_diagram.mmd", {type: "graph", flavor: "mermaid"})) ^ { null }
 let source_nodes = model.nodes(source)
 let source_edges = model.edges(source)
 let source_annotations = model.annotations(source)

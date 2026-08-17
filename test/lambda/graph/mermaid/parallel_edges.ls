@@ -1,8 +1,8 @@
 import layout: lambda.package.graph.layout
 import model: lambda.package.graph.model
 
-let source^err = input("test/lambda/graph/mermaid/parallel_edges.mmd",
-  {type: "graph", flavor: "mermaid"})
+let source = (input("test/lambda/graph/mermaid/parallel_edges.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 
 let routed = layout.compute({
   nodes: [

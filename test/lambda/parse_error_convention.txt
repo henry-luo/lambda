@@ -1,5 +1,5 @@
 {
-  value: type.null,
+  value: error,
   error: error
 }
 {
@@ -7,7 +7,7 @@
   error: type.null
 }
 {
-  value: type.null,
+  value: error,
   error: error
 }
 true

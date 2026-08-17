@@ -1,6 +1,6 @@
 import resolve: lambda.package.pdf.resolve
 pn main() {
-    let doc^err = input("test/input/invoice.pdf", 'pdf')
+    let doc = input("test/input/invoice.pdf", 'pdf') ^ { null }
     let page = doc.pages[0]
     let xo = resolve.deref(doc, page.dict.Resources.XObject.I1)
     print({

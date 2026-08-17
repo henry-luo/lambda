@@ -2,7 +2,7 @@
 // Demonstrates Phase 8: extended interactions (delete, clear completed)
 // Run: ./lambda.exe view test/lambda/ui/todo.ls
 
-let data^err = input('./test/lambda/ui/todos.json', 'json')
+let data = input('./test/lambda/ui/todos.json', 'json') ^ { null }
 
 // ============================================================================
 // Templates — reactive components with state and event handlers

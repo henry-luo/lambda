@@ -381,8 +381,11 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
     case OPERATOR_NOT:      return (Item){.item = b2it(fn_not(operand))};
     case OPERATOR_NEG:      return fn_neg(operand);
     case OPERATOR_POS:      return fn_pos(operand);
-    case OPERATOR_IS_ERROR: return (Item){.item = b2it(item_is_error(operand)
-                                    ? BOOL_TRUE : BOOL_FALSE)};
+    case OPERATOR_PROPAGATE:
+        if (item_is_error(operand) && !interp_frame_pending(f)) {
+            interp_signal(f, EvalSignal::RETURNED, operand);
+        }
+        return operand;
     default:
         log_error("interp: unhandled unary operator %d", (int)node->op);
         return ItemError;

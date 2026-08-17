@@ -13,8 +13,8 @@ fn pairs(value, wanted) => [
     if (wanted == "perspective") child.url else null]
 ]
 
-let source^err = input("test/lambda/graph/structurizr/metadata.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/metadata.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let c4_model = children(workspace, "c4-model")[0]
 let entries = children(c4_model, "c4-element")

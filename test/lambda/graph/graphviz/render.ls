@@ -15,19 +15,19 @@ fn first_route_point(edge) {
   children(route, "point")[0]
 }
 
-let source^source_error = input(
-  "test/lambda/graph/graphviz/annotations.dot", {type: "graph", flavor: "dot"})
+let source = (input(
+  "test/lambda/graph/graphviz/annotations.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let installed = transform.install()
 let rendered = transform.render_scene(source, 640, 480)
 let nodes = children(rendered.scene, "node")
 let edges = children(rendered.scene, "edge")
-let styled_source^styled_error = input(
-  "test/lambda/graph/graphviz/content_shapes_markers.dot", {type: "graph", flavor: "dot"})
+let styled_source = (input(
+  "test/lambda/graph/graphviz/content_shapes_markers.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let styled_rendered = transform.render_scene(styled_source, 800, 600)
 let styled_node = [for (node in children(styled_rendered.scene, "node")
   where node.id == "i") node][0]
-let record_source^record_error = input(
-  "test/lambda/graph/graphviz/records_ports.dot", {type: "graph", flavor: "dot"})
+let record_source = (input(
+  "test/lambda/graph/graphviz/records_ports.dot", {type: "graph", flavor: "dot"})) ^ { null }
 let record_rendered = transform.render_scene(record_source, 800, 600)
 let record_node = item_by_id(children(record_rendered.scene, "node"), "a")
 let record_edges = children(record_rendered.scene, "edge")

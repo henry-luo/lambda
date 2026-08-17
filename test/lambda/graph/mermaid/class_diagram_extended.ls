@@ -11,9 +11,9 @@ fn members(node) => [
     where model.tag(child) == "class-member") child
 ]
 
-let source^source_error = input(
+let source = (input(
   "test/lambda/graph/mermaid/class_diagram_extended.mmd",
-  {type: "graph", flavor: "mermaid"})
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let nodes = model.nodes(source)
 let edges = model.edges(source)
 let normalized = normalize.normalize(source)

@@ -2,8 +2,8 @@ import model: lambda.package.graph.model
 import normalize: lambda.package.graph.normalize
 import transform: lambda.package.graph.transform
 
-let source^parse_err = input("test/lambda/graph/mermaid/node_redeclarations.mmd",
-  {type: "graph", flavor: "mermaid"})
+let source = (input("test/lambda/graph/mermaid/node_redeclarations.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let result = normalize.normalize(source)
 let canonical = result.graph
 let repeated = normalize.normalize(canonical)

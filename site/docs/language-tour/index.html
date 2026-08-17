@@ -210,8 +210,8 @@ fn compute(x: float) float^error => {
     r * 2
 }
 
-// Destructure with let a^err
-let result^err = divide(10, 0)
+// Handle the error with a braced postfix handler
+let result = divide(10, 0) ^ { 0 }
 if err { print("Error: " ++ err.message) }
 else { print("Result: " ++ str(result)) }</code></pre>
 

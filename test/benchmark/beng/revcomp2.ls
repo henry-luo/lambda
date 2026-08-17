@@ -62,7 +62,7 @@ pn output_reverse_complement(header: string, seq: string) any {
 
 pn main() {
     var __t0 = clock()
-    let text^err = input(INPUT_PATH, 'text')
+    let text = input(INPUT_PATH, 'text') ^ { null }
     let lines = split(text, "\n")
     var num_lines = len(lines)
 

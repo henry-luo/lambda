@@ -22,12 +22,12 @@ fn make_error() int^ {
     raise error("this is an error message")
 }
 fn get_error_code() {
-    let a^err = make_error()
-    err.code
+    let a = make_error() ^ { ^ }
+    a.code
 }
 fn get_error_message() {
-    let a^err = make_error()
-    err.message
+    let a = make_error() ^ { ^ }
+    a.message
 }
 'error code:'; get_error_code()
 'error message:'; get_error_message()

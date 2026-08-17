@@ -227,7 +227,7 @@ Bool is_truthy(Item item) {
     case LMD_TYPE_NULL:
         return BOOL_FALSE;
     case LMD_TYPE_ERROR:
-        return BOOL_FALSE;  // errors are falsy — use `if (^e)` to check for errors
+        return BOOL_FALSE;  // errors are falsy; use `is error` to test them
     case LMD_TYPE_BOOL:
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_FLOAT:
@@ -2035,7 +2035,7 @@ static Bool function_eq(Function* a, Function* b, int depth) {
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     if (depth > EQ_MAX_DEPTH) {
-        // Functional `let ^err` keeps its established returned-error flow;
+        // Functional handlers keep returned errors as values;
         // only a live procedural local handler owns this static C14 landing.
         if (lambda_recovery_frame_raise_local_fault(
                 LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_OK)) {

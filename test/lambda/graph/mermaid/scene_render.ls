@@ -5,8 +5,8 @@ fn scene_case(test_case) => string(test_case.policy) == "scene-semantic"
 fn run_case(test_case) {
   let source_path = "test/lambda/graph/mermaid/" ++ string(test_case.source);
   let expected_path = "test/lambda/graph/mermaid/" ++ string(test_case["expected-scene"]);
-  let graph^graph_error = input(source_path, {type: "graph", flavor: "mermaid"});
-  let expected^expected_error = input(expected_path, {type: "mark"});
+  let graph = input(source_path, {type: "graph", flavor: "mermaid"}) ^ { null }
+  let expected = input(expected_path, {type: "mark"}) ^ { null }
   let result = conformance.compare(graph, expected, test_case, 800, 600);
   {
     id: string(test_case.id),

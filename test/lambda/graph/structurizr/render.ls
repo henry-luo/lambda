@@ -10,9 +10,9 @@ fn route_points(edge) => [
   for (route in children(edge, "route"), point in children(route, "point")) point
 ]
 
-let source^source_error = input(
+let source = (input(
   "test/lambda/graph/structurizr/advanced_static.dsl",
-  {type: "graph", flavor: "structurizr"})
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let graph = structurizr.project(workspace, "All")
 let installed = transform.install()

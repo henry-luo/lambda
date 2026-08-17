@@ -679,7 +679,7 @@ fun()^               // propagate error, discard value
 **`e ^ { }` — handle the error here (`~` is the error):**
 ```lambda
 let result = divide(10, x) ^ {
-  print(~.message)            // ~ = the error
+  print(^.message)            // ^ = the current handler error
   0                           // handler value, or raise/return
 }
 result * 2                    // result is clean here

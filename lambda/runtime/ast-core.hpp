@@ -149,7 +149,7 @@ typedef enum Operator {
     OPERATOR_NEG,
     OPERATOR_POS,
     OPERATOR_SPREAD,
-    OPERATOR_IS_ERROR,
+    OPERATOR_PROPAGATE,
 
     // binary
     OPERATOR_ADD,
@@ -453,12 +453,8 @@ typedef AstBinaryNode AstPipeNode;
 typedef struct AstNamedNode : AstNode {
     String* name;
     AstNode *as;
-    String* error_name;
     NameEntry* entry;
     bool is_type_definition;
-    // A `^err` RHS that can suspend keeps ordinary ItemError destructuring,
-    // but cannot retain a native setjmp target across a task poll.
-    bool local_fault_safe;
     // Kept separately from AstNode::type so a declaration can retain both its
     // source annotation and its initializer's inferred type (`as->type`).
     Type* declared_type;

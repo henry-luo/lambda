@@ -1,8 +1,8 @@
 import model: lambda.package.graph.model
 import structurizr: lambda.package.graph.structurizr.structurizr
 
-let source^err = input("test/lambda/graph/structurizr/expression_diagnostics.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/expression_diagnostics.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 
 [

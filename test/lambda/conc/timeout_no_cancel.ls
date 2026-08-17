@@ -5,8 +5,8 @@ pn child() {
 
 pn main() {
     let handle = start child()
-    let first^err = wait(handle, timeout: 1)
-    print(^err)
+    let first = wait(handle, timeout: 1) ^ { ^ }
+    print(first is error)
     send(handle, 8)^
     print(wait(handle)^)
 }

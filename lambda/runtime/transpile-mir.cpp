@@ -6054,7 +6054,7 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             SysFuncInfo* info = ((AstSysFuncNode*)direct_callee)->fn_info;
             if (info && info->can_raise) {
                 // A T^ system result may resume as its original error Item.
-                // Keep it boxed until ^ or ^err handles that channel.
+                // Keep it boxed until propagation or a handler handles that channel.
                 return LMD_TYPE_ANY;
             }
             if (info && !call->propagate && call->argument &&
@@ -6584,8 +6584,6 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                 operand_eff == LMD_TYPE_NUM_SIZED || operand_eff == LMD_TYPE_UINT64 ||
                 operand_eff == LMD_TYPE_FLOAT)
                 return operand_eff;
-        } else if (un->op == OPERATOR_IS_ERROR) {
-            return LMD_TYPE_BOOL;
         }
     }
     return tid;
@@ -8355,6 +8353,35 @@ static MIR_reg_t mir_box_evaluated_node(MirTranspiler* mt, AstNode* node,
 // Unary expressions
 // ============================================================================
 
+// propagate a boxed outcome before allowing its success arm into a native lane
+static MIR_reg_t transpile_propagated_result(MirTranspiler* mt, MIR_reg_t result,
+        AstNode* success_node) {
+    MIR_reg_t type_tag = new_reg(mt, "ptag", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, type_tag),
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 56)));
+    MIR_reg_t is_err = new_reg(mt, "perr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+        MIR_new_reg_op(mt->ctx, type_tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+    MIR_label_t l_ok = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
+        MIR_new_reg_op(mt->ctx, is_err)));
+    // the propagated error exits before any enclosing native consumer sees it
+    async_track_pending_reg(mt, result);
+    transpile_task_scope_unwind(mt, true);
+    async_complete_frame(mt);
+    emit_function_error_return(mt, result);
+    emit_label(mt, l_ok);
+
+    TypeId success_tid = get_effective_type(mt, success_node);
+    if (mir_is_native_scalar_value_type(success_tid) ||
+            is_text_type_id(success_tid)) {
+        // the raw result remains boxed until its error tag has been checked;
+        // unboxing before that point would reinterpret error bits as a value.
+        return emit_unbox(mt, result, success_tid);
+    }
+    return result;
+}
+
 static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
     TypeId operand_tid = get_effective_type(mt, un->operand);
 
@@ -8431,16 +8458,9 @@ static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
         MIR_reg_t boxed = transpile_box_item(mt, un->operand);
         return emit_call_1(mt, "fn_pos", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
     }
-    case OPERATOR_IS_ERROR: {
-        // ^expr: check if Item type is LMD_TYPE_ERROR
-        MIR_reg_t boxed = transpile_box_item(mt, un->operand);
-        MIR_reg_t type_reg = new_reg(mt, "tid", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, type_reg),
-            MIR_new_reg_op(mt->ctx, boxed), MIR_new_int_op(mt->ctx, 56)));
-        MIR_reg_t r = new_reg(mt, "iserr", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, r),
-            MIR_new_reg_op(mt->ctx, type_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
-        return r;
+    case OPERATOR_PROPAGATE: {
+        MIR_reg_t result = transpile_box_item(mt, un->operand);
+        return transpile_propagated_result(mt, result, (AstNode*)un);
     }
     default:
         log_error("mir: unhandled unary op %d", un->op);
@@ -10904,77 +10924,12 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
     return result;
 }
 
-static void transpile_error_destructure(MirTranspiler* mt, AstNamedNode* asn) {
-    const uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
-    // Event handlers have their own transaction/re-entry policy in ER-S5.
-    // A native target may surround only an RHS proven not to suspend; the
-    // ordinary `^err` ItemError split remains valid for an async RHS.
-    bool local_fault_boundary = mt->in_proc && mt->in_user_func &&
-        !mt->in_view_handler && asn->local_fault_safe;
-    MIR_reg_t boxed = new_reg(mt, "destr_rhs", MIR_T_I64);
-    if (local_fault_boundary) {
-        MIR_reg_t protected_result = transpile_local_fault_expression(mt, asn->as);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, boxed), MIR_new_reg_op(mt->ctx, protected_result)));
-    } else {
-        MIR_reg_t normal_result = transpile_box_item(mt, asn->as);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, boxed), MIR_new_reg_op(mt->ctx, normal_result)));
-    }
-    MIR_reg_t type_id = emit_item_tag(mt, boxed);
-    MIR_reg_t is_error = new_reg(mt, "iserr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_error),
-        MIR_new_reg_op(mt->ctx, type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
-
-    MIR_label_t error_path = new_label(mt);
-    MIR_label_t done = new_label(mt);
-    MIR_reg_t value_result = new_reg(mt, "destr_value", MIR_T_I64);
-    MIR_reg_t error_result = new_reg(mt, "destr_error", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, error_path), MIR_new_reg_op(mt->ctx, is_error)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, value_result), MIR_new_reg_op(mt->ctx, boxed)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, error_result), MIR_new_int_op(mt->ctx, (int64_t)null_value)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
-    emit_label(mt, error_path);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, value_result), MIR_new_int_op(mt->ctx, (int64_t)null_value)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, error_result), MIR_new_reg_op(mt->ctx, boxed)));
-    emit_label(mt, done);
-
-    char value_name[128];
-    snprintf(value_name, sizeof(value_name), "%.*s", (int)asn->name->len,
-        asn->name->chars);
-    set_var(mt, value_name, value_result, MIR_T_I64, LMD_TYPE_ANY);
-    if (!mt->in_user_func && !mt->in_lexical_list_declaration) {
-        GlobalVarEntry* value_global = find_global_var(mt, value_name);
-        if (value_global) store_global_var(mt, value_global, value_result, LMD_TYPE_ANY);
-    }
-
-    char error_name[128];
-    snprintf(error_name, sizeof(error_name), "%.*s", (int)asn->error_name->len,
-        asn->error_name->chars);
-    set_var(mt, error_name, error_result, MIR_T_I64, LMD_TYPE_ANY);
-    if (!mt->in_user_func && !mt->in_lexical_list_declaration) {
-        GlobalVarEntry* error_global = find_global_var(mt, error_name);
-        if (error_global) store_global_var(mt, error_global, error_result,
-            LMD_TYPE_ANY);
-    }
-}
-
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     AstNode* declare = let_node->declare;
     while (declare) {
         if (declare->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* asn = (AstNamedNode*)declare;
             if (asn->as) {
-                if (asn->error_name) {
-                    transpile_error_destructure(mt, asn);
-                    declare = declare->next;
-                    continue;
-                }
                 bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
                 if (mt->in_proc && asn->as->node_type == AST_NODE_IF_EXPR) {
                     // let/var initializers consume the if-expression value; without
@@ -11526,65 +11481,6 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     }
                 }
 
-                // Handle error destructuring: let a^err = expr
-                if (asn->error_name) {
-                    // Box the value for error checking
-                    MIR_reg_t boxed = emit_box(mt, val, var_tid);
-                    // Check if result is an error: item_type_id(boxed) == LMD_TYPE_ERROR
-                    // item_type_id returns uint8_t TypeId — zero-extend for clean comparison
-                    MIR_reg_t type_id = emit_uext8(mt, emit_call_1(mt, "item_type_id", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed)));
-                    MIR_reg_t is_error = new_reg(mt, "iserr", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_error),
-                        MIR_new_reg_op(mt->ctx, type_id),
-                        MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
-
-                    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                    MIR_label_t l_is_err = new_label(mt);
-                    MIR_label_t l_end = new_label(mt);
-
-                    // error_var = is_error ? boxed : ITEM_NULL
-                    // value_var = is_error ? ITEM_NULL : boxed
-                    MIR_reg_t err_result = new_reg(mt, "errv", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err_result),
-                        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_is_err),
-                        MIR_new_reg_op(mt->ctx, is_error)));
-                    // Non-error path: val = boxed (convert native to boxed Item)
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, val),
-                        MIR_new_reg_op(mt->ctx, boxed)));
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-                    emit_label(mt, l_is_err);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err_result),
-                        MIR_new_reg_op(mt->ctx, boxed)));
-                    // If error: value_var = ITEM_NULL
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, val),
-                        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                    emit_label(mt, l_end);
-                    // After both paths, val is a boxed Item (either boxed value or NULL)
-                    set_var(mt, name_buf, val, MIR_T_I64, LMD_TYPE_ANY);
-
-                    // Update BSS global if module-level (val may have changed to NULL on error)
-                    if (!mt->in_user_func && !mt->in_lexical_list_declaration) {
-                        GlobalVarEntry* gvar = find_global_var(mt, name_buf);
-                        if (gvar) {
-                            store_global_var(mt, gvar, val, LMD_TYPE_ANY);
-                        }
-                    }
-
-                    char err_name_buf[128];
-                    snprintf(err_name_buf, sizeof(err_name_buf), "%.*s",
-                        (int)asn->error_name->len, asn->error_name->chars);
-                    set_var(mt, err_name_buf, err_result, MIR_T_I64, LMD_TYPE_ANY);
-
-                    // Store error var to BSS global at module level
-                    if (!mt->in_user_func && !mt->in_lexical_list_declaration) {
-                        GlobalVarEntry* err_gvar = find_global_var(mt, err_name_buf);
-                        if (err_gvar) {
-                            store_global_var(mt, err_gvar, err_result, LMD_TYPE_ANY);
-                        }
-                    }
-                }
             }
         } else if (declare->node_type == AST_NODE_DECOMPOSE) {
             AstDecomposeNode* dec = (AstDecomposeNode*)declare;
@@ -18254,7 +18150,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
     // A can-raise (or slow-routed) call already produced a boxed Item — the
     // value-or-error join — even though its declared type is a native scalar.
-    // It is exactly what `^err`/`or` consumers split on; normalizing it
+    // It is exactly what handler/`or` consumers split on; normalizing it
     // through the scalar lane would send the ERROR arm through it2d/it2l and
     // silently destroy the error.
     if (mt->last_call_returned_boxed_item &&
@@ -18493,6 +18389,17 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         TypeId ct = get_effective_type(mt, un->operand);
         int uop = un->op;
 
+        if (uop == OPERATOR_PROPAGATE) {
+            // postfix propagation narrows a primary operand to its native
+            // success lane; re-box that lane when the enclosing content block
+            // needs an Item return, otherwise a top-level `f()^` returns raw
+            // MIR bits as though they were a tagged script value.
+            if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL) {
+                return val;
+            }
+            return emit_box(mt, val, tid);
+        }
+
         // NEG: native for scalar register lanes; compact sized Items stay boxed.
         if (uop == OPERATOR_NEG) {
             if (ct == LMD_TYPE_INT) return emit_box_int(mt, val);
@@ -18512,10 +18419,6 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             if (ct == LMD_TYPE_UINT64) return emit_box_uint64(mt, val);
             if (ct == LMD_TYPE_FLOAT) return emit_box_float(mt, val);
             return val; // fn_pos returns boxed Item for non-numeric operands
-        }
-        // IS_ERROR: always returns native bool regardless of operand type
-        if (uop == OPERATOR_IS_ERROR) {
-            return emit_box_bool(mt, val);
         }
         // Default: assume boxed
         return val;
@@ -19950,33 +19853,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         AstCallNode* cn = (AstCallNode*)node;
         MIR_reg_t call_result = transpile_call(mt, cn);
         if (cn->propagate) {
-            // '^' error propagation: check if result is error, early-return if so.
-            // can_raise calls return boxed Item (LMD_TYPE_ANY), so result is raw i64.
-            // extract type tag from high byte: result >> 56
-            MIR_reg_t type_tag = new_reg(mt, "ptag", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, type_tag),
-                MIR_new_reg_op(mt->ctx, call_result), MIR_new_int_op(mt->ctx, 56)));
-            MIR_reg_t is_err = new_reg(mt, "perr", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
-                MIR_new_reg_op(mt->ctx, type_tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
-            MIR_label_t l_ok = new_label(mt);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
-                MIR_new_reg_op(mt->ctx, is_err)));
-            // error path: return error from enclosing function
-            async_track_pending_reg(mt, call_result);
-            transpile_task_scope_unwind(mt, true);
-            async_complete_frame(mt);
-            emit_function_error_return(mt, call_result);
-            // non-error path: continue with result
-            emit_label(mt, l_ok);
-            TypeId success_tid = get_effective_type(mt, (AstNode*)cn);
-            if (mir_is_native_scalar_value_type(success_tid) ||
-                    is_text_type_id(success_tid)) {
-                // The raw call remains boxed until its error tag has been
-                // checked. Only the surviving success arm may enter a native
-                // carrier; unboxing earlier would reinterpret error bits.
-                call_result = emit_unbox(mt, call_result, success_tid);
-            }
+            call_result = transpile_propagated_result(mt, call_result, (AstNode*)cn);
         }
         return call_result;
     }
@@ -20934,10 +20811,6 @@ static bool declaration_may_check_boundary(AstNode* stam) {
     for (AstNode* d = declare; d; d = d->next) {
         if (d->node_type != AST_NODE_ASSIGN) continue;
         AstNamedNode* asn = (AstNamedNode*)d;
-        // A `^err` destructure may receive the implicit ItemError return from
-        // an error-rejecting system call, so its enclosing function cannot
-        // promise a raw native result lane.
-        if (asn->error_name) return true;
         if (!asn->declared_type || asn->is_type_definition) continue;
         Type* declared = mir_unwrap_decl_type(asn->declared_type);
         if (!declared) return true;
@@ -21013,7 +20886,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     if (!node) return false;
 
     // A can-raise call is an Item-valued merge at every expression boundary:
-    // success and failure share one register until `^`/`^err` consumes it.
+    // success and failure share one register until `^` or a handler consumes it.
     // Its declared payload type must not by itself certify a raw return lane.
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
@@ -21439,7 +21312,7 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     // arms exit on the ERROR lane (emit_function_error_return) and contribute
     // nothing to the value lane, whose type the union records precisely. This
     // mirrors how a tail-raise proc is admitted, and reuses the same caller
-    // merge that reconstructs the Item join for `^`/`^err` consumers.
+    // merge that reconstructs the Item join for propagation/handler consumers.
     //
     // Every native lane, not just FLOAT: RVO12(a) made the body producer
     // publish its carrier, so the return boundary unboxes a boxed value arm to
@@ -24239,21 +24112,6 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                     entry.mir_type = type_to_mir(tid);
                     hashmap_set(mt->global_vars, &entry);
 
-                    // Also create BSS for the error variable (e.g. pub val^err = ...)
-                    if (asn->error_name) {
-                        char err_name[128];
-                        snprintf(err_name, sizeof(err_name), "%.*s",
-                            (int)asn->error_name->len, asn->error_name->chars);
-                        MIR_item_t err_bss = create_global_var_bss(mt, err_name);
-                        GlobalVarEntry err_entry;
-                        memset(&err_entry, 0, sizeof(err_entry));
-                        err_entry.name = mir_em_persist_cstr(&mt->em, err_name).str;
-                        err_entry.bss_item = err_bss;
-                        err_entry.slot = mt->global_var_slot_count++;
-                        err_entry.type_id = LMD_TYPE_ANY;
-                        err_entry.mir_type = MIR_T_I64;
-                        hashmap_set(mt->global_vars, &err_entry);
-                    }
                 } else if (decl->node_type == AST_NODE_DECOMPOSE) {
                     AstDecomposeNode* dec = (AstDecomposeNode*)decl;
                     for (int i = 0; i < dec->name_count; i++) {
@@ -25259,24 +25117,6 @@ static void register_module_pub_fns(AstImportNode* imp) {
                         log_debug("mir: registered import var BSS: %s -> %p", import_key->str, bss_item->addr);
                     }
                     strbuf_free(import_key);
-                }
-                if (named->error_name) {
-                    // Same dual-lookup for error variable BSS
-                    StrBuf* err_key = strbuf_new_cap(64);
-                    strbuf_append_char(err_key, '_');
-                    strbuf_append_str_n(err_key, named->error_name->chars, named->error_name->len);
-                    char gvar_err[200];
-                    snprintf(gvar_err, sizeof(gvar_err), "_gvar_%.*s",
-                             (int)named->error_name->len, named->error_name->chars);
-                    MIR_item_t err_bss = find_import(imp->script->jit_context, gvar_err);
-                    if (!err_bss || !err_bss->addr) {
-                        err_bss = find_import(imp->script->jit_context, err_key->str);
-                    }
-                    if (err_bss && err_bss->addr) {
-                        register_dynamic_import(raw_strdup(err_key->str), err_bss->addr); // RAWALLOC_OK: MIR manages param name lifetime
-                        log_debug("mir: registered import error var BSS: %s -> %p", err_key->str, err_bss->addr);
-                    }
-                    strbuf_free(err_key);
                 }
                 declare = declare->next;
             }

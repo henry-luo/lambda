@@ -5,8 +5,8 @@ fn direct(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child
 ]
 
-let source^err = input("test/lambda/graph/structurizr/basic.dsl",
-  {type: "graph", flavor: "structurizr"})
+let source = (input("test/lambda/graph/structurizr/basic.dsl",
+  {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
 let context = structurizr.project(workspace, "Context")
 let containers = structurizr.project(workspace, "Containers")

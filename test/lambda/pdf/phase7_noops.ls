@@ -8,7 +8,7 @@ import interp:  lambda.package.pdf.interp
 import resolve: lambda.package.pdf.resolve
 
 pn main() {
-    let doc^err = input("test/input/test.pdf", 'pdf')
+    let doc = input("test/input/test.pdf", 'pdf') ^ { null }
     let page = resolve.page_at(doc, 0)
 
     let ops = [

@@ -523,7 +523,9 @@ it.* [TE-13, C14]
   answer → `null`* (or `""` for string results); present-but-invalid →
   `error()` (§S7.10). `input`/`fetch` are effectful readers — pn-family, they
   **raise** (`T^E`), though permitted in expression position; set-oriented
-  input is an explicit wrapper (`fn my_input(f) { input(f) ^ { ~ } }`).
+  input is an explicit wrapper (`fn my_input(f) { input(f) ^ { ^ } }`). The
+  handler is the acknowledgment boundary: `^ { ^ }` engages the hard raised
+  error and returns it as a soft `error` value (`T | error`).
   [C14, C14a]
 
 ### S7.5 Acknowledgment
@@ -1194,7 +1196,7 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-12. Conformance plans:
+Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 [`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
 [`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
 
@@ -1210,8 +1212,8 @@ Status of `*`-marked rulings as of 2026-08-12. Conformance plans:
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
-| S7.6.1–S7.6.3 | The handler/runtime slice is partially landed, but the grammar does not conform to S7.6.2v2/S7.6.3v2: `call_expr` still owns an optional caret; separate call/literal/binary/member and prefix-handler productions implement maximal-left rather than postfix-primary binding. System-fault capture remains incomplete. |
-| S7.6.5 | Grammar still contains the retired `^err` destructure and prefix `^`; ~240 occurrences across ~121 `.ls` files await migration; E228 diagnostic text still advertises the retired form. |
+| S7.6.1–S7.6.3 | The postfix handler/propagation grammar now conforms to S7.6.2v2/S7.6.3v2: `call_expr` has no caret field, and the obsolete call/literal/binary/member and prefix-handler productions are removed. System-fault capture remains incomplete. |
+| S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. Remaining open work is system-fault capture for braced handlers (S7.6.7). |
 | S7.6.7 | May-suspend handler rejection: predicate machinery exists but silently degrades instead of diagnosing. |
 | S7.7.1–S7.7.6 | TE-18 declaration-boundary skip pending (routing, case-7 tiers, edge sites). `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |

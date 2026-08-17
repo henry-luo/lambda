@@ -2,8 +2,8 @@
 // Validates: string conversion, name/path/extension/size/is_dir/scheme/depth/modified
 
 pn main() {
-    var entries^err = input("test/input/test_dir_listing", "dir")
-    if (^err) {
+    var entries: any | error = input("test/input/test_dir_listing", "dir")
+    if (entries is error) {
         print("error")
         return null
     }

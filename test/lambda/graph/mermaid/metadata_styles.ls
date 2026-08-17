@@ -1,8 +1,8 @@
 import model: lambda.package.graph.model
 import transform: lambda.package.graph.transform
 
-let graph^err = input("test/lambda/graph/mermaid/metadata_styles.mmd",
-  {type: "graph", flavor: "mermaid"})
+let graph = (input("test/lambda/graph/mermaid/metadata_styles.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let html = transform.to_html(graph)
 let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
   where string(name(child)) == "node") child]

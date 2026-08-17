@@ -10,14 +10,14 @@ let parsed = graph_style.parse(
 let preserved = graph_style.parse(
   "stroke:#123456;stroke:url(javascript:bad);stroke-width:3px;stroke-width:calc(9px)")
 
-let class_graph^class_err = input("test/lambda/graph/mermaid/class_metadata.mmd",
-  {type: "graph", flavor: "mermaid"})
+let class_graph = (input("test/lambda/graph/mermaid/class_metadata.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let class_html = transform.to_html(class_graph)
 let class_nodes = [for (i in 0 to (len(class_html) - 1), let child = class_html[i]
   where string(name(child)) == "node") child]
 
-let metadata_graph^metadata_err = input("test/lambda/graph/mermaid/metadata_styles.mmd",
-  {type: "graph", flavor: "mermaid"})
+let metadata_graph = (input("test/lambda/graph/mermaid/metadata_styles.mmd",
+  {type: "graph", flavor: "mermaid"})) ^ { null }
 let metadata_html = transform.to_html(metadata_graph)
 let metadata_edges = [for (i in 0 to (len(metadata_html) - 1), let child = metadata_html[i]
   where string(name(child)) == "edge") child]

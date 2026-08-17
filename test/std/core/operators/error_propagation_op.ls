@@ -1,5 +1,5 @@
 // Test: Error Propagation Operator
-// Layer: 2 | Category: operator | Covers: ^ propagation, ^expr check
+// Layer: 2 | Category: operator | Covers: ^ propagation, is error check
 
 // ===== T^ function definition =====
 fn fail() int^ {
@@ -13,48 +13,48 @@ fn succeed() int^ {
 // ===== ^ propagation on calls =====
 succeed()^
 
-// ===== ^expr is_error check =====
+// ===== is error check =====
 fn test_is_error_on_error() {
-    let a^err = fail()
-    ^err
+    let a = fail() ^ { ^ }
+    a is error
 }
 test_is_error_on_error()
 
 fn test_is_error_on_success() {
-    let b^err = succeed()
-    ^err
+    let b = succeed() ^ { ^ }
+    b is error
 }
 test_is_error_on_success()
 
-// ===== ^expr on plain values =====
-^42
-^"hello"
-^null
+// ===== is error on plain values =====
+42 is error
+"hello" is error
+null is error
 
 // ===== Error is falsy =====
 fn test_error_falsy() {
-    let a^err = fail()
-    if (err) 1 else 0
+    let a = fail() ^ { ^ }
+    if (a) 1 else 0
 }
 test_error_falsy()
 
 // ===== Error or default =====
 fn test_error_or_default() {
-    let a^err = fail()
-    err or 100
+    let a = fail() ^ { ^ }
+    a or 100
 }
 test_error_or_default()
 
-// ===== let a^err destructuring =====
+// ===== handler-preserved error value =====
 fn test_destructure_error() {
-    let val^err = fail()
-    [val == null, ^err, err.message]
+    let val = fail() ^ { ^ }
+    [val == null, val is error, val.message]
 }
 test_destructure_error()
 
 fn test_destructure_success() {
-    let val^err = succeed()
-    [val, ^err]
+    let val = succeed() ^ { ^ }
+    [val, val is error]
 }
 test_destructure_success()
 

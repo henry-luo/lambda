@@ -733,7 +733,7 @@ class LayoutDevTool {
     const escapedPdf = this.escapeLambdaString(pdfFile);
     const script =
       'import coords: lambda.package.pdf.coords\n' +
-      `let doc^err = input("${escapedPdf}", 'pdf')\n` +
+      `let doc = input("${escapedPdf}", 'pdf') ^ { null }\n` +
       'fn max_width(pages, i, n, cur) {\n' +
       '    if (i >= n) { cur }\n' +
       '    else {\n' +

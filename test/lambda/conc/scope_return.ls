@@ -1,5 +1,5 @@
 pn child() {
-    sleep(1)^
+    sleep(1)
     print("child")
 }
 pn branch() {

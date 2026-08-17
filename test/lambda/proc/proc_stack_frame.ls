@@ -24,7 +24,7 @@ pn maybe_uwide(ok) u64^ {
 }
 
 pn delayed_wide() {
-    sleep(1)^
+    sleep(1)
     return 9223372036854775805i64
 }
 
@@ -45,18 +45,22 @@ pn main() {
     let joined = [wide()] ++ [reader()]
     let mapped = {value: wide()}
     let umapped = {value: uwide()}
-    let success^success_err = maybe_wide(true)
-    let failed^failure = maybe_wide(false)
-    let usuccess^usuccess_err = maybe_uwide(true)
-    let ufailed^ufailure = maybe_uwide(false)
+    let success: i64 | error = maybe_wide(true)
+    var failure = null
+    maybe_wide(false) ^ { failure = ^ }
+    let failed = null
+    let usuccess: u64 | error = maybe_uwide(true)
+    var ufailure = null
+    maybe_uwide(false) ^ { ufailure = ^ }
+    let ufailed = null
     let handle = start delayed_wide()
     let across_wait = [wide(), wait(handle)^, reader()]
     let scalar_map = make_scalar_map()
 
     print([wide(), reader(), joined[0], joined[1], mapped.value])
     print([uwide(), ureader(), umapped.value])
-    print([success, type(success_err), failed, type(failure)])
-    print([usuccess, type(usuccess_err), ufailed, type(ufailure)])
+    print([success, success is error, failed, type(failure)])
+    print([usuccess, usuccess is error, ufailed, type(ufailure)])
     print(across_wait)
     print([
         scalar_map[9223372036854775807i64],

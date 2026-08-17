@@ -63,10 +63,10 @@ Lambda has a built-in `error` type with the following fields:
 
 ```lambda
 let result = divide(10, 0) ^ {
-    print("code: " ++ str(~.code))
-    print("message: " ++ ~.message)
-    if (~.source is error)
-        print("caused by: " ++ ~.source.message)
+    print("code: " ++ str(^.code))
+    print("message: " ++ ^.message)
+    if (^.source is error)
+        print("caused by: " ++ ^.source.message)
     0                       // the handler's value becomes `result`
 }
 ```
@@ -189,7 +189,7 @@ the error possibility. Channel-agnostic forms are allowed:
 | Pattern | Meaning | Allowed? |
 |---------|---------|----------|
 | `let a = F()^` | Propagate error, bind unwrapped value | ✅ |
-| `let a = F() ^ { … ~ … }` | Handle the error here; `~` is the error | ✅ |
+| `let a = F() ^ { … ^ … }` | Handle the error here; `^` is the current error | ✅ |
 | `let a: T \| error = F()` | Receive the outcome as an explicit union | ✅ |
 | `let a: T^ = F()` | Same, in the enforcing spelling | ✅ |
 | `F() or default` | Explicitly consume a falsy error | ✅ |
@@ -245,13 +245,20 @@ fn compute(x: int) int^ {
 
 ## Error Handling (`e ^ { … }`)
 
+The postfix placement and handler-local `^` follow **S7.6.2v2/S7.6.3v2**;
+the retired destructuring and prefix error-test forms are removed under
+**S7.6.5v2**.
+
 The `^ { … }` handler deals with an error where it happens, instead of
-propagating it. Inside the braces, **`~` is the error** — the same `~` used in
-`match` arms and pipes:
+propagating it. Inside the braces, **`^` is the current error**. This is
+distinct from `~`, which remains the current item in match arms and pipes.
+In the wrapper form `e ^ { ^ }`, the handler explicitly acknowledges a hard
+raised error and wraps that current error into a soft `error` value, changing
+the result from a raised channel into `T | error` data.
 
 ```lambda
 let result = divide(10, x) ^ {
-    print("error: " ++ ~.message)
+    print("error: " ++ ^.message)
     0                       // handler value becomes `result`
 }
 result * 2
@@ -279,7 +286,7 @@ Use `x is error` to test whether a value is an error (see
 | Form | Catches | Error accessible? |
 |------|---------|-------------------|
 | `e or default` | any falsy: error, `null`, `false`, `""` | no |
-| `e ^ { … ~ … }` | errors only | yes, as `~` |
+| `e ^ { … ^ … }` | errors only | yes, as `^` |
 | `e^` | errors only | no — propagates to the caller |
 | `match e { case error: … }` | errors only, with a full success arm | yes, as `~` |
 
@@ -333,7 +340,7 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
 |--------|--------|----------|---------|------------|
 | **Can ignore error?** | ✅ Yes | ⚠️ Warning (`#[must_use]`) | ❌ Compile error | `^E`: ❌; `T \| error`: flows as data |
 | **Propagation syntax** | Manual `if err != nil` | `f()?` | `try f()` | `f()^` |
-| **Handle error locally** | `val, err := f()` | `match` / `let … else` | `catch \|err\|` | `f() ^ { … ~ … }` |
+| **Handle error locally** | `val, err := f()` | `match` / `let … else` | `catch \|err\|` | `f() ^ { … ^ … }` |
 | **Value valid when it failed?** | ⚠️ zero value in scope | ❌ not bound | ❌ not bound | ❌ not reached |
 | **Error type** | `(T, error)` tuple | `Result<T, E>` enum | `T!E` error union | `T^E` |
 | **Type preserved?** | ⚠️ Interface (erased) | ✅ Static | ✅ Static | ✅ Static |
@@ -380,7 +387,7 @@ let data = input("file.json")
 let data = input("file.json")^
 
 // ✅ Handle error explicitly
-let data = input("file.json") ^ { log_warn(~.message); {} }
+let data = input("file.json") ^ { log_warn(^.message); {} }
 
 // ❌ Compile error: unhandled error from 'io.mkdir'
 io.mkdir("output")
@@ -442,7 +449,7 @@ element of a batch. When an error must be engaged rather than inspected, reach
 for `^ { }`, `^`, or `match` instead:
 
 ```lambda
-let data = input("file.json") ^ { raise error("failed to load", ~) }
+let data = input("file.json") ^ { raise error("failed to load", ^) }
 ```
 
 > The prefix form `^expr` has been retired. It existed mainly to test the `err`
@@ -466,7 +473,7 @@ let safe_result = divide(10, x) or 0
 
 // Want the diagnostic as well? Use the handler — `or` cannot see why it failed
 let value = parse(input) ^ {
-    print("Warning: " ++ ~.message)
+    print("Warning: " ++ ^.message)
     default_value
 }
 ```
@@ -525,7 +532,7 @@ may_fail(5)^
 
 // Handle locally with ^ { }
 let result = may_fail(-1) ^ {
-    print("Got error: " ++ ~.message)    // "negative input"
+    print("Got error: " ++ ^.message)    // "negative input"
     0                                     // fallback value
 }
 ```
@@ -557,10 +564,10 @@ fn process_file(path: string) ProcessedData^ {
 ```lambda
 fn load_config(path: string) Config^ {
     let content = input(path, 'text') ^ {
-        raise error("failed to read config file", ~)
+        raise error("failed to read config file", ^)
     }
     let parsed = input(content, 'json') ^ {
-        raise error("invalid JSON in config", ~)
+        raise error("invalid JSON in config", ^)
     }
     parsed
 }
@@ -574,7 +581,7 @@ pn main() {
 
     for item in config.items {
         let result = process(item) ^ {
-            print("Warning: " ++ ~.message)
+            print("Warning: " ++ ^.message)
             continue                       // handler may diverge
         }
         output(result, "output/" ++ item.name ++ ".json")^
@@ -595,7 +602,7 @@ pn main() {
 | Create error | `error("message")` | Construct error value |
 | Raise error | `raise error("...")` | Originate error on a declared `^E` channel |
 | Propagate error | `e^` | Strip success errors or propagate any error outcome |
-| Handle error | `e ^ { … ~ … }` | Handle returned and raised errors; `~` is the error |
+| Handle error | `e ^ { … ^ … }` | Handle returned and raised errors; `^` is the current error |
 | Check for error | `x is error` | Test if a value is an error |
 | Default on error | `expr or default` | Errors are falsy, fall through to default |
 

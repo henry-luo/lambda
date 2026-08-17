@@ -8,8 +8,8 @@ pn main() {
     let handle = start child()
     sleep(1)^
     cancel(handle)
-    let value^err = wait(handle)
-    print(^err)
-    print(err.message)
+    let value = wait(handle) ^ { ^ }
+    print(value is error)
+    print(value.message)
     cancel(handle)
 }

@@ -1,5 +1,5 @@
 // Test: Unhandled Error
-// Layer: 2 | Category: negative | Covers: call error-returning fn without ^ or let a^err
+// Layer: 2 | Category: negative | Covers: call error-returning fn without postfix ^, handler, or or
 
 fn risky() int^ {
     raise error("something went wrong")

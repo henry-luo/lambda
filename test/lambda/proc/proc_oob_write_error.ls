@@ -5,8 +5,8 @@ pn write_oob() int^ {
 }
 
 pn main() {
-    let value^err = write_oob()
-    print(^err)
+    var err = null
+    write_oob() ^ { err = ^ }
+    print(err is error)
     print("\n")
 }
-

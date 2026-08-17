@@ -1,7 +1,7 @@
 // Phase 66 - DCTDecode Image XObjects keep their JPEG bytes as data URIs.
 
 pn main() {
-    let doc^err = input("test/input/dct_image_ascii.pdf", 'pdf')
+    let doc = input("test/input/dct_image_ascii.pdf", 'pdf') ^ { null }
     var found = null
     var i = 0
     while (i < len(doc.objects)) {
