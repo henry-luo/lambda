@@ -487,11 +487,13 @@ module.exports = grammar({
     )),
 
     // handlers own their caret at the same postfix-primary tier as member
-    // access. The result remains primary-like, so `.field`, indexing, calls,
+    // access. The optional `~` arm receives the non-error operand value. The
+    // complete result remains primary-like, so `.field`, indexing, calls,
     // propagation, and another handler continue through the normal chain.
     handler_expr: $ => prec.left(100, seq(
       field('operand', $.primary_expr),
       '^', '{', field('body', $.content), '}',
+      optional(seq('~', '{', field('value', $.content), '}')),
     )),
 
     // `_start` is scanned contextually so ordinary identifiers named `start`

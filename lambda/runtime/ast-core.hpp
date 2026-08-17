@@ -402,11 +402,12 @@ typedef struct AstCallNode : AstNode {
     bool interp_self_tail_call;
 } AstCallNode;
 
-// A handler keeps the operand and recovery body together so both expression
-// and statement forms share the same outcome-routing semantics in the backend.
+// A handler keeps both outcome bodies together so expression and statement
+// forms share the same single-evaluation routing semantics in the backend.
 typedef struct AstHandlerNode : AstNode {
     AstNode* operand;
     AstNode* body;
+    AstNode* value_body; // optional non-error arm, with `~` bound to the operand
     bool is_statement;
 } AstHandlerNode;
 

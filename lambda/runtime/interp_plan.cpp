@@ -157,6 +157,7 @@ static void interp_visit_children(AstNode* node, InterpChildFn visit, void* ctx)
     case AST_NODE_HANDLER_STAM:
         V(((AstHandlerNode*)node)->operand);
         V(((AstHandlerNode*)node)->body);
+        V(((AstHandlerNode*)node)->value_body);
         break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:

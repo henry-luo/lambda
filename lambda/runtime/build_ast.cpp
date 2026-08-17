@@ -1834,6 +1834,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         AstHandlerNode* handler = (AstHandlerNode*)node;
         collect_captures_from_node(tp, handler->operand, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, handler->body, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, handler->value_body, fn_scope, global_scope, captures);
         break;
     }
     case AST_NODE_START: {
@@ -5392,6 +5393,8 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
+        // The value arm binds its own `~`; only the operand and error arm can
+        // consume a current-item context supplied by an enclosing pipe.
         return has_current_item_ref(handler->operand) ||
             has_current_item_ref(handler->body);
     }
@@ -8184,7 +8187,8 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         return join_expr_mentions_name(handler->operand, name) ||
-            join_expr_mentions_name(handler->body, name);
+            join_expr_mentions_name(handler->body, name) ||
+            join_expr_mentions_name(handler->value_body, name);
     }
     default:
         return false;
@@ -9574,6 +9578,8 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, handler->body, false,
             return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, handler->value_body, false,
+            return_acknowledgment);
         return;
     }
     case AST_NODE_BINARY:
@@ -9788,7 +9794,8 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         return ast_reads_binding(handler->operand, name) ||
-            ast_reads_binding(handler->body, name);
+            ast_reads_binding(handler->body, name) ||
+            ast_reads_binding(handler->value_body, name);
     }
     case AST_NODE_MEMBER_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
@@ -9933,7 +9940,13 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             InvalidatedBindingState operand_state = *state;
             InvalidatedBindingState body_state = *state;
             scan_invalidated_bindings(&body_state, handler->body);
-            invalidated_binding_union(state, &operand_state, &body_state);
+            if (handler->value_body) {
+                InvalidatedBindingState value_state = operand_state;
+                scan_invalidated_bindings(&value_state, handler->value_body);
+                invalidated_binding_union(state, &body_state, &value_state);
+            } else {
+                invalidated_binding_union(state, &operand_state, &body_state);
+            }
             break;
         }
         case AST_NODE_BINARY:
@@ -10954,11 +10967,17 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
 
     TSNode operand_node = ts_node_child_by_field_id(handler_node, FIELD_OPERAND);
     TSNode body_node = ts_node_child_by_field_id(handler_node, FIELD_BODY);
+    TSNode value_body_node = ts_node_child_by_field_id(handler_node, FIELD_VALUE);
     ast_node->operand = build_expr(tp, operand_node);
     bool saved_handler_body = tp->building_handler_body;
     tp->building_handler_body = true;
     ast_node->body = build_expr(tp, body_node);
     tp->building_handler_body = saved_handler_body;
+    if (!ts_node_is_null(value_body_node)) {
+        // The normal arm does not own a current error. Restoring the saved
+        // lexical state keeps an enclosing handler's `^` visible when nested.
+        ast_node->value_body = build_expr(tp, value_body_node);
+    }
 
     bool statement_position = is_statement || handler_is_statement_position(handler_node);
     bool value_context = handler_is_value_context(handler_node);
@@ -10995,13 +11014,20 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
         return (AstNode*)ast_node;
     }
 
-    Type* successful = lambda_type_remove_error(tp->pool, ast_node->operand->type);
-    if (!successful) successful = &TYPE_ANY;
     Type* body_type = ast_node->body && ast_node->body->type
         ? ast_node->body->type : &TYPE_ANY;
-    // The handled branch produces the body value; the success branch preserves
-    // the operand's non-error contract for the surrounding expression.
-    ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
+    if (ast_node->value_body) {
+        Type* value_type = ast_node->value_body->type
+            ? ast_node->value_body->type : &TYPE_ANY;
+        // An explicit value arm replaces pass-through, so only the two arm
+        // result types contribute to the handler's contextual type.
+        ast_node->type = lambda_type_union_normalized(tp->pool, body_type, value_type);
+    } else {
+        // Without a value arm, success preserves the operand's non-error contract.
+        Type* successful = lambda_type_remove_error(tp->pool, ast_node->operand->type);
+        if (!successful) successful = &TYPE_ANY;
+        ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
+    }
     return (AstNode*)ast_node;
 }
 
@@ -11987,6 +12013,7 @@ static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         AstHandlerNode* handler = (AstHandlerNode*)node;
         walk_lambda_ast(handler->operand, visitor, data, descend_functions);
         walk_lambda_ast(handler->body, visitor, data, descend_functions);
+        walk_lambda_ast(handler->value_body, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_START:

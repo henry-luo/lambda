@@ -7,13 +7,15 @@ firewall, `or`-narrowing, fault channel), tracked in
 work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
 skip to the closest safe boundary) and TE-16 (the `^ { }` handler; legacy `^err` and prefix
 error tests retired) were decided 2026-08-01. The handler grammar/runtime slice and the Rev 7
-grammar-conformance/corpus migration are landed. Rev 6
+grammar-conformance/corpus migration are landed. The optional two-arm form
+`e ^ { error_arm } ~ { value_arm }` was decided and landed 2026-08-17. Rev 6
 (2026-08-12) adopts the S7.6.2v2/S7.6.3v2 postfix-primary grammar: handlers and
 propagation own their mandatory carets, prefix-handler shorthand is retired, and `call_expr`
 no longer owns an optional caret. Rev 5 (2026-08-06) assigns the handler-local error to `^`
 (`^`, `^.field`, `^[index]`) and leaves `~` under its existing current-value rules.
 **Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01;
-postfix grammar revised 2026-08-12; legacy syntax retirement landed 2026-08-17
+postfix grammar revised 2026-08-12; legacy syntax retirement landed and two-arm handler
+syntax decided 2026-08-17
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
@@ -1101,7 +1103,7 @@ let value: T | error = pn_call // explicit union binding
 The third form is an acknowledgment boundary under **S7.5.1**: success binds `T`, while a
 hard raised error is captured as a soft `error` value in `value`. It neither re-raises nor
 chooses a fallback. The first form uses the handler to preserve the error; the second
-acknowledges it and replaces it with `null`, per **S7.6.2v2/S7.6.3v2**. These forms replace
+acknowledges it and replaces it with `null`, per **S7.6.1v3/S7.6.2v3**. These forms replace
 the retired `let value^err = pn_call` split under **S7.6.5v2**.
 
 **Acknowledgment tightness (DECIDED 2026-07-29, user): tight everywhere for `^` — keyed on the
@@ -1491,7 +1493,7 @@ ANY-poisoning this design exists to remove), or a polled side-flag (cost on ever
   is compile-time gated at the immediate expression and therefore never reaches the skip
   machinery; TE-15 governs defects and boundary-rejected soft errors only.
 
-### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, revised 2026-08-12, user)
+### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, revised 2026-08-17, user)
 
 **Decision.** Local error handling uses one braced syntax with two
 context-selected forms:
@@ -1505,12 +1507,12 @@ pn_call() ^ {               // statement form: handle, then continue
 
 The retirement of `let a^err = e` and the old prefix error test `if (^err)` is now landed: the
 grammar, AST/runtime, and active `.ls` corpus no longer accept or use those forms. The formal
-authority for this retirement is **S7.6.5v2**, alongside **S7.6.2v2/S7.6.3v2** for postfix
+authority for this retirement is **S7.6.5v2**, alongside **S7.6.2v3/S7.6.3v2** for postfix
 handler/propagation placement.
 A bare `^`, `^.field`, or `^[index]` is now a current-error reference only inside an active
 handler body. A handler always has an operand on its left; the prefix `^ { … } e` shorthand does
 not exist. This keeps the error channel consistently spelled with `^` while leaving `~` available
-for its existing current-value contexts. The formal authority is **S7.6.2v2/S7.6.3v2**.
+for its existing current-value contexts. The formal authority is **S7.6.2v3/S7.6.3v2**.
 
 #### Why the destructure had to go
 
@@ -1580,13 +1582,67 @@ then resumes after the handled statement.
 - **Channel-agnostic**, per TE-13: `^ { }` discharges both raised (`T^E`) and soft
   (`T | error`) errors.
 
+#### Extended two-arm handler syntax — six options and decision (decided 2026-08-17, user)
+
+The one-arm handler is ideal when success should pass through unchanged, but explicit
+error-versus-value branching is common enough to warrant a compact form. The six considered
+surfaces were:
+
+| Option | Surface | Assessment |
+|---|---|---|
+| 1 | `e ^ { error_arm } { value_arm }` | Rejected: two adjacent anonymous blocks are too cryptic; the second block has no visible role marker. |
+| 2 | `e ^ { error_arm } else { value_arm }` | Rejected: `else` creates dangling/ownership ambiguity beside `if … else`, especially when the handler is the `if` body expression. |
+| 3 | `e ^ { error_arm } default { value_arm }` | Viable runner-up: explicit and aligned with `match`, but `default` describes selection indirectly rather than naming the normal-value context. |
+| 4 | `e ^ { value_arm } error { error_arm }` | Rejected: the first block reverses the established meaning of `^ { … }`; its interpretation would depend on a later suffix. |
+| 5 | `e ^ { value_arm } catch { error_arm }` | Rejected: it has the same reversal and imports `try`/exception expectations into a channel-agnostic soft-or-raised error handler. |
+| 6 | `e ^ { error_arm } ~ { value_arm }` | **Decided:** preserves the established error arm, marks the non-error arm with Lambda's current-value symbol, and needs neither a new keyword nor `else` ownership rules. |
+
+**Decision: adopt option 6, `e ^ { error_arm } ~ { value_arm }`.** The operand is evaluated
+exactly once. A soft or raised error selects the first arm and binds it to handler-local `^`;
+every non-error result, including `null` and `false`, selects the second arm and binds it to
+handler-local `~`. In the error arm, an enclosing `~` keeps its existing meaning. In the value
+arm, the new `~` is innermost and shadows an enclosing current-value context. Errors raised by
+either selected arm are fresh outcomes and are not swallowed by the same handler.
+
+```lambda
+pn_func(inner, options) ^ {
+    // error arm: ^ is the raised pn error
+    diagnostic(^)
+} ~ {
+    // value arm: ~ is the pn result
+    transform(~)
+}
+```
+
+This statement-position shape is expected to be the common `pn`-call flow: handle a directly
+raised error in the first arm, or continue with the returned value in the second. Omitting the
+`~` arm preserves the one-arm rule: success passes through unchanged. In expression position the
+result type is `type(error_arm) | type(value_arm)`; in statement position the selected arm
+executes and normal completion continues after the handler. The complete two-arm construct
+remains primary-like at the member-access/postfix tier, so, for example,
+`e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
+
+`match` remains the long-term canonical and extensible branching form; the two-arm handler is
+compact syntax for the frequent binary outcome split:
+
+```lambda
+match e {
+    case error { /* error branch; handler form exposes this value as ^ */ }
+    default { /* non-error branch; handler form exposes this value as ~ */ }
+}
+```
+
+The semantic authority is **S7.6.1v3/S7.6.2v3** (with acknowledgment under **S7.5.1**).
+The grammar, AST, MIR lowering, nested handler contexts, and expression/direct-`pn` regression
+coverage landed on 2026-08-17.
+
 #### Syntax: brace-delimited, and why
 
 The handler **must** be braced. `^` followed by `{` is the handler; `^` followed by anything
 else (or nothing) is postfix propagate. This is the lexical discriminator for both the
 expression and statement forms; the surrounding AST context selects which form applies.
 
-Per **S7.6.2v2/S7.6.3v2**, both forms are left-associative postfix-primary operations at the
+Per **S7.6.2v3/S7.6.3v2**, both forms are left-associative postfix-primary operations at the
 same logical precedence tier as member (`.`) and query (`?`) access. Their operand is a primary
 expression; parentheses explicitly widen it. The handler result is itself primary-like, so
 postfix operations continue left-to-right. The mandatory caret is owned by the handler or
@@ -1647,7 +1703,7 @@ A raised `T^E` must be acknowledged at the immediate expression (TE-13 tightness
 one of:
 
 1. `match` with a `case error:` arm;
-2. `e ^ { … }` — handle here;
+2. `e ^ { … }` — handle here, optionally with `~ { … }` as the explicit non-error arm;
 3. `e^` — propagate;
 4. a receiving position that textually admits error — `let x: T^ = e`, `let x: T | error = e`,
    or a declared parameter/return of that shape.
@@ -1700,9 +1756,9 @@ error to allowed is backward-compatible, so no code written under the rejection 
 #### Migration
 
 - Rewrite a value-producing recovery as `let a = e ^ { H }`. A legacy two-arm
-  `let a^err = e; if (^err) { H } else { B }` becomes a `match` unless `H` supplies the value
-  consumed by a common tail or leaves the scope. Rewrite a command-style capture as
-  `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
+  `let a^err = e; if (^err) { H } else { B }` becomes `e ^ { H } ~ { B }` when both branches
+  are local expressions; use `match` for wider or multi-way branching. Rewrite a command-style
+  capture as `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
 - Rewrite `if (^err)` as `if (err is error)`.
 - Grammar: the retirement is landed. `handler_expr` and `propagate_expr` are postfix-primary
   forms over `primary_expr`; all prefix-handler and legacy destructure productions are removed;

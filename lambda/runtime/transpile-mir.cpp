@@ -205,10 +205,13 @@ struct MirTranspiler {
     bool in_pipe;
     AstNode* last_index_object;
 
-    // Handler bodies resolve `^` against the operand's failure Item.  `~`
-    // remains the ordinary current-item lane and is not rebound by a handler.
+    // Error arms resolve `^` against the operand's failure Item. An optional
+    // value arm resolves `~` against the non-error operand without borrowing
+    // pipe state, so outer current-item/current-index scopes remain intact.
     MIR_reg_t handler_error_reg;
     bool in_handler;
+    MIR_reg_t handler_value_reg;
+    bool in_handler_value;
     bool in_handler_operand;
 
     // A direct call routed to the inferred slow body returns a boxed Item even
@@ -10958,8 +10961,14 @@ static MIR_reg_t transpile_local_fault_expression(MirTranspiler* mt,
     return result;
 }
 
-// Lower both handler forms through the boxed Item lane.  A handler consumes
-// only an ItemError result; ordinary successful values bypass its body.
+// Lower both handler forms through the boxed Item lane. A handler consumes
+// only an ItemError result; an optional value body replaces success pass-through.
+static void emit_handler_statement_result(MirTranspiler* mt, MIR_reg_t result) {
+    // Statement handlers expose no selected-arm value to surrounding code.
+    uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
+    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, result, (int64_t)null_value);
+}
+
 static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
     bool saved_in_handler_operand = mt->in_handler_operand;
     mt->in_handler_operand = true;
@@ -10987,11 +10996,23 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, is_error)));
 
-    if (handler->is_statement) {
-        uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
-                (int64_t)null_value)));
+    if (handler->value_body) {
+        MIR_reg_t saved_handler_value = mt->handler_value_reg;
+        bool saved_in_handler_value = mt->in_handler_value;
+        mt->handler_value_reg = operand;
+        mt->in_handler_value = true;
+        MIR_reg_t value_body_result = transpile_box_item(mt, handler->value_body);
+        mt->handler_value_reg = saved_handler_value;
+        mt->in_handler_value = saved_in_handler_value;
+        if (handler->is_statement) {
+            emit_handler_statement_result(mt, result);
+        } else {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx,
+                    value_body_result)));
+        }
+    } else if (handler->is_statement) {
+        emit_handler_statement_result(mt, result);
     } else {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, operand)));
@@ -11008,10 +11029,7 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
     mt->handler_error_reg = saved_handler_error;
     mt->in_handler = saved_in_handler;
     if (handler->is_statement) {
-        uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
-                (int64_t)null_value)));
+        emit_handler_statement_result(mt, result);
     } else {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
@@ -19982,6 +20000,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_PIPE:
         return transpile_pipe(mt, (AstPipeNode*)node);
     case AST_NODE_CURRENT_ITEM: {
+        if (mt->in_handler_value) return mt->handler_value_reg;
         if (mt->in_pipe) return mt->pipe_item_reg;
         // in view/edit template context, ~ resolves to the model parameter
         if (mt->in_view_context) return mt->view_model_reg;
@@ -24037,6 +24056,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             AstHandlerNode* handler = (AstHandlerNode*)node;
             if (handler->operand) prepass_forward_declare(mt, handler->operand);
             if (handler->body) prepass_forward_declare(mt, handler->body);
+            if (handler->value_body) prepass_forward_declare(mt, handler->value_body);
             break;
         }
         case AST_NODE_START: {
