@@ -14072,10 +14072,14 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     LAMBDA_SCALAR_HOME(local_result_home);
     bool uses_local_result_home = false;
     uint64_t* invoke_result_home = result_home;
-    if ((fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) && !invoke_result_home) {
+    if ((fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) &&
+            !(fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) && !invoke_result_home) {
         // Legacy native consumers can safely borrow a local home only for the
         // duration of this call. A pointer-backed scalar is rejected below so
         // it can never escape after this C frame returns.
+        // Context ABI wrappers publish lane 2 through the Context companion
+        // slot, so giving them this legacy fallback would only retain the
+        // retired generated-home ownership path.
         invoke_result_home = &local_result_home;
         uses_local_result_home = true;
     }

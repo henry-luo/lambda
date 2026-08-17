@@ -488,17 +488,11 @@ struct MirEmitter {
     struct hashmap* import_cache; // name -> import (proto+import) memo
     void (*note_mir_call)(const char* name); // optional per-language call telemetry hook
     void* call_owner;
-    // RV14: may this front-end SKIP rehoming a helper's wide result?
-    //
-    // Lambda may: under v3 the payload rides the number stack for the whole
-    // activation. LambdaJS may NOT — it still emits the v2 caller-donated-home
-    // return protocol until P2.5, and that protocol's callee epilogue restores
-    // its own watermark, which would free a payload the caller never rehomed
-    // (caught by test/js/regression_side_stack_frame_gc.js, whose
-    // `Number.MIN_VALUE` is subnormal and therefore genuinely number-stacked).
-    //
-    // Sense matters: the emitter is zero-initialized, so FALSE must be the
-    // safe value. A front-end that never heard of this flag keeps the rehome.
+    // RV14: may this front-end skip rehoming a helper's wide result? Lambda v3
+    // proves helper results stay in its active extent. LambdaJS keeps the
+    // conservative default because a JS helper may return a scalar borrowed
+    // from module state; foreign hosted compilers use the same boundary when
+    // their callback ABI owns a separate result home.
     bool helper_results_skip_rehome;
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);

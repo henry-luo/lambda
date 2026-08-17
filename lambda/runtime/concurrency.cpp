@@ -1322,7 +1322,6 @@ extern "C" Item lambda_task_run_root_raw(void* function_ptr, void* env,
     // Async root lowering publishes the generated `_b` wrapper. Mark its
     // explicit owner so scheduler resumption never reinterprets a user Item as
     // the generated entry's Context argument.
-    lambda_function_mark_mir_public_abi(function);
     lambda_function_mark_mir_context_abi(function);
     lambda_function_mark_lambda_boxed_procedure(function);
     function->closure_field_count = env_count > 0 ? (uint16_t)env_count : 0;

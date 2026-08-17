@@ -290,7 +290,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   lifetime bugs becomes unrepresentable.* (A GC object may *contain*
   scalar payload words; it just never *is* a scalar cell.) [SG1, SG4]
 - **D2.7.2v2*** Public entry wrappers speak the **companion-lane pair**
-  (D5.2.1v2); the trailing home out-param is retired. Rejections stand:
+  (D5.2.1v3); the trailing home out-param is retired. Rejections stand:
   callee donation (unbounded in dynamic-call loops), context-global
   *homes*, C-local forwarding — the Windows companion *transport* (a
   transient `EvalContext` slot, dead at every call boundary, never the
@@ -705,27 +705,26 @@ that carries them.
   [RV14–RV16, Return_Value §4a; Stack_API §15.3, inv. 20–22]
 - **D5.2.3*** **Watermark ownership selects the wide-return transport.** An
   entry that establishes a number-frame watermark tears it down at return,
-  so it may not return a pointer into its own extent: Lambda `fn`/`pn`
-  therefore use the companion lane (D5.2.1v2). An entry that establishes
+  so it may not return a pointer into its own extent: first-party Lambda and
+  LambdaJS `fn`/`pn` therefore use the companion lane (D5.2.1v3). An entry
+  that establishes
   none — a C helper or sys func — allocates in its **caller's** extent, so
   it returns a wide scalar by pushing it on the number stack and handing
   back an ordinary Item, already caller-homed and needing no adoption. The
   rule is stated by ownership, not implementation language, so a sys func
   written in Lambda takes the companion lane and a C helper that ever grew
-  a frame would too. Corollary: the per-call watermark snapshot-and-restore
-  around helper calls is retired — it is a space bound, not a correctness
-  requirement, since the frame epilogue already restores — and the bound is
-  re-established by an on-demand reclaim at loop back edges for loops the
-  compiler saw make a wide-capable helper call. That reclaim is sound only
-  when no loop-carried wide value lives in the reclaimed extent (open:
-  `DO24`). Second corollary, sound today and independent of the rest of this
-  ruling: the call-effect record already carries a per-callee **watermark
-  effect**, and a callee declaring that it leaves the watermark where it
-  found it discharges the adopt by the same argument, with no protocol
-  change. The emitter writes that effect and never reads it; reading it is
-  the cheapest available step. Its enum ordering is load-bearing — the
-  conservative value must be zero, so an unaudited row decodes as
-  "may allocate". [RV14, RV14a, RV15, RVO11, Return_Value §4a]
+  a frame would too. The Lambda emitter sets the helper-result no-rehome rule
+  explicitly. LambdaJS retains the conservative snapshot/restore-plus-adopt
+  path: its helpers can return scalar Items borrowed from module state, and a
+  global skip would leave those pointers unowned across `gc()` (the existing
+  `regression_side_stack_frame_gc` gate catches this). The number-stack bound is
+  re-established by an on-demand
+  reclaim at loop back edges for loops the compiler saw make a wide-capable
+  helper call. That reclaim is sound only when no loop-carried wide value lives
+  in the reclaimed extent (open: `DO24`). The call-effect record still carries
+  a per-callee **watermark effect** for hosted paths; its enum ordering is
+  load-bearing — the conservative value must be zero, so an unaudited row
+  decodes as "may allocate". [RV14, RV14a, RV15, RVO11, Return_Value §4a]
 
 ### D5.3 GC rooting
 
@@ -1134,7 +1133,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   TypeMap shape metadata remains ordinary lookup data, not mutable per-site
   cache state. Generated code stays immutable. [LC1]
 - **D8.4.2v2*** Core direct calls pass individual ABI operands (`Context*`,
-  args); returns are shaped per the companion-lane convention (D5.2.1v2)
+  args); returns are shaped per the companion-lane convention (D5.2.1v3)
   — the trailing scalar-home operand is retired. `Item* + argc` is the JS
   dynamic boundary only. [LC call-ABI, RV1, RV10]
 - **D8.4.3** **Fallible JS/Jube helpers use the merged Item error ABI.** A
@@ -1233,7 +1232,7 @@ Status of `*`-marked rulings as of 2026-08-15.
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
 | D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
-| D5.2.3 | Decided 2026-08-14, implementation pending (Return_Value P2.7). The companion-lane half is what P0–P1.3 landed; the C-helper half is untouched — helper returns still pay the v1 ritual (per-call watermark snapshot, a 20-instruction adopt cluster, a colored home), measured at **68% of all adopt sites** across AWFY (757 of 1108), the largest single population in the census. Retiring it is blocked only on `DO24`: the back-edge reclaim that re-establishes the space bound must first be shown safe for loop-carried wide values. The bound matters — without a reclaim, an untyped million-iteration loop over `int64` storage grows the side stack by 8 bytes per iteration, so the gate for this phase measures peak side-stack usage, not just correctness. |
+| D5.2.3 | Lambda helper-adopt emission is retired as of 2026-08-17: its emitter sets the v3 no-rehome rule and fresh Lambda MIR has zero `lambda_item_adopt_scalar_home` calls. LambdaJS keeps the conservative helper rehome path because helpers may return module-state scalar Items; the attempted global skip changed `regression_side_stack_frame_gc` and was reverted. Shared machinery also remains for foreign hosted compilers and explicit C/host ownership boundaries. Loop back-edge reclaim and the associated peak-side-stack proof remain open under `DO24`; revisit JS only with a per-helper ownership proof. |
 | D5.2.1v3 | LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
@@ -1368,7 +1367,7 @@ Numbered `DO#` (design-open); each links to its record.
   shapes are effectively arena-immortal); state explicitly that
   `byte_offset` is derivable and excluded from identity.
 - **DO24** Unnamed wide temporaries crossing a loop back edge, under
-  D5.2.3's reclaim. **D5.2.2v2 settles the named case**: a wide-capable
+  D5.2.3's reclaim. **D5.2.2v3 settles the named case**: a wide-capable
   mutable local owns a slot allocated at its declaration, which precedes the
   loop and therefore sits below the loop-entry watermark, so the reclaim
   cannot reach it while per-iteration transients above it are freed. What

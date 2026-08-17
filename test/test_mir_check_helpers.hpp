@@ -515,9 +515,8 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
         }
         const JsonValue* convention = group_json.find("return_convention");
         if (convention) {
-            if (convention->kind != JsonValue::KInt ||
-                    (convention->int_value != 2 && convention->int_value != 3)) {
-                *error = "'return_convention' must be 2 or 3";
+            if (convention->kind != JsonValue::KInt || convention->int_value != 3) {
+                *error = "'return_convention' must be 3";
                 return false;
             }
             group.return_convention = convention->int_value;

@@ -1,9 +1,8 @@
-// MT5 fixture: a scalar leaving an activation through a boundary with no
-// declared owner is copied into GC-owned storage rather than keeping a pointer
-// into the activation. The bound (public) entry wrapper has no caller-donated
-// home, so it allocates its own, calls the direct body, and rehomes the result
-// before restoring its watermarks.
-// Checked by closure_scalar_rehome.mir-check (Stack API #24, #27).
+// v3 fixture: a closure return crosses a public wrapper as a companion pair.
+// The bound entry has no hidden caller-home parameter; the wrapper publishes
+// lane 2 through Context::mir_companion_slot and the receiving call resolves
+// it in its own active number extent. Checked by closure_scalar_rehome.mir-check
+// (Stack API #24, #27).
 
 fn make_adder(n) {
     fn inner(x) => x + n

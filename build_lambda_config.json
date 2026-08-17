@@ -4438,20 +4438,6 @@
             "icon": "🐑"
           },
           {
-            "source": "test/test_interp_gtest.cpp",
-            "name": "T0 AST Interpreter Tests",
-            "dependencies": [
-              "lambda-lib"
-            ],
-            "binary": "test_interp_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "parallel": false,
-            "icon": "🌳"
-          },
-          {
             "source": "test/test_lambda_concurrency_gtest.cpp",
             "name": "Lambda Concurrency Runtime Tests",
             "dependencies": [
@@ -4840,6 +4826,20 @@
         "name": "🧪 Extended Development Tests",
         "category": "extended",
         "tests": [
+          {
+            "source": "test/test_interp_gtest.cpp",
+            "name": "T0 AST Interpreter Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_interp_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "🌳"
+          },
           {
             "source": "test/test_math_gtest.cpp",
             "name": "Math Roundtrip Tests",

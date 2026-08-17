@@ -6,8 +6,8 @@ P2.5 / P2.6 / P2.7.0 / P3 / P5a LANDED; P1.7 partial; P2.7 (protocol) and
 P4 remain open. P5a retires the v2 function ABI only; D5.2.2v3 payload-owner
 slots at native and hosted-language boundaries intentionally remain.
 Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV18 + addenda
-RV3a / RV10a / RV14a / RV17a; formal spec D5.2.1v2 / **D5.2.2v2** /
-**D5.2.3** / D2.7.2v2 / D8.4.2v2, **v1.22.0**). Open design residue: RVO8
+RV3a / RV10a / RV14a / RV17a; formal spec D5.2.1v3 / **D5.2.2v3** /
+**D5.2.3** / D2.7.2v2 / D8.4.2v3, **v1.25.0**). Open design residue: RVO8
 (GVN multi-out), RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide
 temporaries across a loop back edge — gates P2.7's reclaim). RVO3 and RVO4
 closed 2026-08-14; RVO10 superseded by RV14/RV15; **RVO12 opened and closed
@@ -2667,3 +2667,46 @@ fallback.
 Verification after the deletion: `make build`, Lambda MIR emission **48/48**,
 JS MIR emission **21/21**, and JS suite **351/351**. Full baseline and
 Test262 reruns remain the closeout gates for this broader runtime change.
+
+### 6.11 Outstanding cleanup closure (2026-08-17)
+
+The post-P5a audit closed the remaining first-party runtime residue without
+weakening the hosted-language ownership contracts.
+
+- `lambda_function_mark_mir_public_abi` was deleted. The old marker encoded
+  the retired trailing-home ABI and was unsafe when a v3 Lambda wrapper crossed
+  the Python hosted boundary. Python dispatch now checks `Function::entry_abi`
+  and routes first-party Lambda entries through `fn_call`; Python-generated
+  functions retain their separately versioned explicit-home ABI. This is the
+  D5.2.1v3/D8.4.2v3 split, not a change to Python's ABI.
+- Generated Core dynamic and cross-module calls no longer allocate a scalar
+  home merely to pass a null/ignored operand. The `fn_callN_into` APIs and the
+  JS export bridge still carry explicit owner storage where a C/host callback
+  actually needs it, as required by D5.2.2v3.
+- LambdaJS generated signatures contain no `_scalar_home` parameters, but its
+  shared helper rehome path remains conservative. A trial global skip was
+  reverted after `regression_side_stack_frame_gc` changed both subnormal-float
+  results: JS helpers can return scalar Items borrowed from module state, so
+  their ownership is not uniformly caller-local. Lambda keeps its proven v3
+  no-rehome rule. D5.2.3 remains open for a per-helper JS ownership proof, the
+  independent loop back-edge reclaim proof (`DO24`), and any future measured
+  hosted/int64-heavy workload.
+- The MIR sidecars and checker are v3-only: all convention-2 assertions were
+  removed, and `return_convention` now accepts only `3`. This prevents the
+  retired selector from being reintroduced by a fixture.
+- `test_interp_gtest` is now classified as extended coverage in
+  `build_lambda_config.json`; it is no longer part of the Lambda baseline
+  gate. The baseline remains focused on compiled Lambda/LambdaJS runtime
+  behavior, while the 341-script AST-interpreter differential stays available
+  through the extended suite.
+
+Closeout gates for this slice are the focused Lambda/JS MIR emission checks,
+`make test-lambda-baseline`, and `make test262-baseline`. The focused checks
+pass. Before this test-metadata move, the safe Lambda baseline snapshot was
+**2003/2004**: the only mismatch was the pre-existing `dom_module_props`
+numeric drift; the first trial global JS skip was rejected by
+`regression_side_stack_frame_gc` and was reverted. After moving the
+interpreter suite out of baseline, the runtime portion is
+**1661/1662** (20 executables; one `dom_module_props` mismatch), with all
+Lambda/MIR and GC suites passing. The post-rollback Test262 gate is clean at
+**40261/40261**, with zero failures and zero retries.

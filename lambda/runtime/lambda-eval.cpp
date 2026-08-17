@@ -773,13 +773,6 @@ Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name) {
     return fn;
 }
 
-void lambda_function_mark_mir_public_abi(Function* fn) {
-    if (!fn) return;
-    // MIR wrappers have a trailing home; treating them as legacy Item calls
-    // would drop the only storage that survives their number-frame teardown.
-    fn->requires_scalar_result_home = 1;
-}
-
 void lambda_function_mark_mir_context_abi(Function* fn) {
     if (!fn) return;
     Context* runtime = (Context*)context;
@@ -4117,7 +4110,6 @@ static Item lambda_bind_object_method(TypeMethod* method, Item self) {
     // A method table keeps raw code, so reattach its TypeFunc when rebuilding
     // the bound closure; dynamic dispatch needs it to validate and marshal calls.
     lambda_function_set_type(bound, method->fn_type);
-    lambda_function_mark_mir_public_abi(bound);
     lambda_function_mark_mir_context_abi(bound);
     if (method->is_proc) {
         lambda_function_mark_lambda_boxed_procedure(bound);

@@ -1234,8 +1234,6 @@ static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
 static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
         bool uses_wrapper, bool is_proc) {
     if (!uses_wrapper) return;
-    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
     emit_call_void_1(mt,
@@ -5232,8 +5230,6 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                 }
                 if (needs_context_abi) {
-                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
@@ -15661,9 +15657,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     log_error("mir: imported context ABI call has unsupported argument count %d", ai);
                     abort();
                 }
-                // Context ABI exports take a trailing caller-owned scalar home.
-                // Route cross-module calls through C so MIR preserves that
-                // final ABI operand and the explicit context owner.
+                // Route cross-module calls through C so the trampoline supplies
+                // the explicit context owner. JS export bridges retain a home
+                // because they can dispatch arbitrary native callbacks; the
+                // Core v3 trampoline ignores that ownership operand.
                 char trampoline_name[32];
                 snprintf(trampoline_name, sizeof(trampoline_name),
                     use_js_export_bridge ? "js_call_export_%d_into" :
@@ -15675,12 +15672,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_new_reg_op(mt->ctx, fp_reg),
                     MIR_new_ref_op(mt->ctx, imp_item)));
 
-                int wrapper_home_id = em_scalar_home_new(&mt->em);
-                MIR_reg_t wrapper_home = em_materialize_frame_ref(&mt->em,
-                    em_scalar_home_ref(&mt->em, wrapper_home_id));
-                if (!wrapper_home) {
-                    log_error("mir: imported context ABI call has no scalar result home");
-                    abort();
+                int wrapper_home_id = 0;
+                MIR_reg_t wrapper_home = 0;
+                if (use_js_export_bridge) {
+                    wrapper_home_id = em_scalar_home_new(&mt->em);
+                    wrapper_home = em_materialize_frame_ref(&mt->em,
+                        em_scalar_home_ref(&mt->em, wrapper_home_id));
+                    if (!wrapper_home) {
+                        log_error("mir: imported JS export has no scalar result home");
+                        abort();
+                    }
                 }
 
                 // The C trampoline reads TLS, then forwards the hidden context
@@ -15701,12 +15702,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 ops[2] = MIR_new_reg_op(mt->ctx, result);
                 ops[3] = MIR_new_reg_op(mt->ctx, fp_reg);
                 for (int i = 0; i < ai; i++) ops[4 + i] = arg_ops[i];
-                ops[4 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
+                ops[4 + ai] = use_js_export_bridge
+                    ? MIR_new_reg_op(mt->ctx, wrapper_home)
+                    : MIR_new_int_op(mt->ctx, 0);
 
                 async_emit_invoke_resume_point(mt, call_node);
                 em_emit_borrowed_call(&mt->em, trampoline_name,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
-                em_scalar_home_bind(&mt->em, wrapper_home_id, result);
+                if (wrapper_home_id) {
+                    em_scalar_home_bind(&mt->em, wrapper_home_id, result);
+                }
             } else {
                 // Item-only host calls return directly (MIR_T_I64).
                 MIR_type_t res_types[1] = { MIR_T_I64 };
@@ -16862,25 +16867,17 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     }
 
     MIR_reg_t dyn_result;
-    // P1.4: the dynamic path is C-mediated — JIT calls `fn_callN_into`, which
-    // resolves `fn->invoke` and calls the public wrapper — and a C prototype
-    // has no portable spelling for MIR's two-result convention.
-    //
-    // The public wrapper returns a pending Item and leaves lane 2 in
-    // `Context::mir_companion_slot`; the C trampoline resolves it before
-    // returning.  Its result-home parameter remains for arbitrary hosted
-    // callbacks, but compiled entries must receive null rather than a new
-    // generated-function caller home.
-    MIR_reg_t dyn_scalar_home;
-    dyn_scalar_home = new_reg(mt, "dyn_no_home", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, dyn_scalar_home), MIR_new_int_op(mt->ctx, 0)));
+    // P1.4: the dynamic path remains C-mediated because a C prototype has no
+    // portable spelling for MIR's two-result convention. The result-home
+    // operand is an ownership API for hosted callbacks; Core's v3 generated
+    // entries resolve their companion in the active context extent, so pass
+    // the null sentinel instead of allocating a dead generated home.
 
     if (arg_count == 0) {
         async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, dyn_scalar_home));
+            MIR_T_P, MIR_new_int_op(mt->ctx, 0));
     } else if (arg_count <= 3) {
         MIR_reg_t args[3];
         int arg_roots[3];
@@ -16900,7 +16897,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, args[0]),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, dyn_scalar_home));
+                MIR_T_P, MIR_new_int_op(mt->ctx, 0));
         } else if (arg_count == 2) {
             MIR_var_t avars[4] = {{MIR_T_I64,"f",0},{MIR_T_I64,"a",0},
                 {MIR_T_I64,"b",0},{MIR_T_P,"home",0}};
@@ -16915,7 +16912,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_new_reg_op(mt->ctx, boxed_fn),
                 MIR_new_reg_op(mt->ctx, args[0]),
                 MIR_new_reg_op(mt->ctx, args[1]),
-                MIR_new_reg_op(mt->ctx, dyn_scalar_home)));
+                MIR_new_int_op(mt->ctx, 0)));
         } else {
             // 3 args
             MIR_var_t avars[5] = {{MIR_T_I64,"f",0},{MIR_T_I64,"a",0},
@@ -16931,7 +16928,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_new_reg_op(mt->ctx, args[0]),
                 MIR_new_reg_op(mt->ctx, args[1]),
                 MIR_new_reg_op(mt->ctx, args[2]),
-                MIR_new_reg_op(mt->ctx, dyn_scalar_home)));
+                MIR_new_int_op(mt->ctx, 0)));
         }
     } else {
         // `fn_call_into` owns the common dynamic ABI. Build a rooted List so
@@ -16956,7 +16953,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, dyn_scalar_home));
+            MIR_T_P, MIR_new_int_op(mt->ctx, 0));
     }
 
     // Dynamic calls (fn_call0/1/2/3) return Item (already boxed).
@@ -24918,8 +24915,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.em.ctx = ctx;  // emitter caches the immutable MIR context handle
     mt.em.call_owner = &mt;
     // RV14: Lambda's caller does not rehome a helper's wide result — it rides
-    // the number stack for the activation. LambdaJS keeps the v2 behaviour
-    // until P2.5, so the flag stays set there.
+    // the number stack for the activation. LambdaJS v3 uses the same rule;
+    // foreign hosted compilers retain the conservative default.
     mt.em.helper_results_skip_rehome = true;
     mt.em.after_may_gc_call = lambda_after_may_gc_call;
     mt.em.root_call_value = lambda_call_root_value;

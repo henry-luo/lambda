@@ -1,23 +1,7 @@
 {
   "schema_version": 1,
-  "description": "Bound-entry wrapper epilogue. Return convention 2: pass an activation-local scalar home to the direct body, adopt its result into the incoming caller home, and only then restore the number watermark directly and return (Stack API #24/#27). Return convention 3 (RV12 slot transport): the wrapper is the C-reachable entry, so it takes no caller home at all — it builds the pending pair, stores lane 2 into Context::mir_companion_slot, restores the watermark, and returns a single result.",
+  "description": "Bound-entry wrapper epilogue. Return convention 3 (RV12 slot transport): the wrapper is the C-reachable entry, so it takes no caller home at all — it builds the pending pair, stores lane 2 into Context::mir_companion_slot, restores the watermark, and returns a single result.",
   "checks": [
-    {
-      "in_func": "_inner_b_#",
-      "return_convention": 2,
-      "expect_seq": [
-        { "pattern": ", _scalar_home" },
-        { "pattern": "mov\ti64:" },
-        { "pattern": "ret\t" }
-      ],
-      "expect": [
-        ", _scalar_home"
-      ],
-      "count": {
-        "call\tlambda_item_adopt_scalar_home_p": 1,
-        "lambda_item_heap_rehome": 0
-      }
-    },
     {
       "in_func": "_inner_b_#",
       "return_convention": 3,

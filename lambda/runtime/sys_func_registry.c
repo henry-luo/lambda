@@ -1105,7 +1105,6 @@ extern Item fn_call0_into(Function* fn, uint64_t* result_home);
 extern Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
 extern Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
 extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
-extern void lambda_function_mark_mir_public_abi(Function* fn);
 extern void lambda_function_mark_mir_context_abi(Function* fn);
 extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
@@ -3156,7 +3155,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_call1_into", FPTR(fn_call1_into)},
     {"fn_call2_into", FPTR(fn_call2_into)},
     {"fn_call3_into", FPTR(fn_call3_into)},
-    {"lambda_function_mark_mir_public_abi", FPTR(lambda_function_mark_mir_public_abi)},
     {"lambda_function_mark_mir_context_abi", FPTR(lambda_function_mark_mir_context_abi)},
     {"lambda_function_mark_lambda_boxed_function", FPTR(lambda_function_mark_lambda_boxed_function)},
     {"lambda_function_mark_lambda_boxed_procedure", FPTR(lambda_function_mark_lambda_boxed_procedure)},

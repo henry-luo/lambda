@@ -26,13 +26,6 @@
       ]
     },
     {
-      "return_convention": 2,
-      "in_func": "_boxed_wide_#",
-      "expect": [
-        "func\ti64, p:runtime, i64:%p1, p:_scalar_home"
-      ]
-    },
-    {
       "return_convention": 3,
       "in_func": "_boxed_unknown_#",
       "expect": [
@@ -40,13 +33,6 @@
       ],
       "forbid": [
         "lambda_item_resolve_pending"
-      ]
-    },
-    {
-      "return_convention": 2,
-      "in_func": "_boxed_unknown_#",
-      "expect": [
-        "func\ti64, p:runtime, i64:%p1, p:_scalar_home"
       ]
     },
     {

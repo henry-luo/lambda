@@ -1140,8 +1140,9 @@ Item fn_call0(Function* fn);
 Item fn_call1(Function* fn, Item a);
 Item fn_call2(Function* fn, Item a, Item b);
 Item fn_call3(Function* fn, Item a, Item b, Item c);
-// MIR-generated public wrappers require a caller-owned scalar result home.
-// These forms keep that home live across dynamic dispatch without GC scalar cells.
+// Hosted-language result-boundary forms. First-party Lambda/LambdaJS v3
+// entries resolve their companion lane in Context; hosted callbacks may still
+// supply an explicit payload owner across this C boundary.
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
 Item fn_call0_into(Function* fn, uint64_t* result_home);
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
@@ -1181,7 +1182,6 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 #ifdef __cplusplus
 extern "C" {
 #endif
-void lambda_function_mark_mir_public_abi(Function* fn);
 void lambda_function_mark_mir_context_abi(Function* fn);
 void lambda_function_mark_lambda_boxed_function(Function* fn);
 void lambda_function_mark_lambda_boxed_procedure(Function* fn);

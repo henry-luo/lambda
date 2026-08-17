@@ -399,10 +399,8 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     Rooted<Item> function_root(export_roots,
                         (Item){.function = fn});
                     if (uses_public_wrapper) {
-                        // Published MIR wrappers require both the dynamic-call home
-                        // and the defining context; otherwise a namespace callback
-                        // shifts its first Item into the generated Context slot.
-                        lambda_function_mark_mir_public_abi(fn);
+                        // Published MIR wrappers require the defining context;
+                        // their v3 companion lane is not a caller-home ABI.
                         lambda_function_mark_mir_context_abi(fn);
                         if (node->node_type == AST_NODE_PROC) {
                             lambda_function_mark_lambda_boxed_procedure(fn);
