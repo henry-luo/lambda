@@ -1240,6 +1240,17 @@ extern "C" Item js_get(Item target, JsPropertyLane lane, Item observable_key,
         // receivers still need the reference-level TypeError completion.
         return js_get_reference(target_root.get(), key_root.get());
     }
+    if (js_is_js_array(target_root.get()) &&
+            receiver_root.get().item == target_root.get().item &&
+            js_property_lane_is_index(lane)) {
+        // D8.4.3: computed member reads enter through this merged-Item kernel;
+        // without the ordinary dense-index guard here, hot array loops fall
+        // through the full property/prototype algorithm on every read. The
+        // indexed helper retains accessor, hole, sparse, and prototype fallback
+        // semantics when its narrow own-slot proof does not hold.
+        return js_elements_get_int(target_root.get(),
+            (int64_t)js_property_lane_payload(lane));
+    }
     // D6.2.2v2: the semantic Get kernel also owns primitive boxing. Reflect's
     // public target validation is a caller policy and would reject valid
     // primitive member reads emitted by MIR.
@@ -1268,7 +1279,7 @@ extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
         return js_set_primitive_completion(target_root.get(), key_root.get(),
             value_root.get());
     }
-    if (get_type_id(target_root.get()) == LMD_TYPE_ARRAY &&
+    if (js_is_js_array(target_root.get()) &&
             receiver_root.get().item == target_root.get().item &&
             js_property_lane_is_index(lane)) {
         Item fast_result = js_elements_set_int_completion(target_root.get(),

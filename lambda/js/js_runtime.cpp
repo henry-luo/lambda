@@ -9178,6 +9178,24 @@ JS_FORWARD_EXPRESSION(int64_t, js_elements_set_existing_dense_int_fast, (Item ar
 
 extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
                                                  Item value) {
+    if (js_is_ordinary_numeric_array(array)) {
+        if (index < 0 || index > 0xFFFFFFFELL ||
+                !js_array_value_is_numeric(value) ||
+                js_array_companion_has_numeric_slot((Array*)array.array_num,
+                    index) || js_array_proto_index_guard_is_dirty(array)) {
+            return ItemNull;
+        }
+        if (index >= array.array_num->length &&
+                (!js_is_extensible(array) || js_array_length_is_non_writable(array))) {
+            return ItemNull;
+        }
+        if (js_array_numeric_store(array, index, value)) {
+            js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            return (Item){.item = b2it(true)};
+        }
+        return ItemNull;
+    }
     if (js_array_set_existing_dense_no_gc(array, index, value)) {
         return (Item){.item = b2it(true)};
     }
@@ -9218,12 +9236,11 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
             JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_TAKEN);
         return (Item){.item = b2it(true)};
     }
-    // Only a contiguous append is safe without the full gap/sparse policy.
-    if (index != arr->length) {
-        js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
-            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
-        return ItemNull;
-    }
+    // Dynamic computed keys arrive here after ToPropertyKey. Once the array
+    // has passed the descriptor/prototype guards, the shared indexed store is
+    // the complete ordinary-array policy, including length-only sparse arrays;
+    // routing these keys through descriptor synthesis made every rehash write
+    // walk the full property kernel (D8.4.3).
     if (!js_is_extensible(array)) {
         js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
             JS_OPT_REASON_NOT_EXTENSIBLE, JS_OPT_OUTCOME_FALLBACK);
@@ -9234,12 +9251,15 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
             JS_OPT_REASON_LENGTH_NOT_WRITABLE, JS_OPT_OUTCOME_FALLBACK);
         return ItemNull;
     }
-    if (js_array_should_store_sparse_for_index(arr, index)) {
+    bool proto_bypass_accessor = false;
+    if (!js_array_set_index_preflight(array, index,
+            (Item){.item = i2it(index)}, false, false,
+            &proto_bypass_accessor) || proto_bypass_accessor) {
         js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
-            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
+            JS_OPT_REASON_PROTOTYPE_ACCESSOR, JS_OPT_OUTCOME_FALLBACK);
         return ItemNull;
     }
-    js_array_push_item_direct(arr, value);
+    js_array_store_index_value(array, index, value, "js_elements_set_int_completion");
     js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     return (Item){.item = b2it(true)};

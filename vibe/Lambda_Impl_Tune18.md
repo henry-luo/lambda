@@ -214,3 +214,31 @@ Final gates after the retained follow-on changes:
 The remaining nbody/list/base64 ratio targets are now measured residual work,
 not incomplete admission or generic-index lowering. No benchmark source,
 baseline, or test harness was changed to conceal them.
+
+## 8. Result32 timeout repair (2026-08-17)
+
+The three Result32 failures were repaired at their runtime representation
+boundaries:
+
+| Row | Root cause | Retained fix and evidence |
+|---|---|---|
+| Typed MIR `awfy/cd` | `mir_can_inline_null_item_test` treated an erased `any` binding whose physical lane was `MIR_T_I64` as a canonical boxed `Item`. That proof was insufficient: the specialized carrier may use another lane, so the direct `ItemNull` tag comparison could admit an invalid loop state before the typed `key: int` boundary [D2.5.1, S7.1]. | Erased `any` now retains `fn_eq`/`fn_ne`; only a proven nullable container may use the direct tag test. `tune18_any_null_item` covers the boundary. `cd2.ls` now returns `collisions=4305` and `CD: PASS`. |
+| LambdaJS `jetstream/navier_stokes` | Indexed reads on JS arrays fell through the generic property/prototype kernel in the dense numeric loop. | `js_get` routes receiver-identical indexed lanes through the existing indexed helper, retaining its hole/sparse/prototype fallback [D8.4.3]. |
+| LambdaJS `jetstream/hashmap` | Indexed writes on ordinary numeric arrays did not use the numeric storage lane and repeatedly paid descriptor/property dispatch. | `js_set` and `js_elements_set_int_completion` now use guarded numeric-array storage, falling back on prototype, descriptor, extensibility, and length guards [D8.4.3]. |
+
+Release benchmark rerun, three runs per row, 180-second timeout:
+
+| Row | Status counts | Median workload time |
+|---|---:|---:|
+| `awfy/cd` MIR typed | `ok: 3` | **244.538 ms** |
+| `jetstream/navier_stokes` LambdaJS | `ok: 3` | **1069.883 ms** |
+| `jetstream/hashmap` LambdaJS | `ok: 3` | **5471.451 ms** |
+
+The new MIR emission regression is green (`tune18_any_null_item`, 1/1).
+`make test262-baseline` completed with 0 failures and 0 regressions; one
+batch-kill classification was recovered by the harness retry. The current
+`make test-lambda-baseline` run exposed 11 unrelated legacy concurrency and
+procedure-handler failures (`E221` plus the existing `proc_local_system_fault`
+stack-overflow case), while the MIR emission, JS MIR, JS runtime, forced-GC,
+and structured Lambda subsets all passed. No test harness or benchmark source
+was changed to mask those failures.

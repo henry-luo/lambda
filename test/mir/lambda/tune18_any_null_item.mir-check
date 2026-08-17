@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Erased any values retain the generic null equality kernel until their Item representation is proven.",
+  "checks": [
+    {
+      "in_func": "_walk_any_chain18_#",
+      "expect": [
+        "call\tfn_ne_p, fn_ne"
+      ]
+    }
+  ]
+}

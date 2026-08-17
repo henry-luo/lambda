@@ -4387,17 +4387,11 @@ static bool mir_can_inline_null_item_test(MirTranspiler* mt,
     if (!node) return false;
     TypeId type_id = get_effective_type(mt, node);
     if (type_id == LMD_TYPE_ANY) {
-        AstNode* base = ast_unwrap_primary(node);
-        if (!base || base->node_type != AST_NODE_IDENT) return false;
-        AstIdentNode* ident = (AstIdentNode*)base;
-        MirVarEntry* var = ident->name
-            ? find_var(mt, ident->name->chars) : NULL;
-        // Inferred map parameters are intentionally boxed Items. Their AST
-        // type remains `any`, so the old nullable-container gate rejected the
-        // exact representation proof and routed `x == null` through fn_eq on
-        // every linked-list hop (D2.5.1, S5.1.1).
-        return var && var->type_id == LMD_TYPE_ANY &&
-            var->mir_type == MIR_T_I64;
+        // An erased `any` binding does not prove the canonical Item carrier
+        // required by the direct tag comparison. Native specializations may
+        // use a different lane, so retain the generic equality kernel here
+        // (D2.5.1, S7.1).
+        return false;
     }
     if (!mir_expr_may_be_null(mt, node)) return false;
     return mir_is_nullable_container_type(type_id);
