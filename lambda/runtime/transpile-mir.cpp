@@ -8881,12 +8881,14 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     bool saved_tail = mt->in_tail_position;
     mt->in_tail_position = false;
 
-    MIR_reg_t scrutinee = transpile_expr(mt, match_node->scrutinee);
+    // Match patterns consume an Item. Use the same boxed boundary as handlers
+    // so a directly raised call preserves its value/error join until `case
+    // error:` can inspect it; materializing the generic expression first can
+    // publish only the success lane and lose the raised channel.
+    MIR_reg_t boxed_scrut = transpile_box_item(mt, match_node->scrutinee);
 
     // Restore tail position for arm bodies
     mt->in_tail_position = saved_tail;
-    TypeId scrut_tid = get_effective_type(mt, match_node->scrutinee);
-    MIR_reg_t boxed_scrut = emit_box(mt, scrutinee, scrut_tid);
 
     // Set ~ (current item) to the scrutinee value for match bodies
     bool old_in_pipe = mt->in_pipe;
