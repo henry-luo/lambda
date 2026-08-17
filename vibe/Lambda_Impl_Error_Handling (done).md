@@ -1,14 +1,10 @@
 # Lambda — Error Handling Implementation Plan (TE-15 / TE-16 / TE-17 / TE-18)
 
-**Status:** IMPLEMENTATION IN PROGRESS — rev 6, 2026-08-12. **Semantically decision-complete;
-the first handler, fault-frame, typed-lane, and cross-frame-state slices are landed.** Rev 6
-records the S7.6.2v2/S7.6.3v2 postfix-primary handler/propagation grammar and retires the
-prefix-handler and call-owned-caret design. Rev 5 separates value flow from control routing,
-narrows `may_defect` to
-escaping boundary defects, makes signal/recovery ownership an explicit phase, and resolves the
-remaining destination, store, handler-context, precedence, and V1 proof obligations. The
-remaining phases below still cover declaration-boundary routing, corpus migration, and proof
-fixtures.
+**Status:** IMPLEMENTATION IN PROGRESS — rev 7, 2026-08-17. **Semantically decision-complete;
+the handler/propagation grammar and legacy error-syntax retirement slices are landed.** Rev 7
+records removal of `let a^err = e` and prefix `^expr` from the grammar, AST/runtime, and active
+`.ls` corpus, alongside the S7.6.2v2/S7.6.3v2 postfix-primary grammar. Remaining phases cover
+declaration-boundary routing, system-fault capture, and proof fixtures.
 
 **Pre-handler prerequisite:** P1F resolves the SIGSEGV/SIGBUS and alternate-stack ownership
 conflict between `lambda-stack.cpp` and batch mode (§8.3) before fault capture by `^ { }` is
@@ -403,20 +399,18 @@ own bisect point. H2/H3/H4 remain the portability/performance audit in §8.3.
   | `e ^ { h1 } ^ { h2 }` | `(e ^ { h1 }) ^ { h2 }` |
   | `f()^ - 1` | `(f()^) - 1` |
   | `pn_call() ^ { recover(); }` | statement handler when used as `_statement` |
-- **Grammar shape.** Replace the call/literal/binary/member and prefix-handler productions with
-  one `handler_expr` over `primary_expr`; admit its result to the postfix/primary chain; remove
-  the optional caret from `call_expr`; and give propagation the same operand/precedence model.
-  When implementation begins, run `make generate-grammar`; never hand-edit `parser.c`. Expect
-  `ts-enum.h` churn.
+- **Grammar shape (landed 2026-08-17).** The call/literal/binary/member and prefix-handler
+  productions are replaced by one `handler_expr` over `primary_expr`; its result is admitted to
+  the postfix/primary chain; `call_expr` no longer owns an optional caret; and propagation uses
+  the same operand/precedence model. The generated parser and `ts-enum.h` were regenerated from
+  `grammar.js`; `parser.c` remains generated output.
 
-### 6.2 System-fault capture — the gap rev 1 missed
+### 6.2 System-fault capture — the remaining gap after syntax retirement
 
-The old destructure is **not** merely syntactic sugar. For eligible procedural expressions it
-installs a `LambdaRecoveryFrame` with a native `setjmp` landing point
-(`transpile_local_fault_expression` / `transpile_error_destructure` in `transpile-mir.cpp`), and
-`AstNamedNode.local_fault_safe` prevents that frame from spanning an async suspension. So rev
-1's claim that the handler "can lower to today's contagion semantics initially" is incomplete:
-contagion catches returned `ItemError` values but **not** native system/resource faults.
+The retired destructure had been carrying a separate native-fault path. That path is removed with
+the legacy AST/runtime lowering; the remaining work is to decide whether and how a braced handler
+installs a `LambdaRecoveryFrame` with a native `setjmp` landing point. Ordinary contagion catches
+returned `ItemError` values but **not** native system/resource faults.
 
 **Context rule.** Native `FAULT` capture is procedural, matching the formal system channel: a
 handler in `pn` context (including the statement form) installs a recovery frame; a handler in
@@ -433,7 +427,7 @@ unknown native crash is not an `error` value and must continue to the prior hand
 boundary. Fault delivery must use a pre-reserved/static payload and perform no allocation; in
 particular, OOM recovery cannot allocate its own rich diagnostic.
 
-Before P4 can retire the old form, P3 must specify and implement:
+Before the fault-capture phase can land, P3 must specify and implement:
 
 - how a procedural `e ^ { … }` installs or reuses `LambdaRecoveryFrame`, and how pure `fn`
   lowering proves that it did not install one;
@@ -466,50 +460,43 @@ Before P4 can retire the old form, P3 must specify and implement:
   statement. `raise`/`return` inside either form still act on the enclosing frame. Letting an
   enclosing block skip is a runtime possibility, not static divergence.
 
-### 6.4 Corpus migration (P3, before the retirement)
+### 6.4 Corpus migration (P3, landed 2026-08-17)
 
-240 occurrences across 121 `.ls` files, plus 20 `if (^…)` sites, across `test/std`
-(`negative/unhandled_error.ls`, `negative/error_propagation.ls`,
-`integration/error_safe_pipeline.ls`, `core/statements/error_handling.ls`,
-`core/datatypes/error_basic.ls`, `core/operators/error_propagation_op.ls`),
-`test/benchmark/beng` (`regexredux`, `knucleotide`, `revcomp` and their `2.ls` variants),
-`test/lambda`, `test/ui/rte_prototype.ls`, and `lambda/package` (`math/render.ls`,
-`latex/latex.ls`, `graph/transform/content.ls`, `graph/mermaid/config.ls`).
+All active `.ls` declarations and prefix error tests were migrated. Value/error capture now uses
+a braced handler that returns the current error as data when inspection is required; value-only
+recovery uses a braced handler or `or`. Boolean error checks use `is error`. No active corpus file
+contains `let a^err = e`, `pub a^err = e`, or prefix `^expr` syntax. Historical design notes retain
+the old spellings only when documenting the retired design.
 
-Migration is shape-sensitive, not universally mechanical. A value-producing recovery becomes
-`let a = e ^ { H }`. A two-arm `let a^err = e; if (^err) { H } else { B }` becomes a `match`
-unless `H` supplies the value consumed by a common tail or leaves the scope. A command-style
-capture becomes `pn_call() ^ { H }`, whose handler may complete and continue. `if (^err)` becomes
-`if (err is error)` only where an independent `err` binding remains. Sites relying on
-`local_fault_safe` recovery need §6.2 complete first. Per repo rule, every new/renamed `*.ls`
-keeps its `*.txt` golden in step.
+**Grammar and corpus retirement landed (2026-08-17).** The implementation now follows
+**S7.6.2v2/S7.6.3v2**: `handler_expr` and `propagate_expr` are mandatory-caret,
+left-associative postfix-primary forms at the member/query tier; `call_expr` no
+longer owns propagation; and the obsolete call/literal/binary/member plus every
+`handler_prefix_*` production is removed. The legacy `^err` destructure and
+prefix `^` error test are now removed as well; active code uses braced handlers,
+postfix propagation, or `is error`.
 
 ---
 
-## 7. P4/P5 — Retirement and routing
+## 7. P4/P5 — Retirement (landed) and routing
 
-### 7.1 P4 — the atomic retirement
+### 7.1 P4 — the atomic retirement (landed 2026-08-17)
 
-- Retire the prefix `^` operator: the unary-operator choice in `grammar.js`
-  (`choice('not', '!', '-', '+', '^', '*')`). Removing it is what buys the parse headroom;
-  `x is error` is the replacement (verified working 2026-08-01).
-- Conform the braced handler and propagation grammar to **S7.6.2v2/S7.6.3v2** in the same
-  grammar change: remove the optional caret from `call_expr`; make `handler_expr` a mandatory-
-  caret postfix operation over `primary_expr`; make its result available to the ordinary postfix
-  chain; and give `propagate_expr` the same operand and precedence model.
-- Retire `handler_member_expr`, `handler_literal_expr`, `handler_binary_expr`, and every
-  `handler_prefix_*` production. Remove their conflict declarations, generated symbols, AST
-  dispatch cases, and prefix-handler fixtures rather than preserving aliases for syntax that no
-  longer exists. Migrate the nested-handler fixture to `operand ^ { ... }`.
-- Retire the destructure: the `'^', field('error', …)` production in `grammar.js`; the
-  `FIELD_ERROR` handling in `build_assign_expr` and the second binding it creates
-  (`build_ast.cpp`); `AstNamedNode.error_name` and its emitter uses. **`pub x^err = …`
-  disappears too** — the module/export path has a dedicated branch (`build_ast.cpp`, in the pub
-  declaration path).
-- **Rewrite the E228 diagnostic.** It advertises the retired form verbatim: *"use '%s(...)^' to
-  propagate, 'let result^err = %s(...)' to capture, or '%s(...) or default' to recover"*
-  (`build_ast.cpp`, in the enforcing-call validation path). It must offer `%s(...) ^ { … }`
-  instead, and keep the `or` form.
+- The prefix `^` operator is removed from the unary-operator choice in `grammar.js`; `x is error`
+  is the replacement.
+- The braced handler and propagation grammar conforms to **S7.6.2v2/S7.6.3v2**: `call_expr`
+  has no optional caret, `handler_expr` is a mandatory-caret postfix operation over
+  `primary_expr`, its result continues through the ordinary postfix chain, and propagation uses
+  the same operand and precedence model.
+- `handler_member_expr`, `handler_literal_expr`, `handler_binary_expr`, and every
+  `handler_prefix_*` production are removed, along with their conflicts, generated symbols, AST
+  dispatch cases, and prefix-handler fixtures. The nested-handler fixture uses
+  `operand ^ { ... }`.
+- The destructure production, `FIELD_ERROR` AST handling, synthetic error binding,
+  `AstNamedNode.error_name`, and the dedicated `pub` path are removed. **`pub x^err = …` no
+  longer exists.**
+- The E228 diagnostic now offers `%s(...) ^ { … }` and `or` recovery; it no longer advertises
+  the retired capture spelling.
 
 ### 7.2 P5 — containment
 
@@ -673,8 +660,8 @@ origination breadcrumb remains. No destination record carries an observation/liv
 `e ^ { … }` over a possibly-suspending operand is a **compile error**, reusing the existing
 `MayAwaitScan`. A recovery frame's jump buffer records a context inside the current JIT
 activation, and `await` unwinds to the scheduler and resumes on a different frame — so the buffer
-would point at dead stack. This is the restriction `local_fault_safe` already imposes, made loud
-instead of silent (today it degrades quietly to value-error-only handling).
+would point at dead stack. The retired destructure used `local_fault_safe` to degrade quietly to
+value-error-only handling; the handler path must diagnose the suspension instead.
 
 Rejected: silently splitting the capability by operand shape. Follow-on (not now): segment the
 protected region at each `await` and arm one frame per segment, so no buffer crosses a poll —
@@ -718,7 +705,7 @@ Lambda's own `setjmp` users, excluding vendored code and tests:
   local live across the checkpoint must be memory-backed or the second return reads a stale
   register. Add an emission test for the second property; it is silent when wrong.
 - **H4 (perf, measure before P3).** `sigsetjmp(env, 1)` saves the signal mask, i.e. a
-  `sigprocmask` syscall per armed frame. Acceptable at today's `^err` frequency; if `^ { }`
+  `sigprocmask` syscall per armed frame. Acceptable at today's braced-handler frequency; if `^ { }`
   becomes the primary error-handling form and arms frames routinely, this lands on a warm path.
   Either audit whether `savemask=0` is safe inside protected regions, or arm lazily.
 
