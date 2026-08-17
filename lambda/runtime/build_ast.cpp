@@ -62,7 +62,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 // Forward declarations for pipe expression building
 AstNode* build_current_expr(Transpiler* tp, TSNode node);
 
-// Forward declaration for let_block (uses build_let_expr defined later)
+// Forward declaration for sequential parenthesized lets (uses build_let_expr defined later)
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node);
 
 // Forward declaration for imported module resolution
@@ -2094,7 +2094,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     tp->current_scope->last = entry;
 }
 
-// let_block: (let x = a, let y = b, expr) — sequential let bindings returning last expr
+// Parenthesized lets: (let x = a, let y = b, expr) — sequential bindings returning the last expr.
 AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
     log_debug("build let_block expr");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, block_node, sizeof(AstListNode));
@@ -2653,6 +2653,18 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         ast_node->type = &TYPE_ANY;
     }
     return (AstNode*)ast_node;
+}
+
+// Left-recursive member chains place member_expr directly in object; both CST
+// entry paths must preserve the same path-versus-field interpretation.
+static AstNode* build_member_expr(Transpiler* tp, TSNode member_node) {
+    ArrayList* segments = arraylist_new(8);
+    int scheme = collect_path_segments_if_path(tp, member_node, segments);
+    AstNode* result = scheme >= 0 ?
+        build_path_expr(tp, member_node, (PathScheme)scheme, segments) :
+        build_field_expr(tp, member_node, AST_NODE_MEMBER_EXPR);
+    arraylist_free(segments);
+    return result;
 }
 
 // Forward declaration: check if AST node contains ~ (current_item) reference
@@ -4362,6 +4374,14 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     TSNode child = ts_node_named_child(pri_node, 0);
     if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
 
+    if (ts_node_symbol(child) == sym_let_expr &&
+            !ts_node_is_null(ts_node_next_named_sibling(child))) {
+        // `_parenthesized_expr` is inline, so its leading lets now live directly
+        // under primary_expr; preserve their shared scope instead of treating only
+        // the first binding as the expression result.
+        return build_let_block(tp, pri_node);
+    }
+
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
 
@@ -4503,19 +4523,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         arraylist_free(segments);
     }
     else if (symbol == SYM_MEMBER_EXPR) {
-        // first check if this is a path expression (file.x.y, http.x.y, etc.)
-        ArrayList* segments = arraylist_new(8);
-        int scheme = collect_path_segments_if_path(tp, child, segments);
-        if (scheme >= 0) {
-            // it's a path expression
-            ast_node->expr = build_path_expr(tp, child, (PathScheme)scheme, segments);
-            ast_node->type = ast_node->expr->type;
-        } else {
-            // regular member expression
-            ast_node->expr = build_field_expr(tp, child, AST_NODE_MEMBER_EXPR);
-            ast_node->type = ast_node->expr->type;
-        }
-        arraylist_free(segments);
+        ast_node->expr = build_member_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_INDEX_EXPR) {
         // Check if this is a path index expression (path[expr])
@@ -5054,7 +5063,20 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     }
 
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
-    StrView op = ts_node_source(tp, op_node);
+    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
+    StrView op;
+    if (!ts_node_is_null(op_node)) {
+        op = ts_node_source(tp, op_node);
+    } else if (!ts_node_is_null(right_node)) {
+        // Grouped operator tokens are hidden from the CST; their exact spelling
+        // is the source span between the already-fielded operand boundaries.
+        uint32_t left_end = ts_node_end_byte(left_node);
+        uint32_t right_start = ts_node_start_byte(right_node);
+        op.str = tp->source + left_end;
+        op.length = right_start - left_end;
+    } else {
+        op = {nullptr, 0};
+    }
     strview_trim(&op);
     ast_node->op_str = op;
     if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
@@ -5096,7 +5118,6 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 
     // For pipe operator: check if RHS uses ~ (current_item)
     // If not, inject the left side as first argument at call lookup time
-    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
     bool pipe_inject = false;
     if (ast_node->op == OPERATOR_PIPE) {
         if (!tsnode_has_current_item_ref(tp, right_node)) {
@@ -6182,10 +6203,10 @@ static bool pattern_is_symbol_tag(Transpiler* tp, TSNode pattern_node) {
         pattern_node = ts_node_named_child(pattern_node, 0);
     }
     if (ts_node_is_null(pattern_node)) return false;
-    TSNode tag_node = ts_node_child_by_field_id(pattern_node, FIELD_TAG);
-    if (ts_node_is_null(tag_node)) return false;
-    StrView tag = ts_node_source(tp, tag_node);
-    return tag.length >= 8 && memcmp(tag.str, "\\symbol(", 8) == 0;
+    StrView source = ts_node_source(tp, pattern_node);
+    // The compact hidden tag token has no CST field node; its spelling remains
+    // the first bytes of the island and determines the pattern representation.
+    return source.length >= 8 && memcmp(source.str, "\\symbol(", 8) == 0;
 }
 
 static bool pattern_ts_literal_set(Transpiler* tp, TSNode node) {
@@ -6210,9 +6231,8 @@ static bool pattern_ts_literal_set(Transpiler* tp, TSNode node) {
             pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_RIGHT));
     }
     if (symbol == sym_pattern_island) {
-        TSNode tag = ts_node_child_by_field_id(node, FIELD_TAG);
-        StrView tag_source = ts_node_source(tp, tag);
-        if (tag_source.length >= 8 && memcmp(tag_source.str, "\\symbol(", 8) == 0) return false;
+        StrView source = ts_node_source(tp, node);
+        if (source.length >= 8 && memcmp(source.str, "\\symbol(", 8) == 0) return false;
         return pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_BODY));
     }
     return false;
@@ -10364,6 +10384,11 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
     if (!ts_node_is_null(kind)) {
         StrView kind_str = ts_node_source(tp, kind);
         ast_node->is_edit = strview_equal(&kind_str, "edit");
+    } else {
+        // The compact view/edit token is hidden from the CST; the declaration
+        // source starts with the keyword that selects the template behavior.
+        StrView source = ts_node_source(tp, view_node);
+        ast_node->is_edit = source.length >= 4 && memcmp(source.str, "edit", 4) == 0;
     }
     log_debug("is edit: %d", ast_node->is_edit);
 
@@ -11117,6 +11142,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     case SYM_PRIMARY_EXPR:
         return build_primary_expr(tp, expr_node);
+    case SYM_MEMBER_EXPR:
+        return build_member_expr(tp, expr_node);
     case SYM_CALL_EXPR:
         // `start_expr` names its call operand directly instead of routing it
         // through primary_expr, so the shared call builder must accept both.
@@ -11135,8 +11162,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_current_error_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
-    case SYM_LET_BLOCK:
-        return build_let_block(tp, expr_node);
     case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
         return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:

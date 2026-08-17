@@ -431,10 +431,6 @@
             "named": false
           },
           {
-            "type": "!=",
-            "named": false
-          },
-          {
             "type": "%",
             "named": false
           },
@@ -475,10 +471,6 @@
             "named": false
           },
           {
-            "type": "==",
-            "named": false
-          },
-          {
             "type": ">",
             "named": false
           },
@@ -499,35 +491,11 @@
             "named": false
           },
           {
-            "type": "eq",
-            "named": false
-          },
-          {
-            "type": "ge",
-            "named": false
-          },
-          {
-            "type": "gt",
-            "named": false
-          },
-          {
             "type": "in",
             "named": false
           },
           {
             "type": "is",
-            "named": false
-          },
-          {
-            "type": "le",
-            "named": false
-          },
-          {
-            "type": "lt",
-            "named": false
-          },
-          {
-            "type": "ne",
             "named": false
           },
           {
@@ -2284,49 +2252,6 @@
     }
   },
   {
-    "type": "let_block",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "binary_expr",
-          "named": true
-        },
-        {
-          "type": "for_expr",
-          "named": true
-        },
-        {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "let_expr",
-          "named": true
-        },
-        {
-          "type": "match_expr",
-          "named": true
-        },
-        {
-          "type": "primary_expr",
-          "named": true
-        },
-        {
-          "type": "raise_expr",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "let_expr",
     "named": true,
     "fields": {
@@ -2588,10 +2513,6 @@
           },
           {
             "type": "base_type",
-            "named": true
-          },
-          {
-            "type": "dotted_name",
             "named": true
           },
           {
@@ -2873,6 +2794,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "member_expr",
+            "named": true
+          },
           {
             "type": "primary_expr",
             "named": true
@@ -3363,20 +3288,6 @@
             "named": true
           }
         ]
-      },
-      "tag": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\(",
-            "named": false
-          },
-          {
-            "type": "\\symbol(",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -3606,7 +3517,7 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "types": [
         {
@@ -3643,10 +3554,6 @@
         },
         {
           "type": "decimal",
-          "named": true
-        },
-        {
-          "type": "dotted_name",
           "named": true
         },
         {
@@ -3691,10 +3598,6 @@
         },
         {
           "type": "last_index",
-          "named": true
-        },
-        {
-          "type": "let_block",
           "named": true
         },
         {
@@ -4592,20 +4495,6 @@
           }
         ]
       },
-      "kind": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "edit",
-            "named": false
-          },
-          {
-            "type": "view",
-            "named": false
-          }
-        ]
-      },
       "name": {
         "multiple": false,
         "required": false,
@@ -4707,10 +4596,6 @@
     "named": false
   },
   {
-    "type": "!=",
-    "named": false
-  },
-  {
     "type": "%",
     "named": false
   },
@@ -4787,10 +4672,6 @@
     "named": false
   },
   {
-    "type": "==",
-    "named": false
-  },
-  {
     "type": "=>",
     "named": false
   },
@@ -4812,14 +4693,6 @@
   },
   {
     "type": "\\",
-    "named": false
-  },
-  {
-    "type": "\\(",
-    "named": false
-  },
-  {
-    "type": "\\symbol(",
     "named": false
   },
   {
@@ -4911,19 +4784,7 @@
     "named": false
   },
   {
-    "type": "edit",
-    "named": false
-  },
-  {
     "type": "else",
-    "named": false
-  },
-  {
-    "type": "eq",
-    "named": false
-  },
-  {
-    "type": "error",
     "named": false
   },
   {
@@ -4939,15 +4800,7 @@
     "named": false
   },
   {
-    "type": "ge",
-    "named": false
-  },
-  {
     "type": "group",
-    "named": false
-  },
-  {
-    "type": "gt",
     "named": false
   },
   {
@@ -4987,19 +4840,11 @@
     "named": true
   },
   {
-    "type": "le",
-    "named": false
-  },
-  {
     "type": "let",
     "named": false
   },
   {
     "type": "limit",
-    "named": false
-  },
-  {
-    "type": "lt",
     "named": false
   },
   {
@@ -5009,10 +4854,6 @@
   {
     "type": "named_value",
     "named": true
-  },
-  {
-    "type": "ne",
-    "named": false
   },
   {
     "type": "not",
@@ -5079,14 +4920,6 @@
     "named": true
   },
   {
-    "type": "string",
-    "named": false
-  },
-  {
-    "type": "symbol",
-    "named": false
-  },
-  {
     "type": "symbol",
     "named": true
   },
@@ -5113,10 +4946,6 @@
   {
     "type": "variadic",
     "named": true
-  },
-  {
-    "type": "view",
-    "named": false
   },
   {
     "type": "w",
