@@ -434,6 +434,7 @@ struct MirFrameState {
     MIR_type_t return_type;
     MIR_reg_t runtime;
     MIR_reg_t root_base;
+    MIR_reg_t root_end;
     MIR_reg_t number_base;
     MIR_label_t anchor;
     MIR_label_t return_label;
@@ -452,6 +453,11 @@ struct MirFrameState {
     MIR_reg_t incoming_scalar_home;
     int return_lane_kind;
     int root_slot_count;
+    // Fixed suffix slots (for example JavaScript's prerooted argument span)
+    // are appended after semantic root coloring. They are part of the
+    // published physical range but are initialized by their owning lowering
+    // path before use (D5.3.1).
+    int fixed_root_slots;
     int gc_home_count;
     int fixed_number_slots;
     MIR_reg_t* root_latest;
@@ -477,9 +483,6 @@ struct MirFrameState {
     MirGcCallSite* gc_call_sites;
     int gc_call_site_count;
     int gc_call_site_capacity;
-    MIR_insn_t* root_backedge_reloads;
-    int root_backedge_reload_count;
-    int root_backedge_reload_capacity;
     MirEnvBinding* env_bindings;
     int env_binding_count;
     int env_binding_capacity;
@@ -499,6 +502,10 @@ struct MirEmitter {
     MIR_context_t ctx;            // MIR context — immutable after init (cached from owner)
     MIR_item_t func_item;         // current function item — emit target cursor
     MIR_func_t func;              // current function — register-allocation target
+    // Optional prologue cursor used by compiler-invariant scalar materialization.
+    // It is intentionally separate from the ordinary append cursor so a value
+    // first requested inside a loop can still be defined at function entry.
+    MIR_insn_t insert_after;
     int reg_counter;              // monotonic register-id source
     int label_counter;            // monotonic label/proto-id source
     struct hashmap* import_cache; // name -> import (proto+import) memo
@@ -512,7 +519,8 @@ struct MirEmitter {
     bool helper_results_skip_rehome;
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);
-    void (*root_call_value)(void* owner, MIR_reg_t reg);
+    void (*root_call_value)(void* owner, MIR_reg_t reg,
+        JitValueClass value_class);
     void (*after_call_result)(void* owner, MIR_reg_t reg, MIR_type_t type);
     void (*note_call_exception)(void* owner, JitExceptionEffect effect);
     MirValue (*convert_rep)(void* owner, MirValue value, ValueRep required);
@@ -619,7 +627,6 @@ static inline void em_frame_dispose(MirEmitter* em) {
     if (frame->gc_candidate_by_reg) mem_free(frame->gc_candidate_by_reg);
     if (frame->pending_root_stores) mem_free(frame->pending_root_stores);
     if (frame->gc_call_sites) mem_free(frame->gc_call_sites);
-    if (frame->root_backedge_reloads) mem_free(frame->root_backedge_reloads);
     if (frame->env_bindings) mem_free(frame->env_bindings);
     if (frame->scalar_home_bindings) mem_free(frame->scalar_home_bindings);
     if (frame->scalar_home_fixups) mem_free(frame->scalar_home_fixups);
@@ -1058,7 +1065,12 @@ static inline void em_emit_insn(MirEmitter* em, MIR_insn_t insn) {
         em_emit_unknown_call(em, insn);
         return;
     }
-    mir_append_emit_insn(em->ctx, em->func_item, insn);
+    if (em && em->insert_after) {
+        MIR_insert_insn_after(em->ctx, em->func_item, em->insert_after, insn);
+        em->insert_after = insn;
+    } else {
+        mir_append_emit_insn(em->ctx, em->func_item, insn);
+    }
 }
 static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     mir_append_emit_label(em->ctx, em->func_item, label);
@@ -1428,7 +1440,7 @@ static inline MirValue em_materialize_pending_value(MirEmitter* em,
     }
     if (em && em->root_call_value && mir_gc_value_needs_root(
             value.value_class, value.mir_type)) {
-        em->root_call_value(em->call_owner, value.reg);
+        em->root_call_value(em->call_owner, value.reg, value.value_class);
     }
     return value;
 }
@@ -1614,51 +1626,64 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
     return found ? &found->entry : NULL;
 }
 
-// A newly published root-frame range must never expose stale side-stack words
-// to the collector. Small frames are cheaper to clear inline; larger frames
-// use the audited NO_GC memset leaf so zeroing does not create a safepoint.
-static inline void em_insert_zero_frame_slots(MirEmitter* em,
-        MIR_insn_t before, MIR_reg_t frame_base, int slot_count) {
-    if (!em || !before || !frame_base || slot_count <= 0) return;
-    // D1b: the crossover is well past 8. Each cleared slot is one independent
-    // store that pipelines, whereas the memset leaf costs an FFI call before it
-    // writes anything — fib's 10-slot (80-byte) frame paid a call to do what ten
-    // stores do. Zeroing still happens either way; only the mechanism changes,
-    // so this carries none of the GC risk that *eliding* the clear would.
-    const int inline_slot_limit = 16;
-    if (slot_count <= inline_slot_limit) {
-        for (int slot = 0; slot < slot_count; slot++) {
-            MIR_insn_t clear = MIR_new_insn(em->ctx, MIR_MOV,
-                MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
-                    frame_base, 0, 1),
-                MIR_new_int_op(em->ctx, 0));
-            MIR_insert_insn_before(em->ctx, em->func_item, before, clear);
-        }
+static inline void em_insert_zero_frame_slot_range(MirEmitter* em,
+        MIR_insn_t before, MIR_reg_t frame_base, int first_slot,
+        int slot_count) {
+    if (!em || !before || !frame_base || first_slot < 0 || slot_count <= 0) {
         return;
     }
+    for (int i = 0; i < slot_count; i++) {
+        int slot = first_slot + i;
+        MIR_insn_t clear = MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_mem_op(em->ctx, MIR_T_I64,
+                (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
+                frame_base, 0, 1),
+            MIR_new_int_op(em->ctx, 0));
+        MIR_insert_insn_before(em->ctx, em->func_item, before, clear);
+    }
+}
 
-    MIR_var_t args[3] = {
-        {MIR_T_P, "dest", 0},
-        {MIR_T_I64, "value", 0},
-        {MIR_T_I64, "size", 0},
-    };
-    MirImportEntry* memset_import = em_ensure_import(em, "memset", MIR_T_P,
-        3, args, 1, true);
-    if (!memset_import) {
-        log_error("mir-root-frame-zero: unable to import memset");
-        return;
-    }
-    MIR_reg_t result = em_new_reg(em, "root_frame_zeroed", MIR_T_P);
-    MIR_op_t call_args[3] = {
-        MIR_new_reg_op(em->ctx, frame_base),
-        MIR_new_int_op(em->ctx, 0),
-        MIR_new_int_op(em->ctx,
-            (int64_t)slot_count * (int64_t)sizeof(uint64_t)),
-    };
-    MIR_insn_t clear = mir_new_call_with_args(em->ctx,
-        memset_import->proto, memset_import->import, result, 3, call_args);
-    MIR_insert_insn_before(em->ctx, em->func_item, before, clear);
+// Publish a frame exactly once. After publication, nested native RootFrames may
+// extend side_root_top above root_end; rewriting the watermark at every later
+// safepoint would hide such a child frame and violate LIFO restoration.
+static inline void em_insert_root_publication_store(MirEmitter* em,
+        MIR_insn_t before, MIR_reg_t runtime, size_t root_top_offset,
+        MIR_reg_t root_end) {
+    if (!em || !before || !runtime || !root_end) return;
+    MIR_insn_t store = MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_mem_op(em->ctx, MIR_T_I64,
+                (MIR_disp_t)root_top_offset, runtime, 0, 1),
+            MIR_new_reg_op(em->ctx, root_end));
+    MIR_insert_insn_before(em->ctx, em->func_item, before, store);
+}
+
+static inline void em_insert_root_publication_guard(MirEmitter* em,
+        MIR_insn_t before, MIR_reg_t runtime, size_t root_top_offset,
+        MIR_reg_t frame_base, MIR_reg_t root_end) {
+    if (!em || !before || !runtime || !frame_base ||
+            !root_end) return;
+    MIR_label_t ready = em_new_label(em);
+    MIR_reg_t current_top = em_new_reg(em, "root_current_top", MIR_T_I64);
+    MIR_reg_t at_base = em_new_reg(em, "root_at_base", MIR_T_I64);
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, current_top),
+            MIR_new_mem_op(em->ctx, MIR_T_I64,
+                (MIR_disp_t)root_top_offset, runtime, 0, 1)));
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_EQ, MIR_new_reg_op(em->ctx, at_base),
+            MIR_new_reg_op(em->ctx, current_top),
+            MIR_new_reg_op(em->ctx, frame_base)));
+    // A persistent child frame already makes this frame's prefix visible. Do
+    // not rewind its watermark merely because this is our first own safepoint.
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_BF, MIR_new_label_op(em->ctx, ready),
+            MIR_new_reg_op(em->ctx, at_base)));
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_mem_op(em->ctx, MIR_T_I64,
+                (MIR_disp_t)root_top_offset, runtime, 0, 1),
+            MIR_new_reg_op(em->ctx, root_end)));
+    MIR_insert_insn_before(em->ctx, em->func_item, before, ready);
 }
 
 // D3: does any instruction other than `def` read `reg`? Covers register
@@ -1824,11 +1849,14 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
     }
 
     if (frame->root_slot_count > 0) {
-        MIR_reg_t top = em_new_reg(em, "root_top", MIR_T_I64);
+        if (!frame->root_end) {
+            frame->root_end = em_new_reg(em, "root_top", MIR_T_I64);
+        }
         MIR_reg_t limit = em_new_reg(em, "root_limit", MIR_T_I64);
         MIR_reg_t overflow = em_new_reg(em, "root_overflow", MIR_T_I64);
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, top),
+            MIR_new_insn(em->ctx, MIR_ADD,
+                MIR_new_reg_op(em->ctx, frame->root_end),
                 MIR_new_reg_op(em->ctx, frame->root_base),
                 MIR_new_int_op(em->ctx, (int64_t)frame->root_slot_count *
                     (int64_t)sizeof(uint64_t))));
@@ -1838,7 +1866,8 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                     (MIR_disp_t)root_commit_limit_offset, frame->runtime, 0, 1)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_UGT, MIR_new_reg_op(em->ctx, overflow),
-                MIR_new_reg_op(em->ctx, top), MIR_new_reg_op(em->ctx, limit)));
+                MIR_new_reg_op(em->ctx, frame->root_end),
+                MIR_new_reg_op(em->ctx, limit)));
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_BT,
                 MIR_new_label_op(em->ctx, grow_label),
@@ -1851,13 +1880,19 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                     MIR_new_reg_op(em->ctx, number_top_reg)));
             number_top_reg = 0;
         }
-        em_insert_zero_frame_slots(em, frame->anchor, frame->root_base,
-            frame->root_slot_count);
-        MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
-            MIR_new_insn(em->ctx, MIR_MOV,
-                MIR_new_mem_op(em->ctx, MIR_T_I64,
-                    (MIR_disp_t)root_top_offset, frame->runtime, 0, 1),
-                MIR_new_reg_op(em->ctx, top)));
+        if (frame->fixed_root_slots > 0 &&
+                frame->root_slot_count >= frame->fixed_root_slots) {
+            // Fixed suffix slots are not semantic candidates. Initialize the
+            // borrowed argument span while its range is still unpublished.
+            em_insert_zero_frame_slot_range(em, frame->anchor,
+                frame->root_base,
+                frame->root_slot_count - frame->fixed_root_slots,
+                frame->fixed_root_slots);
+        }
+        // The watermark is published at the first reachable MAY_GC boundary,
+        // after the frame's slots have been initialized and current roots
+        // stored. Keeping it unchanged here makes an unentered frame invisible
+        // to the collector (D5.3.1, D8.6.3).
     }
     // A frame with only number slots still has to publish its bumped top.
     if (number_top_reg) {
@@ -2148,6 +2183,148 @@ static inline void em_root_collect_block_successors(int block_index,
 }
 
 static inline bool em_root_call_may_collect(MIR_insn_t insn,
+        const MirGcCallSite* call_sites, int call_site_count);
+
+// A frame needs publication only on the first MAY_GC boundary reachable along
+// a path.  A runtime guard is still needed for loops, but placing it at every
+// call made the E6 precision change dominate the MIR ratchet.  This forward
+// dataflow marks blocks whose every incoming path has already crossed a
+// safepoint, so straight-line calls pay no repeated publication code.
+static inline void em_compute_root_publication_frontier(
+        MIR_insn_t* instructions, MirRootLivenessBlock* blocks,
+        int block_count, uint64_t* successors, int successor_word_count,
+        const MirGcCallSite* call_sites, int call_site_count,
+        uint8_t* frontier) {
+    if (!instructions || !blocks || block_count <= 0 || !successors ||
+            successor_word_count <= 0 || !frontier) return;
+    uint8_t* has_may_gc = (uint8_t*)mem_alloc((size_t)block_count,
+        MEM_CAT_TEMP);
+    uint8_t* published_in = (uint8_t*)mem_alloc((size_t)block_count,
+        MEM_CAT_TEMP);
+    uint8_t* published_out = (uint8_t*)mem_alloc((size_t)block_count,
+        MEM_CAT_TEMP);
+    if (!has_may_gc || !published_in || !published_out) {
+        log_error("mir-root-publication-frontier: dataflow allocation failed");
+        abort();
+    }
+    memset(has_may_gc, 0, (size_t)block_count);
+    memset(published_in, 0, (size_t)block_count);
+    memset(published_out, 0, (size_t)block_count);
+    int* predecessor_counts = (int*)mem_calloc((size_t)block_count,
+        sizeof(int), MEM_CAT_TEMP);
+    int* predecessor_offsets = (int*)mem_alloc(
+        (size_t)(block_count + 1) * sizeof(int), MEM_CAT_TEMP);
+    int* predecessor_cursor = (int*)mem_alloc((size_t)block_count *
+        sizeof(int), MEM_CAT_TEMP);
+    if (!predecessor_counts || !predecessor_offsets || !predecessor_cursor) {
+        log_error("mir-root-publication-frontier: predecessor allocation failed");
+        abort();
+    }
+    // The successor matrix is bit-packed, but repeatedly scanning every row
+    // for every destination made this dataflow quadratic in basic-block count.
+    // Deep JavaScript destructuring creates tens of thousands of small blocks;
+    // materialize the sparse predecessor edges once so publication analysis is
+    // linear in the actual control-flow graph (D8.6.1).
+    for (int pred = 0; pred < block_count; pred++) {
+        const uint64_t* row = successors +
+            (size_t)pred * (size_t)successor_word_count;
+        for (int word = 0; word < successor_word_count; word++) {
+            uint64_t bits = row[word];
+            while (bits != 0) {
+                int succ = word * 64 + __builtin_ctzll(bits);
+                if (succ < block_count) predecessor_counts[succ]++;
+                bits &= bits - 1;
+            }
+        }
+    }
+    predecessor_offsets[0] = 0;
+    for (int bi = 0; bi < block_count; bi++) {
+        predecessor_offsets[bi + 1] = predecessor_offsets[bi] +
+            predecessor_counts[bi];
+        predecessor_cursor[bi] = predecessor_offsets[bi];
+    }
+    int predecessor_edge_count = predecessor_offsets[block_count];
+    int* predecessors = predecessor_edge_count > 0
+        ? (int*)mem_alloc((size_t)predecessor_edge_count * sizeof(int),
+            MEM_CAT_TEMP) : NULL;
+    if (predecessor_edge_count > 0 && !predecessors) {
+        log_error("mir-root-publication-frontier: predecessor edge allocation failed");
+        abort();
+    }
+    for (int pred = 0; pred < block_count; pred++) {
+        const uint64_t* row = successors +
+            (size_t)pred * (size_t)successor_word_count;
+        for (int word = 0; word < successor_word_count; word++) {
+            uint64_t bits = row[word];
+            while (bits != 0) {
+                int succ = word * 64 + __builtin_ctzll(bits);
+                if (succ < block_count) predecessors[predecessor_cursor[succ]++] = pred;
+                bits &= bits - 1;
+            }
+        }
+    }
+    for (int bi = 0; bi < block_count; bi++) {
+        for (int i = blocks[bi].start; i < blocks[bi].end; i++) {
+            if (MIR_call_code_p(instructions[i]->code) &&
+                    em_root_call_may_collect(instructions[i], call_sites,
+                        call_site_count)) {
+                has_may_gc[bi] = 1;
+                break;
+            }
+        }
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int bi = 0; bi < block_count; bi++) {
+            bool has_predecessor = predecessor_counts[bi] > 0;
+            bool all_predecessors_published = true;
+            for (int pi = predecessor_offsets[bi];
+                    pi < predecessor_offsets[bi + 1]; pi++) {
+                int pred = predecessors[pi];
+                if (!published_out[pred]) all_predecessors_published = false;
+            }
+            // Block zero is the only normal entry. Unreachable cycles must not
+            // become published merely because every member points at another.
+            bool next_in = bi != 0 && has_predecessor &&
+                all_predecessors_published;
+            bool next_out = next_in || has_may_gc[bi];
+            if (published_in[bi] != (uint8_t)next_in ||
+                    published_out[bi] != (uint8_t)next_out) {
+                published_in[bi] = (uint8_t)next_in;
+                published_out[bi] = (uint8_t)next_out;
+                changed = true;
+            }
+        }
+    }
+    for (int bi = 0; bi < block_count; bi++) {
+        frontier[bi] = 0;
+        if (has_may_gc[bi] && !published_in[bi]) {
+            bool has_published_predecessor = false;
+            for (int pi = predecessor_offsets[bi];
+                    pi < predecessor_offsets[bi + 1]; pi++) {
+                if (published_out[predecessors[pi]]) {
+                    has_published_predecessor = true;
+                    break;
+                }
+            }
+            // An entry-only frontier cannot have a child RootFrame yet. A merge
+            // or loop frontier can, so retain the non-rewinding runtime check only
+            // for those paths.
+            frontier[bi] = has_published_predecessor ? 2 : 1;
+        }
+    }
+    mem_free(has_may_gc);
+    mem_free(published_in);
+    mem_free(published_out);
+    mem_free(predecessor_counts);
+    mem_free(predecessor_offsets);
+    mem_free(predecessor_cursor);
+    if (predecessors) mem_free(predecessors);
+}
+
+static inline bool em_root_call_may_collect(MIR_insn_t insn,
         const MirGcCallSite* call_sites, int call_site_count) {
     for (int i = 0; i < call_site_count; i++) {
         if (call_sites[i].insn == insn) {
@@ -2175,13 +2352,33 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             !candidate_by_reg || !candidate_by_reg_capacity) return false;
     if (result) memset(result, 0, sizeof(*result));
 
+    MirFrameState* frame = &em->frame;
+
     // Root identity follows MIR copies into narrowing, return, and join
     // registers even when the destination has no source-language binding.
     em_root_propagate_mov_candidates(em, candidates, candidate_count_ptr,
         candidate_capacity, candidate_by_reg, candidate_by_reg_capacity);
     MirRootCandidate* root_candidates = *candidates;
     int candidate_count = *candidate_count_ptr;
-    if (candidate_count == 0) return true;
+    if (candidate_count == 0) {
+        // JavaScript can have a fixed prerooted-argument suffix without any
+        // semantic candidates. Its owner initializes that suffix in the
+        // prologue, but it still needs a visible watermark before the first
+        // call that validates the borrowed span (D5.3.1).
+        if (frame->fixed_root_slots > 0) {
+            for (MIR_insn_t current = DLIST_HEAD(MIR_insn_t, em->func->insns);
+                    current; current = DLIST_NEXT(MIR_insn_t, current)) {
+                if (MIR_call_code_p(current->code) &&
+                        em_root_call_may_collect(current, call_sites,
+                            call_site_count)) {
+                    em_insert_root_publication_guard(em, current,
+                        frame->runtime, offsetof(Context, side_root_top),
+                        frame_base, frame->root_end);
+                }
+            }
+        }
+        return true;
+    }
 
     int instruction_count = 0;
     MIR_reg_t max_candidate_reg = 0;
@@ -2524,6 +2721,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     }
 
     int total_slot_count = stable_slot_count + scratch_slot_count;
+    frame->root_slot_count = total_slot_count;
     int dirty_word_count = (total_slot_count + 63) / 64;
     if (dirty_word_count < 1) dirty_word_count = 1;
     int successor_word_count = (block_count + 63) / 64;
@@ -2543,8 +2741,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         dirty_block_words * sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* successors = (uint64_t*)mem_alloc(
         successor_block_words * sizeof(uint64_t), MEM_CAT_TEMP);
+    uint8_t* publication_frontier = (uint8_t*)mem_alloc(
+        (size_t)block_count, MEM_CAT_TEMP);
     if (!dirty_in || !dirty_out || !dirty_state || !dirty_preserve ||
-            !dirty_generate || !successors) {
+            !dirty_generate || !successors || !publication_frontier) {
         log_error("mir-semantic-root-write-back: dirty-state allocation failed");
         abort();
     }
@@ -2558,6 +2758,9 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             labels, label_blocks, label_count, successors,
             successor_word_count);
     }
+    em_compute_root_publication_frontier(instructions, blocks, block_count,
+        successors, successor_word_count, call_sites, call_site_count,
+        publication_frontier);
     // Dirty-state flow is a per-block transfer function:
     //     out = (in & preserve) | generate
     // Precomputing it avoids rescanning every instruction and every candidate
@@ -2680,6 +2883,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
 
     int inserted_stores = retained_oracle_store_count;
     for (int bi = 0; bi < block_count; bi++) {
+        uint8_t publication_mode = publication_frontier[bi];
         memcpy(dirty_state,
             dirty_in + (size_t)bi * (size_t)dirty_word_count,
             (size_t)dirty_word_count * sizeof(uint64_t));
@@ -2714,6 +2918,18 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
                     dirty_state[slot >> 6] &=
                         ~(UINT64_C(1) << (slot & 63));
                     inserted_stores++;
+                }
+                if (total_slot_count > 0 && publication_mode != 0) {
+                    if (publication_mode == 2) {
+                        em_insert_root_publication_guard(em, current,
+                            em->frame.runtime, offsetof(Context, side_root_top),
+                            frame_base, frame->root_end);
+                    } else {
+                        em_insert_root_publication_store(em, current,
+                            em->frame.runtime, offsetof(Context, side_root_top),
+                            frame->root_end);
+                    }
+                    publication_mode = 0;
                 }
             }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
@@ -2765,6 +2981,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(dirty_in); mem_free(dirty_out); mem_free(dirty_state);
     mem_free(dirty_preserve); mem_free(dirty_generate);
     mem_free(successors);
+    mem_free(publication_frontier);
     return true;
 }
 
@@ -3341,7 +3558,8 @@ static inline void em_before_resolved_call(MirEmitter* em,
             for (int i = 0; i < nargs; i++) {
                 if (arg_ops[i].mode == MIR_OP_REG && mir_gc_value_needs_root(
                         metadata->abi_args[i].value.value_class, arg_types[i])) {
-                    em->root_call_value(em->call_owner, arg_ops[i].u.reg);
+                    em->root_call_value(em->call_owner, arg_ops[i].u.reg,
+                        metadata->abi_args[i].value.value_class);
                 }
             }
         }
@@ -3367,7 +3585,8 @@ static inline void em_publish_call_result(MirEmitter* em,
     }
     if (em->root_call_value && mir_gc_value_needs_root(
             metadata->normal_result.value.value_class, ret_type)) {
-        em->root_call_value(em->call_owner, result);
+        em->root_call_value(em->call_owner, result,
+            metadata->normal_result.value.value_class);
     }
 }
 
@@ -3434,7 +3653,15 @@ static inline void em_emit_unclassified_call(MirEmitter* em,
                     name, i);
                 abort();
             }
-            if (em->root_call_value) em->root_call_value(em->call_owner, reg);
+            if (em->root_call_value) {
+                MIR_type_t type = MIR_reg_type(em->ctx, reg, em->func);
+                JitValueClass value_class = type == MIR_T_P
+                    ? JIT_VALUE_RAW_GC_POINTER : JIT_VALUE_BOXED_ITEM;
+                if (type == MIR_T_D || type == MIR_T_F || type == MIR_T_LD) {
+                    value_class = JIT_VALUE_NON_GC_SCALAR;
+                }
+                em->root_call_value(em->call_owner, reg, value_class);
+            }
         }
     }
     em->frame.may_gc_call_count++;
@@ -3459,7 +3686,14 @@ static inline void em_emit_unclassified_call(MirEmitter* em,
             if (em->after_call_result) {
                 em->after_call_result(em->call_owner, reg, type);
             }
-            if (em->root_call_value) em->root_call_value(em->call_owner, reg);
+            if (em->root_call_value) {
+                JitValueClass value_class = type == MIR_T_P
+                    ? JIT_VALUE_RAW_GC_POINTER : JIT_VALUE_BOXED_ITEM;
+                if (type == MIR_T_D || type == MIR_T_F || type == MIR_T_LD) {
+                    value_class = JIT_VALUE_NON_GC_SCALAR;
+                }
+                em->root_call_value(em->call_owner, reg, value_class);
+            }
         }
     }
     if (em->after_may_gc_call) em->after_may_gc_call(em->call_owner);
@@ -3556,7 +3790,12 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
     MIR_reg_t res = em_new_reg(em, fn_name, ret_type);
     MIR_insn_t call = mir_new_call_with_args(em->ctx, resolved.proto,
         resolved.import, res, nargs, arg_ops);
-    mir_append_emit_insn(em->ctx, em->func_item, call);
+    if (em->insert_after) {
+        MIR_insert_insn_after(em->ctx, em->func_item, em->insert_after, call);
+        em->insert_after = call;
+    } else {
+        mir_append_emit_insn(em->ctx, em->func_item, call);
+    }
     em_after_resolved_call(em, fn_name, &resolved.call, call, res, ret_type);
     if (em->after_may_gc_call &&
             resolved.call.effects.gc != JIT_EFFECT_NO_GC) {

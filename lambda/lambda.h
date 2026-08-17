@@ -2302,6 +2302,7 @@ extern "C" {
     Item fn_index(Item item, Item index);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
+    Item fn_member_by_id(Item item, uint32_t name_id);
     // length function
     int64_t fn_len(Item item);
     Item fn_int(Item a);

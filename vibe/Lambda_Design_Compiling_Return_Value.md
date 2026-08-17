@@ -1095,11 +1095,9 @@ numbering stays traceable.)*
   their own boundary, if any exist. This does not remove the RVO11 obligation
   — it relocates it to a place the emitter already has structure for.
 
-  *Implementation survey, 2026-08-14.* The emitter has no loop-structure
-  tracking to hang this on: `MirFrameState.root_backedge_reloads` exists but
-  has no writer or reader — declared and unconsumed, like
-  `JitCallEffects.number_stack` was before RV14a and like `BindingStorage`
-  still is. Emitting the restore is easy (the back edge is a `MIR_JMP` the
+  *Implementation survey, 2026-08-14, superseded by Tune18 E6.* Root
+  publication now follows the sparse CFG frontier rather than a dedicated
+  `MirFrameState.root_backedge_reloads` field. Emitting the restore is easy (the back edge is a `MIR_JMP` the
   loop lowering already writes); deciding whether it is *safe* is what needs
   a home. The promising placement is **`em_finalize_scalar_homes`**, which
   already computes home live ranges and interference at function

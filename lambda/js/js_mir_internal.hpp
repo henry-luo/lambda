@@ -260,7 +260,6 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name);
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var);
 void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg);
-void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);
 MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t value);

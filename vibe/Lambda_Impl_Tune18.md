@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-17
 - **Input:** `test/benchmark/Overall_Result30.md` / `benchmark_results_v30.json`; fresh finalized-MIR dumps of 14 typed benchmarks against their native C2MIR ports under `temp/mir_cmp/` (`*.lambda.mir` vs `*.c2m.mir`, script `dump_all.sh`, timings `timings.tsv`, narrative `MIR_Efficiency_Analysis.md`)
-- **Status:** PROPOSED — evidence gathered, no slice coded
+- **Status:** IMPLEMENTED — E1–E6 mechanisms and the retained follow-on slices landed; full gates and release evidence are recorded in §§6–7
 - **Related:** `vibe/Lambda_Impl_Tune17 (done).md` (T1–T5, regression ledger), `vibe/Lambda_Impl_Tune16 (done).md` (C-slices, categorical bar), `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (Result18 M1–M8 mechanism catalog, T-A/T-B/T-C/T-D), `vibe/Lambda_Design_Const_Pool.md` (CP1, CP7), `vibe/Lambda_Design_Compiling.md` (LC1), `vibe/Lambda_Design_Compiling_Nullable.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S7.1, S7.2.1; `doc/Lambda_Formal_Design.md` D2.2.3, D2.5.2–D2.5.3, D2.6.1–D2.6.3, D2.7.1, D3.2.1, D3.3.1–D3.3.3, D4.6.1v2–D4.6.2v2, D4.7.1, D5.3.1, D5.3.4–D5.3.5, D5.4.3, D8.3.3, D8.4.1, D8.6.1–D8.6.3
 
@@ -138,3 +138,79 @@ Targets: MIR (typed)/C2MIR geo **5.70x → ≤3.5x** (the E1+E2 population alone
 Non-goals, restated: no inline caches in Lambda script [LC1, D8.4.1]; no change to int53 saturation semantics [S4.1.2]; no `i64?`/`u64?` lane revival [D2.5.2]; no vendored-dependency edits (`c2m` is a measurement rig built from pinned sources, not a change surface); no benchmark-source annotation edits to dodge a cost the compiler should elide; the byte/binary string lane ships only behind its own design doc.
 
 Interaction note: the D8.1.1v2 tier-up plan (T0 interpreter + per-function MIR promotion, not yet started) changes *when* this MIR runs, not *what it looks like* — every E-slice improves the promoted code it will eventually target, and the E6/IR-volume shrinkage directly reduces the promotion latency it will pay. The two plans compose; neither blocks the other.
+
+## 6. As-landed implementation and verification (2026-08-17)
+
+The six mechanism families are implemented in the MIR-Direct emitter/runtime. The
+implementation preserves the public nullable/boxed contracts while consuming
+proofs only on their proven native edges (D2.5.3, D2.6.2–D2.6.3), keeps int53
+saturation semantics unchanged (S4.1.1–S4.1.2), and publishes only the precise
+GC representations allowed by D5.3.1 and D5.3.4.
+
+| Family | Landed mechanism | Checked-in proof fixture |
+|---|---|---|
+| E1 | Typed-array witness/layout caching, native boundary-carrier propagation, and surviving fallback checks | `tune18_boundary_witness`, `tune18_array_witness` |
+| E2 | CP1 float/packable-datetime immediates and loop-invariant typed-array/constant paths | `tune18_float_const`, `tune18_dtime_const`, `tune18_loop_cache` |
+| E3 | Inline nullable Item tag tests, `fn_member_by_id`, and function-entry NameId resolution through the per-context table (D4.6.1v2–D4.6.2v2) | `tune18_member_by_id` |
+| E4 | String-buffer ownership/freeze path and direct `string[]` indexed reads | `tune18_string_array` |
+| E5 | Forward int-range facts that elide redundant in-band checks without changing S4.1.2 behavior | `tune18_int_range` |
+| E6 | Exact root value classes, sparse root-publication frontier analysis, first-safepoint publication, fixed-suffix initialization, and zero-root frame elision | `typed_array_guard` plus forced-GC sweep |
+
+The frontier dataflow was also corrected as part of E6: the previous dense
+successor-row scan was quadratic for deep destructuring. Sparse predecessor
+materialization makes the publication analysis linear in actual CFG edges
+(D8.6.1), reducing the isolated deep-destructuring release run to 1.95s.
+
+Verification from the landed tree:
+
+- `make test-lambda-baseline`: **3,786/3,786** (2,104 input, 1,682 runtime), including MIR emission **58/58**, JS MIR emission **21/21**, forced-GC **87/87**, and ratchet **16/16**.
+- `make test262-baseline`: **40,261/40,261 fully passing**, 0 failures, 0 non-fully-passing, 0 retries; 2,652 tests skipped by the maintained harness classification.
+- `make release`: passed.
+- The release three-run named timing set and 66-configuration MIR-vs-C scorecard were rerun from the landed binary. The named typed/C2MIR medians were: sum **3.07x**, sumfp **0.87x**, nqueens **8.54x**, sieve **2.00x**, towers **15.76x**, list **28.55x**, nbody **13.51x**, brainfuck **14.04x**, matmul **1.85x**, base64 **48.32x**, quicksort **5.37x**, hashmap **19.35x**. The independent MIR-vs-C scorecard reported **0.63x overall geomean**; its pre-existing richards/splay/crypto_sha1 port failures were excluded from ratios.
+
+The mechanism and regression gates are complete. The wall-clock ratios above
+show that the original round targets for the remaining algorithmic/representation
+gaps (especially nbody, list, and base64) are not all met by this slice; those
+numbers remain explicit follow-on performance targets rather than being hidden by
+benchmark-source changes or relaxed acceptance gates. No failed target is being
+claimed as achieved.
+
+## 7. Follow-on implementation and verification (2026-08-17)
+
+The first follow-on slice closed two representation gaps that were still visible
+in the landed MIR. It keeps the public contracts and defensive edges intact:
+
+| Slice | Root cause and retained implementation | Evidence |
+|---|---|---|
+| Closed inferred ArrayNum entry | Scalar specialization closure did not prove the array carrier. The raw entry now skips `ensure_typed_array` admission only when every non-escaped direct caller supplies the exact `LMD_TYPE_ARRAY_NUM` carrier and matching element witness. Declared array parameters, open callers, and escaped functions retain the fallback [D3.3.1, D3.3.3, D8.3.3]. | `tune18_closed_witness` raw body forbids the admission branch; its boxed companion still contains it. |
+| Module-level typed `string[]` indexing | The declaration node carries the annotation meta-type while the immutable assignment value carries the concrete Array-of-Items witness. Indexed lowering now reconciles those nodes before selecting the direct bounds/payload load, preserving the generic path when the witness is absent [D2.6.2, D3.2.1]. | `tune18_global_string_array`; typed `base642` MIR has no `fn_index` calls in `_b64_encode`. |
+
+The global `string[]` path changed the optimized release median for `base64`
+from **48.3s** to **18.2s** (five-run matched release medians); untyped MIR
+remained **48.3s** and C2MIR was **0.565s**. This is a substantial reduction,
+but it is still **32.2x** C2MIR and therefore does not claim the original E4
+`<=15x` target. The remaining gap is the representation/accumulation cost,
+not a hidden generic index dispatch.
+
+Two residual checks were measured before being rejected or left explicit:
+
+- The declared-parameter nbody path retains its defensive witness branches by
+  design; its final typed release median is **20.4s** versus **1.52s** for
+  C2MIR, so the closed-inferred admission slice does not claim an nbody timing
+  win [D3.3.1, D3.3.3].
+- A lazy TypeMap hash build for `fn_member_by_id` was removed after a matched
+  release A/B: typed `list` was **0.756s** with the extra build versus **0.628s**
+  without it. The retained E3 path remains the NameId-based linear semantic
+  walk, preserving spread/nested and last-writer behavior [D4.6.1v2–D4.6.2v2].
+
+Final gates after the retained follow-on changes:
+
+- `make test-lambda-baseline`: **3,786/3,786**.
+- `make test262-baseline`: **40,261/40,261 fully passing**, 0 failures, 0
+  non-fully-passing results, and 0 retries; 2,652 maintained skips.
+- MIR emission follow-on filter: **11/11**; forced-GC sweep: **87/87**;
+  emission ratchet: **16/16**; release build: passed.
+
+The remaining nbody/list/base64 ratio targets are now measured residual work,
+not incomplete admission or generic-index lowering. No benchmark source,
+baseline, or test harness was changed to conceal them.

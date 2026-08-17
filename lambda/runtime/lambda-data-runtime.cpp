@@ -2341,6 +2341,50 @@ Item map_get(Map* map, Item key) {
                              map->data, key_str, &is_found);
 }
 
+static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
+                                     void* map_data, NameId name_id,
+                                     bool* is_found) {
+    Item result = ItemNull;
+    *is_found = false;
+    if (!map_type || !map_data || name_id == NAME_ID_NONE) return result;
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+
+    FOR_EACH_MAP_FIELD(map_type, field) {
+        if (!field->name) {
+            Map* nested_map = map_shape_field_to_map(map_data, field);
+            if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
+                bool nested_found = false;
+                Item nested_result = map_get_by_name_id_keyed(
+                    (Container*)nested_map, (TypeMap*)nested_map->type,
+                    nested_map->data, name_id, &nested_found);
+                if (nested_found) {
+                    *is_found = true;
+                    result = nested_result;
+                }
+            }
+        } else if (key && field->name && field->name->length == key->len &&
+                memcmp(field->name->str, key->chars, key->len) == 0) {
+            // Some element/input shape transitions preserve an older identity
+            // while replacing the spelling. The NameId fast path therefore
+            // confirms bytes before selecting a slot; this is the correctness
+            // seam for those shapes (D4.6.1v2-D4.6.2v2).
+            // Keep the same declaration-order last-writer semantics as the
+            // string-key path, including fields stored in immortal input maps.
+            *is_found = true;
+            result = map_read_field_for_owner(owner, field, map_data);
+        }
+    }
+    return result;
+}
+
+Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
+                        NameId name_id, bool* is_found) {
+    if (!is_found) return ItemNull;
+    return map_get_by_name_id_keyed(owner, map_type, map_data, name_id,
+                                    is_found);
+}
+
 Element* elmt(int64_t type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeElmt *elmt_type = (TypeElmt*)(type_list->data[type_index]);

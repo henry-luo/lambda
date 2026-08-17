@@ -2483,6 +2483,7 @@ static int jube_host_mir_function_frame_begin(void* compiler_cursor,
     frame->scalar_return_mode = MIR_SCALAR_RETURN_DYNAMIC;
     frame->runtime = (MIR_reg_t)runtime_register;
     frame->root_base = em_new_reg(emitter, "py_root_frame", MIR_T_I64);
+    frame->root_end = em_new_reg(emitter, "py_root_frame_end", MIR_T_I64);
     frame->number_base = em_new_reg(emitter, "py_number_frame", MIR_T_I64);
     frame->anchor = em_new_label(emitter);
     frame->return_label = em_new_label(emitter);
@@ -2748,8 +2749,14 @@ static bool jube_host_mir_lookup_import_metadata(const char* name,
 }
 
 static void jube_host_mir_root_call_value(void* compiler_cursor,
-        MIR_reg_t register_id) {
-    jube_host_mir_note_root_candidate(jube_host_mir_cursor_emitter(compiler_cursor), register_id);
+        MIR_reg_t register_id, JitValueClass value_class) {
+    MirEmitter* emitter = jube_host_mir_cursor_emitter(compiler_cursor);
+    if (!emitter || !emitter->frame.active || !register_id) return;
+    em_root_note_candidate(&emitter->frame.gc_candidates,
+        &emitter->frame.gc_candidate_count, &emitter->frame.gc_candidate_capacity,
+        &emitter->frame.gc_candidate_by_reg,
+        &emitter->frame.gc_candidate_by_reg_capacity, register_id,
+        value_class, 0);
 }
 
 static int jube_host_mir_compiler_cursor_create(void* mir_context,

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 string[] indexing keeps the generic array bounds contract but removes fn_index dispatch for the stable boxed element lane.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "mov\ti64:("
+      ],
+      "forbid": [
+        "call\tfn_index_p, fn_index",
+        "call\titem_at_p, item_at"
+      ]
+    }
+  ]
+}

@@ -1053,11 +1053,10 @@ that noticed into noise. Recorded here as the open item instead.
   this positively in the emitter; do not assume it. A wrong answer here is a
   use-after-free, not a slowdown, so P2.7.2's reclaim must not ship until
   P2.7.3 answers.
-- **Survey done 2026-08-14; there is nothing existing to hang it on.**
-  `MirFrameState.root_backedge_reloads` is declared with no writer and no
-  reader — the third declared-but-unconsumed field found in this area, after
-  `JitCallEffects.number_stack` (which P2.6 gave a reader) and
-  `BindingStorage` (which P2.7.1 must give one). So the emitter does not
+- **Survey done 2026-08-14; superseded by Tune18 E6.**
+  There is no dedicated `MirFrameState.root_backedge_reloads` field now: root
+  publication follows the sparse CFG frontier and the frame base remains stable.
+  So the emitter does not
   track loop structure today. Emitting the restore is the easy half — the
   back edge is a `MIR_JMP` the loop lowering already writes.
 - Recommended placement: **`em_finalize_scalar_homes`**, which already

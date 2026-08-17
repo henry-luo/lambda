@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 E3 passes static member names as NameIds and preserves the generic fallback only outside the static map hop.",
+  "checks": [
+    {
+      "in_func": "_walk_chain18_#",
+      "expect": [
+        "call\tfn_member_by_id_p, fn_member_by_id"
+      ],
+      "forbid": [
+        "call\tlambda_name_id_to_item_p, lambda_name_id_to_item",
+        "call\tfn_eq_p, fn_eq",
+        "call\tfn_ne_p, fn_ne"
+      ],
+      "count": {
+        "call\tlambda_module_name_id_at_p, lambda_module_name_id_at": {
+          "max": 1
+        }
+      }
+    }
+  ]
+}

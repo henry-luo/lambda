@@ -4403,6 +4403,47 @@ Item fn_member(Item item, Item key) {
     }
 }
 
+extern "C" Item fn_member_by_id(Item item, NameId name_id) {
+    // A generated static member name is already resolved in the active module
+    // state. Maps and objects can consume that identity directly; only the
+    // id-less/input and non-map property paths need the legacy boxed fallback.
+    if (name_id == NAME_ID_NONE) return ItemNull;
+    TypeId type_id = get_type_id(item);
+    bool is_found = false;
+    switch (type_id) {
+    case LMD_TYPE_MAP: {
+        Map* map = item.map;
+        if (map) {
+            Item result = map_get_by_name_id((Container*)map,
+                (TypeMap*)map->type, map->data, name_id, &is_found);
+            if (is_found) return result;
+        }
+        break;
+    }
+    case LMD_TYPE_OBJECT: {
+        Object* object = item.object;
+        if (object) {
+            Item result = map_get_by_name_id((Container*)object,
+                (TypeMap*)object->type, object->data, name_id, &is_found);
+            if (is_found) return result;
+        }
+        break;
+    }
+    // Elements have content/attribute lookup rules beyond their map-shaped
+    // storage (for example a literal attribute can share an element shape
+    // identity). Keep them on fn_member's spelling-aware path until those
+    // rules are represented in the raw NameId ABI (D4.6.1v2-D4.6.2v2).
+    default:
+        break;
+    }
+
+    // Id-less input shapes and built-in properties still require spelling
+    // semantics. This is cold relative to generated map/object field hops and
+    // preserves fn_member's path, datetime, vmap, array, and element rules.
+    Item key = lambda_name_id_to_item(name_id);
+    return fn_member(item, key);
+}
+
 // length of an item's content, relates to indexed access, i.e. item[index]
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);

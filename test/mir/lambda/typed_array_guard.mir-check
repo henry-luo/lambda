@@ -22,7 +22,7 @@
       "in_func": "_guarded_store_#",
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
-        { "pattern": "call\tlambda_module_const_at_p" },
+        { "pattern": "dmov\t{{r}}, 9.50000000000000000000000000000000000000000000000000000e+00" },
         { "pattern": "dmov\td:({{r}}), {{r}}" }
       ]
     },

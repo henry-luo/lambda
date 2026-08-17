@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 module-level string[] indexing uses the direct boxed-element load instead of generic fn_index dispatch.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "mov\ti64:("
+      ],
+      "forbid": [
+        "call\tfn_index_p, fn_index",
+        "call\titem_at_p, item_at"
+      ]
+    }
+  ]
+}

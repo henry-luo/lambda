@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 E2.a keeps packable datetime literals as scalar MIR immediates and boxes only at the semantic comparison boundary.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "mov\ti64:"
+      ],
+      "forbid": [
+        "call\tlambda_module_const_at_p, lambda_module_const_at"
+      ]
+    }
+  ]
+}

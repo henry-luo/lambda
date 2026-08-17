@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 follow-on omits redundant typed-array witness admission in a closed inferred raw body while retaining it at the boxed boundary.",
+  "checks": [
+    {
+      "in_func": "_closed_witness18_#",
+      "forbid": [
+        "call\tensure_typed_array_p, ensure_typed_array",
+        "array_witness_bit"
+      ]
+    },
+    {
+      "in_func": "_closed_witness18_b_#",
+      "expect": [
+        "call\tensure_typed_array_p, ensure_typed_array"
+      ]
+    }
+  ]
+}

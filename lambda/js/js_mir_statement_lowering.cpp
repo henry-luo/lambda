@@ -1602,7 +1602,6 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
         }
     }
 
-    jm_emit_loop_backedge_frame_reload(mt);
     jm_emit_jmp(mt, l_test);
     jm_emit_label(mt, l_end);
 
@@ -1888,7 +1887,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         jm_restore_last_closure_snapshot(mt, &saved_last_closure);
     }
 
-    jm_emit_loop_backedge_frame_reload(mt);
     jm_emit_jmp(mt, l_test);
     jm_emit_label(mt, l_end);
 
@@ -2419,7 +2417,6 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     if (dw->test) {
         // v23b: unified condition handling
         MIR_reg_t truthy = jm_transpile_condition(mt, dw->test);
-        jm_emit_loop_backedge_frame_reload(mt);
         jm_emit_branch(mt, MIR_BT, l_body, truthy);
     }
 
@@ -2776,7 +2773,6 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
         jm_emit_label(mt, l_update);
         jm_emit_reg_binary_op(mt, MIR_ADD, idx, idx, MIR_new_int_op(mt->ctx, 1));
-        jm_emit_loop_backedge_frame_reload(mt);
         jm_emit_jmp(mt, l_test);
 
         jm_emit_label(mt, l_end);
@@ -2936,7 +2932,6 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Update: jump back to test (no index to increment — iterator handles state)
     jm_emit_label(mt, l_update);
-    jm_emit_loop_backedge_frame_reload(mt);
     jm_emit_jmp(mt, l_test);
 
     // v29: Break target — call IteratorClose before exiting

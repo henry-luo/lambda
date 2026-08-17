@@ -170,9 +170,16 @@ int jm_capture_env_slot(FnCapture* capture, int dense_slot) {
     return dense_slot;
 }
 
-static void js_call_root_value(void* owner, MIR_reg_t reg) {
+static void jm_note_gc_candidate(JsMirTranspiler* mt, MIR_reg_t reg,
+        JitValueClass value_class, int home_id);
+
+static void js_call_root_value(void* owner, MIR_reg_t reg,
+        JitValueClass value_class) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
-    if (mt && mt->em.frame.active && reg) jm_create_gc_root_slot(mt, reg);
+    if (mt && mt->em.frame.active && reg) {
+        jm_note_gc_candidate(mt, reg, value_class, 0);
+        jm_create_gc_root_slot(mt, reg);
+    }
 }
 
 static void jm_note_call_error_lane(void* owner, JitExceptionEffect effect) {
@@ -376,32 +383,6 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
     jm_note_gc_candidate(mt, stable_reg, JIT_VALUE_RAW_GC_POINTER, 0);
 }
 
-void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt) {
-    if (!mt || !mt->em.frame.active || !mt->em.frame.root_base) return;
-    // The enclosing generated entry already owns this register.  A loop
-    // backedge is hot, so reloading a process-global runtime pointer here
-    // would both violate context ownership and add avoidable work per loop.
-    MIR_reg_t runtime = mt->em.frame.runtime;
-    MIR_reg_t top = jm_new_reg(mt, "js_root_top_backedge", MIR_T_I64);
-    em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, top),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
-            runtime, 0, 1)));
-    MIR_insn_t reload = MIR_new_insn(mt->ctx, MIR_SUB,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
-        MIR_new_reg_op(mt->ctx, top), MIR_new_int_op(mt->ctx, 0));
-    em_emit_insn(&mt->em, reload);
-    if (mt->em.frame.root_backedge_reload_count >= mt->em.frame.root_backedge_reload_capacity) {
-        int next_capacity = mt->em.frame.root_backedge_reload_capacity
-            ? mt->em.frame.root_backedge_reload_capacity * 2 : 8;
-        mt->em.frame.root_backedge_reloads = (MIR_insn_t*)mem_realloc(
-            mt->em.frame.root_backedge_reloads,
-            (size_t)next_capacity * sizeof(MIR_insn_t), MEM_CAT_JS_RUNTIME);
-        mt->em.frame.root_backedge_reload_capacity = next_capacity;
-    }
-    mt->em.frame.root_backedge_reloads[mt->em.frame.root_backedge_reload_count++] = reload;
-}
-
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value) {
     if (!mt || !mt->em.frame.active || !value) return -1;
     jm_note_gc_candidate(mt, value, JIT_VALUE_UNKNOWN, 0);
@@ -508,6 +489,7 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     }
     mt->em.frame.runtime = runtime_reg;
     mt->em.frame.root_base = jm_new_reg(mt, "js_root_frame", MIR_T_I64);
+    mt->em.frame.root_end = jm_new_reg(mt, "js_root_frame_end", MIR_T_I64);
     mt->em.frame.number_base = jm_new_reg(mt, "js_number_frame", MIR_T_I64);
     mt->em.frame.anchor = jm_new_label(mt);
     mt->em.frame.return_label = jm_new_label(mt);
@@ -515,6 +497,10 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->em.frame.plan.entry_kind = FN_ENTRY_PUBLIC_WRAPPER;
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     mt->em.frame.active = true;
+    // D5.3.1: keep the generated frame base stable across loop backedges.
+    // Nested callee epilogues restore side_root_top to their caller watermark;
+    // deriving this base by subtracting a frame size would rewind into the
+    // caller after such a return and hide the caller's published roots.
     jm_emit_label(mt, mt->em.frame.anchor);
     if (clean_error_lane_entry) {
         jm_error_lane_set_state(mt, JS_ERROR_LANE_CLEAN);
@@ -547,6 +533,10 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
 
 static void jm_finalize_write_back_roots(JsMirTranspiler* mt) {
     if (!mt) return;
+    // Prerooted argument spans are a fixed suffix after semantic root coloring;
+    // include that physical suffix in the shared watermark publication while
+    // keeping it out of the semantic candidate graph (D5.3.1).
+    mt->em.frame.fixed_root_slots = mt->arg_frame_slot_count;
     MirRootWriteBackResult result = {};
     em_finalize_semantic_root_write_back(&mt->em,
         mt->em.frame.root_base, mt->em.frame.anchor, false, 0,
@@ -622,16 +612,6 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
             (int64_t)mt->em.frame.root_slot_count *
             (int64_t)sizeof(uint64_t);
         mt->em.frame.root_slot_count += mt->arg_frame_slot_count;
-    }
-    // Scratch coloring fixes the physical frame size only after the complete
-    // function, including cleanup calls, has been analyzed.
-    int64_t root_frame_bytes =
-        (int64_t)mt->em.frame.root_slot_count * (int64_t)sizeof(uint64_t);
-    for (int i = 0; i < mt->em.frame.root_backedge_reload_count; i++) {
-        MIR_insn_t reload = mt->em.frame.root_backedge_reloads[i];
-        if (reload && reload->nops >= 3 && reload->ops[2].mode == MIR_OP_INT) {
-            reload->ops[2].u.i = root_frame_bytes;
-        }
     }
     mt->em.frame.active = false;
     jm_finalize_side_root_prologue(mt);

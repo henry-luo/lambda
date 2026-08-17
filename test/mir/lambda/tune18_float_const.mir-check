@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 E2.a keeps CP1 double literals as MIR immediates in the loop body.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "dmov\t{{r}}, 0.00000000000000000000000000000000000000000000000000000e+00",
+        "dmov\t{{r}}, 1.00000000000000000000000000000000000000000000000000000e+00",
+        "dadd\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "call\tlambda_module_const_at_p, lambda_module_const_at"
+      ]
+    }
+  ]
+}

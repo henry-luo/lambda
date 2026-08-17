@@ -457,6 +457,11 @@ Item map_field_to_item(void* field_ptr, TypeId type_id);
 // Read/write helpers must see ShapeEntry::type: TypeId alone cannot tell
 // `int` apart from `int?` once both use an eight-byte packed slot.
 Item map_shape_field_to_item(void* map_data, const ShapeEntry* field);
+// Static MIR member sites already carry a context-resolved NameId. Keep the
+// hot lookup on that identity instead of reconstructing a boxed key string;
+// NAME_ID_NONE remains the id-less Input fallback handled by the caller.
+Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
+    NameId name_id, bool* is_found);
 bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
     Item value);
 Item scalar_storage_read(Item item, bool immortal);

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune18 E1 consumes the proven ArrayNum in-bounds lane at a plain int declaration while retaining the nullable OOB rejection edge.",
+  "checks": [
+    {
+      "in_func": "_boundary18_#",
+      "expect": [
+        "call\tensure_typed_array_p, ensure_typed_array"
+      ],
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": 1
+      }
+    }
+  ]
+}

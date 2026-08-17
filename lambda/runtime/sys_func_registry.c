@@ -1112,6 +1112,7 @@ extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t 
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
+extern Item fn_member_by_id(Item item, NameId name_id);
 extern uint64_t js_active_module_name_id(uint32_t index);
 extern Item js_active_module_name_item(uint32_t module_name_index,
                                        NameId direct_name_id);
@@ -1761,6 +1762,11 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
+    {"fn_member_by_id", FPTR(fn_member_by_id),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
     // ========================================================================
     // Path functions
