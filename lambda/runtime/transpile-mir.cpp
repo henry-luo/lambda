@@ -337,7 +337,12 @@ struct MirTranspiler {
 struct LocalFuncEntry {
     const char* name;
     MIR_item_t func_item;
-    const FnVariantAnalysis* variant;
+    // Keep raw-body and public-wrapper contracts distinct. A forward
+    // declaration can be published before either variant is finalized, and a
+    // single variant slot would let later wrapper publication overwrite the
+    // contract consumed by an already-emitted raw call (D2.4.1, D5.2.1v3).
+    const FnVariantAnalysis* raw_variant;
+    const FnVariantAnalysis* public_variant;
 };
 HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
 
@@ -638,6 +643,7 @@ static bool mir_param_is_inferred_specialization(AstFuncNode* fn_node, int index
 static TypeId mir_native_param_type(const NativeFuncInfo* info, int index);
 static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node);
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object);
+static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node);
 
 static bool mir_inferred_raw_scalar_lane(TypeId type_id) {
     // inferred raw edges are scalar-only: container Items must stay visible to
@@ -1212,14 +1218,31 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
 // the first ordinary-Item consumer instead of teaching every AST helper a
 // second value abstraction (D5.2.1v3, D5.2.2v3).
 static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
-        MIR_reg_t value) {
+        MIR_reg_t value,
+        MirPendingMaterializeReason reason = MIR_PENDING_REASON_UNKNOWN_CALL) {
     if (!mt || !value || mt->em.pending_live_item != value ||
             !mt->em.pending_live_companion) return value;
     MirValue pending = em_value(value, MIR_T_I64, LMD_TYPE_ANY,
         VALUE_REP_ITEM, JIT_VALUE_BOXED_ITEM);
     pending.pending_companion = mt->em.pending_live_companion;
     pending.maybe_pending = true;
-    return em_materialize_pending_value(&mt->em, pending).reg;
+    return em_materialize_pending_value(&mt->em, pending, reason).reg;
+}
+
+static void mir_discard_pending_result(MirTranspiler* mt, MIR_reg_t value) {
+    if (!mt || !value || mt->em.pending_live_item != value ||
+            !mt->em.pending_live_companion) return;
+    // A semantically discarded expression has no Item, root, spill, or
+    // second call consumer. Drop both raw lanes instead of resolving a scalar
+    // home that cannot escape this lowering sequence (D5.2.1v3, D5.2.2v3).
+    em_note_pending_materialize(&mt->em, MIR_PENDING_REASON_DISCARD);
+    mt->em.pending_live_item = 0;
+    mt->em.pending_live_companion = 0;
+}
+
+static void transpile_discard_expr(MirTranspiler* mt, AstNode* node) {
+    MIR_reg_t result = transpile_expr(mt, node);
+    mir_discard_pending_result(mt, result);
 }
 
 #define emit_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, false)
@@ -1232,7 +1255,7 @@ static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
 #define emit_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, false)
 
 static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
-        bool uses_wrapper, bool is_proc) {
+        bool uses_wrapper, bool is_proc, AstFuncNode* fn_node) {
     if (!uses_wrapper) return;
     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
@@ -1240,6 +1263,31 @@ static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
         is_proc ? "lambda_function_mark_lambda_boxed_procedure"
                 : "lambda_function_mark_lambda_boxed_function",
         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+    FnVariantAnalysis* public_variant = fn_node && fn_node->analysis
+        ? fn_analysis_variant(fn_node->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
+    uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    if (public_variant) {
+        public_shape = public_variant->result.shape == RETURN_SHAPE_ITEM
+            ? LAMBDA_MIR_PUBLIC_RETURN_ITEM
+            : public_variant->result.shape == RETURN_SHAPE_ITEM_SCALAR
+                ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION
+                : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    }
+    // Function values can be created in a hot loop. Publish the two-bit
+    // descriptor in-place instead of adding a third runtime call to every
+    // function allocation; the C helper remains for module/host publication.
+    uint32_t shape_bits = public_shape << LAMBDA_MIR_PUBLIC_RETURN_SHAPE_SHIFT;
+    MIR_reg_t flags = new_reg(mt, "fn_flags", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, flags),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(Function, flags),
+            fn_obj, 0, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+        MIR_new_reg_op(mt->ctx, flags), MIR_new_reg_op(mt->ctx, flags),
+        MIR_new_uint_op(mt->ctx, shape_bits)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(Function, flags),
+            fn_obj, 0, 1), MIR_new_reg_op(mt->ctx, flags)));
 }
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
@@ -1498,7 +1546,7 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         // restore reclaims.
         MIR_reg_t pair_item = mt->em.frame.pending_return_item;
         MIR_reg_t pair_companion = mt->em.frame.pending_return_companion;
-        if (!pair_companion) {
+        if (!pair_item || !pair_companion) {
             em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
                 &pair_item, &pair_companion);
         }
@@ -1512,10 +1560,16 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         // v3 shape 2, slot transport (RV12): same pending-pair construction as
         // the register form, but lane 2 goes to `Context::mir_companion_slot`
         // so a C caller can read it. Built BEFORE the watermark restore — the
-        // payload lives in the extent that restore reclaims.
-        MIR_reg_t pair_item = 0, pair_companion = 0;
-        em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
-            &pair_item, &pair_companion);
+        // payload lives in the extent that restore reclaims. A forwarded
+        // direct-call pair is already classified; rebuilding it from the
+        // boxed lane here used to reclassify/rebuild every wrapper return and
+        // defeated C2.1's lazy transport (D5.2.1v3, D5.2.2v3).
+        MIR_reg_t pair_item = mt->em.frame.pending_return_item;
+        MIR_reg_t pair_companion = mt->em.frame.pending_return_companion;
+        if (!pair_item || !pair_companion) {
+            em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
+                &pair_item, &pair_companion);
+        }
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, mir_companion_slot), pair_companion);
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
@@ -1715,7 +1769,8 @@ static void store_gc_root_slot(MirTranspiler* mt, int root_slot, MIR_reg_t value
     // valid GC Item until its companion has been consumed; resolving here
     // closes helper paths that register roots without going through emit_box
     // (D5.2.1v3, D5.2.2v3).
-    value = mir_materialize_pending_reg(mt, value);
+    value = mir_materialize_pending_reg(mt, value,
+        MIR_PENDING_REASON_ROOT_OR_SPILL);
     // G0: a value in a double register is a scalar — `int` lives there now, as
     // `float` always did — and a scalar is never a GC reference. Rooting one
     // was previously harmless only because the int lane was word-sized; it is
@@ -1771,7 +1826,8 @@ static int create_binding_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
 static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
     // A root slot is memory-visible immediately, so it cannot retain the
     // register-only pending protocol across a safepoint (RV4.1).
-    value = mir_materialize_pending_reg(mt, value);
+    value = mir_materialize_pending_reg(mt, value,
+        MIR_PENDING_REASON_ROOT_OR_SPILL);
     // G0: a double register holds a scalar (`int` or `float`), never a GC
     // reference, so it takes no root slot. See store_gc_root_slot.
     if (value && MIR_reg_type(mt->ctx, value, mt->em.func) == MIR_T_D) return -1;
@@ -1901,7 +1957,8 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
 
 static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
     MIR_type_t mir_type, TypeId type_id, const char* prefix) {
-    result = mir_materialize_pending_reg(mt, result);
+    result = mir_materialize_pending_reg(mt, result,
+        MIR_PENDING_REASON_ROOT_OR_SPILL);
     if (!should_gc_root_var(mir_type, type_id)) return result;
     int root_slot = create_gc_root_slot(mt, result);
     return load_gc_root_slot(mt, root_slot, prefix);
@@ -2134,13 +2191,45 @@ static MIR_item_t find_local_func(MirTranspiler* mt, const char* name) {
     return found ? found->func_item : NULL;
 }
 
+static const FnVariantAnalysis* local_func_variant_for_call(
+        const LocalFuncEntry* entry, const char* call_name) {
+    if (!entry) return NULL;
+    // MIR names carry the wrapper marker before their stable hash
+    // (`_name_b_<hash>`), so an end-of-string `_b` test misses every real
+    // generated wrapper. The published entry kind remains the authority when
+    // a forward alias does not use the conventional spelling (D2.4.1).
+    bool public_name = call_name && strstr(call_name, "_b_") != NULL;
+    if (public_name && entry->public_variant) return entry->public_variant;
+    if (!public_name && entry->raw_variant) return entry->raw_variant;
+    // A descriptor is stronger than the spelling fallback for forward or
+    // aliased entries whose public name is not the usual `_b` suffix.
+    if (entry->public_variant && entry->public_variant->entry.kind ==
+            FN_ENTRY_PUBLIC_WRAPPER) return entry->public_variant;
+    return entry->raw_variant;
+}
+
 static void register_local_func_contract(MirTranspiler* mt, const char* name,
         MIR_item_t func_item, const FnVariantAnalysis* variant = NULL) {
+    const char* semantic_name = mir_semantic_name_cstr(mt, name).str;
+    LocalFuncEntry* existing = find_local_func_entry(mt, semantic_name);
+    if (existing) {
+        existing->func_item = func_item;
+        if (variant && variant->entry.kind == FN_ENTRY_PUBLIC_WRAPPER) {
+            existing->public_variant = variant;
+        } else if (variant) {
+            existing->raw_variant = variant;
+        }
+        return;
+    }
     LocalFuncEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.name = mir_semantic_name_cstr(mt, name).str;
+    entry.name = semantic_name;
     entry.func_item = func_item;
-    entry.variant = variant;
+    if (variant && variant->entry.kind == FN_ENTRY_PUBLIC_WRAPPER) {
+        entry.public_variant = variant;
+    } else if (variant) {
+        entry.raw_variant = variant;
+    }
     hashmap_set(mt->local_funcs, &entry);
 }
 
@@ -2668,7 +2757,8 @@ static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg)
 }
 
 static MIR_reg_t emit_item_tag(MirTranspiler* mt, MIR_reg_t item_reg) {
-    item_reg = mir_materialize_pending_reg(mt, item_reg);
+    item_reg = mir_materialize_pending_reg(mt, item_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
     MIR_reg_t tag = new_reg(mt, "item_tag", MIR_T_I64);
     // Error Items are always self-tagged; checking their high byte inline
     // avoids a safepoint before the dispatcher has rooted or rejected a value.
@@ -3114,7 +3204,8 @@ static MIR_reg_t emit_unbox_container(MirTranspiler* mt, MIR_reg_t item_reg) {
 
 // Unbox Item -> native type
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id) {
-    item_reg = mir_materialize_pending_reg(mt, item_reg);
+    item_reg = mir_materialize_pending_reg(mt, item_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
     switch (type_id) {
     case LMD_TYPE_INT:
         // v5: unboxing an int yields its LANE value (i64), so poison arrives as
@@ -3471,7 +3562,8 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg,
         TypeId type_id) {
     // Boxing is an ordinary-Item/escape boundary.  Resolve a live companion
     // before the value can enter a root, container, helper, or wrapper ABI.
-    val_reg = mir_materialize_pending_reg(mt, val_reg);
+    val_reg = mir_materialize_pending_reg(mt, val_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
     if (type_id == LMD_TYPE_FLOAT &&
             MIR_reg_type(mt->ctx, val_reg, mt->em.func) != MIR_T_D) {
         // A float-typed expression can take the generic Item path after a
@@ -4068,7 +4160,8 @@ static void async_save_spills(MirTranspiler* mt, int count) {
                 "without an async spill slot");
             abort();
         }
-        resolved_pending = mir_materialize_pending_reg(mt, pending_item);
+        resolved_pending = mir_materialize_pending_reg(mt, pending_item,
+            MIR_PENDING_REASON_SUSPEND);
     }
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
@@ -5305,7 +5398,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                         MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                         MIR_new_int_op(mt->ctx, cap_count)));
                     emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                        fn_node->node_type == AST_NODE_PROC);
+                        fn_node->node_type == AST_NODE_PROC, fn_node);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     return fn_obj;
@@ -5325,7 +5418,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                     }
                     emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                        fn_node->node_type == AST_NODE_PROC);
+                        fn_node->node_type == AST_NODE_PROC, fn_node);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     strbuf_free(nm_buf);
@@ -8493,7 +8586,8 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     // A dynamic boxed condition may still be the first lane of a pending
     // shape-2 call even when inference says bool. Truthiness is a consumer,
     // so resolve before the branch reads the pending tag (D5.2.1v3).
-    cond = mir_materialize_pending_reg(mt, cond);
+    cond = mir_materialize_pending_reg(mt, cond,
+        MIR_PENDING_REASON_REP_CONVERSION);
 
     // Restore tail position for branches
     mt->in_tail_position = saved_tail;
@@ -9582,7 +9676,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
             // Result demand suppresses key storage, not evaluation of an
             // order expression whose procedure calls may still have effects.
             AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-            (void)transpile_expr(mt, first_spec->expr);
+            transpile_discard_expr(mt, first_spec->expr);
         }
 
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, out_idx),
@@ -10595,7 +10689,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
         MIR_new_reg_op(mt->ctx, cond_val)));
 
     // Body
-    transpile_expr(mt, while_node->body);
+    transpile_discard_expr(mt, while_node->body);
 
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
     emit_label(mt, l_end);
@@ -11981,6 +12075,8 @@ static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
     if (mt->current_func_can_raise && side_effect_result_can_error(item->node_type)) {
         // can-raise procs must not discard failed mutation/helper statements as side effects.
         emit_return_if_item_error(mt, stmt_result);
+    } else {
+        mir_discard_pending_result(mt, stmt_result);
     }
 }
 
@@ -11991,7 +12087,7 @@ static bool transpile_content_decl_or_side_effect(MirTranspiler* mt,
             item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
             transpile_let_stam(mt, (AstLetNode*)item);
         } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-            transpile_expr(mt, item); // emit method registration
+            transpile_discard_expr(mt, item); // emit method registration
         }
         return true;
     }
@@ -12107,7 +12203,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
-                    transpile_expr(mt, item);
+                    transpile_discard_expr(mt, item);
                 }
             } else if (item == last_value) {
                 // Last value expression: this is the return value
@@ -12115,10 +12211,10 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (item->node_type == AST_NODE_IF_EXPR ||
                        item->node_type == AST_NODE_WHILE_STAM ||
                        item->node_type == AST_NODE_FOR_STAM) {
-                transpile_expr(mt, item);
+                transpile_discard_expr(mt, item);
             } else {
                 // Non-last value expression in proc: side effect only
-                transpile_expr(mt, item);
+                transpile_discard_expr(mt, item);
             }
             item = item->next;
         }
@@ -12142,7 +12238,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
-                    transpile_expr(mt, item);
+                    transpile_discard_expr(mt, item);
                 }
             } else if (item == last_value) {
                 // This is the single value expression
@@ -12150,7 +12246,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
-                transpile_expr(mt, item); // proc context side effect
+                transpile_discard_expr(mt, item); // proc context side effect
             }
             item = item->next;
         }
@@ -12175,12 +12271,12 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
-                    transpile_expr(mt, item);
+                    transpile_discard_expr(mt, item);
                 }
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
-                transpile_expr(mt, item); // proc context side effect
+                transpile_discard_expr(mt, item); // proc context side effect
             }
             item = item->next;
         }
@@ -12214,7 +12310,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                 transpile_let_stam(mt, (AstLetNode*)item);
             } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-                transpile_expr(mt, item); // emit method registration
+                transpile_discard_expr(mt, item); // emit method registration
             }
             item = item->next;
             continue;
@@ -16453,7 +16549,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     options.hidden_env = direct_env;
                 }
                 MirCallResult direct = em_call_direct(&mt->em, direct_call_name,
-                    local_func, local_entry ? local_entry->variant : NULL, ai, call_types,
+                    local_func, local_func_variant_for_call(local_entry,
+                        direct_call_name), ai, call_types,
                     call_ops, &options);
                 direct_value = direct.normal;
                 result = direct_value.reg;
@@ -16499,7 +16596,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // own descriptor. Cross-check those two derivations here.
             if (call_error_lane && local_entry) {
                 em_assert_error_lane_agreement(direct_call_name,
-                    local_entry->variant, error_lane_in_register);
+                    local_func_variant_for_call(local_entry, direct_call_name),
+                    error_lane_in_register);
             }
             if (call_error_lane) {
                 second_result = error_lane_in_register ? direct_error_reg
@@ -16635,7 +16733,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     // consumer. materialize before unboxing, root publication,
                     // or any helper call can observe it (D5.2.1v3, RV4.1).
                     direct_value = em_materialize_pending_value(&mt->em,
-                        direct_value);
+                        direct_value, MIR_PENDING_REASON_REP_CONVERSION);
                     result = direct_value.reg;
                 }
                 if (!can_forward_pending && !call_error_lane && !call_node->propagate &&
@@ -16647,8 +16745,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     bool closed_item_result = call_fn_type && call_return_contract &&
                         call_return_contract != &TYPE_ANY && !call_fn_type->can_raise &&
                         !routed_to_boxed_entry &&
-                        (!local_entry || !local_entry->variant ||
-                         !local_entry->variant->effects.may_return_error);
+                        (!local_entry ||
+                         !local_func_variant_for_call(local_entry,
+                             direct_call_name) ||
+                         !local_func_variant_for_call(local_entry,
+                             direct_call_name)->effects.may_return_error);
                     // An explicit or implicit clean return contract rejects
                     // openness in the callee. Do not add a second Item-error
                     // branch before native unboxing; direct callers already
@@ -16678,7 +16779,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // an unresolved pair past this point. They are escape or
                 // second-call boundaries, so resolve before entering them.
                 direct_value = em_materialize_pending_value(&mt->em,
-                    direct_value);
+                    direct_value, MIR_PENDING_REASON_SECOND_PAIR);
                 result = direct_value.reg;
             }
 
@@ -18141,7 +18242,8 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // `transpile_box_item` is itself an ordinary-Item consumer.  This covers
     // dynamic/type-dispatch paths whose static type is ANY and therefore return
     // before the type-specific boxing cases below (D5.2.1v3).
-    val = mir_materialize_pending_reg(mt, val);
+    val = mir_materialize_pending_reg(mt, val,
+        MIR_PENDING_REASON_REP_CONVERSION);
 
     // If the expression already emitted a return (e.g. RETURN_STAM in a proc),
     // the val is a dummy register and any further boxing would be dead code.
@@ -20198,7 +20300,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                     MIR_new_int_op(mt->ctx, cap_count)));
                 emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                    fn_node->node_type == AST_NODE_PROC);
+                    fn_node->node_type == AST_NODE_PROC, fn_node);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 return fn_obj;
@@ -20218,7 +20320,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                 }
                 emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                    fn_node->node_type == AST_NODE_PROC);
+                    fn_node->node_type == AST_NODE_PROC, fn_node);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 strbuf_free(name_buf);
@@ -21100,8 +21202,12 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
     if (!node) return false;
 
     TypeId type_id = get_effective_type(mt, node);
-    if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE ||
-            lambda_type_id_may_be_wide_scalar(type_id)) {
+    Type* semantic_type = node->type
+        ? mir_unwrap_decl_contract(node->type) : NULL;
+    LambdaWideResultProof proof = semantic_type
+        ? lambda_type_wide_result_proof(semantic_type)
+        : lambda_type_wide_result_proof(type_id);
+    if (proof != LAMBDA_WIDE_RESULT_FREE) {
         return false;
     }
 
@@ -21423,6 +21529,30 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
         }
         return MIR_SCALAR_RETURN_DYNAMIC;
     }
+    AstNode* body_result = function_body_result_expr(fn_node);
+    bool body_wide_free = body_result &&
+        mir_expr_proves_wide_free(mt, body_result);
+    if (!body_wide_free && fn_node->type &&
+            fn_node->type->type_id == LMD_TYPE_FUNC) {
+        // Some inferred array/union result nodes expose only the compact TYPE
+        // id at this point. The declared function contract is the stronger
+        // semantic witness; use it instead of treating a known `int[]`/map
+        // producer as UNKNOWN merely because its expression node is sparse
+        // (D2.4.1, D5.2.1v3).
+        TypeFunc* ft = (TypeFunc*)fn_node->type;
+        Type* contract = ft->return_contract ? ft->return_contract :
+            ft->returned;
+        body_wide_free = contract &&
+            lambda_type_wide_result_proof(mir_unwrap_decl_contract(contract)) ==
+                LAMBDA_WIDE_RESULT_FREE;
+    }
+    if (body_wide_free) {
+        // A closed boxed union/optional can be wide-free even though its
+        // compact TypeId is LMD_TYPE_TYPE. Use the same producer proof as the
+        // body consumers instead of collapsing every structured contract to
+        // the dynamic companion shape.
+        return MIR_SCALAR_RETURN_NONE;
+    }
     TypeId return_type = LMD_TYPE_ANY;
     if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
         TypeFunc* ft = (TypeFunc*)fn_as_node->type;
@@ -21462,6 +21592,8 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     }
     TypeFunc* type = fn->type && fn->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)fn->type : NULL;
+    bool is_proc = ((AstNode*)fn)->node_type == AST_NODE_PROC ||
+        (type && type->is_proc);
     bool may_return_boundary_error = function_return_may_defer(mt, fn);
     int param_count = type ? type->param_count : 0;
     FnVariantAnalysis* public_entry = analysis
@@ -21476,15 +21608,11 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         // A boxed wrapper can carry a subnormal or wide integer even when
         // static inference chose a native body, so its public ABI is dynamic.
         SCALAR_RETURN_DYNAMIC};
-    // RV10 §6: the boxed public entry is the one every DYNAMIC call site
-    // dispatches through, so it always speaks the universal pair shape — even
-    // when the body underneath returns natively.
-    public_entry->result.shape = em_return_shape(false, false,
-        MIR_SCALAR_RETURN_DYNAMIC);
-    // The public wrapper is the C-reachable entry, so its lane 2 rides the
-    // context slot (RV12), never a second MIR result.
-    public_entry->result.companion = em_companion_transport(
-        public_entry->result.shape, /*c_reachable=*/true);
+    // Start fail-closed. The body analysis below can narrow this to shape 1
+    // only after every wrapper path, including boxing and slow bodies, is
+    // accounted for (RVO13, D2.4.1).
+    public_entry->result.shape = RETURN_SHAPE_ITEM_SCALAR;
+    public_entry->result.companion = FN_COMPANION_CONTEXT_SLOT;
     public_entry->param_count = param_count;
 
     FnVariantAnalysis* body = analysis
@@ -21538,6 +21666,21 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
                 0};
         }
     }
+
+    // A public shape-1 entry is admitted only when the internal boxed body is
+    // already a one-result Item. This avoids making a C-reachable wrapper
+    // resolve a pending pair merely to satisfy the narrower public contract;
+    // procedural/native/error bodies remain fail-closed until their raw/public
+    // descriptor split and boxing cost are separately proven (D2.4.1,
+    // D5.2.1v3).
+    bool public_wide_free = !is_proc && !native && native_info &&
+        !native_info->needs_boxed_entry &&
+        !native_info->needs_boxed_slow_body &&
+        body->result.shape == RETURN_SHAPE_ITEM;
+    public_entry->result.shape = public_wide_free
+        ? RETURN_SHAPE_ITEM : RETURN_SHAPE_ITEM_SCALAR;
+    public_entry->result.companion = em_companion_transport(
+        public_entry->result.shape, /*c_reachable=*/true);
     return body;
 }
 
@@ -21712,6 +21855,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_type_t ret_type = MIR_T_I64;
     MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, wrapper_name->str, 1, &ret_type, param_count, params);
     MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
+    FnVariantAnalysis* public_variant = fn_node->analysis
+        ? fn_analysis_variant(fn_node->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
+    FnReturnShape public_shape = public_variant
+        ? public_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
+    bool public_returns_pair = fn_return_shape_is_pair(public_shape);
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
     mt->module_state_reg = 0;
@@ -21727,10 +21875,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         MIR_SCALAR_RETURN_DYNAMIC);
     mt->em.frame.plan.scalar_home_lane_mask = 0;
     mt->em.frame.plan.accepts_caller_scalar_home = false;
-    // Universal shape: this wrapper is what dynamic dispatch calls (RV10 §6).
-    mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
+    // RVO13: the public descriptor is selected once with the body analysis;
+    // wrapper emission must consume that descriptor rather than re-derive it.
+    mt->em.frame.plan.return_shape = public_shape;
     mt->em.frame.plan.companion = em_companion_transport(
-        RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/true);
+        public_shape, /*c_reachable=*/true);
     mt->em.frame.incoming_scalar_home = 0;
     mt->em.frame.plan.debug_name = wrapper_name->str;
     emit_number_frame_enter(mt);
@@ -21745,6 +21894,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_reg_t raw_array_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     uint64_t wrapper_array_witness_mask = nfi
         ? mir_typed_array_witness_mask(nfi->fn_node) : 0;
+    bool wrapper_has_parameter_error_guard = false;
     bool has_slow_body = nfi && nfi->needs_boxed_slow_body;
     MIR_reg_t inferred_guard = 0;
     MIR_label_t slow_body_label = NULL;
@@ -21774,6 +21924,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
         TypeParam* parameter = (TypeParam*)param->type;
         if (mir_param_short_circuits_item_error(parameter)) {
+            wrapper_has_parameter_error_guard = true;
             // The wrapper is the dynamic/imported entry point. Check before
             // resolving an optional default so an incoming error cannot run
             // user code or be mistaken for a missing argument.
@@ -21919,7 +22070,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
     MIR_item_t raw_func = find_local_func(mt, raw_name);
     LocalFuncEntry* raw_entry = find_local_func_entry(mt, raw_name);
-    if (!raw_func || !raw_entry || !raw_entry->variant) {
+    if (!raw_func || !raw_entry ||
+            !local_func_variant_for_call(raw_entry, raw_name)) {
         log_error("mir: ABI wrapper - missing body contract for '%s'", raw_name);
         abort();
     }
@@ -21933,13 +22085,29 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     MirCallOptions options = {true, false, 0};
     MirCallResult direct = em_call_direct(&mt->em, raw_name, raw_func,
-        raw_entry ? raw_entry->variant : NULL, call_arg_count,
+        local_func_variant_for_call(raw_entry, raw_name), call_arg_count,
         call_types, call_args, &options);
-    if (direct.normal.maybe_pending) {
-        // the wrapper changes the internal pair into the public slot shape;
-        // resolve at that incompatible escape boundary before it builds its
-        // own pair in the epilogue (D5.2.1v3).
-        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
+    if (direct.normal.maybe_pending && public_returns_pair && !has_slow_body &&
+            raw_lane_kind == RETURN_LANE_SCALAR &&
+            !wrapper_has_parameter_error_guard) {
+        // A register pair crossing into the C-reachable wrapper changes only
+        // transport: the wrapper's epilogue writes lane 2 to the context
+        // slot. Keep both lanes live so the wrapper does not resolve and then
+        // rebuild the same pending pair (D5.2.1v3, D5.2.2v3).
+        mt->em.frame.pending_return_item = direct.normal.reg;
+        mt->em.frame.pending_return_companion =
+            direct.normal.pending_companion;
+        mt->em.pending_live_item = 0;
+        mt->em.pending_live_companion = 0;
+    } else if (direct.normal.maybe_pending) {
+        // an error-rejecting parameter can return before the normal call; the
+        // shared epilogue must build its pair from that edge's return Item,
+        // not from the normal call's pending lanes (D5.2.1v3).
+        // Slow-body joins still need a pair merge. Until that merge is
+        // explicit, materialize at this incompatible control-flow boundary
+        // rather than letting one predecessor's lane reach every return.
+        direct.normal = em_materialize_pending_value(&mt->em, direct.normal,
+            MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
     }
     MIR_reg_t result = direct.normal.reg;
     int scalar_home_id = direct.normal.scalar_home_id
@@ -24957,14 +25125,15 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                     MirCallOptions main_options = {true, false, 0};
                     MirCallResult call = em_call_direct(&mt.em,
                         main_name->str, main_func,
-                        entry ? entry->variant : NULL, 0, NULL, NULL,
+                        local_func_variant_for_call(entry, main_name->str),
+                        0, NULL, NULL,
                         &main_options);
                     if (call.normal.maybe_pending) {
                         // the module entry returns through its own public
                         // result boundary; consume the pair before copying it
                         // into the module result register (D5.2.1v3).
                         call.normal = em_materialize_pending_value(&mt.em,
-                            call.normal);
+                            call.normal, MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
                     }
                     MIR_reg_t main_result = call.normal.reg;
                     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, result),

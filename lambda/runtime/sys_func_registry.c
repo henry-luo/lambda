@@ -1108,6 +1108,7 @@ extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result
 extern void lambda_function_mark_mir_context_abi(Function* fn);
 extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
+extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
@@ -3158,6 +3159,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_function_mark_mir_context_abi", FPTR(lambda_function_mark_mir_context_abi)},
     {"lambda_function_mark_lambda_boxed_function", FPTR(lambda_function_mark_lambda_boxed_function)},
     {"lambda_function_mark_lambda_boxed_procedure", FPTR(lambda_function_mark_lambda_boxed_procedure)},
+    {"lambda_function_mark_mir_public_return_shape", FPTR(lambda_function_mark_mir_public_return_shape)},
     {"lambda_function_set_type", FPTR(lambda_function_set_type)},
     {"to_sys_fn_named", FPTR(to_sys_fn_named)},
 
