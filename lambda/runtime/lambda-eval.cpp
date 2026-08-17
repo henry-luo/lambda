@@ -796,6 +796,16 @@ void lambda_function_mark_lambda_boxed_procedure(Function* fn) {
     fn->entry_abi = FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE;
 }
 
+void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape) {
+    if (!fn) return;
+    // Unknown remains fail-closed: a missed publication site must resolve the
+    // slot rather than let a pending Item cross a dynamic call boundary.
+    if (shape > LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION) {
+        shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    }
+    fn->mir_public_return_shape = shape;
+}
+
 void lambda_function_set_type(Function* fn, void* fn_type) {
     if (!fn) return;
     // First-class calls need the semantic signature for optional and variadic
@@ -1012,6 +1022,14 @@ struct LambdaDynamicNativeInvoker;
 
 template <int... indices>
 struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
+    static Item resolve_public_result(Function* fn, Item value) {
+        if (fn && fn->mir_public_return_shape ==
+                LAMBDA_MIR_PUBLIC_RETURN_ITEM) {
+            return value;
+        }
+        return lambda_item_resolve_pending_slot(value);
+    }
+
     static Item invoke(Function* fn, const Item* args, uint64_t* result_home,
             const char* caller) {
         // A published Core entry must retain its hidden context operand. This
@@ -1040,11 +1058,11 @@ struct LambdaDynamicNativeInvoker<LambdaHostedItemIndexSequence<indices...>> {
         // RV12: no trailing home operand; resolve lane 2 from the context slot
         // immediately, before anything else can clobber it (RV4.2).
         if (fn->closure_env) {
-            return lambda_item_resolve_pending_slot(
+            return resolve_public_result(fn,
                 ((Item (*)(Context*, void*, LambdaHostedItem<indices>...))fn->ptr)(
                     runtime, fn->closure_env, args[indices]...));
         }
-        return lambda_item_resolve_pending_slot(
+        return resolve_public_result(fn,
             ((Item (*)(Context*, LambdaHostedItem<indices>...))fn->ptr)(
                 runtime, args[indices]...));
     }

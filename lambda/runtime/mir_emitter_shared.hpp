@@ -3663,9 +3663,10 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         : FnReturnLaneAnalysis{LMD_TYPE_ANY, VALUE_REP_ITEM,
             SCALAR_RETURN_DYNAMIC};
     MIR_type_t result_type = em_mir_type_for_rep(normal.abi_rep);
+    JitValueClass normal_value_class = em_value_class_for_rep(normal.abi_rep);
     metadata.normal_result.value = {
-        em_abi_rep(result_type, em_value_class_for_rep(normal.abi_rep), true),
-        em_value_class_for_rep(normal.abi_rep)};
+        em_abi_rep(result_type, normal_value_class, true),
+        normal_value_class};
     metadata.normal_result.transport = JIT_RETURN_MIR_RESULT;
     metadata.normal_result.scalar_class = normal.scalar_class;
     metadata.normal_result.may_use_scalar_return_home = false;

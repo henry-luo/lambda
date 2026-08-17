@@ -17,6 +17,104 @@ static Type* contract_unwrap_type(Type* type) {
     return type;
 }
 
+static LambdaWideResultProof wide_result_join(LambdaWideResultProof left,
+        LambdaWideResultProof right) {
+    if (left == LAMBDA_WIDE_RESULT_CAPABLE ||
+            right == LAMBDA_WIDE_RESULT_CAPABLE) {
+        return LAMBDA_WIDE_RESULT_CAPABLE;
+    }
+    if (left == LAMBDA_WIDE_RESULT_UNKNOWN ||
+            right == LAMBDA_WIDE_RESULT_UNKNOWN) {
+        return LAMBDA_WIDE_RESULT_UNKNOWN;
+    }
+    return LAMBDA_WIDE_RESULT_FREE;
+}
+
+static LambdaWideResultProof wide_result_proof_inner(const Type* type,
+        int depth) {
+    if (!type || depth > 64) return LAMBDA_WIDE_RESULT_UNKNOWN;
+
+    // `any`, its exclusion variants, and abstract integer/number contracts do
+    // not name a closed value domain. Their physical carrier is not proof of
+    // an inline result (D2.4.1).
+    if (type->type_id == LMD_TYPE_ANY || type == &TYPE_INTEGER ||
+            type == &TYPE_NUMBER || type == &TYPE_TYPE) {
+        return LAMBDA_WIDE_RESULT_UNKNOWN;
+    }
+
+    if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type)) {
+        switch (type->kind) {
+        case TYPE_KIND_SIMPLE: {
+            const TypeType* wrapper = (const TypeType*)type;
+            return wrapper->type
+                ? wide_result_proof_inner(wrapper->type, depth + 1)
+                : LAMBDA_WIDE_RESULT_UNKNOWN;
+        }
+        case TYPE_KIND_PARAM: {
+            const TypeParam* param = (const TypeParam*)type;
+            const Type* contract = param->contract_type
+                ? param->contract_type : param->full_type;
+            return contract ? wide_result_proof_inner(contract, depth + 1)
+                : LAMBDA_WIDE_RESULT_UNKNOWN;
+        }
+        case TYPE_KIND_CONSTRAINED: {
+            const TypeConstrained* constrained = (const TypeConstrained*)type;
+            return constrained->base
+                ? wide_result_proof_inner(constrained->base, depth + 1)
+                : LAMBDA_WIDE_RESULT_UNKNOWN;
+        }
+        case TYPE_KIND_UNARY: {
+            const TypeUnary* unary = (const TypeUnary*)type;
+            if (unary->op == OPERATOR_REPEAT) {
+                // A repeated value is a container, regardless of its element
+                // contract; the result itself cannot be a wide scalar.
+                return LAMBDA_WIDE_RESULT_FREE;
+            }
+            if (unary->op == OPERATOR_OPTIONAL) {
+                return wide_result_join(LAMBDA_WIDE_RESULT_FREE,
+                    wide_result_proof_inner(unary->operand, depth + 1));
+            }
+            return LAMBDA_WIDE_RESULT_UNKNOWN;
+        }
+        case TYPE_KIND_BINARY: {
+            const TypeBinary* binary = (const TypeBinary*)type;
+            if (binary->op != OPERATOR_UNION) {
+                return LAMBDA_WIDE_RESULT_UNKNOWN;
+            }
+            return wide_result_join(
+                wide_result_proof_inner(binary->left, depth + 1),
+                wide_result_proof_inner(binary->right, depth + 1));
+        }
+        default:
+            return LAMBDA_WIDE_RESULT_UNKNOWN;
+        }
+    }
+
+    // D2.2.2's packed int and pointer-backed values are wide-free. Only the
+    // out-of-band scalar family can carry a companion payload (D2.2.3).
+    if (type->type_id == LMD_TYPE_FLOAT ||
+            type->type_id == LMD_TYPE_FLOAT64 ||
+            type->type_id == LMD_TYPE_INT64 ||
+            type->type_id == LMD_TYPE_UINT64) {
+        return LAMBDA_WIDE_RESULT_CAPABLE;
+    }
+    return LAMBDA_WIDE_RESULT_FREE;
+}
+
+LambdaWideResultProof lambda_type_wide_result_proof(const Type* type) {
+    return wide_result_proof_inner(type, 0);
+}
+
+LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id) {
+    if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE)
+        return LAMBDA_WIDE_RESULT_UNKNOWN;
+    if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ||
+            type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64) {
+        return LAMBDA_WIDE_RESULT_CAPABLE;
+    }
+    return LAMBDA_WIDE_RESULT_FREE;
+}
+
 static bool contract_storage_desc_equal(const ShapeEntry* left,
         const ShapeEntry* right) {
     LaneStorageDesc left_lane = {};

@@ -9,7 +9,9 @@ Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV18 + addenda
 RV3a / RV10a / RV14a / RV17a; formal spec D5.2.1v3 / **D5.2.2v3** /
 **D5.2.3** / D2.7.2v2 / D8.4.2v3, **v1.25.0**). Open design residue: RVO8
 (GVN multi-out), RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide
-temporaries across a loop back edge — gates P2.7's reclaim). RVO3 and RVO4
+temporaries across a loop back edge — gates P2.7's reclaim), and proposed
+**RVO13/RVO14** (wide-free public-shape refinement and genuinely lazy pending
+transport; design §11). RVO3 and RVO4
 closed 2026-08-14; RVO10 superseded by RV14/RV15; **RVO12 opened and closed
 2026-08-15** (shape 4 on all three lanes).
 **Tree anchor**: master `af254850f`, plus `7187898f1` for the landed phases
@@ -2710,3 +2712,545 @@ interpreter suite out of baseline, the runtime portion is
 **1661/1662** (20 executables; one `dom_module_props` mismatch), with all
 Lambda/MIR and GC suites passing. The post-rollback Test262 gate is clean at
 **40261/40261**, with zero failures and zero retries.
+
+---
+
+## 7. RVO13/RVO14 tuning implementation plan — shape refinement, then lazy pending completion
+
+> **Status: PARTIAL 2026-08-17; implementation is recorded in §7.11.4 and
+> remains blocked at the five-workload preliminary gate.**
+> This plan implements design §11 in two ordered programs: **B2 / RVO13**
+> proves and publishes narrower return shapes; **C2 / RVO14** keeps genuine
+> pairs intact until a consumer or ownership boundary requires materialization.
+> The work remains governed by **D2.2.2**, **D2.2.3**,
+> **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.2.2v3**, **D6.2.1**, and
+> **D8.3.1–D8.3.4**. Because per-function public shapes refine the current
+> universal-shape-2 ruling, B2 implementation must not start until the formal
+> D5.2.1/D6.2.1 text is revised in place with version suffixes and the formal
+> design document's semver is bumped.
+
+### 7.1 Baseline and definition of success
+
+The live 65-file typed benchmark corpus is the structural baseline. It has
+143 shape-2 bodies in 33 files and 608 emitted
+`lambda_item_resolve_pending` calls: 65 at module result boundaries, 152 in
+public `_b` wrappers, and 391 at body consumers or escapes. The 24
+integer-focused files account for only 51 calls (24 module, 8 wrapper, 19
+body), so deleting a once-per-program resolver is not itself evidence of a
+faster integer kernel.
+
+This program succeeds only when all four outcomes are demonstrated:
+
+1. functions with an all-exits wide-free proof use shape 1;
+2. their public `_b` entries also use shape 1 when every wrapper arm is
+   wide-free;
+3. a real pair can travel body → wrapper, through safe control-flow joins, and
+   into a pending-aware consumer without resolve-and-rebuild work; and
+4. every remaining resolver is classified by the semantic consumer or
+   ownership boundary that requires it.
+
+Code-size reduction is a structural result. Runtime improvement is reported
+only from release-mode alternating measurements with identical output.
+The five resolver-bearing workloads in §7.11 are the mandatory preliminary
+effectiveness gate: no project-wide correctness gate or broad benchmark sweep
+starts until all five are clean and fully tuned under that definition.
+
+### 7.2 B2.0 — ruling, census, and observability prerequisites
+
+Before changing return shapes:
+
+- [ ] Accept design §11, revise **D5.2.1v3** and **D6.2.1** in place with
+  version suffixes, bump `doc/Lambda_Formal_Design.md` semver, and synchronize
+  the ruling/status in both return-value documents.
+- [ ] Extend the existing MIR census tooling rather than create another
+  overlapping scanner. It must report, per function and aggregate: body and
+  public return shapes, pair-producing calls, resolver counts split into
+  module/wrapper/body, resolver reason, number-extent dirtiness, and optimized
+  MIR/native spill traffic where available.
+- [ ] Give emitted resolver sites a stable compiler-side reason enum:
+  `REP_CONVERSION`, `STORE`, `ROOT_OR_SPILL`, `UNKNOWN_CALL`, `SUSPEND`,
+  `INCOMPATIBLE_RETURN`, and `SECOND_PAIR` (or one centralized equivalent).
+  The reason belongs to the emitter; no runtime branch is added for census
+  purposes.
+- [ ] Archive the pre-change release binary, build identity, exact benchmark
+  commands, raw results, MIR census, and output hashes under `temp/`. Do not
+  encode a benchmark's current counts as a source-level optimization rule.
+- [ ] Add debug assertions that a shape-1 value never has a live companion and
+  that a shape-2 ordinary Item carries companion zero.
+
+**Exit gate:** the unchanged compiler reproduces the §7.1 counts and every
+existing resolver is either reason-attributed or listed as an instrumentation
+gap. This prevents later count movement from being mistaken for a semantic
+win.
+
+### 7.3 B2.1 — one recursive `Type*` wide-result proof
+
+**Primary files:** `lambda/runtime/type_contract.hpp`,
+`lambda/runtime/type_contract.cpp`, `lambda/runtime/ast-core.hpp`,
+`lambda/runtime/mir.c`, and `lambda/runtime/transpile-mir.cpp`, plus a
+C-compatible declaration in `lambda/lambda.h` if `mir.c` needs the shared
+classifier across the language boundary.
+
+- [ ] Define one shared tri-state fact: `WIDE_RESULT_UNKNOWN`,
+  `WIDE_RESULT_FREE`, and `WIDE_RESULT_CAPABLE`. Keep it in a Lambda-owned
+  runtime header; do not add a third shallow type switch beside
+  `jit_import_get_metadata()` and `mir_expr_proves_wide_free()`.
+- [ ] Walk the complete `Type*`: aliases/constrained types, closed unions,
+  optionals, and nested result contracts. `int` is wide-free by **D2.2.2**;
+  `int64`, `uint64`, float, and float64 are wide-capable by **D2.2.3**.
+  `any`, unresolved variables, open patterns, and incomplete structure remain
+  unknown.
+- [ ] Make union joining monotone: any capable member makes the union capable;
+  all-free members make it free; otherwise it is unknown. Never strengthen a
+  semantic result from its physical `MIR_T_I64` carrier (**D2.4.1**).
+- [ ] Replace both existing shallow checks with this helper. Sys-function
+  metadata and Lambda function analysis must therefore classify the same
+  result type identically.
+- [ ] Add focused unit coverage for simple scalars, closed/nested unions,
+  optional wide scalars, aliases/constrained types, `any`, and unresolved
+  generic/open contracts.
+
+**Exit gate:** no previously wide-capable or unknown contract becomes shape 1;
+the classifier is the only recursive type-to-wide-result implementation.
+
+### 7.4 B2.2 — whole-function producer and exit proof
+
+**Primary files:** `lambda/runtime/ast-core.hpp` and
+`lambda/runtime/transpile-mir.cpp`, using the existing `FnAnalysis`,
+`FnReturnAnalysis`, `CallSiteEntry`, and `prepass_forward_declare()` pipeline.
+
+- [ ] Store the tri-state proof and a diagnostic reason on the function
+  analysis. `FnReturnAnalysis.shape` remains the sole physical ABI authority;
+  call emitters must not recompute the shape from the proof.
+- [ ] Classify exact literals/constructors from their semantic contracts and
+  representation facts; join every `if`, `match`, nullable, explicit return,
+  and fall-through exit.
+- [ ] Propagate immutable bindings from their producer. For a mutable binding,
+  require a declared wide-free contract and prove every assignment; otherwise
+  fail closed.
+- [ ] Read sys-function catalog metadata for system calls and the callee's
+  published proof for direct local calls. Computed calls, unresolved external
+  calls, and dynamically selected functions remain unknown.
+- [ ] Build local call edges before emitting bodies and solve recursive
+  strongly connected components to a fixed point. An SCC becomes wide-free
+  only if every non-recursive exit and every outgoing edge is wide-free;
+  source order must not affect the result.
+- [ ] Treat raise/error exits as ordinary Error Items. They do not require a
+  companion, but every successful exit still participates in the proof.
+- [ ] Include boxed slow bodies, inferred-parameter fallback paths, native
+  boxing, and admission-error arms in the public-entry proof.
+- [ ] Change `infer_boxed_return_mode()` to consume the completed analysis; do
+  not make it a second expression walker.
+
+Focused fixtures must cover a closed wide-free union, a union containing one
+wide arm, forward calls, mutual recursion, source-order reversal, mutable
+assignment, a dynamic-call negative case, and an error-only arm.
+
+**Exit gate:** repeated compilation produces identical descriptors regardless
+of declaration order, and every shape-1 choice has an inspectable all-exits
+proof.
+
+### 7.5 B2.3 — body and public `_b` descriptors
+
+**Primary symbols:** `analyze_lambda_mir_variants()` and
+`emit_boxed_abi_wrapper()` in `lambda/runtime/transpile-mir.cpp`.
+
+- [ ] Select the internal boxed-body shape from the completed proof and record
+  it in its `FnVariantAnalysis.result`; preserve native-lane and error-lane
+  rules already required by **D8.3.2–D8.3.4**.
+- [ ] Compute the public `_b` descriptor as the join of its selected body,
+  boxed slow body, parameter/admission failures, and any native-to-Item boxing.
+- [ ] Remove the hard-coded public shape-2 descriptor. A public shape-1 entry
+  returns one Item and neither builds a pending pair nor writes
+  `Context::mir_companion_slot`.
+- [ ] Drive the wrapper epilogue solely from the public descriptor. Add a
+  compile-time/debug assertion that wrapper emission, exported metadata, and
+  the corresponding `FnReturnAnalysis` agree.
+- [ ] Keep unknown and wide-capable entries at shape 2. LambdaJS Number and
+  other untyped JS results remain conservative unless LambdaJS supplies its
+  own proof.
+
+Add MIR-check fixtures that assert both absence and presence: a wide-free
+`_b` has one result and no pair builder/slot store/resolver; int64, uint64,
+out-of-band float, `any`, and dynamic-call controls retain the companion path.
+
+**Exit gate:** the shape is selected once per entry, consumers read that
+descriptor, and the census reports newly eliminated shape-2 bodies and public
+entries without output changes.
+
+### 7.6 B2.4 — `Function` metadata and dynamic dispatch
+
+**Primary files:** `lambda/lambda.h`, `lambda/runtime/lambda-eval.cpp`,
+`lambda/runtime/transpile-mir.cpp`, `lambda/runtime/module_registry.cpp`, and
+`lambda/runtime/concurrency.cpp`, plus every constructor/copy/equality path
+found by a complete `Function` audit.
+
+- [ ] Use reserved `Function::flags` space for an encoded
+  `mir_public_return_shape` with `UNKNOWN`, `ITEM`, and `ITEM_COMPANION` states.
+  Do not use a zero-default boolean whose missed initialization would silently
+  skip resolution; `UNKNOWN` must fail closed to companion-slot resolution for
+  a generated boxed entry.
+- [ ] Add one publication helper and MIR import that sets the field from the
+  public `FnReturnAnalysis`. Emit it beside the existing boxed-entry/context
+  publication, not independently at call sites.
+- [ ] Preserve the field through named functions, closures, bound functions,
+  module exports/imports, async/task wrappers, cache restoration, copy, and
+  equality. Initialize foreign, interpreted, and hosted entries explicitly;
+  their existing ABI/ownership rules remain unchanged.
+- [ ] In `fn_call`/dynamic dispatch, call
+  `lambda_item_resolve_pending_slot()` for `ITEM_COMPANION` and `UNKNOWN`, and
+  skip it only for `ITEM`. Clear or overwrite the context slot according to
+  the existing transport invariant so a prior call cannot leak lane 2.
+- [ ] Assert during publication that the metadata field and emitted public
+  descriptor match. Add a negative test that omits/retains unknown metadata
+  and confirms fail-closed behavior rather than a pending-Item escape.
+
+Fixtures must exercise direct and dynamic shape-1 calls, dynamic shape-2 calls,
+closures, bound functions, cross-module calls, task wrappers, admission errors,
+and hosted/foreign controls.
+
+**Exit gate:** dynamic shape-1 calls perform no slot resolution; all shape-2 or
+unknown generated calls resolve correctly; no pending Item reaches a root,
+container, or user-visible result.
+
+### 7.7 C2.1 — direct register-pair → context-slot forwarding
+
+**Primary files:** `lambda/runtime/mir_emitter_shared.hpp` and
+`lambda/runtime/transpile-mir.cpp`, especially the shape-2 wrapper epilogue.
+
+- [ ] Extend the epilogue representation so `FN_COMPANION_RESULT_REG` and
+  `FN_COMPANION_CONTEXT_SLOT` can accept an already-built `MirValue` pair.
+- [ ] When a public shape-2 wrapper calls an internal shape-2 body, transfer
+  `direct.normal.reg` and `direct.normal.pending_companion` into the return
+  state without `em_materialize_pending_value()`.
+- [ ] At the context-slot epilogue, store lane 2 directly and return lane 1
+  unchanged. Do not classify lane 1 again or call `em_build_pending_pair()`.
+- [ ] Clear the emitter's one-live-pair marker after ownership transfers to the
+  epilogue. A resolved branch must assign companion zero; no predecessor may
+  reuse a stale lane.
+- [ ] Keep guard/slow/error branches explicit. If they cannot supply the
+  wrapper's pair shape directly, materialize at that incompatible join and
+  record `INCOMPATIBLE_RETURN`.
+- [ ] Add a short root-cause/invariant comment at the forwarding fix: a
+  register-pair to context-slot conversion changes transport, not payload
+  ownership, so resolve-and-rebuild is unnecessary.
+
+Add a dedicated wrapper-forward MIR fixture for ordinary Item, int64, uint64,
+and out-of-band float results, including a slow/error branch. Assert direct
+lane-2 store, no wrapper-local resolver, and companion zero on ordinary arms.
+
+**Exit gate:** every structurally eligible wrapper resolve-and-rebuild site is
+gone. Report the measured reduction; do not assume all 152 baseline wrapper
+sites are eligible before the post-change census.
+
+### 7.8 C2.2 — pair-safe multi-return control-flow merge
+
+**Primary files:** shared MIR frame/epilogue state and Lambda return lowering.
+
+- [ ] Allocate explicit `return_item` and `return_companion` merge registers
+  for pair-returning frames. These are return transport registers, not roots or
+  number homes.
+- [ ] Make every predecessor assign both registers. Ordinary/resolved arms
+  write companion zero; pending arms transfer both call results.
+- [ ] Route explicit return, fall-through, `if`, `match`, early-return, and
+  error-arm lowering through the same pair merge. Restore number watermark and
+  other required frame cleanup only after both lanes are captured.
+- [ ] Remove the single-return forwarding restriction only for paths proven to
+  reach this pair-safe epilogue. Raising/region cleanup, capture write-back,
+  variadic cleanup, coroutine suspension, and async/task handoff remain
+  materialization firewalls until separately proven safe.
+- [ ] Assert that the merged companion is defined on every predecessor and is
+  live iff the merged Item is pending. This directly guards the stale-lane bug
+  that blocked the earlier multi-return attempt.
+
+Extend the Action C fixtures with nested branches, `match`, an ordinary/wide
+mixed join, multiple early returns, a raise arm, and loop exits. Force GC near
+the join to prove no pending lane was published as a root.
+
+**Exit gate:** same-shape calls can tail-forward through multiple return sites
+with no stale companion, wrong answer, or lifetime failure.
+
+### 7.9 C2.3 — make `MirValue` the expression corridor
+
+**Primary files:** `lambda/runtime/mir_emitter_shared.hpp` and Lambda call,
+branch, conversion, store, and return lowering in
+`lambda/runtime/transpile-mir.cpp`.
+
+- [ ] Reuse the existing `MirValue`; do not introduce a parallel emitted-value
+  record or a second pending side channel.
+- [ ] Add or migrate an expression-lowering entry that returns `MirValue` and
+  start with direct-call expressions. Preserve `contract_type`, semantic type,
+  representation, provenance, and pending companion together.
+- [ ] Keep a temporary raw-`MIR_reg_t` compatibility entry for legacy
+  consumers. It must call `em_materialize_pending_value()` with an explicit
+  reason before discarding pair metadata.
+- [ ] Move representation conversion through `em_require_rep()`/the existing
+  centralized conversion path. No consumer may inspect a raw carrier and
+  independently decide that pending resolution is unnecessary.
+- [ ] Migrate call result → return, discard, native unbox, `type()`, and
+  truthiness corridors first. Store/root/spill, unknown helper calls,
+  suspension, and incompatible returns remain materializing boundaries.
+- [ ] Enforce RV4.2's one-live-pair rule. Before producing a second pair,
+  materialize the first with reason `SECOND_PAIR`; do not expand this phase to
+  multiple pending values.
+
+**Exit gate:** pendingness follows the value through the selected corridors;
+there is no unreasoned conversion from `MirValue` to a bare register.
+
+### 7.10 C2.4 — pending-aware consumers in risk order
+
+Land each consumer independently, with a MIR assertion and value-level test:
+
+1. **Discard:** drop both lanes and clear the live-pair marker. No allocation
+   or resolution is needed.
+2. **Same-shape tail return:** forward both lanes to the pair-safe epilogue.
+3. **Native wide unbox:** validate pending kind, consume lane 2 directly, and
+   preserve the existing error lane. Ordinary heap/activation-owned scalar
+   Items continue through the normal unbox path.
+4. **`type()`:** derive the runtime type from the pending kind without
+   allocating a scalar home.
+5. **Truthiness:** apply **S3.1** directly: every pending number is truthy,
+   including positive/negative zero and NaN, so this consumer does not need to
+   materialize or inspect payload truthiness.
+
+Generic arithmetic, equality/order, container insertion, helper calls, and
+foreign calls continue to materialize unless they receive a separate explicit
+pair contract and measured justification. Test int64 minimum/maximum, uint64
+high-bit values, positive/negative zero, subnormal floats, infinities, NaN,
+ordinary non-pending Items, Error Items, and forced-GC boundaries.
+
+**Exit gate:** each optimized consumer is semantically identical to the
+materializing path, while all unknown or ownership-taking consumers still
+resolve before escape.
+
+### 7.11 Mandatory preliminary effectiveness gate
+
+After the slice-local compiler/MIR tests needed to produce a runnable
+candidate and a fresh `make release`, stop and test these five typed Lambda
+workloads first. They were selected because resolver traffic occurs inside
+real work rather than only at the once-per-program module result boundary:
+
+| canonical row | exact typed source | preliminary role |
+|---|---|---|
+| `jetstream/crypto_sha1` | `test/benchmark/jetstream/crypto_sha12.ls` | primary call-heavy canary |
+| `awfy/json` | `test/benchmark/awfy/json2.ls` | primary call-heavy canary |
+| `awfy/deltablue` | `test/benchmark/awfy/deltablue2.ls` | structured call/branch coverage |
+| `awfy/havlak` | `test/benchmark/awfy/havlak2.ls` | structured call/loop coverage |
+| `kostya/json_gen` | `test/benchmark/kostya/json_gen2.ls` | typed construction/string-loop coverage |
+
+The build and slice-local fixtures are prerequisites, not permission to start
+the broad gates. The preliminary set must pass all three stages below.
+
+#### 7.11.1 Clean correctness
+
+- [ ] Run every exact typed source with the archived control release and the
+  candidate release. Compare normalized stdout/result hashes and the checked-in
+  golden where one exists; timing lines are the only removable output.
+- [ ] Require every run and every A/B pair to report success: no crash, timeout,
+  retry, error diagnostic, nondeterministic output, pending-value assertion, or
+  GC/ownership assertion.
+- [ ] Compile each workload twice and require identical function descriptors,
+  public-shape metadata, resolver-reason census, and relevant optimized MIR.
+  Source order or stale compiler state must not change the proof.
+
+#### 7.11.2 Fully tuned structure
+
+Regenerate MIR and the extended §7.2 census for each exact source, then inspect
+the functions that execute inside the workload rather than accepting only an
+aggregate count:
+
+- [ ] Every all-exits wide-free body reached by the workload has shape 1, and
+  its public `_b` entry also has shape 1 when all wrapper arms prove wide-free.
+- [ ] Every eligible shape-2 body → public-wrapper edge forwards its register
+  pair directly to `Context::mir_companion_slot`; no resolver/reclassify/
+  rebuild sequence remains on that edge.
+- [ ] Same-shape tail returns, pair-safe joins, and the pending-aware consumers
+  landed by the current C2 slice retain the pair. There is no earlier
+  compatibility materialization in front of them.
+- [ ] Every remaining resolver has a named reason and is attached to a real
+  ownership or semantic boundary. `UNKNOWN_CALL` and
+  `INCOMPATIBLE_RETURN` must be inspected individually; they are not automatic
+  waivers.
+- [ ] Lane 2 is zero for an ordinary shape-2 result, live only with a pending
+  lane 1, and never published as an Item/root. Number-extent and spill evidence
+  must agree with the ownership proof.
+- [ ] Compare control/candidate hot-function MIR and, when a timing result is
+  unexplained, optimized/native output. The intended resolver traffic must
+  actually disappear from executed work; deleting only dead or module-exit
+  code does not pass this stage.
+
+“Fully tuned” does **not** mean forcing the resolver count to zero. It means no
+remaining hot resolver is removable by the accepted RVO13/RVO14 slice, all
+remaining sites are justified, and every optimization that should apply to
+these five sources demonstrably applies. If an eligible site remains, continue
+tuning the current slice; do not proceed to another gate.
+
+#### 7.11.3 Paired effectiveness measurement
+
+Use the archived pre-change release as `--control`, the current release as
+`--candidate`, typed variants only, and 41 alternating pairs per row. Keep the
+three suite groups separate so the raw artifacts identify every workload:
+
+```bash
+python3 test/benchmark/run_paired_benchmarks.py \
+  --control temp/lambda-control-release.exe --candidate ./lambda.exe \
+  -s jetstream -b crypto_sha1 --variants typed --pairs 41 \
+  --output temp/rvo13_14_prelim_jetstream.json
+
+python3 test/benchmark/run_paired_benchmarks.py \
+  --control temp/lambda-control-release.exe --candidate ./lambda.exe \
+  -s awfy -b json,deltablue,havlak --variants typed --pairs 41 \
+  --output temp/rvo13_14_prelim_awfy.json
+
+python3 test/benchmark/run_paired_benchmarks.py \
+  --control temp/lambda-control-release.exe --candidate ./lambda.exe \
+  -s kostya -b json_gen --variants typed --pairs 41 \
+  --output temp/rvo13_14_prelim_kostya.json
+```
+
+- [ ] Require matching stdout for every pair and retain every raw status/timing
+  record plus both binary hashes.
+- [ ] A repeatable regression greater than 1% in any row fails the preliminary
+  gate. Re-run an affected row in a second alternating batch before assigning
+  causality.
+- [ ] A movement below 1% is neutral, not a win. It may pass only when §7.11.2
+  proves the intended hot resolver path was completely tuned and native/profile
+  evidence explains why the removed work is below timing resolution.
+- [ ] A claimed improvement greater than 1% must repeat and must correlate with
+  the expected resolver, pair-live-range, number-extent, or spill reduction.
+  An unexplained speedup is not evidence that RVO13/RVO14 is effective.
+
+Record one preliminary table with, per row: correctness status, control and
+candidate hashes, before/after hot resolver counts by reason, shape changes,
+remaining justified sites, median ratio/dispersion, and conclusion. Mark
+`PRELIM_PASS` only when **all five rows** are clean and fully tuned. If any row
+fails any stage, stop broad verification and return to the current B2/C2
+implementation slice.
+
+#### 7.11.4 Implementation checkpoint — 2026-08-17
+
+The first implementation slice is landed and release-built. It contains the
+shared wide-result proof, body-side `maybe_pending` propagation, C2.1 pair
+forwarding into the context slot, fail-closed public-shape metadata, and the
+epilogue fix that reuses an already-forwarded pair instead of rebuilding it
+(D2.4.1, D5.2.1v3). The public shape-1 rule is deliberately limited to a
+non-procedural, non-native boxed body whose internal descriptor is already
+`RETURN_SHAPE_ITEM`; native/error and slow-body wrappers remain shape 2 until
+their raw/public boxing costs are separately proven. The local-function
+registry now keeps raw-body and public-wrapper variant records separately, so
+a later `_b` publication cannot replace the descriptor consumed by a direct
+raw call.
+
+Evidence retained under `temp/`:
+
+| artifact | result |
+|---|---|
+| `lambda-control-release.exe` SHA-256 `a087eb80a65a3fd5ac6035c32c305da2a3990dbe6269d4ca2d642e86324856b6` | archived pre-change control |
+| `lambda-candidate-rvo13-split-narrow-release.exe` SHA-256 `d67bad430fc2e537a393e7e6037899a9b8f9acc14f6db30314d447dc7ffc8380` | fresh `make release`, 0 errors, 279 warnings |
+| `lambda-candidate-rvo13-final-impl-release.exe` SHA-256 `8fb929ec0a8a2a028393eb3eb0e2e0a70b811670c01d0957266eed2a576d36ed` | final current-source release rebuild, 0 errors, 279 warnings |
+| `rvo13_14_final_impl_jetstream.json` + `_repeat.json` | final current-source crypto rerun `1.0150` then `1.0183`; 41/41 OK and stdout-equal, still above the 1% gate |
+| `lambda-candidate-rvo13-final-corrected-release.exe` SHA-256 `5ae4388a1534c6027bff23ef5032b1c5ff95c8490c86f2d7e7d2284a34e6beef` | corrected `_b_<hash>` wrapper-marker release rebuild, 0 errors, 279 warnings |
+| `rvo13_14_final_corrected_jetstream.json` + `_repeat.json` | corrected current-source crypto `1.0617` then `1.0637`; 41/41 OK and stdout-equal, regression remains |
+| `rvo13_14_split_awfy.json` | `json` 0.9702, `deltablue` 0.9948, `havlak` 0.9949; 41/41 OK and stdout-equal per row |
+| `rvo13_14_split_kostya.json` | `json_gen` 0.9743; 41/41 OK and stdout-equal |
+| `rvo13_14_split_jetstream.json` + `_repeat.json` | `crypto_sha1` 1.0166 then 1.0247; 41/41 OK and stdout-equal, but a repeatable >1% regression |
+| `rvo13_14_split_cached_jetstream.json` | caching the selected descriptor at each call site made `crypto_sha1` 1.0712; rejected, so the cache-only change is not retained |
+| `rvo13_14_proc_public_{awfy,kostya,jetstream}.json` | experimental procedural public shape-1 widening; `json` 1.0374, `json_gen` 0.9717, `crypto_sha1` 1.0679; rejected because native-heavy rows regressed |
+| `rvo13_14_proc_novalue_jetstream.json` | no-value-procedure-only public shape-1 experiment; `crypto_sha1` 1.0628, 0/41 wins; rejected even though the body returns only `ItemNull` |
+| `rvo13_14_public_native_self_201.json` | native public shape-1 experiment 1.0146 vs the body-only candidate; rejected |
+| `rvo13_14_final_safe_crypto.mir` | one `lambda_item_resolve_pending` at the module-result escape; no wrapper resolver call in this canary |
+
+This is **not `PRELIM_PASS`**. The crypto row fails the explicit 1% timing
+rule, so no Lambda, LambdaJS, Test262, Node, or broad benchmark gate has been
+started. The native public-shape experiment is also not an acceptable escape:
+its shorter wrappers changed the raw-function lowering/layout and still lost
+in the 201-pair comparison. Procedural public-shape widening was tested as a
+separate slice and rejected because the native-heavy canaries regressed. The
+raw/public record split is implemented, but the five-row gate still blocks
+the next step: classify remaining wrapper resolver sites by ownership
+boundary, then migrate only pair-safe consumers before reconsidering native
+or procedural public shape 1.
+
+### 7.12 Post-preliminary verification gates
+
+Only after `PRELIM_PASS` may the other acceptance gates run. Do not use a green
+baseline or Test262 result to waive an incomplete preliminary workload.
+
+| order | area | required verification |
+|---:|---|---|
+| 1 | focused proof replay | classifier tests; source-order, recursion, union, mutable, dynamic-negative, body/`_b`, wrapper, tail, branch/match, error-lane, and ownership fixtures |
+| 2 | Lambda | `make test-lambda-baseline`; the extended `test_interp_gtest` is not a gate for this work |
+| 3 | LambdaJS shared runtime | focused JS MIR/runtime suites, then `make test262-baseline` |
+| 4 | Node compatibility | `make node-baseline` when shared `Function` metadata, dispatcher behavior, or LambdaJS code changed |
+| 5 | release reproduction | `make release` again after test commands, then reproduce the five-row preliminary structural census with the final binary |
+
+The frozen C2MIR path is out of scope. Do not patch vendored MIR for pair
+optimization evidence; first reduce and measure Lambda-emitted live ranges.
+
+### 7.13 Post-preliminary broad performance confirmation
+
+Only after §7.12 is green:
+
+- [ ] Compare the final release against the same archived control with
+  alternating runs, stable inputs, identical environment, and stdout hashes.
+- [ ] Run the complete typed/untyped AWFY gate and the broader benchmark matrix
+  needed for the release report to detect redistributed regressions. The five
+  preliminary rows must remain present and retain their clean conclusions.
+- [ ] Keep `collatz`, `diviter`, `sum`, and `sieve` as correctness/structural
+  controls. Do not advertise their once-per-program resolver deletion as a hot
+  kernel improvement.
+- [ ] Regenerate the complete 65-file typed census and record binary/text size,
+  pair-body and public-shape counts, resolver count by reason, number-extent
+  dirtiness, and optimized MIR/native spills for affected functions.
+- [ ] Treat movement below 1% as neutral. Any larger claimed improvement or
+  regression must repeat across paired batches; investigate changed output,
+  retries, timeouts, or thermal/order bias before attributing it to RVO13/14.
+- [ ] Revisit RVO8/RVO9 only if optimized MIR/native evidence still shows
+  multi-output GVN loss, dummy lane-2 traffic, or spills after the Lambda-side
+  pair live ranges have been reduced.
+
+**Acceptance:** the preliminary gate remains clean; all post-preliminary gates
+pass; no resolver is unclassified; the full typed/untyped gate has no
+repeatable regression greater than 1%; and any performance win is tied to a
+measured hot-path reduction rather than MIR text deletion alone.
+
+### 7.14 Landing order, rollback rules, and done criteria
+
+Land the smallest independently reversible slices in this order:
+
+1. B2.0 census/reason instrumentation;
+2. B2.1 shared type proof;
+3. B2.2 function/SCC proof;
+4. B2.3 public descriptors and B2.4 dynamic metadata as one atomic ABI-visible
+   slice;
+5. C2.1 wrapper pair forwarding;
+6. C2.2 pair-safe control-flow merge;
+7. C2.3 `MirValue` corridor migrations, one consumer family at a time;
+8. C2.4 pending-aware consumers in the listed risk order.
+
+For every runtime-changing landing unit, the required order is: slice-local
+tests → release candidate → all-five preliminary gate → post-preliminary
+verification gates → broad performance confirmation. Never start the latter
+two stages while even one preliminary row is incorrect, structurally
+untuned, unclassified, or regressed.
+
+Rollback the current slice if it produces a descriptor/metadata mismatch,
+publishes pending lane 1 to memory, leaves a stale lane 2, changes output,
+fails an ownership/GC gate, fails any preliminary stage, or causes a repeatable
+greater-than-1% full-gate regression without a justified tradeoff. Preserve
+the prior accepted slice; do not hide the failure by widening tests,
+hard-coding a benchmark/function, or reintroducing scalar-home donation.
+
+RVO13/RVO14 are complete only when:
+
+- [ ] formal and working design documents describe the shipped contract;
+- [ ] all shape-1 selections have recorded proofs and all unknowns fail closed;
+- [ ] public descriptor and `Function` metadata have one source of truth;
+- [ ] wrapper and pair-safe tail forwarding no longer resolve/rebuild;
+- [ ] selected consumers operate on pairs and every other escape has a reason;
+- [ ] all five preliminary workloads are recorded as clean and fully tuned,
+  and `PRELIM_PASS` predates every broad-gate result;
+- [ ] focused, Lambda, Test262, conditional Node, and release gates pass;
+- [ ] the fresh 65-file census and paired benchmark report are recorded; and
+- [ ] the report distinguishes structural deletion, neutral movement, and
+  repeatable runtime improvement.

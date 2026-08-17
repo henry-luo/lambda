@@ -337,7 +337,12 @@ struct MirTranspiler {
 struct LocalFuncEntry {
     const char* name;
     MIR_item_t func_item;
-    const FnVariantAnalysis* variant;
+    // Keep raw-body and public-wrapper contracts distinct. A forward
+    // declaration can be published before either variant is finalized, and a
+    // single variant slot would let later wrapper publication overwrite the
+    // contract consumed by an already-emitted raw call (D2.4.1, D5.2.1v3).
+    const FnVariantAnalysis* raw_variant;
+    const FnVariantAnalysis* public_variant;
 };
 HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
 
@@ -1232,7 +1237,7 @@ static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
 #define emit_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, false)
 
 static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
-        bool uses_wrapper, bool is_proc) {
+        bool uses_wrapper, bool is_proc, AstFuncNode* fn_node) {
     if (!uses_wrapper) return;
     emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
@@ -1240,6 +1245,31 @@ static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
         is_proc ? "lambda_function_mark_lambda_boxed_procedure"
                 : "lambda_function_mark_lambda_boxed_function",
         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+    FnVariantAnalysis* public_variant = fn_node && fn_node->analysis
+        ? fn_analysis_variant(fn_node->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
+    uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    if (public_variant) {
+        public_shape = public_variant->result.shape == RETURN_SHAPE_ITEM
+            ? LAMBDA_MIR_PUBLIC_RETURN_ITEM
+            : public_variant->result.shape == RETURN_SHAPE_ITEM_SCALAR
+                ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION
+                : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    }
+    // Function values can be created in a hot loop. Publish the two-bit
+    // descriptor in-place instead of adding a third runtime call to every
+    // function allocation; the C helper remains for module/host publication.
+    uint32_t shape_bits = public_shape << LAMBDA_MIR_PUBLIC_RETURN_SHAPE_SHIFT;
+    MIR_reg_t flags = new_reg(mt, "fn_flags", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, flags),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(Function, flags),
+            fn_obj, 0, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+        MIR_new_reg_op(mt->ctx, flags), MIR_new_reg_op(mt->ctx, flags),
+        MIR_new_uint_op(mt->ctx, shape_bits)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(Function, flags),
+            fn_obj, 0, 1), MIR_new_reg_op(mt->ctx, flags)));
 }
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
@@ -1498,7 +1528,7 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         // restore reclaims.
         MIR_reg_t pair_item = mt->em.frame.pending_return_item;
         MIR_reg_t pair_companion = mt->em.frame.pending_return_companion;
-        if (!pair_companion) {
+        if (!pair_item || !pair_companion) {
             em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
                 &pair_item, &pair_companion);
         }
@@ -1512,10 +1542,16 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         // v3 shape 2, slot transport (RV12): same pending-pair construction as
         // the register form, but lane 2 goes to `Context::mir_companion_slot`
         // so a C caller can read it. Built BEFORE the watermark restore — the
-        // payload lives in the extent that restore reclaims.
-        MIR_reg_t pair_item = 0, pair_companion = 0;
-        em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
-            &pair_item, &pair_companion);
+        // payload lives in the extent that restore reclaims. A forwarded
+        // direct-call pair is already classified; rebuilding it from the
+        // boxed lane here used to reclassify/rebuild every wrapper return and
+        // defeated C2.1's lazy transport (D5.2.1v3, D5.2.2v3).
+        MIR_reg_t pair_item = mt->em.frame.pending_return_item;
+        MIR_reg_t pair_companion = mt->em.frame.pending_return_companion;
+        if (!pair_item || !pair_companion) {
+            em_build_pending_pair(&mt->em, mt->em.frame.return_reg,
+                &pair_item, &pair_companion);
+        }
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, mir_companion_slot), pair_companion);
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
@@ -2134,13 +2170,45 @@ static MIR_item_t find_local_func(MirTranspiler* mt, const char* name) {
     return found ? found->func_item : NULL;
 }
 
+static const FnVariantAnalysis* local_func_variant_for_call(
+        const LocalFuncEntry* entry, const char* call_name) {
+    if (!entry) return NULL;
+    // MIR names carry the wrapper marker before their stable hash
+    // (`_name_b_<hash>`), so an end-of-string `_b` test misses every real
+    // generated wrapper. The published entry kind remains the authority when
+    // a forward alias does not use the conventional spelling (D2.4.1).
+    bool public_name = call_name && strstr(call_name, "_b_") != NULL;
+    if (public_name && entry->public_variant) return entry->public_variant;
+    if (!public_name && entry->raw_variant) return entry->raw_variant;
+    // A descriptor is stronger than the spelling fallback for forward or
+    // aliased entries whose public name is not the usual `_b` suffix.
+    if (entry->public_variant && entry->public_variant->entry.kind ==
+            FN_ENTRY_PUBLIC_WRAPPER) return entry->public_variant;
+    return entry->raw_variant;
+}
+
 static void register_local_func_contract(MirTranspiler* mt, const char* name,
         MIR_item_t func_item, const FnVariantAnalysis* variant = NULL) {
+    const char* semantic_name = mir_semantic_name_cstr(mt, name).str;
+    LocalFuncEntry* existing = find_local_func_entry(mt, semantic_name);
+    if (existing) {
+        existing->func_item = func_item;
+        if (variant && variant->entry.kind == FN_ENTRY_PUBLIC_WRAPPER) {
+            existing->public_variant = variant;
+        } else if (variant) {
+            existing->raw_variant = variant;
+        }
+        return;
+    }
     LocalFuncEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.name = mir_semantic_name_cstr(mt, name).str;
+    entry.name = semantic_name;
     entry.func_item = func_item;
-    entry.variant = variant;
+    if (variant && variant->entry.kind == FN_ENTRY_PUBLIC_WRAPPER) {
+        entry.public_variant = variant;
+    } else if (variant) {
+        entry.raw_variant = variant;
+    }
     hashmap_set(mt->local_funcs, &entry);
 }
 
@@ -5305,7 +5373,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                         MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                         MIR_new_int_op(mt->ctx, cap_count)));
                     emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                        fn_node->node_type == AST_NODE_PROC);
+                        fn_node->node_type == AST_NODE_PROC, fn_node);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     return fn_obj;
@@ -5325,7 +5393,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                     }
                     emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                        fn_node->node_type == AST_NODE_PROC);
+                        fn_node->node_type == AST_NODE_PROC, fn_node);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     strbuf_free(nm_buf);
@@ -16557,7 +16625,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     options.hidden_env = direct_env;
                 }
                 MirCallResult direct = em_call_direct(&mt->em, direct_call_name,
-                    local_func, local_entry ? local_entry->variant : NULL, ai, call_types,
+                    local_func, local_func_variant_for_call(local_entry,
+                        direct_call_name), ai, call_types,
                     call_ops, &options);
                 direct_value = direct.normal;
                 result = direct_value.reg;
@@ -16603,7 +16672,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // own descriptor. Cross-check those two derivations here.
             if (call_error_lane && local_entry) {
                 em_assert_error_lane_agreement(direct_call_name,
-                    local_entry->variant, error_lane_in_register);
+                    local_func_variant_for_call(local_entry, direct_call_name),
+                    error_lane_in_register);
             }
             if (call_error_lane) {
                 second_result = error_lane_in_register ? direct_error_reg
@@ -16751,8 +16821,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     bool closed_item_result = call_fn_type && call_return_contract &&
                         call_return_contract != &TYPE_ANY && !call_fn_type->can_raise &&
                         !routed_to_boxed_entry &&
-                        (!local_entry || !local_entry->variant ||
-                         !local_entry->variant->effects.may_return_error);
+                        (!local_entry ||
+                         !local_func_variant_for_call(local_entry,
+                             direct_call_name) ||
+                         !local_func_variant_for_call(local_entry,
+                             direct_call_name)->effects.may_return_error);
                     // An explicit or implicit clean return contract rejects
                     // openness in the callee. Do not add a second Item-error
                     // branch before native unboxing; direct callers already
@@ -20321,7 +20394,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                     MIR_new_int_op(mt->ctx, cap_count)));
                 emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                    fn_node->node_type == AST_NODE_PROC);
+                    fn_node->node_type == AST_NODE_PROC, fn_node);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 return fn_obj;
@@ -20341,7 +20414,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                 }
                 emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
-                    fn_node->node_type == AST_NODE_PROC);
+                    fn_node->node_type == AST_NODE_PROC, fn_node);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 strbuf_free(name_buf);
@@ -21227,8 +21300,12 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
     if (!node) return false;
 
     TypeId type_id = get_effective_type(mt, node);
-    if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE ||
-            lambda_type_id_may_be_wide_scalar(type_id)) {
+    Type* semantic_type = node->type
+        ? mir_unwrap_decl_contract(node->type) : NULL;
+    LambdaWideResultProof proof = semantic_type
+        ? lambda_type_wide_result_proof(semantic_type)
+        : lambda_type_wide_result_proof(type_id);
+    if (proof != LAMBDA_WIDE_RESULT_FREE) {
         return false;
     }
 
@@ -21550,6 +21627,30 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
         }
         return MIR_SCALAR_RETURN_DYNAMIC;
     }
+    AstNode* body_result = function_body_result_expr(fn_node);
+    bool body_wide_free = body_result &&
+        mir_expr_proves_wide_free(mt, body_result);
+    if (!body_wide_free && fn_node->type &&
+            fn_node->type->type_id == LMD_TYPE_FUNC) {
+        // Some inferred array/union result nodes expose only the compact TYPE
+        // id at this point. The declared function contract is the stronger
+        // semantic witness; use it instead of treating a known `int[]`/map
+        // producer as UNKNOWN merely because its expression node is sparse
+        // (D2.4.1, D5.2.1v3).
+        TypeFunc* ft = (TypeFunc*)fn_node->type;
+        Type* contract = ft->return_contract ? ft->return_contract :
+            ft->returned;
+        body_wide_free = contract &&
+            lambda_type_wide_result_proof(mir_unwrap_decl_contract(contract)) ==
+                LAMBDA_WIDE_RESULT_FREE;
+    }
+    if (body_wide_free) {
+        // A closed boxed union/optional can be wide-free even though its
+        // compact TypeId is LMD_TYPE_TYPE. Use the same producer proof as the
+        // body consumers instead of collapsing every structured contract to
+        // the dynamic companion shape.
+        return MIR_SCALAR_RETURN_NONE;
+    }
     TypeId return_type = LMD_TYPE_ANY;
     if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
         TypeFunc* ft = (TypeFunc*)fn_as_node->type;
@@ -21589,6 +21690,8 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     }
     TypeFunc* type = fn->type && fn->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)fn->type : NULL;
+    bool is_proc = ((AstNode*)fn)->node_type == AST_NODE_PROC ||
+        (type && type->is_proc);
     bool may_return_boundary_error = function_return_may_defer(mt, fn);
     int param_count = type ? type->param_count : 0;
     FnVariantAnalysis* public_entry = analysis
@@ -21603,15 +21706,11 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         // A boxed wrapper can carry a subnormal or wide integer even when
         // static inference chose a native body, so its public ABI is dynamic.
         SCALAR_RETURN_DYNAMIC};
-    // RV10 §6: the boxed public entry is the one every DYNAMIC call site
-    // dispatches through, so it always speaks the universal pair shape — even
-    // when the body underneath returns natively.
-    public_entry->result.shape = em_return_shape(false, false,
-        MIR_SCALAR_RETURN_DYNAMIC);
-    // The public wrapper is the C-reachable entry, so its lane 2 rides the
-    // context slot (RV12), never a second MIR result.
-    public_entry->result.companion = em_companion_transport(
-        public_entry->result.shape, /*c_reachable=*/true);
+    // Start fail-closed. The body analysis below can narrow this to shape 1
+    // only after every wrapper path, including boxing and slow bodies, is
+    // accounted for (RVO13, D2.4.1).
+    public_entry->result.shape = RETURN_SHAPE_ITEM_SCALAR;
+    public_entry->result.companion = FN_COMPANION_CONTEXT_SLOT;
     public_entry->param_count = param_count;
 
     FnVariantAnalysis* body = analysis
@@ -21665,6 +21764,21 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
                 0};
         }
     }
+
+    // A public shape-1 entry is admitted only when the internal boxed body is
+    // already a one-result Item. This avoids making a C-reachable wrapper
+    // resolve a pending pair merely to satisfy the narrower public contract;
+    // procedural/native/error bodies remain fail-closed until their raw/public
+    // descriptor split and boxing cost are separately proven (D2.4.1,
+    // D5.2.1v3).
+    bool public_wide_free = !is_proc && !native && native_info &&
+        !native_info->needs_boxed_entry &&
+        !native_info->needs_boxed_slow_body &&
+        body->result.shape == RETURN_SHAPE_ITEM;
+    public_entry->result.shape = public_wide_free
+        ? RETURN_SHAPE_ITEM : RETURN_SHAPE_ITEM_SCALAR;
+    public_entry->result.companion = em_companion_transport(
+        public_entry->result.shape, /*c_reachable=*/true);
     return body;
 }
 
@@ -21839,6 +21953,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_type_t ret_type = MIR_T_I64;
     MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, wrapper_name->str, 1, &ret_type, param_count, params);
     MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
+    FnVariantAnalysis* public_variant = fn_node->analysis
+        ? fn_analysis_variant(fn_node->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
+    FnReturnShape public_shape = public_variant
+        ? public_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
+    bool public_returns_pair = fn_return_shape_is_pair(public_shape);
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
     mt->module_state_reg = 0;
@@ -21854,10 +21973,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         MIR_SCALAR_RETURN_DYNAMIC);
     mt->em.frame.plan.scalar_home_lane_mask = 0;
     mt->em.frame.plan.accepts_caller_scalar_home = false;
-    // Universal shape: this wrapper is what dynamic dispatch calls (RV10 §6).
-    mt->em.frame.plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
+    // RVO13: the public descriptor is selected once with the body analysis;
+    // wrapper emission must consume that descriptor rather than re-derive it.
+    mt->em.frame.plan.return_shape = public_shape;
     mt->em.frame.plan.companion = em_companion_transport(
-        RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/true);
+        public_shape, /*c_reachable=*/true);
     mt->em.frame.incoming_scalar_home = 0;
     mt->em.frame.plan.debug_name = wrapper_name->str;
     emit_number_frame_enter(mt);
@@ -22046,7 +22166,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
     MIR_item_t raw_func = find_local_func(mt, raw_name);
     LocalFuncEntry* raw_entry = find_local_func_entry(mt, raw_name);
-    if (!raw_func || !raw_entry || !raw_entry->variant) {
+    if (!raw_func || !raw_entry ||
+            !local_func_variant_for_call(raw_entry, raw_name)) {
         log_error("mir: ABI wrapper - missing body contract for '%s'", raw_name);
         abort();
     }
@@ -22060,12 +22181,23 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     MirCallOptions options = {true, false, 0};
     MirCallResult direct = em_call_direct(&mt->em, raw_name, raw_func,
-        raw_entry ? raw_entry->variant : NULL, call_arg_count,
+        local_func_variant_for_call(raw_entry, raw_name), call_arg_count,
         call_types, call_args, &options);
-    if (direct.normal.maybe_pending) {
-        // the wrapper changes the internal pair into the public slot shape;
-        // resolve at that incompatible escape boundary before it builds its
-        // own pair in the epilogue (D5.2.1v3).
+    if (direct.normal.maybe_pending && public_returns_pair && !has_slow_body &&
+            raw_lane_kind == RETURN_LANE_SCALAR) {
+        // A register pair crossing into the C-reachable wrapper changes only
+        // transport: the wrapper's epilogue writes lane 2 to the context
+        // slot. Keep both lanes live so the wrapper does not resolve and then
+        // rebuild the same pending pair (D5.2.1v3, D5.2.2v3).
+        mt->em.frame.pending_return_item = direct.normal.reg;
+        mt->em.frame.pending_return_companion =
+            direct.normal.pending_companion;
+        mt->em.pending_live_item = 0;
+        mt->em.pending_live_companion = 0;
+    } else if (direct.normal.maybe_pending) {
+        // Slow-body joins still need a pair merge. Until that merge is
+        // explicit, materialize at this incompatible control-flow boundary
+        // rather than letting one predecessor's lane reach every return.
         direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
     }
     MIR_reg_t result = direct.normal.reg;
@@ -25099,7 +25231,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                     MirCallOptions main_options = {true, false, 0};
                     MirCallResult call = em_call_direct(&mt.em,
                         main_name->str, main_func,
-                        entry ? entry->variant : NULL, 0, NULL, NULL,
+                        local_func_variant_for_call(entry, main_name->str),
+                        0, NULL, NULL,
                         &main_options);
                     if (call.normal.maybe_pending) {
                         // the module entry returns through its own public

@@ -1095,6 +1095,15 @@ enum {
     FN_ENTRY_ABI_LAMBDA_INTERPRETED,
 };
 
+// RVO13: public boxed entries publish their post-call companion contract so
+// dynamic dispatch can skip slot resolution for proven shape-1 results.
+enum {
+    LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN = 0,
+    LAMBDA_MIR_PUBLIC_RETURN_ITEM = 1,
+    LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION = 2,
+};
+#define LAMBDA_MIR_PUBLIC_RETURN_SHAPE_SHIFT 7
+
 // Function as first-class value
 // Supports both direct function references and closures
 struct Function {
@@ -1112,7 +1121,8 @@ struct Function {
             uint32_t is_system_function_ref : 1;
             uint32_t requires_scalar_result_home : 1;
             uint32_t requires_runtime_context : 1;
-            uint32_t reserved_flags : 25;
+            uint32_t mir_public_return_shape : 2;
+            uint32_t reserved_flags : 23;
         };
     };
     void* fn_type;        // fn type definition (TypeFunc*)
@@ -1185,6 +1195,7 @@ extern "C" {
 void lambda_function_mark_mir_context_abi(Function* fn);
 void lambda_function_mark_lambda_boxed_function(Function* fn);
 void lambda_function_mark_lambda_boxed_procedure(Function* fn);
+void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
 void lambda_function_set_type(Function* fn, void* fn_type);
 #ifdef __cplusplus
 }

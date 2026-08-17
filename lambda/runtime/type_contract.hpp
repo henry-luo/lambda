@@ -9,6 +9,18 @@ enum LambdaTypeExclusion {
     LAMBDA_TYPE_EXCLUDE_NULL = 1u << 1,
 };
 
+// Compile-time result proof used by both boxed-return analysis and helper
+// metadata. UNKNOWN is deliberately distinct from CAPABLE so open contracts
+// fail closed instead of being treated as inline-only by a shallow TypeId.
+enum LambdaWideResultProof {
+    LAMBDA_WIDE_RESULT_UNKNOWN,
+    LAMBDA_WIDE_RESULT_FREE,
+    LAMBDA_WIDE_RESULT_CAPABLE,
+};
+
+LambdaWideResultProof lambda_type_wide_result_proof(const Type* type);
+LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id);
+
 // Static half of an annotated boundary. PROVEN means the source type already
 // satisfies the target, so the runtime check is redundant; DEFERRED means only
 // the dynamic boundary can decide. `any` sources and unproven map shapes are

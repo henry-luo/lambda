@@ -10,8 +10,8 @@
 > **[measured 2026-08-14]** below were revised from proposal fidelity to
 > observed behaviour once shape 2 was emitting; §1.4 corrects §1.2's site
 > split, §8 is re-costed against it, and RVO10 is new.
-> Ledger **RV1–RV18** (+ addenda RV3a, RV10a, RV14a, **RV15a**, RV17a) + open issues
-> **RVO1–RVO12**. **RV17/RV17a** (ruled 2026-08-15, §2.1) are what make
+> Ledger **RV1–RV18** (+ addenda RV3a, RV10a, RV14a, **RV15a**, RV17a) +
+> issue ledger **RVO1–RVO14**. **RV17/RV17a** (ruled 2026-08-15, §2.1) are what make
 > **shape 4 reachable from ordinary source**: an `if` whose arms differ joins
 > to `T | error` — the union — instead of widening to ANY, so a `T^E` body
 > finally names its value component and can be admitted to the native lane.
@@ -35,7 +35,9 @@
 > proposal fidelity until then. The 2026-08-14 rulings on Windows lowering,
 > LambdaJS scope, DTIME, and the error-lane encoding are folded into
 > **RV12**, **RV13**, **RV8**, and **RV9** (RVO1/RVO2/RVO5/RVO6/RVO7
-> retired); RVO3, RVO4, RVO8, and RVO9 remain open; RVO12 opened and CLOSED 2026-08-15 (§10).
+> retired); RVO3, RVO4, RVO8, and RVO9 remain open; RVO12 opened and CLOSED
+> 2026-08-15 (§10); **RVO13/RVO14** are the proposed shape-refinement and
+> lazy-pending tuning follow-up (§11).
 > This design **revives SF14's original two-lane return** (implemented
 > 2026-07-15, superseded 2026-07-16) with new measured evidence and a new
 > pending-Item encoding that removes the defect that killed the first
@@ -1264,3 +1266,275 @@ numbering stays traceable.)*
   settled, since shape 4's whole premise is that the error leaves the value
   lane alone. Resolving RVO12 before that gate would re-introduce exactly
   the domain-value theft §0 lists as the thing v3 exists to stop.
+
+---
+
+## 11. Tuning proposal — wide-free public shapes and genuinely lazy pending values
+
+> **Status: PROPOSED 2026-08-17; not yet a ruling.** This section opens
+> **RVO13** (prove more boxed results wide-free, including their public entry)
+> and **RVO14** (forward and consume genuine pairs without eager patching).
+> It refines the implementation of **D5.2.1v3** under **D2.2.2**,
+> **D2.2.3**, **D2.4.1–D2.4.3**, **D5.2.2v3**, **D6.2.1**, and
+> **D8.3.1–D8.3.4**; it does not change Lambda value semantics. If accepted,
+> the formal design must first state the per-function public return-shape
+> metadata by revising D5.2.1/D6.2.1 in place with a version suffix and
+> document-semver bump, as required for a design-ruling change.
+
+### 11.1 Measured frontier
+
+The first Action B/C slice is already present. `infer_boxed_return_mode()` can
+select shape 1 for a narrow proven-wide-free body; `MirValue` carries
+`pending_companion`/`maybe_pending`; direct calls defer publication until
+`em_materialize_pending_value()`; and a single-return, non-raising tail call
+can forward both registers. The remaining problem is therefore not “add shape
+inference” or “add lazy values” from zero. It is to finish them where the live
+tree still forces conservative work:
+
+1. `mir_expr_proves_wide_free()` is shallow. `ANY`, every structured type,
+   many joins, and calls whose producer descriptor is not visible at that
+   point remain dynamic even when all reachable values are inline-only.
+2. Every public `_b` wrapper still declares shape 2, even when its internal
+   body is shape 1 and every parameter-error arm returns an ordinary Error
+   Item.
+3. A genuine register-pair body called by `_b` is resolved into the wrapper's
+   number extent and then classified again to rebuild the context-slot pair.
+   Register pair → context slot is a transport conversion, not an ownership
+   escape; the raw pair can be forwarded directly.
+4. The expression API still collapses most results to `MIR_reg_t`. The emitter
+   retains one pending pair out of band and therefore has to materialize at
+   compatibility firewalls that a complete `MirValue` corridor would cross.
+5. Multi-return bodies cannot tail-forward safely because the shared epilogue
+   does not merge the companion lane on every predecessor. The earlier attempt
+   exposed a stale-lane bug, so the single-return restriction is correct until
+   an explicit pair merge exists.
+
+Fresh v3 MIR from the 65 typed `*2.ls` benchmark files (59 canonical report
+rows) contains **143 two-result bodies across 33 files** and **608** calls to
+`lambda_item_resolve_pending`:
+
+| resolver location | all typed files | 24 integer-focused files |
+|---|---:|---:|
+| module `main` result boundary | 65 | 24 |
+| public `_b` wrapper | 152 | 8 |
+| ordinary body consumer / escape | 391 | 19 |
+| **total** | **608** | **51** |
+
+The integer interpretation matters. `collatz`, `diviter`, `sum`, and `sieve`
+already have no hot body resolver attributable to their typed integer kernel;
+their remaining resolver is chiefly the once-per-program module boundary.
+Removing it is a structural and startup improvement, not a workload-time
+claim. The useful timing canaries are the call-heavy rows whose resolver sites
+occur in real work: typed `crypto_sha1`, `awfy/json`, `deltablue`, `havlak`,
+and `kostya/json_gen`.
+
+### 11.2 RVO13 — one wide-result proof, used by both body and public entry
+
+The proof is a three-point compile-time lattice:
+
+| proof | meaning | resulting boxed shape |
+|---|---|---|
+| `WIDE_FREE` | no reachable success value can carry a D2.2.3 payload | shape 1 |
+| `WIDE_CAPABLE` | at least one reachable success value may carry `int64`, `uint64`, or an out-of-band float | shape 2 |
+| `UNKNOWN` | open/dynamic producer or incomplete analysis | shape 2, fail closed |
+
+This proof is analysis only. `FnReturnAnalysis.shape` remains the sole ABI
+descriptor under RV10; no call site may independently re-derive a shape.
+
+#### Type proof
+
+Extract one shared recursive `Type*` classifier for the MIR transpiler and
+sys-function metadata:
+
+- `int` is wide-free by **D2.2.2**: finite values pack and poison stays an
+  inline IEEE Item. Bool, null, Error, strings, symbols, binary, containers,
+  and object-backed datetime are also wide-free.
+- `int64`, `uint64`, float, and float64 are wide-capable by **D2.2.3**.
+- A closed union/optional is wide-free iff every member is wide-free; it is
+  wide-capable if any member is wide-capable; otherwise it is unknown.
+- `any`, unresolved type variables, open type patterns, and other incomplete
+  structured types are unknown. No physical `MIR_T_I64` observation may
+  strengthen the result (**D2.4.1**).
+
+The shared helper is necessary because the current sys-function narrowing and
+Lambda body proof each inspect a shallow TypeId. A third near-identical type
+walk would violate the single-proof goal and invite descriptor drift.
+
+#### Producer and exit proof
+
+For an unannotated boxed body, classify the value birth sites and join every
+reachable exit:
+
+- exact literals and constructors use their semantic `Type*` plus exact
+  representation facts where available;
+- `if`/`match`/nullable joins are wide-free only when every value arm is;
+- an immutable identifier follows its initializer;
+- a mutable identifier is wide-free only when its declared contract excludes
+  wide scalars and every assignment preserves that contract;
+- a sys-function call reads catalog result metadata;
+- a direct local call reads the callee's published `FnReturnAnalysis`;
+- a computed/dynamic function call remains unknown;
+- raise/error exits are ordinary Error Items and do not by themselves require
+  shape 2; only the success value domain decides the scalar companion.
+
+Source order must not decide the proof. Build a module-level call graph before
+emission and solve strongly connected components to a fixed point. A recursive
+SCC is wide-free only when every non-recursive exit is wide-free and every
+outgoing call is wide-free. An unresolved edge keeps the SCC unknown. This is
+an inductive proof over closed producers, not optimistic inference.
+
+#### Public `_b` entry
+
+The boxed `_b` entry remains the universal *target* for dynamic calls under
+**D6.2.1** and **D8.3.1**. “Universal target” does not require “universal
+shape 2.” Its public result shape is the join of:
+
+1. the selected internal body result;
+2. any boxed slow body selected by inferred-parameter guards;
+3. parameter/admission failure arms; and
+4. the wrapper's boxing operation when the body returns natively.
+
+Native `int`/bool and pointer/container boxing is wide-free. Native
+`int64`/`uint64`/float boxing is wide-capable. A shape-1 `_b` returns one Item,
+does not build a pending pair, and does not write `mir_companion_slot`.
+
+Dynamic dispatch needs the result contract carried with the `Function` value,
+as **D6.2.1** already requires for entry/signature metadata. Add a small
+`mir_public_return_shape` field with explicit `UNKNOWN`, `ITEM`, and
+`ITEM_COMPANION` states, set at publication from the same public
+`FnReturnAnalysis`. `UNKNOWN` fails closed to companion-slot resolution; this
+prevents a missed publication site from silently treating a pending result as
+an ordinary Item. The C dispatcher skips
+`lambda_item_resolve_pending_slot()` only for `ITEM`. The physical C prototype
+remains one-Item-return in every state; this is metadata-selected post-call
+handling, not a second dynamic entry ABI. Binding, closure creation, module
+publication, task wrapping, equality/copy logic, and cache restoration must
+preserve the field.
+
+LambdaJS may reuse the shared descriptor machinery only where its own analysis
+proves a generated result wide-free. An untyped JS Number is float-capable and
+therefore not wide-free. Missing JS proof remains shape 2; no Lambda proof may
+be applied by analogy.
+
+### 11.3 RVO14 — forward genuine pairs and materialize only at ownership boundaries
+
+The pair lifecycle remains **D5.2.1v3**:
+
+```text
+birth/classify -> register pair -> pending-aware consume or tail forward
+                                  -> materialize only on ordinary-Item escape
+```
+
+The proposal does not allow a pending Item into a root, spill, container,
+module slot, closure environment, async frame, or ordinary one-lane return.
+Those destinations need a valid Item backed by destination/caller ownership
+under **D5.2.2v3**.
+
+#### Register pair → context-slot forwarding
+
+A public shape-2 wrapper calling an internal shape-2 body already has the exact
+public result:
+
+```text
+internal body:       [pending-or-ordinary Item, raw payload-or-zero]
+public wrapper:      store lane 2 to Context::mir_companion_slot
+                     return lane 1 unchanged
+```
+
+No resolver, number-stack allocation, or second `em_build_pending_pair()` is
+needed. `mir_companion_slot` is raw transient transport, never an Item/root;
+storing lane 2 there preserves RV12 and does not publish lane 1 into memory.
+The wrapper epilogue must accept an already-built pending return pair for both
+`RESULT_REG` and `CONTEXT_SLOT` transports.
+
+#### Control-flow merge and tail forwarding
+
+Replace the current compile-time “one chosen predecessor's registers” state
+with explicit frame return registers:
+
+```text
+return_item
+return_companion
+```
+
+Every return predecessor assigns both. A resolved arm assigns companion zero;
+a same-shape pending arm assigns both call results. The shared epilogue returns
+or stores that merged pair after the number watermark is restored. Only after
+this pair-phi discipline exists may multi-return, `if`, or `match` tails lift
+the single-return restriction. Raising, async, variadic cleanup, capture
+write-back, and region teardown remain separate firewalls until their required
+post-call work is proven pair-safe.
+
+#### `MirValue` corridor and consumers
+
+Use the existing `MirValue`; do not introduce `EmittedValue`, a second pending
+record, or a parallel representation conversion API. Migrate call-expression
+lowering first and keep a compatibility entry that materializes before handing
+a raw `MIR_reg_t` to legacy consumers.
+
+Pending-aware consumers should land in increasing semantic risk:
+
+| consumer | pair action |
+|---|---|
+| discarded value | drop both lanes |
+| same-shape tail return | forward both lanes |
+| native wide unbox | validate pending kind and consume lane 2 directly |
+| `type()` | derive the declared runtime type from pending kind without allocation |
+| truthiness | evaluate the pending number under the S3.1 truthiness rule |
+| generic arithmetic/comparison/helper | materialize unless that helper has an explicit pair contract |
+
+Materialization remains mandatory before an ordinary Item store, root/spill
+publication, unknown/C call argument, dynamic dispatch that cannot carry the
+pair, suspension, incompatible return shape, or production of a second pending
+pair. Keep RV4.2's one-live-pair limit. Supporting multiple simultaneous pairs
+would expand liveness/register pressure and the formal escape proof without a
+measured need.
+
+Each emitted resolver should carry a compiler-side reason classification
+(`REP_CONVERSION`, `STORE`, `ROOT_OR_SPILL`, `UNKNOWN_CALL`, `SUSPEND`,
+`INCOMPATIBLE_RETURN`, `SECOND_PAIR`, or equivalent) so the census can prove
+that a remaining call is attached to a named consumer/escape rather than an
+accidental eager firewall.
+
+### 11.4 Safety and acceptance
+
+Safety gates are stronger than the performance target:
+
+1. every shape-1 selection has a recorded all-exits wide-free proof;
+2. every unknown or wide-capable result remains shape 2;
+3. pending lane 1 is never published to Lambda-visible memory or a GC root;
+4. lane 2 remains a raw non-root word and is live iff lane 1 is pending;
+5. no source type is changed to obtain a shape and no shape is inferred from a
+   MIR register class (**D2.4.1–D2.4.3**);
+6. a `Function`'s public return-shape field and `_b` entry descriptor are emitted
+   from the same analysis result; mismatches fail during compilation/testing;
+7. LambdaJS defaults conservatively and the shared emitter change passes its
+   Test262 and Node-facing gates.
+
+Structural acceptance:
+
+- eliminate wrapper-local resolve-and-rebuild sites by direct pair transport;
+- eliminate shape-2 bodies/public entries proven wide-free;
+- attribute every remaining resolver to a named consumer or escape;
+- re-run the 65-file census and record pair bodies, pair calls, resolver reasons,
+  number-frame dirtiness, and optimized MIR/native spill traffic.
+
+Performance acceptance uses release binaries and alternating paired runs. The
+primary canaries are typed `crypto_sha1` and `awfy/json`; `deltablue`, `havlak`,
+and `kostya/json_gen` cover call-heavy structure; the full typed/untyped AWFY
+gate prevents redistribution. A movement below 1% is neutral; a larger claimed
+win/regression must repeat. `collatz`/`diviter` are correctness controls, not
+performance gates for this proposal, because their remaining resolution is
+outside the hot integer kernel.
+
+### 11.5 Non-goals
+
+- no change to Lambda numeric semantics or the D2.2.3 wide-scalar set;
+- no reintroduction of caller-donated generated-function homes;
+- no multiple-live-pending protocol;
+- no conservative stack scanning;
+- no C2MIR support work;
+- no vendored MIR modification for RVO8/RVO9 — first reduce/measure the
+  Lambda-emitted pair live ranges and use a principled shape-driven workaround
+  if native evidence still exposes a backend limitation;
+- no claim that static MIR deletion alone is a benchmark improvement.
