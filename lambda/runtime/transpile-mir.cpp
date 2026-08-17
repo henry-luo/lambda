@@ -22021,6 +22021,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_reg_t raw_array_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     uint64_t wrapper_array_witness_mask = nfi
         ? mir_typed_array_witness_mask(nfi->fn_node) : 0;
+    bool wrapper_has_parameter_error_guard = false;
     bool has_slow_body = nfi && nfi->needs_boxed_slow_body;
     MIR_reg_t inferred_guard = 0;
     MIR_label_t slow_body_label = NULL;
@@ -22050,6 +22051,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
         TypeParam* parameter = (TypeParam*)param->type;
         if (mir_param_short_circuits_item_error(parameter)) {
+            wrapper_has_parameter_error_guard = true;
             // The wrapper is the dynamic/imported entry point. Check before
             // resolving an optional default so an incoming error cannot run
             // user code or be mistaken for a missing argument.
@@ -22213,7 +22215,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         local_func_variant_for_call(raw_entry, raw_name), call_arg_count,
         call_types, call_args, &options);
     if (direct.normal.maybe_pending && public_returns_pair && !has_slow_body &&
-            raw_lane_kind == RETURN_LANE_SCALAR) {
+            raw_lane_kind == RETURN_LANE_SCALAR &&
+            !wrapper_has_parameter_error_guard) {
         // A register pair crossing into the C-reachable wrapper changes only
         // transport: the wrapper's epilogue writes lane 2 to the context
         // slot. Keep both lanes live so the wrapper does not resolve and then
@@ -22224,6 +22227,9 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         mt->em.pending_live_item = 0;
         mt->em.pending_live_companion = 0;
     } else if (direct.normal.maybe_pending) {
+        // an error-rejecting parameter can return before the normal call; the
+        // shared epilogue must build its pair from that edge's return Item,
+        // not from the normal call's pending lanes (D5.2.1v3).
         // Slow-body joins still need a pair merge. Until that merge is
         // explicit, materialize at this incompatible control-flow boundary
         // rather than letting one predecessor's lane reach every return.
