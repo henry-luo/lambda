@@ -457,16 +457,26 @@ static bool mir_branch_join_uses_merged_carrier(const char* mir,
     const char* branch_label_end = strchr(branch_label, ',');
     if (!branch_label_end || branch_label_end >= function_end) return false;
     char branch_marker[40];
+    char branch_marker_crlf[40];
     int branch_label_len = (int)(branch_label_end - branch_label);
     if (branch_label_len <= 0 || branch_label_len + 3 >=
             (int)sizeof(branch_marker)) return false;
+    if (branch_label_len + 4 >= (int)sizeof(branch_marker_crlf)) return false;
     branch_marker[0] = '\n';
     memcpy(branch_marker + 1, branch_label, (size_t)branch_label_len);
     branch_marker[branch_label_len + 1] = ':';
     branch_marker[branch_label_len + 2] = '\n';
     branch_marker[branch_label_len + 3] = '\0';
+    // Windows MIR dumps use CRLF; accept both line endings when locating labels.
+    branch_marker_crlf[0] = '\n';
+    memcpy(branch_marker_crlf + 1, branch_label, (size_t)branch_label_len);
+    branch_marker_crlf[branch_label_len + 1] = ':';
+    branch_marker_crlf[branch_label_len + 2] = '\r';
+    branch_marker_crlf[branch_label_len + 3] = '\n';
+    branch_marker_crlf[branch_label_len + 4] = '\0';
 
     const char* branch_target = strstr(branch_label_end, branch_marker);
+    if (!branch_target) branch_target = strstr(branch_label_end, branch_marker_crlf);
     if (!branch_target || branch_target >= function_end) return false;
     const char* join_jump = find_last_before(branch_label_end, branch_target,
         "\n\tjmp\tL");
@@ -487,15 +497,25 @@ static bool mir_branch_join_uses_merged_carrier(const char* mir,
     const char* label_end = strchr(label, '\n');
     if (!label_end || label_end >= function_end) return false;
     char join_marker[40];
+    char join_marker_crlf[40];
     int label_len = (int)(label_end - label);
+    if (label_len > 0 && label[label_len - 1] == '\r') label_len--;
     if (label_len <= 0 || label_len + 3 >= (int)sizeof(join_marker)) return false;
+    if (label_len + 4 >= (int)sizeof(join_marker_crlf)) return false;
     join_marker[0] = '\n';
     memcpy(join_marker + 1, label, (size_t)label_len);
     join_marker[label_len + 1] = ':';
     join_marker[label_len + 2] = '\n';
     join_marker[label_len + 3] = '\0';
+    join_marker_crlf[0] = '\n';
+    memcpy(join_marker_crlf + 1, label, (size_t)label_len);
+    join_marker_crlf[label_len + 1] = ':';
+    join_marker_crlf[label_len + 2] = '\r';
+    join_marker_crlf[label_len + 3] = '\n';
+    join_marker_crlf[label_len + 4] = '\0';
 
     const char* join = strstr(branch_target, join_marker);
+    if (!join) join = strstr(branch_target, join_marker_crlf);
     const char* error_test = join ? strstr(join, "\n\tursh\t") : NULL;
     if (!error_test || error_test >= function_end) return false;
     const char* first_comma = strchr(error_test, ',');

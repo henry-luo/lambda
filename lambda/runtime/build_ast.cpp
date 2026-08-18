@@ -2302,10 +2302,10 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
-// check if an identifier is a path scheme keyword (http, https, sys)
-// NOTE: file and cwd are no longer keywords - use / and . instead
+// check if an identifier is a path scheme keyword
 // returns the PathScheme if it is, or -1 if not
 static int get_path_scheme_from_name(StrView name) {
+    if (strview_equal(&name, "file")) return PATH_SCHEME_FILE;
     if (strview_equal(&name, "http")) return PATH_SCHEME_HTTP;
     if (strview_equal(&name, "https")) return PATH_SCHEME_HTTPS;
     if (strview_equal(&name, "sys")) return PATH_SCHEME_SYS;
@@ -2363,6 +2363,22 @@ static void append_path_segment(Transpiler* tp, TSNode field_node, ArrayList* se
         AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
         seg->name = name_pool_create_strview(tp->name_pool, field_name);
         seg->type = LPATH_SEG_NORMAL;
+        seg->int_value = 0;
+        arraylist_append(segments, seg);
+    }
+    else if (field_sym == SYM_INT) {
+        StrView source = ts_node_source(tp, field_node);
+        char* text = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+        memcpy(text, source.str, source.length);
+        text[source.length] = '\0';
+        int64_t value = 0;
+        bool valid = lambda_parse_int_literal(text, &value);
+        mem_free(text);
+        if (!valid || value < 0) return;
+        AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+        seg->name = NULL;
+        seg->type = LPATH_SEG_INT;
+        seg->int_value = value;
         arraylist_append(segments, seg);
     }
     else if (field_sym == SYM_PATH_WILDCARD) {
@@ -2370,6 +2386,14 @@ static void append_path_segment(Transpiler* tp, TSNode field_node, ArrayList* se
         AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
         seg->name = NULL;
         seg->type = (wc_src.length == 2) ? LPATH_SEG_WILDCARD_REC : LPATH_SEG_WILDCARD;
+        seg->int_value = 0;
+        arraylist_append(segments, seg);
+    }
+    else if (field_sym == SYM_PATH_PARENT || field_sym == SYM_PATH_ROOT) {
+        AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+        seg->name = NULL;
+        seg->type = field_sym == SYM_PATH_PARENT ? LPATH_SEG_PARENT : LPATH_SEG_ROOT;
+        seg->int_value = 0;
         arraylist_append(segments, seg);
     }
 }
@@ -2377,22 +2401,17 @@ static void append_path_segment(Transpiler* tp, TSNode field_node, ArrayList* se
 static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList* segments) {
     TSSymbol symbol = ts_node_symbol(node);
 
-    // New path tokens: /, ., ..
-    // _path_prefix is a hidden token, so standalone path_root/path_self won't appear
-    // path_parent is still a separate visible symbol for parent_expr
-    if (symbol == SYM_PATH_PARENT) {
-        return PATH_SCHEME_PARENT; // .. is parent path
-    }
-
     // path_expr: _path_prefix optional(field)
     if (symbol == SYM_PATH_EXPR) {
-        // determine scheme from path_expr source text (first char(s) are the prefix)
+        // `/` is the logical root; `.` is the active relative root.
         StrView source = ts_node_source(tp, node);
+        if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
+            record_semantic_error(tp, node, ERR_SYNTAX_ERROR,
+                "legacy '..' path syntax is not supported; use '.~~'");
+        }
         int scheme;
         if (source.length >= 1 && source.str[0] == '/') {
-            scheme = PATH_SCHEME_FILE;
-        } else if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
-            scheme = PATH_SCHEME_PARENT;
+            scheme = PATH_SCHEME_LOGICAL;
         } else {
             scheme = PATH_SCHEME_REL;
         }
@@ -2423,12 +2442,36 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
         // first recurse to check if the object is a path
         int scheme = collect_path_segments_if_path(tp, object_node, segments);
         if (scheme >= 0) {
+            StrView source = ts_node_source(tp, node);
+            if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
+                record_semantic_error(tp, node, ERR_SYNTAX_ERROR,
+                    "legacy '..' path syntax is not supported; use '.~~'");
+            }
             // the object is part of a path, add the field as a segment
             // field can be identifier, symbol, or wildcard
             append_path_segment(tp, field_node, segments);
             return scheme;
         }
         return -1;  // not a path
+    }
+    else if (symbol == SYM_NAV_EXPR) {
+        TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
+        TSNode op_node = ts_node_child_by_field_id(node, FIELD_OPERATION);
+        int scheme = collect_path_segments_if_path(tp, object_node, segments);
+        if (scheme < 0) {
+            StrView object_source = ts_node_source(tp, object_node);
+            if (ts_node_symbol(object_node) == SYM_IDENT &&
+                    object_source.length == 4 &&
+                    strncmp(object_source.str, "file", 4) == 0 &&
+                    ts_node_symbol(op_node) == SYM_PATH_ROOT) {
+                scheme = PATH_SCHEME_FILE;
+            }
+        }
+        if (scheme >= 0) {
+            append_path_segment(tp, op_node, segments);
+            return scheme;
+        }
+        return -1;
     }
     else if (symbol == SYM_PRIMARY_EXPR) {
         // unwrap primary_expr
@@ -2448,14 +2491,27 @@ static AstNode* build_path_expr(Transpiler* tp, TSNode node, PathScheme scheme, 
 
     AstPathNode* path_node = (AstPathNode*)alloc_ast_node(tp, AST_NODE_PATH_EXPR, node, sizeof(AstPathNode));
     path_node->scheme = scheme;
-    path_node->segment_count = segments->length;
+    StrView source = ts_node_source(tp, node);
+    path_node->file_local = scheme == PATH_SCHEME_FILE && source.length >= 6 &&
+        strncmp(source.str, "file./", 6) == 0;
+    int first_segment = 0;
+    path_node->authority = NULL;
+    if (scheme == PATH_SCHEME_FILE && !path_node->file_local && segments->length > 0) {
+        AstPathSegment* authority = (AstPathSegment*)segments->data[0];
+        if (authority->type == LPATH_SEG_NORMAL && authority->name) {
+            path_node->authority = authority->name;
+            first_segment = 1;
+        }
+    }
+    path_node->segment_count = segments->length - first_segment;
 
     // allocate array for segments in the pool
-    if (segments->length > 0) {
-        path_node->segments = (AstPathSegment*)pool_calloc(tp->pool, segments->length * sizeof(AstPathSegment));
-        for (int i = 0; i < segments->length; i++) {
-            AstPathSegment* src = (AstPathSegment*)segments->data[i];
-            path_node->segments[i] = *src;  // copy the segment info
+    if (path_node->segment_count > 0) {
+        path_node->segments = (AstPathSegment*)pool_calloc(tp->pool,
+            path_node->segment_count * sizeof(AstPathSegment));
+        for (int i = 0; i < path_node->segment_count; i++) {
+            AstPathSegment* src = (AstPathSegment*)segments->data[i + first_segment];
+            path_node->segments[i] = *src;
             if (src->name) {
                 log_debug("  segment[%d]: %.*s (type=%d)", i, (int)src->name->len, src->name->chars, src->type);
             } else {
@@ -2814,8 +2870,8 @@ static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
 
     TSSymbol symbol = ts_node_symbol(node);
 
-    // Check for current_expr (~ or ~#)
-    if (symbol == sym_current_expr) {
+    // Check for current_expr (~ or ~#) and its contextual parent shorthand.
+    if (symbol == sym_current_expr || symbol == sym_current_parent_expr) {
         return true;
     }
 
@@ -4549,6 +4605,29 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     }
 }
 
+static AstNode* build_navigation_expr(Transpiler* tp, TSNode node) {
+    TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
+    TSNode operation_node = ts_node_child_by_field_id(node, FIELD_OPERATION);
+    AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
+        AST_NODE_NAVIGATION_EXPR, node, sizeof(AstNavigationNode));
+    nav->object = build_expr(tp, object_node);
+    nav->root = ts_node_symbol(operation_node) == SYM_PATH_ROOT;
+    nav->type = nav->object ? nav->object->type : &TYPE_ANY;
+    return (AstNode*)nav;
+}
+
+// Provider roots such as file./ are complete static paths even without a
+// following key; ordinary value./ remains dynamic navigation.
+static AstNode* build_navigation_or_path_expr(Transpiler* tp, TSNode node) {
+    ArrayList* segments = arraylist_new(8);
+    int scheme = collect_path_segments_if_path(tp, node, segments);
+    AstNode* result = scheme >= 0
+        ? build_path_expr(tp, node, (PathScheme)scheme, segments)
+        : build_navigation_expr(tp, node);
+    arraylist_free(segments);
+    return result;
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     log_debug("*** DEBUG: build_primary_expr called ***");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
@@ -4707,6 +4786,21 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_member_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
+    else if (symbol == SYM_NAV_EXPR) {
+        ast_node->expr = build_navigation_or_path_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_CURRENT_PARENT_EXPR) {
+        AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
+            AST_NODE_NAVIGATION_EXPR, child, sizeof(AstNavigationNode));
+        AstNode* current = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, child, sizeof(AstNode));
+        current->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+        nav->object = current;
+        nav->root = false;
+        nav->type = nav->object->type;
+        ast_node->expr = (AstNode*)nav;
+        ast_node->type = nav->type;
+    }
     else if (symbol == SYM_INDEX_EXPR) {
         // Check if this is a path index expression (path[expr])
         // Path subscripts add dynamic segments, unlike regular index expressions
@@ -4753,31 +4847,6 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         log_debug("build query_expr: direct=%d", query_node->direct);
         ast_node->expr = (AstNode*)query_node;
         ast_node->type = query_node->type;
-    }
-    else if (symbol == SYM_PARENT_EXPR) {
-        // parent access: expr.. for .parent, expr.._.. for .parent.parent
-        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
-        AstParentNode* parent_node = (AstParentNode*)alloc_ast_node(tp, AST_NODE_PARENT_EXPR, child, sizeof(AstParentNode));
-        parent_node->object = build_expr(tp, object_node);
-
-        // count the depth: each path_parent (..) adds one level
-        int depth = 0;
-        uint32_t child_count = ts_node_child_count(child);
-        for (uint32_t i = 0; i < child_count; i++) {
-            TSNode c = ts_node_child(child, i);
-            if (ts_node_symbol(c) == SYM_PATH_PARENT) {
-                depth++;
-            }
-        }
-        parent_node->depth = depth > 0 ? depth : 1;  // at least 1 for single ..
-        log_debug("build parent_expr: depth=%d", parent_node->depth);
-
-        // type inherits from object
-        if (parent_node->object && parent_node->object->type) {
-            parent_node->type = parent_node->object->type;
-        }
-        ast_node->expr = (AstNode*)parent_node;
-        ast_node->type = parent_node->type;
     }
     else if (symbol == SYM_CURRENT_EXPR) {
         ast_node->expr = build_current_expr(tp, child);
@@ -5674,6 +5743,8 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_INDEX_EXPR:
         return has_current_item_ref(((AstFieldNode*)node)->object) ||
                has_current_item_ref(((AstFieldNode*)node)->field);
+    case AST_NODE_NAVIGATION_EXPR:
+        return has_current_item_ref(((AstNavigationNode*)node)->object);
     case AST_NODE_ARRAY: {
         AstNode* item = ((AstArrayNode*)node)->item;
         while (item) {
@@ -11507,6 +11578,18 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_expr(tp, expr_node);
     case SYM_MEMBER_EXPR:
         return build_member_expr(tp, expr_node);
+    case SYM_NAV_EXPR:
+        return build_navigation_or_path_expr(tp, expr_node);
+    case SYM_CURRENT_PARENT_EXPR: {
+        AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
+            AST_NODE_NAVIGATION_EXPR, expr_node, sizeof(AstNavigationNode));
+        AstNode* current = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, expr_node, sizeof(AstNode));
+        current->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+        nav->object = current;
+        nav->root = false;
+        nav->type = nav->object->type;
+        return (AstNode*)nav;
+    }
     case SYM_CALL_EXPR:
         // `start_expr` names its call operand directly instead of routing it
         // through primary_expr, so the shared call builder must accept both.

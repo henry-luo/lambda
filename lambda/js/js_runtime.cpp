@@ -4680,6 +4680,13 @@ static const JsBuiltinProtoSpec k_builtin_proto_specs[] = {
     {"String", "__primitiveValue__", JS_PROTO_VALUE_EMPTY_STRING, 0},
 };
 
+static void js_define_data_prop_key(Item object, Item key, Item value, uint8_t flags) {
+    js_set_key_default(object, key, value);
+    if (flags & JS_PROTO_PROP_NON_ENUMERABLE) js_mark_non_enumerable(object, key);
+    if (flags & JS_PROTO_PROP_NON_WRITABLE) js_mark_non_writable(object, key);
+    if (flags & JS_PROTO_PROP_NON_CONFIGURABLE) js_mark_non_configurable(object, key);
+}
+
 static void js_define_data_prop(Item object, const char* name, int name_len,
         Item value, uint8_t flags) {
     Item key = js_name_item(name, name_len);
@@ -5449,11 +5456,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         js_materialize_builtin_proto_specs(fn->prototype, nm, nl);
                         // Array.prototype.length = 0 (per spec, Array.prototype is an Array exotic object)
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
-                            Item lk = (Item){.item = s2it(heap_create_name("length", 6))};
-                            js_set_key_default(fn->prototype, lk, js_make_number(0));
                             // ES spec: length is {writable:true, enumerable:false, configurable:false}
-                            js_mark_non_enumerable(fn->prototype, lk);
-                            js_mark_non_configurable(fn->prototype, lk);
+                            js_define_data_prop(fn->prototype, "length", 6, js_make_number(0),
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_CONFIGURABLE);
                             // ES spec 23.1.3.34: Array.prototype[@@unscopables]
                             // {writable:false, enumerable:false, configurable:true}
                             // Value: object with boolean true for each scoped-out method
@@ -5468,10 +5473,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                                 Item uk = (Item){.item = s2it(heap_create_name(unscopal_keys[ui], strlen(unscopal_keys[ui])))};
                                 js_set_key_default(unscopal_val, uk, (Item){.item = b2it(true)});
                             }
-                            Item us_k = js_well_known_symbol_key(11);
-                            js_set_key_default(fn->prototype, us_k, unscopal_val);
-                            js_mark_non_enumerable(fn->prototype, us_k);
-                            js_mark_non_writable(fn->prototype, us_k);
+                            js_define_data_prop_key(fn->prototype, js_well_known_symbol_key(11),
+                                unscopal_val, JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
                         }
                         // Annex B Object.prototype.__proto__ accessor.
                         if (nl == 6 && strncmp(nm, "Object", 6) == 0) {
@@ -5494,20 +5497,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         // v18g: For error constructors, set name and message on prototype
                         bool is_error = js_intrinsic_is_error_name(nm, nl);
                         if (is_error) {
-                            Item nk = (Item){.item = s2it(heap_create_name("name", 4))};
-                            Item nv = (Item){.item = s2it(heap_create_name(nm, nl))};
-                            js_set_key_default(fn->prototype, nk, nv);
-                            js_mark_non_enumerable(fn->prototype, nk);
-                            Item mk = (Item){.item = s2it(heap_create_name("message", 7))};
-                            Item mv = (Item){.item = s2it(heap_create_name("", 0))};
-                            js_set_key_default(fn->prototype, mk, mv);
-                            js_mark_non_enumerable(fn->prototype, mk);
+                            js_define_data_prop(fn->prototype, "name", 4, js_name_item(nm, nl), JS_PROTO_PROP_NON_ENUMERABLE);
+                            js_define_data_prop(fn->prototype, "message", 7, js_name_item("", 0), JS_PROTO_PROP_NON_ENUMERABLE);
                             // Set Error.prototype.toString to generic Error toString builtin
-                            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                            Item ts_fn = js_intrinsic_binding_get(
-                                JS_BUILTIN_OWNER_ERROR_INTERNAL, "toString", 8);
-                            js_set_key_default(fn->prototype, ts_key, ts_fn);
-                            js_mark_non_enumerable(fn->prototype, ts_key);
+                            js_define_data_prop(fn->prototype, "toString", 8,
+                                js_intrinsic_binding_get(JS_BUILTIN_OWNER_ERROR_INTERNAL, "toString", 8), JS_PROTO_PROP_NON_ENUMERABLE);
                             // For error subclasses, set __proto__ to Error.prototype
                             if (!(nl == 5 && strncmp(nm, "Error", 5) == 0)) {
                                 Item err_name = (Item){.item = s2it(heap_create_name("Error", 5))};
@@ -5577,9 +5571,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             Item values_fn = js_intrinsic_binding_get(
                                 JS_BUILTIN_OWNER_SET_PROTOTYPE_METHOD, "values", 6);
                             if (values_fn.item != ItemNull.item) {
-                                Item keys_key = (Item){.item = s2it(heap_create_name("keys", 4))};
-                                js_set_key_default(fn->prototype, keys_key, values_fn);
-                                js_mark_non_enumerable(fn->prototype, keys_key);
+                                js_define_data_prop(fn->prototype, "keys", 4, values_fn, JS_PROTO_PROP_NON_ENUMERABLE);
                             }
                             // Symbol.iterator = values
                             js_intrinsic_set_symbol_method(fn->prototype, 1,
@@ -5629,10 +5621,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         }
                         // v88: Populate Promise.prototype methods
                         if (nl == 7 && strncmp(nm, "Promise", 7) == 0) {
-                            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                            Item ctor_val = (Item){.function = (Function*)fn};
-                            js_set_key_default(fn->prototype, ctor_key, ctor_val);
-                            js_mark_non_enumerable(fn->prototype, ctor_key);
+                            js_define_data_prop(fn->prototype, "constructor", 11,
+                                (Item){.function = (Function*)fn}, JS_PROTO_PROP_NON_ENUMERABLE);
                             // Symbol.toStringTag = "Promise"
                             js_intrinsic_set_to_string_tag(fn->prototype, "Promise", 7);
                         }
@@ -5645,11 +5635,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         }
                         // v29: Populate String.prototype methods for test262 compliance
                         if (nl == 6 && strncmp(nm, "String", 6) == 0) {
-                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                            js_set_key_default(fn->prototype, length_key, (Item){.item = i2it(0)});
-                            js_mark_non_writable(fn->prototype, length_key);
-                            js_mark_non_enumerable(fn->prototype, length_key);
-                            js_mark_non_configurable(fn->prototype, length_key);
+                            js_define_data_prop(fn->prototype, "length", 6, (Item){.item = i2it(0)},
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE | JS_PROTO_PROP_NON_CONFIGURABLE);
                             // Symbol.iterator
                             js_intrinsic_set_symbol_method(fn->prototype, 1,
                                 JS_BUILTIN_OWNER_STRING_ITERATOR_INTERNAL,
@@ -5674,14 +5661,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                                 js_set_prototype(function_proto_root.get(),
                                     object_proto_root.get());
                             }
-                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                            js_set_key_default(fn->prototype, length_key, (Item){.item = i2it(0)});
-                            js_mark_non_writable(fn->prototype, length_key);
-                            js_mark_non_enumerable(fn->prototype, length_key);
-                            Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-                            js_set_key_default(fn->prototype, name_key, (Item){.item = s2it(heap_create_name("", 0))});
-                            js_mark_non_writable(fn->prototype, name_key);
-                            js_mark_non_enumerable(fn->prototype, name_key);
+                            js_define_data_prop(fn->prototype, "length", 6, (Item){.item = i2it(0)},
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
+                            js_define_data_prop(fn->prototype, "name", 4, js_name_item("", 0),
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             Item thrower = js_intrinsic_binding_get(
                                 JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "ThrowTypeError", 14);
@@ -5689,13 +5672,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             Item arguments_key = (Item){.item = s2it(heap_create_name("arguments", 9))};
                             js_install_native_accessor(fn->prototype, caller_key, thrower, thrower, JSPD_NON_ENUMERABLE);
                             js_install_native_accessor(fn->prototype, arguments_key, thrower, thrower, JSPD_NON_ENUMERABLE);
-                            Item has_instance_key = js_well_known_symbol_key(3);
-                            Item has_instance = js_intrinsic_binding_get(
-                                JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "[Symbol.hasInstance]", 20);
-                            js_set_key_default(fn->prototype, has_instance_key, has_instance);
-                            js_mark_non_writable(fn->prototype, has_instance_key);
-                            js_mark_non_enumerable(fn->prototype, has_instance_key);
-                            js_mark_non_configurable(fn->prototype, has_instance_key);
+                            js_define_data_prop_key(fn->prototype, js_well_known_symbol_key(3),
+                                js_intrinsic_binding_get(JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL,
+                                    "[Symbol.hasInstance]", 20),
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE | JS_PROTO_PROP_NON_CONFIGURABLE);
                         }
                         // Boolean methods must be published on the real
                         // prototype. Property-miss synthesis formerly hid the
@@ -14217,6 +14197,12 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // generator callee whose current prototype is read after those parameters.
     js_pending_args_callee = saved_pending_args_callee_root.get();
     js_eval_initializer_context = prev_eval_initializer_context;
+    if (result_home && !uses_local_result_home &&
+            lambda_item_uses_scalar_home(result)) {
+        // D5.3: context-ABI MIR calls ignore the legacy result-home argument;
+        // adopt their transient scalar before the callee activation expires.
+        result = lambda_item_adopt_scalar_home(result, result_home);
+    }
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
 }
 

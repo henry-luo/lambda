@@ -38,6 +38,7 @@ static inline TypeId local_item_type_id(Item item) {
 #else
 extern "C" TypeId item_type_id(Item item);
 #endif
+extern "C" Pool* path_get_pool(void);
 
 extern "C" {
 
@@ -100,6 +101,7 @@ static TargetScheme scheme_from_path(Path* path) {
         case PATH_SCHEME_HTTP: return TARGET_SCHEME_HTTP;
         case PATH_SCHEME_HTTPS: return TARGET_SCHEME_HTTPS;
         case PATH_SCHEME_SYS: return TARGET_SCHEME_SYS;
+        case PATH_SCHEME_LOGICAL: return TARGET_SCHEME_FILE;
         case PATH_SCHEME_REL:
         case PATH_SCHEME_PARENT:
             return TARGET_SCHEME_FILE;  // relative paths are local files
@@ -233,10 +235,18 @@ Target* item_to_target(uint64_t item, Url* cwd) {
             mem_free(target);
             return NULL;
         }
+        if (path_get_scheme(path) == PATH_SCHEME_FILE &&
+                !path_file_authority_is_local(path)) {
+            log_error("item_to_target: remote file authority is not supported");
+            mem_free(target);
+            return NULL;
+        }
 
         target->type = TARGET_TYPE_PATH;
-        target->path = path;
-        target->scheme = scheme_from_path(path);
+        Pool* pool = path_get_pool();
+        target->path = (pool && path_get_scheme(path) == PATH_SCHEME_LOGICAL)
+            ? path_qualify_default(pool, path) : path;
+        target->scheme = scheme_from_path(target->path);
         target->url_hash = target_compute_hash(target);
 
         log_debug("item_to_target: created Path target (scheme=%d, hash=0x%llx)", target->scheme, (unsigned long long)target->url_hash);
@@ -296,6 +306,16 @@ void* target_to_local_path(Target* target, Url* cwd) {
     else if (target->type == TARGET_TYPE_PATH) {
         Path* path = target->path;
         if (!path) {
+            strbuf_free(path_buf);
+            return NULL;
+        }
+        Pool* pool = path_get_pool();
+        if (pool && path_get_scheme(path) == PATH_SCHEME_LOGICAL) {
+            path = path_qualify_default(pool, path);
+        }
+        if (path_get_scheme(path) == PATH_SCHEME_FILE &&
+                !path_file_authority_is_local(path)) {
+            log_error("target_to_local_path: remote file authority is not supported");
             strbuf_free(path_buf);
             return NULL;
         }
@@ -417,7 +437,7 @@ bool target_is_dir(Target* target) {
     }
     else if (target->type == TARGET_TYPE_PATH && target->path) {
         StrBuf* path_buf = strbuf_new();
-        path_to_os_path(target->path, path_buf);
+        path_to_os_path(path_qualify_default(path_get_pool(), target->path), path_buf);
         bool is_dir = file_is_dir(path_buf->str);
         strbuf_free(path_buf);
         return is_dir;
@@ -458,7 +478,7 @@ bool target_exists(Target* target) {
     }
     else if (target->type == TARGET_TYPE_PATH && target->path) {
         StrBuf* path_buf = strbuf_new();
-        path_to_os_path(target->path, path_buf);
+        path_to_os_path(path_qualify_default(path_get_pool(), target->path), path_buf);
         bool exists = file_exists(path_buf->str);
         strbuf_free(path_buf);
         return exists;

@@ -621,10 +621,12 @@ extern "C" Item js_xhr_send(Item body_arg) {
     log_debug("xhr: send() %s %s", xhr->method, xhr->url);
 
     if (xhr->url && strncmp(xhr->url, "file:", 5) == 0) {
-        const char* path = xhr->url + 5;
-        if (path[0] == '/' && path[1] == '/') path += 2;
+        Url* file_url = url_parse(xhr->url);
+        // url_to_local_path owns the Windows drive-letter and percent-decoding
+        // rules; stripping file:// manually turns file:///C:/... into /C:/... .
+        char* path = file_url ? url_to_local_path(file_url) : nullptr;
         size_t file_size = 0;
-        char* file_data = read_binary_file(path, &file_size);
+        char* file_data = path ? read_binary_file(path, &file_size) : nullptr;
         if (file_data) {
             // Browser-page file XHR shares fetch's local-resource semantics;
             // routing file:// through the HTTP client always produced status 0.
@@ -635,8 +637,12 @@ extern "C" Item js_xhr_send(Item body_arg) {
             // File requests bypass http_fetch, but their synthesized header
             // lines have the same per-send ownership as network requests.
             xhr_free_request_header_lines(header_strs, xhr->req_header_count);
+            if (path) mem_free(path);
+            if (file_url) url_destroy(file_url);
             return make_js_undef();
         }
+        if (path) mem_free(path);
+        if (file_url) url_destroy(file_url);
     }
 
     // Perform HTTP request (synchronous)

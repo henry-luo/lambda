@@ -1728,11 +1728,11 @@ static void emit_expr(const char* source, AstNode* node) {
         break;
     }
 
-    case AST_NODE_PARENT_EXPR: {
-        AstParentNode* pe = (AstParentNode*)node;
-        printf("(parent ");
-        emit_expr(source, pe->object);
-        printf(" %d)", pe->depth);
+    case AST_NODE_NAVIGATION_EXPR: {
+        AstNavigationNode* nav = (AstNavigationNode*)node;
+        printf("(%s ", nav->root ? "root" : "parent");
+        emit_expr(source, nav->object);
+        printf(")");
         break;
     }
 
@@ -2101,7 +2101,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_TYPE_STAM: return "AST_NODE_TYPE_STAM";
         case AST_NODE_PATH_EXPR: return "AST_NODE_PATH_EXPR";
         case AST_NODE_PATH_INDEX_EXPR: return "AST_NODE_PATH_INDEX_EXPR";
-        case AST_NODE_PARENT_EXPR: return "AST_NODE_PARENT_EXPR";
+        case AST_NODE_NAVIGATION_EXPR: return "AST_NODE_NAVIGATION_EXPR";
         case AST_NODE_QUERY_EXPR: return "AST_NODE_QUERY_EXPR";
         case AST_NODE_SYS_FUNC: return "AST_NODE_SYS_FUNC";
         case AST_NODE_NAMED_ARG: return "AST_NODE_NAMED_ARG";
@@ -2420,8 +2420,8 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_lambda_dump_field(source, "segment", path->segment_expr, indent + 1);
             break;
         }
-        case AST_NODE_PARENT_EXPR:
-            emit_lambda_dump_field(source, "object", ((AstParentNode*)node)->object, indent + 1);
+        case AST_NODE_NAVIGATION_EXPR:
+            emit_lambda_dump_field(source, "object", ((AstNavigationNode*)node)->object, indent + 1);
             break;
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)node;

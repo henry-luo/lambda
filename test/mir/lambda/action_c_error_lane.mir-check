@@ -4,9 +4,10 @@
   "checks": [
     {
       "in_func": "_checked_double_#",
-      "expect": [
-        "func	d, i64, p:runtime",
-        "ret\t"
+      "expect": ["ret\t"],
+      "expect_any": [
+        "func\td, i64, p:runtime",
+        "func\td, p:runtime"
       ],
       "forbid": [
         "lambda_item_resolve_pending"

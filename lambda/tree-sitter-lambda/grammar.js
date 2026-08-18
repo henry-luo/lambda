@@ -150,8 +150,11 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$._expr, $.member_expr],
-    [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
+    [$._expr, $.member_expr, $.nav_expr],
+    [$._expr, $.nav_expr],                         // expr.~~ / expr./ postfix navigation
     [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
+    [$.dotted_name, $.path_expr],                  // dotted attributes vs rooted path steps
+    [$._attr_expr, $.member_expr, $.nav_expr],     // attribute value postfix chain
   ],
 
   precedences: $ => [
@@ -162,7 +165,7 @@ module.exports = grammar({
     $.call_expr,
     $.index_expr,
     'member',
-    $.parent_expr,
+    $.nav_expr,
     $.primary_expr,
     $.unary_expr,
     // statement end: linebreak terminates statement before binary operators can continue
@@ -453,9 +456,9 @@ module.exports = grammar({
       $.pattern_island, // inline string/symbol type pattern
       $.identifier,
       $.index_expr,
-      $.path_expr,   // /, ., or .. paths with optional segment
+      $.path_expr,   // / or . paths with optional segment
       $.member_expr,
-      $.parent_expr,  // expr.. for parent access shorthand
+      $.nav_expr,     // expr.~~ / expr./ navigation
       $.handler_expr,
       $.propagate_expr,
       $.call_expr,
@@ -464,6 +467,7 @@ module.exports = grammar({
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_expr,   // ~ or ~# for pipe context
+      $.current_parent_expr, // ~~ is exactly ~.~~
       $.current_error_expr, // ^ inside an active error-handler body
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
@@ -520,37 +524,45 @@ module.exports = grammar({
       field('query', $.primary_type),
     ),
 
-    // Path prefix: /, ., or .. for path expressions
-    // Combines path_root, path_self, path_parent into single token for path_expr
-    _path_prefix: _ => token(choice('/', '.', '..')),
+    // Path prefix: / or . for rooted/relative path expressions.
+    _path_prefix: _ => token(choice('/', '.')),
 
     // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
     var_param_marker: _ => token(prec(3, 'var')),
 
-    // Path parent: .. for parent directory (kept separate for parent_expr)
-    path_parent: _ => '..',
+    // Navigation operations. `~~` is the sole parent step and `/` is the
+    // postfix root step; both share member precedence.
+    path_parent: _ => token(prec(3, '~~')),
+    path_root: _ => token(prec(3, '/')),
 
-    // Path expression: /, ., or .. optionally followed by a field
-    // This allows /etc, .test, ..parent, /, ., .. as path expressions
-    path_expr: $ => prec.right(seq(
-      $._path_prefix,
-      optional(field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type)))
+    // Path expression: a logical root requires the dotted first step (`/.a`)
+    // while a bare `/` remains the root token; relative paths keep `.a`.
+    path_expr: $ => prec.right(choice(
+      seq('/', optional(seq('.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent))))),
+      seq('.', optional(field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent))))
     )),
 
     // Member access is the value form of dot syntax; dotted_name is reserved
     // for qualified element and attribute names.
     member_expr: $ => prec.left('member', seq(
-      field('object', choice($.primary_expr, $.member_expr)), '.',
+      field('object', choice($.primary_expr, $.member_expr, $.nav_expr)), '.',
       field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),
 
-    // Parent access: expr.. for .parent, expr.._.. for .parent.parent
-    parent_expr: $ => seq(
-      field('object', $.primary_expr),
-      $.path_parent,                     // .. for parent access
-      repeat(seq('_', $.path_parent))   // _.. for additional parent levels
-    ),
+    // Root/parent access after an expression. Keep the operation as a named
+    // child so the AST can distinguish it from an ordinary member named
+    // `parent`.
+    nav_expr: $ => prec.left('member', seq(
+      field('object', choice($.primary_expr, $.member_expr, $.nav_expr)),
+      '.',
+      field('operation', choice($.path_parent, $.path_root))
+    )),
+
+    // Bare `~~` is the contextual parent atom and lowers to `~.~~`.
+    current_parent_expr: _ => token(prec(4, '~~')),
 
     // Path wildcard: * (single segment) or ** (recursive, zero or more segments)
     path_wildcard: _ => token(choice('**', '*')),

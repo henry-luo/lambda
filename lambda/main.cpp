@@ -437,6 +437,8 @@ extern void jm_abandon_active_mir_after_signal(void);
 // In MinGW, we'll use regular setjmp instead of the Microsoft intrinsic
 #include <setjmp.h>
 #include <windows.h>  // For console UTF-8 setup
+// the PSAPI header declares PROCESS_MEMORY_COUNTERS and GetProcessMemoryInfo; windows.h does not.
+#include <psapi.h>
 extern "C" int __intrinsic_setjmpex(jmp_buf env, void* context) {
     // In practice, __intrinsic_setjmpex is similar to setjmp but with SEH support
     // For MinGW compatibility, we'll use standard setjmp

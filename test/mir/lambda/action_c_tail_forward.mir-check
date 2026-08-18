@@ -5,13 +5,16 @@
     {
       "return_convention": 3,
       "in_func": "_forward_#",
-      "expect": [
+      "expect": ["ret\t"],
+      "expect_any": [
         "func\ti64, i64, p:runtime, i64:%p1",
-        "ret\t"
+        "func\ti64, p:runtime, i64:%p1"
       ],
-      "forbid": [
-        "lambda_item_resolve_pending"
-      ]
+      "forbid_if": {
+        "func\ti64, i64, p:runtime, i64:%p1": [
+          "lambda_item_resolve_pending"
+        ]
+      }
     },
     {
       "return_convention": 3,

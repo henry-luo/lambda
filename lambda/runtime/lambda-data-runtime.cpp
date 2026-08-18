@@ -1639,6 +1639,8 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         }
         return h;
     }
+    case LMD_TYPE_PATH:
+        return path_hash(key.path, seed0, seed1);
     default:
         return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
     }

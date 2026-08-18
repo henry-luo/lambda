@@ -171,7 +171,7 @@ static void interp_visit_children(AstNode* node, InterpChildFn visit, void* ctx)
         V(((AstPathIndexNode*)node)->base_path);
         V(((AstPathIndexNode*)node)->segment_expr);
         break;
-    case AST_NODE_PARENT_EXPR:      V(((AstParentNode*)node)->object); break;
+    case AST_NODE_NAVIGATION_EXPR:  V(((AstNavigationNode*)node)->object); break;
     case AST_NODE_QUERY_EXPR:       V(((AstQueryNode*)node)->object); break;
     case AST_NODE_CONSTRAINED_TYPE:
         V(((AstConstrainedTypeNode*)node)->base);
@@ -300,7 +300,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_CURRENT_INDEX:
     case AST_NODE_PATH_EXPR:
     case AST_NODE_PATH_INDEX_EXPR:
-    case AST_NODE_PARENT_EXPR:
+    case AST_NODE_NAVIGATION_EXPR:
     case AST_NODE_QUERY_EXPR:
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM:
@@ -331,7 +331,7 @@ const char* interp_node_kind_name(AstNodeType kind) {
     K(AST_NODE_ORDER_SPEC) K(AST_NODE_GROUP_CLAUSE) K(AST_NODE_JOIN_KEY)
     K(AST_NODE_FOR_EXPR) K(AST_NODE_INDEX_ASSIGN_STAM) K(AST_NODE_MEMBER_ASSIGN_STAM)
     K(AST_NODE_PIPE_FILE_STAM) K(AST_NODE_TYPE_STAM) K(AST_NODE_PATH_EXPR)
-    K(AST_NODE_PATH_INDEX_EXPR) K(AST_NODE_PARENT_EXPR) K(AST_NODE_QUERY_EXPR)
+    K(AST_NODE_PATH_INDEX_EXPR) K(AST_NODE_NAVIGATION_EXPR) K(AST_NODE_QUERY_EXPR)
     K(AST_NODE_SYS_FUNC) K(AST_NODE_NAMED_ARG) K(AST_NODE_TYPE)
     K(AST_NODE_CONTENT_TYPE) K(AST_NODE_LIST_TYPE) K(AST_NODE_ARRAY_TYPE)
     K(AST_NODE_MAP_TYPE) K(AST_NODE_ELMT_TYPE) K(AST_NODE_FUNC_TYPE)
@@ -765,8 +765,12 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t l = plan_need(b->left);
         // Left is held while right runs, and both are published across the
         // helper call, so the call itself has two slots live.
-        uint32_t r = 1 + plan_need(b->right);
-        uint32_t at_call = 2;
+        // The mapping context owns five additional homes beside the source
+        // while its right side runs; nested pipes retain the enclosing homes.
+        uint32_t r = 6 + plan_need(b->right);
+        // Mapping pipes retain the source, result, item, index, parent, and
+        // root occurrence homes while evaluating each right-hand expression.
+        uint32_t at_call = 6;
         uint32_t best = l > r ? l : r;
         return best > at_call ? best : at_call;
     }
@@ -793,6 +797,15 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t at_call = 2;
         uint32_t best = o > k ? o : k;
         return best > at_call ? best : at_call;
+    }
+    case AST_NODE_NAVIGATION_EXPR: {
+        // A direct occurrence chain is evaluated once for the navigation
+        // result and may be re-evaluated as its parent carrier; reserve both
+        // homes in addition to the child expression's normal demand.
+        AstNavigationNode* nav = (AstNavigationNode*)node;
+        uint32_t child = plan_need(nav->object);
+        uint32_t at_call = child + 3;
+        return at_call > 3 ? at_call : 3;
     }
     case AST_NODE_CALL_EXPR:
     case AST_NODE_NEW_EXPR: {

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 4.1.0 (2026-08-18)
+**Spec version:** 6.0.0 (2026-08-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -38,6 +38,8 @@ RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
 R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
 C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md)).
+PTH1v2, PTH2v2, PTH3–PTH29
+([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
 
 ---
@@ -187,6 +189,56 @@ harnesses.
   deterministic iteration, order-significant formats — while map **equality
   compares keys unordered** (§S5.4). Representation order is data; identity is
   content. [C8.6-R]
+
+### S2.4 Paths
+
+- **S2.4.1v2*** Path values use dotted steps. `/` selects the logical global
+  reference root and `.` the active relative reference root: a resolver may
+  qualify `/.a.b` as `file.hostname.a.b` (projected as `/a/b`) or as
+  `http.hostname.a.b`; `.a.b` remains relative to the active base. `~~` is the
+  parent step, never a root: `.~~.a` is parent-relative and `.~~.~~.a` applies
+  two parent steps. The retired `/a`, `..a`, and compound `_..` spellings do
+  not exist. Quoted, wildcard, and dynamic steps retain their ordinary
+  dotted/indexed forms. [PTH1v2, PTH2v2, PTH3–PTH4, PTH11, PTH17]
+- **S2.4.2v3*** Every hierarchical reference is a typed root plus ordered
+  operations. Ordinary keys are `NameKey` or non-negative `IntKey`; a dynamic
+  key is evaluated before lookup and must produce one of those two kinds.
+  Other key values are unsupported reads under S7.1.1. Root, parent, and
+  wildcard navigation are operation kinds, so `a.1.b` and `a.'1'.b` remain
+  distinct. Postfix root `./` discards descendant steps back to the logical or
+  provider/authority anchor; unresolved relative root selection remains as
+  `./`. Parent steps apply left-to-right: they remove a preceding child,
+  accumulate at the relative root, and clamp at an anchored root. Equality,
+  hashing, printing, target resolution, and
+  `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1,
+  PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
+- **S2.4.3*** Paths, names, symbols, and member expressions use this one
+  reference scheme but retain distinct evaluation contracts. Paths are
+  static root-selected plans and produce lazy target handles; names are
+  statically namespace-qualified (`a` may become `ns.a`) and read bindings;
+  symbols are static `NameKey` reference values and do not implicitly read
+  bindings.
+  Member/index expressions apply typed keys to a runtime base and are dynamic.
+  Static specialization and generic dynamic lookup must be semantically
+  identical; the scheme introduces no mutable reference identity. [S1.6,
+  S5.1.4, S8.2.2, S9.1.5, PTH13–PTH16, PTH20]
+- **S2.4.4*** Each evaluation's immutable resolver deterministically maps
+  logical `/` prefixes, namespaces, and provider aliases to qualified roots.
+  Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
+  it never uses mutable process-global bindings or existence/failure-based
+  provider fallback. Address resolution performs no I/O; forcing an external
+  target is a separate operation with its declared effect/error contract.
+  [S1.10, PTH16–PTH19]
+- **S2.4.5v2*** Paths have three root forms: rooted `/.a.b`, relative `.a.b`,
+  and absolute `SchemeName...`. Rooted paths qualify logical `/` through the
+  active resolver; absolute paths name their provider/authority directly and
+  bypass that mount. File absolutes use `file./.a.b` for `/a/b` on the current
+  machine and `file.hostname.a.b` for `/a/b` on a named machine; consequently
+  `file.a.b` selects host `a` and path key `b`. A registered scheme name
+  heading a dotted chain is reserved as an absolute-path root. Rooted and
+  absolute path values retain distinct root kinds even when they resolve to
+  the same qualified target. All three forms use the same typed operations.
+  [S5.1.4, PTH21–PTH28]
 
 ---
 
@@ -935,6 +987,42 @@ construct; `let` is final.* [C4]
   Lambda is a keyword-operator language; new operators prefer words over
   sigils.
 
+### S10.4 Parent navigation
+
+- **S10.4.1*** Postfix `.~~` is the parent-navigation step at the ordinary
+  member/index precedence tier; it chains left-to-right (`value.~~.~~.name`).
+  A value domain or active traversal context supplies the parent relation;
+  absence of one yields `null` and chains by S7.1.1. Path values use S2.4.2v3.
+  A field named `.parent` remains an ordinary member, not a syntactic alias.
+  [PTH3, PTH5, PTH9]
+- **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
+  bound, selects the innermost current-value context, and counts as a free
+  `~` for the S10.1.2 mapping-pipe test. Thus `~~.~~.a` means
+  `~.~~.~~.a`; it never denotes a relative path, whose form starts with `.`.
+  [S10.1.2,
+  S10.1.3, PTH6]
+- **S10.4.3*** Contextual parent navigation is occurrence-based and carries
+  lineage in the evaluation context as a navigation path, cursor, or zipper.
+  It never adds parent pointers or observable identity to Lambda containers or
+  document values. [S1.4, S1.6, S9.1, S9.3, PTH10]
+
+### S10.5 Root navigation
+
+- **S10.5.1*** `/` is the one root-selection operation. Initial `/` selects
+  the logical root of the implicit resolution universe; postfix `./` selects
+  the root of its explicit base. The postfix form has ordinary member/index
+  precedence and chains left-to-right (`value./.name`, `value.~~./.name`).
+  [S1.7, PTH25–PTH26]
+- **S10.5.2*** For a path, `./` selects its logical or provider/authority
+  anchor. For a traversal occurrence it selects the outermost occurrence from
+  the active navigation path/zipper; a declared root-aware model supplies its
+  own root; a standalone hierarchical value is its own root. Absence of a root
+  relation yields `null` and chains by S7.1.1. [PTH26–PTH28]
+- **S10.5.3*** Dynamic root navigation is occurrence-based. Its lineage lives
+  in the evaluation context as a navigation path, cursor, or zipper; it never
+  adds root/parent pointers or observable identity to Lambda values. [S1.4,
+  S1.6, S9.1, S9.3, PTH29]
+
 ---
 
 ## S11 Types and Patterns
@@ -1247,13 +1335,14 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
+Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 [`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
 [`Lambda_Impl_Error_Rework.md`](../vibe/Lambda_Impl_Error_Rework.md),
 [`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
 
 | Ruling | Status |
 |---|---|
+| S2.4.1v2, S2.4.2v3, S2.4.3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path scope on 2026-08-18: logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, and network hostname discovery remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
@@ -1317,7 +1406,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO16** Close-error routing (double fault): proposed — normal-exit close failure becomes the `pn`'s error; on error exit the original wins, close error attached suppressed. To confirm. [Features §3.5.2]
 - **SO17** Resource-carrying-type containment rules (when a wrapping value is itself resource-typed). [R3]
 - **SO18** Snapshot iteration to be formally recorded (C4.2d) when implemented.
-- **SO19** Upward/lateral document axes must be path-carrying or zippers, never parent pointers — needs a design note before someone hacks pointers in.
+- **SO19** Root and upward-parent navigation are resolved by S10.4.3,
+  S10.5.3 / PTH10, PTH29: lineage lives in a navigation path, cursor, or
+  zipper, never root/parent pointers on document values. Lateral-axis spellings
+  and exact semantics remain open and must preserve that invariant.
 
 **Concurrency**
 - **SO20** O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) — must precede thread-mode workers.
@@ -1345,7 +1437,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C17 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R | `Lambda_Semantics_Formal.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; PTH1v2, PTH2v2, PTH3–PTH29 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md` |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only) |
@@ -1353,7 +1445,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S7 absence/errors | C5, C5.3, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | S8 membership | C5.3a; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
 | S9 mutability | C4, C4.2a/b/c, C4.3, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Design_Runtime_COW.md` |
-| S10 operators | C6, C6.2–C6.4, C10 | `Lambda_Semantics_Formal2.md` |
+| S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |

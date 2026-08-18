@@ -1,73 +1,73 @@
 // Path expression tests
-// Paths use /, ., .. for file, relative, parent schemes
+// Paths use /., ., and .~~ for logical, relative, and parent paths
 
 "Basic path expressions"
-/etc.hosts
-/usr.local.bin
+/.etc.hosts
+/.usr.local.bin
 http.api.example.com
 https.secure.api.example.com
 sys.config
 
 "Path with 6+ segments (tests extended path_build)"
-/home.user.documents.projects.lambda.test
+/.home.user.documents.projects.lambda.test
 
 "Path in let binding"
-let config_path = /etc.config
+let config_path = /.etc.config
 config_path
 
 "Path in array"
-[/a, /b, http.x]
+[/.a, /.b, http.x]
 
 "Path in map"
-{input: /data.input, output: /data.output}
+{input: /.data.input, output: /.data.output}
 
 "Path with quoted segments (dots in filenames)"
-/etc.'nginx.conf'
-/home.user.'config.json'
+/.etc.'nginx.conf'
+/.home.user.'config.json'
 http.'api.github.com'.users
 
 "Dynamic path segment with subscript"
 let segment = "config"
-let dynamic_path = /etc[segment]
+let dynamic_path = /.etc[segment]
 dynamic_path
 
 "Wildcard patterns (single segment match)"
-/src.*
+/.src.*
 http.api.users.*
 
 "Wildcard patterns (recursive match)"
-/src.**
+/.src.**
 http.api.**
 
 "Quoted wildcard (literal asterisk, not a wildcard)"
-/data.'*'
-/data.'**'
+/.data.'*'
+/.data.'**'
 
 "Path type checking"
-type(/etc.hosts)
+type(/.etc.hosts)
 
 "File content (lazy loading)"
-let hosts = /etc.hosts
+let hosts = /.etc.hosts
 (len(hosts) > 0)
 
 "exists() function - directory exists"
-exists(/etc)
+exists(/.etc)
 
 "exists() function - file exists"
-exists(/etc.hosts)
+exists(/.etc.hosts)
 
 "exists() function - non-existent path"
-exists(/this_path_does_not_exist)
+exists(/.this_path_does_not_exist)
 
 "len() on directory - counts entries"
-(len(/etc) > 0)
+(len(/.etc) > 0)
 
 "Path iteration - for loop over directory"
-let etc_items = for (item in /etc) item
+let etc_items = for (item in /.etc) item
 (len(etc_items) > 0)
 
 "Path iteration - collect types"
-let item_types = for (item in /etc) type(item)
+let item_types = for (item in /.etc) type(item)
 item_types[0]
 
 "Relative path with . scheme"
@@ -125,51 +125,51 @@ let names = for (item in .test.input.dir.*) item.name
 let first_item = .test.input.dir.child_dir
 first_item.is_dir
 
-"Parent path with .. scheme"
-let parent_path = ..
+"Parent path with .~~ scheme"
+let parent_path = .~~
 parent_path
 
 "Parent path with segment"
-..test.input.dir
+.~~.test.input.dir
 
 "Parent path type checking"
-type(..test)
+type(.~~.test)
 
 'exists() on parent path'
-// exists(..Lambda.test.input.dir)
+// exists(.~~.Lambda.test.input.dir)
 
 "Parent path in let binding"
-let parent_dir = ..Lambda.test
+let parent_dir = .~~.Lambda.test
 parent_dir
 
 "Parent path with quoted segment"
-..Lambda.'README.md'
+.~~.Lambda.'README.md'
 
 "Path ++ string: append segment"
-let base = /etc
+let base = /.etc
 base ++ "hosts"
 
 "Path ++ string: multiple appends"
-let p1 = /home
+let p1 = /.home
 let p2 = p1 ++ "user"
 p2 ++ "documents"
 
 "Path ++ symbol: append symbol segment"
-let dir = /var
+let dir = /.var
 dir ++ 'log'
 
 "Path ++ relative path: concat relative path"
-let abs = /home.user
+let abs = /.home.user
 let rel = .documents.file
 abs ++ rel
 
 "Path ++ parent path: concat parent path"
-let base_path = /home.user.projects
-let parent_rel = ..shared.lib
+let base_path = /.home.user.projects
+let parent_rel = .~~.shared.lib
 base_path ++ parent_rel
 
 "Path type preserved after ++"
-type(/etc ++ "hosts")
+type(/.etc ++ "hosts")
 
 "Chained ++ operations"
-/home ++ "user" ++ "documents" ++ "file.txt"
+/.home ++ "user" ++ "documents" ++ "file.txt"
