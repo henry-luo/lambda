@@ -340,10 +340,179 @@ js-mir-emission 21/21; test262 0 failures / 0 regressions (one test needed the h
 Phase-4 batch-kill retry). Fixture: `test/lambda/proc/type_infer_native_locals.ls`, whose
 values were checked to be **identical on a binary predating both T19-3 and T19-4** (SI3v2).
 
-**Still open in this track:** the transitive scalar edge. `mul_Av(n, …)` gets no closed-INT
-witness because its caller forwards its own untyped `n`, and `resolve_inferred_type`
-deliberately requires real numeric use so "a param merely passed along stays boxed". A
-forwarding fixpoint would close spectralnorm's remaining 13.7x.
+#### The companion-lane bug — **FIXED**
+
+`mir: pending companion reached function epilogue in _try_error_prefix_match_…` was a real
+latent crash, not a symptom of the inference work. Two independent causes:
+
+**(a) Root cause — a declaration initializer inherited the caller's tail flag.**
+`transpile_let_stam` never cleared `mt->in_tail_position`, so `(let text = concat_strings(…),
+if …)` appearing in tail position lowered its *initializer* as if it were the function's tail
+expression. The direct-call emitter's tail-forward path then handed the callee's shape-2 pair
+to the return epilogue for a value that never reaches a return, and `finish_function_epilogue`
+aborted on the D5.2.1v3 one-live-pair assertion. A binding is a side effect of the enclosing
+expression, not its result — `transpile_binary_out` already clears the same flag for operands,
+and `transpile_let_stam` now does too.
+
+**(b) A structural hole in the same invariant.** `transpile_if` materialized a pending pair for
+the *condition* but not for the *arms*, and the arms are `MIR_MOV`ed into a shared join
+register — which erases the register identity `mir_materialize_pending_reg` matches on
+(`pending_live_item == value`). A pair reaching a join therefore survives silently to the same
+abort. No corpus script reaches it (the leak above was the initializer), but the epilogue
+asserts the invariant, so both arms now resolve at the producer. It is a no-op when no pair is
+live.
+
+Verified: baseline 3808/3808, mir-emission 59/59, ratchet 16/16, js-mir 21/21, test262
+40261/40261 with **zero** batch-kill retries.
+
+#### The transitive scalar edge — BUILT, MEASURED, **NOT SHIPPED**
+
+It works. It is not worth it. All three pieces were implemented and measured on release builds.
+
+1. **Forwarding as a real use** (`INFER_FORWARDED_ARG`) closes the chain: `mul_AtAv.n`
+   resolves int, and the driver's fixpoint carries the witness to `mul_Av`/`mul_Atv` in the
+   next round. spectralnorm 22.09 → 17.69 (**1.25x**).
+2. **But it costs far more than it gains.** A param merely passed along gains nothing from a
+   native lane and pays an unbox at entry plus a re-box at the forward: **geomean 1.02** over
+   63 rows, with gcbench +31%, nqueens +29%, binarytrees +26%, cd2 +9%. The existing comment
+   ("a param merely passed along stays boxed") was right on performance grounds.
+3. **And the soundness prerequisite costs more still.** Relaxing the resolve-time guards to
+   let the chain through exposes that `INFER_CALLSITE_INT` is not the proof its name claims:
+   `mir_callsite_join_specialization_type` SKIPS an argument it cannot type instead of joining
+   it to ANY, so it means "every call site whose argument was a statically known scalar passed
+   an int". cd's `rbt_put(tree, key, value)` takes `1`, an array AND a map, and records INT —
+   with the guards relaxed, cd2_orig miscompiles (`type check at declaration 'wc2' failed:
+   expected int, got null`). Making the join honest fixes cd and is the correct rule, but it
+   costs **geomean 1.038** on its own (gcbench +31%, nqueens +30%, binarytrees +28%), because
+   `ANY` there conflates "genuinely dynamic argument" with "this round cannot type it yet" and
+   poisons the second case too.
+
+**Disposition:** shipped the companion-lane fix only; the tree is otherwise at landed T19-4
+(re-verified against the archived v32 control back-to-back: sieve 16.4x, primes 3.47x,
+spectralnorm 2.01x, bounce 2.31x). ⚠ comments now mark both the skip in
+`mir_callsite_join_specialization_type` and the forwarding decision in
+`resolve_inferred_type`, each carrying its measured cost. **The prerequisite for revisiting
+this is separating "unknown yet" from "genuinely dynamic" in the call-site join** — flipping
+the branch is not it. Until then the resolve-time guards must not be relaxed: that combination
+miscompiles cd.
+
+⚠ Benchmark note: an early sweep of this work showed a uniform 3–18% slowdown across all 63
+rows *including* rows the change cannot touch (`sum`, `sumfp`, `pidigits2`, `regexredux`).
+That was machine state after hours of continuous builds, not code. Always re-check against an
+archived control binary run back-to-back before believing a broad regression.
+
+### T19-4 — Closed-caller specialization (owns sieve/primes/spectralnorm) — **LANDED**
+
+Four changes, two of them fixes to *pre-existing* oracle/emitter disagreements that T19-3
+merely made reachable.
+
+**(a) The call-site witness had no case for a local binding.** `mir_callsite_arg_elem_type`
+resolved a literal array, a static `T[]`, a direct `fill(n, v)` and an identifier naming a
+parameter of the ENCLOSING function — but not `var flags = fill(5000, true)` followed by
+`sieve(flags, sz)`, which is how an array normally reaches a call. Verified by probe: the
+consumer side was already satisfied (`used_as_container=1`, `container_store_type=BOOL`,
+courtesy of T19-3's `for`-walk) while `specialization_types[0]` sat at its never-recorded
+sentinel. Added local-binding resolution (declared array type first, else recurse into the
+initializer, depth-capped). A mutable binding rebound to a different shape is a *speed*
+question, not a soundness one — the witness only picks which native shape to generate, and
+both the callee's body evidence and the call site's carrier check must still agree or the
+call routes to the `_b` entry.
+
+**(b) Unannotated locals never reached the int lane.** The declaration gate required the
+initializer's *boxed carrier* to already read `int`, so `var k = i + i` bound boxed and
+dragged its whole loop into the generic tower. A proven native int tree IS the lane. This is
+not a new kind of binding — `var b = 3` already binds natively and the assignment cascade
+already widens it when a later value does not fit (verified: `var b = 3; b = 1.5` → `1.5`,
+identical on a pre-change binary).
+
+⚠ The decision must have **one owner**. Writing it only at the declaration site broke
+`(let a = 100, let b = a + 1, b)`: the block published a raw lane while the carrier oracle's
+own block-tail resolution still reported the default boxed carrier, and the module read `101`
+as an Item tag. Boxing the block instead broke the opposite direction (`(let t = ints[1], t) + 1`
+→ `inf`, caught by `type_infer_carrier_lanes`). Both are the same mistake — the answer asked
+twice, spelled differently. Extracted `mir_unannotated_native_int_decl()` and call it from
+both the declaration lowering and the oracle.
+
+**(c) The carrier oracle claimed `int / int` and `int % int` were raw lanes.** They are not:
+`transpile_binary_out` returns the `LaneReg` only when the consumer passes `native_int_out`,
+and boxes otherwise — exactly as for ADD/SUB/MUL, which already reported ANY. This stayed
+hidden while both operands were rarely proven int at once; once loop induction variables
+reached the int lane, chart's `ci = i % n_cols` published a boxed Item through an int-typed
+binding and every read saturated to `inf`. div/mod now joins the ADD/SUB/MUL rule. Consumers
+that reopen the lane are unaffected: they ask the LANE WITNESS
+(`mir_native_arithmetic_operand_type`), which still reports INT for the whole tree.
+
+**(d) `INFER_FLOAT_CONTEXT` vetoed closed INT call edges.** A closed edge is a static fact
+about *that parameter*; FLOAT_CONTEXT only says the body mentions a float literal somewhere.
+`eval_A(i, j)` stayed boxed because an unrelated `1.0 /` sits in the same body. Dropping the
+veto outright was measured and **rejected** — spectralnorm 1.87x but brainfuck2 +13%,
+gcbench2 +11%, deriv2 +7%, net geomean only 0.5%. The shipped rule keeps the veto unless the
+parameter's OWN arithmetic uses are int-flavoured (`INFER_ARITH_USE` present, `INFER_FLOAT`
+absent): same spectralnorm win, brainfuck2 regression gone, geomean 0.9% better on its own.
+
+#### Result (release, median-of-5, 61 range rows, vs the post-T19-3 build)
+
+| row | T19-3 | T19-4 | |
+|---|---|---|---|
+| sieve | 0.499 | **0.032** | **15.6x** |
+| paraffins | 1.933 | 0.527 | 3.67x |
+| primes (kostya / larceny) | 66.9 / 67.1 | 19.0 / 19.0 | 3.5x |
+| base64 | 47.76 | 17.07 | 2.80x |
+| spectralnorm | 44.85 | 22.09 | 2.03x |
+| nqueens 1.18x, pnpoly 1.14x, brainfuck2 1.12x, revcomp 1.10x, gcbench2/json2/cd2/cd2_orig 1.05–1.06x, richards/richards2/json/gcbench/deriv2 1.03–1.04x |
+| triangl / pidigits / cpstak2 | | | 1.03–1.04x slower |
+| 39 rows flat | | | **geomean 0.859** |
+
+Untyped `sieve` now **beats** its typed twin (0.032 vs 0.037) and `base64` is at parity. The
+untyped-vs-typed gap closed from 14.3x → 0.89x (sieve), 19.4x → 5.5x (primes), 2.7x → 0.99x
+(base64), 27.9x → 13.7x (spectralnorm). Baseline 3808/3808; mir-emission 59/59, ratchet 16/16,
+js-mir-emission 21/21; test262 0 failures / 0 regressions (one test needed the harness's own
+Phase-4 batch-kill retry). Fixture: `test/lambda/proc/type_infer_native_locals.ls`, whose
+values were checked to be **identical on a binary predating both T19-3 and T19-4** (SI3v2).
+
+#### The transitive scalar edge — ATTEMPTED, REVERTED, blocked on a companion-lane bug
+
+Attempted and backed out. The chain works; it is gated on a bug in a different subsystem.
+Recording the whole diagnosis because each step was verified.
+
+1. **Forwarding must count as a use.** `main` proves `mul_AtAv(N, …)` is int, but `mul_AtAv`
+   only passes its `n` on to `mul_Av`/`mul_Atv`, so the proof died one frame short —
+   `resolve_inferred_type` requires real numeric use so "a param merely passed along stays
+   boxed". Adding an `INFER_FORWARDED_ARG` bit (set when a tracked param is a direct argument
+   of a call to a resolvable user fn/pn) fixes that, and the driver's existing fixpoint loop
+   carries the witness down on the next round. **Verified:** `mul_AtAv.n` → int, then
+   `mul_Av.n`/`mul_Atv.n` pick up `INFER_CALLSITE_INT` in round 2.
+
+2. **The body-level float veto has to go.** `INFER_FLOAT_CONTEXT` blocked each frame for a
+   *different* unrelated reason — `eval_A` for `1.0 /`, `mul_AtAv` for `fill(n, 0.0)`,
+   `mul_Av` for `s = 0.0`. Patching it case-by-case (ARITH_USE, then FORWARDED, …) just moves
+   the failure one frame along. The principled rule is the parameter-level veto that already
+   exists: `INFER_FLOAT`, recorded when a float is the OTHER operand of one of this
+   parameter's own arithmetic uses. With that, every `n` in the chain resolves int and
+   spectralnorm is correct.
+
+3. **…which exposes that `INFER_CALLSITE_INT` is not the proof its name claims.**
+   `mir_callsite_join_specialization_type` **silently skips** an argument it cannot type
+   instead of joining it to ANY, so the flag means *"every call site whose argument happened
+   to be a statically known scalar passed an int"*. cd's `rbt_put(tree, key, value)` is called
+   with `1`, with an array, and with a map — and the specialization records INT. The two
+   resolve-time guards removed in (1) and (2) were the only thing keeping that from being
+   acted on; they are not a soundness argument. Symptom when acted on: cd2_orig dies with
+   `type check at declaration 'wc2' failed: expected int, got null`.
+
+4. **Making the join honest is correct, fixes cd — and trips D5.2.1v3.** Joining unknown
+   arguments to ANY (each round re-joins from `LMD_TYPE_ERROR`, so the fixpoint can still
+   climb) restores cd2_orig and keeps spectralnorm's win. But `lambda/package/math` then
+   aborts with `mir: pending companion reached function epilogue in
+   _try_error_prefix_match_…` — a return-convention v3 companion-lane invariant, a subsystem
+   untouched by this track.
+
+**Disposition:** reverted to the landed T19-4 state; a ⚠ comment now marks the dishonest join
+in `mir_callsite_join_specialization_type` and points here. **Do (3)+(4) first, behind the
+companion-lane fix — not the perf work.** Fixing the join is a correctness change that stands
+on its own; the transitive edge is then a small follow-on ((1) + (2), both verified) worth
+spectralnorm's remaining 13.7x.
+
 
 ### T19-4 — Closed-caller scalar lane specialization (owns ray/spectralnorm/fft)
 Extend Tune18's closed-caller witness analysis from array carriers to scalar param **and return** lanes: when every non-escaped direct caller supplies a proven `int`/`float` lane, the raw entry takes `i64`/`d` natively; open/escaped callees keep the boxed entry unchanged [D3.3.1, D3.3.3, D8.3.3]. Combine with T19-1 so an `sx[s]` float-array read counts as a proven producer on the call edge.

@@ -9072,6 +9072,17 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         mt->in_tail_position = saved_tail;  // ensure correct before then branch
         push_scope(mt);  // isolate branch variables
         MIR_reg_t then_val = transpile_expr(mt, if_node->then);
+        // An arm's value is MOVed into the shared join register below, which
+        // erases the register identity the pair tracking matches on
+        // (`pending_live_item == value`). Resolve HERE, at the producer, exactly
+        // as the condition above does: a tail call in an arm is forwardable only
+        // when its value reaches the return UNCHANGED, and once it feeds a join
+        // it is an ordinary consumer (D5.2.1v3, RV4.1). No corpus script reaches
+        // this today -- the leak that motivated the audit was the declaration
+        // initializer below -- but the epilogue ASSERTS this invariant and
+        // aborts, so close it structurally. Costs nothing when no pair is live.
+        then_val = mir_materialize_pending_reg(mt, then_val,
+            MIR_PENDING_REASON_REP_CONVERSION);
         if (mt->block_returned) {
             // Branch contains a terminal statement (return/break/continue).
             // Code after MIR_RET/TCO is unreachable, but MIR still validates
@@ -9140,6 +9151,9 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     if (if_node->otherwise) {
         push_scope(mt);  // isolate branch variables
         MIR_reg_t else_val = transpile_expr(mt, if_node->otherwise);
+        // Same join-register rule as the `then` arm above.
+        else_val = mir_materialize_pending_reg(mt, else_val,
+            MIR_PENDING_REASON_REP_CONVERSION);
         if (mt->block_returned) {
             // Same as above: terminal in else branch still needs a type-shaped dummy.
             if (result_type == MIR_T_D) {
@@ -11649,6 +11663,15 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
 
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     AstNode* declare = let_node->declare;
+    // TCO: a DECLARATION's initializer is never in tail position -- the binding
+    // is a side effect of the enclosing expression, not its result. Leaving the
+    // caller's tail flag set made the direct-call emitter hand a shape-2 pair
+    // to the return epilogue (its tail-forward path) for a value that never
+    // reaches a return: `(let text = concat_strings(…), if …)` inside a tail
+    // position then leaked the pair and tripped the D5.2.1v3 epilogue check.
+    // Mirrors transpile_binary_out, which clears the same flag for operands.
+    bool saved_tail_position = mt->in_tail_position;
+    mt->in_tail_position = false;
     while (declare) {
         if (declare->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* asn = (AstNamedNode*)declare;
@@ -12332,6 +12355,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
         }
         declare = declare->next;
     }
+    mt->in_tail_position = saved_tail_position;
 }
 
 // ============================================================================
@@ -21670,6 +21694,13 @@ static TypeId resolve_inferred_type(FnParamEvidence* ctx, bool is_proc) {
     // M2: body evidence alone stops here — see below — but a param every caller
     // in the unit provably feeds a native scalar is not a guess. Require real
     // numeric use too, so a param merely passed along stays boxed.
+    // ⚠ Forwarding a param into another call is deliberately NOT a "real use".
+    // Counting it closes spectralnorm's transitive chain (its `n` reaches
+    // mul_Av/mul_Atv through mul_AtAv) for 1.25x, but a param merely passed
+    // along gains nothing from a native lane and pays an unbox at entry plus a
+    // re-box at the forward: measured geomean 1.02 over 63 rows, with gcbench
+    // +31%, nqueens +29%, binarytrees +26%. A future rule would have to prove
+    // the CALLEE benefits before promoting a forwarding-only param [T19-4].
     if ((ctx->evidence & (INFER_NUMERIC_USE | INFER_ARITH_USE)) != 0) {
         if ((ctx->evidence & INFER_CALLSITE_FLOAT) &&
                 !(ctx->evidence & INFER_CALLSITE_INT)) {
@@ -24797,6 +24828,20 @@ static void mir_callsite_join_elem(CallSiteEntry* e, int pos, TypeId elem) {
 
 static void mir_callsite_join_specialization_type(CallSiteEntry* e, int pos,
         TypeId tid) {
+    // ⚠ KNOWN IMPRECISION, measured and deliberately kept. An argument this pass
+    // cannot type is SKIPPED rather than joined to ANY, so INFER_CALLSITE_INT
+    // means "every call site whose argument was a statically known scalar passed
+    // an int", NOT "every call site passes an int" -- cd's
+    // `rbt_put(tree, key, value)` takes `1`, an array AND a map, and this records
+    // INT. Nothing acts on it today: the resolve-time guards in
+    // resolve_inferred_type reject those shapes. Joining to ANY instead is the
+    // honest rule and was implemented and measured: it costs **geomean 1.038**
+    // over 63 benchmark rows (gcbench +31%, nqueens +30%, binarytrees +28%),
+    // because `ANY` here conflates "genuinely dynamic argument" with "this round
+    // cannot type it yet" and poisons the second case too. Fixing it properly
+    // means separating those two, not flipping this branch [T19-4; see
+    // vibe/Lambda_Impl_Tune19.md]. Do not relax the resolve-time guards while
+    // this stands -- that combination miscompiles cd.
     if (pos < 0 || pos >= e->param_count || pos >= 16 ||
             tid == LMD_TYPE_ANY) {
         return;
