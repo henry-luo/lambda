@@ -155,6 +155,21 @@ static inline Item interp_signal_payload(InterpFrame* f) {
     return (Item){.item = f->slots[f->signal_index]};
 }
 
+static bool interp_is_statement_handler(AstNode* node) {
+    AstNode* effective = ast_unwrap_primary(node);
+    return effective && effective->node_type == AST_NODE_HANDLER_STAM;
+}
+
+static bool interp_propagate_handler_error(InterpFrame* f, AstNode* node,
+        Item value) {
+    if (!interp_is_statement_handler(node) || !item_is_error(value)) return false;
+    // Primary wrappers are transparent in the AST but content lowering may
+    // classify the wrapper as a value item; preserve the handler arm's fresh
+    // error instead of silently discarding it as a non-final proc expression.
+    interp_signal(f, EvalSignal::RETURNED, value);
+    return true;
+}
+
 // Consumes a loop-scoped signal. `break` and `continue` stop at the nearest
 // enclosing loop; `return` and `error-skip` keep unwinding past it.
 static inline void interp_clear_loop_signal(InterpFrame* f) {
@@ -522,7 +537,17 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
         return ItemError;
     }
     switch (c_ret) {
-    case LMD_TYPE_INT:    return (Item){.item = i2it(SYS_DISPATCH(int64_t))};
+    case LMD_TYPE_INT: {
+        // len() has a raw integer C ABI, so its value-family error guard cannot
+        // travel in the return register. Keep the rejected operand intact
+        // before boxing the ordinary count (S7.6/S7.7).
+        if (info->fn == SYSFUNC_LEN) {
+            for (int i = 0; i < argc; i++) {
+                if (get_type_id(args[i]) == LMD_TYPE_ERROR) return ItemError;
+            }
+        }
+        return (Item){.item = i2it(SYS_DISPATCH(int64_t))};
+    }
     case LMD_TYPE_INT64:
         // int64() returns a raw int64_t even when its semantic type is
         // int64 | error; INT64_ERROR is its out-of-band failure signal, so the
@@ -531,10 +556,34 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
             return box_int64_result_or_error(SYS_DISPATCH(int64_t));
         }
         return box_int64_value(SYS_DISPATCH(int64_t));
-    case LMD_TYPE_BOOL:   return (Item){.item = b2it(SYS_DISPATCH(Bool) ? BOOL_TRUE : BOOL_FALSE)};
+    case LMD_TYPE_BOOL: {
+        // Bool-returning helpers use BOOL_ERROR as their third state. Treating
+        // it as C truth would turn a failed value computation into `true` at
+        // the interpreter ABI boundary; the JIT bool boxer preserves it as
+        // ItemError (S7.6 value-family propagation).
+        Bool result = SYS_DISPATCH(Bool);
+        return result >= BOOL_ERROR ? ItemError
+            : (Item){.item = b2it(result ? BOOL_TRUE : BOOL_FALSE)};
+    }
     case LMD_TYPE_FLOAT:  return push_d(SYS_DISPATCH(double));
-    case LMD_TYPE_STRING: { String* str = SYS_DISPATCH(String*); return str ? (Item){.item = s2it(str)} : ItemNull; }
-    case LMD_TYPE_SYMBOL: { Symbol* sym = SYS_DISPATCH(Symbol*); return sym ? (Item){.item = y2it(sym)} : ItemNull; }
+    case LMD_TYPE_STRING: {
+        String* str = SYS_DISPATCH(String*);
+        // Pointer-returning conversion APIs cannot carry ItemError in their C
+        // signature. A null result is therefore the error carrier here; the
+        // successful `string(null)` case returns the non-null STR_NULL object.
+        return str ? (Item){.item = s2it(str)} : ItemError;
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol* sym = SYS_DISPATCH(Symbol*);
+        // `name(null)` has a legitimate null result, while an error operand
+        // must remain an error. The input check distinguishes those cases for
+        // both name() and symbol(), whose C ABI uses a nullable pointer.
+        if (sym) return (Item){.item = y2it(sym)};
+        for (int i = 0; i < argc; i++) {
+            if (get_type_id(args[i]) == LMD_TYPE_ERROR) return ItemError;
+        }
+        return ItemNull;
+    }
     case LMD_TYPE_TYPE:   return interp_ptr_item(SYS_DISPATCH(Type*));
     case LMD_TYPE_DTIME:  return push_k(SYS_DISPATCH(DateTime));
     default:              return SYS_DISPATCH(Item);
@@ -914,6 +963,50 @@ public:
     InterpContextGuard(const InterpContextGuard&) = delete;
     InterpContextGuard& operator=(const InterpContextGuard&) = delete;
 };
+
+// Handler bodies run in the same activation as their operand. Keeping the
+// caught Item in a Scratch home makes `^` safe across every allocating child
+// evaluation while this guard restores an enclosing handler's binding.
+class InterpErrorContextGuard {
+    InterpState* st_;
+    InterpErrorContext entry_;
+public:
+    InterpErrorContextGuard(InterpState* st, uint64_t* error)
+            : st_(st), entry_{error, st->errors} {
+        st_->errors = &entry_;
+    }
+    ~InterpErrorContextGuard() { st_->errors = entry_.prev; }
+    InterpErrorContextGuard(const InterpErrorContextGuard&) = delete;
+    InterpErrorContextGuard& operator=(const InterpErrorContextGuard&) = delete;
+};
+
+// One handler evaluation owns one operand completion. The error arm is a
+// local branch on that completion; it does not use a recovery boundary and a
+// failure produced by the body remains the body's own returned outcome.
+static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
+    Scratch operand(f);
+    operand.set(eval_expr(f, handler->operand));
+    if (interp_frame_pending(f)) return operand.get();
+
+    Item operand_value = operand.get();
+    if (item_is_error(operand_value)) {
+        InterpErrorContextGuard error_scope(f->st, operand.home());
+        Item body_value = eval_expr(f, handler->body);
+        // A statement handler discards only a normal arm result. An error
+        // created by the selected body is a fresh completion and must leave
+        // this activation instead of being converted to statement null.
+        return handler->is_statement && !item_is_error(body_value)
+            ? ItemNull : body_value;
+    }
+
+    if (handler->value_body) {
+        InterpContextGuard value_scope(f->st, operand.home(), NULL);
+        Item value = eval_expr(f, handler->value_body);
+        return handler->is_statement && !item_is_error(value)
+            ? ItemNull : value;
+    }
+    return handler->is_statement ? ItemNull : operand_value;
+}
 
 // ---------------------------------------------------------------------------
 // Match
@@ -1327,13 +1420,15 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                      item->node_type == AST_NODE_FUNC_EXPR);
                 if (!already_hoisted) exec_declaration(f, item);
             } else if (is_side_effect_stam(item->node_type)) {
-                eval_expr(f, item);
+                Item side_effect = eval_expr(f, item);
+                interp_propagate_handler_error(f, item, side_effect);
             } else if (item == last_value) {
                 result = eval_expr(f, item);
             } else if (item->node_type == AST_NODE_FOR_STAM) {
                 eval_for(f, (AstForNode*)item, false);   // statement: stream discarded
             } else {
-                eval_expr(f, item);                      // side effect only
+                Item side_effect = eval_expr(f, item);   // side effect only
+                interp_propagate_handler_error(f, item, side_effect);
             }
             // break / continue / return / error-skip abandon the rest of the
             // block; the enclosing loop or call frame consumes the signal.
@@ -1354,7 +1449,8 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             continue;
         }
         if (is_side_effect_stam(item->node_type)) {
-            eval_expr(f, item);
+            Item side_effect = eval_expr(f, item);
+            interp_propagate_handler_error(f, item, side_effect);
             if (interp_frame_pending(f)) return acc.get();
             continue;
         }
@@ -1538,10 +1634,14 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_CURRENT_INDEX:
         return f->st->contexts
             ? (Item){.item = *f->st->contexts->index} : ItemNull;
+    case AST_NODE_CURRENT_ERROR:
+        return f->st->errors
+            ? (Item){.item = *f->st->errors->error} : ItemError;
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         Item cond = eval_expr(f, branch->cond);
-        if (item_is_error(cond)) return cond;
+        // `if` belongs to the truthy error family: an error condition is
+        // false, not an ordinary value-family propagation edge (S7.6).
         if (is_truthy(cond)) return eval_expr(f, branch->then);
         if (branch->otherwise) return eval_expr(f, branch->otherwise);
         return ItemNull;
@@ -1557,6 +1657,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         return result;
     }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM:
+        return eval_handler(f, (AstHandlerNode*)node);
     case AST_NODE_MEMBER_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
         Item object_value = eval_expr(f, field->object);
@@ -1707,6 +1810,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         Item value = eval_expr(f, assign->value);
         if (interp_frame_pending(f)) return ItemNull;
+        AstNode* rhs = ast_unwrap_primary(assign->value);
+        if (item_is_error(value) && rhs &&
+                rhs->node_type != AST_NODE_CURRENT_ERROR &&
+                rhs->node_type != AST_NODE_CURRENT_ITEM) {
+            // A fresh failure on the RHS is a completion of the assignment;
+            // only an explicit handler binding (`x = ^`/`x = ~`) consumes the
+            // current arm value as data (S7.6.1).
+            return value;
+        }
         NameEntry* target = assign->target_entry;
         if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
             target = ((AstIdentNode*)assign->left)->entry;
@@ -1847,10 +1959,18 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // node; lowering emits that pointer, so the walker publishes it too.
         return interp_ptr_item(node->type);
     case AST_NODE_SYS_FUNC:
-        // A bare system-function reference outside a call is not a first-class
-        // value in T0; the pre-scan lets it through only as a call callee.
-        log_error("interp: system function reference used as a value");
-        return ItemError;
+        // Bare system functions are first-class identity values. Mirror the
+        // MIR `to_sys_fn_named` wrapper so equality and `name(len)` observe the
+        // same callable metadata instead of turning the reference into an
+        // unrelated interpreter error.
+        {
+            AstSysFuncNode* sys = (AstSysFuncNode*)node;
+            SysFuncInfo* info = sys->fn_info;
+            if (!info || !info->func_ptr) return ItemError;
+            Function* fn = to_sys_fn_named(info->func_ptr, info->arg_count,
+                info->name);
+            return interp_ptr_item(fn);
+        }
     default:
         log_error("interp: unhandled node kind %s",
             interp_node_kind_name(node->node_type));
@@ -1879,13 +1999,15 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
         return ItemError;
     }
     if (st->depth == 0) {
-        // A clean S7.4.3-channel fault before either the C-stack guard or the
-        // side-stack limit fires. Fault timing may differ from T1 (S7.11.4).
+        // The interpreter budget is a language/runtime completion, not the
+        // native stack-fault carve-out. Return it through this call frame so a
+        // caller handler can consume it without a non-local jump.
         st->depth_exhausted = true;
         log_error("interp: recursion depth budget %u exhausted in '%s'",
             st->depth_limit, fn->name ? fn->name : "<anonymous>");
-        lambda_recovery_frame_raise_fault(LAMBDA_FAULT_STACK_OVERFLOW, ERR_OK);
-        return ItemError;
+        LambdaError* error = err_create_heap(ERR_STACK_OVERFLOW,
+            "Stack overflow", NULL);
+        return error ? err2it(error) : ItemError;
     }
 
     st->depth--;
@@ -2011,6 +2133,11 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     // makes its result the script result — the same scan and zero-arg call the
     // generated module entry emits under Context::run_main.
     if (run_main) {
+        // An import/top-level expression can return a rich ERROR Item without
+        // raising an EvalSignal; do not invoke main after that failed module
+        // completion, or the interpreter would silently discard the immediate
+        // frame's explicit failure.
+        if (item_is_error(tail.get())) return tail.get();
         // A top-level `pn main` is reachable through two root children — it is
         // linked both as a root statement and inside the content node's item
         // list — so the scan must stop at the first call, not merely leave the
@@ -2051,13 +2178,13 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
 // initializer lands on its own barrier, resets the partial module slab, then
 // forwards to the still-armed execution boundary, so a half-initialized module
 // is never visible to a local handler.
-static bool interp_run_module_init(Runner* runner, InterpState* st, Script* module) {
+static Item interp_run_module_init(Runner* runner, InterpState* st, Script* module) {
     LambdaRecoveryFrame* barrier = lambda_recovery_frame_begin_for(
         (Context*)runner->context, LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER);
     if (!barrier) {
         log_error("interp: failed to allocate a module transaction frame");
         lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
-        return false;
+        return ItemError;
     }
     if (LAMBDA_RECOVERY_FRAME_SETJMP(barrier)) {
         LambdaFaultReason reason = LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT;
@@ -2072,17 +2199,19 @@ static bool interp_run_module_init(Runner* runner, InterpState* st, Script* modu
         lambda_module_state_reset();
         st->top = NULL;   // frames above the landing are abandoned wholesale
         lambda_recovery_frame_raise_fault(reason, prior);
-        return false;
+        return ItemError;
     }
     if (!lambda_recovery_frame_arm(barrier)) {
         log_error("interp: failed to arm a module transaction frame");
         lambda_recovery_frame_end(barrier);
-        return false;
+        return ItemError;
     }
     log_info("interp: running imported module init index=%d", module->index);
-    interp_execute_module(runner, st, module, false);
+    Item result = interp_execute_module(runner, st, module, false);
     lambda_recovery_frame_end(barrier);
-    return true;
+    // Module transaction cleanup is complete before the explicit completion
+    // crosses to the importing frame; ordinary errors never use the barrier.
+    return result;
 }
 
 // Post-order over the import cone, then the main script — the order
@@ -2093,9 +2222,10 @@ static Item interp_execute(Runner* runner, InterpState* st) {
         for (int i = 0; i < cone->length; i++) {
             Script* module = (Script*)cone->data[i];
             if (!module || !module->ast_root) continue;
-            if (!interp_run_module_init(runner, st, module)) {
+            Item module_result = interp_run_module_init(runner, st, module);
+            if (item_is_error(module_result)) {
                 arraylist_free(cone);
-                return ItemError;
+                return module_result;
             }
         }
         arraylist_free(cone);

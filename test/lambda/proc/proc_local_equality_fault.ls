@@ -1,4 +1,4 @@
-// ER-S4: equality-depth exhaustion is a static C14 fault in a local pn handler.
+// ER-S4: equality-depth exhaustion is an ordinary error in a local pn handler.
 fn deep(n) => if (n == 0) [] else [deep(n - 1)]
 
 pn main() {

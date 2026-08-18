@@ -105,11 +105,21 @@ struct InterpContext {
     InterpContext* prev;
 };
 
+// A handler-local `^` is rooted by the frame slot that owns the caught
+// completion.  The chain is interpreter control state only; it never owns an
+// Item, so nested handlers can restore the enclosing binding without adding a
+// second unrooted value stack (S7.6.1v4).
+struct InterpErrorContext {
+    uint64_t* error;
+    InterpErrorContext* prev;
+};
+
 struct InterpState {
     EvalContext* ctx;
     Runtime*     runtime;
     InterpFrame* top;
     InterpContext* contexts;
+    InterpErrorContext* errors;
     EvalMode     mode;
     uint32_t     depth;          // remaining recursion budget
     uint32_t     depth_limit;

@@ -5,8 +5,11 @@ pn child() {
 
 pn main() {
     let handle = start child()
-    let first = wait(handle, timeout: 1) ^ { ^ }
+    var first = null
+    wait(handle, timeout: 1) ^ { first = ^ } ~ { first = ~ }
     print(first is error)
     send(handle, 8)^
-    print(wait(handle)^)
+    var second = null
+    wait(handle)^ { second = ^ } ~ { second = ~ }
+    print(second)
 }

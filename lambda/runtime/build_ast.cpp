@@ -12387,6 +12387,21 @@ typedef struct AwaitPointScan {
     int count;
 } AwaitPointScan;
 
+typedef struct HandlerStateScan {
+    int base_state;
+    int count;
+} HandlerStateScan;
+
+static bool assign_async_handler_state(AstNode* node, void* data) {
+    if (node->node_type != AST_NODE_HANDLER_STAM) return true;
+    AstHandlerNode* handler = (AstHandlerNode*)node;
+    HandlerStateScan* scan = (HandlerStateScan*)data;
+    if (handler->is_statement && handler_operand_is_proc(handler->operand)) {
+        handler->async_fault_state = scan->base_state + ++scan->count;
+    }
+    return true;
+}
+
 static bool count_await_point_node(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_START) return false;
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
@@ -12485,9 +12500,12 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
     AstHandlerNode* handler = (AstHandlerNode*)node;
     MayAwaitScan scan = {};
     walk_lambda_ast(handler->operand, scan_may_await_node, &scan, false);
-    if (scan.found) {
-        // Fault recovery owns a native jump buffer; letting its protected
-        // operand suspend would leave that buffer pointing at a dead stack.
+    bool proc_statement = handler->is_statement &&
+        handler_operand_is_proc(handler->operand);
+    if (scan.found && !proc_statement) {
+        // A statement pn handler consumes the call's explicit Item completion
+        // after the async resume point; only value handlers still require a
+        // live native result context that cannot span a scheduler yield.
         record_semantic_error(validation->tp, node->node, ERR_INVALID_EXPR_CONTEXT,
             "error handler operand may suspend (%s); await before applying `^ { ... }`",
             scan.cause ? scan.cause : "possible await");
@@ -12507,6 +12525,7 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
         fn->analysis->needs_task_context = false;
         fn->analysis->has_indirect_pn_call = false;
         fn->analysis->await_point_count = 0;
+        fn->analysis->async_fault_handler_count = 0;
         fn->analysis->may_await_cause = NULL;
     }
 
@@ -12571,6 +12590,9 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
         AwaitPointScan scan = {};
         walk_lambda_ast(fn->body, count_await_point_node, &scan, false);
         fn->analysis->await_point_count = scan.count;
+        HandlerStateScan handler_scan = {scan.count, 0};
+        walk_lambda_ast(fn->body, assign_async_handler_state, &handler_scan, false);
+        fn->analysis->async_fault_handler_count = handler_scan.count;
     }
 
     arraylist_free(functions);

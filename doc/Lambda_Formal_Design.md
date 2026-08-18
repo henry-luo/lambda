@@ -8,7 +8,9 @@ implementation decisions that realize the semantics in
 document — including the `vibe/` design records — or the implementation
 disagrees, this specification wins; the design records govern the history.
 Scope: the Lambda core runtime and Jube polyglot hosting. LambdaJS and
-Radiant get their own documents.
+Radiant get their own documents, but the cross-language runtime contracts
+explicitly named in D1.4v3 and D8.4.3v2 bind every language hosted on the
+Lambda runtime.
 
 **Ruling IDs.** Same convention as the semantics spec: section-path IDs
 (`D2.3.1` = first ruling of §2.3), `v2` suffix on revision, doc-level
@@ -39,10 +41,21 @@ the decision records.
   implementation accidents**, and pay for reuse only below the semantic
   boundary (no guest inherits another language's truthiness, coercion, or
   object model). [Lang_Hosting P1–P10, C1–C10]
-- **D1.4v2 — Errors are return values at every boundary.** A fallible
-  function returns one merged `Item`: its success value or an ERROR-tagged
-  error value. No pending-exception side channel, C++ exception, `longjmp`,
-  or guest unwind crosses a language or module boundary. [S7.4.4, JA5, J3]
+- **D1.4v3 — Language failures return through every frame.** A fallible
+  function returns an explicit completion: normally one merged `Item`, its
+  success value or an ERROR-tagged error value; a proven native lane uses its
+  declared companion error lane (D5.2.1v3). Lambda errors, LambdaJS throws and
+  rejections, and every hosted language's exceptions propagate by normal
+  return through **each** generated and native caller. Every caller observes
+  and routes the failure before consuming the success result, and every
+  crossed activation runs its own cleanup/epilogue. No pending-exception side
+  channel, C++ exception, `setjmp`/`longjmp`, SEH unwind, signal jump, or guest
+  unwind implements a language failure or skips an intervening frame. The
+  sole temporary exception is an untyped native system/resource fault from
+  the closed S7.11.1 set: it may abandon frames through
+  `LambdaRecoveryFrame` under D2.8.2/D6.3.3, but that mechanism is never an
+  ordinary error or hosted-language exception path. [S7.4.3, S7.4.4,
+  S7.11.1–S7.11.4, Runtime_Error_Handling REH-D1–REH-D5, JA5, J3]
 - **D1.5 — Precise GC everywhere, forever.** Conservative native-stack
   scanning is retired from every build and stays retired; a guest is
   precise iff it emits through the shared rooting primitives. [CR1–CR8]
@@ -114,9 +127,12 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **DI14 — Entry integrity.** The unboxed entry has exactly two
   proof-producing paths, and a guard-failing input never reaches it;
   generated code is immutable — never patched. [D8.3.3, D8.4.1]
-- **DI15 — Nothing unwinds across a boundary.** Errors are return values
-  at every language and module boundary; no exception, `longjmp`, or guest
-  unwind crosses one; faults never cross a thread boundary. [D1.4v2, D6.3.3]
+- **DI15v2 — No language failure skips a frame.** Errors and hosted-language
+  exceptions move between activations only by explicit completion and normal
+  return; each generated/native frame routes the failure and executes its own
+  epilogue. `LambdaRecoveryFrame` is reserved for the native system-fault
+  carve-out, and faults never cross a thread boundary. [D1.4v3, D5.1.4,
+  D6.3.3, D8.4.3v2]
 - **DI16 — Transactional initialization.** A half-initialized package or a
   failed module registration is never observable — init commits or rolls
   back. [D7.2.2, D7.3.2]
@@ -1011,8 +1027,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   through the catalog, never by guessing. The host owns heap activation,
   context install, side-stack entry/exit, and recovery boundaries —
   guests never construct contexts or touch global runtime pointers (the
-  G1 gate). The JS merged Item error lane (D8.4.3) is not reused as another
-  guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3]
+  G1 gate). The JS merged Item error lane (D8.4.3v2) is not reused as another
+  guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3v2]
 - **D7.4.4** **Declared interfaces + record-owned hooks are the ONLY
   host-object protocol — one way to be a host object, no fallback tier.**
   A host type's surface is its Lambda-type-syntax interface declaration
@@ -1166,14 +1182,24 @@ loosely across the corpus — context disambiguates, and we live with it.
   args); returns are shaped per the companion-lane convention (D5.2.1v3)
   — the trailing scalar-home operand is retired. `Item* + argc` is the JS
   dynamic boundary only. [LC call-ABI, RV1, RV10]
-- **D8.4.3** **Fallible JS/Jube helpers use the merged Item error ABI.** A
-  helper that can raise returns an ERROR-tagged `Item` and never relies on a
-  pending flag or a separate poll result; MIR lowering tests the returned
-  tag, and try/catch/finally routing carries that same Item identity. Raw
-  scalar helpers are permitted only when their catalog contract is
-  infallible (`PRESERVES`). `LambdaError` is the shared ERROR carrier; its
-  Map-compatible resting prologue is traced as a heap reference, and JS
-  Error stack materialization may remain lazy. [S7.4.4, D1.4v2, JR3]
+- **D8.4.3v2*** **Every hosted-language helper uses an explicit completion
+  ABI.** A helper that can produce a Lambda error, LambdaJS throw/rejection,
+  or another guest-language exception returns an explicit completion: the
+  shared ABI uses an ERROR-tagged `Item` (or the declared companion error
+  lane), while a separately versioned guest ABI may use only its
+  profile-declared completion adapter. Neither form relies on a pending flag,
+  C++ exception, non-local jump, or separate exception poll. MIR lowering tests
+  the returned completion in the current activation and routes it to that
+  activation's handler/finally/cleanup or error return; propagation to a
+  caller then occurs by an ordinary return carrying the same error identity.
+  Raw scalar helpers are permitted only when their catalog contract is
+  infallible (`PRESERVES`). A guest may retain its own exception payload and
+  language semantics, but its adapter must materialize an explicit host
+  completion before returning to host code. `LambdaError` is the shared ERROR
+  carrier; its Map-compatible resting prologue is traced as a heap reference,
+  and JS Error stack materialization may remain lazy. Native system faults are
+  outside this helper exception ABI and use only the D1.4v3 carve-out.
+  [S7.4.3, S7.4.4, D1.4v3, Runtime_Error_Handling REH-D3–REH-D12, JR3]
 
 ### D8.5 MIR module cache
 
@@ -1234,7 +1260,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-15.
+Status of `*`-marked rulings as of 2026-08-17.
 
 | Ruling | Status |
 |---|---|
@@ -1278,7 +1304,7 @@ Status of `*`-marked rulings as of 2026-08-15.
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
 | D8.4.2v3 | Lambda and LambdaJS direct calls pass `Context*` and source operands only; internal shape-2 results use two MIR results and C-reachable entries use the context companion slot. The trailing scalar-home operand is deleted from generated call ABI. |
-| D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
+| D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. The LOC and compiler-time ratchets remain open against anchor `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` at 319,606 lines; large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
@@ -1413,7 +1439,7 @@ Numbered `DO#` (design-open); each links to its record.
 
 | Section | Records | Where argued |
 |---|---|---|
-| D1 | JA4/JA13, J5, P1–P10, LC/Lane/MT preambles, rules 5/7/14 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
+| D1 | JA4/JA13, J5, P1–P10, LC/Lane/MT preambles, REH-D1–REH-D5, rules 5/7/14 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D2.1 | Item_Boxing §0–§8 (R7–R10, W1–W3) | `Lambda_Design_Item_Boxing.md` |
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
@@ -1433,7 +1459,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
 | D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
-| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling.md` |
+| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
@@ -1442,7 +1468,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
-| D8.4 | LC1 + call-ABI notes | `Lambda_Design_Compiling.md` |
+| D8.4 | LC1 + call-ABI notes; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
 | D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Impl_Tune_Ast.md` |
 

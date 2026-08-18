@@ -13,8 +13,8 @@ ECMAScript Symbols/private names, reflection, and the Mark/Input seam.
 Per **D1.6**, implementation and verification cover MIR Direct only; the
 frozen `--c2mir` compatibility path receives no NameId-first extension.
 
-**Current formal authority:** **D1.4v2** (errors cross boundaries as `Item`
-values), **D1.5** (precise rooting only), **D1.6** (C2MIR is frozen), **D1.7**
+**Current formal authority:** **D1.4v3** (language failures return as explicit
+completions through every frame), **D1.5** (precise rooting only), **D1.6** (C2MIR is frozen), **D1.7**
 (MIR is a local derived cache, not a distribution format), **D3.4.4v2**
 (`ShapeEntry` identity is one `NameId`), **D4.2.1v2** (MemContext factory
 owns every allocator), **D4.6.1v2** (`NameId` is the semantic property

@@ -51,7 +51,7 @@ The strongest answer to *ABI stability across runtime versions*:
 - Values are opaque handles (`napi_value`) with lifetime tied to **handle scopes**; long-lived references use explicit `napi_ref` (create/delete) — the GC contract is explicit API, not convention.
 - Native objects wrap into JS via `napi_wrap` with a **finalizer callback** — the GC tells native code when to free.
 - Errors: Node-API itself returns `napi_status` and exposes a pending-exception
-  query. LambdaJS keeps the no-unwinding boundary property, but D8.4.3 routes
+  query. LambdaJS keeps the no-unwinding boundary property, but D8.4.3v2 routes
   its own abrupt completion as the returned ERROR `Item`, not a pending flag.
 
 **Adopt**: versioned additive-only host API; explicit GC rooting/reference API; finalizers for native resources; status-code error discipline at the boundary.

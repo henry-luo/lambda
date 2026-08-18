@@ -2053,12 +2053,9 @@ static Bool function_eq(Function* a, Function* b, int depth) {
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     if (depth > EQ_MAX_DEPTH) {
-        // Functional handlers keep returned errors as values;
-        // only a live procedural local handler owns this static C14 landing.
-        if (lambda_recovery_frame_raise_local_fault(
-                LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_OK)) {
-            return BOOL_ERROR;
-        }
+        // Equality depth is a language-visible runtime failure, not a native
+        // fault. Return the existing three-state error lane so every caller
+        // unwinds through its own completion path (D1.4v3/DI15v2).
         set_runtime_error(ERR_RUNTIME_ERROR,
             "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
         return BOOL_ERROR;

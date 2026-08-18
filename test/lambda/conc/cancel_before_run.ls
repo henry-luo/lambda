@@ -5,7 +5,8 @@ pn child() {
 pn main() {
     let handle = start child()
     cancel(handle)
-    let value = wait(handle) ^ { ^ }
+    var value = null
+    wait(handle) ^ { value = ^ } ~ { value = ~ }
     print(value is error)
     print(value.message)
 }

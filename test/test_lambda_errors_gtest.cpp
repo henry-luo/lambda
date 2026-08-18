@@ -344,21 +344,21 @@ TEST_F(ErrorCreationTest, FaultRecordUsesStaticErrorStorage) {
     lambda_fault_record_init(&record);
     EXPECT_EQ(lambda_fault_record_error(&record), nullptr);
 
-    lambda_fault_record_prepare(&record, LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION,
+    lambda_fault_record_prepare(&record, LAMBDA_FAULT_SIDE_STACK_EXHAUSTION,
                                 ERR_OK);
     LambdaError* error = lambda_fault_record_error(&record);
     ASSERT_NE(error, nullptr);
     EXPECT_TRUE(error->is_static);
     EXPECT_FALSE(error->is_heap);
-    EXPECT_EQ(error->code, ERR_RUNTIME_ERROR);
-    EXPECT_STREQ(lambda_fault_reason_name(record.reason), "equality_depth_exhaustion");
-    EXPECT_STREQ(error->message, "Structural equality recursion limit exceeded");
+    EXPECT_EQ(error->code, ERR_STACK_OVERFLOW);
+    EXPECT_STREQ(lambda_fault_reason_name(record.reason), "side_stack_exhaustion");
+    EXPECT_STREQ(error->message, "Side-stack capacity exhausted");
 
     // Fault records may be temporarily installed as last_error; ordinary error
     // cleanup must leave their pre-reserved message and embedded storage intact.
     err_free(error);
     EXPECT_EQ(lambda_fault_record_error(&record), error);
-    EXPECT_STREQ(error->message, "Structural equality recursion limit exceeded");
+    EXPECT_STREQ(error->message, "Side-stack capacity exhausted");
 }
 
 TEST_F(ErrorCreationTest, ErrorAllocationFailureBuildsStaticOomFault) {

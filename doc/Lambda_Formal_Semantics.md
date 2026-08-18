@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 3.1.0 (2026-08-18)
+**Spec version:** 4.1.0 (2026-08-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -28,6 +28,8 @@ the number model
 TE-1–TE-18
 ([`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md));
 ER-D1–D13 ([`Lambda_Design_Exec_Recovery.md`](../vibe/Lambda_Design_Exec_Recovery.md));
+REH-D1–D14
+([`Lambda_Design_Runtime_Error_Handling.md`](../vibe/Lambda_Design_Runtime_Error_Handling.md));
 K11–K32 ([`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md));
 PD9–PD16 / FC1–FC11
 ([`Lambda_Design_Data_Processing.md`](../vibe/Lambda_Design_Data_Processing.md),
@@ -564,7 +566,7 @@ it.* [TE-13, C14]
 
 ### S7.6 Discharge: the handler and postfix `^`
 
-- **S7.6.1v3*** **`e ^ { … ^ … }` handles the error locally and is
+- **S7.6.1v4*** **`e ^ { … ^ … }` handles the error locally and is
   channel-agnostic** — it receives soft values, raised errors, and (at `pn`
   boundaries) system faults alike, binding the error to handler-local `^`
   (innermost-wins). In the one-arm form, the handler introduces no `~`
@@ -585,7 +587,15 @@ it.* [TE-13, C14]
   In either form the selected handler result has the ordinary contextual type
   or the arm does not complete normally (`raise` / `return`); the binding it
   feeds is therefore **statically clean** — *sound by construction*, no flow
-  analysis: *a binding's static type is never a lie* (SI14). [TE-16]
+  analysis: *a binding's static type is never a lie* (SI14).
+
+  Ordinary error outcomes always reach this handler by normal return and a
+  local generated branch; the handler never uses non-local recovery for a
+  returned or raised language error. In statement position,
+  `pn_call() ^ { error_body }` may protect a procedure call that suspends: its
+  completion and handler destination are durable state, and the body executes
+  after resume with the same single-evaluation and fresh-outcome rules.
+  [TE-16, REH-D8, REH-D12]
 - **S7.6.2v3** The handler is the left-associative postfix-primary form
   `primary ^ { error_body }`, optionally followed immediately by the normal
   value arm `~ { value_body }`. It occupies the same precedence tier as member
@@ -627,10 +637,17 @@ it.* [TE-13, C14]
   `e^` catches errors only, propagating. `or` and `^` are *not* a soft/hard
   split — both work on both channels; the axis is coalescing-without-access
   vs error-specific handling. [TE-16]
-- **S7.6.7v2*** Either handler form over a possibly-suspending operand is a
-  **compile error** — a recovery frame cannot span a scheduler yield, and
-  silently splitting the capability ("same construct, two behaviours by
-  invisible context") is rejected. [TE-16, ER-D13]
+- **S7.6.7v3*** A statement-position procedure handler
+  `pn_call() ^ { error_body }` may protect a possibly-suspending call. No
+  `LambdaRecoveryFrame`, native frame address, or jump buffer survives a
+  scheduler yield. Ordinary errors are stored as the call's durable completion
+  and branch to the handler when the caller state machine resumes. If an S7.11
+  native system fault occurs after suspension, the task fault boundary may use
+  the temporary non-local carve-out, but it must materialize the fault as a
+  durable completion and resume the nearest active procedural handler state;
+  subsequent propagation is again frame-by-frame. A value-producing postfix
+  handler over a possibly-suspending `pn` remains a compile error because `pn`
+  handlers are statement-only. [TE-16, ER-D13, REH-D12, REH-D13]
 
 ### S7.7 Containment: the declaration-boundary skip
 
@@ -743,10 +760,12 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S7.11 System faults and recovery
 
-- **S7.11.1** Fault reasons are a closed, typed set: stack overflow,
-  side-stack exhaustion, out-of-memory, equality-depth exhaustion, runtime
-  boundary defect. Faults never enter function types and are never a normal
-  call-result ABI — recursion never forces `T^stack_overflow`. [ER-D4, ER-D9]
+- **S7.11.1v2** Fault reasons are a closed, typed native set: stack overflow,
+  side-stack exhaustion, out-of-memory, and runtime boundary defect. Faults
+  never enter function types and are never a normal call-result ABI —
+  recursion never forces `T^stack_overflow`. Structural-equality depth
+  exhaustion is instead a language-visible ordinary error and propagates by
+  explicit completion through each frame. [ER-D4, ER-D9, D1.4v3]
 - **S7.11.2** Faults pass transparently through `fn` frames; only `pn`
   boundaries and execution boundaries own them. A caught fault cannot resume
   the abandoned expression. Recovery frames never survive a scheduler yield —
@@ -1230,6 +1249,7 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
 
 Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 [`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
+[`Lambda_Impl_Error_Rework.md`](../vibe/Lambda_Impl_Error_Rework.md),
 [`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
 
 | Ruling | Status |
@@ -1244,9 +1264,9 @@ Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
-| S7.6.1 | The one- and two-arm postfix handler grammar and MIR lowering conform to S7.6.1v3/S7.6.2v3/S7.6.6v2, including nested `^`/`~` scope restoration and direct raised-`pn` outcome routing. System-fault capture remains incomplete. |
-| S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. Remaining open work is system-fault capture for braced handlers (S7.6.7). |
-| S7.6.7 | May-suspend handler rejection: predicate machinery exists but silently degrades instead of diagnosing. |
+| S7.6.1 | The one- and two-arm postfix handler grammar and MIR/interpreter lowering conform to S7.6.1v4/S7.6.2v3/S7.6.6v2, including nested `^`/`~` scope restoration, direct raised-`pn` outcome routing, and rich-error preservation. |
+| S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. The handler-local `^` remains scoped to the selected error arm. |
+| S7.6.7 | Landed 2026-08-17: statement-position `pn_call() ^ { error_body }` uses explicit ordinary completions before and after suspension; durable native-fault targets cover the S7.11 carve-out without retaining a recovery frame or jump buffer across a yield. Value-producing handlers over possibly-suspending `pn` calls remain rejected. |
 | S7.7.1–S7.7.6 | TE-18 declaration-boundary skip pending (routing, case-7 tiers, edge sites). `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
 | S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
@@ -1330,7 +1350,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only) |
 | S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
-| S7 absence/errors | C5, C5.3, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md` |
+| S7 absence/errors | C5, C5.3, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | S8 membership | C5.3a; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
 | S9 mutability | C4, C4.2a/b/c, C4.3, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Design_Runtime_COW.md` |
 | S10 operators | C6, C6.2–C6.4, C10 | `Lambda_Semantics_Formal2.md` |

@@ -7,6 +7,7 @@ pn worker() {
 
 pn main() {
     let handle = start worker()
-    let value = wait(handle) ^ { ^ }
+    var value = null
+    wait(handle) ^ { value = ^ } ~ { value = ~ }
     print([value, value is error, value.code, value.message])
 }

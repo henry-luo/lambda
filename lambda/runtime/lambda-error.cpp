@@ -333,7 +333,6 @@ const char* lambda_fault_reason_name(LambdaFaultReason reason) {
     case LAMBDA_FAULT_STACK_OVERFLOW: return "stack_overflow";
     case LAMBDA_FAULT_SIDE_STACK_EXHAUSTION: return "side_stack_exhaustion";
     case LAMBDA_FAULT_OUT_OF_MEMORY: return "out_of_memory";
-    case LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION: return "equality_depth_exhaustion";
     case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT: return "runtime_boundary_defect";
     case LAMBDA_FAULT_NONE: return "none";
     }
@@ -347,8 +346,6 @@ static LambdaErrorCode lambda_fault_error_code(LambdaFaultReason reason) {
         return ERR_STACK_OVERFLOW;
     case LAMBDA_FAULT_OUT_OF_MEMORY:
         return ERR_OUT_OF_MEMORY;
-    case LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION:
-        return ERR_RUNTIME_ERROR;
     case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT:
         return ERR_INVALID_STATE;
     case LAMBDA_FAULT_NONE:
@@ -365,8 +362,6 @@ static const char* lambda_fault_error_message(LambdaFaultReason reason) {
         return "Side-stack capacity exhausted";
     case LAMBDA_FAULT_OUT_OF_MEMORY:
         return "Out of memory";
-    case LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION:
-        return "Structural equality recursion limit exceeded";
     case LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT:
         return "Runtime boundary invariant failed";
     case LAMBDA_FAULT_NONE:
