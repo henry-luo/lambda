@@ -1,7 +1,7 @@
 # Lambda Impl Plan: Structural Type Inference (Decided-but-Unbuilt Backlog)
 
 - **Date:** 2026-08-18
-- **Status:** IP0–IP3 IMPLEMENTED (2026-08-18); IP5 ATTEMPTED — §10 records what it proved and why TIG1 needs a bounded sweep rather than more special cases. IP4/IP6/IP7 pending.
+- **Status:** IP0–IP4 and IP6 IMPLEMENTED; the §10.3 carrier sweep DONE (§14); **TIG1 LANDED** after the defect-1 hunt fixed the underlying emitter bug (§15). IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
 - **Design authority:** `vibe/Lambda_Design_Type_Infer.md` (TI1–TI8, TIG1–TIG17); this doc implements only its *decided* items and never resolves an open design question in code — where an open question gates a slice, the interim disposition is stated and the slice stays inside it
 - **Formal authority:** D2.4.1, D2.5.3, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.6.1–D8.6.3; S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1–S11.4.4; SI3v2, SI14
 - **Related:** `vibe/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D3.3
@@ -498,3 +498,410 @@ Step 2 is the real cost and the reason this is its own gated change: the
 failure mode is a segfault, not a diagnostic, so it needs the forced-GC and
 differential harnesses running against each converted consumer group rather
 than one big flip.
+
+
+---
+
+## 11. IP6 as-landed — the JS structural pass (2026-08-18)
+
+### 11.1 What landed
+
+| Slice | Change |
+|---|---|
+| **TIG13** | `build_js_ast.cpp` binary typing replaced: relational/equality/`instanceof`/`in` → `bool`; `+` → `string` or `float` by proven operands, else open; `&&`/`\|\|`/`??` → the shared operand type when both agree, else open; arithmetic/exponent/bitwise → `float`. Unary was already correct (`!`→bool, `typeof`→string, `+`/`-`/`~`→float) and was left alone. |
+| **TIG14b** | JS member reads resolve the property against the receiver's recorded `TypeMap` shape, publishing only CONTAINER-valued fields — the boxed-pointer-safe class, mirroring Lambda's TIG2. Dynamic (`obj[expr]`) properties stay open by construction. |
+| **Census** | `js_report_any_census` wired into the shared `build_js_ast_indexed` wrapper so BOTH JS entrypoints report; reason split into `js_call` / `js_member` so the two halves of TIG14 are separately measurable; `test/type_infer/refresh_js_census.sh` + committed baseline. |
+| **Dump** | The JS AST dump now emits `(value_type …)` on binary and unary nodes, mirroring the Lambda dump, so JS typing is assertable in a fixture. |
+| **Dedup** | `is_global_simple_type` and `unwrap_simple_type_type` promoted from `build_ast.cpp` statics to `transpiler.hpp` declarations rather than copied into the JS builder (house rule 13). |
+
+### 11.2 The measured result
+
+Across 80 representative JS files, 11,532 binary expressions:
+
+| Result type | Count | Share |
+|---|---:|---:|
+| `bool` | 5,478 | 47% |
+| `any` (honestly open) | 3,842 | 33% |
+| `float` | 1,440 | 12% |
+| `string` | 769 | 7% |
+| `null` | 3 | <1% |
+
+**Before IP6 every one of these was typed `float`.** So 88% carried an actively
+wrong static type; now 67% carry a correct precise type and 33% are honestly
+open. Note the census TOTAL rises rather than falls for this phase — TIG13
+converts silent wrongness into recorded openness, which is the point: an
+honest `any` is usable by later phases, a wrong `float` is not.
+
+JS census baseline (497 files, 779,621 nodes): `open_param` 354,720,
+`js_member` 202,406, `js_call` 104,528, `open_map` 40,958, `js_binary` 35,306.
+The two biggest remaining targets are now named and separately measurable.
+
+### 11.3 Why the IP5 hazard did not repeat
+
+The JS lane has the same "type implies carrier" contract as Lambda —
+`jm_transpile_box_item` switches on `item->type->type_id` and expects a raw
+carrier for INT/BOOL/STRING. TIG13 was safe only because each published type
+matches what the JS lowering already produces: JS numbers are binary64 so
+arithmetic stays `float`, and **bitwise results were deliberately NOT typed
+`int`** even though ToInt32/ToUint32 make them integral — `int` would claim a
+carrier the lowering does not produce. That restraint is the IP5 lesson
+applied prospectively, and it is why the hard gate stayed green.
+
+### 11.4 IP6.5 — the warn-only seam
+
+Ruled satisfied without new code: the JS lane emits **no static type-error
+producers** today. `js_error` (which sets `has_errors`) covers transpiler
+faults and `js_check_early_errors` covers ECMAScript early errors — both
+syntax-level and correctly fatal. There is no E208 equivalent on the JS side,
+so "static type findings are warnings only" holds trivially. Adding a
+`js_type_warning` API now would be dead code; the seam gets built with its
+first producer.
+
+### 11.5 Gates
+
+`test_js_gtest` (only the pre-existing `lib_tabulator` failure, verified at
+HEAD by stash-and-rebuild), `test_lambda_gtest` 728/728,
+`test_lambda_errors_gtest` 109/109 including the new
+`IP6JsOperatorsPublishPreciseTypes`, and `make test262-baseline`
+**40,261 / 40,261 with 0 regressions** — run twice, once on the comparison
+probe and once on the full operator table.
+
+Fixture: `test/js/type_infer_ip6.js` + golden, which also runs in the
+auto-discovered JS suite.
+
+
+---
+
+## 12. IP4 as-landed — and why most of TI7 was already true (2026-08-18)
+
+### 12.1 The survey result: two of three slices were already satisfied
+
+**IP4.2 (incompatible declared/inferred is a static error) is already
+implemented.** Probed directly:
+
+| Program | Today's answer |
+|---|---|
+| `let a: int[] = ["x"]` | E201 array element type mismatch |
+| `let b: int = "s"` | E201 cannot initialize 'b' of type int with string |
+| `let e: int = 3.7` | E201 type check at declaration failed |
+| `let p: P = {x: 1, y: "s"}` | E201 field 'y' expects int, but got string |
+| `fn f() int { "s" }` | E208 body returns string, declared int |
+| `let c: float[] = [1, 2]` | accepted — correct, int widens to float (S11.4.5) |
+| `let q: Q = {x: 1, z: 9}` | accepted — correct, named maps are OPEN (S11.4.6) |
+
+No gap found. The two "accepted" rows are required by the semantics, not
+misses.
+
+**IP4.1/IP4.3 (stricter-of for reads) are already realized where they pay.**
+The emitter performs the meet itself: `get_effective_type` carries an explicit
+"AST says ANY but var narrowed by inference → upgrade to narrowed type" case,
+and `let a: any = 5` followed by `a + 1` emits **zero `fn_add`** — the addition
+is already on the native int lane. Recording the meet on the AST would
+therefore change no codegen; its only remaining value is to static checking,
+and it carries the §9.2 carrier hazard for any consumer that reads the binding
+type for a lane decision. Left as a D3.2.3 bookkeeping item, not built
+speculatively.
+
+### 12.2 What IP4 actually delivered: TIG11's single-value blocks
+
+§9.3 parked TIG11 (5,388 nodes — the largest single Lambda reason) on "IP4's
+return-contract seam". With the seam understood, the retry decomposed cleanly:
+
+- **A single value item IS the block's value on every lowering path**
+  (`transpile_content` returns it directly), so the block carries that item's
+  type. Landed.
+- **The multi-item cases stay open, with evidence.** A functional block builds
+  a list whose element types are unproven; a procedural block's last-value type
+  leaks its raw lane into the for-expression collector — `[inf, inf, inf]`
+  instead of `[3, 5, 7]` on `proc_for_expr_content_proc`. That is the IP5
+  carrier class again, in its third distinct form.
+
+Landing the single-item case alone took the earlier 197-script breakage to
+**2**, and restricting to it took that to **0**.
+
+### 12.3 A census bug in IP0, found and fixed
+
+`build_content` and `build_list` both assigned `set_type_any(...)` at the TOP
+and refined the type at their exits, so every refined block was still counted
+as ANY. The census over-reported by ~2,000 nodes. Both now default to `NULL`
+and record only the answer that survives.
+
+**Census: 27,569 → 25,558 (−2,011, −7.3%)**, `list` 5,388 → 3,377. Part of that
+is the real TIG11 win and part is the corrected accounting — they are not
+separable after the fact, which is itself the argument for having landed IP0
+before anything else.
+
+### 12.4 Gates
+
+`test_lambda_gtest` 728/728, `test_lambda_errors_gtest` 109/109,
+`test_mir_emission_gtest` 59/59, `test_mir_gc_stress_gtest` 88/88,
+`test_js_gtest` (only the pre-existing `lib_tabulator`), lint clean.
+
+
+---
+
+## 13. IP7 attempted — arm-join unions are blocked on TWO sides (2026-08-18)
+
+Attempted per TI6 (no staging, repair the corpus in-change). Both the full
+form and a restricted form were measured and reverted. The E208 budget §7
+allocated to this phase was not spent, because the findings it would have
+repaired are **not real**.
+
+### 13.1 Attempt A — the full union: 109 SPURIOUS E208s
+
+Replacing the plain-differing-arms ANY with
+`lambda_type_union_normalized(then, else)` produced 156 script failures,
+driven by 109 E208s across ~14 library files (`lambda/package/editor/*`,
+`lambda/package/graph/*`, `lambda/package/latex/*`, `lambda/package/math/*`).
+
+Top reported callees: `caret` ×28, `float` ×20, `node` ×15, `child_text` ×12.
+
+**They are spurious, and recursion is the mechanism.** A function's
+forward-reference placeholder return is `&TYPE_ANY` — which INCLUDES error
+(S11.4.3) — while its body is still being built. A recursive arm therefore
+contributes error-ness that the finished function does not have, the union
+preserves it (where ANY absorbed it), and every caller inherits it.
+
+Minimal repro, isolating recursion as the trigger:
+
+```
+fn pos(p, o) => {p: p, o: o}
+fn last_in(n, path) { if (n == 0) { pos(path, 1) } else { last_in(n - 1, path) } }
+fn caret(p) => {a: p, b: p}
+fn top(b) => if (len(b) == 0) { caret(pos([], 0)) } else { caret(last_in(2, [0])) }
+```
+→ E208 on `top`. Delete the recursion from `last_in` and it compiles clean.
+`last_caret_pos_in` in the real library provably returns a map on every path,
+yet its callers were told it may return an error.
+
+Repairing these with `or` / `| error` would add containment noise to correct
+code, and the same shape recurs in any user code with a recursive helper. TI6
+requires repairing *genuinely* mis-typed scripts; it does not license
+repairing the compiler's own artifact.
+
+### 13.2 Attempt B — union only when neither arm is error-capable
+
+This removed every spurious E208 and is a defensible subset (the real
+precision win, `int | string` and friends, is retained; the diverging-arm case
+is unaffected because its error comes from a `raise` the source wrote).
+
+It still left **21 failures, including a segfault** (exit 139) in the math
+package. Simple pairs are fine in isolation — `1|"s"`, `"s"|true`,
+`[1]|{a:1}`, `null|"s"`, `1|null`, `true|"s"` all evaluate correctly — so the
+breaking combination is compound and lives in library code: the union type
+reaches a consumer that decodes it as a lane. That is the §10.2 carrier class
+for the fourth time.
+
+### 13.3 What TIG7/TIG8 actually need
+
+Two prerequisites, neither local to the join:
+
+1. **Resolved recursive return types.** The join must not observe a
+   forward-reference placeholder. This needs a fixpoint over the call graph
+   (or an explicit "unresolved" marker that joins treat as open) before arm
+   types are combined — the two-pass function pre-registration already in
+   `build_content` is the natural place.
+2. **The carrier sweep of §10.3.** Same prerequisite as TIG1, ARRAY_NUM
+   iteration, `slice`, the polymorphic registry rows, and multi-item content
+   blocks.
+
+TIG8 (match arms) was not attempted: it shares both prerequisites and its
+scrutinee-narrowing half additionally needs TI5, which has no S-level ruling
+yet.
+
+### 13.4 State at close
+
+Reverted to the verified-green form, with the diagnosis recorded at the site.
+`test_lambda_gtest` 728/728, `test_lambda_errors_gtest` 109/109,
+`test_mir_emission_gtest` 59/59, `test_js_gtest` (only the pre-existing
+`lib_tabulator`), lint clean, census steady at 25,558.
+
+**The carrier class has now blocked five distinct items across three phases**
+(index reads, polymorphic sys-func rows, multi-item content blocks, arm-join
+unions, and ARRAY_NUM iteration). That is the strongest available argument for
+doing §10.3's sweep as its own gated effort before any further typing
+precision is attempted.
+
+
+---
+
+## 14. The carrier sweep as-landed (2026-08-18)
+
+Done per §10.3. The headline is that **the sweep is far smaller than §10.3
+assumed**, and it moved TIG1 from "blocked by an unknown class" to "blocked by
+three named defects".
+
+### 14.1 The inventory — 83 reads, 2 unsafe
+
+`transpile-mir.cpp` has 83 `->type->type_id` reads and 15
+`mir_decl_type_id(node->type)` calls against 166 oracle calls. Classifying all
+83 by what the read DECIDES:
+
+| Class | Count | Disposition |
+|---|---:|---|
+| Structural predicate — "is this a FUNC / TYPE / MAP / NULL node?" | ~70 | Correct as-is. These ask what a node IS, not which carrier it arrives in. |
+| Literal-guarded — inside `if (node->type->is_literal)` | ~8 | Correct as-is: a literal's type IS its carrier by construction (`transpile_primary`). |
+| Already co-guarded by an oracle call or a native-arith proof | ~3 | Correct as-is (e.g. the store edge at `:20235` ANDs with `get_effective_type(...) == storage_type`). |
+| **Genuinely unsafe carrier decisions** | **2** | Converted. |
+
+The two converted:
+
+1. **Member unbox** (`transpile_member`): decided `emit_unbox_contract_lane`
+   from the field node's AST type. `fn_member` publishes a boxed Item unless
+   the oracle proves a lane, so this decoded an Item as raw bits the moment
+   member typing got precise — exactly TIG2's hazard.
+2. **Variable registration** (`set_var` in the assign path): registered a
+   binding's MIR type from its initializer's *semantic* type rather than the
+   carrier the initializer actually produced.
+
+### 14.2 The oracle is named
+
+`get_effective_type` → **`mir_expr_carrier_type`**, with a doc comment stating
+the contract: it answers which machine carrier a value arrives in, never what
+the value means; every special case inside it is a "type says X, carrier is Y"
+correction. The old spelling survives as one `#define` alias so the rename
+landed as a single reviewable change.
+
+New lint rule **`no-ast-type-carrier-read`** (manifest category `correctness`,
+tag `carrier`) pins the two converted shapes so they cannot regress. It is
+deliberately narrow — matching the exact converted patterns rather than all
+`->type->type_id` reads — because ~78 of the 83 reads are legitimate.
+
+### 14.3 What the sweep bought, measured on TIG1
+
+| State | TIG1 corpus failures |
+|---|---:|
+| Before the sweep | 9 |
+| After converting the 2 carrier readers | **3** |
+| Additionally excluding native-scalar element types | **1** |
+
+`int_arr[0]`, `str_arr[1]`, `mixed_arr[0]` and `nested_arr[2]` on module
+imports — all previously broken — now work.
+
+### 14.4 The three remaining defects, each reproducible
+
+TIG1 is still reverted, but its blocker is no longer a class:
+
+1. **Module-bound `float[]` as an arithmetic operand.**
+   `import .mod_arrays; float_arr[2] + 0.0` → `dmov: got 'int', expected
+   'double'`. Note the asymmetry: the same read of an `int[]` works, because a
+   boxed Item and an int lane are both i64 registers while `dmov` demands
+   `MIR_T_D` — so MIR's verifier catches the float case and misses the int
+   one. The three obvious float seams are each ALREADY guarded
+   (`emit_int_or_float_to_double` → `emit_scalar_native_lane`; `emit_box`'s
+   reg-class check; `emit_index_result_move`'s `loaded_is_boxed` unbox), so
+   the offender is a fourth, unlocated consumer.
+2. **`int?` used AS an index.** `board[mfrom[last_m]]`
+   (`larceny/triangl2`) — a nullable int is no longer recognized by the
+   integer-index test, so index lowering takes a different path and the
+   program yields `null`.
+3. **`var vvx: int = vxy[0]`** (`awfy/cd2_orig`) reports *"cannot initialize
+   'vvx' of type int with null"*. The "with null" formatting suggests a defect
+   in the nullable construction rather than a legitimate finding — it wants
+   confirming before being treated as a real E201.
+
+Suppressing `mir_known_index_element_type`'s AST-only fallback for module
+bindings was tried twice and rejected both times: it fixes (1) but breaks
+`pdf_phase29_font_encoding_round`, whose module-level int arrays genuinely
+need that witness.
+
+### 14.5 Gates
+
+`test_lambda_gtest` 728/728, `test_lambda_errors_gtest` 109/109,
+`test_mir_emission_gtest` 59/59, `test_js_mir_emission_gtest` 21/21,
+`test_mir_gc_stress_gtest` 88/88, `test_js_gtest` (only the pre-existing
+`lib_tabulator`), both lint rules clean, census steady at 25,558.
+
+
+---
+
+## 15. Defect (1) hunt — a four-site emitter bug, and TIG1 lands (2026-08-18)
+
+§14.4 named three defects blocking TIG1. Hunting the first one found a genuine
+emitter bug, fixing it dissolved the second, and the third turned out to be a
+correct finding against a stale type. **TIG1 is now landed for every element
+type.**
+
+### 15.1 The bug: reinterpreting a boxed float through the double lane
+
+`import .mod_arrays; float_arr[2] + 0.0` failed with
+`dmov: unexpected operand mode for operand #2. Got 'int', expected 'double'`.
+
+Root cause: **`emit_double_bits` reinterprets a double's bits by emitting a
+`DMOV` through a scratch slot, so it requires a real `MIR_T_D` register — but
+a float-typed value can still arrive BOXED** (a cross-module `float[]` read
+publishes an Item, since a module slot has no live MIR entry). Four call sites
+passed the raw register:
+
+| Site | What it does |
+|---|---|
+| `emit_nullable_float_arith` | float null test, BEFORE `l_normal` runs the guarded conversion |
+| `emit_box_float` | the float boxer's bit view *and* its `DEQ` zero test |
+| `emit_box_float_lane` | the `float?` boxer — the one our new `T?` type selects |
+| `emit_native_scalar_declaration_boundary` | the declared-boundary null test |
+
+The three seams I had already checked in §14.4 (`emit_int_or_float_to_double`,
+`emit_box`'s reg-class check, `emit_index_result_move`) were all genuinely
+guarded — the offenders were the *null-test* and *boxing* paths, which run
+before or beside the guarded conversion.
+
+**Fix, at the choke point:** `emit_double_bits` now normalizes any non-`MIR_T_D`
+register through `emit_unbox(..., LMD_TYPE_FLOAT)` — an i64 register reaching a
+"give me this double's bits" request can only be a boxed float. `emit_box_float`
+and `emit_box_float_lane` additionally normalize the register *itself*, because
+they also move and `DEQ`-compare it, not only its bit view. (Guarding only
+`emit_double_bits` moved the failure from `dmov` to `deq` — the intermediate
+state is why both guards are needed and neither is redundant.)
+
+This is a **latent bug independent of TIG1**: any path that delivers a boxed
+value to a float-typed consumer could hit it. It went unnoticed because before
+TIG1 those consumers rarely saw a float-typed boxed value.
+
+### 15.2 Defect (2) dissolved
+
+`larceny/triangl2` (`board[mfrom[last_m]]`, an `int?` used as an index) passed
+as soon as the float fix landed — it was a downstream symptom of the same
+emitter bug, not a separate index-recognition defect as §14.4 assumed.
+
+### 15.3 Defect (3) was a correct finding against a stale type
+
+`var vvx: int = vxy[0]` in `awfy/cd2_orig` reported *"cannot initialize 'vvx'
+of type int with null"*. Not a nullable-construction defect: the source is
+`var vxy = [null, null]`, so the array's recorded element type genuinely IS
+`null` — and a helper later fills it with ints.
+
+The right rule is **D3.3.3** ("container element-type narrowing dies with its
+binding"): a `var` array's element contract is not stable, because any later
+store can rewrite it. TIG1 now declines to publish an element type when the
+object is a mutable or widened binding — the same guard
+`mir_known_index_element_type` already applies on the emitter side.
+
+### 15.4 TIG1 as landed
+
+`a[i]` publishes `nullable(elem)` when: the object is an array with a recorded
+element type, the object binding is immutable, and the subscript is neither a
+range (slice), a type expression (child query), nor a container (mask select).
+Element type, nullability and object mutability are all respected; no element
+type is excluded.
+
+Census `index_elem` **1,165 → 992**; total **25,558 → 25,385**.
+Regression fixture `test/lambda/proc/type_infer_index_elem.ls` covers all four
+float consumers, int/string elements, OOB totality, and the mutable-binding
+rule.
+
+### 15.5 Gates
+
+`test_lambda_gtest` **729/729**, `test_lambda_errors_gtest` 109/109,
+`test_mir_emission_gtest` 59/59, `test_js_mir_emission_gtest` 21/21,
+`test_mir_gc_stress_gtest` 88/88, both lint rules clean.
+
+### 15.6 What this says about the remaining reverts
+
+The carrier class was never five independent problems — at least three of the
+five were **one emitter bug** wearing different symptoms. ARRAY_NUM iteration,
+`slice`, the polymorphic registry rows and multi-item content blocks should
+each be retried against the fixed emitter before being treated as blocked;
+they were reverted when the float-lane bug was still live. IP7's arm-join
+union is the exception: its blocker is the recursive forward-reference
+placeholder (§13.1), which is a typing-side prerequisite the emitter fix does
+not touch.

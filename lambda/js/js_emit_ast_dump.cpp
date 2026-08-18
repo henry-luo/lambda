@@ -1,4 +1,5 @@
 #include "../runtime/emit_sexpr.h"
+#include "../runtime/type_contract.hpp"
 #include "js_transpiler.hpp"
 #include "../ts/ts_ast.hpp"
 #include "../../lib/file.h"
@@ -205,6 +206,15 @@ static void emit_js_dump_list(const char* source, const char* label, JsAstNode* 
     printf(")");
 }
 
+// Publish the node's inferred static type so IP6 fixtures can assert it, the
+// same way the Lambda dump does [Type_Infer TIG13/TIG14].
+static void js_dump_value_type(JsAstNode* node) {
+    if (!node || !node->type) return;
+    char name[128];
+    lambda_type_format_name(node->type, name, sizeof(name));
+    printf(" (value_type \"%s\")", name);
+}
+
 static void emit_js_dump_field(const char* source, const char* label, JsAstNode* node, int indent) {
     if (!node) return;
     printf("\n");
@@ -263,6 +273,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case JS_AST_NODE_BINARY_EXPRESSION: {
             JsBinaryNode* bin = (JsBinaryNode*)node;
             printf(" (op %s)", js_dump_operator_name(bin->op));
+            js_dump_value_type(node);
             emit_js_dump_field(source, "left", bin->left, indent + 1);
             emit_js_dump_field(source, "right", bin->right, indent + 1);
             break;
@@ -270,6 +281,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case JS_AST_NODE_UNARY_EXPRESSION: {
             JsUnaryNode* un = (JsUnaryNode*)node;
             printf(" (op %s)", js_dump_operator_name(un->op));
+            js_dump_value_type(node);
             emit_js_dump_field(source, "operand", un->operand, indent + 1);
             break;
         }

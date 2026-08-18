@@ -8,14 +8,14 @@ compare	497
 decompose	64
 dynamic_name	66
 explicit	457
-index_elem	1165
+index_elem	992
 join	1631
 join_op	1001
-list	5388
+list	3377
 loop_src	252
 member_shape	4564
 statement	5453
 sysfunc_row	4699
 unary	11
 widened_var	303
-_total	27569
+_total	25385

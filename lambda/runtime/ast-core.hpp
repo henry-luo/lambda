@@ -828,6 +828,8 @@ typedef enum AnyReason {
     ANY_PIPE,                // pipe result element type (TIG16)
     ANY_JS_BINARY,           // JS binary expression (TIG13)
     ANY_JS_CALL_MEMBER,      // JS call/member result (TIG14)
+    ANY_JS_CALL,             // JS call result specifically (TIG14a)
+    ANY_JS_MEMBER,           // JS member/subscript read specifically (TIG14b)
     ANY_ARITH_OPERAND,       // arithmetic where an operand is not statically numeric
     ANY_JOIN_OP,             // `++` join/concat result
     ANY_CALL_RESULT,         // callee's return type unknown (recursive/open fn)

@@ -205,6 +205,40 @@ TEST(TypeInferenceStructuralTest, IP2SysFuncRowsResolvePreciseResults) {
     shell_result_free(&result);
 }
 
+TEST(TypeInferenceStructuralTest, IP6JsOperatorsPublishPreciseTypes) {
+    // IP6 [Type_Infer TIG13/TI2]: JS binary expressions publish the type the
+    // operator produces. Every one of them used to be typed `float`.
+    const char* args[] = {LAMBDA_EXE, "--emit-js-ast-dump",
+        "test/js/type_infer_ip6.js", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+
+    // Equality, relational and membership tests are predicates.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op strict_eq) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op lt) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op in) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+    // `+` is overloaded: string concatenation and numeric addition both appear.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op add) (value_type \"string\")"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op add) (value_type \"float\")"), nullptr) << result.stdout_buf;
+    // JS numbers are binary64: a bitwise result is still a number, and typing
+    // it `int` would claim a carrier the lowering does not produce.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op bit_or) (value_type \"float\")"), nullptr) << result.stdout_buf;
+    // No comparison may still report the old blanket `float`.
+    EXPECT_EQ(strstr(result.stdout_buf,
+        "(op strict_eq) (value_type \"float\")"), nullptr) << result.stdout_buf;
+
+    shell_result_free(&result);
+}
+
 TEST(TypeContractMetadataTest, ImplicitParameterErrorMatchArmIsLinted) {
     const char* args[] = {LAMBDA_EXE, "test/lambda/type_implicit_param_match_lint.ls", NULL};
     ShellOptions options = {0};

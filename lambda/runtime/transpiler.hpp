@@ -164,6 +164,14 @@ bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
 
+// Shape/type-graph helpers shared by the Lambda and JS AST builders.
+// `is_global_simple_type` answers whether a Type* is one of the compact global
+// singletons (which carry only the Type prefix and must never be read as a
+// TypeMap/TypeArray); `unwrap_simple_type_type` peels compiler-built TypeType
+// wrappers off a recorded field type.
+bool is_global_simple_type(const Type* type);
+Type* unwrap_simple_type_type(Type* type);
+
 // ANY-census recorders [Type_Infer TI3]. Every `any` fallback in the builders
 // goes through one of these so the reason is counted; never bare-assign
 // `&TYPE_ANY` to an expression node's type.
