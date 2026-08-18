@@ -1,7 +1,7 @@
 # Lambda Impl Plan: Structural Type Inference (Decided-but-Unbuilt Backlog)
 
 - **Date:** 2026-08-18
-- **Status:** IP0–IP4 and IP6 IMPLEMENTED; carrier sweep DONE (§14); TIG1 LANDED (§15); reverts retried (§16); int-lane audit DONE and multi-item content blocks LANDED (§17). Census 28,203 → 22,890. IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
+- **Status:** IP0–IP4 and IP6 IMPLEMENTED; carrier sweep DONE (§14); TIG1 LANDED (§15); reverts retried (§16); int-lane audit DONE (§17); the graphviz "regression" resolved as a keyed-sort BUG FIX with stale goldens (§18). Census 28,203 → 22,890; `test_lambda_gtest` 732/732. IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
 - **Design authority:** `vibe/Lambda_Design_Type_Infer.md` (TI1–TI8, TIG1–TIG17); this doc implements only its *decided* items and never resolves an open design question in code — where an open question gates a slice, the interim disposition is stated and the slice stays inside it
 - **Formal authority:** D2.4.1, D2.5.3, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.6.1–D8.6.3; S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1–S11.4.4; SI3v2, SI14
 - **Related:** `vibe/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D3.3
@@ -1057,3 +1057,69 @@ The carrier story has one shape, and it is now stated precisely:
 Adding a node kind to the AST, or changing a lowering to box, therefore
 requires checking the oracle. That is a much smaller and more checkable
 obligation than the "audit every consumer" framing this work started with.
+
+
+---
+
+## 18. The graphviz "regression" was a keyed-sort bug FIX (2026-08-18)
+
+`graphviz_rank_layout` and `graphviz_ordering_groups` were the last two
+failures, carried through several sections as "pre-existing, unrelated". They
+were neither: the behavior change is a **fix**, and the goldens were stale.
+
+### 18.1 Establishing that it WAS a change
+
+The archived pre-session release binary (`test/benchmark/exe/lambda-v32-a6192c1086`)
+passes `rank_layout`; the current build does not. So something in this
+session's window changed the output — earlier attribution attempts had only
+ruled out the member-carrier conversion, which fails either way.
+
+### 18.2 Which primitive changed
+
+Decomposing the layout pipeline, `group by … into` produces **identical**
+group order on both binaries. The difference is `sort(array, keyFn)`.
+
+With a key function chosen to DISAGREE with natural order:
+
+| Program | v32 | current | correct |
+|---|---|---|---|
+| `sort([{s:3.0,id:"a"},{s:2.0,id:"b"},{s:1.0,id:"c"}], e => e.s)` | `[a,b,c]` | `[c,b,a]` | **`[c,b,a]`** |
+| `sort([{s:1.0,id:"z"},{s:2.0,id:"a"}], e => e.s)` | `[a,z]` | `[z,a]` | **`[z,a]`** |
+| `sort([{n:3,id:"a"},{n:1,id:"b"}], e => e.n)` | `[a,b]` | `[b,a]` | **`[b,a]`** |
+
+**v32 silently ignored the key function** and fell back to the values' natural
+order. The current build honors it. Note the third row: INT keys were broken
+too, so this was never float-specific.
+
+### 18.3 Why it is fixed now
+
+Most plausibly the §17 `AST_NODE_CONTENT` oracle case. A single-expression
+closure body (`(e) => e.s`) lowers through content, whose carrier is a boxed
+Item; without the oracle case the key value was published as a raw lane and
+the comparator read tag bits instead of the value. That explains both the int
+and float breakage in one mechanism. (Stated as the likely cause rather than a
+proven one — the fix was not made against this symptom.)
+
+### 18.4 Resolution
+
+The graphviz goldens encoded the broken ordering, so they were **regenerated**,
+not worked around. The new `rank_layout` layer order is insertion order, which
+is what `layer_with_order` actually computes — it scores by `float(i)`, the
+insertion index. The old alphabetical order was an artifact of the comparator
+falling back to comparing whole node maps.
+
+New fixture `test/lambda/sort_key_fn_float.ls` pins the fix directly: four
+keyed-sort cases each chosen so that honoring the key gives a different answer
+from natural order, plus a stability check. The same file run on the archived
+v32 binary produces the wrong answer for every case, which is what makes it a
+real regression test rather than a restatement of current behavior.
+
+`test_lambda_gtest` is now **732/732**.
+
+### 18.5 Lesson
+
+A failing golden is a hypothesis, not a verdict. This one was labelled
+"pre-existing, unrelated" for several sections on the strength of one
+bisect that only excluded a single candidate. Confirming against an archived
+binary — cheap, no rebuild — would have identified it immediately, and is the
+right first move whenever a golden disagrees.
