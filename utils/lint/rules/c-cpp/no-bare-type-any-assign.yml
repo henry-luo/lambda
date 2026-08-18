@@ -1,0 +1,20 @@
+id: no-bare-type-any-assign
+language: cpp
+severity: error
+message: >-
+  Bare `&TYPE_ANY` assignment in a type-inference builder. Every `any` fallback
+  must record its reason through set_type_any()/set_lit_type_any() (Lambda) or
+  js_set_type_any() (LambdaJS) so the ANY-census stays complete — the census is
+  how later inference slices prove their effect [Type_Infer TI3, TI1]. Declared
+  function return contracts (`fn_type->returned`) are not inference fallbacks
+  and are exempt. Mark audited exceptions with a trailing
+  "// ANY_ASSIGN_OK: <reason>".
+metadata:
+  suppress: ANY_ASSIGN_OK
+rule:
+  any:
+    - pattern: $NODE->type = &TYPE_ANY
+    - pattern: $NODE->type = (Type *)&LIT_TYPE_ANY
+files:
+  - "lambda/runtime/build_ast.cpp"
+  - "lambda/js/build_js_ast.cpp"

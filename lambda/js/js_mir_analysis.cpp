@@ -375,10 +375,14 @@ int jm_count_awaits(JsAstNode* node) { return jm_count_suspensions(node, JS_SUSP
 // Collect assignment target identifiers within a single function body.
 // Does NOT recurse into nested function bodies — only collects assignments
 // at the current function level.
+// Adapter so the shared child-table visitor can drive this walk.
+static void jm_collect_func_assignments_child(JsAstNode* child, void* ctx) {
+    jm_collect_func_assignments(child, (struct hashmap*)ctx);
+}
+
 void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
     if (!node) return;
-    switch (node->node_type) {
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+    switch (node->node_type) {    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* a = (JsAssignmentNode*)node;
         if (a->left && a->left->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)a->left;
@@ -406,91 +410,9 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
         jm_collect_func_assignments(un->operand, names);
         break;
     }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_collect_func_assignments(s, names); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
-        jm_collect_func_assignments(es->expression, names);
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_collect_func_assignments(ifn->test, names);
-        jm_collect_func_assignments(ifn->consequent, names);
-        jm_collect_func_assignments(ifn->alternate, names);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        jm_collect_func_assignments(f->init, names);
-        jm_collect_func_assignments(f->test, names);
-        jm_collect_func_assignments(f->update, names);
-        jm_collect_func_assignments(f->body, names);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        jm_collect_func_assignments(w->test, names);
-        jm_collect_func_assignments(w->body, names);
-        break;
-    }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* r = (JsReturnNode*)node;
-        jm_collect_func_assignments(r->argument, names);
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
-        JsAstNode* d = v->declarations;
-        while (d) { jm_collect_func_assignments(d, names); d = d->next; }
-        break;
-    }
     case JS_AST_NODE_VARIABLE_DECLARATOR: {
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
         if (d->init) jm_collect_func_assignments(d->init, names);
-        break;
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        jm_collect_func_assignments(bin->left, names);
-        jm_collect_func_assignments(bin->right, names);
-        break;
-    }
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* c = (JsCallNode*)node;
-        jm_collect_func_assignments(c->callee, names);
-        JsAstNode* arg = c->arguments;
-        while (arg) { jm_collect_func_assignments(arg, names); arg = arg->next; }
-        break;
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* m = (JsMemberNode*)node;
-        jm_collect_func_assignments(m->object, names);
-        if (m->computed) jm_collect_func_assignments(m->property, names);
-        break;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* cond = (JsConditionalNode*)node;
-        jm_collect_func_assignments(cond->test, names);
-        jm_collect_func_assignments(cond->consequent, names);
-        jm_collect_func_assignments(cond->alternate, names);
-        break;
-    }
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* arr = (JsArrayNode*)node;
-        JsAstNode* el = arr->elements;
-        while (el) { jm_collect_func_assignments(el, names); el = el->next; }
-        break;
-    }
-    case JS_AST_NODE_OBJECT_EXPRESSION: {
-        JsObjectNode* obj = (JsObjectNode*)node;
-        JsAstNode* prop = obj->properties;
-        while (prop) { jm_collect_func_assignments(prop, names); prop = prop->next; }
         break;
     }
     case JS_AST_NODE_PROPERTY: {
@@ -503,35 +425,9 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
         break;
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        jm_collect_func_assignments(sw->discriminant, names);
-        JsAstNode* c = sw->cases;
-        while (c) { jm_collect_func_assignments(c, names); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        jm_collect_func_assignments(sc->test, names);
-        JsAstNode* s = sc->consequent;
-        while (s) { jm_collect_func_assignments(s, names); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        jm_collect_func_assignments(t->block, names);
-        jm_collect_func_assignments(t->handler, names);
-        jm_collect_func_assignments(t->finalizer, names);
-        break;
-    }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* cc = (JsCatchNode*)node;
         jm_collect_func_assignments(cc->body, names);
-        break;
-    }
-    case JS_AST_NODE_THROW_STATEMENT: {
-        JsThrowNode* th = (JsThrowNode*)node;
-        jm_collect_func_assignments(th->argument, names);
         break;
     }
     case JS_AST_NODE_FOR_IN_STATEMENT:
@@ -541,30 +437,43 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
         jm_collect_func_assignments(fi->body, names);
         break;
     }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        JsAstNode* child = seq->expressions;
-        while (child) { jm_collect_func_assignments(child, names); child = child->next; }
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
-        jm_collect_func_assignments(ls->body, names);
-        break;
-    }
     case JS_AST_NODE_WITH_STATEMENT: {
         // Do NOT recurse into 'with' bodies — assignments inside 'with' may resolve
         // to the scope object at runtime, so they are not implicit globals
         break;
     }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        jm_collect_func_assignments(dw->body, names);
-        jm_collect_func_assignments(dw->test, names);
+
+    // Plain traversals whose child order matches JS_AST_CHILDREN — one shared
+    // visitor replaces 21 hand-written bodies. Listed explicitly, not folded
+    // into `default:`: this walker has no case for PROGRAM, class kinds,
+    // patterns, yield/await, spread/rest or templates, and delegating the
+    // default would start descending into all of them. The cases kept above
+    // record names or deliberately visit fewer children than the table lists.
+    case JS_AST_NODE_BLOCK_STATEMENT:
+    case JS_AST_NODE_EXPRESSION_STATEMENT:
+    case JS_AST_NODE_IF_STATEMENT:
+    case JS_AST_NODE_FOR_STATEMENT:
+    case JS_AST_NODE_WHILE_STATEMENT:
+    case JS_AST_NODE_RETURN_STATEMENT:
+    case JS_AST_NODE_VARIABLE_DECLARATION:
+    case JS_AST_NODE_BINARY_EXPRESSION:
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION:
+    case JS_AST_NODE_MEMBER_EXPRESSION:
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+    case JS_AST_NODE_SWITCH_STATEMENT:
+    case JS_AST_NODE_SWITCH_CASE:
+    case JS_AST_NODE_TRY_STATEMENT:
+    case JS_AST_NODE_THROW_STATEMENT:
+    case JS_AST_NODE_SEQUENCE_EXPRESSION:
+    case JS_AST_NODE_LABELED_STATEMENT:
+    case JS_AST_NODE_DO_WHILE_STATEMENT:
+        js_ast_visit_children(node, jm_collect_func_assignments_child, names);
         break;
-    }
     default:
-        break;
+        break; // unchanged
     }
 }
 

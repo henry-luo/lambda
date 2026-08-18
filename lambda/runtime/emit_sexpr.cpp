@@ -2645,6 +2645,18 @@ int emit_ast_dump_file(const char* script_path) {
 
     printf("(ast-dump lambda\n");
     emit_lambda_dump_node(source, tp.ast_root, 1);
+    // ANY-census block [Type_Infer TI3]: the machine-readable form of the
+    // compile-time report, so census fixtures can assert per-reason counts.
+    {
+        int any_total = 0;
+        for (int r = 0; r < ANY_REASON_COUNT; r++) any_total += tp.any_census[r];
+        printf("\n  (any_census (total %d)", any_total);
+        for (int r = 0; r < ANY_REASON_COUNT; r++) {
+            if (!tp.any_census[r]) continue;
+            printf(" (%s %d)", any_reason_name((AnyReason)r), tp.any_census[r]);
+        }
+        printf(")\n");
+    }
     printf(")\n");
 
     arraylist_free(tp.const_list);

@@ -51,6 +51,11 @@ typedef struct JsTranspiler {
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
     bool in_async_function;         // True while building an async function body/parameters
     
+    // ANY-census [Type_Infer TI3]: per-reason counts of expressions whose
+    // static type fell back to `any`. Diagnostic only — shares the Lambda
+    // reason catalog so both lanes report against one vocabulary.
+    int any_census[ANY_REASON_COUNT];
+
     // Error handling
     bool has_errors;                // Error flag
     StrBuf* error_buf;              // Error messages

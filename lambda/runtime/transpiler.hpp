@@ -163,6 +163,13 @@ ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int na
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
+
+// ANY-census recorders [Type_Infer TI3]. Every `any` fallback in the builders
+// goes through one of these so the reason is counted; never bare-assign
+// `&TYPE_ANY` to an expression node's type.
+Type* set_type_any(Transpiler* tp, AnyReason reason);
+Type* set_lit_type_any(Transpiler* tp, AnyReason reason);
+TypeId census_any_type_id(Transpiler* tp, AnyReason reason);
 TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);

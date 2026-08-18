@@ -3,6 +3,38 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Names are stable report keys, not prose: the census baseline file and the
+// AST dump are diffed across builds [Type_Infer TI3].
+extern "C" const char* any_reason_name(AnyReason reason) {
+    switch (reason) {
+    case ANY_OPEN_PARAM:          return "open_param";
+    case ANY_OPEN_MAP:            return "open_map";
+    case ANY_DYNAMIC_NAME:        return "dynamic_name";
+    case ANY_EXPLICIT:            return "explicit";
+    case ANY_SYSFUNC_ROW:         return "sysfunc_row";
+    case ANY_INDEX_ELEM:          return "index_elem";
+    case ANY_MEMBER_SHAPE:        return "member_shape";
+    case ANY_JOIN:                return "join";
+    case ANY_LOGICAL_AND:         return "logical_and";
+    case ANY_COMPARE:             return "compare";
+    case ANY_LIST:                return "list";
+    case ANY_UNARY:               return "unary";
+    case ANY_LOOP_SRC:            return "loop_src";
+    case ANY_DECOMPOSE:           return "decompose";
+    case ANY_PIPE:                return "pipe";
+    case ANY_JS_BINARY:           return "js_binary";
+    case ANY_JS_CALL_MEMBER:      return "js_call_member";
+    case ANY_ARITH_OPERAND:       return "arith_operand";
+    case ANY_JOIN_OP:             return "join_op";
+    case ANY_CALL_RESULT:         return "call_result";
+    case ANY_WIDENED_VAR:         return "widened_var";
+    case ANY_STATEMENT:           return "statement";
+    case ANY_ERROR_RECOVERY:      return "error_recovery";
+    case ANY_LEGACY_UNCLASSIFIED: return "legacy_unclassified";
+    default:                      return "unknown";
+    }
+}
+
 static unsigned long ast_ptr_hash(const AstNode* node) {
     uintptr_t value = (uintptr_t)node;
     value >>= 3;

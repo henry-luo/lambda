@@ -806,6 +806,46 @@ typedef struct FnCapture {
     struct FnCapture* next;
 } FnCapture;
 
+// Why an expression's static type fell back to `any`. Every ANY assignment in
+// the Lambda and JS builders names its reason so "where does ANY come from" is
+// a report instead of an archaeology pass [Type_Infer TI3]. The catalog IDs in
+// the comments are the TIG# gap entries the reason tracks.
+typedef enum AnyReason {
+    ANY_OPEN_PARAM = 0,      // untyped parameter — genuinely open
+    ANY_OPEN_MAP,            // unshaped/open map or element
+    ANY_DYNAMIC_NAME,        // computed member/field name
+    ANY_EXPLICIT,            // source wrote `any`
+    ANY_SYSFUNC_ROW,         // registry row has no precise success type (TIG4)
+    ANY_INDEX_ELEM,          // a[i] with unknown element type (TIG1)
+    ANY_MEMBER_SHAPE,        // field not resolvable from the shape (TIG2/TIG3)
+    ANY_JOIN,                // if/match arms disagree (TIG7/TIG8)
+    ANY_LOGICAL_AND,         // `and` result (TIG5)
+    ANY_COMPARE,             // relational operands not proven comparable (TIG6)
+    ANY_LIST,                // list/content literal (TIG11)
+    ANY_UNARY,               // unary +/- on non-numeric (TIG12)
+    ANY_LOOP_SRC,            // for-loop source element type unknown (TIG10)
+    ANY_DECOMPOSE,           // destructuring target (TIG15)
+    ANY_PIPE,                // pipe result element type (TIG16)
+    ANY_JS_BINARY,           // JS binary expression (TIG13)
+    ANY_JS_CALL_MEMBER,      // JS call/member result (TIG14)
+    ANY_ARITH_OPERAND,       // arithmetic where an operand is not statically numeric
+    ANY_JOIN_OP,             // `++` join/concat result
+    ANY_CALL_RESULT,         // callee's return type unknown (recursive/open fn)
+    ANY_WIDENED_VAR,         // mutable binding widened by reassignment
+    ANY_STATEMENT,           // statement node carries no value type
+    ANY_ERROR_RECOVERY,      // a diagnostic already fired; ANY avoids cascades
+    ANY_LEGACY_UNCLASSIFIED, // not yet classified — must trend to zero
+    ANY_REASON_COUNT
+} AnyReason;
+
+// C linkage: this header is reached both directly and through ast.hpp's
+// `extern "C"` block, so an unqualified declaration would mangle differently
+// per includer and fail to link.
+#ifdef __cplusplus
+extern "C"
+#endif
+const char* any_reason_name(AnyReason reason);
+
 typedef struct FnParamEvidence {
     int evidence;
     int int_evidence;

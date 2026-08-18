@@ -443,16 +443,15 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     return collected;
 }
 
+// Adapter so the shared child-table visitor can drive the collection walk.
+static void jm_collect_functions_child(JsAstNode* child, void* ctx) {
+    jm_collect_functions((JsMirTranspiler*)ctx, child);
+}
+
 void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node || mt->collection_failed) return;
 
     switch (node->node_type) {
-    case JS_AST_NODE_PROGRAM: {
-        JsProgramNode* prog = (JsProgramNode*)node;
-        JsAstNode* s = prog->body;
-        while (s) { jm_collect_functions(mt, s); s = s->next; }
-        break;
-    }
     case JS_AST_NODE_FUNCTION_DECLARATION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION: {
@@ -505,44 +504,6 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 mt->func_count, mt->func_capacity);
             mt->collection_failed = true;
         }
-        break;
-    }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_collect_functions(mt, s); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* n = (JsIfNode*)node;
-        jm_collect_functions(mt, n->test);
-        jm_collect_functions(mt, n->consequent);
-        jm_collect_functions(mt, n->alternate);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* n = (JsWhileNode*)node;
-        jm_collect_functions(mt, n->test);
-        jm_collect_functions(mt, n->body);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* n = (JsForNode*)node;
-        jm_collect_functions(mt, n->init);
-        jm_collect_functions(mt, n->test);
-        jm_collect_functions(mt, n->update);
-        jm_collect_functions(mt, n->body);
-        break;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* n = (JsExpressionStatementNode*)node;
-        jm_collect_functions(mt, n->expression);
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* n = (JsVariableDeclarationNode*)node;
-        JsAstNode* d = n->declarations;
-        while (d) { jm_collect_functions(mt, d); d = d->next; }
         break;
     }
     case JS_AST_NODE_VARIABLE_DECLARATOR: {
@@ -609,29 +570,6 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         }
         break;
     }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* n = (JsReturnNode*)node;
-        jm_collect_functions(mt, n->argument);
-        break;
-    }
-    case JS_AST_NODE_CALL_EXPRESSION: {
-        JsCallNode* n = (JsCallNode*)node;
-        jm_collect_functions(mt, n->callee);
-        JsAstNode* a = n->arguments;
-        while (a) { jm_collect_functions(mt, a); a = a->next; }
-        break;
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* n = (JsBinaryNode*)node;
-        jm_collect_functions(mt, n->left);
-        jm_collect_functions(mt, n->right);
-        break;
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* n = (JsUnaryNode*)node;
-        jm_collect_functions(mt, n->operand);
-        break;
-    }
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
         jm_collect_functions(mt, n->left);
@@ -652,37 +590,6 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         }
         break;
     }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* n = (JsMemberNode*)node;
-        jm_collect_functions(mt, n->object);
-        jm_collect_functions(mt, n->property);
-        break;
-    }
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* n = (JsArrayNode*)node;
-        JsAstNode* e = n->elements;
-        while (e) { jm_collect_functions(mt, e); e = e->next; }
-        break;
-    }
-    case JS_AST_NODE_OBJECT_EXPRESSION: {
-        JsObjectNode* n = (JsObjectNode*)node;
-        JsAstNode* p = n->properties;
-        while (p) { jm_collect_functions(mt, p); p = p->next; }
-        break;
-    }
-    case JS_AST_NODE_PROPERTY: {
-        JsPropertyNode* n = (JsPropertyNode*)node;
-        if (n->computed) jm_collect_functions(mt, n->key);
-        jm_collect_functions(mt, n->value);
-        break;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* n = (JsConditionalNode*)node;
-        jm_collect_functions(mt, n->test);
-        jm_collect_functions(mt, n->consequent);
-        jm_collect_functions(mt, n->alternate);
-        break;
-    }
     case JS_AST_NODE_TEMPLATE_LITERAL: {
         JsTemplateLiteralNode* n = (JsTemplateLiteralNode*)node;
         JsAstNode* e = n->expressions;
@@ -693,59 +600,6 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsTaggedTemplateNode* tt = (JsTaggedTemplateNode*)node;
         jm_collect_functions(mt, tt->tag);
         if (tt->quasi) { JsAstNode* e = tt->quasi->expressions; while (e) { jm_collect_functions(mt, e); e = e->next; } }
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* n = (JsTryNode*)node;
-        jm_collect_functions(mt, n->block);
-        jm_collect_functions(mt, n->handler);
-        jm_collect_functions(mt, n->finalizer);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* n = (JsCatchNode*)node;
-        jm_collect_functions(mt, n->param);
-        jm_collect_functions(mt, n->body);
-        break;
-    }
-    case JS_AST_NODE_THROW_STATEMENT: {
-        JsThrowNode* n = (JsThrowNode*)node;
-        jm_collect_functions(mt, n->argument);
-        break;
-    }
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* n = (JsCallNode*)node;
-        jm_collect_functions(mt, n->callee);
-        JsAstNode* a = n->arguments;
-        while (a) { jm_collect_functions(mt, a); a = a->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* n = (JsSwitchNode*)node;
-        jm_collect_functions(mt, n->discriminant);
-        JsAstNode* c = n->cases;
-        while (c) { jm_collect_functions(mt, c); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
-        jm_collect_functions(mt, n->test);
-        JsAstNode* s = n->consequent;
-        while (s) { jm_collect_functions(mt, s); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* n = (JsDoWhileNode*)node;
-        jm_collect_functions(mt, n->body);
-        jm_collect_functions(mt, n->test);
-        break;
-    }
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT: {
-        JsForOfNode* n = (JsForOfNode*)node;
-        jm_collect_functions(mt, n->left);
-        jm_collect_functions(mt, n->right);
-        jm_collect_functions(mt, n->body);
         break;
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
@@ -1042,66 +896,53 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_IMPORT_DECLARATION:
         // v14: imports don't contain function declarations to collect
         break;
-    case JS_AST_NODE_YIELD_EXPRESSION: {
-        // v14: recurse into yield argument
-        JsYieldNode* y = (JsYieldNode*)node;
-        if (y->argument) jm_collect_functions(mt, y->argument);
-        break;
-    }
-    case JS_AST_NODE_AWAIT_EXPRESSION: {
-        // v14: recurse into await argument
-        JsAwaitNode* a = (JsAwaitNode*)node;
-        if (a->argument) jm_collect_functions(mt, a->argument);
-        break;
-    }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-        // default param: (x = expr) — recurse into default value in case it's a function
-        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
-        if (ap->left) jm_collect_functions(mt, ap->left);
-        if (ap->right) jm_collect_functions(mt, ap->right);
-        break;
-    }
+
+    // These kinds are plain traversals whose child order matches
+    // JS_AST_CHILDREN, so one shared visitor replaces 35 hand-written
+    // bodies. They are listed explicitly rather than folded into `default:`
+    // because the original walker did NOT descend into kinds it had no case
+    // for (CLASS_EXPRESSION, FIELD/METHOD_DEFINITION, REST_PROPERTY,
+    // STATIC_BLOCK); delegating the default would silently start descending
+    // into them. Keeping the list explicit makes this refactor behaviour-neutral.
+    case JS_AST_NODE_PROGRAM:
+    case JS_AST_NODE_BLOCK_STATEMENT:
+    case JS_AST_NODE_IF_STATEMENT:
+    case JS_AST_NODE_WHILE_STATEMENT:
+    case JS_AST_NODE_FOR_STATEMENT:
+    case JS_AST_NODE_EXPRESSION_STATEMENT:
+    case JS_AST_NODE_VARIABLE_DECLARATION:
+    case JS_AST_NODE_RETURN_STATEMENT:
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_BINARY_EXPRESSION:
+    case JS_AST_NODE_UNARY_EXPRESSION:
+    case JS_AST_NODE_MEMBER_EXPRESSION:
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+    case JS_AST_NODE_PROPERTY:
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
+    case JS_AST_NODE_TRY_STATEMENT:
+    case JS_AST_NODE_CATCH_CLAUSE:
+    case JS_AST_NODE_THROW_STATEMENT:
+    case JS_AST_NODE_NEW_EXPRESSION:
+    case JS_AST_NODE_SWITCH_STATEMENT:
+    case JS_AST_NODE_SWITCH_CASE:
+    case JS_AST_NODE_DO_WHILE_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_YIELD_EXPRESSION:
+    case JS_AST_NODE_AWAIT_EXPRESSION:
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
     case JS_AST_NODE_SPREAD_ELEMENT:
-    case JS_AST_NODE_REST_ELEMENT: {
-        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
-        if (sp->argument) jm_collect_functions(mt, sp->argument);
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_SEQUENCE_EXPRESSION:
+    case JS_AST_NODE_LABELED_STATEMENT:
+    case JS_AST_NODE_WITH_STATEMENT:
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_OBJECT_PATTERN:
+        js_ast_visit_children(node, jm_collect_functions_child, mt);
         break;
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        // v24: comma operator — recurse into all sub-expressions
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        JsAstNode* e = seq->expressions;
-        while (e) { jm_collect_functions(mt, e); e = e->next; }
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        // v24: labeled statement — recurse into body
-        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
-        if (ls->body) jm_collect_functions(mt, ls->body);
-        break;
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* ws = (JsWithStatementNode*)node;
-        if (ws->object) jm_collect_functions(mt, ws->object);
-        if (ws->body) jm_collect_functions(mt, ws->body);
-        break;
-    }
-    case JS_AST_NODE_ARRAY_PATTERN: {
-        // v24: destructuring array pattern — elements may contain default values with functions
-        JsArrayPatternNode* ap = (JsArrayPatternNode*)node;
-        JsAstNode* e = ap->elements;
-        while (e) { jm_collect_functions(mt, e); e = e->next; }
-        break;
-    }
-    case JS_AST_NODE_OBJECT_PATTERN: {
-        // v24: destructuring object pattern — properties may contain default values with functions
-        JsObjectPatternNode* op = (JsObjectPatternNode*)node;
-        JsAstNode* p = op->properties;
-        while (p) { jm_collect_functions(mt, p); p = p->next; }
-        break;
-    }
     default:
-        break; // leaf nodes, identifiers, literals
+        break; // leaf nodes, identifiers, literals — unchanged
     }
 }
 
