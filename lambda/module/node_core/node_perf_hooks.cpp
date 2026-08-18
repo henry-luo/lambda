@@ -1,5 +1,6 @@
 // node_perf_hooks.cpp — node:perf_hooks facade through Jube value and script services.
 #include "node_perf_hooks.hpp"
+#include "node_core_common.hpp"
 #include "../../jube/jube_registry.h"
 
 #include <cstring>
@@ -60,20 +61,7 @@ static void node_perf_hooks_set_method(Item object, const char* name,
 }
 
 static Item node_perf_hooks_global_property(const char* name) {
-    JubeRootFrame frame = {};
-    if (!node_perf_hooks_host->node->roots->root_frame_begin(&frame, 1)) return ItemNull;
-    uint64_t* key_root = node_perf_hooks_host->node->roots->root_frame_take_slot(&frame);
-    if (!key_root) {
-        node_perf_hooks_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
-    }
-    Item key = node_perf_hooks_host->value->string_from_utf8_n(name, strlen(name));
-    *key_root = key.item;
-    // Keep the global key rooted because string construction can compact before lookup.
-    Item result = node_perf_hooks_host->script->global_property(
-        node_perf_hooks_root_value(key_root));
-    node_perf_hooks_host->node->roots->root_frame_end(&frame);
-    return result;
+    return jube_node_global_property(node_perf_hooks_host, name);
 }
 
 Item node_perf_hooks_namespace(void) {

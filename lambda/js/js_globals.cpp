@@ -10082,22 +10082,6 @@ extern "C" Item js_is_constructor(Item fn) {
 }
 
 
-extern "C" Item js_decimal_to_percent_hex_string(Item n_item) {
-    static Item cache[256] = {};
-    JS_ASSIGN_OR_RETURN(num, (get_type_id(n_item) == LMD_TYPE_INT ||
-                get_type_id(n_item) == LMD_TYPE_INT64 ||
-                get_type_id(n_item) == LMD_TYPE_FLOAT) ? n_item : js_to_number(n_item));
-    int32_t n = js_to_int32(js_get_number(num));
-    int byte = n & 0xFF;
-    if (cache[byte].item) return cache[byte];
-    static const char hex[] = "0123456789ABCDEF";
-    char buf[3];
-    buf[0] = '%';
-    buf[1] = hex[(byte >> 4) & 0xF];
-    buf[2] = hex[byte & 0xF];
-    cache[byte] = js_name_item(buf, 3);
-    return cache[byte];
-}
 #endif
 
 // =============================================================================
@@ -13201,7 +13185,9 @@ static bool js_message_port_is_object(Item value) {
 
 static bool js_worker_transfer_markable(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_ARRAY || type == LMD_TYPE_MAP ||
+    // array-family: a numeric or freshly built [] is LMD_TYPE_ARRAY_NUM, which
+    // the bare tag misses, so markAsUntransferable([]) silently did nothing.
+    return is_array_family_type_id(type) || type == LMD_TYPE_MAP ||
         type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP ||
         type == LMD_TYPE_ELEMENT;
 }

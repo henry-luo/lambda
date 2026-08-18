@@ -93,6 +93,38 @@ Behavioral fixes land before the refactors that absorb them, each with a regress
 ### 4.1 Confirmed by execution (regex, blocking §5.C)
 `bt_pattern` is captured (`js_runtime.cpp:17198`) **before** escape normalization, so patterns already routed to the backtracker mis-parse: (1) `\uHHHH` (bt `parse_atom` has no `u` case), (2) `\u{...}`, (3) `\p{...}` (parsed as literal `p`), (4) `\cX`, (5) non-ASCII `/i` folding (`bt_canon` is ASCII-only, `js_bt_regex.cpp:171-176`). Fix = split preprocessing into engine-neutral normalization **before** routing vs RE2-only rewrites after (§5.C stage 0). Independently justified; gates on new `test_js_bt_regex_gtest` cases.
 
+### 4.1b `LMD_TYPE_ARRAY_NUM` is invisible to the JS layer (FOUND DURING R3.0 — not in the audit)
+
+**The whole seven-agent audit missed this class.** A JS array whose elements are
+all numeric — and a freshly built `[]` — is stored in the `LMD_TYPE_ARRAY_NUM`
+lane, not `LMD_TYPE_ARRAY`; pushing a non-numeric element promotes it. The JS
+layer classifies values by the bare tag in **~650 sites** and `lambda.h`'s
+canonical `is_array_family_type_id()` had **zero adopters** in `lambda/js/`.
+Most sites are benign (arrays built internally by `js_array_new` are always
+`LMD_TYPE_ARRAY`), but every site that classifies a *user-supplied* value is
+wrong for numeric arrays.
+
+Confirmed broken and fixed in R3.0: `assert.deepStrictEqual([1,2],[1,2])` and
+`util.isDeepStrictEqual([],[])` returned **false** (the object-like predicate
+dropped the array to the primitive path and compared Item pointers);
+`util.inspect([1,2])` printed `[1,2]` instead of Node's `[ 1, 2 ]` (the
+dispatch missed the array renderer and fell through to `js_json_stringify`);
+`util.types.isArray([])` was false; `markAsUntransferable([])` silently did
+nothing. Nine sites in `js_util.cpp` and one in `js_globals.cpp` now use
+`is_array_family_type_id`.
+
+**Still outstanding — the remaining ~640 raw sites are unaudited.** The
+per-file counts are `js_runtime.cpp` 177, `js_stream.cpp` 100,
+`js_globals.cpp` 83, `js_assert.cpp` 44, `js_http.cpp` 34, `js_clipboard.cpp`
+32, `js_dom.cpp` 26, `js_child_process.cpp` 22, then a long tail. A blanket
+substitution is **wrong** — internal-construction sites legitimately mean
+`LMD_TYPE_ARRAY`. Each site must be classified as *user-value classification*
+(fix) vs *internal construction* (leave). `js_assert.cpp`'s 44 are the highest
+priority: they decide assert message rendering, which is §5.B's golden
+contract, so they must be settled **before** B starts or the goldens will
+shift under the refactor. `js_stream.cpp`'s 100 are the next concern (12
+stream tests still fail).
+
 ### 4.2 Property protocol
 - String-wrapper presence drift: `js_property_ops_has_property` re-inlines the index probe bounds-checked against **byte** length (`js_globals.cpp:1042`) while `js_string_exotic_index_in_range` uses **UTF-16** length — `in`/HasProperty disagrees with `hasOwnProperty` on non-ASCII wrappers.
 - `js_in`'s array lane lacks `js_has_own_property`'s numeric-array and identity-key companion paths (drift trio; §5.A4).
@@ -130,7 +162,7 @@ Behavioral fixes land before the refactors that absorb them, each with a regress
 
 The protocol spans `js_runtime.cpp` (~4.4K of it), `js_globals.cpp` (~3.9K), `js_props.cpp`, `js_property_attrs.cpp` (~10.5K total). Hot/cold rule: the named-fast infra (`js_runtime.cpp:8055-8267`), MAP own-get sequence (`:4945-4983`), ARRAY dense read (`:5225-5236`), FUNC own-get (`:5351-5371`) stay inline; extraction targets only cold phases. Gate every step with `JS_EXEC_PROFILE=1` named-fast hit-rate delta = 0.
 
-**A1. get/set-core decomposition (C5.5v2) — −600.** `js_get_key_core` is `:4760-5783` (1,024 lines); set cores `:6404-7468`; the real OrdinarySet is `js_set_completion_with_key` (`js_globals.cpp:6427-6755`). Items: (a) the 338-line lazy `.prototype` init block (`:5419-5756`) → extend `JsBuiltinProtoSpec` rows (toStringTag flag, symbol-method list, accessor list, per-class fixup cb for Array/Object/Error/Function) + one cold driver, keep the 3-line hot check inline (−250); (b) error-carrier std-field ladder ≥6 copies → one field enum + accessor pair (−60); (c) RegExp legacy statics table (−25); (d) primitive-key→string normalization, 5 copies → `js_property_key_normalize_primitive` (−100); (e) array own-index existence, 4 parallel impls → `js_array_own_index_status()` tri-state (−90); (f) String-wrapper `__primitiveValue__` probes (−45); (g) **one classified set-miss walk** `js_classify_set_obstacle()` replacing the three back-to-back proto walks (−50, plus the biggest perf win here — 3→1 walks on the hot-adjacent set slow path, and it unifies the inconsistent depth caps); (h) array named-get tail (−40); (i) ArraySetLength double-ToNumber ×2 → `js_array_set_length()` (−45); misc restricted-name/getter-only-throw helpers (−30). Landing pad for per-class logic is the existing `JsPropertyOps` table (`js_object_meta.h`), not a new mechanism.
+**A1. get/set-core decomposition (C5.5v2) — −600.** `js_get_key_core` is `:4760-5783` (1,024 lines); set cores `:6404-7468`; the real OrdinarySet is `js_set_completion_with_key` (`js_globals.cpp:6427-6755`). Items: (a) the 338-line lazy `.prototype` init block (`:5419-5756`) → extend `JsBuiltinProtoSpec` rows (toStringTag flag, symbol-method list, accessor list, per-class fixup cb for Array/Object/Error/Function) + one cold driver, keep the 3-line hot check inline (−250); (b) error-carrier std-field ladder ≥6 copies → one field enum + accessor pair (−60); (c) RegExp legacy statics table (−25); (d) primitive-key→string normalization — **re-measured during execution: −25, not −100; deprioritised.** The six sites are not copies of one algorithm. Two are full ladders that differ in policy (the get side wraps every result in `js_to_property_key`, roots it, and handles INT64; the set side interns raw, guards symbols, and returns errors through `JS_ASSIGN_OR_RETURN_INTO`), two normalise and immediately re-dispatch into `js_get_key_core`/`js_set_storage_mode` rather than falling through, and two are BOOL-only companion-map lookups (one already using `js_name_item`). The only safely shared core is "primitive scalar → interned name" (~25 lines), which leaves each site its own wrapping, rooting and error policy and nets ≈ −25 — not worth touching the hottest path in the engine for; (e) array own-index existence, 4 parallel impls → `js_array_own_index_status()` tri-state (−90); (f) String-wrapper `__primitiveValue__` probes (−45); (g) **one classified set-miss walk** `js_classify_set_obstacle()` replacing the three back-to-back proto walks (−50, plus the biggest perf win here — 3→1 walks on the hot-adjacent set slow path, and it unifies the inconsistent depth caps); (h) array named-get tail (−40); (i) ArraySetLength double-ToNumber ×2 → `js_array_set_length()` (−45); misc restricted-name/getter-only-throw helpers (−30). Landing pad for per-class logic is the existing `JsPropertyOps` table (`js_object_meta.h`), not a new mechanism.
 
 **A2. own-keys unification (C4.3) — −430.** 14 walkers in `js_globals.cpp` (`:8091-9070` region + `js_reflect_own_keys:6299`, `js_error_own_property_names:6266`, `js_object_copy_enumerable_own:10116`); the skip-deleted stanza appears 29×; the String-wrapper index walk is written 3×. Unified `js_own_keys(obj, JsOwnKeysFilter{strings, symbols, enumerable_only, include_length, es_order})` over per-storage enumerators; `js_for_in_keys` stays a proto-loop + seen-set on top. Gates: test262 own-keys order sections, Proxy `ownKeys`.
 
@@ -157,7 +189,7 @@ Families D (diff engine) and E (per-type first-mismatch summarizers) stay — th
 Current layout: RE2 wrapper + emulation (`js_regex_wrapper.cpp` 2,812), spec backtracker (`js_bt_regex.cpp` 1,046), frontend (`js_regexp_compile.cpp` 497), runtime block (`js_runtime.cpp` ~14.4K-19.5K region), routing at `js_regex_needs_backtrack` (`js_runtime.cpp:16251-16333`).
 
 - **Stage 0 (bug fixes, +60..100):** split preprocessing — engine-neutral normalization (`\u`/`\c`/octal→`\x{}`, `[^]`, dot-class, `\p`→ranges) **before** routing; RE2-only rewrites (`\s`→`\p{Z}…`, `(?P<`, `(?m)` prefix) after. Fixes §4.1. Add bt gtest cases + failure counters.
-- **Stage 1 (−250, near-zero risk):** delete the wrapper's dead backref lane (`:2320-2563` + helpers) — backrefs route to bt at `:16270` before the wrapper predicate is consulted.
+- **Stage 1 (−250, ~~near-zero risk~~ BLOCKED — audit claim disproved):** the audit called this lane dead because backrefs route to bt before `js_regex_needs_wrapper` is consulted. **That is wrong.** `bt` is a *pointer* (`JsBtRegex* bt`); when `js_bt_compile` fails it is null, and both downstream guards are spelled `if (!bt ...)` — so a backref pattern whose bt compile fails falls straight through to the wrapper path, where `js_regex_needs_wrapper` returns true and the backref emulation runs. The lane is a **live fallback**, not dead code. Deleting it needs the same evidence as the routing flip: a test262 sweep proving `js_bt_compile` never returns NULL for a valid routed pattern (gate 5 below). Until that sweep exists, do not delete.
 - **Stage 2 (bt gap closure, +205..325):** `\p{gc}/\p{Script}` property-class node backed by utf8proc + existing `JsRegexRange` tables; full simple case folding in `bt_canon` via utf8proc (honoring the non-Unicode /i U+017F/U+212A exception); then flip lookahead/easy-lookbehind routing **behind the bench gate**.
 - **Stage 3 (−1,433):** delete assertion surgery (`:1307-1788`), scanner helpers (~269 of `:30-334`), `AssertionInfo` (`:335-443`), marker/filter runtime (`:2087-2240`), wrapper compile/exec (`:2242-2799`), header structs; **keep** the `/v` rewriter (`:495-1305`) and the /u//v validators (`:1790-2085`). Runtime side: wrapper predicates/branches/group-remap/strip-fallback (−260).
 - **Stage 4 (−395):** shared `js_regex_scan.h` (UTF-8 fwd/bwd decode, hex/u escape, class-state tracker, capture-group walker — currently 4-6 copies each across engines/frontend/runtime) −170; kind-indexed `JsRegexRange` table + one alias table (currently triplicated) −110; named-groups object builder ×3 → one iterator −85; flag-parse ×4 −30.
@@ -203,6 +235,29 @@ No single item justifies its own change; batch opportunistically when touching t
 **G1. AST-walker migration (C3.1 remainder) — −600 plan-credible.** Full classification done (audit table). Migrate the top-6 first: `jm_collect_functions` (660 LOC, COMPLETE, ~33 generic case blocks whose visit order was verified to match the child table — −170), `jm_collect_func_assignments` (−100), `jm_callsite_scan_node` (−65), `jm_mutable_native_var_needs_boxing_walk` (−60), `jm_infer_walk` (−55), `jm_collect_body_locals` (−50); then the sub-45 tier or the alternative packaging: one `jm_for_each_statement(root, flags, cb, ctx)` replacing the 10-member statement-recursion family (do NOT double-count). PARTIAL walkers (allow-lists: tail-call, pattern shapes, float hints, P9 widen) stay hand-written.
 
 **Correctness rule (from round-2 execution, non-negotiable):** a migrated walker must visit the same nodes in the same order. Where a hand-written walker deliberately *skips* a child — not descending into nested functions, for instance — that skip becomes an **explicit case**, never an accident of the table. Gap closures (§4.4) are separate commits with their own golden re-baseline.
+
+**Delegate explicitly, never through `default:` (learned in execution).** The
+obvious migration — keep the interesting cases and let `default:` call
+`js_ast_visit_children` — is **wrong** for every walker measured so far. These
+walkers use `default: break`, so a node kind with *no case* is a node kind they
+never descend into; routing `default:` to the visitor silently starts
+descending into all of them. Measured gaps: `jm_collect_functions` would newly
+descend into 5 kinds (CLASS_EXPRESSION, FIELD/METHOD_DEFINITION, REST_PROPERTY,
+STATIC_BLOCK), `jm_collect_func_assignments` into **18** (including PROGRAM,
+class kinds, patterns, yield/await), `jm_callsite_scan_node` into **31**. The
+correct shape lists the delegate-able kinds as bare `case` labels falling into
+one `js_ast_visit_children` call and leaves `default: break` untouched. That
+costs one line per kind and is provably behaviour-neutral. It also lowers the
+yield: the three walkers above came in at −164/−96/−61 rather than the
+−201/−119/−80 the fold-into-default shape produced.
+
+**Verify order mechanically, not by eye.** Comparing each walker's recursion
+sequence against the child table by script caught deliberate partial visits
+that reading would have missed — `catch` body-but-not-param, `for-in/of`
+left-and-body-but-not-right, declarator `init`-but-not-`id`, property
+`value`-but-not-`key`. One apparent mismatch was a false positive:
+`AstArrayNode` unions `item`/`elements`/`expressions`, so the table's
+`elements` and the walkers' `expressions` are the same field.
 
 **Classify before migrating.** Round 2's original −1,500 assumed these walkers are complete traversals whose `default:` can simply delegate; many are not. `jm_node_has_direct_eval_call`, for example, returns false for for/while/try/switch/object/array and every other unlisted kind, so delegating would newly descend into them — and under the correctness rule those kinds must become explicit skip cases, costing back most of what the table saves. The cheap signal: **does the walker's `default:` recurse generically, or return/break?** Complete walkers give ~75% reduction; deliberately partial ones give roughly nothing and should keep their allow-list shape.
 **G2. `JsMirCompileUnit` (C3.2 remainder) — −135.** The five pipelines still duplicate: parse→build→early-errors ×4 (~90), jit-init→transpiler→module→lower→validate ×5 (~125, divergences are pure options: opt level, dims, is_module, prelink, preamble seeding), link→find `js_main` ×5 (~50), activate/link-names ×4–5 (~60), success cleanup (generalize `jm_finish_module_transpile:5488`). Unit struct = the failure primitive's field set + options; each pipeline keeps its unique middle inline. Spine emits no MIR → goldens must be byte-identical.
@@ -280,6 +335,38 @@ Commit discipline: one task (or one file-batch of a mechanical task) per commit,
 | **R3.8** | Relocations (§6), incl. the js_dom points-scanner dedupe and **H7** | ~−35 | low |
 
 Cumulative through R3.5 ≈ **−5,680 net** (−5,730 of deletions, less the ~50 lines of new regression tests R3.0 adds) — the ≥5,000 target is met before the regex work starts. R3.6–R3.8 add ~−2,430 of upside. If a phase underdelivers, the target still holds at ~75% realization of R3.1–R3.5, or at lower realization plus either R3.6 or R3.7.
+
+## 7b. Execution status (2026-08-18)
+
+Core-JS scope only — Node workstreams (D, F1, F3, F5, and the assert/util
+workstream B) are deferred at the owner's direction.
+
+**Net so far: −367 across `lambda/js`** (294 insertions, 661 deletions).
+
+| Item | Result |
+|---|---|
+| R3.0 `ARRAY_NUM` bug class (§4.1b) | 10 sites fixed in `js_util.cpp` / `js_globals.cpp` |
+| R3.0 `worker_threads` constructors | exports the real globals; identity matches Node |
+| G1 `jm_collect_functions` | 661 → 497 |
+| G1 `jm_collect_func_assignments` | 192 → 96 |
+| G1 `jm_callsite_scan_node` | 143 → 82 |
+| H1 test262 intercept table | 144-line chain → table + emitter; dead `js_decimal_to_percent_hex_string` deleted (decl, def, registration) |
+| G4 binary-op native lanes | float-arith + comparison tables; DIV's byte-identical `both_int` split collapsed |
+
+**Gates, green after every step:** `test262-baseline` 40261/40261 with zero
+regressions (four separate runs), `test_js_mir_emission_gtest` 21/21
+byte-stable, `test_js_gtest` clean apart from `lib_tabulator`, `test/node`
+unchanged at 161/36.
+
+`lib_tabulator` was verified failing at pristine HEAD (stash + rebuild), so it
+is pre-existing and not attributable to this work.
+
+**Deferred:** `jm_infer_walk` — five parameters, so the visitor adapter needs a
+context struct, dropping it to roughly −35 for meaningful complexity. Next
+best: `jm_mutable_native_var_needs_boxing_walk` (bool walker; needs
+`js_ast_any_child`, not the void visitor), then workstream A.
+
+---
 
 ## 8. Success criteria
 

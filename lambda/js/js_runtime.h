@@ -1251,7 +1251,6 @@ Item js_assert_throws(Item expected_ctor, Item func, Item message);
 Item js_assert_base(Item must_be_true, Item message);
 Item js_donotevaluate(void);
 Item js_is_constructor(Item fn);
-Item js_decimal_to_percent_hex_string(Item n);
 Item js_test262_build_string(Item args);
 uint64_t lambda_mir_double_bits(double dval);
 double lambda_mir_bits_double(uint64_t bits);
