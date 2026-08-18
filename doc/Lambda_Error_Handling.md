@@ -20,12 +20,13 @@ This document covers Lambda's error handling system — how errors are created, 
 6. [Error Handling at Call Sites](#error-handling-at-call-sites)
 7. [Error Propagation (`^` Operator)](#error-propagation--operator)
 8. [Error Handling (`e ^ { … }`)](#error-handling-e---)
-9. [Compile-Time Enforcement](#compile-time-enforcement)
-10. [System Functions That Can Raise](#system-functions-that-can-raise)
-11. [Error Code Categories](#error-code-categories)
-12. [Checking for Errors](#checking-for-errors)
-13. [Error Truthiness and Defaults](#error-truthiness-and-defaults)
-14. [Examples](#examples)
+9. [Procedure-Call Statement Handler (`pn_call() ^ { … }`)](#procedure-call-statement-handler-pn_call---)
+10. [Compile-Time Enforcement](#compile-time-enforcement)
+11. [System Functions That Can Raise](#system-functions-that-can-raise)
+12. [Error Code Categories](#error-code-categories)
+13. [Checking for Errors](#checking-for-errors)
+14. [Error Truthiness and Defaults](#error-truthiness-and-defaults)
+15. [Examples](#examples)
 
 ---
 
@@ -42,6 +43,8 @@ no `try`/`throw`/`catch` exception handling. Instead:
 - The one-arm `e ^ { … }`, two-arm `e ^ { … } ~ { … }`, and postfix `e^`
   forms are channel-agnostic: they discharge both returned error values and
   raised errors through one surface.
+- A procedure call may use `pn_call() ^ { … }` as a statement handler that
+  remains valid across suspension.
 
 This approach is inspired by Rust's `Result<T, E>` and Zig's `T!E`, but with lighter syntax.
 
@@ -196,6 +199,7 @@ the error possibility. Channel-agnostic forms are allowed:
 | `let a: T^ = F()` | Same, in the enforcing spelling | ✅ |
 | `F() or default` | Explicitly consume a falsy error | ✅ |
 | `match (F()) { case error: ... }` | Explicitly branch on the error | ✅ |
+| `P() ^ { … ^ … }` where `P` is a `pn` | Handle a procedure error and continue | ✅ |
 | `F()^` | Propagate error, discard value | ✅ |
 | `let a = F()` | **Ignoring error** | ❌ Compile error |
 | `F()` | **Ignoring error and value** | ❌ Compile error |
@@ -247,7 +251,7 @@ fn compute(x: int) int^ {
 
 ## Error Handling (`e ^ { … }`)
 
-The postfix placement and handler-local bindings follow **S7.6.1v3/S7.6.2v3**;
+The postfix placement and handler-local bindings follow **S7.6.1v4/S7.6.2v3**;
 the retired destructuring and prefix error-test forms are removed under
 **S7.6.5v2**.
 
@@ -300,6 +304,48 @@ pn_func(inner, options) ^ {
 Use `x is error` to test whether a value is an error (see
 [Checking for Errors](#checking-for-errors)).
 
+### Procedure-call statement handler (`pn_call() ^ { … }`)
+
+A `pn` call can use the postfix braced handler directly as a statement:
+
+```lambda
+pn submit(job) int^ {
+    if (job is null) raise error("missing job")
+    return 1
+}
+
+pn main() {
+    submit(null) ^ {
+        print("submit failed: " ++ ^.message)
+    }
+    print("main continues")
+}
+```
+
+This is a statement, not a value-producing expression:
+
+- The complete procedure call is evaluated exactly once.
+- On success, its result is discarded, the handler body is skipped, and the
+  next statement runs.
+- On an ordinary returned or raised error, the body runs with `^` bound to the
+  error. If the body completes normally, the next statement runs.
+- `return`, `raise`, `break`, and `continue` inside the body keep their normal
+  control-flow meaning. A new error from the body is not caught again by the
+  same handler.
+- In this statement interpretation the static callee must be a `pn`. A
+  value-producing `fn` call uses the expression form instead; a `pn` handler
+  cannot be used in a binding or another value context.
+- The call may suspend. Its completion and handler continuation live in the
+  procedure state machine, so no native stack frame or jump buffer is retained
+  across the suspension.
+
+Ordinary Lambda errors, including cancellation delivered as the procedure's
+error completion, always reach the handler through explicit return or resume
+state. They never use `setjmp`/`longjmp`. Native S7.11 system faults retain a
+temporary separate path: a live synchronous handler may receive the recovered
+fault directly, while a fault after suspension is materialized at the task
+fault boundary and delivered to the durable handler state.
+
 ### Choosing a form
 
 | Form | Catches | Error accessible? |
@@ -307,6 +353,7 @@ Use `x is error` to test whether a value is an error (see
 | `e or default` | any falsy: error, `null`, `false`, `""` | no |
 | `e ^ { … ^ … }` | errors only | yes, as `^` |
 | `e ^ { error_arm } ~ { value_arm }` | explicit error/non-error split | yes, as `^`; value as `~` |
+| statement `pn_call() ^ { … ^ … }` | procedure-call errors; success discarded | yes, as `^` |
 | `e^` | errors only | no — propagates to the caller |
 | `match e { case error: … }` | errors only, with a full success arm | yes, as `~` |
 
@@ -624,6 +671,7 @@ pn main() {
 | Propagate error | `e^` | Strip success errors or propagate any error outcome |
 | Handle error | `e ^ { … ^ … }` | Handle returned and raised errors; `^` is the current error |
 | Branch on outcome | `e ^ { error_arm } ~ { value_arm }` | Bind the error to `^` or the non-error result to `~` |
+| Handle procedure statement | `pn_call() ^ { … ^ … }` | Handle a procedure error and continue; may suspend |
 | Check for error | `x is error` | Test if a value is an error |
 | Default on error | `expr or default` | Errors are falsy, fall through to default |
 

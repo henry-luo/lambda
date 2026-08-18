@@ -270,7 +270,7 @@ static LambdaTaskPoll raise_task_fault(LambdaTask* task, void* data, Item* out) 
     // The scheduler must own the native target for this poll; it cannot
     // survive into a later resumption after the task yields.
     if (!lambda_recovery_frame_raise_fault(
-            LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_TYPE_MISMATCH)) {
+            LAMBDA_FAULT_SIDE_STACK_EXHAUSTION, ERR_TYPE_MISMATCH)) {
         ADD_FAILURE() << "task fault had no scheduler recovery target";
     }
     return LAMBDA_TASK_POLL_DONE;
@@ -344,18 +344,18 @@ TEST_F(LambdaConcurrencyRuntime, TaskPollFaultCompletesWithDurableStaticResult) 
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     Item first_result = lambda_task_result(first);
     ASSERT_EQ(get_type_id(first_result), LMD_TYPE_ERROR);
-    EXPECT_EQ(it2err(first_result)->code, ERR_RUNTIME_ERROR);
+    EXPECT_EQ(it2err(first_result)->code, ERR_STACK_OVERFLOW);
     EXPECT_TRUE(it2err(first_result)->is_static);
     EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
 
     ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
     Item second_result = lambda_task_result(second);
     ASSERT_EQ(get_type_id(second_result), LMD_TYPE_ERROR);
-    EXPECT_EQ(it2err(second_result)->code, ERR_RUNTIME_ERROR);
+    EXPECT_EQ(it2err(second_result)->code, ERR_STACK_OVERFLOW);
     EXPECT_TRUE(it2err(second_result)->is_static);
     // The second landing reuses the TLS handoff record, but it cannot alter
     // the first completed task's own static result.
-    EXPECT_EQ(it2err(first_result)->code, ERR_RUNTIME_ERROR);
+    EXPECT_EQ(it2err(first_result)->code, ERR_STACK_OVERFLOW);
     EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
 }
 

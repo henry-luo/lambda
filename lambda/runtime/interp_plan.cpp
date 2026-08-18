@@ -302,6 +302,9 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PATH_INDEX_EXPR:
     case AST_NODE_PARENT_EXPR:
     case AST_NODE_QUERY_EXPR:
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM:
+    case AST_NODE_CURRENT_ERROR:
         return true;
     default:
         return false;
@@ -799,6 +802,19 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t fn = plan_need(c->function);
         uint32_t args = 1 + plan_need_max_siblings(c->argument);
         return fn > args ? fn : args;
+    }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        // The operand remains rooted while either arm runs. The arms are
+        // mutually exclusive, so only the selected arm contributes to the
+        // maximum beyond that operand home.
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        uint32_t operand = plan_need(handler->operand);
+        uint32_t body = 1 + plan_need(handler->body);
+        uint32_t value = handler->value_body
+            ? 1 + plan_need(handler->value_body) : 0;
+        uint32_t best = operand > body ? operand : body;
+        return value > best ? value : best;
     }
     case AST_NODE_IF_EXPR:
     case AST_NODE_CONDITIONAL_EXPR: {

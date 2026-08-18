@@ -80,6 +80,9 @@ typedef struct LambdaTaskObserver {
 struct LambdaAsyncFrame {
     LambdaTask* task;
     int state;
+    int fault_target_state;
+    Item fault_item;
+    LambdaTaskScope* fault_scope_base;
     Item* slots;
     uint8_t* slot_is_item;
     int slot_count;
@@ -223,6 +226,9 @@ static void task_handle_trace(void* data, gc_heap_t* gc) {
 static void async_frame_reset_from(LambdaAsyncFrame* frame) {
     while (frame) {
         frame->state = 0;
+        frame->fault_target_state = 0;
+        owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
+        frame->fault_scope_base = NULL;
         for (int i = 0; i < frame->slot_count; i++) {
             owned_item_slot_store(frame->slots, frame->slot_capacity, i, ItemNull);
             if (frame->slot_is_item) frame->slot_is_item[i] = 1;
@@ -231,22 +237,61 @@ static void async_frame_reset_from(LambdaAsyncFrame* frame) {
     }
 }
 
+static void async_frame_release(LambdaAsyncFrame* frame) {
+    if (!frame) return;
+    if (frame->slots && frame->slot_capacity > 0 && scheduler_has_heap()) {
+        heap_unregister_gc_root_range((uint64_t*)frame->slots);
+    }
+    if (scheduler_has_heap()) heap_unregister_gc_root(&frame->fault_item.item);
+    mem_free(frame->slots);
+    mem_free(frame->slot_is_item);
+    mem_free(frame);
+}
+
 static void async_frames_destroy(LambdaTask* task) {
     LambdaAsyncFrame* frame = task ? task->async_frames : NULL;
     while (frame) {
         LambdaAsyncFrame* next = frame->next;
-        if (frame->slots && frame->slot_capacity > 0 && scheduler_has_heap()) {
-            heap_unregister_gc_root_range((uint64_t*)frame->slots);
-        }
-        mem_free(frame->slots);
-        mem_free(frame->slot_is_item);
-        mem_free(frame);
+        async_frame_release(frame);
         frame = next;
     }
     if (task) {
         task->async_frames = NULL;
         task->async_cursor = NULL;
     }
+}
+
+static LambdaAsyncFrame* async_fault_target(LambdaTask* task) {
+    LambdaAsyncFrame* target = NULL;
+    for (LambdaAsyncFrame* frame = task ? task->async_frames : NULL;
+            frame; frame = frame->next) {
+        if (frame->fault_target_state > 0) target = frame;
+    }
+    return target;
+}
+
+static void async_discard_frames_after(LambdaTask* task,
+        LambdaAsyncFrame* target) {
+    if (!task || !target) return;
+    LambdaAsyncFrame* discarded = target->next;
+    target->next = NULL;
+    while (discarded) {
+        LambdaAsyncFrame* next = discarded->next;
+        async_frame_release(discarded);
+        discarded = next;
+    }
+}
+
+static bool async_route_fault(LambdaTask* task, Item fault) {
+    LambdaAsyncFrame* target = async_fault_target(task);
+    if (!target) return false;
+    // A native fault can abandon nested generated activations. Retain only the
+    // frame whose handler state will be re-entered; every later poll then uses
+    // the same explicit completion route as an ordinary error.
+    async_discard_frames_after(task, target);
+    owned_item_slot_store(&target->fault_item, 1, 0, fault);
+    target->state = target->fault_target_state;
+    return true;
 }
 
 static void task_scopes_destroy(LambdaTask* task) {
@@ -766,6 +811,7 @@ extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
                 LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK));
         } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
             Item recovered = ItemError;
+            bool route_to_handler = false;
             if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
                 log_error("concurrency recovery: task poll landing invariant failed");
                 recovered = lambda_recovery_publish_fault_item((Context*)context,
@@ -776,9 +822,17 @@ extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
                 (void)lambda_recovery_frame_fault_item((Context*)context, recovery_frame);
                 task->fault = recovery_frame->fault;
                 recovered = err2it(&task->fault.error);
+                route_to_handler = async_route_fault(task, recovered);
             }
             lambda_recovery_frame_end(recovery_frame);
-            lambda_task_complete(task, recovered);
+            if (route_to_handler) {
+                // The fault has become a rooted Item in the durable async
+                // frame. Re-enter the task state machine; no native landing
+                // activation is reused after this point.
+                scheduler_enqueue(task);
+            } else {
+                lambda_task_complete(task, recovered);
+            }
         } else if (!lambda_recovery_frame_arm(recovery_frame)) {
             log_error("concurrency recovery: failed to arm task poll frame");
             lambda_recovery_frame_end(recovery_frame);
@@ -1100,11 +1154,15 @@ extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity)
         ? lambda_scheduler_current(context->scheduler) : NULL;
     if (!task) return NULL;
     LambdaAsyncFrame* frame = task->async_cursor;
+    bool created = false;
     if (!frame) {
         frame = (LambdaAsyncFrame*)mem_calloc(1, sizeof(LambdaAsyncFrame), MEM_CAT_EVAL);
         if (!frame) return NULL;
+        created = true;
         frame->task = task;
+        frame->fault_item = ItemNull;
         frame->scope_base = task->scope_top;
+        if (scheduler_has_heap()) heap_register_gc_root(&frame->fault_item.item);
         if (!task->async_frames) {
             task->async_frames = frame;
         } else {
@@ -1113,7 +1171,21 @@ extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity)
             tail->next = frame;
         }
     }
-    if (slot_capacity > 0 && !async_frame_reserve(frame, slot_capacity)) return NULL;
+    if (slot_capacity > 0 && !async_frame_reserve(frame, slot_capacity)) {
+        if (created) {
+            // A failed first reservation must undo the linked/rooted frame;
+            // otherwise a later task poll can route a fault into an activation
+            // whose spill storage was never established.
+            if (task->async_frames == frame) task->async_frames = NULL;
+            else {
+                LambdaAsyncFrame* prior = task->async_frames;
+                while (prior && prior->next != frame) prior = prior->next;
+                if (prior) prior->next = frame->next;
+            }
+            async_frame_release(frame);
+        }
+        return NULL;
+    }
     task->async_cursor = frame->next;
     return frame;
 }
@@ -1221,6 +1293,34 @@ extern "C" uint64_t lambda_async_frame_get_word(LambdaAsyncFrame* frame, int slo
     return frame->slot_is_item && frame->slot_is_item[slot]
         ? frame->slots[slot].item
         : frame->slots[frame->slot_capacity + slot].item;
+}
+
+extern "C" void lambda_async_frame_set_fault_target(
+        LambdaAsyncFrame* frame, int state) {
+    if (!frame) return;
+    frame->fault_target_state = state > 0 ? state : 0;
+    frame->fault_scope_base = lambda_task_scope_current();
+}
+
+extern "C" void lambda_async_frame_clear_fault_target(LambdaAsyncFrame* frame) {
+    if (!frame) return;
+    frame->fault_target_state = 0;
+    frame->fault_scope_base = NULL;
+    owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
+}
+
+extern "C" Item lambda_async_frame_take_fault(LambdaAsyncFrame* frame) {
+    if (!frame || frame->fault_target_state <= 0) return ItemError;
+    Item fault = frame->fault_item;
+    frame->fault_target_state = 0;
+    frame->fault_scope_base = NULL;
+    owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
+    return fault;
+}
+
+extern "C" LambdaTaskScope* lambda_async_frame_fault_scope_base(
+        LambdaAsyncFrame* frame) {
+    return frame ? frame->fault_scope_base : NULL;
 }
 
 extern "C" void lambda_async_frame_complete(LambdaAsyncFrame* frame) {

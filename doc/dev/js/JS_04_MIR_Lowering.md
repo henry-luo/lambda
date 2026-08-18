@@ -129,9 +129,11 @@ dynamic call and the explicit construct operand shape.
 ## 9. Exceptions
 
 LambdaJS does not use C++ exceptions or `longjmp` for ordinary JS throws. It
-uses Lambda's merged Item error lane, as required by S7.4.4 and D8.4.3: a
-fallible helper returns either its normal Item or an ERROR-tagged
-`LambdaError*`, and JIT frames unwind by returning that Item normally.
+uses Lambda's merged Item error lane, as required by D1.4v3/DI15v2/D8.4.3v2:
+a fallible helper returns either its normal Item or an ERROR-tagged
+`LambdaError*`, and each JIT/native caller routes and returns that Item through
+its own activation. The cross-language contract is detailed in
+[`vibe/Lambda_Design_Runtime_Error_Handling.md`](../../../vibe/Lambda_Design_Runtime_Error_Handling.md).
 
 **Carrier** (`js_runtime_state.cpp`): `js_throw_value(v)` creates or reuses
 the `LambdaError` carrier and returns its ERROR-tagged Item; every convenience

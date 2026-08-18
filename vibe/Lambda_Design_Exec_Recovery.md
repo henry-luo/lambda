@@ -5,7 +5,8 @@ implemented them (Appendix A). The Windows SEH path shares the frame ABI but its
 is still outstanding. **Five open hazards, one of them blocking** — see §5.
 
 **Date:** 2026-07-17, rev 2 2026-08-06 (restructured from inventory-ledger to design record;
-inventory re-verified against the live tree; hazards H1–H9 added).
+inventory re-verified against the live tree; hazards H1–H9 added); rev 3 2026-08-17
+(restricted non-local recovery explicitly to native system faults under D1.4v3/DI15v2).
 
 **Companion documents:**
 
@@ -15,15 +16,27 @@ inventory re-verified against the live tree; hazards H1–H9 added).
 | `vibe/Lambda_Stack_Safety.md` | Defines the signal-based stack-overflow mechanism routed through the recovery frame |
 | `vibe/Lambda_Design_Stack_Frame.md` | Defines root/number frame lifetime and the normal epilogue invariants a jump bypasses |
 | `vibe/Lambda_Design_Type_Enforcement.md` | TE-16/TE-18 own the language surface; C14 defines the unchecked system-fault channel |
-| `vibe/Lambda_Impl_Error_Handling.md` | Consumes this machinery — `e ^ { … }` inherits the local-fault frame |
+| `vibe/Lambda_Design_Runtime_Error_Handling.md` | Owns ordinary Lambda, LambdaJS, and hosted-language failures; every such failure returns through each frame |
+| `vibe/Lambda_Impl_Error_Handling (done).md` | Records the Lambda-specific implementation that consumes the ordinary returned error lane |
 
 ---
 
 ## 1. Scope
 
-**In scope:** every non-local control transfer in the Lambda core runtime, the LambdaJS runtime,
-and the Jube hosted-guest bridge — stack overflow, resource faults, MIR errors, batch timeout,
-and batch crash containment.
+**In scope:** non-local control transfer for the closed native system-fault set, plus separately
+identified test/process containment: stack overflow, side-stack/resource exhaustion, OOM,
+runtime-boundary defects, MIR fatal errors, batch timeout, and batch crash containment.
+Structural-equality depth exhaustion is a language-visible ordinary error and is outside this
+native recovery design.
+
+**Strict ordinary-failure exclusion (D1.4v3, DI15v2, D8.4.3v2):** this is not a general error or
+exception mechanism. Lambda `error`/`raise`/propagation, LambdaJS `throw`/rejection, guest-language
+exceptions, I/O errors, cancellation, parse/type errors, and all other language failures return
+through every generated/native frame under
+[`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md). None may call
+`lambda_recovery_frame_raise_fault`, select a jump target, or skip an intervening epilogue. A
+`LOCAL_FAULT` frame around a procedural handler exists solely to expose an S7.11 native fault;
+ordinary operand errors continue to use their returned lane even while that frame is armed.
 
 **Out of scope, deliberately:**
 
@@ -58,11 +71,12 @@ This single observation is what the rest of the design serves.
 
 ## 3. Design decisions
 
-### ER-D1 — One mechanism: a TLS LIFO of explicit recovery frames
+### ER-D1 — One native system-fault mechanism: a TLS LIFO of explicit recovery frames
 
-There is exactly one non-local-jump mechanism in the runtime: `LambdaRecoveryFrame`, a per-thread
-LIFO. It replaced four independent buffers plus a boolean armed flag, which were non-nestable —
-the runner, cached MIR, direct JS, and hosted Jube entries all overwrote one target.
+There is exactly one production non-local-jump mechanism for native system faults in the runtime:
+`LambdaRecoveryFrame`, a per-thread LIFO. It replaced four independent buffers plus a boolean
+armed flag, which were non-nestable — the runner, cached MIR, direct JS, and hosted Jube entries
+all overwrote one target. It is forbidden as an implementation of an ordinary language failure.
 
 ```text
 LambdaRecoveryFrame
@@ -117,7 +131,6 @@ primitive. See H3 for the cost of this decision.
 STACK_OVERFLOW
 SIDE_STACK_EXHAUSTION        // RootFrame or number-home reservation
 OUT_OF_MEMORY
-EQUALITY_DEPTH_EXHAUSTION
 RUNTIME_BOUNDARY_DEFECT      // compiler-inserted fail-closed guard only
 ```
 
@@ -409,7 +422,7 @@ Complete on POSIX as of 2026-07-31.
 | ER-S1 | TLS frame ABI plus exact common snapshot; nested-frame, forced-GC, exhaustion tests | complete |
 | ER-S2 | Migrate all execution entries to the frame top; normal nested return proves the outer target stays armed | complete |
 | ER-S3 | MIR emits a real checkpoint only for a non-suspending RHS; native root-fault test proves local-then-outer selection | complete |
-| ER-S4 | Stack/RootFrame/OOM origins transfer static records; rich-error allocation failure becomes static OOM; equality-depth takes the static path for a live procedural handler | complete |
+| ER-S4 | Stack/RootFrame/OOM origins transfer static records; rich-error allocation failure becomes static OOM; structural-equality depth returns an ordinary language error through the explicit completion lane | complete |
 | ER-S5 | Task-poll and module transaction boundaries; hosted guests poison abandoned runtime/scalar slots | complete |
 | ER-S6 | Production event loop no longer replaces SIGSEGV handling or continues after arbitrary corruption | complete |
 | ER-S7 | Precise-root and POSIX recovery gates | POSIX complete; **Windows run outstanding (H4)** |

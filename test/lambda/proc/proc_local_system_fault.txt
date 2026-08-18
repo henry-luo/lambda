@@ -1,1 +1,1 @@
-[null, true, 308, "Stack overflow"]
+[error, true, 308, "Stack overflow"]
