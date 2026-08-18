@@ -147,6 +147,64 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
     shell_result_free(&result);
 }
 
+TEST(TypeInferenceStructuralTest, IP1OperatorsPublishPreciseTypes) {
+    // IP1 [Type_Infer TIG5/TIG6/TIG11/TIG12/TIG16]: operators that previously
+    // fell back to `any` now publish the type their operands prove.
+    const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
+        "test/lambda/type_infer_ip1.ls", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+
+    // TIG5: `and` over two bools is bool, not any; over mixed operands it is
+    // their union (a union renders under the shared `type` tag).
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_BINARY (op \"and\") (value_type \"bool\")"), nullptr)
+        << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_BINARY (op \"and\") (value_type \"type\")"), nullptr)
+        << result.stdout_buf;
+    // TIG6: string/string relational comparison is bool — the old rule only
+    // admitted native-numeric pairs and left every other comparable pair open.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_BINARY (op \"<\") (value_type \"bool\")"), nullptr)
+        << result.stdout_buf;
+    // No relational node may still report `any` in this fixture.
+    EXPECT_EQ(strstr(result.stdout_buf,
+        "(AST_NODE_BINARY (op \"<\") (value_type \"any\")"), nullptr)
+        << result.stdout_buf;
+
+    shell_result_free(&result);
+}
+
+TEST(TypeInferenceStructuralTest, IP2SysFuncRowsResolvePreciseResults) {
+    // IP2 [Type_Infer TI4/TIG4]: registry rows derive a precise success type
+    // from the call site instead of falling back to `any`.
+    const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
+        "test/lambda/type_infer_ip2.ls", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+
+    // Real-scalar transcendentals and carrier-preserving rounding → float;
+    // text transforms → string; order-preserving collection ops → array.
+    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR (value_type \"float\")"), nullptr)
+        << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR (value_type \"string\")"), nullptr)
+        << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR (value_type \"array\")"), nullptr)
+        << result.stdout_buf;
+    // Every sys-func call in this fixture must be resolved; none may remain open.
+    EXPECT_EQ(strstr(result.stdout_buf, "CALL_EXPR (value_type \"any\")"), nullptr)
+        << result.stdout_buf;
+
+    shell_result_free(&result);
+}
+
 TEST(TypeContractMetadataTest, ImplicitParameterErrorMatchArmIsLinted) {
     const char* args[] = {LAMBDA_EXE, "test/lambda/type_implicit_param_match_lint.ls", NULL};
     ShellOptions options = {0};

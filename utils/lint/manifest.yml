@@ -92,6 +92,12 @@ rules:
     category: memory-safety
     tags: [radiant, lifetime, mandatory]
 
+  no-bare-type-any-assign:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-bare-type-any-assign.yml
+    category: api-hygiene
+    tags: [lambda, type-inference, mandatory]
+
   no-item-payload-cast:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/no-item-payload-cast.yml

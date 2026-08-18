@@ -6575,11 +6575,16 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             TypeId element_type = mir_known_index_element_type(mt, fn->object);
             if (element_type != LMD_TYPE_ANY) return element_type;
             TypeId object_eff = get_effective_type(mt, fn->object);
-            if (object_eff == LMD_TYPE_ARRAY || object_eff == LMD_TYPE_ARRAY_NUM) {
-                // An array with no surviving element witness is read through
-                // the boxed index helper. Keep the result boxed instead of
-                // inheriting the AST scalar type and re-boxing that Item as a
-                // lane, which turns compact values into infinity.
+            // No surviving element witness means the read goes through the
+            // boxed index helper, so the CARRIER is an Item no matter what the
+            // AST type says [T19-1]. This must not be narrowed to the
+            // array-typed object case: a cross-module `float[]` reaches here
+            // with an unproven object witness, and inheriting the AST's
+            // element type made the emitter move a boxed Item through the
+            // double lane ("dmov: got 'int', expected 'double'"). `binary`
+            // keeps the fall-through because its u8 element lane is produced
+            // by a dedicated load, not by the generic helper.
+            if (object_eff != LMD_TYPE_BINARY) {
                 return LMD_TYPE_ANY;
             }
         }
