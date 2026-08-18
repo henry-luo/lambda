@@ -501,7 +501,9 @@ SysFuncInfo sys_func_defs[] = {
     // Math functions — method-eligible on numbers
     // ========================================================================
     {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1},
+     C_RET_ITEM, C_ARG_ITEM, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_round", FPTR(fn_round), "round", NPTR(round), true, 1,
@@ -524,7 +526,9 @@ SysFuncInfo sys_func_defs[] = {
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
@@ -670,25 +674,33 @@ SysFuncInfo sys_func_defs[] = {
     // Statistical functions — math module
     // ========================================================================
     {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_MEAN2, "math_mean", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
 
     {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_MEDIAN2, "math_median", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_median2", FPTR(fn_math_median2), NULL, NULL, false, 0},
 
     {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_VARIANCE2, "math_variance", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_variance2", FPTR(fn_math_variance2), NULL, NULL, false, 0},
 
     {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_DEVIATION2, "math_deviation", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation2", FPTR(fn_math_deviation2), NULL, NULL, false, 0},
