@@ -547,7 +547,9 @@ module.exports = grammar({
 
     // Member access is the value form of dot syntax; dotted_name is reserved
     // for qualified element and attribute names.
-    member_expr: $ => prec.left('member', seq(
+    // member access must bind before a call so qualified calls stay intact
+    // when their argument list is parsed inside a procedural block.
+    member_expr: $ => prec.left(110, seq(
       field('object', choice($.primary_expr, $.member_expr, $.nav_expr)), '.',
       field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
     )),

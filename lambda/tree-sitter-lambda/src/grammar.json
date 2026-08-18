@@ -4430,7 +4430,7 @@
     },
     "member_expr": {
       "type": "PREC_LEFT",
-      "value": "member",
+      "value": 110,
       "content": {
         "type": "SEQ",
         "members": [

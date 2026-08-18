@@ -6617,6 +6617,62 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         js_object_has_class(target, JS_CLASS_TYPED_ARRAY);
     if (receiver.item == target.item && !target_is_typed_array) {
         bool can_fast_set = true;
+        // Shape-flag shortcut. js_object_get_own_property_descriptor allocates a
+        // whole descriptor Map (js_new_object plus four interned-key writes)
+        // that this branch immediately probes with three string lookups and
+        // throws away — purely to recover three booleans the ShapeEntry already
+        // holds. That cost lands on every Set that misses the named fast path
+        // (new property, any non-default attribute, stored-type change, or any
+        // computed key): measured 42ns -> 1570ns per set, a 37x cliff.
+        //
+        // The POD kernel answers only for plain shape storage, and it returns
+        // false both for "no such property" and for "cannot describe this"
+        // (array dense slots, unmaterialized FUNC prototype, string-exotic
+        // indices). Only a definite `true` is therefore usable; everything else
+        // falls through to the object path below, unchanged. Classes whose
+        // object-form descriptor overrides shape storage are excluded outright:
+        // String wrappers synthesize length/indices from __primitiveValue__,
+        // RegExp suppresses virtual flag properties, Error overrides `stack`'s
+        // enumerability, and `__proto__` is not an own property at all.
+        bool pod_answered = false;
+        if (get_type_id(target) == LMD_TYPE_MAP &&
+                get_type_id(key_root.get()) == LMD_TYPE_STRING) {
+            JsClass tcls = js_class_id(target_root.get());
+            String* ks = it2s(key_root.get());
+            bool guarded_class = tcls == JS_CLASS_STRING || tcls == JS_CLASS_ERROR ||
+                tcls == JS_CLASS_REGEXP;
+            bool guarded_key = ks->len == 9 && memcmp(ks->chars, "__proto__", 9) == 0;
+            if (!guarded_class && !guarded_key) {
+                JsPropertyDescriptor pd;
+                if (js_get_own_property_descriptor(target_root.get(), ks->chars,
+                        (int)ks->len, &pd)) {
+                    pod_answered = true;
+                    if (js_pd_is_accessor(&pd)) {
+                        if ((pd.flags & JS_PD_HAS_SET) && js_is_callable(pd.setter)) {
+                            // Root the setter: the call can allocate, and the
+                            // shape entry it came from is only reachable via target.
+                            descriptor_root.set(pd.setter);
+                            Item set_args[1] = { value };
+                            JS_ASSIGN_OR_RETURN(pod_setter_result,
+                                js_call_function(descriptor_root.get(), receiver, set_args, 1));
+                            return (Item){.item = b2it(true)};
+                        }
+                        can_fast_set = false;   // accessor with no callable setter
+                    } else if ((pd.flags & JS_PD_HAS_WRITABLE) &&
+                               !(pd.flags & JS_PD_WRITABLE)) {
+                        can_fast_set = false;   // non-writable data property
+                    }
+                    if (can_fast_set) {
+                        JS_ASSIGN_OR_RETURN(pod_set_result,
+                            js_define_own_key_storage(target, key, value));
+                        return (Item){.item = b2it(true)};
+                    }
+                    // Not fast-settable: fall through to the prototype walk,
+                    // exactly as the object path does when can_fast_set is false.
+                }
+            }
+        }
+        if (!pod_answered) {
         Item fast_desc = js_object_get_own_property_descriptor(
             target_root.get(), key_root.get());
         descriptor_root.set(fast_desc);
@@ -6650,6 +6706,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         // An absent own descriptor is not a storage fast path: an inherited
         // setter or non-writable data property still governs OrdinarySet.
         // Let the prototype walk below decide before creating a receiver slot.
+        }
     }
 
     // Walk prototype chain to find the descriptor that governs this Set.
@@ -8897,6 +8954,23 @@ extern "C" Item js_for_in_keys(Item object) {
     return result_root.get();
 }
 
+// True when the POD descriptor kernel can speak for this object/key pair.
+// It reads plain shape storage only, and reports `false` both for "absent" and
+// for "cannot describe" (array dense slots, unmaterialized FUNC prototype,
+// string-exotic indices) — so callers may only trust a `true` return. Classes
+// whose object-form descriptor overrides shape storage are excluded: String
+// wrappers synthesize length/indices from __primitiveValue__, RegExp suppresses
+// virtual flag properties, Error overrides `stack`'s enumerability, and
+// `__proto__` is not an own property at all.
+static bool js_pod_descriptor_applies(Item object, Item key) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    JsClass cls = js_class_id(object);
+    if (cls == JS_CLASS_STRING || cls == JS_CLASS_ERROR || cls == JS_CLASS_REGEXP) return false;
+    String* ks = it2s(key);
+    return !(ks->len == 9 && memcmp(ks->chars, "__proto__", 9) == 0);
+}
+
 extern "C" bool js_for_in_key_is_live(Item object, Item key) {
     RootFrame roots(4);
     Rooted<Item> object_root(roots, object);
@@ -8926,6 +9000,18 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
         if (current_type != LMD_TYPE_MAP && !js_is_js_array(current_root.get()) &&
             current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT) {
             break;
+        }
+        // Shape-flag shortcut: allocating a descriptor Map per prototype level
+        // to read one bit dominated for-in (measured ~1.8us/key vs 455ns for
+        // Object.keys). Only a definite `true` from the POD kernel is usable.
+        if (js_pod_descriptor_applies(current_root.get(), key_root.get())) {
+            String* ks = it2s(key_root.get());
+            JsPropertyDescriptor pd;
+            if (js_get_own_property_descriptor(current_root.get(), ks->chars,
+                    (int)ks->len, &pd)) {
+                return (pd.flags & JS_PD_HAS_ENUMERABLE)
+                    ? (pd.flags & JS_PD_ENUMERABLE) != 0 : true;
+            }
         }
         desc_root.set(js_object_get_own_property_descriptor(
             current_root.get(), key_root.get()));
@@ -9016,11 +9102,27 @@ static Item js_object_collect_enumerable_own(Item object, bool entries) {
     for (int i = 0; i < len; i++) {
         Item key = js_elements_get(keys, (Item){.item = i2it(i)});
         if (js_key_is_symbol_c(key)) continue;
-        JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(object, key));
-        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
-        bool en_found = false;
-        Item en = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &en_found);
-        if (!en_found || !js_is_truthy(en)) continue;
+        // Shape-flag shortcut, same rationale as for-in above: this ran once
+        // per key and dominated Object.values/entries.
+        bool pod_enumerable = false, pod_answered = false;
+        if (js_pod_descriptor_applies(object, key)) {
+            String* ks = it2s(key);
+            JsPropertyDescriptor pd;
+            if (js_get_own_property_descriptor(object, ks->chars, (int)ks->len, &pd)) {
+                pod_answered = true;
+                pod_enumerable = (pd.flags & JS_PD_HAS_ENUMERABLE)
+                    ? (pd.flags & JS_PD_ENUMERABLE) != 0 : true;
+            }
+        }
+        if (pod_answered) {
+            if (!pod_enumerable) continue;
+        } else {
+            JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(object, key));
+            if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+            bool en_found = false;
+            Item en = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &en_found);
+            if (!en_found || !js_is_truthy(en)) continue;
+        }
         JS_ASSIGN_OR_RETURN(val, js_get_reference(object, key));
         if (!entries) {
             js_array_push(result, val);
