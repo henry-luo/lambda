@@ -14,6 +14,9 @@
 #include <cstring>
 #include <string>
 
+// js_bt_regex.cpp resolves \p{...} through the generated property tables, so
+// this unity-style test must pull that translation unit in as well.
+#include "../lambda/js/js_regex_generated_properties.cpp"
 #include "../lambda/js/js_bt_regex.cpp"
 
 namespace {

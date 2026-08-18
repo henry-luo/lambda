@@ -17172,6 +17172,47 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // Unicode binary properties such as Alphabetic are valid in both /u and
     // /v but RE2 does not recognize all of their names. Flatten their generated
     // ranges together with /v set operations before RE2 sees the class.
+    // The rewriter below only flattens property escapes that sit *inside* a
+    // class, so a bare \p{White_Space} reached RE2 unflattened and threw
+    // "invalid character class range", while the identical [\p{White_Space}]
+    // matched fine. Wrap bare property escapes in a one-element class first so
+    // both spellings take the same path. 13 of the 20 most common binary
+    // properties were affected (White_Space, Alphabetic, Math, Uppercase, ...).
+    std::string bare_property_wrapped;
+    if (compile_info.unicode || compile_info.unicode_sets) {
+        int class_depth = 0;
+        bool wrapped_any = false;
+        for (int i = 0; i < vpat_len; i++) {
+            char c = vpat[i];
+            if (c == '\\' && i + 1 < vpat_len) {
+                char nx = vpat[i + 1];
+                if (class_depth == 0 && (nx == 'p' || nx == 'P') &&
+                        i + 2 < vpat_len && vpat[i + 2] == '{') {
+                    int close = i + 3;
+                    while (close < vpat_len && vpat[close] != '}') close++;
+                    if (close < vpat_len) {
+                        bare_property_wrapped += (nx == 'P') ? "[^\\p{" : "[\\p{";
+                        bare_property_wrapped.append(vpat + i + 3, (size_t)(close - (i + 3)));
+                        bare_property_wrapped += "}]";
+                        i = close;
+                        wrapped_any = true;
+                        continue;
+                    }
+                }
+                bare_property_wrapped += c;
+                bare_property_wrapped += nx;
+                i++;
+                continue;
+            }
+            if (c == '[') class_depth++;
+            else if (c == ']' && class_depth > 0) class_depth--;
+            bare_property_wrapped += c;
+        }
+        if (wrapped_any) {
+            vpat = bare_property_wrapped.c_str();
+            vpat_len = (int)bare_property_wrapped.size();
+        }
+    }
     if (compile_info.unicode || compile_info.unicode_sets) {
         char* rewritten = nullptr;
         int rewritten_len = 0;

@@ -4,7 +4,7 @@ t3:true,false
 t4:true,false
 t5:true,false
 t6:true,false
-t7:true,true,false
+t7:true,false,false
 t8:false,true
 t9:true,true,false
 t10:true,true,true,false
