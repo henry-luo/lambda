@@ -30,8 +30,8 @@ C2MIR and Go are native statically typed ports of the same workloads, present as
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.22x | 1.42x | 0.23x | 54.2x | 11.9x |
 | LARCENY | 11 | 11 | 11 | 10 | 11 | 11 | 11 | 2.50x | 0.88x | 0.30x | 33.2x | 13.3x |
 | JetStream | 6 | 6 | 6 | 1 | 6 | 4 | 6 | 6.18x | 3.97x | 0.19x | 76.1x | 12.9x |
-| Text | 3 | 2 | 2 | 3 | 3 | 3 | 3 | 1.60x | 1.15x | 0.02x | 67.7x | 9.50x |
-| **Overall** | 59 | 58 | 58 | 47 | 59 | 53 | 59 | 1.49x | 0.87x | 0.14x | 30.8x | 7.38x |
+| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.53x | 0.42x | 0.02x | 67.7x | 9.50x |
+| **Overall** | 59 | 59 | 59 | 47 | 59 | 53 | 59 | 1.41x | 0.83x | 0.14x | 30.8x | 7.38x |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -42,12 +42,13 @@ C2MIR and Go are native statically typed ports of the same workloads, present as
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 4.06x over 46 of 59 rows
+- **MIR (typed) / C2MIR geomean:** 4.30x over 47 of 59 rows
 
 **Widest gaps vs C2MIR**
 
 | Benchmark | MIR (typed) | C2MIR | MIR (typed)/C2MIR |
 |---|---:|---:|---:|
+| text/microdiff | 0.918 | 0.016 | 57.0x |
 | kostya/base64 | 17.0 | 0.558 | 30.5x |
 | awfy/list | 0.608 | 0.023 | 26.5x |
 | text/hyphen | 2.15 | 0.087 | 24.7x |
@@ -59,17 +60,14 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | kostya/brainfuck | 396.2 | 28.3 | 14.0x |
 | awfy/nbody | 20.2 | 1.51 | 13.4x |
 | text/fast_diff | 156.1 | 13.0 | 12.0x |
-| r7rs/fft | 0.252 | 0.024 | 10.5x |
 
 ---
 
 ## Notable Results
 
-- Missing timings: **20** cells
+- Missing timings: **18** cells
 - QuickJS missing: r7rs/ack (exit_1), beng/knucleotide (exit_1), beng/regexredux (exit_1), beng/revcomp (exit_1), jetstream/cube3d (exit_1), jetstream/raytrace3d (exit_1)
 - C2MIR missing: awfy/richards (missing_port), awfy/json (missing_port), awfy/deltablue (missing_port), awfy/havlak (missing_port), awfy/cd (missing_port), beng/pidigits (missing_port), larceny/deriv (missing_port), jetstream/cube3d (missing_port), +4 more
-- MIR (untyped) missing: text/microdiff (exit_-11)
-- MIR (typed) missing: text/microdiff (exit_-11)
 
 ### Largest LambdaJS / Node.js Ratios
 
@@ -183,5 +181,5 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | Benchmark | Category | MIR (untyped) (ms) | MIR (typed) (ms) | C2MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR (untyped)/Node | MIR (typed)/Node | C2MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | fast_diff | text-diff | 257.0 | 156.1 | 13.0 | 2.61s | 613.8 | 39.2 | 6.56x | 3.99x | 0.33x | 66.6x | 15.7x |
-| microdiff | data-diff | --- | --- | 0.016 | 1.30s | 108.5 | 16.3 | --- | --- | 0.001x | 79.7x | 6.67x |
+| microdiff | data-diff | 0.930 | 0.918 | 0.016 | 1.30s | 108.5 | 16.3 | 0.06x | 0.06x | 0.001x | 79.7x | 6.67x |
 | hyphen | hyphenation | 2.52 | 2.15 | 0.087 | 377.1 | 52.9 | 6.45 | 0.39x | 0.33x | 0.01x | 58.4x | 8.20x |

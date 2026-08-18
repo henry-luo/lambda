@@ -2551,10 +2551,10 @@
     },
     "microdiff": {
       "category": "data-diff",
-      "mir": null,
+      "mir": 0.93,
       "_status": {
-        "mir": "exit_-11",
-        "mir_typed": "exit_-11",
+        "mir": "ok",
+        "mir_typed": "ok",
         "c2mir": "ok",
         "lambdajs": "ok",
         "quickjs": "ok",
@@ -2563,12 +2563,12 @@
       "_status_detail": {
         "mir": {
           "status_counts": {
-            "exit_-11": 3
+            "ok": 3
           }
         },
         "mir_typed": {
           "status_counts": {
-            "exit_-11": 3
+            "ok": 3
           }
         },
         "c2mir": {
@@ -2592,7 +2592,7 @@
           }
         }
       },
-      "mir_typed": null,
+      "mir_typed": 0.918,
       "c2mir": 0.016113,
       "lambdajs": 1297.36,
       "quickjs": 108.521,
