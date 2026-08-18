@@ -4,6 +4,7 @@
 >
 > **Primary sources:** `lambda/lambda-error.h` (`LambdaErrorCode`, `SourceLocation`, `StackFrame`, `LambdaError`, `FuncDebugInfo`, the API), `lambda/lambda-error.cpp` (code tables, creation/enrichment, FP-walk capture, formatting, GC hooks, `find_errors`), `lambda/lambda.h` (`ItemError`, `err2it`/`it2err`, `DATETIME_MAKE_ERROR`, `RetItem`/`item_to_ri`), `lambda/lambda.hpp` (the `GUARD_ERROR*` macros), `lambda/lambda-eval.cpp` (`fn_error`, `set_runtime_error`, `is_truthy`), `lambda/lambda-mem.cpp` (GC-hook registration), `lambda/mir.c` (`build_debug_info_table`).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. The `Item`/`LMD_TYPE_ERROR` tag itself is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); this doc owns only what the tag *carries* and how it flows.
+> **Cross-language control-flow authority:** **D1.4v3/DI15v2/D8.4.3v2** and [`vibe/Lambda_Design_Runtime_Error_Handling.md`](../../../vibe/Lambda_Design_Runtime_Error_Handling.md) require every ordinary Lambda, LambdaJS, and hosted-language failure to return through each native/generated frame. Native system-fault non-local recovery is a separate temporary carve-out owned by **S7.11** and `vibe/Lambda_Design_Exec_Recovery.md`.
 
 ---
 

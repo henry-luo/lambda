@@ -409,6 +409,10 @@ typedef struct AstHandlerNode : AstNode {
     AstNode* body;
     AstNode* value_body; // optional non-error arm, with `~` bound to the operand
     bool is_statement;
+    // Async MIR reserves a dispatcher state for a statement pn handler's
+    // fault-only continuation. Zero means that this handler is not a
+    // suspension-capable procedural target.
+    int async_fault_state;
 } AstHandlerNode;
 
 typedef struct AstStartNode : AstNode {
@@ -984,6 +988,7 @@ typedef struct FnAnalysis {
     bool needs_task_context;
     bool has_indirect_pn_call;
     int await_point_count;
+    int async_fault_handler_count;
     const char* may_await_cause;
     FnVariantAnalysis variants[4];
     int variant_count;

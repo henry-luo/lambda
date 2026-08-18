@@ -339,15 +339,18 @@ TEST(SideStackRootFrameTest, TransactionBarrierWinsOverInnerLocalFault) {
             ASSERT_TRUE(lambda_recovery_frame_arm(local));
             // A module/guest transaction must retire the inner handler before
             // it can observe a fault from work whose epilogue was skipped.
+            // Equality-depth exhaustion is an ordinary language completion;
+            // use the native side-stack fault here because this test verifies
+            // transaction-barrier landing, not language error transport.
             lambda_recovery_frame_raise_local_fault(
-                LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION, ERR_TYPE_MISMATCH);
+                LAMBDA_FAULT_SIDE_STACK_EXHAUSTION, ERR_TYPE_MISMATCH);
             ADD_FAILURE() << "transaction-owned fault returned instead of landing";
         }
         ADD_FAILURE() << "inner local frame landed across transaction barrier";
     }
 
     ASSERT_TRUE(lambda_recovery_frame_restore_landing(transaction));
-    EXPECT_EQ(transaction->fault.reason, LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION);
+    EXPECT_EQ(transaction->fault.reason, LAMBDA_FAULT_SIDE_STACK_EXHAUSTION);
     EXPECT_EQ(transaction->fault.prior_error_code, ERR_TYPE_MISMATCH);
     EXPECT_EQ(runtime.side_root_top, initial_root_top);
     EXPECT_EQ(lambda_recovery_frame_current(), transaction);
@@ -359,7 +362,7 @@ TEST(SideStackRootFrameTest, TransactionBarrierWinsOverInnerLocalFault) {
 TEST(SideStackRootFrameTest, StaticFaultOriginsLandWithoutAllocating) {
     static const LambdaFaultReason reasons[] = {
         LAMBDA_FAULT_OUT_OF_MEMORY,
-        LAMBDA_FAULT_EQUALITY_DEPTH_EXHAUSTION,
+        LAMBDA_FAULT_SIDE_STACK_EXHAUSTION,
         LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT,
     };
     Context runtime{};

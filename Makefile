@@ -536,7 +536,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
@@ -1499,6 +1499,13 @@ test-all-baseline: build-test
 # Lambda baseline cases, including ABI checks, are listed in the build config
 # consumed by test_run.js so execution and final-summary accounting stay under
 # one runner.
+# ---------------------------------------------------------------------------
+# Error completion / native-fault separation gate
+# ---------------------------------------------------------------------------
+
+check-error-recovery:
+	@python3 test/error_handling/check_recovery_boundaries.py
+
 # ---------------------------------------------------------------------------
 # T0 AST interpreter (LAMBDA_TIER=interp) — vibe/Lambda_Impl_Ast_Interp.md
 # ---------------------------------------------------------------------------

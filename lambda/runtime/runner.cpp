@@ -479,13 +479,23 @@ void clear_persistent_last_error() {
 
 void preserve_context_last_error(Item result) {
     EvalContext* ctx = context;
-    if (!ctx || !ctx->last_error) {
+    if (!ctx) {
         return;
     }
 
     if (get_type_id(result) == LMD_TYPE_ERROR) {
+        LambdaError* result_error = it2err(result);
+        if (result_error && ctx->last_error != result_error) {
+            // An explicit interpreter/JIT completion can be the only owner of
+            // the rich error; publish it for diagnostics without making the
+            // diagnostic mirror part of ordinary control flow.
+            if (ctx->last_error) err_free(ctx->last_error);
+            ctx->last_error = result_error;
+        }
         return;
     }
+
+    if (!ctx->last_error) return;
 
     // error() values can be consumed by total equality, so a non-error result must drop stale diagnostics.
     // A completed non-error result cannot retain this context's old diagnostic.
@@ -1989,7 +1999,13 @@ void runtime_cleanup(Runtime* runtime) {
         lambda_uv_cleanup();
     }
     if (runtime->js_bootstrap_context) {
-        mem_free(runtime->js_bootstrap_context);
+        // A failed cross-language compile can leave the bootstrap pointer
+        // aliased to the canonical EvalContext. Freeing it here makes the
+        // later last_error cleanup dereference a dead context; the canonical
+        // owner is released in the eval_context block below.
+        if (runtime->js_bootstrap_context != runtime->eval_context) {
+            mem_free(runtime->js_bootstrap_context);
+        }
         runtime->js_bootstrap_context = NULL;
     }
     if (runtime->eval_context) {

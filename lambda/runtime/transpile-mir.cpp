@@ -271,6 +271,7 @@ struct MirTranspiler {
     MIR_reg_t async_frame_reg;
     MIR_reg_t async_scope_base_reg;
     MIR_label_t* async_state_labels;
+    uint8_t* async_state_label_emitted;
     int async_state_count;
     int async_next_state;
     int async_next_slot;
@@ -11273,7 +11274,27 @@ static void emit_handler_statement_result(MirTranspiler* mt, MIR_reg_t result) {
     mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, result, (int64_t)null_value);
 }
 
+static bool handler_body_consumes_error_value(AstNode* node) {
+    AstNode* effective = ast_unwrap_primary(node);
+    if (!effective) return false;
+    if (effective->node_type == AST_NODE_CURRENT_ERROR) return true;
+    if (effective->node_type != AST_NODE_ASSIGN_STAM) return false;
+    AstAssignStamNode* assign = (AstAssignStamNode*)effective;
+    AstNode* rhs = ast_unwrap_primary(assign->value);
+    // Only an assignment of the handler's current/value binding consumes the
+    // selected input (`value = ^` or `value = ~`). An assignment of a fresh
+    // fallible call must still propagate that call's ERROR result.
+    return rhs && (rhs->node_type == AST_NODE_CURRENT_ERROR ||
+        rhs->node_type == AST_NODE_CURRENT_ITEM);
+}
+
 static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
+    bool durable_fault_target = mt->in_async_proc && handler->async_fault_state > 0;
+    if (durable_fault_target) {
+        emit_call_void_2(mt, "lambda_async_frame_set_fault_target",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, handler->async_fault_state));
+    }
     bool saved_in_handler_operand = mt->in_handler_operand;
     mt->in_handler_operand = true;
     MIR_reg_t operand;
@@ -11285,6 +11306,11 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
         operand = transpile_box_item(mt, handler->operand);
     }
     mt->in_handler_operand = saved_in_handler_operand;
+    // The native-fault landing resumes after the operand call, so it must
+    // restore the exact pre-handler spill set before entering cleanup or
+    // binding `^`.  Body-local spills are allocated later and are not part of
+    // the abandoned operand activation.
+    int fault_spill_count = mt->async_spill_count;
     MIR_reg_t type_tag = new_reg(mt, "handler_tag", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH,
         MIR_new_reg_op(mt->ctx, type_tag), MIR_new_reg_op(mt->ctx, operand),
@@ -11301,6 +11327,10 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
         MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, is_error)));
 
     if (handler->value_body) {
+        if (durable_fault_target) {
+            emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
+        }
         MIR_reg_t saved_handler_value = mt->handler_value_reg;
         bool saved_in_handler_value = mt->in_handler_value;
         mt->handler_value_reg = operand;
@@ -11309,6 +11339,13 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
         mt->handler_value_reg = saved_handler_value;
         mt->in_handler_value = saved_in_handler_value;
         if (handler->is_statement) {
+            // A statement handler discards only a normal value-body result.
+            // An error created by that selected body is a fresh completion
+            // and must unwind this activation instead of becoming statement
+            // null (S7.6.1).
+            if (!handler_body_consumes_error_value(handler->value_body)) {
+                emit_return_if_item_error(mt, value_body_result);
+            }
             emit_handler_statement_result(mt, result);
         } else {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -11316,6 +11353,10 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
                     value_body_result)));
         }
     } else if (handler->is_statement) {
+        if (durable_fault_target) {
+            emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
+        }
         emit_handler_statement_result(mt, result);
     } else {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -11325,6 +11366,10 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
         MIR_new_label_op(mt->ctx, done)));
 
     emit_label(mt, handle);
+    if (durable_fault_target) {
+        emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
+    }
     MIR_reg_t saved_handler_error = mt->handler_error_reg;
     bool saved_in_handler = mt->in_handler;
     mt->handler_error_reg = operand;
@@ -11333,12 +11378,64 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
     mt->handler_error_reg = saved_handler_error;
     mt->in_handler = saved_in_handler;
     if (handler->is_statement) {
+        // The selected statement arm is outside the operand's recovery
+        // boundary; preserve fresh body errors for the enclosing caller.
+        if (!handler_body_consumes_error_value(handler->body)) {
+            emit_return_if_item_error(mt, body_value);
+        }
         emit_handler_statement_result(mt, result);
     } else {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
     }
     emit_label(mt, done);
+    if (durable_fault_target) {
+        MIR_label_t after_fault = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, after_fault)));
+        emit_label(mt, mt->async_state_labels[handler->async_fault_state]);
+        mt->async_state_label_emitted[handler->async_fault_state] = 1;
+        async_restore_spills(mt, fault_spill_count);
+        async_restore_vars(mt);
+        // A native fault may have abandoned several generated activations.
+        // Their task scopes must be cancelled and joined before the target
+        // handler runs; otherwise a later poll would retain resources owned by
+        // the skipped native frames.  Re-entering this same state after a
+        // child completes makes the cleanup frame-by-frame and suspension-safe.
+        MIR_reg_t fault_scope_base = emit_call_1(mt,
+            "lambda_async_frame_fault_scope_base", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
+        MIR_reg_t scope_result = emit_call_2(mt, "lambda_task_scope_unwind",
+            MIR_T_I64, MIR_T_P,
+            MIR_new_reg_op(mt->ctx, fault_scope_base),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+        async_emit_suspended_return(mt, scope_result,
+            handler->async_fault_state, fault_spill_count);
+        MIR_reg_t scope_tag = emit_item_tag(mt, scope_result);
+        MIR_reg_t scope_error = new_reg(mt, "handler_scope_error", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, scope_error),
+            MIR_new_reg_op(mt->ctx, scope_tag),
+            MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+        MIR_label_t scope_ready = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, scope_ready),
+            MIR_new_reg_op(mt->ctx, scope_error)));
+        // Scope cleanup failure is a fresh ordinary outcome.  It cannot be
+        // routed back into the abandoned handler operand, whose fault target
+        // has already been consumed by this state.
+        async_complete_frame(mt);
+        emit_function_error_return(mt, scope_result);
+        emit_label(mt, scope_ready);
+        MIR_reg_t fault = emit_call_1(mt, "lambda_async_frame_take_fault",
+            MIR_T_I64, MIR_T_P,
+            MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, operand), MIR_new_reg_op(mt->ctx, fault)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, handle)));
+        emit_label(mt, after_fault);
+    }
     return result;
 }
 
@@ -22956,6 +23053,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t saved_async_frame_reg = mt->async_frame_reg;
     MIR_reg_t saved_async_scope_base_reg = mt->async_scope_base_reg;
     MIR_label_t* saved_async_state_labels = mt->async_state_labels;
+    uint8_t* saved_async_state_label_emitted = mt->async_state_label_emitted;
     int saved_async_state_count = mt->async_state_count;
     int saved_async_next_state = mt->async_next_state;
     int saved_async_next_slot = mt->async_next_slot;
@@ -22980,7 +23078,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->async_frame_reg = 0;
     mt->async_scope_base_reg = 0;
     mt->async_state_count = is_async_proc && fn_node->analysis
-        ? fn_node->analysis->await_point_count : 0;
+        ? fn_node->analysis->await_point_count +
+            fn_node->analysis->async_fault_handler_count : 0;
     mt->async_next_state = 0;
     mt->async_next_slot = 0;
     mt->async_spills = NULL;
@@ -22989,9 +23088,12 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->async_tracking = false;
     mt->async_tracking_suppressed = false;
     mt->async_state_labels = NULL;
+    mt->async_state_label_emitted = NULL;
     if (mt->async_state_count > 0) {
         mt->async_state_labels = (MIR_label_t*)mem_calloc(
             (size_t)(mt->async_state_count + 1), sizeof(MIR_label_t), MEM_CAT_EVAL);
+        mt->async_state_label_emitted = (uint8_t*)mem_calloc(
+            (size_t)(mt->async_state_count + 1), sizeof(uint8_t), MEM_CAT_EVAL);
     }
 
     // Save original strdup pointers before MIR overwrites them
@@ -23755,7 +23857,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // lowering proves they cannot suspend. MIR still requires every dispatcher
     // target to be present, even though those states can never be stored.
     for (int state = mt->async_next_state + 1; state <= mt->async_state_count; state++) {
-        emit_label(mt, mt->async_state_labels[state]);
+        if (!mt->async_state_label_emitted ||
+                !mt->async_state_label_emitted[state]) {
+            emit_label(mt, mt->async_state_labels[state]);
+            if (mt->async_state_label_emitted) {
+                mt->async_state_label_emitted[state] = 1;
+            }
+        }
     }
     async_complete_frame(mt);
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
@@ -23803,6 +23911,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         sizeof(mt->typed_array_inbounds_roots));
     mt->typed_array_inbounds_root_count = saved_typed_array_inbounds_root_count;
     mem_free(mt->async_state_labels);
+    mem_free(mt->async_state_label_emitted);
     mem_free(mt->async_spills);
     mt->in_async_proc = saved_in_async_proc;
     mt->emitting_async_call = saved_emitting_async_call;
@@ -23813,6 +23922,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->async_frame_reg = saved_async_frame_reg;
     mt->async_scope_base_reg = saved_async_scope_base_reg;
     mt->async_state_labels = saved_async_state_labels;
+    mt->async_state_label_emitted = saved_async_state_label_emitted;
     mt->async_state_count = saved_async_state_count;
     mt->async_next_state = saved_async_next_state;
     mt->async_next_slot = saved_async_next_slot;

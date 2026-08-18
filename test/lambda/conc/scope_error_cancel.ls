@@ -8,7 +8,8 @@ pn fail() int^error {
 }
 
 pn main() {
-    let value = fail() ^ { ^ }
+    var value = null
+    fail() ^ { value = ^ } ~ { value = ~ }
     print(value is error)
     print(value.message)
 }

@@ -1054,7 +1054,8 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
     }
 JS_UTIL_TYPE_TEST(js_util_types_isDate, js_class_id(value) == JS_CLASS_DATE)
 JS_UTIL_TYPE_TEST(js_util_types_isRegExp, js_class_id(value) == JS_CLASS_REGEXP)
-JS_UTIL_TYPE_TEST(js_util_types_isArray, get_type_id(value) == LMD_TYPE_ARRAY)
+// array-family: an all-numeric or empty array is stored in LMD_TYPE_ARRAY_NUM
+JS_UTIL_TYPE_TEST(js_util_types_isArray, is_array_family_type_id(get_type_id(value)))
 JS_UTIL_TYPE_TEST(js_util_types_isMap, js_class_id(value) == JS_CLASS_MAP)
 JS_UTIL_TYPE_TEST(js_util_types_isSet, js_class_id(value) == JS_CLASS_SET)
 #undef JS_UTIL_TYPE_TEST
@@ -1552,7 +1553,11 @@ typedef struct JsDeepEqualContext {
     JsDeepEqualPair stack[4096];
     int depth;
 } JsDeepEqualContext;
-JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
+// array-family, not bare LMD_TYPE_ARRAY: a JS array whose elements are all
+// numeric (and a freshly built []) is stored in the LMD_TYPE_ARRAY_NUM lane,
+// so testing the generic tag alone drops such an array to the primitive path
+// and compares Item pointers — deepStrictEqual([1,2],[1,2]) was false.
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
 
 static int js_util_deep_equal_enter(JsDeepEqualContext* ctx, Item a, Item b) {
     if (!ctx) return 1;
@@ -2016,8 +2021,11 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         return (Item){.item = b2it(equal)};
     }
 
-    if (ta == LMD_TYPE_ARRAY) {
-        if (tb != LMD_TYPE_ARRAY) {
+    if (is_array_family_type_id(ta)) {
+        // an all-numeric array lands in LMD_TYPE_ARRAY_NUM and a mixed one in
+        // LMD_TYPE_ARRAY; both are the same JS array to the language, so the
+        // lanes must compare across each other, not just within.
+        if (!is_array_family_type_id(tb)) {
             js_util_deep_equal_leave(ctx);
             return (Item){.item = b2it(false)};
         }
