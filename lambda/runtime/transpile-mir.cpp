@@ -14819,7 +14819,12 @@ static MIR_reg_t emit_generic_array_index_load(MirTranspiler* mt,
                 obj_ident->name->chars);
             MirVarEntry* ov = find_var(mt, oname);
             // mutable bindings need an explicit INT witness before decoding the lane.
-            if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
+            // Module slots have no MirVarEntry witness; their typed read can
+            // still take the boxed slow/oob arm, so publishing that load as a
+            // raw lane would pass Item bits into the return boundary (D2.2.2,
+            // D3.2.1). Keep the result boxed until a live binding proves the
+            // representation end to end.
+            if (ov && ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
         }
 
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
