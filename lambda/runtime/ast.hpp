@@ -50,10 +50,12 @@ extern "C" {
 // Path wildcards for glob patterns
 #define SYM_PATH_WILDCARD sym_path_wildcard
 
-// Path tokens: .. for parent (kept separate for parent_expr)\n// SYM_PATH_ROOT and SYM_PATH_SELF removed — merged into _path_prefix token
+// Path/navigation tokens.
 #define SYM_PATH_PARENT sym_path_parent
+#define SYM_PATH_ROOT sym_path_root
 #define SYM_PATH_EXPR sym_path_expr
-#define SYM_PARENT_EXPR sym_parent_expr   // expr.. parent access shorthand
+#define SYM_NAV_EXPR sym_nav_expr
+#define SYM_CURRENT_PARENT_EXPR sym_current_parent_expr
 
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_EXPR sym_current_expr
@@ -154,6 +156,7 @@ extern "C" {
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
 #define FIELD_OPERATOR field_operator
+#define FIELD_OPERATION field_operation
 #define FIELD_OPERAND field_operand
 #define FIELD_ALIAS field_alias
 #define FIELD_MODULE field_module
@@ -231,10 +234,13 @@ typedef struct AstQueryNode : AstNode {
 typedef struct AstPathSegment {
     String* name;           // segment name (NULL for wildcards)
     LPathSegmentType type;   // LPATH_SEG_NORMAL, LPATH_SEG_WILDCARD, etc.
+    int64_t int_value;      // value for LPATH_SEG_INT
 } AstPathSegment;
 
 typedef struct AstPathNode : AstNode {
-    PathScheme scheme;           // file, http, https, sys, PATH_RELATIVE, PATH_PARENT
+    PathScheme scheme;           // logical, file, http, https, sys, or relative
+    bool file_local;              // `file./` rather than `file.hostname`
+    String* authority;            // named file authority, if present
     int segment_count;           // number of path segments
     AstPathSegment* segments;    // array of segment info (allocated in pool)
 } AstPathNode;
@@ -246,11 +252,10 @@ typedef struct AstPathIndexNode : AstNode {
     AstNode* segment_expr;   // expression for the dynamic segment
 } AstPathIndexNode;
 
-// Parent access expression: expr.. for .parent, expr.._.. for .parent.parent
-typedef struct AstParentNode : AstNode {
-    AstNode* object;          // the base expression
-    int depth;                // number of parent levels (1 for .., 2 for .._.., etc.)
-} AstParentNode;
+typedef struct AstNavigationNode : AstNode {
+    AstNode* object;
+    bool root;                // true for ./, false for .~~
+} AstNavigationNode;
 
 // CRetType, CArgConvention, and SysFuncInfo are now in sys_func_registry.h
 

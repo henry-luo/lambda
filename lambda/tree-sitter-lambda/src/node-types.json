@@ -2799,6 +2799,10 @@
             "named": true
           },
           {
+            "type": "nav_expr",
+            "named": true
+          },
+          {
             "type": "primary_expr",
             "named": true
           }
@@ -2858,6 +2862,44 @@
           },
           {
             "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "nav_expr",
+    "named": true,
+    "fields": {
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "member_expr",
+            "named": true
+          },
+          {
+            "type": "nav_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      },
+      "operation": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "path_parent",
+            "named": true
+          },
+          {
+            "type": "path_root",
             "named": true
           }
         ]
@@ -3201,32 +3243,6 @@
     }
   },
   {
-    "type": "parent_expr",
-    "named": true,
-    "fields": {
-      "object": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_expr",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "path_parent",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "path_expr",
     "named": true,
     "fields": {
@@ -3244,6 +3260,10 @@
           },
           {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "path_parent",
             "named": true
           },
           {
@@ -3549,6 +3569,10 @@
           "named": true
         },
         {
+          "type": "current_parent_expr",
+          "named": true
+        },
+        {
           "type": "datetime",
           "named": true
         },
@@ -3621,7 +3645,7 @@
           "named": true
         },
         {
-          "type": "parent_expr",
+          "type": "nav_expr",
           "named": true
         },
         {
@@ -4704,10 +4728,6 @@
     "named": false
   },
   {
-    "type": "_",
-    "named": false
-  },
-  {
     "type": "a",
     "named": false
   },
@@ -4757,6 +4777,10 @@
   },
   {
     "type": "current_expr",
+    "named": true
+  },
+  {
+    "type": "current_parent_expr",
     "named": true
   },
   {
@@ -4877,6 +4901,10 @@
   },
   {
     "type": "path_parent",
+    "named": true
+  },
+  {
+    "type": "path_root",
     "named": true
   },
   {

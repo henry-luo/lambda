@@ -1772,7 +1772,11 @@ JitImport jit_runtime_imports[] = {
     // Path functions
     // ========================================================================
     {"path_new", FPTR(path_new)},
+    {"path_new_authority", FPTR(path_new_authority)},
     {"path_extend", FPTR(path_extend)},
+    {"path_extend_int", FPTR(path_extend_int)},
+    {"path_select_parent", FPTR(path_select_parent)},
+    {"path_select_root", FPTR(path_select_root)},
     {"path_concat", FPTR(path_concat)},
     {"path_wildcard", FPTR(path_wildcard)},
     {"path_wildcard_recursive", FPTR(path_wildcard_recursive)},

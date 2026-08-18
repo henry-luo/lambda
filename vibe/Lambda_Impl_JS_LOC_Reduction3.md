@@ -162,11 +162,124 @@ stream tests still fail).
 
 The protocol spans `js_runtime.cpp` (~4.4K of it), `js_globals.cpp` (~3.9K), `js_props.cpp`, `js_property_attrs.cpp` (~10.5K total). Hot/cold rule: the named-fast infra (`js_runtime.cpp:8055-8267`), MAP own-get sequence (`:4945-4983`), ARRAY dense read (`:5225-5236`), FUNC own-get (`:5351-5371`) stay inline; extraction targets only cold phases. Gate every step with `JS_EXEC_PROFILE=1` named-fast hit-rate delta = 0.
 
-**A1. get/set-core decomposition (C5.5v2) — −600.** `js_get_key_core` is `:4760-5783` (1,024 lines); set cores `:6404-7468`; the real OrdinarySet is `js_set_completion_with_key` (`js_globals.cpp:6427-6755`). Items: (a) the 338-line lazy `.prototype` init block (`:5419-5756`) → extend `JsBuiltinProtoSpec` rows (toStringTag flag, symbol-method list, accessor list, per-class fixup cb for Array/Object/Error/Function) + one cold driver, keep the 3-line hot check inline (−250); (b) error-carrier std-field ladder ≥6 copies → one field enum + accessor pair (−60); (c) RegExp legacy statics table (−25); (d) primitive-key→string normalization — **re-measured during execution: −25, not −100; deprioritised.** The six sites are not copies of one algorithm. Two are full ladders that differ in policy (the get side wraps every result in `js_to_property_key`, roots it, and handles INT64; the set side interns raw, guards symbols, and returns errors through `JS_ASSIGN_OR_RETURN_INTO`), two normalise and immediately re-dispatch into `js_get_key_core`/`js_set_storage_mode` rather than falling through, and two are BOOL-only companion-map lookups (one already using `js_name_item`). The only safely shared core is "primitive scalar → interned name" (~25 lines), which leaves each site its own wrapping, rooting and error policy and nets ≈ −25 — not worth touching the hottest path in the engine for; (e) array own-index existence, 4 parallel impls → `js_array_own_index_status()` tri-state (−90); (f) String-wrapper `__primitiveValue__` probes (−45); (g) **one classified set-miss walk** `js_classify_set_obstacle()` replacing the three back-to-back proto walks (−50, plus the biggest perf win here — 3→1 walks on the hot-adjacent set slow path, and it unifies the inconsistent depth caps); (h) array named-get tail (−40); (i) ArraySetLength double-ToNumber ×2 → `js_array_set_length()` (−45); misc restricted-name/getter-only-throw helpers (−30). Landing pad for per-class logic is the existing `JsPropertyOps` table (`js_object_meta.h`), not a new mechanism.
+**A1. get/set-core decomposition (C5.5v2) — −600 as scoped, but see the two items re-measured in execution: (a) is ≈ −20, not −250, and (d) is ≈ −25, not −100. The honest remaining figure for A1 is closer to −250.** `js_get_key_core` is `:4760-5783` (1,024 lines); set cores `:6404-7468`; the real OrdinarySet is `js_set_completion_with_key` (`js_globals.cpp:6427-6755`). Items: (a) the lazy `.prototype` init block — **re-measured in execution: ≈ −20, not −250. Done; do not re-open.** The estimate assumed the block was repetitive. It is not: its 342 lines are 18 per-class blocks of *distinct ES spec conformance* (Array's @@unscopables object, Object's Annex-B `__proto__` accessor descriptor, the Error family's name/message/toString plus subclass proto chaining, Set's `keys === values` aliasing, Function's chain to %Object.prototype% plus ThrowTypeError accessors and @@hasInstance, the TypedArray base-proto link, DataView's own populator). The recurring *operations* — `js_intrinsic_set_to_string_tag`, `js_intrinsic_set_symbol_method`, `js_install_native_accessor` — are already one-line calls, and RegExp's symbol-method and accessor sets are already local tables. The only genuinely repeated shape was the data-property stanza (`heap_create_name` + `js_set_key_default` + up to three attribute marks), written 9×; those now use the existing `js_define_data_prop`, plus a new `js_define_data_prop_key` for the two symbol-keyed cases. Net −20. A spec table over the remainder would encode 18 one-off behaviours as 18 one-off callbacks and save nothing, while making property insertion order — which is observable through `Object.keys` — harder to reason about; (b) error-carrier std-field ladder ≥6 copies → one field enum + accessor pair (−60); (c) RegExp legacy statics table (−25); (d) primitive-key→string normalization — **re-measured during execution: −25, not −100; deprioritised.** The six sites are not copies of one algorithm. Two are full ladders that differ in policy (the get side wraps every result in `js_to_property_key`, roots it, and handles INT64; the set side interns raw, guards symbols, and returns errors through `JS_ASSIGN_OR_RETURN_INTO`), two normalise and immediately re-dispatch into `js_get_key_core`/`js_set_storage_mode` rather than falling through, and two are BOOL-only companion-map lookups (one already using `js_name_item`). The only safely shared core is "primitive scalar → interned name" (~25 lines), which leaves each site its own wrapping, rooting and error policy and nets ≈ −25 — not worth touching the hottest path in the engine for; (e) array own-index existence, 4 parallel impls → `js_array_own_index_status()` tri-state (−90); (f) String-wrapper `__primitiveValue__` probes (−45); (g) **one classified set-miss walk** `js_classify_set_obstacle()` replacing the three back-to-back proto walks (−50, plus the biggest perf win here — 3→1 walks on the hot-adjacent set slow path, and it unifies the inconsistent depth caps); (h) array named-get tail (−40); (i) ArraySetLength double-ToNumber ×2 → `js_array_set_length()` (−45); misc restricted-name/getter-only-throw helpers (−30). Landing pad for per-class logic is the existing `JsPropertyOps` table (`js_object_meta.h`), not a new mechanism.
 
-**A2. own-keys unification (C4.3) — −430.** 14 walkers in `js_globals.cpp` (`:8091-9070` region + `js_reflect_own_keys:6299`, `js_error_own_property_names:6266`, `js_object_copy_enumerable_own:10116`); the skip-deleted stanza appears 29×; the String-wrapper index walk is written 3×. Unified `js_own_keys(obj, JsOwnKeysFilter{strings, symbols, enumerable_only, include_length, es_order})` over per-storage enumerators; `js_for_in_keys` stays a proto-loop + seen-set on top. Gates: test262 own-keys order sections, Proxy `ownKeys`.
+**A2. own-keys unification (C4.3) — MEASURED: ≈ −50, not −430 (12% realization). Do NOT build `JsOwnKeysFilter`.** 14 walkers in `js_globals.cpp` (`:8091-9070` region + `js_reflect_own_keys:6299`, `js_error_own_property_names:6266`, `js_object_copy_enumerable_own:10116`), ~1,017 lines. ~~The skip-deleted stanza appears 29×; the String-wrapper index walk is written 3×~~ — **both counts disproven below: 11 in-family, and the wrapper walk is written once as a helper with two callers.** ~~Unified `js_own_keys(obj, JsOwnKeysFilter{...})`~~ — **costed at +84 to +124; do not build it.** Gates: test262 own-keys order sections, Proxy `ownKeys`.
 
-**A3. descriptor pipeline (C4.4) — −350, land LAST.** Two live IRs confirmed; worse than planned: every slow-path Set **allocates a descriptor Map object** (even receiver==target), again per proto level, per for-in key, per `Object.values/entries` key. Make POD `JsPropertyDescriptor` the only internal IR: `js_get_own_pd()` absorbing per-class branches (object-returning GOPD becomes an adapter), `js_set_completion_with_key` walks on POD, validators parse once at entry. Also a measurable perf win. Gate: full test262 property sections zero-delta.
+**Measurement (2026-08-18, verified independently against running code).** The
+LOC inventory is right (1,017 lines across 14 functions) but the duplication
+premise is wrong on three counts.
+
+*The proposed kernel already exists and is already flag-parameterized.*
+`js_map_own_string_keys(Item, bool enumerable_only)` (`js_globals.cpp:8292`),
+`js_array_append_companion_keys(..., bool enumerable_only, bool include_length)`
+(`:7567`) and `js_append_string_wrapper_indices` (`:8083`) are exactly the
+proposed dimensions, and gOPN and `Object.keys` already share them. Wrapping
+them in a struct is a rename that deletes nothing.
+
+*The five flags cannot express what the callers differ on.* At least eight
+further dimensions are needed and several are non-orthogonal: three different
+exotic-dispatch routes (gOPN routes everything through
+`js_property_ops_own_property_names`, `Object.keys` re-implements proxy/VMAP/TA
+inline, `Reflect.ownKeys` dispatches only proxy); a proxy recursion boundary
+(`js_proxy_trap_own_keys` calls `js_reflect_own_keys(target)` three times inside
+its invariant checks); a `.prototype` **materialization side effect** in gOPN
+only; sparse-hash collection in `Object.keys` only; `skip_error_stack`
+*conjoined* with `enumerable_only`; shape-name dedup; for-in's "skip but
+remember" seen-set which `enumerable_only` cannot model; and two different
+prototype accessors in one walk. Costed out, the specified merge is
+**+84 to +124 lines** — it makes the file bigger.
+
+*They do not share an ordering contract — they disagree today.* Verified by
+running the engine: `Object.getOwnPropertyNames` on a sparse array returns
+`["0","1","length","zz"]`, silently **dropping the sparse indices** that
+`Object.keys` returns; and `Object.keys(new String("ab"))` with an extra `foo`
+and index `7` returns `["0","1","foo","7"]` — a named key **before** an integer
+index. Both are observable ES violations, and they are in opposite directions,
+so no flag bridges them.
+
+*Two supporting counts were wrong.* The "skip-deleted stanza ×29" is 11 inside
+this family (48 repo-wide, but the rest are in `js_in`, `hasOwnProperty`, GOPD
+and ArraySetLength — unrelated); and the "String-wrapper walk written 3×" is
+written **once**, as a helper with two callers, with for-in delegating to
+`Object.keys` outright.
+
+**What to take instead (≈ −40 to −60):** merge the two near-identical passes
+inside `js_map_own_string_keys` (19 identical lines, diff-verified) and promote
+a `js_shape_key_is_public()` visibility predicate to `js_props.h` for the 7
+remaining 4-line preambles (rule 13). **Risk is HIGH and asymmetric** — own-key
+order is among the most-observed contracts in the language, and `js_for_in_keys`
+bypassing the proxy `ownKeys` trap sits on an invariant path where a wrong
+unification yields either a spurious `TypeError` or unbounded recursion.
+
+**Separately, file as spec bugs with their own test262 deltas** (they will *add*
+lines): gOPN dropping sparse-hash array indices, and `Object.keys` emitting
+String-wrapper named keys before integer indices.
+
+**A3. descriptor pipeline (C4.4) — MEASURED and SPLIT. LOC consolidation ≈ −55 to −115 (not −350), high risk, low value: defer. The perf defect underneath it is REAL and worth landing on its own (~30 lines).** Two live IRs confirmed. A Set that **misses the named fast path** allocates a throwaway descriptor Map object (even on the receiver==target branch), as does every for-in liveness check and every `Object.values`/`entries` key. ~~every slow-path Set … again per proto level~~ — **corrected below: monomorphic `o.x = v` on a stable shape never reaches it, and absent prototype levels do not allocate.** ~~Make POD `JsPropertyDescriptor` the only internal IR~~ — **the object form is irreducible at the two Proxy traps and the public GOPD return; it can only become a leaf adapter, and the consolidation is deferred.** Gate: full test262 property sections zero-delta.
+
+**Measurement (2026-08-18, reproduced independently).**
+
+*LOC: 16–33% of estimate.* The object form cannot be deleted — it is
+irreducible at three ES boundaries: the Proxy `getOwnPropertyDescriptor` trap
+(the invariant checks compare *the user's* object against the target), the
+Proxy `defineProperty` trap (the user's object is passed through intact,
+including extra own properties), and the public return of
+`Object.getOwnPropertyDescriptor(s)`. The 362-line `js_object_get_own_property_descriptor`
+— the biggest number in the claim — yields **−8**: it already calls the POD
+kernel at 8 sites, and the ~270 remaining lines are per-class ES exotic rules
+(`__proto__` suppression, RegExp virtual flags, Function `prototype` lazy
+materialization, String primitive vs wrapper `length`, array dense/sparse/
+companion, `Error.stack`) that **move** into `js_get_own_pd` rather than
+vanishing. Same failure mode as A1(a). Realistic total: −54 order-preserving,
+−116 only if the validator parse is hoisted — and that hoist **changes the
+observable Has/Get trap sequence**, so it is a fork, not a free win. (Noted in
+passing: the current probe order already deviates from §6.2.5.5, which
+interleaves Has/Get per field starting at `enumerable`; Lambda probes
+`get,set,value,writable` and throws early from
+`js_define_property_validate_descriptor_object`.)
+
+*Perf: CONFIRMED, and it is the real prize.* `js_make_data_descriptor`
+(`js_globals.cpp:6973`) allocates a Map via `js_new_object()` plus four
+`js_define_own_key_storage` writes, each preceded by a fresh `js_name_item` —
+then `js_set_completion_with_key`'s receiver==target fast branch (`:6620`)
+probes it with three `js_map_shape_lookup_ext` calls and discards it, to learn
+three booleans that `js_props_desc_from_shape_slot` already had in a `uint8_t`.
+
+Measured on this tree (1M iterations each), and independently reproduced:
+
+| Path | ns/op |
+|---|---:|
+| `o.x = i`, existing slot, default flags (named fast path) | **42** |
+| same, but property has `enumerable:false` (`entry->flags != 0`) | **1570** |
+| `o[k] = i`, computed key (always kernel) | **1573** |
+
+A **37× cliff** the moment the named fast path misses. It misses when the
+property does not yet exist, when it has any non-default attribute, on a stored
+type change, on a deleted sentinel, on a non-fast receiver — and **always** for
+computed keys. Same defect hits `js_for_in_key_is_live` (per for-in key) and
+`js_object_collect_enumerable_own` (`Object.values`/`entries`, per key), both
+~1.6µs/key against `Object.keys`' 238ns.
+
+Two honest corrections to the original claim: it is **not** "every Set"
+(monomorphic `o.x = v` on a stable shape is already fast), and **not** once per
+prototype level (absent levels return without allocating). Real-world share
+sampled over bundled libraries is **1–20%**, not the 61% a microbenchmark
+shows.
+
+*Scoped fix, provably a no-op:* in the `:6614–6655` fast branch, consult the
+POD `js_get_own_property_descriptor` first and read its flags directly, falling
+back to the object path when it returns false. Safe because
+`js_props_query_writable(m, se, …)` is literally `se ? jspd_is_writable(se) : true`
+(`js_property_attrs.cpp:499`) — the same `ShapeEntry` bits the POD carries.
+Four guards preserve current behaviour: skip the shortcut for `JS_CLASS_STRING`
+wrappers, `JS_CLASS_ERROR` + `"stack"`, `JS_CLASS_REGEXP`, and the `__proto__`
+key. ~30 lines, independent of `js_get_own_pd`, no descriptor-IR unification
+required. The same 3-line treatment applies to `js_for_in_key_is_live` and
+`js_object_collect_enumerable_own`.
+
+**Recommendation: land the perf fix as its own change; treat the LOC
+consolidation as deferred, low-value and high-risk.**
 
 **A4. own-presence kernel — −50 (beyond A1e's shared helper).** `js_in` (`js_globals.cpp:5745-5913`) / `js_has_own_property` (`:10197-10399`) / `js_property_ops_has_property` (`:1002-1052`) triplicate own-membership; unify on a tri-state `js_own_presence()` built on A1(e), fixing the §4.2 byte-vs-UTF-16 bug and the `js_in` array-lane drift. Coordinate the seam with A2 (enumeration) — different kernels, same neighborhood.
 

@@ -1174,7 +1174,15 @@ typedef struct PathMeta PathMeta;
 
 // Path construction API (called by JIT-generated code)
 Path* path_new(Pool* pool, int scheme);                           // Create new path with scheme
+Path* path_new_authority(Pool* pool, int scheme, const char* authority);
 Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
+Path* path_extend_int(Pool* pool, Path* base, int64_t value);
+Path* path_select_parent(Pool* pool, Path* base);
+Path* path_select_root(Pool* pool, Path* base);
+Path* path_qualify_default(Pool* pool, Path* path);
+bool path_file_authority_is_local(Path* path);
+bool path_equal(Path* left, Path* right);
+uint64_t path_hash(Path* path, uint64_t seed0, uint64_t seed1);
 Path* path_concat(Pool* pool, Path* base, Path* suffix);          // Concatenate two paths
 Path* path_wildcard(Pool* pool, Path* base);                      // Add * wildcard segment
 Path* path_wildcard_recursive(Pool* pool, Path* base);            // Add ** wildcard segment
@@ -2220,6 +2228,7 @@ extern "C" {
     void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func);
     Item item_at(Item data, int64_t index);
     Item item_attr(Item data, const char* key);  // get attribute by name
+    bool path_is_property_name(const char* key);
     Item path_property_get(Path* path, const char* key);  // built-in Path properties (shared by fn_member/item_attr)
     SymbolKeyList* item_keys(Item data);     // get typed list of Symbol* attribute names
     SymbolKeyList* symbol_key_list_new(int64_t initial_capacity);

@@ -7,6 +7,8 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/shell.h"
+#include "../lib/mem.h"
 #include <cstring>
 
 extern "C" {
@@ -85,9 +87,10 @@ TEST_F(PathTest, RootSchemeCreation) {
     ASSERT_NE(rel_root, nullptr);
     EXPECT_STREQ(rel_root->name, ".");
 
-    Path* parent_root = path_get_root(PATH_SCHEME_PARENT);
-    ASSERT_NE(parent_root, nullptr);
-    EXPECT_STREQ(parent_root->name, "..");
+    Path* logical_root = path_get_root(PATH_SCHEME_LOGICAL);
+    ASSERT_NE(logical_root, nullptr);
+    EXPECT_STREQ(path_get_scheme_name(logical_root), "/");
+    EXPECT_TRUE(path_is_root(logical_root));
 }
 
 // Test path appending
@@ -149,14 +152,14 @@ TEST_F(PathTest, PathToString) {
 
     StrBuf* buf = strbuf_new();
 
-    // Test root - file scheme root outputs "/"
+    // Explicit file roots use the new file./ spelling.
     path_to_string(file_root, buf);
-    EXPECT_STREQ(buf->str, "/");
+    EXPECT_STREQ(buf->str, "file./");
 
-    // Test /etc.hosts (shorthand for file.etc.hosts)
+    // Test explicit file path spelling.
     strbuf_reset(buf);
     path_to_string(hosts, buf);
-    EXPECT_STREQ(buf->str, "/etc.hosts");
+    EXPECT_STREQ(buf->str, "file./.etc.hosts");
 
     strbuf_free(buf);
 }
@@ -240,6 +243,10 @@ TEST_F(PathTest, GetRootByName) {
     ASSERT_NE(rel_root, nullptr);
     EXPECT_STREQ(rel_root->name, ".");
 
+    Path* logical_root = path_get_root_by_name("/");
+    ASSERT_NE(logical_root, nullptr);
+    EXPECT_EQ(path_get_scheme(logical_root), PATH_SCHEME_LOGICAL);
+
     // Unknown scheme should return NULL
     Path* unknown = path_get_root_by_name("unknown");
     EXPECT_EQ(unknown, nullptr);
@@ -253,9 +260,9 @@ TEST_F(PathTest, SpecialCharacterSegments) {
 
     StrBuf* buf = strbuf_new();
 
-    // Segment with dot should be quoted, file scheme uses / prefix
+    // Segment with dot is quoted while retaining the file authority.
     path_to_string(dotfile, buf);
-    EXPECT_STREQ(buf->str, "/home.'.bashrc'");
+    EXPECT_STREQ(buf->str, "file./.home.'.bashrc'");
 
     strbuf_free(buf);
 }
@@ -268,9 +275,9 @@ TEST_F(PathTest, HyphenSegment) {
 
     StrBuf* buf = strbuf_new();
 
-    // Segment with hyphen should be quoted, file scheme uses / prefix
+    // Segment with hyphen is quoted while retaining the file authority.
     path_to_string(local, buf);
-    EXPECT_STREQ(buf->str, "/usr.'local-bin'");
+    EXPECT_STREQ(buf->str, "file./.usr.'local-bin'");
 
     strbuf_free(buf);
 }
@@ -307,7 +314,7 @@ TEST_F(PathTest, DeepPath) {
     Path* file_root = path_get_root(PATH_SCHEME_FILE);
     Path* current = file_root;
 
-    // Build a deep path: /a.b.c.d.e.f.g.h.i.j (file scheme uses / prefix)
+    // Build a deep explicit file path.
     const char* segments[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"};
     for (int i = 0; i < 10; i++) {
         current = path_append(current, segments[i]);
@@ -319,6 +326,98 @@ TEST_F(PathTest, DeepPath) {
 
     StrBuf* buf = strbuf_new();
     path_to_string(current, buf);
-    EXPECT_STREQ(buf->str, "/a.b.c.d.e.f.g.h.i.j");
+    EXPECT_STREQ(buf->str, "file./.a.b.c.d.e.f.g.h.i.j");
+    strbuf_free(buf);
+}
+
+TEST_F(PathTest, RootParentAndTypedIntegerOperations) {
+    Path* logical = path_get_root(PATH_SCHEME_LOGICAL);
+    Path* a = path_append(logical, "a");
+    Path* b = path_append(a, "b");
+    Path* parent = path_select_parent(pool, b);
+    Path* root = path_select_root(pool, b);
+    Path* relative = path_get_root(PATH_SCHEME_REL);
+    Path* relative_parent = path_select_parent(pool, relative);
+    Path* integer = path_extend_int(pool, a, 1);
+    Path* numeric_name = path_append(a, "1");
+    StrBuf* buf = strbuf_new();
+
+    path_to_string(parent, buf);
+    EXPECT_STREQ(buf->str, "/.a");
+    strbuf_reset(buf);
+    path_to_string(root, buf);
+    EXPECT_STREQ(buf->str, "/");
+    strbuf_reset(buf);
+    path_to_string(relative_parent, buf);
+    EXPECT_STREQ(buf->str, ".~~");
+    strbuf_reset(buf);
+    path_to_string(integer, buf);
+    EXPECT_STREQ(buf->str, "/.a.1");
+    strbuf_reset(buf);
+    path_to_string(numeric_name, buf);
+    EXPECT_STREQ(buf->str, "/.a.'1'");
+    strbuf_free(buf);
+}
+
+TEST_F(PathTest, LogicalRootDefaultQualification) {
+    Path* logical = path_append(path_get_root(PATH_SCHEME_LOGICAL), "a");
+    Path* qualified = path_qualify_default(pool, logical);
+    ASSERT_NE(qualified, nullptr);
+    EXPECT_EQ(path_get_scheme(logical), PATH_SCHEME_LOGICAL);
+    EXPECT_EQ(path_get_scheme(qualified), PATH_SCHEME_FILE);
+    StrBuf* buf = strbuf_new();
+    path_to_string(logical, buf);
+    EXPECT_STREQ(buf->str, "/.a");
+    strbuf_reset(buf);
+    path_to_string(qualified, buf);
+    EXPECT_STREQ(buf->str, "file./.a");
+    strbuf_free(buf);
+}
+
+TEST_F(PathTest, StructuralEqualityAndHash) {
+    Path* left = path_append(path_get_root(PATH_SCHEME_LOGICAL), "a");
+    Path* right = path_append(path_get_root(PATH_SCHEME_LOGICAL), "a");
+    Path* other = path_append(path_get_root(PATH_SCHEME_LOGICAL), "b");
+    EXPECT_TRUE(path_equal(left, right));
+    EXPECT_FALSE(path_equal(left, other));
+    EXPECT_EQ(path_hash(left, 11, 29), path_hash(right, 11, 29));
+    EXPECT_NE(path_hash(left, 11, 29), path_hash(other, 11, 29));
+}
+
+TEST_F(PathTest, NamedFileAuthority) {
+    char* hostname = shell_get_hostname();
+    ASSERT_NE(hostname, nullptr);
+    Path* named = path_new_authority(pool, PATH_SCHEME_FILE, hostname);
+    ASSERT_NE(named, nullptr);
+    Path* child = path_append(named, "tmp");
+    StrBuf* buf = strbuf_new();
+    path_to_string(child, buf);
+    StrBuf* expected = strbuf_new();
+    strbuf_append_str(expected, "file.");
+    bool quote_authority = hostname[0] == '\0' ||
+        !((hostname[0] >= 'A' && hostname[0] <= 'Z') ||
+          (hostname[0] >= 'a' && hostname[0] <= 'z') || hostname[0] == '_');
+    for (const char* c = hostname + 1; *c && !quote_authority; c++) {
+        if (!((*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') ||
+              (*c >= '0' && *c <= '9') || *c == '_')) quote_authority = true;
+    }
+    if (quote_authority) strbuf_append_char(expected, '\'');
+    strbuf_append_str(expected, hostname);
+    if (quote_authority) strbuf_append_char(expected, '\'');
+    strbuf_append_str(expected, ".tmp");
+    EXPECT_STREQ(buf->str, expected->str);
+    EXPECT_TRUE(path_file_authority_is_local(child));
+    strbuf_free(expected);
+    strbuf_free(buf);
+    mem_free(hostname);
+}
+
+TEST_F(PathTest, RemoteFileAuthorityStaysConstructibleButNotLocal) {
+    Path* remote = path_new_authority(pool, PATH_SCHEME_FILE, "other-host");
+    ASSERT_NE(remote, nullptr);
+    EXPECT_FALSE(path_file_authority_is_local(remote));
+    StrBuf* buf = strbuf_new();
+    path_to_os_path(remote, buf);
+    EXPECT_EQ(buf->length, 0u);
     strbuf_free(buf);
 }

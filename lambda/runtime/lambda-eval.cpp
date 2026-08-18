@@ -100,6 +100,7 @@ extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern "C" Pool* eval_context_get_pool(void);
 extern "C" Path* path_extend(Pool* pool, Path* base, const char* segment);
 extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
+extern "C" Path* path_qualify_default(Pool* pool, Path* path);
 extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
@@ -2169,6 +2170,10 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // pointer identity fast-path for all container types
         if (a_item.item == b_item.item) return BOOL_TRUE;
 
+        if (a_tid == LMD_TYPE_PATH && b_tid == LMD_TYPE_PATH) {
+            return path_equal(a_item.path, b_item.path) ? BOOL_TRUE : BOOL_FALSE;
+        }
+
         // type values
         if (a_tid == LMD_TYPE_TYPE && b_tid == LMD_TYPE_TYPE) {
             // compare type values by their inner type
@@ -4140,6 +4145,17 @@ static Item lambda_bind_object_method(TypeMethod* method, Item self) {
 // diverging copies — item_attr lacked path/extension/scheme/depth/mode and
 // fn_member lacked is_file and metadata auto-load — so the value of `p.extension`
 // depended on which lane compiled the access (tier mismatch, SI3v2/D3.3.1v2).
+extern "C" bool path_is_property_name(const char* k) {
+    if (!k) return false;
+    static const char* const names[] = {
+        "name", "is_dir", "is_file", "is_link", "size", "modified",
+        "path", "extension", "scheme", "depth", "parent", "mode"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strcmp(k, names[i]) == 0) return true;
+    }
+    return false;
+}
+
 extern "C" Item path_property_get(Path* path, const char* k) {
     if (!path || !k) return ItemNull;
 
@@ -4152,7 +4168,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "path") == 0) {
         // return the full OS path string (e.g. "./lib/file.txt")
         StrBuf* sb = strbuf_new();
-        path_to_os_path(path, sb);
+        path_to_os_path(path_qualify_default(eval_context_get_pool(), path), sb);
         String* result = heap_strcpy(sb->str, sb->length);
         strbuf_free(sb);
         return {.item = s2it(result)};
@@ -4234,7 +4250,17 @@ Item fn_member(Item item, Item key) {
             // path metadata and structural property access
             if (is_text_type_id(key._type_id)) {
                 const char* k = key.get_chars();
-                if (k) return path_property_get(path, k);
+                if (k && path_is_property_name(k)) return path_property_get(path, k);
+            }
+            Pool* pool = context ? context->pool : NULL;
+            if (get_type_id(key) == LMD_TYPE_INT && key.int_val >= 0) {
+                return {.item = (uint64_t)(uintptr_t)path_extend_int(pool, path, key.int_val)};
+            }
+            if (get_type_id(key) == LMD_TYPE_INT64 && key.get_int64() >= 0) {
+                return {.item = (uint64_t)(uintptr_t)path_extend_int(pool, path, key.get_int64())};
+            }
+            if (is_text_type_id(key._type_id) && key.get_chars()) {
+                return {.item = (uint64_t)(uintptr_t)path_extend(pool, path, key.get_chars())};
             }
         }
         return ItemNull;
@@ -4406,7 +4432,8 @@ Item fn_member(Item item, Item key) {
         Element *elmt = item.element;
         return elmt_get(elmt, key);
     }
-    case LMD_TYPE_ARRAY: {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM: {
         // Handle built-in properties for List type
         if (is_text_type_id(key._type_id)) {
             const char* k = key.get_chars();
@@ -4414,6 +4441,12 @@ Item fn_member(Item item, Item key) {
                 List *list = item.array;
                 return {.item = i2it(list->length)};
             }
+        }
+        int64_t index = -1;
+        // Numeric dotted members are IntKey access (`a.1`), not NameKey
+        // lookup; route them through the existing indexed-array helper.
+        if (lambda_item_to_int64_exact(key, &index)) {
+            return item_at(item, index);
         }
         return ItemNull;
     }

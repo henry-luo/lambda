@@ -956,7 +956,12 @@ class InterpContextGuard {
     InterpContext entry_;
 public:
     InterpContextGuard(InterpState* st, uint64_t* item, uint64_t* index)
-            : st_(st), entry_{item, index, st->contexts} {
+            : st_(st), entry_{item, index, NULL, NULL, st->contexts} {
+        st_->contexts = &entry_;
+    }
+    InterpContextGuard(InterpState* st, uint64_t* item, uint64_t* index,
+            uint64_t* parent, uint64_t* root)
+            : st_(st), entry_{item, index, parent, root, st->contexts} {
         st_->contexts = &entry_;
     }
     ~InterpContextGuard() { st_->contexts = entry_.prev; }
@@ -1037,7 +1042,20 @@ static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& sc
             // `~` is the scrutinee while the constraint runs.
             Scratch index_slot(f);
             index_slot.set(ItemNull);
-            InterpContextGuard bound(f->st, scrut.home(), index_slot.home());
+            Scratch parent_slot(f);
+            Scratch root_slot(f);
+            if (f->st->contexts && f->st->contexts->parent) {
+                parent_slot.set((Item){.item = *f->st->contexts->parent});
+            } else {
+                parent_slot.set(ItemNull);
+            }
+            if (f->st->contexts && f->st->contexts->root) {
+                root_slot.set((Item){.item = *f->st->contexts->root});
+            } else {
+                root_slot.set(scrut.get());
+            }
+            InterpContextGuard bound(f->st, scrut.home(), index_slot.home(),
+                parent_slot.home(), root_slot.home());
             Item ok = eval_expr(f, ct->constraint);
             if (interp_frame_pending(f)) return false;
             return is_truthy(ok) == BOOL_TRUE;
@@ -1063,7 +1081,20 @@ static Item eval_match(InterpFrame* f, AstMatchNode* node) {
     scrut.set(value);
     Scratch index_slot(f);
     index_slot.set(ItemNull);
-    InterpContextGuard bound(f->st, scrut.home(), index_slot.home());
+    Scratch parent_slot(f);
+    Scratch root_slot(f);
+    if (f->st->contexts && f->st->contexts->item) {
+        parent_slot.set((Item){.item = *f->st->contexts->item});
+    } else {
+        parent_slot.set(ItemNull);
+    }
+    if (f->st->contexts && f->st->contexts->root) {
+        root_slot.set((Item){.item = *f->st->contexts->root});
+    } else {
+        root_slot.set(scrut.get());
+    }
+    InterpContextGuard bound(f->st, scrut.home(), index_slot.home(),
+        parent_slot.home(), root_slot.home());
 
     for (AstNode* arm = (AstNode*)node->first_arm; arm; arm = arm->next) {
         AstMatchArm* match_arm = (AstMatchArm*)arm;
@@ -1144,8 +1175,19 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
     out.set(interp_ptr_item(array()));
     Scratch item_slot(f);
     Scratch index_slot(f);
+    Scratch parent_slot(f);
+    Scratch root_slot(f);
+    parent_slot.set(source);
+    if (f->st->contexts && f->st->contexts->root) {
+        root_slot.set((Item){.item = *f->st->contexts->root});
+    } else {
+        root_slot.set(source);
+    }
     {
-        InterpContextGuard bound(f->st, item_slot.home(), index_slot.home());
+        // A pipe occurrence is rooted by its source container; nested pipes
+        // retain the outer traversal root while replacing only the parent.
+        InterpContextGuard bound(f->st, item_slot.home(), index_slot.home(),
+            parent_slot.home(), root_slot.home());
         for (int64_t i = 0; i < len; i++) {
             Item current, key;
             if (is_map) {
@@ -1587,6 +1629,30 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
 static_assert((int)AST_NODE_START != (int)AST_NODE_EVENT_HANDLER,
     "AST_NODE_START and AST_NODE_EVENT_HANDLER must stay distinguishable");
 
+// Dynamic root/parent navigation may retain lineage only across a direct
+// member/index chain. The carrier is activation state, never a field on the
+// resulting Lambda value.
+static bool interp_navigation_chain_has_current(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CURRENT_ITEM) return true;
+    if (node->node_type == AST_NODE_NAVIGATION_EXPR) {
+        return interp_navigation_chain_has_current(((AstNavigationNode*)node)->object);
+    }
+    if (node->node_type != AST_NODE_MEMBER_EXPR &&
+            node->node_type != AST_NODE_INDEX_EXPR) return false;
+    return interp_navigation_chain_has_current(((AstFieldNode*)node)->object);
+}
+
+static AstNode* interp_navigation_direct_parent(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node || (node->node_type != AST_NODE_MEMBER_EXPR &&
+            node->node_type != AST_NODE_INDEX_EXPR)) return NULL;
+    AstFieldNode* field = (AstFieldNode*)node;
+    return interp_navigation_chain_has_current(field->object)
+        ? field->object : NULL;
+}
+
 static Item eval_expr(InterpFrame* f, AstNode* node) {
     if (!node) return ItemNull;
     f->cur = node;
@@ -1685,12 +1751,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (field->field && field->field->node_type == AST_NODE_IDENT &&
                 get_type_id(obj.get()) == LMD_TYPE_PATH) {
             const char* k = ((AstIdentNode*)field->field)->name->chars;
-            static const char* const kPathProps[] = {
-                "name", "is_dir", "is_file", "is_link", "size", "modified",
-                "path", "extension", "scheme", "depth", "parent", "mode"};
-            for (size_t i = 0; i < sizeof(kPathProps) / sizeof(kPathProps[0]); i++) {
-                if (strcmp(k, kPathProps[i]) == 0) return item_attr(obj.get(), k);
-            }
+            if (path_is_property_name(k)) return item_attr(obj.get(), k);
         }
         // null totality (S7.1.1) comes from the helper; both operands are
         // published first because it allocates.
@@ -1720,7 +1781,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         AstPathNode* path_node = (AstPathNode*)node;
         Pool* pool = f->st->ctx->pool;
         Scratch acc(f);
-        acc.set(interp_ptr_item(path_new(pool, (int)path_node->scheme)));
+        Path* initial = path_node->authority
+            ? path_new_authority(pool, (int)path_node->scheme, path_node->authority->chars)
+            : path_new(pool, (int)path_node->scheme);
+        acc.set(interp_ptr_item(initial));
         for (int i = 0; i < path_node->segment_count; i++) {
             AstPathSegment* seg = &path_node->segments[i];
             // Re-read the accumulator: every extension allocates.
@@ -1730,6 +1794,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 next = path_wildcard(pool, base);
             } else if (seg->type == LPATH_SEG_WILDCARD_REC) {
                 next = path_wildcard_recursive(pool, base);
+            } else if (seg->type == LPATH_SEG_PARENT) {
+                next = path_select_parent(pool, base);
+            } else if (seg->type == LPATH_SEG_ROOT) {
+                next = path_select_root(pool, base);
+            } else if (seg->type == LPATH_SEG_INT) {
+                next = path_extend_int(pool, base, seg->int_value);
             } else {
                 next = path_extend(pool, base, seg->name ? seg->name->chars : "");
             }
@@ -1747,24 +1817,62 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (interp_frame_pending(f)) return segment;
         Scratch seg_slot(f);
         seg_slot.set(segment);
-        const char* text = fn_to_cstr(seg_slot.get());
-        return interp_ptr_item(path_extend(f->st->ctx->pool,
-            (Path*)(uintptr_t)base.get().item, text));
-    }
-    case AST_NODE_PARENT_EXPR: {
-        // `expr..` is fn_member(expr, "parent") repeated `depth` times.
-        AstParentNode* parent = (AstParentNode*)node;
-        if (!parent->object) return ItemNull;
-        Item object = eval_expr(f, parent->object);
-        if (interp_frame_pending(f)) return object;
-        Scratch current(f);
-        current.set(object);
-        Scratch key(f);
-        key.set((Item){.item = s2it(heap_create_name("parent", 6))});
-        for (int i = 0; i < parent->depth; i++) {
-            current.set(fn_member(current.get(), key.get()));
+        Item key = seg_slot.get();
+        Path* base_path = (Path*)(uintptr_t)base.get().item;
+        if (get_type_id(key) == LMD_TYPE_INT && key.int_val >= 0) {
+            return interp_ptr_item(path_extend_int(f->st->ctx->pool, base_path, key.int_val));
         }
-        return current.get();
+        if (get_type_id(key) == LMD_TYPE_INT64 && key.get_int64() >= 0) {
+            return interp_ptr_item(path_extend_int(f->st->ctx->pool, base_path, key.get_int64()));
+        }
+        const char* text = fn_to_cstr(key);
+        return interp_ptr_item(path_extend(f->st->ctx->pool, base_path, text));
+    }
+    case AST_NODE_NAVIGATION_EXPR: {
+        AstNavigationNode* nav = (AstNavigationNode*)node;
+        if (!nav->object) return ItemNull;
+        Item object = eval_expr(f, nav->object);
+        if (interp_frame_pending(f)) return object;
+        if (get_type_id(object) == LMD_TYPE_PATH) {
+            Path* path = (Path*)(uintptr_t)object.item;
+            Path* result = nav->root
+                ? path_select_root(f->st->ctx->pool, path)
+                : path_select_parent(f->st->ctx->pool, path);
+            return interp_ptr_item(result);
+        }
+        // The contextual atom (`~`) carries the active occurrence relation in
+        // the interpreter context. Keep that relation out of Lambda values;
+        // the navigation node consumes the rooted activation slots directly.
+        if (f->st->contexts && interp_navigation_chain_has_current(nav->object)) {
+            InterpContext* context = f->st->contexts;
+            if (nav->root) {
+                return context->root
+                    ? (Item){.item = *context->root} : object;
+            }
+            AstNode* direct_parent = interp_navigation_direct_parent(nav->object);
+            if (direct_parent) {
+                Scratch parent(f);
+                parent.set(eval_expr(f, direct_parent));
+                return parent.get();
+            }
+            AstNode* nav_object = ast_unwrap_primary(nav->object);
+            if (nav_object && nav_object->node_type == AST_NODE_NAVIGATION_EXPR) {
+                AstNavigationNode* inner = (AstNavigationNode*)nav_object;
+                AstNode* inner_object = ast_unwrap_primary(inner->object);
+                // A second parent after bare `~~` has no defined relation;
+                // a member/index occurrence's first parent is still `~`, so
+                // its next parent is the active context parent.
+                if (inner->root || (inner_object &&
+                        inner_object->node_type == AST_NODE_CURRENT_ITEM)) {
+                    return ItemNull;
+                }
+            }
+            return context->parent
+                ? (Item){.item = *context->parent} : ItemNull;
+        }
+        // Dynamic occurrence lineage is added in the navigation phase. A
+        // non-path value without a cursor has no parent/root relation.
+        return nav->root ? object : ItemNull;
     }
     case AST_NODE_QUERY_EXPR: {
         AstQueryNode* query = (AstQueryNode*)node;

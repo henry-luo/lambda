@@ -210,6 +210,8 @@ struct MirTranspiler {
     // Current pipe context
     MIR_reg_t pipe_item_reg;
     MIR_reg_t pipe_index_reg;
+    MIR_reg_t pipe_parent_reg;
+    MIR_reg_t pipe_root_reg;
     bool in_pipe;
     AstNode* last_index_object;
 
@@ -8491,8 +8493,12 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
             // Base type matches — evaluate constraint with ~ bound to ct_value
             emit_label(mt, lbl_check);
             MIR_reg_t old_pipe_item = mt->pipe_item_reg;
+            MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
+            MIR_reg_t old_pipe_root = mt->pipe_root_reg;
             bool old_in_pipe = mt->in_pipe;
             mt->pipe_item_reg = ct_value;
+            mt->pipe_parent_reg = old_in_pipe ? old_pipe_parent : emit_null_item_reg(mt);
+            mt->pipe_root_reg = old_in_pipe ? old_pipe_root : ct_value;
             mt->in_pipe = true;
 
             MIR_reg_t constraint_val = transpile_box_item(mt, constrained_node->constraint);
@@ -8502,6 +8508,8 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
                 MIR_new_reg_op(mt->ctx, truthy)));
 
             mt->pipe_item_reg = old_pipe_item;
+            mt->pipe_parent_reg = old_pipe_parent;
+            mt->pipe_root_reg = old_pipe_root;
             mt->in_pipe = old_in_pipe;
 
             emit_label(mt, lbl_end);
@@ -9113,8 +9121,12 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
 
             // Base type matches — evaluate constraint with ~ bound to scrutinee
             MIR_reg_t old_pipe_item = mt->pipe_item_reg;
+            MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
+            MIR_reg_t old_pipe_root = mt->pipe_root_reg;
             bool old_in_pipe = mt->in_pipe;
             mt->pipe_item_reg = boxed_scrut;
+            mt->pipe_parent_reg = old_in_pipe ? old_pipe_parent : emit_null_item_reg(mt);
+            mt->pipe_root_reg = old_in_pipe ? old_pipe_root : boxed_scrut;
             mt->in_pipe = true;
 
             MIR_reg_t constraint_val = transpile_box_item(mt, ct->constraint);
@@ -9122,6 +9134,8 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val)));
 
             mt->pipe_item_reg = old_pipe_item;
+            mt->pipe_parent_reg = old_pipe_parent;
+            mt->pipe_root_reg = old_pipe_root;
             mt->in_pipe = old_in_pipe;
 
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fail),
@@ -9202,8 +9216,12 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     bool old_in_pipe = mt->in_pipe;
     MIR_reg_t old_pipe_item = mt->pipe_item_reg;
     MIR_reg_t old_pipe_index = mt->pipe_index_reg;
+    MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
+    MIR_reg_t old_pipe_root = mt->pipe_root_reg;
     mt->in_pipe = true;
     mt->pipe_item_reg = boxed_scrut;
+    mt->pipe_parent_reg = old_in_pipe ? old_pipe_item : emit_null_item_reg(mt);
+    mt->pipe_root_reg = old_in_pipe ? old_pipe_root : boxed_scrut;
 
     MIR_reg_t result = new_reg(mt, "match", MIR_T_I64);
     MIR_label_t l_end = new_label(mt);
@@ -9247,6 +9265,8 @@ static MIR_reg_t transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     mt->in_pipe = old_in_pipe;
     mt->pipe_item_reg = old_pipe_item;
     mt->pipe_index_reg = old_pipe_index;
+    mt->pipe_parent_reg = old_pipe_parent;
+    mt->pipe_root_reg = old_pipe_root;
 
     return result;
 }
@@ -13844,12 +13864,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     if (obj_tid == LMD_TYPE_PATH && field_node->field->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)field_node->field;
         const char* k = ident->name->chars;
-        bool is_property = (strcmp(k, "name") == 0 || strcmp(k, "is_dir") == 0 ||
-                           strcmp(k, "is_file") == 0 || strcmp(k, "is_link") == 0 ||
-                           strcmp(k, "size") == 0 || strcmp(k, "modified") == 0 ||
-                           strcmp(k, "path") == 0 || strcmp(k, "extension") == 0 ||
-                           strcmp(k, "scheme") == 0 || strcmp(k, "depth") == 0 ||
-                           strcmp(k, "parent") == 0 || strcmp(k, "mode") == 0);
+        bool is_property = path_is_property_name(k);
         if (is_property) {
             MIR_reg_t key_ptr = emit_load_string_literal(mt, k);
             return emit_call_2(mt, "item_attr", MIR_T_I64,
@@ -17933,9 +17948,13 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     bool old_in_pipe = mt->in_pipe;
     MIR_reg_t old_pipe_item = mt->pipe_item_reg;
     MIR_reg_t old_pipe_index = mt->pipe_index_reg;
+    MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
+    MIR_reg_t old_pipe_root = mt->pipe_root_reg;
     mt->in_pipe = true;
     mt->pipe_item_reg = pipe_item;
     mt->pipe_index_reg = pipe_index;
+    mt->pipe_parent_reg = boxed_left;
+    mt->pipe_root_reg = old_in_pipe ? old_pipe_root : boxed_left;
 
     // Evaluate right-side expression
     MIR_reg_t right_val = transpile_expr(mt, pipe_node->right);
@@ -17949,6 +17968,8 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     mt->in_pipe = old_in_pipe;
     mt->pipe_item_reg = old_pipe_item;
     mt->pipe_index_reg = old_pipe_index;
+    mt->pipe_parent_reg = old_pipe_parent;
+    mt->pipe_root_reg = old_pipe_root;
 
     if (pipe_node->op == OPERATOR_WHERE) {
         // Filter: only push original item if predicate is truthy
@@ -19332,6 +19353,31 @@ static void emit_array_num_store_fallback(MirTranspiler* mt,
     // keep the branch result in one register so an OOB error reaches T^ propagation
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg),
         MIR_new_reg_op(mt->ctx, result)));
+}
+
+// A direct member/index chain retains occurrence lineage only until a
+// navigation operation consumes it. Stored or returned Items never carry this
+// metadata, which keeps duplicate equal values occurrence-correct.
+static bool mir_navigation_chain_has_current(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CURRENT_ITEM) return true;
+    if (node->node_type == AST_NODE_NAVIGATION_EXPR) {
+        return mir_navigation_chain_has_current(((AstNavigationNode*)node)->object);
+    }
+    if (node->node_type != AST_NODE_MEMBER_EXPR &&
+            node->node_type != AST_NODE_INDEX_EXPR) return false;
+    AstFieldNode* field = (AstFieldNode*)node;
+    return mir_navigation_chain_has_current(field->object);
+}
+
+static AstNode* mir_navigation_direct_parent(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node || (node->node_type != AST_NODE_MEMBER_EXPR &&
+            node->node_type != AST_NODE_INDEX_EXPR)) return NULL;
+    AstFieldNode* field = (AstFieldNode*)node;
+    return mir_navigation_chain_has_current(field->object)
+        ? field->object : NULL;
 }
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
@@ -20763,10 +20809,18 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 
         MIR_reg_t pool = emit_runtime_pool(mt);
 
-        // Create base path: path_new(pool, scheme)
-        MIR_reg_t path = emit_call_2(mt, "path_new", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int)path_node->scheme));
+        MIR_reg_t path;
+        if (path_node->authority) {
+            MIR_reg_t authority = emit_load_string_literal(mt, path_node->authority->chars);
+            path = emit_call_3(mt, "path_new_authority", MIR_T_P,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int)path_node->scheme),
+                MIR_T_P, MIR_new_reg_op(mt->ctx, authority));
+        } else {
+            path = emit_call_2(mt, "path_new", MIR_T_P,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int)path_node->scheme));
+        }
 
         // Extend with each segment
         for (int i = 0; i < path_node->segment_count; i++) {
@@ -20779,6 +20833,19 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 path = emit_call_2(mt, "path_wildcard_recursive", MIR_T_P,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, path));
+            } else if (seg->type == LPATH_SEG_PARENT) {
+                path = emit_call_2(mt, "path_select_parent", MIR_T_P,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, path));
+            } else if (seg->type == LPATH_SEG_ROOT) {
+                path = emit_call_2(mt, "path_select_root", MIR_T_P,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, path));
+            } else if (seg->type == LPATH_SEG_INT) {
+                path = emit_call_3(mt, "path_extend_int", MIR_T_P,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, path),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, seg->int_value));
             } else {
                 // Normal segment: pass C string name
                 const char* seg_name = seg->name ? seg->name->chars : "";
@@ -20800,34 +20867,49 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t seg_val = transpile_expr(mt, pix->segment_expr);
         TypeId seg_tid = get_effective_type(mt, pix->segment_expr);
         MIR_reg_t boxed_seg = emit_box(mt, seg_val, seg_tid);
+        if (seg_tid == LMD_TYPE_INT) {
+            return emit_call_3(mt, "path_extend_int", MIR_T_P,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                MIR_T_P, MIR_new_reg_op(mt->ctx, base),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, seg_val));
+        }
         MIR_reg_t seg_cstr = emit_call_1(mt, "fn_to_cstr", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_seg));
-        MIR_reg_t result = emit_call_3(mt, "path_extend", MIR_T_P,
+        return emit_call_3(mt, "path_extend", MIR_T_P,
             MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
             MIR_T_P, MIR_new_reg_op(mt->ctx, base),
             MIR_T_P, MIR_new_reg_op(mt->ctx, seg_cstr));
-        return result;
     }
-    case AST_NODE_PARENT_EXPR: {
-        // Parent access: expr.. → fn_member(expr, "parent") repeated for depth levels
-        AstParentNode* parent = (AstParentNode*)node;
-        if (parent->object) {
-            MIR_reg_t obj = transpile_expr(mt, parent->object);
-            TypeId obj_tid = get_effective_type(mt, parent->object);
-            MIR_reg_t current = emit_box(mt, obj, obj_tid);
-
-            // Create a "parent" string at runtime via heap_create_name
-            MIR_reg_t name_ptr = emit_load_string_literal(mt, "parent");
-            MIR_reg_t parent_str = emit_call_1(mt, "heap_create_name", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr));
-            MIR_reg_t parent_key = emit_box_string(mt, parent_str);
-
-            for (int i = 0; i < parent->depth; i++) {
-                current = emit_call_2(mt, "fn_member", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, current),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_key));
+    case AST_NODE_NAVIGATION_EXPR: {
+        AstNavigationNode* nav = (AstNavigationNode*)node;
+        if (nav->object) {
+            MIR_reg_t obj = transpile_expr(mt, nav->object);
+            TypeId obj_tid = get_effective_type(mt, nav->object);
+            if (obj_tid == LMD_TYPE_PATH) {
+                MIR_reg_t pool = emit_runtime_pool(mt);
+                return emit_call_2(mt, nav->root ? "path_select_root" : "path_select_parent", MIR_T_P,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, obj));
             }
-            return current;
+            // `~` is an activation-owned occurrence. Its parent/root lanes are
+            // separate from the value so ordinary Lambda containers stay
+            // lineage-free; only direct contextual navigation consumes them.
+            if (mt->in_pipe && mir_navigation_chain_has_current(nav->object)) {
+                if (nav->root) return mt->pipe_root_reg;
+                AstNode* direct_parent = mir_navigation_direct_parent(nav->object);
+                if (direct_parent) return transpile_box_item(mt, direct_parent);
+                AstNode* nav_object = ast_unwrap_primary(nav->object);
+                if (nav_object && nav_object->node_type == AST_NODE_NAVIGATION_EXPR) {
+                    AstNavigationNode* inner = (AstNavigationNode*)nav_object;
+                    AstNode* inner_object = ast_unwrap_primary(inner->object);
+                    if (inner->root || (inner_object &&
+                            inner_object->node_type == AST_NODE_CURRENT_ITEM)) {
+                        return emit_null_item_reg(mt);
+                    }
+                }
+                return mt->pipe_parent_reg;
+            }
+            if (nav->root) return emit_box(mt, obj, obj_tid);
         }
         MIR_reg_t r = new_reg(mt, "parent", MIR_T_I64);
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
@@ -23272,6 +23354,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t saved_env_reg = mt->env_reg;
     bool saved_in_pipe = mt->in_pipe;
     MIR_reg_t saved_pipe_item_reg = mt->pipe_item_reg;
+    MIR_reg_t saved_pipe_parent_reg = mt->pipe_parent_reg;
+    MIR_reg_t saved_pipe_root_reg = mt->pipe_root_reg;
     MIR_reg_t saved_self_reg = mt->self_reg;
     if (is_closure) {
         mt->current_closure = fn_node;
@@ -23333,6 +23417,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // make '~' (current item / self) refer to self inside method body
         mt->in_pipe = true;
         mt->pipe_item_reg = self_item_reg;
+        mt->pipe_parent_reg = emit_null_item_reg(mt);
+        mt->pipe_root_reg = self_item_reg;
 
         // Load each field of the object type as a local variable
         TypeObject* obj_type = mt->method_owner;
@@ -23944,6 +24030,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->self_reg = saved_self_reg;
     mt->in_pipe = saved_in_pipe;
     mt->pipe_item_reg = saved_pipe_item_reg;
+    mt->pipe_parent_reg = saved_pipe_parent_reg;
+    mt->pipe_root_reg = saved_pipe_root_reg;
     mt->tco_func = saved_tco_func;
     mt->tco_label = saved_tco_label;
     mt->tco_count_reg = saved_tco_count_reg;
