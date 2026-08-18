@@ -789,6 +789,27 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("building AST", start, end);
 
+    // ANY-census [Type_Infer TI3]: one line per compile naming where static
+    // types fell back to `any`. Purely diagnostic — later inference slices
+    // prove their effect by the delta, not by reading the emitter.
+    {
+        int any_total = 0;
+        for (int r = 0; r < ANY_REASON_COUNT; r++) any_total += tp->any_census[r];
+        if (any_total > 0) {
+            StrBuf* census = strbuf_new();
+            if (census) {
+                strbuf_append_format(census, "any_census: total=%d", any_total);
+                for (int r = 0; r < ANY_REASON_COUNT; r++) {
+                    if (!tp->any_census[r]) continue;
+                    strbuf_append_format(census, " %s=%d",
+                        any_reason_name((AnyReason)r), tp->any_census[r]);
+                }
+                log_info("%s (%s)", census->str, script_path);
+                strbuf_free(census);
+            }
+        }
+    }
+
     // Check for errors during AST building
     if (tp->error_count > 0) {
         log_error("compiled '%s' with error!!", script_path);

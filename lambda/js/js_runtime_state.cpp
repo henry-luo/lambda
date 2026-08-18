@@ -840,7 +840,11 @@ extern "C" Item js_to_property_key(Item key) {
 extern "C" void js_set_module_var(int index, Item value) {
     if (index >= 0 && context && context->active_js_module_state &&
             index < (int)context->active_js_module_state->var_count) {
-        js_active_module_vars[index] = value;
+        // D5.3: module variables outlive the current MIR frame, so a scalar
+        // home returned by a call must be copied into the module state's
+        // persistent payload instead of retaining the frame-owned pointer.
+        lambda_module_var_store(context->active_js_module_state,
+            (uint32_t)index, value);
     }
 }
 

@@ -26,7 +26,7 @@ import .mod_md_schema
 // ---------------------------------------------------------------------------
 
 fn sel_collapsed(sel) =>
-  sel.kind == 'text' and pos_equal(sel.anchor, sel.head)
+  sel.kind == 'text' and pos_equal(sel.anchor, sel.head) or false
 
 fn sel_lo(sel) => pos_min(sel.anchor, sel.head)
 fn sel_hi(sel) => pos_max(sel.anchor, sel.head)
@@ -38,10 +38,10 @@ fn caret(p) => text_selection(p, p)
 // text leaf. Most commands here only handle this simple case; cross-leaf
 // editing is deferred to the same layer that handles HTML paste.
 fn sel_single_leaf(sel) =>
-  sel.kind == 'text' and path_equal(sel.anchor.path, sel.head.path)
+  sel.kind == 'text' and path_equal(sel.anchor.path, sel.head.path) or false
 
 fn sel_same_parent_leaves(sel) =>
-  sel.kind == 'text' and path_equal(parent_path(sel.anchor.path), parent_path(sel.head.path))
+  sel.kind == 'text' and path_equal(parent_path(sel.anchor.path), parent_path(sel.head.path)) or false
 
 fn state_schema(state) =>
   if (state.schema == null) { md_schema } else { state.schema }
@@ -925,7 +925,7 @@ fn merge_adjacent_text_at(content, i, n, acc) {
 fn merge_adjacent_text(content) => merge_adjacent_text_at(content, 0, len(content), [])
 
 fn jlist_is_list_tag(tag) => tag == 'ul' or tag == 'ol' or tag == 'list'
-fn jlist_is_list(n) => is_node(n) and jlist_is_list_tag(n.tag)
+fn jlist_is_list(n) => is_node(n) and jlist_is_list_tag(n.tag) or false
 
 // Join `list_path` with its previous-sibling list (the earlier list's kind wins),
 // placing the caret at the start of the first item carried over from the second
@@ -1146,9 +1146,9 @@ fn state_list_item_tag(state) =>
   if (state_schema(state).li != null and state_schema(state).list_item == null) { 'li' } else { 'list_item' }
 
 fn is_list_tag(tag) => tag == 'list' or tag == 'ul' or tag == 'ol'
-fn is_list_node(n) => is_node(n) and is_list_tag(n.tag)
+fn is_list_node(n) => is_node(n) and is_list_tag(n.tag) or false
 
-fn same_list_kind(a, b) => is_list_node(a) and is_list_node(b) and a.tag == b.tag
+fn same_list_kind(a, b) => is_list_node(a) and is_list_node(b) and a.tag == b.tag or false
 
 fn append_to_sublist(prev_item, list_node, item) {
   let kids = prev_item.content

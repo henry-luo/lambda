@@ -12,6 +12,13 @@
 #include <stdint.h>
 #include "../../lib/mem.h"
 
+// Assign `any` and record WHY [Type_Infer TI3]. Shares the Lambda reason
+// catalog so one vocabulary covers both lanes; never bare-assign &TYPE_ANY.
+static Type* js_set_type_any(JsTranspiler* tp, AnyReason reason) {
+    if (tp && reason >= 0 && reason < ANY_REASON_COUNT) tp->any_census[reason]++;
+    return &TYPE_ANY;
+}
+
 // forward declarations
 static char js_decode_escape_char(char c);
 static String* js_decode_identifier_name(JsTranspiler* tp, const char* source,
@@ -63,7 +70,7 @@ static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
         memset(placeholder, 0, sizeof(JsIdentifierNode));
         placeholder->node_type = JS_AST_NODE_IDENTIFIER;
         placeholder->node = declarator_node;
-        placeholder->type = &TYPE_ANY;
+        placeholder->type = js_set_type_any(tp, ANY_ERROR_RECOVERY);
         placeholder->name = name;
         js_scope_define(tp, name, (JsAstNode*)placeholder, JS_VAR_VAR);
         return;
@@ -585,7 +592,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
         identifier->type = identifier->entry->node->type;
     } else {
         // Undefined identifier - could be global or error
-        identifier->type = &TYPE_ANY;
+        identifier->type = js_set_type_any(tp, ANY_OPEN_PARAM);
         log_debug("Undefined identifier: %.*s (ts_type=%s)", (int)identifier->name->len, identifier->name->chars, actual_type);
     }
 
@@ -613,7 +620,7 @@ static JsAstNode* build_js_binding_identifier(JsTranspiler* tp, TSNode id_node) 
         return NULL;
     }
     identifier->entry = NULL;
-    identifier->type = &TYPE_ANY;
+    identifier->type = js_set_type_any(tp, ANY_OPEN_PARAM);
     return (JsAstNode*)identifier;
 }
 
@@ -711,7 +718,7 @@ static JsAstNode* build_js_non_async_await_call(JsTranspiler* tp, TSNode await_n
     }
 
     call->optional = false;
-    call->type = &TYPE_ANY;
+    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
     return (JsAstNode*)call;
 }
 
@@ -779,7 +786,7 @@ JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node) {
             unary->type = &TYPE_NULL; // void always returns undefined
             break;
         default:
-            unary->type = &TYPE_ANY;
+            unary->type = js_set_type_any(tp, ANY_JS_BINARY);
     }
 
     return (JsAstNode*)unary;
@@ -808,7 +815,7 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
                 tp, JS_AST_NODE_TAGGED_TEMPLATE, call_node, sizeof(JsTaggedTemplateNode));
             tagged->tag = build_js_expression(tp, callee_node);
             tagged->quasi = (JsTemplateLiteralNode*)build_js_template_literal(tp, args_node);
-            tagged->type = &TYPE_ANY;
+            tagged->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
             return (JsAstNode*)tagged;
         }
     }
@@ -854,7 +861,7 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
     }
 
     // Function calls return ANY type by default
-    call->type = &TYPE_ANY;
+    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
 
     // Detect optional chaining (obj?.method() or obj?.())
     TSNode opt_chain = ts_node_child_by_field_name(call_node, "optional_chain", strlen("optional_chain"));
@@ -922,7 +929,7 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
     member->property = build_js_expression(tp, property_node);
 
     // Property access returns ANY type by default
-    member->type = &TYPE_ANY;
+    member->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
 
     return (JsAstNode*)member;
 }
@@ -946,7 +953,7 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node) {
                 // consecutive comma or leading comma = elision: insert undefined hole
                 JsAstNode* elision = (JsAstNode*)alloc_js_ast_node(
                     tp, JS_AST_NODE_NULL, child, sizeof(JsAstNode));
-                elision->type = &TYPE_ANY;
+                elision->type = js_set_type_any(tp, ANY_STATEMENT);
                 if (!prev_element) array->elements = elision;
                 else prev_element->next = elision;
                 prev_element = elision;
@@ -999,7 +1006,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             if (!ts_node_is_null(inner)) {
                 spread->argument = build_js_expression(tp, inner);
             }
-            spread->type = &TYPE_ANY;
+            spread->type = js_set_type_any(tp, ANY_STATEMENT);
             if (!prev_property) {
                 object->properties = (JsAstNode*)spread;
             } else {
@@ -1021,7 +1028,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             property->key = ident;
             property->value = ident;
             property->shorthand = true;
-            property->type = &TYPE_ANY;
+            property->type = js_set_type_any(tp, ANY_OPEN_MAP);
             if (!prev_property) {
                 object->properties = (JsAstNode*)property;
             } else {
@@ -1210,7 +1217,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                 }
             }
 
-            property->type = &TYPE_ANY;
+            property->type = js_set_type_any(tp, ANY_OPEN_MAP);
             if (!prev_property) {
                 object->properties = (JsAstNode*)property;
             } else {
@@ -1237,7 +1244,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             property->value = property->key;
             property->shorthand = true;
         }
-        property->type = &TYPE_ANY;
+        property->type = js_set_type_any(tp, ANY_OPEN_MAP);
 
         if (!prev_property) {
             object->properties = (JsAstNode*)property;
@@ -1457,7 +1464,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
                         tp, JS_AST_NODE_ASSIGNMENT_PATTERN, param_node, sizeof(JsAssignmentPatternNode));
                     assign_pat->left = build_js_expression(tp, pat_node);
                     assign_pat->right = build_js_expression(tp, default_node);
-                    assign_pat->type = &TYPE_ANY;
+                    assign_pat->type = js_set_type_any(tp, ANY_DECOMPOSE);
                     param = (JsAstNode*)assign_pat;
                 } else if (!ts_node_is_null(pat_node)) {
                     param = build_js_expression(tp, pat_node);
@@ -1894,7 +1901,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
             identifier->name = name_pool_create_len(tp->name_pool, private_name, private_len);
             identifier->entry = NULL;
-            identifier->type = &TYPE_ANY;
+            identifier->type = js_set_type_any(tp, ANY_OPEN_PARAM);
             return (JsAstNode*)identifier;
         }
         return build_js_identifier(tp, expr_node);
@@ -1902,20 +1909,20 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         // Handle 'this' keyword
         JsIdentifierNode* this_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
         this_node->name = name_pool_create_len(tp->name_pool, "this", 4);
-        this_node->type = &TYPE_ANY;
+        this_node->type = js_set_type_any(tp, ANY_OPEN_PARAM);
         return (JsAstNode*)this_node;
     } else if (strcmp(node_type, "super") == 0) {
         // Handle 'super' keyword — create identifier with name "super"
         JsIdentifierNode* super_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
         super_node->name = name_pool_create_len(tp->name_pool, "super", 5);
-        super_node->type = &TYPE_ANY;
+        super_node->type = js_set_type_any(tp, ANY_OPEN_PARAM);
         return (JsAstNode*)super_node;
     } else if (strcmp(node_type, "import") == 0) {
         // Handle dynamic import() — create identifier with name "import"
         // Tree-sitter parses import(x) as call_expression with callee being an "import" node
         JsIdentifierNode* import_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
         import_node->name = name_pool_create_len(tp->name_pool, "import", 6);
-        import_node->type = &TYPE_ANY;
+        import_node->type = js_set_type_any(tp, ANY_STATEMENT);
         return (JsAstNode*)import_node;
     } else if (strcmp(node_type, "meta_property") == 0) {
         // Handle new.target and import.meta
@@ -1938,13 +1945,13 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         if (is_new_target) {
             JsIdentifierNode* nt_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
             nt_node->name = name_pool_create_len(tp->name_pool, "new.target", 10);
-            nt_node->type = &TYPE_ANY;
+            nt_node->type = js_set_type_any(tp, ANY_STATEMENT);
             return (JsAstNode*)nt_node;
         }
         // import.meta
         JsIdentifierNode* meta_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
         meta_node->name = name_pool_create_len(tp->name_pool, "import.meta", 11);
-        meta_node->type = &TYPE_ANY;
+        meta_node->type = js_set_type_any(tp, ANY_STATEMENT);
         return (JsAstNode*)meta_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 ||
                strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
@@ -2013,7 +2020,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             TSNode arg = ts_node_named_child(expr_node, 0);
             yield_node->argument = build_js_expression(tp, arg);
         }
-        yield_node->type = &TYPE_ANY;
+        yield_node->type = js_set_type_any(tp, ANY_STATEMENT);
         return (JsAstNode*)yield_node;
     } else if (strcmp(node_type, "await_expression") == 0) {
         if (!tp->in_async_function && js_await_expression_looks_like_call(tp, expr_node)) {
@@ -2024,7 +2031,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             TSNode arg = ts_node_named_child(expr_node, 0);
             await_node->argument = build_js_expression(tp, arg);
         }
-        await_node->type = &TYPE_ANY;
+        await_node->type = js_set_type_any(tp, ANY_STATEMENT);
         return (JsAstNode*)await_node;
     } else if (strcmp(node_type, "assignment_expression") == 0 ||
                strcmp(node_type, "augmented_assignment_expression") == 0) {
@@ -2078,7 +2085,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 prev = expr;
             }
         }
-        seq->type = &TYPE_ANY;
+        seq->type = js_set_type_any(tp, ANY_JS_BINARY);
         return (JsAstNode*)seq;
     } else if (strcmp(node_type, "computed_property_name") == 0) {
         // [expr] — computed key in class/object. Unwrap the inner expression.
@@ -2093,7 +2100,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         // Empty computed property — return null identifier
         JsIdentifierNode* id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
         id->name = name_pool_create_len(tp->name_pool, "__computed__", 12);
-        id->type = &TYPE_ANY;
+        id->type = js_set_type_any(tp, ANY_OPEN_PARAM);
         return (JsAstNode*)id;
     } else if (strcmp(node_type, "ternary_expression") == 0) {
         JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
@@ -2122,10 +2129,10 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             if (cond->consequent->type->type_id == cond->alternate->type->type_id) {
                 cond->type = cond->consequent->type;
             } else {
-                cond->type = &TYPE_ANY;
+                cond->type = js_set_type_any(tp, ANY_JOIN);
             }
         } else {
-            cond->type = &TYPE_ANY;
+            cond->type = js_set_type_any(tp, ANY_JOIN);
         }
 
         return (JsAstNode*)cond;
@@ -2159,7 +2166,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 }
             }
         }
-        re->type = &TYPE_ANY;
+        re->type = js_set_type_any(tp, ANY_STATEMENT);
         return (JsAstNode*)re;
     } else if (strcmp(node_type, "spread_element") == 0) {
         JsSpreadElementNode* spread = (JsSpreadElementNode*)alloc_js_ast_node(
@@ -2178,7 +2185,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         TSNode right = ts_node_child_by_field_name(expr_node, "right", 5);
         if (!ts_node_is_null(left)) assign_pat->left = build_js_expression(tp, left);
         if (!ts_node_is_null(right)) assign_pat->right = build_js_expression(tp, right);
-        assign_pat->type = &TYPE_ANY;
+        assign_pat->type = js_set_type_any(tp, ANY_DECOMPOSE);
         return (JsAstNode*)assign_pat;
     } else if (strcmp(node_type, "array_pattern") == 0) {
         // destructuring pattern: [a, b, ...rest] or [, b] (with elisions)
@@ -2199,7 +2206,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                     // consecutive comma (or leading comma) = elision: insert null node
                     JsAstNode* elision = (JsAstNode*)alloc_js_ast_node(
                         tp, JS_AST_NODE_NULL, child, sizeof(JsAstNode));
-                    elision->type = &TYPE_ANY;
+                    elision->type = js_set_type_any(tp, ANY_DECOMPOSE);
                     if (!prev) pattern->elements = elision;
                     else prev->next = elision;
                     prev = elision;
@@ -2232,7 +2239,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 TSNode right = ts_node_child_by_field_name(child, "right", 5);
                 if (!ts_node_is_null(left)) assign_pat->left = build_js_expression(tp, left);
                 if (!ts_node_is_null(right)) assign_pat->right = build_js_expression(tp, right);
-                assign_pat->type = &TYPE_ANY;
+                assign_pat->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 elem = (JsAstNode*)assign_pat;
             } else {
                 elem = build_js_expression(tp, child);
@@ -2264,7 +2271,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 prop->value = build_js_identifier(tp, child);
                 prop->computed = false;
                 prop->method = false;
-                prop->type = &TYPE_ANY;
+                prop->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 elem = (JsAstNode*)prop;
             } else if (strcmp(child_type, "pair_pattern") == 0) {
                 // {a: b} or {a: b = default} or {[expr]: b}
@@ -2276,7 +2283,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 if (!ts_node_is_null(value_node)) prop->value = build_js_expression(tp, value_node);
                 prop->computed = (!ts_node_is_null(key_node) && strcmp(ts_node_type(key_node), "computed_property_name") == 0);
                 prop->method = false;
-                prop->type = &TYPE_ANY;
+                prop->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 elem = (JsAstNode*)prop;
             } else if (strcmp(child_type, "rest_pattern") == 0) {
                 // ...rest
@@ -2286,7 +2293,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 if (!ts_node_is_null(inner)) {
                     rest->argument = build_js_expression(tp, inner);
                 }
-                rest->type = &TYPE_ANY;
+                rest->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 elem = (JsAstNode*)rest;
             } else if (strcmp(child_type, "object_assignment_pattern") == 0) {
                 // {x = defaultVal} shorthand with default
@@ -2301,11 +2308,11 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                     tp, JS_AST_NODE_ASSIGNMENT_PATTERN, child, sizeof(JsAssignmentPatternNode));
                 if (!ts_node_is_null(left)) assign_pat->left = build_js_expression(tp, left);
                 if (!ts_node_is_null(right)) assign_pat->right = build_js_expression(tp, right);
-                assign_pat->type = &TYPE_ANY;
+                assign_pat->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 prop->value = (JsAstNode*)assign_pat;
                 prop->computed = false;
                 prop->method = false;
-                prop->type = &TYPE_ANY;
+                prop->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 elem = (JsAstNode*)prop;
             } else {
                 elem = build_js_expression(tp, child);
@@ -2316,7 +2323,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 prev = elem;
             }
         }
-        pattern->type = &TYPE_ANY;
+        pattern->type = js_set_type_any(tp, ANY_DECOMPOSE);
         return (JsAstNode*)pattern;
     } else if (!tp->strict_js && strcmp(node_type, "as_expression") == 0) {
         // TS: expr as Type — build as type expression wrapper
@@ -2781,7 +2788,7 @@ JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node) {
         }
     }
 
-    program->type = &TYPE_ANY;
+    program->type = js_set_type_any(tp, ANY_STATEMENT);
 
     return (JsAstNode*)program;
 }
@@ -3057,7 +3064,7 @@ JsAstNode* build_js_new_expression(JsTranspiler* tp, TSNode new_node) {
         }
     }
 
-    call->type = &TYPE_ANY;
+    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
     return (JsAstNode*)call;
 }
 
@@ -3548,7 +3555,7 @@ static JsAstNode* build_js_static_get_field_for_asi(JsTranspiler* tp, TSNode met
     JsIdentifierNode* key = (JsIdentifierNode*)alloc_js_ast_node(
         tp, JS_AST_NODE_IDENTIFIER, method_node, sizeof(JsIdentifierNode));
     key->name = name_pool_create_len(tp->name_pool, "get", 3);
-    key->type = &TYPE_ANY;
+    key->type = js_set_type_any(tp, ANY_DYNAMIC_NAME);
     field->key = (JsAstNode*)key;
     return (JsAstNode*)field;
 }
@@ -4265,7 +4272,7 @@ static JsAstNode* build_ts_parameter_u(JsTranspiler* tp, TSNode param_node, bool
                 JS_AST_NODE_ASSIGNMENT_PATTERN, param_node, sizeof(JsAssignmentPatternNode));
             assign->left = name_ast;
             assign->right = default_value;
-            assign->type = &TYPE_ANY;
+            assign->type = js_set_type_any(tp, ANY_STATEMENT);
             return (JsAstNode*)assign;
         }
 
@@ -4276,7 +4283,7 @@ static JsAstNode* build_ts_parameter_u(JsTranspiler* tp, TSNode param_node, bool
         ts_param->ts_type = ts_type;
         ts_param->default_value = default_value;
         ts_param->optional = (strcmp(ptype, "optional_parameter") == 0);
-        ts_param->type = &TYPE_ANY;
+        ts_param->type = js_set_type_any(tp, ANY_OPEN_PARAM);
         return (JsAstNode*)ts_param;
     }
 
@@ -4438,7 +4445,7 @@ static JsAstNode* make_ts_identifier_u(JsTranspiler* tp, TSNode node, const char
     JsIdentifierNode* id = (JsIdentifierNode*)alloc_js_ast_node(tp,
         JS_AST_NODE_IDENTIFIER, node, sizeof(JsIdentifierNode));
     id->name = name_pool_create_len(tp->name_pool, name, len);
-    id->type = &TYPE_ANY;
+    id->type = js_set_type_any(tp, ANY_OPEN_PARAM);
     return (JsAstNode*)id;
 }
 
@@ -4449,14 +4456,14 @@ static JsAstNode* make_this_assignment_u(JsTranspiler* tp, TSNode node, const ch
     member->property = make_ts_identifier_u(tp, node, name, len);
     member->computed = false;
     member->optional = false;
-    member->type = &TYPE_ANY;
+    member->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
 
     JsAssignmentNode* assign = (JsAssignmentNode*)alloc_js_ast_node(tp,
         JS_AST_NODE_ASSIGNMENT_EXPRESSION, node, sizeof(JsAssignmentNode));
     assign->op = JS_OP_ASSIGN;
     assign->left = (JsAstNode*)member;
     assign->right = make_ts_identifier_u(tp, node, name, len);
-    assign->type = &TYPE_ANY;
+    assign->type = js_set_type_any(tp, ANY_STATEMENT);
 
     JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp,
         JS_AST_NODE_EXPRESSION_STATEMENT, node, sizeof(JsExpressionStatementNode));

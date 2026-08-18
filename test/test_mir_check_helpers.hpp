@@ -374,6 +374,11 @@ struct SeqExpectation {
     bool next_line = false;
 };
 
+struct ConditionalForbid {
+    std::string when;
+    std::vector<std::string> patterns;
+};
+
 struct CheckGroup {
     bool has_module = false;
     std::string module;
@@ -388,7 +393,13 @@ struct CheckGroup {
     // fails loudly instead of quietly asserting nothing.
     long long return_convention = 0;
     std::vector<std::string> expect;
+    // At least one alternative must match; used for ABI transports that are
+    // intentionally different on Windows and POSIX.
+    std::vector<std::string> expect_any;
     std::vector<std::string> forbid;
+    // A transport-specific pattern can make a lowering forbidden only when
+    // that ABI shape is present in the dump.
+    std::vector<ConditionalForbid> forbid_if;
     std::vector<SeqExpectation> expect_seq;
     std::vector<CountExpectation> counts;
 };
@@ -476,7 +487,7 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
     }
 
     static const char* kCheckKeys[] = {
-        "in_module", "in_func", "occurrence", "expect", "forbid", "expect_seq", "count",
+        "in_module", "in_func", "occurrence", "expect", "expect_any", "forbid", "forbid_if", "expect_seq", "count",
         "return_convention",
     };
     static const char* kSeqKeys[] = { "pattern", "next_line" };
@@ -530,12 +541,52 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
                 group.expect.push_back(expect->items[i].str_value);
             }
         }
+        const JsonValue* expect_any = group_json.find("expect_any");
+        if (expect_any) {
+            if (expect_any->kind != JsonValue::KArr || expect_any->items.empty()) {
+                *error = "'expect_any' must be a non-empty array of strings"; return false;
+            }
+            for (size_t i = 0; i < expect_any->items.size(); i++) {
+                if (expect_any->items[i].kind != JsonValue::KStr) {
+                    *error = "'expect_any' entries must be strings"; return false;
+                }
+                group.expect_any.push_back(expect_any->items[i].str_value);
+            }
+        }
         const JsonValue* forbid = group_json.find("forbid");
         if (forbid) {
             if (forbid->kind != JsonValue::KArr) { *error = "'forbid' must be an array of strings"; return false; }
             for (size_t i = 0; i < forbid->items.size(); i++) {
                 if (forbid->items[i].kind != JsonValue::KStr) { *error = "'forbid' entries must be strings"; return false; }
                 group.forbid.push_back(forbid->items[i].str_value);
+            }
+        }
+        const JsonValue* forbid_if = group_json.find("forbid_if");
+        if (forbid_if) {
+            if (forbid_if->kind != JsonValue::KObj) {
+                *error = "'forbid_if' must be an object mapping patterns to arrays of strings";
+                return false;
+            }
+            for (size_t i = 0; i < forbid_if->fields.size(); i++) {
+                const JsonValue& patterns = forbid_if->fields[i].second;
+                if (patterns.kind != JsonValue::KArr) {
+                    *error = "'forbid_if' values must be arrays of strings";
+                    return false;
+                }
+                ConditionalForbid conditional;
+                conditional.when = forbid_if->fields[i].first;
+                for (size_t p = 0; p < patterns.items.size(); p++) {
+                    if (patterns.items[p].kind != JsonValue::KStr) {
+                        *error = "'forbid_if' entries must be strings";
+                        return false;
+                    }
+                    conditional.patterns.push_back(patterns.items[p].str_value);
+                }
+                if (conditional.patterns.empty()) {
+                    *error = "'forbid_if' values must not be empty";
+                    return false;
+                }
+                group.forbid_if.push_back(conditional);
             }
         }
         const JsonValue* seq = group_json.find("expect_seq");
@@ -622,7 +673,8 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
             }
         }
 
-        if (group.expect.empty() && group.forbid.empty() &&
+        if (group.expect.empty() && group.expect_any.empty() && group.forbid.empty() &&
+            group.forbid_if.empty() &&
             group.expect_seq.empty() && group.counts.empty()) {
             *error = "checks entry has no assertions";
             return false;
@@ -1124,9 +1176,29 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
             EXPECT_GT(count_matches(lines, group.expect[i]), 0)
                 << "expected pattern not emitted: \"" << group.expect[i] << "\"" << context;
         }
+        if (!group.expect_any.empty()) {
+            bool matched = false;
+            for (size_t i = 0; i < group.expect_any.size(); i++) {
+                if (count_matches(lines, group.expect_any[i]) > 0) {
+                    matched = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(matched)
+                << "none of the alternative patterns were emitted" << context;
+        }
         for (size_t i = 0; i < group.forbid.size(); i++) {
             EXPECT_EQ(count_matches(lines, group.forbid[i]), 0)
                 << "forbidden pattern was emitted: \"" << group.forbid[i] << "\"" << context;
+        }
+        for (size_t i = 0; i < group.forbid_if.size(); i++) {
+            if (count_matches(lines, group.forbid_if[i].when) == 0) continue;
+            for (size_t p = 0; p < group.forbid_if[i].patterns.size(); p++) {
+                EXPECT_EQ(count_matches(lines, group.forbid_if[i].patterns[p]), 0)
+                    << "forbidden pattern was emitted for conditional ABI pattern \""
+                    << group.forbid_if[i].when << "\": \""
+                    << group.forbid_if[i].patterns[p] << "\"" << context;
+            }
         }
         for (size_t i = 0; i < group.counts.size(); i++) {
             const CountExpectation& expectation = group.counts[i];

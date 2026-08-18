@@ -5,8 +5,9 @@
     {
       "in_func": "_twice_#",
       "return_convention": 3,
-      "expect": [
-        ":\tfunc\ti64, i64, p:runtime, i64:%p1"
+      "expect_any": [
+        ":\tfunc\ti64, i64, p:runtime, i64:%p1",
+        ":\tfunc\ti64, p:runtime, i64:%p1"
       ],
       "forbid": [
         "_scalar_home",

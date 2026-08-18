@@ -90,6 +90,31 @@ static MIR_reg_t jm_finish_scalar_result_home(JsMirTranspiler* mt,
     return result;
 }
 
+static MIR_reg_t jm_adopt_direct_scalar_result(JsMirTranspiler* mt,
+        const FnVariantAnalysis* body, MIR_reg_t result) {
+    if (!mt || !result || !mt->em.frame.active) return result;
+    MirScalarReturnMode mode = body
+        ? em_scalar_return_mode_for_class(body->result.normal.scalar_class)
+        : MIR_SCALAR_RETURN_DYNAMIC;
+    if (mode == MIR_SCALAR_RETURN_NONE) return result;
+    int home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, home_id));
+    if (!home) {
+        log_error("js-mir scalar-home: failed to materialize direct-call result home");
+        abort();
+    }
+    // D5.3: a direct JS call may return a number-home pointer from its
+    // transient activation; adopt it before a local or closure can retain it.
+    // The no-GC adopter already classifies packed values, so keep that check in
+    // one runtime helper instead of expanding a tag branch at every call site.
+    MIR_reg_t adopted = em_call_2(&mt->em, "lambda_item_adopt_scalar_home",
+        MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, home), true);
+    em_scalar_home_bind(&mt->em, home_id, adopted);
+    return adopted;
+}
+
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs, bool discard_result) {
     if (!mt || !callee || !callee->body_func_item || arg_count < 0) return 0;
@@ -119,7 +144,8 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         // pending tag as an ordinary Item (D5.2.1v3, D5.2.2v3).
         direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
     }
-    return jm_publish_call_result(mt, direct.normal.reg);
+    MIR_reg_t result = jm_adopt_direct_scalar_result(mt, body, direct.normal.reg);
+    return jm_publish_call_result(mt, result);
 }
 
 static bool jm_args_are_prerooted(JsMirTranspiler* mt, MIR_op_t args,

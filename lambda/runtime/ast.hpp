@@ -618,6 +618,12 @@ typedef struct Transpiler : Script {
     // overflowing the stack. Zeroed by the memset that initializes the Transpiler.
     int build_depth;
 
+    // ANY-census: per-reason counts of expressions whose static type fell back
+    // to `any` [Type_Infer TI3]. Read by the compile-time report and the AST
+    // dump; carries no semantics, so an unrecorded site is a bookkeeping bug,
+    // never a behavior change.
+    int any_census[ANY_REASON_COUNT];
+
     // Namespace declarations (file-local)
     NamespaceEntry* namespaces;  // linked list of declared namespaces
 

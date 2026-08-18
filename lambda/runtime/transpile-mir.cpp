@@ -6577,11 +6577,16 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             TypeId element_type = mir_known_index_element_type(mt, fn->object);
             if (element_type != LMD_TYPE_ANY) return element_type;
             TypeId object_eff = get_effective_type(mt, fn->object);
-            if (object_eff == LMD_TYPE_ARRAY || object_eff == LMD_TYPE_ARRAY_NUM) {
-                // An array with no surviving element witness is read through
-                // the boxed index helper. Keep the result boxed instead of
-                // inheriting the AST scalar type and re-boxing that Item as a
-                // lane, which turns compact values into infinity.
+            // No surviving element witness means the read goes through the
+            // boxed index helper, so the CARRIER is an Item no matter what the
+            // AST type says [T19-1]. This must not be narrowed to the
+            // array-typed object case: a cross-module `float[]` reaches here
+            // with an unproven object witness, and inheriting the AST's
+            // element type made the emitter move a boxed Item through the
+            // double lane ("dmov: got 'int', expected 'double'"). `binary`
+            // keeps the fall-through because its u8 element lane is produced
+            // by a dedicated load, not by the generic helper.
+            if (object_eff != LMD_TYPE_BINARY) {
                 return LMD_TYPE_ANY;
             }
         }
@@ -17140,6 +17145,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // Item as a second MIR result, so the caller reads a register
             // instead of `Context::mir_return_lane`.
             MIR_reg_t direct_error_reg = 0;
+            const FnVariantAnalysis* call_variant = local_func
+                ? local_func_variant_for_call(local_entry, direct_call_name)
+                : NULL;
             if (local_func) {
                 // A forward entry can temporarily lack its refined return
                 // contract, but its generated body always has Context first.
@@ -17152,8 +17160,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     options.hidden_env = direct_env;
                 }
                 MirCallResult direct = em_call_direct(&mt->em, direct_call_name,
-                    local_func, local_func_variant_for_call(local_entry,
-                        direct_call_name), ai, call_types,
+                    local_func, call_variant, ai, call_types,
                     call_ops, &options);
                 direct_value = direct.normal;
                 result = direct_value.reg;
@@ -17191,22 +17198,23 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, 3 + ai, ops));
             }
             MIR_reg_t second_result = 0;
-            // v3 shape 4 hands the error back in a register; v1 leaves it in
-            // the context lane for the caller to load.
-            bool error_lane_in_register = call_error_lane && direct_error_reg;
-            // RV9: the call site infers the transport from "did em_call_direct
-            // hand me an error register?"; the callee wrote its lane from its
-            // own descriptor. Cross-check those two derivations here.
+            // the slot transport is also materialized in a MIR register by
+            // em_call_direct, so register presence does not identify a pair.
+            bool error_lane_in_register = call_error_lane && call_variant &&
+                em_variant_returns_pair(call_variant);
+            bool error_lane_available = call_error_lane && direct_error_reg;
+            // RV9/RV10: derive the comparison encoding from the callee
+            // descriptor; the materialized slot value is still tested as 0.
             if (call_error_lane && local_entry) {
                 em_assert_error_lane_agreement(direct_call_name,
-                    local_func_variant_for_call(local_entry, direct_call_name),
+                    call_variant,
                     error_lane_in_register);
             }
             if (call_error_lane) {
-                second_result = error_lane_in_register ? direct_error_reg
+                second_result = error_lane_available ? direct_error_reg
                     : new_reg(mt, "call_error", MIR_T_I64);
             }
-            if (second_result && !error_lane_in_register) {
+            if (second_result && !error_lane_available) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, second_result),
                     MIR_new_mem_op(mt->ctx, MIR_T_I64,
@@ -22784,9 +22792,10 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         call_types[i] = call_vars[i].type;
     }
     MirCallOptions options = {true, false, 0};
+    const FnVariantAnalysis* raw_variant =
+        local_func_variant_for_call(raw_entry, raw_name);
     MirCallResult direct = em_call_direct(&mt->em, raw_name, raw_func,
-        local_func_variant_for_call(raw_entry, raw_name), call_arg_count,
-        call_types, call_args, &options);
+        raw_variant, call_arg_count, call_types, call_args, &options);
     if (direct.normal.maybe_pending && public_returns_pair && !has_slow_body &&
             raw_lane_kind == RETURN_LANE_SCALAR &&
             !wrapper_has_parameter_error_guard) {
@@ -22813,15 +22822,17 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     int scalar_home_id = direct.normal.scalar_home_id
         ? direct.normal.scalar_home_id : direct.error.scalar_home_id;
     MIR_reg_t second_result = 0;
-    // v3 shape 4: the raw body hands its error back in a second result
-    // register, so the wrapper reads that instead of the context lane.
+    // the slot transport is materialized in a register too; only the
+    // descriptor distinguishes it from a physical MIR result pair.
     bool wrapper_error_in_register = raw_lane_kind == RETURN_LANE_ERROR &&
+        raw_variant && em_variant_returns_pair(raw_variant);
+    bool wrapper_error_available = raw_lane_kind == RETURN_LANE_ERROR &&
         direct.error.reg != 0;
     if (raw_lane_kind == RETURN_LANE_ERROR) {
-        second_result = wrapper_error_in_register ? direct.error.reg
+        second_result = wrapper_error_available ? direct.error.reg
             : new_reg(mt, "werr", MIR_T_I64);
     }
-    if (second_result && !wrapper_error_in_register) {
+    if (second_result && !wrapper_error_available) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, second_result),
             MIR_new_mem_op(mt->ctx, MIR_T_I64,

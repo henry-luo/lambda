@@ -2469,7 +2469,10 @@ static void prepare_all_tests(
 // If a worker exceeds this, a watchdog thread sends SIGKILL to prevent infinite hangs
 // (the internal js-test-batch timeout only catches JS-level loops, not hangs in JIT/parser).
 static constexpr int T262_HARD_TIMEOUT_PER_TEST = 15;
+#ifndef _WIN32
+// the persistent POSIX worker watchdog is the only consumer of this floor.
 static constexpr int T262_HARD_TIMEOUT_MIN = 30;
+#endif
 static constexpr int T262_SLOW_HARD_TIMEOUT_PER_TEST = 60;
 // A batch normally emits one BATCH_END record per test.  Bound the silent
 // interval independently of batch size so a native crash-recovery loop cannot

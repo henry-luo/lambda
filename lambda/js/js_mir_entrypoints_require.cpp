@@ -9,6 +9,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#ifdef _WIN32
+// the Win32 header declares GetTickCount64; omitting it leaves the native Windows build without the timing API declaration.
+#include <windows.h>
+#endif
 #ifndef _WIN32
 #include <sys/time.h>
 #endif

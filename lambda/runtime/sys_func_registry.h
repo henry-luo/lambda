@@ -45,6 +45,29 @@ typedef enum CArgConvention {
     C_ARG_NATIVE,      // arguments are native C types (int64_t for bitwise ops)
 } CArgConvention;
 
+// How a system function's success type is computed [Type_Infer TI4].
+// The zero value must stay FIXED so an unaudited row keeps today's behavior
+// (its declared `success_type`/`return_type`) rather than silently deriving
+// something from an argument it was never checked against.
+typedef enum SysFuncResultKind {
+    SYS_RESULT_FIXED = 0,       // use success_type/return_type as written
+    SYS_RESULT_SAME_AS_ARG0,    // result carries arg0's type (abs, sort, reverse)
+    SYS_RESULT_ELEM_OF_ARG0,    // result is arg0's element type (min1, max1)
+    SYS_RESULT_ARRAY_OF_ARG0_ELEM, // array over arg0's element type (unique)
+    SYS_RESULT_ARG0_NUMERIC,    // arg0's numeric carrier, else the fixed type (sum, avg)
+    // Real-scalar transcendental: `float` ONLY when arg0 is a proven real
+    // numeric scalar. These rows are polymorphic — math.sqrt also accepts
+    // complex and vector arguments and returns those shapes — so an
+    // unconditional `float` would make the emitter take the native scalar
+    // lane for a complex/array argument and produce nan (SI14).
+    SYS_RESULT_REAL_TO_FLOAT,
+    // Text transforms preserve their argument's text family: a string yields a
+    // string and a symbol yields a symbol. Anything else keeps the row's open
+    // type — these rows accept only text, so a non-text argument is a runtime
+    // error whose type must not be guessed from the argument (SI14).
+    SYS_RESULT_TEXT_SAME_AS_ARG0,
+} SysFuncResultKind;
+
 // System function metadata + JIT import pointer
 typedef struct SysFuncInfo {
     SysFunc fn;
@@ -70,6 +93,10 @@ typedef struct SysFuncInfo {
     // ordinary ItemError values that callers may contain with `or`.
     Type* success_type;
     bool may_return_error;
+    // How the success type is derived from the call site [Type_Infer TI4].
+    // A fixed `success_type` answers most rows; the element-preserving ops
+    // need the first argument, which only the AST builder can see.
+    SysFuncResultKind result_kind;
 } SysFuncInfo;
 
 // GC effect and representation metadata consumed by MIR emitters. Unknown

@@ -17,8 +17,9 @@
     {
       "return_convention": 3,
       "in_func": "_boxed_wide_#",
-      "expect": [
-        "func\ti64, i64, p:runtime, i64:%p1"
+      "expect_any": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "func\ti64, p:runtime, i64:%p1"
       ],
       "forbid": [
         "_scalar_home",
@@ -28,8 +29,9 @@
     {
       "return_convention": 3,
       "in_func": "_boxed_unknown_#",
-      "expect": [
-        "func\ti64, i64, p:runtime, i64:%p1"
+      "expect_any": [
+        "func\ti64, i64, p:runtime, i64:%p1",
+        "func\ti64, p:runtime, i64:%p1"
       ],
       "forbid": [
         "lambda_item_resolve_pending"

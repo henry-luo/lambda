@@ -793,6 +793,9 @@ static Type* clone_type_without_const(Transpiler* tp, Type* source) {
     return clone;
 }
 
+static Type* known_array_element_type(Type* type);
+static bool is_magnitude_numeric_type(TypeId type_id);
+
 static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
         AstNode* first_arg) {
     Type* success = info && info->success_type ? info->success_type :
@@ -814,18 +817,50 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
 
     if (!first_arg || !first_arg->type) return success ? success : &TYPE_ANY;
 
-    switch (info->fn) {
-    case SYSFUNC_FLOOR:
-    case SYSFUNC_CEIL:
-    case SYSFUNC_ROUND:
-    case SYSFUNC_TRUNC:
-        // A concrete real numeric argument keeps its carrier through these
-        // operations. The generic registry stays open for complex/vector
-        // inputs, but a typed scalar must not become `any` before int(...).
-        if (lambda_numeric_kind_from_type(first_arg->type) != LAMBDA_NUM_INVALID) {
-            return first_arg->type;
+    // Element-preserving and carrier-preserving rows derive their success type
+    // from the first argument [TI4]. This replaced a per-function switch: at
+    // the third near-identical case the shape belongs in the registry, not in
+    // a growing list of SYSFUNC_ labels here.
+    Type* arg0 = first_arg->type;
+    switch (info->result_kind) {
+    case SYS_RESULT_SAME_AS_ARG0:
+        // A proven concrete argument keeps its carrier through the operation;
+        // an open argument leaves the registry's declared type in force.
+        if (arg0->type_id != LMD_TYPE_ANY) return arg0;
+        break;
+    case SYS_RESULT_ARG0_NUMERIC:
+        if (lambda_numeric_kind_from_type(arg0) != LAMBDA_NUM_INVALID) return arg0;
+        break;
+    case SYS_RESULT_TEXT_SAME_AS_ARG0:
+        if (arg0->type_id == LMD_TYPE_STRING || arg0->type_id == LMD_TYPE_SYMBOL) {
+            return arg0;
         }
         break;
+    case SYS_RESULT_REAL_TO_FLOAT:
+        // Complex and vector arguments keep the row's open type: these builtins
+        // are polymorphic and return the argument's own shape for them.
+        if (arg0->type_id != LMD_TYPE_COMPLEX &&
+                is_magnitude_numeric_type(arg0->type_id)) {
+            return &TYPE_FLOAT;
+        }
+        break;
+    case SYS_RESULT_ELEM_OF_ARG0: {
+        Type* elem = known_array_element_type(arg0);
+        if (elem && elem != arg0 && elem->type_id != LMD_TYPE_ANY) return elem;
+        break;
+    }
+    case SYS_RESULT_ARRAY_OF_ARG0_ELEM: {
+        Type* elem = known_array_element_type(arg0);
+        if (elem && elem->type_id != LMD_TYPE_ANY) {
+            TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+                sizeof(TypeArray));
+            out->nested = elem;
+            out->type_index = -1;
+            return (Type*)out;
+        }
+        break;
+    }
+    case SYS_RESULT_FIXED:
     default:
         break;
     }
@@ -834,8 +869,11 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
 
 static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
         bool may_return_error, AstNode* first_arg) {
-    if (!info) return &TYPE_ANY;
+    if (!info) return set_type_any(tp, ANY_ERROR_RECOVERY);
     Type* success = sys_func_success_result_type(tp, info, first_arg);
+    // A row with no precise success type is the TIG4 gap, not a property of
+    // the call site — census it here so IP2's row sweep has a metric.
+    if (success == &TYPE_ANY) set_type_any(tp, ANY_SYSFUNC_ROW);
     return may_return_error
         ? lambda_type_union_normalized(tp->pool, success, &TYPE_ERROR) : success;
 }
@@ -1172,6 +1210,27 @@ static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* se
     default:
         return NULL;
     }
+}
+
+// Assign `any` and record WHY [Type_Infer TI3]. Never bare-assign
+// `node->type = &TYPE_ANY` in this file: the census is how later inference
+// slices prove their effect, and an unclassified site hides a gap.
+Type* set_type_any(Transpiler* tp, AnyReason reason) {
+    if (tp && reason >= 0 && reason < ANY_REASON_COUNT) tp->any_census[reason]++;
+    return &TYPE_ANY;
+}
+
+// Same for the literal-typed variant used by type-annotation positions.
+Type* set_lit_type_any(Transpiler* tp, AnyReason reason) {
+    if (tp && reason >= 0 && reason < ANY_REASON_COUNT) tp->any_census[reason]++;
+    return (Type*)&LIT_TYPE_ANY;
+}
+
+// Operator paths pick a TypeId first and allocate the Type afterwards, so they
+// record through the id rather than through a Type* [Type_Infer TI3].
+TypeId census_any_type_id(Transpiler* tp, AnyReason reason) {
+    if (tp && reason >= 0 && reason < ANY_REASON_COUNT) tp->any_census[reason]++;
+    return LMD_TYPE_ANY;
 }
 
 // relaxed mode (--static-warning): a semantic (E2xx) diagnostic is stored as
@@ -2683,13 +2742,19 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     }
 
     TypeId obj_tid = ast_node->object->type->type_id;
-    if (obj_tid == LMD_TYPE_ARRAY_NUM) {
-        // element type depends on the array's elem_type, but at AST phase we don't know it yet
-        // default to ANY; the transpiler will refine this
-        ast_node->type = &TYPE_ANY;
-    }
-    else if (obj_tid == LMD_TYPE_ARRAY) {
-        ast_node->type = &TYPE_ANY;
+    if (obj_tid == LMD_TYPE_ARRAY_NUM || obj_tid == LMD_TYPE_ARRAY) {
+        // TIG1 stays open, now with a precise blocker [Impl IP5 §9.2].
+        // Publishing the element type here is semantically right (D2.5.3,
+        // S7.1) and the declared-destination path above already does it. What
+        // blocks the general case is not this rule and not the nullability:
+        // `int_arr[0]` on a MODULE-bound array segfaults with `int?`, with a
+        // `int | null` union, and with a plain `int` alike. The emitter's rep
+        // oracle (get_effective_type) correctly answers "boxed Item" for that
+        // read, but consumers that read `node->type` directly instead of the
+        // oracle still decode a scalar lane. Closing it means routing every
+        // carrier decision through the oracle — the systematic sweep T19-1
+        // describes — not another special case here.
+        ast_node->type = set_type_any(tp, ANY_INDEX_ELEM);
     }
     else if (obj_tid == LMD_TYPE_BINARY) {
         // Scalar binary indexes are u8 values; range indexes retain binary type.
@@ -2720,22 +2785,32 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
             }
             if (resolved_type) {
                 TypeId rid = resolved_type->type_id;
-                // only resolve scalar types that have matching unbox functions
+                // Scalars are re-allocated as a bare Type so the field's own
+                // node is not aliased into the expression graph.
                 if (is_native_numeric_type_id(rid)
                     || rid == LMD_TYPE_BOOL || rid == LMD_TYPE_STRING) {
                     ast_node->type = alloc_type(tp->pool, rid, sizeof(Type));
+                } else if (rid == LMD_TYPE_MAP || rid == LMD_TYPE_ELEMENT ||
+                        rid == LMD_TYPE_OBJECT) {
+                    // Container fields keep the shape recorded on the map, which
+                    // is what makes chained access (`a.b.c`) resolve instead of
+                    // dying at the first non-scalar hop [TIG2]. Representation
+                    // is unaffected: a container field is a boxed pointer on
+                    // both paths, so this publishes a type the emitter already
+                    // produces (unlike the numeric-lane element reads of TIG1).
+                    ast_node->type = resolved_type;
                 } else {
-                    ast_node->type = &TYPE_ANY;
+                    ast_node->type = set_type_any(tp, ANY_MEMBER_SHAPE);
                 }
             } else {
-                ast_node->type = &TYPE_ANY;  // field not in shape (e.g. method name)
+                ast_node->type = set_type_any(tp, ANY_MEMBER_SHAPE);  // field not in shape (e.g. method name)
             }
         } else {
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_MEMBER_SHAPE);
         }
     }
     else {
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_MEMBER_SHAPE);
     }
     return (AstNode*)ast_node;
 }
@@ -3006,7 +3081,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                     }
                     ast_node->type = function_call_result_type(tp, func_type);
                 } else {
-                    ast_node->type = &TYPE_ANY;
+                    ast_node->type = set_type_any(tp, ANY_CALL_RESULT);
                 }
             }
         }
@@ -3197,14 +3272,14 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             }
             ast_node->type = function_call_result_type(tp, func_type);
             if (!ast_node->type) { // e.g. recursive fn
-                ast_node->type = &TYPE_ANY;
+                ast_node->type = set_type_any(tp, ANY_CALL_RESULT);
             }
             if (ast_node->type && ast_node->type->is_const) {
                 ast_node->type = clone_type_without_const(tp, ast_node->type);
             }
         }
         else {
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_CALL_RESULT);
         }
     }
 
@@ -3505,9 +3580,9 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
             field_node->object = current_item;
             // use the identifier as the field name (without scope lookup)
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
             field_node->field = (AstNode*)ast_node;
-            field_node->type = &TYPE_ANY;
+            field_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
             return (AstNode*)field_node;
         }
         // Global import: resolve math constants (pi, e) when `import math;` is active
@@ -3552,7 +3627,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             return (AstNode*)sys_node;
         }
         // ident is used for member access, thus we return TYPE_ANY
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
     }
     else {
         log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
@@ -3598,12 +3673,12 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             if (entry->is_mutable && entry->type_widened && !entry->has_type_annotation) {
                 // widened vars must read as ANY so later map/element shapes do not
                 // retain the null-shaped initializer and discard reassigned values.
-                ast_node->type = &TYPE_ANY;
+                ast_node->type = set_type_any(tp, ANY_WIDENED_VAR);
             }
             if (!ast_node->type) {
                 log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY",
                     (int)entry->name->len, entry->name->chars);
-                ast_node->type = &TYPE_ANY;
+                ast_node->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
             }
             // Special handling: if identifier refers to a type definition, wrap type in TypeType
             else if (entry->node->node_type == AST_NODE_TYPE_STAM) {
@@ -4382,7 +4457,7 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
         return (Type*)&LIT_TYPE_NULL;
     }
     else if (strview_equal(&type_name, "any")) {
-        return (Type*)&LIT_TYPE_ANY;
+        return set_lit_type_any(tp, ANY_EXPLICIT);
     }
     else if (strview_equal(&type_name, "bool")) {
         return (Type*)&LIT_TYPE_BOOL;
@@ -4781,7 +4856,7 @@ AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
     AstPrimaryNode* any_node = (AstPrimaryNode*)alloc_ast_node(tp,
         AST_NODE_PRIMARY, node, sizeof(AstPrimaryNode));
     any_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    ((TypeType*)any_node->type)->type = &TYPE_ANY;
+    ((TypeType*)any_node->type)->type = set_type_any(tp, ANY_EXPLICIT);
     ast_node->left = (AstNode*)any_node;
 
     ast_node->op = OPERATOR_EXCLUDE;
@@ -4853,13 +4928,23 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
         if (IS_NUMERIC_ID(operand_type)) {
             type_id = operand_type;  // Preserve the exact numeric type
         }
+        else if (operand_type != LMD_TYPE_ANY) {
+            // A non-numeric operand of known type cannot silently become `any`:
+            // negation either produces a number or raises, so the honest type
+            // is `number | error` [TIG12, S7.2.1]. An open (`any`) operand
+            // stays open — nothing has been proven about it.
+            ast_node->type = lambda_type_union_normalized(tp->pool,
+                &TYPE_NUMBER, &TYPE_ERROR);
+            log_debug("end build unary expr");
+            return (AstNode*)ast_node;
+        }
         else {
-            type_id = LMD_TYPE_ANY;  // Non-numeric types need runtime handling
+            type_id = census_any_type_id(tp, ANY_UNARY);  // open operand stays open
         }
     }
     else {
         log_error("Error: build_unary_expr unknown operator");
-        type_id = LMD_TYPE_ANY;  // Default fallback
+        type_id = census_any_type_id(tp, ANY_ERROR_RECOVERY);  // Default fallback
     }
 
     ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
@@ -5460,11 +5545,19 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
             }
-            type_id = LMD_TYPE_ANY;
+            type_id = census_any_type_id(tp, ANY_ARITH_OPERAND);
         }
     }
     else if (ast_node->op == OPERATOR_AND) {
-        type_id = LMD_TYPE_ANY;  // based on truthy idiom, not simple logic and/or
+        // `and` yields the LEFT value when it is falsy, else the right value —
+        // both constituents can reach the result, so the sound type is their
+        // normalized union [TIG5, S5.5.2]. Unlike `or` (which only reaches its
+        // right side after an error/null left), nothing may be removed here:
+        // the falsy set includes `false` and `""`, which are ordinary values.
+        inferred_binary_type = lambda_type_union_normalized(tp->pool,
+            ast_node->left->type, ast_node->right->type);
+        type_id = inferred_binary_type ? inferred_binary_type->type_id
+            : census_any_type_id(tp, ANY_LOGICAL_AND);
     }
     else if (ast_node->op == OPERATOR_OR) {
         // `or` evaluates its right side only after an error/null left value;
@@ -5487,16 +5580,26 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         // Keyword comparisons are the explicit element-wise family.  Symbolic
         // < <= > >= stay scalar so array masks cannot leak into control flow.
         if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
-            bool l_native = (is_native_numeric_type_id(left_type));
-            bool r_native = (is_native_numeric_type_id(right_type));
-            if (l_native && r_native) type_id = LMD_TYPE_BOOL;
-            else if (left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) type_id = LMD_TYPE_ANY;
-            else                           type_id = LMD_TYPE_ANY;
+            // A magnitude comparison over a statically comparable pair always
+            // yields bool — numeric/numeric, string/string and dtime/dtime all
+            // qualify, not just the native-numeric pair the old rule admitted
+            // [TIG6]. `known_magnitude_comparable` deliberately answers true
+            // for ANY/NULL operands (it gates a diagnostic, not this typing),
+            // so those cases are excluded here and stay open.
+            bool l_open = left_type == LMD_TYPE_ANY || left_type == LMD_TYPE_NULL;
+            bool r_open = right_type == LMD_TYPE_ANY || right_type == LMD_TYPE_NULL;
+            if (!l_open && !r_open &&
+                    known_magnitude_comparable(left_type, right_type)) {
+                type_id = LMD_TYPE_BOOL;
+            } else {
+                type_id = census_any_type_id(tp, ANY_COMPARE);
+            }
         }
         else if (is_elementwise_comparison_op(ast_node->op)) {
             bool l_arr = is_array_family_type_id(left_type);
             bool r_arr = is_array_family_type_id(right_type);
-            type_id = (l_arr || r_arr) ? LMD_TYPE_ARRAY_NUM : LMD_TYPE_ANY;
+            type_id = (l_arr || r_arr) ? LMD_TYPE_ARRAY_NUM
+                : census_any_type_id(tp, ANY_COMPARE);
         }
 
         // equality is total: incompatible concrete families compile and evaluate
@@ -5516,6 +5619,14 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             // pipe: if using ~ (current item), always produces Array;
             // otherwise it's "inject first arg" and result type follows the right side
             if (has_current_item_ref(ast_node->right)) {
+                // The mapped expression's type IS the element type; keeping a
+                // bare ARRAY discarded it and forced every consumer back to a
+                // dynamic read [TIG16, D2.6.2].
+                TypeArray* mapped = (TypeArray*)alloc_type(tp->pool,
+                    LMD_TYPE_ARRAY, sizeof(TypeArray));
+                mapped->nested = ast_node->right->type;
+                mapped->type_index = -1;
+                inferred_binary_type = (Type*)mapped;
                 type_id = LMD_TYPE_ARRAY;
             } else {
                 type_id = right_type;
@@ -5523,7 +5634,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     }
     else {  // OPERATOR_JOIN, etc.
-        type_id = LMD_TYPE_ANY;
+        type_id = census_any_type_id(tp, ANY_JOIN_OP);
     }
     if (inferred_binary_type) {
         ast_node->type = inferred_binary_type;
@@ -5825,7 +5936,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
             else_contrib == &TYPE_ERROR;
         if (!has_divergence ||
                 then_type_id == LMD_TYPE_ANY || else_type_id == LMD_TYPE_ANY) {
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_JOIN);
         } else {
             TypeBinary* join = (TypeBinary*)alloc_type_kind(tp->pool,
                 TYPE_KIND_BINARY, sizeof(TypeBinary));
@@ -5941,7 +6052,7 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
 
     // result type: if all arms have same type, use it; otherwise ANY
     if (need_any_type) {
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_JOIN);
     } else if (result_type_id >= LMD_TYPE_CONTAINER && first_arm && first_arm->type) {
         // reuse arm type to preserve full struct (TypeMap, TypeArray, etc.)
         ast_node->type = first_arm->type;
@@ -5958,7 +6069,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
     TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
-    ast_node->type = &TYPE_ANY;  // list returns Item, not List
+    ast_node->type = set_type_any(tp, ANY_LIST);  // list returns Item, not List
 
     ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
@@ -6005,6 +6116,21 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         return ast_node->item;
     }
     tp->current_scope = ast_node->vars->parent;
+
+    // A list node's runtime value is NOT always a list: `transpile_list`
+    // collapses a declaration block with exactly one value item to that value
+    // (`(let x = 10, x)` evaluates to `x`). Typing follows the same split, so
+    // the static type never claims a container the emitter will not build
+    // [TIG11, SI3v2 — the type must describe what is actually produced].
+    if (ast_node->declare && type->length == 1 && ast_node->item) {
+        ast_node->type = ast_node->item->type;
+    } else if (type->length > 0) {
+        // Genuine multi-item list: publish the container type. Element typing
+        // stays open until the items are proven homogeneous (TIG11 residue).
+        ast_node->type = (Type*)type;
+    } else {
+        ast_node->type = set_type_any(tp, ANY_LIST);
+    }
     return (AstNode*)ast_node;
 }
 
@@ -6126,7 +6252,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
 
         if (ts_node_is_null(val_node)) {
             log_error("type definition: missing type expression");
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
             ast_node->as = nullptr;
         } else {
             AstNode* type_expr = build_expr(tp, val_node);
@@ -6172,7 +6298,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                 }
             } else {
                 log_warn("type definition: failed to build type expression");
-                ast_node->type = &TYPE_ANY;
+                ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
             }
         }
     } else {
@@ -6180,7 +6306,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
         if (ts_node_is_null(val_node)) {
             log_error("assignment: missing value expression");
             ast_node->as = nullptr;
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
         } else {
             ast_node->as = build_expr(tp, val_node);
 
@@ -6277,7 +6403,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                         }
                     }
                 } else {
-                    ast_node->type = &TYPE_ANY;
+                    ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
                 }
             }
         }
@@ -6341,10 +6467,33 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
     if (ts_node_is_null(val_node)) {
         log_error("decompose: missing source expression");
         ast_node->as = nullptr;
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_DECOMPOSE);
     } else {
         ast_node->as = build_expr(tp, val_node);
-        ast_node->type = &TYPE_ANY;  // decomposition itself doesn't have a single type
+        ast_node->type = set_type_any(tp, ANY_DECOMPOSE);  // decomposition itself doesn't have a single type
+    }
+
+    // Project the source's shape onto each target where it is knowable [TIG15].
+    // Positional decomposition of a homogeneous array binds the element type;
+    // a named decomposition (`let a, b at m`) reads the map's shape by name.
+    // Everything else stays open — a wrong projection here would be a binding
+    // whose declared type is a lie (SI14), so only proven shapes are used.
+    Type* source_type = ast_node->as ? ast_node->as->type : NULL;
+    TypeMap* source_map = source_type && !is_global_simple_type(source_type) &&
+        (source_type->type_id == LMD_TYPE_MAP || source_type->type_id == LMD_TYPE_OBJECT)
+        ? (TypeMap*)source_type : NULL;
+    Type* source_elem = NULL;
+    if (source_type && !is_global_simple_type(source_type) &&
+            (source_type->type_id == LMD_TYPE_ARRAY ||
+             source_type->type_id == LMD_TYPE_ARRAY_NUM)) {
+        Type* nested = ((TypeArray*)source_type)->nested;
+        // Container elements are boxed pointers on every path, so publishing
+        // them cannot outrun the emitter the way a numeric lane would (TIG1).
+        if (nested && (nested->type_id == LMD_TYPE_MAP ||
+                nested->type_id == LMD_TYPE_ELEMENT ||
+                nested->type_id == LMD_TYPE_OBJECT)) {
+            source_elem = nested;
+        }
     }
 
     // Push all names to the name stack
@@ -6352,7 +6501,25 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
         // Create a temporary named node for each variable
         AstNamedNode* var_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
         var_node->name = ast_node->names[i];
-        var_node->type = &TYPE_ANY;  // type will be determined at runtime
+        Type* projected = NULL;
+        if (is_named && source_map && source_map->shape) {
+            FOR_EACH_MAP_FIELD(source_map, se) {
+                if (se->name && (int)se->name->length == (int)var_node->name->len &&
+                        strncmp(se->name->str, var_node->name->chars,
+                            se->name->length) == 0) {
+                    Type* ft = unwrap_simple_type_type(se->type);
+                    if (ft && (ft->type_id == LMD_TYPE_MAP ||
+                            ft->type_id == LMD_TYPE_ELEMENT ||
+                            ft->type_id == LMD_TYPE_OBJECT)) {
+                        projected = ft;
+                    }
+                    break;
+                }
+            }
+        } else if (!is_named && source_elem) {
+            projected = source_elem;
+        }
+        var_node->type = projected ? projected : set_type_any(tp, ANY_DECOMPOSE);
         var_node->as = nullptr;
         push_name(tp, var_node, NULL);
     }
@@ -6757,7 +6924,7 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     if (ts_node_is_null(name)) {
         log_error("build_key_expr: missing name field");
         ast_node->name = name_pool_create_strview(tp->name_pool, (StrView){.str = "", .length = 0});
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
         ast_node->as = nullptr;
         return ast_node;
     }
@@ -6785,7 +6952,7 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
             AstNode* val_expr = ts_node_is_null(val_node) ? nullptr : build_expr(tp, val_node);
             if (!val_expr) {
                 log_error("build_key_expr: missing value for ns.attr");
-                ast_node->type = &TYPE_ANY;
+                ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
                 ast_node->as = nullptr;
                 return ast_node;
             }
@@ -6804,7 +6971,7 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
     if (ts_node_is_null(val_node)) {
         log_error("build_key_expr: missing value field");
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
         ast_node->as = nullptr;
         return ast_node;
     }
@@ -6825,7 +6992,7 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         ast_node->type = (Type*)&LIT_TYPE_NULL;
     }
     else if (strview_equal(&type_name, "any")) {
-        ast_node->type = (Type*)&LIT_TYPE_ANY;
+        ast_node->type = set_lit_type_any(tp, ANY_EXPLICIT);
     }
     else if (strview_equal(&type_name, "bool")) {
         ast_node->type = (Type*)&LIT_TYPE_BOOL;
@@ -7562,7 +7729,7 @@ AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
             constrained->base = ast_node->base->type;
         }
     } else {
-        constrained->base = &TYPE_ANY;
+        constrained->base = set_type_any(tp, ANY_EXPLICIT);
     }
     constrained->constraint = ast_node->constraint;
 
@@ -7878,7 +8045,7 @@ AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
         StrView type_str = ts_node_source(tp, ok_node);
         log_error("Error: invalid return type '%.*s' - not a valid type",
             (int)type_str.length, type_str.str);
-        ok_type = &TYPE_ANY;
+        ok_type = set_type_any(tp, ANY_ERROR_RECOVERY);
     }
 
     // Check for optional error type: T^E or T^
@@ -8502,7 +8669,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     // determine the type of the loop variable
     Type* expr_type = ast_node->as->type;
     if (ast_node->key_only) {
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_LOOP_SRC);
     }
     else if (expr_type->type_id == LMD_TYPE_ARRAY) {
         TypeArray* array_type = (TypeArray*)expr_type;
@@ -8511,7 +8678,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
         }
         else {
             log_debug("Warning: Invalid nested type in array during loop AST building, using TYPE_ANY");
-            ast_node->type = &TYPE_ANY;
+            ast_node->type = set_type_any(tp, ANY_LOOP_SRC);
         }
     }
     else if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -8523,7 +8690,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     }
     else {
         // for maps/elements/any: value type is any
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_LOOP_SRC);
     }
 
     // push the index name to the name stack if present
@@ -8536,9 +8703,16 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
         if (ast_node->key_filter == LOOP_KEY_INT) {
             index_entry->type = &TYPE_INT;
         } else if (ast_node->key_filter == LOOP_KEY_SYMBOL) {
-            index_entry->type = &TYPE_ANY;  // symbol at runtime
+            // A symbol-filtered key is a symbol at runtime; saying so costs
+            // nothing (symbols are boxed on every path) [TIG10].
+            index_entry->type = &TYPE_SYMBOL;
         } else {
-            index_entry->type = &TYPE_ANY;  // could be int or symbol
+            // LOOP_KEY_ALL yields int OR symbol. The union is the honest type,
+            // but it has no magnitude, so `k < n` on an unfiltered key becomes
+            // a static E312 — 113 corpus scripts compare an index that is an
+            // int at runtime. It stays open until TI5 narrowing can separate
+            // the two per branch.
+            index_entry->type = set_type_any(tp, ANY_LOOP_SRC);
         }
         push_name(tp, index_entry, NULL);
     }
@@ -8575,7 +8749,7 @@ AstNode* build_order_spec(Transpiler* tp, TSNode spec_node) {
         ast_node->descending = false;  // default ascending
     }
 
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     return (AstNode*)ast_node;
 }
 
@@ -8597,7 +8771,7 @@ AstNode* build_for_let_clause(Transpiler* tp, TSNode let_node) {
     if (ts_node_is_null(value_node)) {
         log_error("for_let_clause: value_node is null");
         ast_node->as = NULL;
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_ERROR_RECOVERY);
     } else {
         const char* value_type = ts_node_type(value_node);
         log_debug("for_let_clause: value_node type = %s", value_type);
@@ -8700,7 +8874,7 @@ AstNode* build_group_clause(Transpiler* tp, TSNode group_node) {
     }
     ts_tree_cursor_delete(&cursor);
 
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     return (AstNode*)ast_node;
 }
 
@@ -8891,7 +9065,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
         // For expression type should be Item | List containing the element type
         // TypeList* type_list = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
         // type_list->nested = ast_node->then->type;
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_LIST);
     }
 
     tp->current_scope = ast_node->vars->parent;
@@ -8915,7 +9089,7 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
     log_debug("got for then type %d", ast_node->then->node_type);
 
     // for statement returns type
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
@@ -8942,9 +9116,9 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
 
     // current item ~ as the source
     AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, apply_node, sizeof(AstNode));
-    current_item->type = &TYPE_ANY;
+    current_item->type = set_type_any(tp, ANY_STATEMENT);
     loop->as = current_item;
-    loop->type = &TYPE_ANY;
+    loop->type = set_type_any(tp, ANY_STATEMENT);
 
     // register the loop var in scope
     push_name(tp, (AstNamedNode*)loop, NULL);
@@ -8975,7 +9149,7 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
         AST_NODE_IDENT, apply_node, sizeof(AstIdentNode));
     arg->name = loop->name;
     arg->entry = lookup_name(tp, c_name);
-    arg->type = &TYPE_ANY;
+    arg->type = set_type_any(tp, ANY_STATEMENT);
 
     AstCallNode* call = (AstCallNode*)alloc_ast_node(tp,
         AST_NODE_CALL_EXPR, apply_node, sizeof(AstCallNode));
@@ -8984,10 +9158,10 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
     call->pipe_inject = false;
     call->propagate = false;
     call->can_raise = false;
-    call->type = &TYPE_ANY;
+    call->type = set_type_any(tp, ANY_CALL_RESULT);
 
     for_node->then = (AstNode*)call;
-    for_node->type = &TYPE_ANY;
+    for_node->type = set_type_any(tp, ANY_STATEMENT);
 
     tp->current_scope = for_node->vars->parent;
     return (AstNode*)for_node;
@@ -9031,7 +9205,7 @@ AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
     ast_node->body = build_expr(tp, body_node);
     log_debug("got while body type %d", ast_node->body ? ast_node->body->node_type : -1);
 
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
@@ -9044,7 +9218,7 @@ AstNode* build_break_stam(Transpiler* tp, TSNode break_node) {
     if (!require_proc_scope(tp, break_node, "`break`")) return NULL;
 
     AstNode* ast_node = alloc_ast_node(tp, AST_NODE_BREAK_STAM, break_node, sizeof(AstNode));
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     return ast_node;
 }
 
@@ -9056,7 +9230,7 @@ AstNode* build_continue_stam(Transpiler* tp, TSNode continue_node) {
     if (!require_proc_scope(tp, continue_node, "`continue`")) return NULL;
 
     AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CONTINUE_STAM, continue_node, sizeof(AstNode));
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     return ast_node;
 }
 
@@ -9175,7 +9349,7 @@ AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
     }
     ts_tree_cursor_delete(&cursor);
 
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
     return (AstNode*)ast_node;
 }
 
@@ -9236,7 +9410,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         left->object = ast_node->object;
         left->field = ast_node->key;
         left->computed = true;
-        left->type = &TYPE_ANY;
+        left->type = set_type_any(tp, ANY_INDEX_ELEM);
         ast_node->left = (AstNode*)left;
         ast_node->right = ast_node->value;
 
@@ -9277,7 +9451,7 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         left->object = ast_node->object;
         left->field = ast_node->key;
         left->computed = false;
-        left->type = &TYPE_ANY;
+        left->type = set_type_any(tp, ANY_MEMBER_SHAPE);
         ast_node->left = (AstNode*)left;
         ast_node->right = ast_node->value;
 
@@ -9509,7 +9683,7 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
 static AstNode* build_start_expr(Transpiler* tp, TSNode start_node) {
     AstStartNode* ast_node = (AstStartNode*)alloc_ast_node(
         tp, AST_NODE_START, start_node, sizeof(AstStartNode));
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
     ast_node->owner_scope = tp->current_scope;
 
     // The contextual scanner admits `start` only before a named call operand;
@@ -10562,7 +10736,7 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
 
     AstViewNode* ast_node = (AstViewNode*)alloc_ast_node(tp,
         AST_NODE_VIEW, view_node, sizeof(AstViewNode));
-    ast_node->type = &TYPE_ANY;
+    ast_node->type = set_type_any(tp, ANY_STATEMENT);
 
     // determine view vs edit
     TSNode kind = ts_node_child_by_field_id(view_node, FIELD_KIND);
@@ -10642,7 +10816,7 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
             if (sym == SYM_STATE_ENTRY) {
                 AstStateEntry* entry = (AstStateEntry*)alloc_ast_node(tp,
                     AST_NODE_STATE_ENTRY, child, sizeof(AstStateEntry));
-                entry->type = &TYPE_ANY;
+                entry->type = set_type_any(tp, ANY_STATEMENT);
 
                 TSNode name = ts_node_child_by_field_id(child, FIELD_NAME);
                 StrView name_str = node_name_text(tp, name);
@@ -10693,7 +10867,7 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
 
             AstEventHandler* handler = (AstEventHandler*)alloc_ast_node(tp,
                 AST_NODE_EVENT_HANDLER, handler_node, sizeof(AstEventHandler));
-            handler->type = &TYPE_ANY;
+            handler->type = set_type_any(tp, ANY_STATEMENT);
 
             // event name
             TSNode event_node = ts_node_child_by_field_id(handler_node, FIELD_EVENT);
@@ -10763,7 +10937,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
     TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
-    ast_node->type = &TYPE_ANY;  // content() returns Item, not List
+    ast_node->type = set_type_any(tp, ANY_LIST);  // content() returns Item, not List
 
     // Two-pass compilation for top-level functions (only when is_global is true)
     if (is_global) {
@@ -10842,7 +11016,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     AstViewNode* view_node = (AstViewNode*)alloc_ast_node(tp,
                         AST_NODE_VIEW, child, sizeof(AstViewNode));
                     view_node->name = name_pool_create_strview(tp->name_pool, tmpl_name);
-                    view_node->type = &TYPE_ANY;
+                    view_node->type = set_type_any(tp, ANY_STATEMENT);
                     view_node->pattern = NULL;
                     view_node->param = NULL;
                     view_node->body = NULL;
@@ -11112,6 +11286,14 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
     log_debug("end building content item: %p, %ld", ast_node->item, type->length);
     if (flattern && type->length == 1) { return ast_node->item; }
+
+    // TIG11 residue, deliberately NOT typed here: a content block's value
+    // depends on its context (`transpile_content` yields the last item in a
+    // proc, the sole item in a fn, a list only for a multi-item fn block), and
+    // this node doubles as the function-body node whose type feeds the return
+    // contract. Publishing the container type broke 197 corpus scripts through
+    // that path. It needs the return-contract seam of IP4/TI7, not a local
+    // rule; the census keeps counting it under `list` until then.
     return ast_node;
 }
 
@@ -11220,7 +11402,7 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
     }
 
     if (is_statement) {
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = set_type_any(tp, ANY_STATEMENT);
         return (AstNode*)ast_node;
     }
 
@@ -11235,7 +11417,7 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
     } else {
         // Without a value arm, success preserves the operand's non-error contract.
         Type* successful = lambda_type_remove_error(tp->pool, ast_node->operand->type);
-        if (!successful) successful = &TYPE_ANY;
+        if (!successful) successful = set_type_any(tp, ANY_ERROR_RECOVERY);
         ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
     }
     return (AstNode*)ast_node;
@@ -11271,7 +11453,7 @@ static AstNode* build_propagate_expr(Transpiler* tp, TSNode propagate_node) {
     }
 
     Type* success_type = lambda_type_remove_error(tp->pool, operand->type);
-    if (!success_type) success_type = &TYPE_ANY;
+    if (!success_type) success_type = set_type_any(tp, ANY_ERROR_RECOVERY);
     if (effective_operand && effective_operand->node_type == AST_NODE_CALL_EXPR) {
         // retain the call node for the direct-call lowering path, but publish
         // the error-free result type so a surrounding Item boundary boxes the
