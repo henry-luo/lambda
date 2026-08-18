@@ -1,0 +1,13 @@
+ok   u-escape multiline => true
+ok   u-escape backref => true
+ok   u-brace astral => true
+ok   u-escape in class => true
+ok   u-surrogate pair under /u => true
+ok   c-escape tab => true
+ok   p-property backref => true
+ok   p-property multiline => true
+ok   P-property negated => true
+ok   sigma folds => true
+ok   lookbehind sigma folds => true
+ok   long-s does not fold to s => false
+ok   kelvin does not fold to k => false

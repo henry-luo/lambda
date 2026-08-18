@@ -11,6 +11,8 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/utf.h"
+#include "js_regex_generated_properties.h"
+#include <utf8proc.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -168,11 +170,24 @@ static inline uint32_t bt_to_upper(uint32_t cp) {
 static inline uint32_t bt_to_lower(uint32_t cp) {
     return (cp >= 'A' && cp <= 'Z') ? cp + 32 : cp;
 }
-// ECMA-262 Canonicalize for the comparison of single characters (ASCII fast path,
-// sufficient for the routed tests which fold only ASCII letters under /i).
+// ECMA-262 Canonicalize (§22.2.2.9) for single-character comparison.
+//
+// This was ASCII-only, so /i comparisons silently failed to fold any non-ASCII
+// letter -- /(?<=\u03a3+)b/i did not match "\u03c3b". It now applies the real
+// rule: uppercase the codepoint, but leave a non-ASCII character alone when its
+// uppercase is ASCII. That exception is what keeps U+017F (long s) and U+212A
+// (Kelvin sign) from folding to "S"/"K" outside /u, and the old ASCII-only code
+// satisfied it only by never folding anything non-ASCII at all.
+//
+// Under /u the spec uses simple case folding rather than uppercasing; the two
+// agree on the bicameral scripts that matter here, and the /u distinction is
+// not threaded through the matcher yet.
 static inline uint32_t bt_canon(uint32_t cp, bool icase) {
     if (!icase) return cp;
-    return bt_to_upper(cp);
+    if (cp < 128) return bt_to_upper(cp);
+    uint32_t upper = (uint32_t)utf8proc_toupper((utf8proc_int32_t)cp);
+    if (upper < 128) return cp;
+    return upper;
 }
 static inline bool bt_char_eq(uint32_t a, uint32_t b, bool icase) {
     return a == b || (icase && bt_canon(a, icase) == bt_canon(b, icase));
@@ -265,6 +280,61 @@ static uint32_t parse_hex_escape(Parser* ps, bool* ok) {
     *ok = true; return v;
 }
 
+static int bt_hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// \uHHHH and \u{H+}. The backtracker previously had no 'u' case at all, so a
+// routed pattern such as /^\u0041$/m matched a literal 'u' — see the escape
+// normalization note in parse_atom. The brace form shares parse_hex_escape's
+// contract; the 4-digit form additionally combines a surrogate pair so
+// \uD83D\uDE00 is one astral codepoint rather than two halves.
+static uint32_t parse_unicode_escape(Parser* ps, bool* ok) {
+    *ok = false;
+    if (ps->pos < ps->len && ps->p[ps->pos] == '{') return parse_hex_escape(ps, ok);
+    uint32_t v = 0;
+    for (int i = 0; i < 4; i++) {
+        if (ps->pos >= ps->len) return 0;
+        int d = bt_hex_digit(ps->p[ps->pos]);
+        if (d < 0) return 0;
+        v = v * 16 + (uint32_t)d; ps->pos++;
+    }
+    // Only /u combines a surrogate pair into one codepoint. Without it the
+    // pattern is a sequence of UTF-16 code units and \uD83D must stay its own
+    // unit, so combining here would change non-unicode matching.
+    if (ps->flags.unicode && v >= 0xD800 && v <= 0xDBFF && ps->pos + 1 < ps->len &&
+            ps->p[ps->pos] == '\\' && ps->p[ps->pos + 1] == 'u') {
+        int save = ps->pos;
+        ps->pos += 2;
+        uint32_t lo = 0; bool lo_ok = true;
+        for (int i = 0; i < 4; i++) {
+            if (ps->pos >= ps->len) { lo_ok = false; break; }
+            int d = bt_hex_digit(ps->p[ps->pos]);
+            if (d < 0) { lo_ok = false; break; }
+            lo = lo * 16 + (uint32_t)d; ps->pos++;
+        }
+        if (lo_ok && lo >= 0xDC00 && lo <= 0xDFFF) {
+            v = 0x10000 + ((v - 0xD800) << 10) + (lo - 0xDC00);
+        } else {
+            ps->pos = save;
+        }
+    }
+    *ok = true; return v;
+}
+
+// \cX — control escape. A non-letter after \c is not a control escape; the
+// caller then treats the sequence as the literal 'c' (Annex B behaviour).
+static bool parse_control_escape(Parser* ps, uint32_t* out) {
+    if (ps->pos >= ps->len) return false;
+    char c = ps->p[ps->pos];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) return false;
+    *out = (uint32_t)(c & 0x1F); ps->pos++;
+    return true;
+}
+
 // Append the codepoint ranges for a class shorthand (\d \D \w \W \s \S) into vec.
 // Returns whether the shorthand is itself "negated" (\D \W \S). For simplicity we
 // represent negated shorthands by adding their positive ranges and a separate
@@ -302,6 +372,31 @@ static RxNode* shorthand_class(Parser* ps, char kind) {
     return n;
 }
 
+// \p{...} / \P{...} — Unicode property class. The backtracker had no 'p' case,
+// so a routed pattern such as /(\p{L})\1/u matched a literal 'p'. Ranges come
+// from the same generated tables the RE2 side uses, so both engines agree.
+// Returns NULL (without setting ps->error) when the name is not a known
+// property, letting the caller fall back to its previous literal handling.
+static RxNode* property_class(Parser* ps, const char* name, int name_len, bool negated) {
+    enum { BT_PROP_MAX_PAIRS = 8192 };
+    int* pairs = (int*)mem_alloc(sizeof(int) * BT_PROP_MAX_PAIRS * 2, MEM_CAT_PARSER);
+    if (!pairs) return NULL;
+    int count = js_regex_wrapper_lookup_property_ranges(name, name_len, pairs, BT_PROP_MAX_PAIRS);
+    if (count <= 0) { mem_free(pairs); return NULL; }
+    RxNode* n = new_node(ps, RX_CLASS);
+    RxClass* cls = (RxClass*)bt_alloc(ps, sizeof(RxClass));
+    cls->range_count = count;
+    cls->ranges = (RxRange*)bt_alloc(ps, sizeof(RxRange) * count);
+    for (int i = 0; i < count; i++) {
+        cls->ranges[i].lo = (uint32_t)pairs[i * 2];
+        cls->ranges[i].hi = (uint32_t)pairs[i * 2 + 1];
+    }
+    cls->negated = negated;
+    mem_free(pairs);
+    n->cls = cls;
+    return n;
+}
+
 // Parse a character class [...]; ps->pos points at '['.
 static RxNode* parse_class(Parser* ps) {
     ps->pos++; // [
@@ -331,6 +426,8 @@ static RxNode* parse_class(Parser* ps) {
                 case 'v': lo = '\v'; ps->pos++; break;
                 case '0': lo = 0; ps->pos++; break;
                 case 'x': { ps->pos++; bool ok; lo = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; mem_free(ranges.data); return NULL; } break; }
+                case 'u': { ps->pos++; bool ok; lo = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; mem_free(ranges.data); return NULL; } break; }
+                case 'c': { ps->pos++; if (!parse_control_escape(ps, &lo)) lo = 'c'; break; }
                 default: lo = (unsigned char)e; ps->pos++; break;
             }
         } else {
@@ -354,6 +451,8 @@ static RxNode* parse_class(Parser* ps) {
                     case 'v': hi='\v'; ps->pos++; break;
                     case '0': hi=0; ps->pos++; break;
                     case 'x': { ps->pos++; bool ok; hi = parse_hex_escape(ps,&ok); if(!ok){ps->error=true;mem_free(ranges.data);return NULL;} break; }
+                    case 'u': { ps->pos++; bool ok; hi = parse_unicode_escape(ps,&ok); if(!ok){ps->error=true;mem_free(ranges.data);return NULL;} break; }
+                    case 'c': { ps->pos++; if (!parse_control_escape(ps, &hi)) hi = 'c'; break; }
                     default: hi=(unsigned char)e; ps->pos++; break;
                 }
             } else {
@@ -493,6 +592,18 @@ static RxNode* parse_atom(Parser* ps) {
         if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S') {
             ps->pos += 2; return shorthand_class(ps, e);
         }
+        // \p{...} / \P{...} before the single-char escapes: the name is braced,
+        // so it cannot be confused with a one-character escape.
+        if ((e == 'p' || e == 'P') && ps->pos + 2 < ps->len && ps->p[ps->pos + 2] == '{') {
+            int close = ps->pos + 3;
+            while (close < ps->len && ps->p[close] != '}') close++;
+            if (close < ps->len) {
+                RxNode* pn = property_class(ps, ps->p + ps->pos + 3,
+                                            close - (ps->pos + 3), e == 'P');
+                if (pn) { ps->pos = close + 1; return pn; }
+            }
+        }
+
         // single-char escapes
         uint32_t cp;
         switch (e) {
@@ -503,6 +614,8 @@ static RxNode* parse_atom(Parser* ps) {
             case 'v': cp = '\v'; ps->pos += 2; break;
             case '0': cp = 0; ps->pos += 2; break;
             case 'x': { ps->pos += 2; bool ok; cp = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; return NULL; } break; }
+            case 'u': { ps->pos += 2; bool ok; cp = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; return NULL; } break; }
+            case 'c': { ps->pos += 2; if (!parse_control_escape(ps, &cp)) cp = 'c'; break; }
             default: cp = (unsigned char)e; ps->pos += 2; break;
         }
         RxNode* n = new_node(ps, RX_CHAR); n->cp = cp; return n;

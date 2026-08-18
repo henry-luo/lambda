@@ -297,7 +297,7 @@ Inventory verified: 68 appender/message functions ≈ 2,176 lines in `js_assert.
 
 Families D (diff engine) and E (per-type first-mismatch summarizers) stay — they are two-value algorithms. Note `js_assert.cpp:5167-5859` is an unrelated node:test/mock module — split candidate for §6.
 
-### C. Regex consolidation — net ≈ −1,925, staged with go/no-go
+### C. Regex consolidation — MEASURED: the flip is a NO-GO. Net ≈ −150 LOC, plus 7 confirmed spec bugs worth fixing on their own merits (was: −1,925)
 
 Current layout: RE2 wrapper + emulation (`js_regex_wrapper.cpp` 2,812), spec backtracker (`js_bt_regex.cpp` 1,046), frontend (`js_regexp_compile.cpp` 497), runtime block (`js_runtime.cpp` ~14.4K-19.5K region), routing at `js_regex_needs_backtrack` (`js_runtime.cpp:16251-16333`).
 
@@ -307,6 +307,83 @@ Current layout: RE2 wrapper + emulation (`js_regex_wrapper.cpp` 2,812), spec bac
 - **Stage 3 (−1,433):** delete assertion surgery (`:1307-1788`), scanner helpers (~269 of `:30-334`), `AssertionInfo` (`:335-443`), marker/filter runtime (`:2087-2240`), wrapper compile/exec (`:2242-2799`), header structs; **keep** the `/v` rewriter (`:495-1305`) and the /u//v validators (`:1790-2085`). Runtime side: wrapper predicates/branches/group-remap/strip-fallback (−260).
 - **Stage 4 (−395):** shared `js_regex_scan.h` (UTF-8 fwd/bwd decode, hex/u escape, class-state tracker, capture-group walker — currently 4-6 copies each across engines/frontend/runtime) −170; kind-indexed `JsRegexRange` table + one alias table (currently triplicated) −110; named-groups object builder ×3 → one iterator −85; flag-parse ×4 −30.
 - **Follow-up (LOC-neutral):** port the kept /v rewriter + validators off `std::` (56 sites remain after deletion; satisfies rule 3 where deletion alone cannot).
+
+**MEASUREMENT (2026-08-18) — the no-go trigger fires.** The plan gated the
+routing flip on "flipped lookaround categories ≤2× today's wrapper timings".
+`test/js_runtime_bench/bench_regexp.js` now exists (it did not before) and the
+gate fails decisively.
+
+Isolating *engine* cost with identical matching semantics — the same pattern
+prefixed with `()\1`, which always matches empty but forces backtracker
+routing — on a 20K-char scan-to-miss, release build:
+
+| Pattern | RE2 | backtracker | ratio |
+|---|---:|---:|---:|
+| literal scan | 92 µs | 372 µs | **4.0×** |
+| class+quant scan | 35 µs | 825 µs | **23.6×** |
+
+Confirmed by proxy pairs too: capture-free lookahead 70.5 µs (wrapper) vs 217 µs
+(bt, 3.1×); fixed lookbehind 96.5 µs (wrapper) vs 623 µs (variable-length bt,
+6.5×). RE2's linear-time engine and literal prefilters are exactly why the
+emulation layer exists. **Stage 2 (flip) and Stage 3 (−1,433 emulation
+deletion + −260 runtime plumbing) cannot proceed as designed.** The plan's
+fallback ("retain only the ~60-LOC trim-group lane … still nets ≈ −1,700") does
+not survive either: the wrapper's assertion surgery, marker/filter runtime and
+two-pass retry are all *load-bearing* for patterns that must stay on RE2.
+
+**What survives:**
+- **Stage 0 — DONE (2026-08-18), for correctness not LOC.** Fixed in the backtracker itself rather than by restructuring the shared preprocessing loop: `js_bt_regex.cpp` now parses `\uHHHH` / `\u{...}` (with surrogate-pair combining gated on `/u`, since without it the pattern is a sequence of UTF-16 code units), `\cX`, and `\p{...}` / `\P{...}` via the same generated tables the RE2 side uses — in atom position and inside character classes, including as a range endpoint. `bt_canon` now implements the real ES §22.2.2.9 rule (uppercase, but leave a non-ASCII character alone when its uppercase is ASCII), which keeps U+017F and U+212A from folding — the property the old ASCII-only code satisfied only by never folding anything. All seven bugs verified fixed; locked by `test/js/regexp_backtracker_escapes.{js,txt}`. `test_js_bt_regex_gtest` needed the generated-properties TU added to its unity include to link. Gates: bt gtest 50/50, test262 40261/40261 zero regressions, MIR goldens 21/21. Cost: **+~90 lines** in the backtracker.
+- ~~Stage 0 — DO IT (+60…100 lines)~~ Seven spec bugs
+  verified live by execution on this tree, all on patterns that *already* route
+  to the backtracker, because `bt_pattern` is captured before escape
+  normalization: `\uHHHH`, `\u{...}`, `\p{L}` (top-level and with backref),
+  `\cX`, and non-ASCII `/i` folding all silently return the wrong answer.
+  Splitting preprocessing into engine-neutral normalization (before routing) vs
+  RE2-only rewrites (after) fixes all seven and is independent of any flip.
+- **Eighth regex bug — FIXED (2026-08-18).** Bare `\p{...}` threw
+  `SyntaxError: invalid character class range` for 13 of the 20 most common
+  binary properties (White_Space, Alphabetic, Math, Uppercase, Lowercase, Dash,
+  Quotation_Mark, Radical, Bidi_Control, Join_Control, Emoji_Modifier, the two
+  IDS operators, Pattern_White_Space), while the identical `[\p{...}]` spelling
+  matched correctly. Root cause: RE2 does not know all binary-property names, so
+  the `/v` class rewriter flattens them to explicit ranges — but only **inside**
+  a class, leaving the bare form to reach RE2 unflattened. Fixed by wrapping
+  bare property escapes in a one-element class *before* the rewriter runs, so
+  both spellings take one path; an unrecognised name still raises SyntaxError.
+  Covered by extending `test/js/regex_unicode_binary_property_class.{js,txt}`.
+
+  This also corrected `regex_unicode_props` t7: `^\p{XID_Start}\p{XID_Continue}*$`
+  no longer matches `"_test"`. U+005F is XID_Continue but **not** XID_Start — JS
+  permits a leading underscore through a separate `IdentifierStart` production,
+  not by `_` being ID_Start. The golden had recorded the unflattened-RE2
+  behaviour; the in-class spelling always reported false, and the fix does not
+  touch the in-class path, so this is the bare form being brought into line.
+- **Stage 1 — BLOCKED** (see above: the backref lane is a live fallback, not
+  dead code).
+- **Stage 4 — IMPLEMENTED AND REVERTED for the measured item; ≈ −17, not −150.**
+  The `JsRegexRange` consolidation was built: all 18 table-shaped branches in
+  `js_regex_special_property_contains` were hoisted to file scope and driven
+  from a kind-indexed table. It measured **−17 lines**, not the −90 estimated
+  (hoisting preserves every data line; only the `if`/`return`/`}` scaffolding
+  goes, and the table rows and header give most of it back). It also replaces an
+  early-exiting if-chain with a linear 18-entry scan on a per-codepoint matching
+  path. Reverted: the line saving does not justify a possible regression on
+  property-heavy patterns. The remaining Stage 4 items (UTF-8 decoder sharing,
+  named-groups builder, flag-parse) are unmeasured, and on this evidence should
+  be measured before any are attempted.
+- ~~Stage 4 — ≈ −150, flip-independent~~ Confirmed
+  present: 48 `static const JsRegexRange` branches in `js_runtime.cpp` whose
+  ~3-line dispatch each can collapse to a kind-indexed table (the range arrays
+  themselves are data and stay, so ≈ −90, not −110); and five UTF-8 decoders
+  (`bt_utf8_decode`, `bt_utf8_decode_prev`, `v_utf8_decode`,
+  `js_regex_decode_utf8_permissive`, `js_regex_utf8_sequence_len`) whose
+  contracts genuinely differ (forward/backward/permissive/length-only/
+  `std::string`-based), so ≈ −60, not −170. Named-groups builder and flag-parse
+  consolidation unmeasured.
+
+**Net verdict: C is worth ≈ −150 LOC and seven bug fixes, not −1,925.** The
+`std::` removal goal for `js_regex_wrapper.cpp` (114 sites) cannot be achieved
+by deletion and needs a straight port instead.
 
 **Gates (go/no-go):** test262 full baseline no regressions (40,261 passing; RegExp 1,703, lookBehind 17/17, property-escapes 611/613, unicodeSets ~150); extended `test_js_bt_regex_gtest` green; zero bt budget-exhaust/group-cap events across test262; **new `test/js_runtime_bench/bench_regexp.js`** (none exists today — must be created; release build per rule 10): plain lane ±2%, flipped lookaround ≤2× wrapper timings; a sweep proving `js_bt_compile` never fails a valid routed pattern before the strip-fallback becomes SyntaxError. **No-go fallback:** keep only a ~60-LOC trim-group lane for capture-free trailing lookaheads — still nets ≈ −1,700.
 
