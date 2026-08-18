@@ -2181,7 +2181,10 @@ static bool mir_argument_is_module_binding(MirTranspiler* mt, AstNode* node) {
     return ident->name && find_global_var(mt, ident->name->chars) != NULL;
 }
 
-static TypeId get_effective_type(MirTranspiler* mt, AstNode* node);
+static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node);
+// Deprecated spelling of the carrier oracle; retained so the rename lands as
+// one reviewable change. New code calls mir_expr_carrier_type.
+#define get_effective_type mir_expr_carrier_type
 
 static bool mir_module_binding_has_native_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected) {
@@ -2907,6 +2910,16 @@ static void emit_jump_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg,
 }
 
 static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
+    // The reinterpretation emits a DMOV, so it needs a real MIR_T_D register.
+    // A float-typed value can still arrive BOXED — a cross-module `float[]`
+    // read publishes an Item — and every caller here (the two boxers, the
+    // nullable-arith null test, the declaration boundary) wants the double,
+    // not the tag. Guarding at this one instruction covers all four instead of
+    // repeating the check per caller [T19-1]. An i64 register reaching a
+    // "give me this double's bits" request can only be a boxed float.
+    if (MIR_reg_type(mt->ctx, d_reg, mt->em.func) != MIR_T_D) {
+        d_reg = emit_unbox(mt, d_reg, LMD_TYPE_FLOAT);
+    }
     // Result15: the call edge to the 2-insn helper made numeric loops
     // placement-sensitive; reinterpret inline via the shared per-function
     // scratch slot (see em_emit_double_bits for the full rationale).
@@ -2923,6 +2936,12 @@ static MIR_reg_t emit_float_null_lane(MirTranspiler* mt) {
 
 // Box float (double) -> Item; the hot in-band arm is inline.
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
+    // Normalize the register itself, not just the bit view: this boxer also
+    // DEQ-compares `val_reg` against 0.0 on the zero arm, so guarding only
+    // inside emit_double_bits moved the failure from `dmov` to `deq` [T19-1].
+    if (MIR_reg_type(mt->ctx, val_reg, mt->em.func) != MIR_T_D) {
+        val_reg = emit_unbox(mt, val_reg, LMD_TYPE_FLOAT);
+    }
     MIR_reg_t bits = emit_double_bits(mt, val_reg);
     MIR_reg_t in_band = new_reg(mt, "fdmask", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -2983,6 +3002,11 @@ static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
 // the F64 lane and translate it only at an Item boundary; the ordinary float
 // boxer would otherwise turn it into a user-visible NaN.
 static MIR_reg_t emit_box_float_lane(MirTranspiler* mt, MIR_reg_t val_reg) {
+    // Same normalization as emit_box_float: the null/non-null arms below move
+    // `val_reg` through the double lane, not only its bit view [T19-1].
+    if (MIR_reg_type(mt->ctx, val_reg, mt->em.func) != MIR_T_D) {
+        val_reg = emit_unbox(mt, val_reg, LMD_TYPE_FLOAT);
+    }
     MIR_reg_t bits = emit_double_bits(mt, val_reg);
     MIR_reg_t is_null = new_reg(mt, "fnull", MIR_T_I64);
     MIR_reg_t result = new_reg(mt, "boxf_lane", MIR_T_I64);
@@ -3834,7 +3858,7 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
 // The redundancy rule itself lives with the other type reasoning in
 // build_ast.cpp; asking it here rather than re-deriving it is what keeps
 // emission and diagnosis from drifting apart.
-static TypeId get_effective_type(MirTranspiler* mt, AstNode* node);
+static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node);
 static TypeId mir_native_arithmetic_operand_type(MirTranspiler* mt,
         AstNode* node);
 static bool mir_expr_proven_nonnull_under_dense_guard(MirTranspiler* mt,
@@ -6249,7 +6273,15 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
     return LMD_TYPE_ANY;
 }
 
-static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
+// THE CARRIER ORACLE [T19-1]. Answers which machine carrier an expression's
+// value actually arrives in — NOT its semantic type. Every special case in
+// this function is a "the type says X but the carrier is Y" correction
+// (match/handler/can-raise/unproven-index all report ANY because their value
+// is a boxed Item). Any emitter decision that selects a lane, an unbox, a
+// move or a store must ask THIS, never `node->type->type_id`: the two diverge
+// for every boxed producer with a precise static type, and reading the type
+// there is how precise inference turns into a segfault.
+static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
     if (!node) return LMD_TYPE_ANY;
     // Braced handlers join a successful value with a body value in the boxed
     // Item lane; keep callers from interpreting the merged register as a raw
@@ -7894,6 +7926,15 @@ static LaneReg emit_int_lane_arith(MirTranspiler* mt, Operator op,
 static MIR_reg_t emit_nullable_float_arith(MirTranspiler* mt, Operator op,
         MIR_reg_t left, TypeId left_tid, bool left_nullable,
         MIR_reg_t right, TypeId right_tid, bool right_nullable) {
+    // Normalize BOTH operands to their native lane before anything reads them.
+    // The float null test below reinterprets the operand's bits through
+    // `emit_double_bits`, which emits a DMOV and therefore requires a real
+    // MIR_T_D register — but the value can still arrive boxed (a cross-module
+    // `float[]` read publishes an Item), and the DMOV then fails MIR's
+    // verifier with "got 'int', expected 'double'". The guarded conversion
+    // used to run only at `l_normal`, i.e. AFTER this test [T19-1].
+    left = emit_scalar_native_lane(mt, left, left_tid);
+    right = emit_scalar_native_lane(mt, right, right_tid);
     MIR_reg_t has_null = new_reg(mt, "fa_null", MIR_T_I64);
     MIR_reg_t result = new_reg(mt, "fa_res", MIR_T_D);
     MIR_label_t l_normal = new_label(mt);
@@ -13985,7 +14026,10 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
 
     // when the member expression has a resolved field type, unbox the fn_member
     // result so that transpile_expr returns a native value matching the type
-    TypeId mem_tid = ((AstNode*)field_node)->type ? ((AstNode*)field_node)->type->type_id : LMD_TYPE_ANY;
+    // Carrier, not contract [T19-1]: `fn_member` publishes a boxed Item unless
+    // the oracle proves a lane, so unboxing on the AST's field type alone would
+    // decode an Item as raw bits the moment member typing gets precise (TIG2).
+    TypeId mem_tid = get_effective_type(mt, (AstNode*)field_node);
     if (mir_is_native_scalar_value_type(mem_tid) || mem_tid == LMD_TYPE_STRING) {
         result = emit_unbox_contract_lane(mt, result, mem_tid,
             ((AstNode*)field_node)->type);
@@ -20467,7 +20511,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_reg_t val = transpile_expr(mt, asn->as);
             char name_buf[128];
             snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
-            TypeId tid = asn->as->type ? asn->as->type->type_id : LMD_TYPE_ANY;
+            // Register the binding with the carrier its initializer actually
+            // produced, not with the initializer's semantic type [T19-1]: the
+            // two diverge for every boxed producer with a precise static type.
+            TypeId tid = get_effective_type(mt, asn->as);
             set_var(mt, name_buf, val, type_to_mir(tid), tid);
             return val;
         }

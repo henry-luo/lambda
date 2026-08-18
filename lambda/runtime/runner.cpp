@@ -804,7 +804,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                     strbuf_append_format(census, " %s=%d",
                         any_reason_name((AnyReason)r), tp->any_census[r]);
                 }
-                log_info("%s (%s)", census->str, script_path);
+                log_notice("%s (%s)", census->str, script_path);
                 strbuf_free(census);
             }
         }

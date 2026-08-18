@@ -94,6 +94,7 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
+void js_report_any_census(JsTranspiler* tp);
 void js_scope_lookup_cache_enable(JsTranspiler* tp);
 typedef struct JsAstIndexPassContext {
     JsTranspiler* transpiler;
@@ -108,6 +109,7 @@ static inline int js_index_compiler_pass(void* opaque) {
 static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     JsAstNode* ast = build_js_ast(tp, root);
     if (!ast) return NULL;
+    js_report_any_census(tp);
     js_scope_lookup_cache_enable(tp);
     JsAstIndexPassContext pass_context = {tp, ast};
     CompilerPassManager pass_manager;

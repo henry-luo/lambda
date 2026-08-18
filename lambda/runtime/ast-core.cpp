@@ -24,6 +24,8 @@ extern "C" const char* any_reason_name(AnyReason reason) {
     case ANY_PIPE:                return "pipe";
     case ANY_JS_BINARY:           return "js_binary";
     case ANY_JS_CALL_MEMBER:      return "js_call_member";
+    case ANY_JS_CALL:             return "js_call";
+    case ANY_JS_MEMBER:           return "js_member";
     case ANY_ARITH_OPERAND:       return "arith_operand";
     case ANY_JOIN_OP:             return "join_op";
     case ANY_CALL_RESULT:         return "call_result";

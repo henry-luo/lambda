@@ -1,0 +1,27 @@
+id: no-ast-type-carrier-read
+language: cpp
+severity: error
+message: >-
+  A carrier decision must ask the carrier oracle, not the AST's semantic type.
+  `mir_expr_carrier_type(mt, node)` answers which machine carrier a value
+  actually arrives in; `node->type->type_id` answers what the value MEANS, and
+  the two diverge for every boxed producer with a precise static type. Reading
+  the semantic type to pick a lane, unbox, move or store is how precise
+  inference turns into a segfault — it blocked five separate typing items
+  across three phases (Type_Infer Impl §10, §13, §14). Structural predicates
+  ("is this a FUNC / TYPE / MAP node?") and literal-guarded reads are fine and
+  are what the narrow pattern below deliberately excludes. Mark audited
+  exceptions with a trailing "// CARRIER_READ_OK: <reason>".
+metadata:
+  suppress: CARRIER_READ_OK
+rule:
+  any:
+    # The two shapes that were actually converted: deciding an unbox lane from
+    # a member/field node's type, and registering a binding's MIR type from its
+    # initializer's type.
+    - pattern: |
+        TypeId $MEM = ((AstNode*)$FIELD)->type ? ((AstNode*)$FIELD)->type->type_id : LMD_TYPE_ANY;
+    - pattern: |
+        TypeId $T = $ASN->as->type ? $ASN->as->type->type_id : LMD_TYPE_ANY;
+files:
+  - "lambda/runtime/transpile-mir.cpp"

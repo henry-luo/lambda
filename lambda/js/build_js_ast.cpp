@@ -19,6 +19,25 @@ static Type* js_set_type_any(JsTranspiler* tp, AnyReason reason) {
     return &TYPE_ANY;
 }
 
+// One report per compiled JS unit, matching the Lambda lane's line so both
+// lanes are measured against one vocabulary [Type_Infer TI3].
+void js_report_any_census(JsTranspiler* tp) {
+    if (!tp) return;
+    int any_total = 0;
+    for (int r = 0; r < ANY_REASON_COUNT; r++) any_total += tp->any_census[r];
+    if (!any_total) return;
+    StrBuf* census = strbuf_new();
+    if (!census) return;
+    strbuf_append_format(census, "any_census: total=%d", any_total);
+    for (int r = 0; r < ANY_REASON_COUNT; r++) {
+        if (!tp->any_census[r]) continue;
+        strbuf_append_format(census, " %s=%d",
+            any_reason_name((AnyReason)r), tp->any_census[r]);
+    }
+    log_notice("%s (js)", census->str);
+    strbuf_free(census);
+}
+
 // forward declarations
 static char js_decode_escape_char(char c);
 static String* js_decode_identifier_name(JsTranspiler* tp, const char* source,
@@ -718,7 +737,7 @@ static JsAstNode* build_js_non_async_await_call(JsTranspiler* tp, TSNode await_n
     }
 
     call->optional = false;
-    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    call->type = js_set_type_any(tp, ANY_JS_CALL);
     return (JsAstNode*)call;
 }
 
@@ -741,7 +760,60 @@ JsAstNode* build_js_binary_expression(JsTranspiler* tp, TSNode binary_node) {
         binary->op = JS_OP_ADD; // fallback
     }
 
-    binary->type = &TYPE_FLOAT;
+    // TIG13: publish the type the operator actually produces. Every binary
+    // expression used to be typed `float` — including `===`, `&&` and string
+    // `+` — which made the JS lane's static types unusable for anything.
+    //
+    // JS policy notes [TI2]: Number is binary64 so arithmetic is `float`, not
+    // `int`; bitwise operators run ToInt32/ToUint32 so their RESULT is an
+    // integral value but it is still a JS number, and the emitter carries it
+    // in the same lane as any other number — typing it `int` would claim a
+    // carrier the lowering does not produce (the IP5 lesson), so it stays
+    // `float`. `+` is overloaded on strings and `&&`/`||`/`??` yield one of
+    // their operands, so those need their operands' types rather than a
+    // fixed answer.
+    switch (binary->op) {
+    case JS_OP_EQ: case JS_OP_NE:
+    case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+    case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+    case JS_OP_INSTANCEOF: case JS_OP_IN:
+        // Relational, equality and membership tests are total predicates.
+        binary->type = &TYPE_BOOL;
+        break;
+    case JS_OP_ADD: {
+        // `+` is string concatenation when either side is a string, numeric
+        // addition otherwise. Only a proven pair answers; anything open stays
+        // open rather than guessing one of the two behaviors.
+        Type* lt = binary->left ? binary->left->type : NULL;
+        Type* rt = binary->right ? binary->right->type : NULL;
+        TypeId l = lt ? lt->type_id : LMD_TYPE_ANY;
+        TypeId r = rt ? rt->type_id : LMD_TYPE_ANY;
+        if (l == LMD_TYPE_STRING || r == LMD_TYPE_STRING) {
+            binary->type = &TYPE_STRING;
+        } else if (l == LMD_TYPE_FLOAT && r == LMD_TYPE_FLOAT) {
+            binary->type = &TYPE_FLOAT;
+        } else {
+            binary->type = js_set_type_any(tp, ANY_JS_BINARY);
+        }
+        break;
+    }
+    case JS_OP_AND: case JS_OP_OR: case JS_OP_NULLISH_COALESCE:
+        // These yield one OPERAND, never a coerced number. Both constituents
+        // reach the result, so the answer is their union when both are known.
+        if (binary->left && binary->right && binary->left->type &&
+                binary->right->type &&
+                binary->left->type->type_id == binary->right->type->type_id) {
+            binary->type = binary->left->type;
+        } else {
+            binary->type = js_set_type_any(tp, ANY_JS_BINARY);
+        }
+        break;
+    default:
+        // Arithmetic, exponentiation and the bitwise/shift family all produce
+        // a JS number.
+        binary->type = &TYPE_FLOAT;
+        break;
+    }
 
     return (JsAstNode*)binary;
 }
@@ -815,7 +887,7 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
                 tp, JS_AST_NODE_TAGGED_TEMPLATE, call_node, sizeof(JsTaggedTemplateNode));
             tagged->tag = build_js_expression(tp, callee_node);
             tagged->quasi = (JsTemplateLiteralNode*)build_js_template_literal(tp, args_node);
-            tagged->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+            tagged->type = js_set_type_any(tp, ANY_JS_CALL);
             return (JsAstNode*)tagged;
         }
     }
@@ -861,7 +933,7 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
     }
 
     // Function calls return ANY type by default
-    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    call->type = js_set_type_any(tp, ANY_JS_CALL);
 
     // Detect optional chaining (obj?.method() or obj?.())
     TSNode opt_chain = ts_node_child_by_field_name(call_node, "optional_chain", strlen("optional_chain"));
@@ -928,8 +1000,40 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
     }
     member->property = build_js_expression(tp, property_node);
 
-    // Property access returns ANY type by default
-    member->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    // TIG14b: resolve the property against the receiver's recorded shape when
+    // there is one. Only CONTAINER-valued fields are published: those are a
+    // boxed pointer on every lowering path, so the type cannot outrun the
+    // carrier — the numeric/string fields are the IP5 hazard class and stay
+    // open until the carrier sweep lands. A dynamic (`obj[expr]`) property has
+    // no static name, so it stays open by construction.
+    Type* resolved_member = NULL;
+    if (!member->computed && member->object && member->object->type &&
+            member->property &&
+            member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        Type* recv = member->object->type;
+        if ((recv->type_id == LMD_TYPE_MAP || recv->type_id == LMD_TYPE_OBJECT) &&
+                !is_global_simple_type(recv)) {
+            TypeMap* recv_map = (TypeMap*)recv;
+            JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+            if (recv_map->shape && prop->name) {
+                FOR_EACH_MAP_FIELD(recv_map, se) {
+                    if (se->name && (int)se->name->length == (int)prop->name->len &&
+                            strncmp(se->name->str, prop->name->chars,
+                                se->name->length) == 0) {
+                        Type* ft = unwrap_simple_type_type(se->type);
+                        if (ft && (ft->type_id == LMD_TYPE_MAP ||
+                                ft->type_id == LMD_TYPE_ELEMENT ||
+                                ft->type_id == LMD_TYPE_OBJECT)) {
+                            resolved_member = ft;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    member->type = resolved_member ? resolved_member
+        : js_set_type_any(tp, ANY_JS_MEMBER);
 
     return (JsAstNode*)member;
 }
@@ -3064,7 +3168,7 @@ JsAstNode* build_js_new_expression(JsTranspiler* tp, TSNode new_node) {
         }
     }
 
-    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    call->type = js_set_type_any(tp, ANY_JS_CALL);
     return (JsAstNode*)call;
 }
 
@@ -4456,7 +4560,7 @@ static JsAstNode* make_this_assignment_u(JsTranspiler* tp, TSNode node, const ch
     member->property = make_ts_identifier_u(tp, node, name, len);
     member->computed = false;
     member->optional = false;
-    member->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    member->type = js_set_type_any(tp, ANY_JS_MEMBER);
 
     JsAssignmentNode* assign = (JsAssignmentNode*)alloc_js_ast_node(tp,
         JS_AST_NODE_ASSIGNMENT_EXPRESSION, node, sizeof(JsAssignmentNode));

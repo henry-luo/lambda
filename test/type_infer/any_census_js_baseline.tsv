@@ -1,0 +1,14 @@
+# JS ANY-census baseline [Type_Infer TI3]. Regenerate with
+# `sh test/type_infer/refresh_js_census.sh`; commit the diff with the change.
+reason	count
+_files	497
+decompose	3235
+error_recovery	29644
+join	4629
+js_binary	35306
+js_call	104528
+js_member	202406
+open_map	40958
+open_param	354720
+statement	4195
+_total	779621

@@ -92,6 +92,13 @@ rules:
     category: memory-safety
     tags: [radiant, lifetime, mandatory]
 
+  no-ast-type-carrier-read:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-ast-type-carrier-read.yml
+    category: correctness
+    tags: [lambda, type-inference, carrier, mandatory]
+    note: "T19-1 carrier oracle: lane/unbox/move/store decisions read mir_expr_carrier_type, never the AST semantic type."
+
   no-bare-type-any-assign:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/no-bare-type-any-assign.yml

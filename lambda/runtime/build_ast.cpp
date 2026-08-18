@@ -525,9 +525,8 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
     return info;
 }
 
-static bool is_global_simple_type(const Type* type);
 
-static Type* unwrap_simple_type_type(Type* type) {
+Type* unwrap_simple_type_type(Type* type) {
     while (type && type->type_id == LMD_TYPE_TYPE && !is_global_simple_type(type) &&
             type->kind == TYPE_KIND_SIMPLE) {
         // Global meta-types use the compact Type prefix. Only a compiler-built
@@ -692,7 +691,7 @@ static bool typed_array_literal_elements_compatible(AstNode* node, Type* expecte
     return true;
 }
 
-static bool is_global_simple_type(const Type* type) {
+bool is_global_simple_type(const Type* type) {
     return type_is_global_meta_type(type) || type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
         type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_COMPLEX || type == &TYPE_DECIMAL ||
            type == &TYPE_INTEGER_VALUE || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
@@ -2743,18 +2742,52 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
 
     TypeId obj_tid = ast_node->object->type->type_id;
     if (obj_tid == LMD_TYPE_ARRAY_NUM || obj_tid == LMD_TYPE_ARRAY) {
-        // TIG1 stays open, now with a precise blocker [Impl IP5 §9.2].
-        // Publishing the element type here is semantically right (D2.5.3,
-        // S7.1) and the declared-destination path above already does it. What
-        // blocks the general case is not this rule and not the nullability:
-        // `int_arr[0]` on a MODULE-bound array segfaults with `int?`, with a
-        // `int | null` union, and with a plain `int` alike. The emitter's rep
-        // oracle (get_effective_type) correctly answers "boxed Item" for that
-        // read, but consumers that read `node->type` directly instead of the
-        // oracle still decode a scalar lane. Closing it means routing every
-        // carrier decision through the oracle — the systematic sweep T19-1
-        // describes — not another special case here.
-        ast_node->type = set_type_any(tp, ANY_INDEX_ELEM);
+        // TIG1: publish the array's recorded element type as `T?` — the same
+        // answer the declared-destination path above gives, with D2.5.3's
+        // nullability for an unproven index (an OOB read is total null, S7.1).
+        TypeArray* arr = (TypeArray*)ast_node->object->type;
+        Type* elem = !is_global_simple_type(ast_node->object->type) ? arr->nested : NULL;
+        // A `var` array's element contract is not stable: its elements can be
+        // rewritten by any later store, and the literal's own element type
+        // goes stale the moment they are. `var vxy = [null, null]` filled with
+        // ints by a helper is the corpus case (awfy/cd2_orig) — publishing the
+        // literal's `null` element made a later `var vvx: int = vxy[0]` a type
+        // error against a value that is an int at runtime. This is D3.3.3's
+        // rule ("container element-type narrowing dies with its binding") at
+        // the AST level, and it mirrors the same guard
+        // `mir_known_index_element_type` applies for mutable bindings.
+        AstNode* object_base = unwrap_primary_node(ast_node->object);
+        bool object_is_mutable_binding = object_base &&
+            object_base->node_type == AST_NODE_IDENT &&
+            ((AstIdentNode*)object_base)->entry &&
+            (((AstIdentNode*)object_base)->entry->is_mutable ||
+             ((AstIdentNode*)object_base)->entry->type_widened);
+        AstNode* index_expr = unwrap_primary_node(ast_node->field);
+        TypeId index_tid = index_expr && index_expr->type
+            ? index_expr->type->type_id : LMD_TYPE_ANY;
+        bool range_index = index_expr &&
+            ((index_expr->node_type == AST_NODE_BINARY &&
+              ((AstBinaryNode*)index_expr)->op == OPERATOR_TO) ||
+             index_tid == LMD_TYPE_RANGE);
+        bool query_index = index_expr &&
+            (index_tid == LMD_TYPE_TYPE || index_tid == LMD_TYPE_ARRAY ||
+             index_tid == LMD_TYPE_ARRAY_NUM ||
+             index_expr->node_type == AST_NODE_TYPE ||
+             index_expr->node_type == AST_NODE_ARRAY_TYPE ||
+             index_expr->node_type == AST_NODE_LIST_TYPE ||
+             index_expr->node_type == AST_NODE_MAP_TYPE ||
+             index_expr->node_type == AST_NODE_ELMT_TYPE ||
+             index_expr->node_type == AST_NODE_FUNC_TYPE ||
+             index_expr->node_type == AST_NODE_BINARY_TYPE ||
+             index_expr->node_type == AST_NODE_UNARY_TYPE ||
+             index_expr->node_type == AST_NODE_CONTENT_TYPE);
+        if (elem && !range_index && !query_index &&
+                elem->type_id != LMD_TYPE_ANY && elem->type_id != LMD_TYPE_TYPE &&
+                !object_is_mutable_binding) {
+            ast_node->type = lambda_type_nullable_normalized(tp->pool, elem);
+        } else {
+            ast_node->type = set_type_any(tp, ANY_INDEX_ELEM);
+        }
     }
     else if (obj_tid == LMD_TYPE_BINARY) {
         // Scalar binary indexes are u8 values; range indexes retain binary type.
@@ -5925,19 +5958,41 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         // and the hardened native-return admission treats it as unprovable,
         // so the boxed error join that propagation/handler consumers use stays intact.
         //
-        // Plain differing arms (no divergence) still join as ANY for now: the
-        // general `T1 | T2` join is more precise but makes the E208
-        // containment checker see error-capable branches that ANY hid —
-        // observed as 95 corpus failures (`function may return error from
-        // call to 'float'`) — i.e. it changes which programs compile, which
-        // is a language-surface decision, not a typing cleanup. ANY also
-        // still absorbs a diverging arm when the surviving arm is ANY.
+        // TIG7: plain differing arms now join as the normalized union too.
+        // An open arm keeps the result open — `any` already contains the other
+        // constituent, so unioning with it would only re-derive `any`.
+        //
+        // Acceptance tightening is expected and sanctioned here: the union
+        // makes error-capable branches visible to the E208 containment checker
+        // that ANY was hiding. Under SI3v2/D3.3.1v2 that is the point, and
+        // TI6 forbids staging it — the scripts it rejects are genuinely
+        // mis-typed and are repaired in the same change.
+        // TIG7 stays open, with a two-sided blocker measured in Impl §13.
+        //
+        // Unioning plain differing arms is right in principle and carrier-safe
+        // in isolation, but two independent failures block it:
+        //
+        // 1. A function's forward-reference placeholder return is `any`
+        //    (error-capable) while its body is still being built, so a
+        //    RECURSIVE arm contributes error-ness the finished function does
+        //    not have. The full union produced 109 SPURIOUS E208s across ~14
+        //    library files — `last_caret_pos_in` provably returns a map on
+        //    every path, yet callers were told it may return an error.
+        // 2. Restricting the union to error-free arms removed those, but left
+        //    21 failures including a segfault in the math package: the union
+        //    type reaches consumers that decode it as a lane.
+        //
+        // Closing it needs resolved recursive return types (a fixpoint before
+        // joins observe them) AND the carrier sweep of §10.3 — not another
+        // local rule here.
         bool has_divergence = then_contrib == &TYPE_ERROR ||
             else_contrib == &TYPE_ERROR;
         if (!has_divergence ||
                 then_type_id == LMD_TYPE_ANY || else_type_id == LMD_TYPE_ANY) {
             ast_node->type = set_type_any(tp, ANY_JOIN);
         } else {
+            // A diverging arm still unions with TYPE_ERROR: that error comes
+            // from a `raise` the source actually wrote, not from a placeholder.
             TypeBinary* join = (TypeBinary*)alloc_type_kind(tp->pool,
                 TYPE_KIND_BINARY, sizeof(TypeBinary));
             join->left = then_contrib;
@@ -6069,7 +6124,10 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
     TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
-    ast_node->type = set_type_any(tp, ANY_LIST);  // list returns Item, not List
+    // Provisional: the real answer is chosen at the exits below (a one-value
+    // declaration block carries its value's type). Counting here would
+    // double-report every list whose type is later refined.
+    ast_node->type = NULL;
 
     ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
@@ -10937,7 +10995,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
     TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
     ast_node->list_type = type;
-    ast_node->type = set_type_any(tp, ANY_LIST);  // content() returns Item, not List
+    // Provisional: the real answer is chosen at the exits below. Counting here
+    // would double-report every block whose type is later refined.
+    ast_node->type = NULL;
 
     // Two-pass compilation for top-level functions (only when is_global is true)
     if (is_global) {
@@ -11287,13 +11347,20 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     log_debug("end building content item: %p, %ld", ast_node->item, type->length);
     if (flattern && type->length == 1) { return ast_node->item; }
 
-    // TIG11 residue, deliberately NOT typed here: a content block's value
-    // depends on its context (`transpile_content` yields the last item in a
-    // proc, the sole item in a fn, a list only for a multi-item fn block), and
-    // this node doubles as the function-body node whose type feeds the return
-    // contract. Publishing the container type broke 197 corpus scripts through
-    // that path. It needs the return-contract seam of IP4/TI7, not a local
-    // rule; the census keeps counting it under `list` until then.
+    // TIG11 (IP4): type the block by what `transpile_content` actually
+    // yields — a proc block's LAST value item, a single-item block's sole
+    // value, a list only for a multi-item functional block.
+    // yields. A single value item IS the block's value on every path, so the
+    // block carries that item's type. The multi-item cases stay open: a
+    // functional block builds a list whose element types are unproven, and a
+    // procedural block's last-value type leaks its raw lane into the
+    // for-expression collector (`[inf, inf, inf]` on
+    // `proc_for_expr_content_proc`) — the IP5 carrier class again.
+    if (type->length == 1 && ast_node->item && ast_node->item->type) {
+        ast_node->type = ast_node->item->type;
+    } else {
+        ast_node->type = set_type_any(tp, ANY_LIST);
+    }
     return ast_node;
 }
 
