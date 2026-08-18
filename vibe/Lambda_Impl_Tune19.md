@@ -199,6 +199,152 @@ Restated acceptance for this track: *no `fn_to`/`iter_val_at` in any corpus rang
 bounds are int-producible* — met, with `havlak` the one member-shape exception. The sieve and
 primes timing goals move to T19-4.
 
+### Post-T19-3 re-measurement (2026-08-18, release, median-of-5, 64 range rows)
+
+Ranking the remaining work against fresh numbers rather than the Result32 snapshot.
+
+**Annotation still buys ≥1.5x on 15 rows** — this is the T19-4 surface, and the mechanism is
+*uniform*. Per-helper diffs of untyped vs typed (`temp/t19/mech/*.mir`):
+
+| row | untyped | typed | gain | abs gap (ms) |
+|---|---|---|---|---|
+| spectralnorm | 44.849 | 1.608 | 27.9x | 43.2 |
+| primes | 66.902 | 3.449 | 19.4x | 63.5 |
+| sieve | 0.499 | 0.035 | 14.3x | 0.5 |
+| richards | 2689.05 | 266.76 | 10.1x | **2422.3** |
+| paraffins | 1.933 | 0.288 | 6.7x | 1.6 |
+| cd | 852.3 | 243.0 | 3.5x | **609.3** |
+| json 3.5x, base64 2.7x, triangl 2.3x (288 ms), binarytrees 2.0x, nqueens/queens 1.7x, nbody/storage/gcbench 1.5x (68 ms) |
+
+In every one, the untyped body falls to the **generic numeric tower** — `fn_add`, `fn_sub`,
+`fn_mul`, `fn_div`, `fn_lt`, `fn_gt`, `fn_le`, `fn_ge`, `fn_index`, `fn_index_assign`,
+`item_at`, `is_truthy` — and the typed body has **zero** of them, carrying only a handful of
+one-time `ensure_typed_array` admissions. One missing container carrier costs the whole body.
+
+**Where the container witness actually dies — verified, not inferred.** Annotating only the
+*caller's local* (`var flags: bool[] = fill(5000, true)`, params left untyped) does **not**
+recover untyped sieve — 1.01 ms vs 1.01 ms unannotated, against sieve2's 0.046 (same debug
+build, relative A/B). Probing `infer_param_types_batched`'s container branch for `flags`:
+
+    used_as_container=1  conflict=0  container_store_type=BOOL      <- consumer READY
+    specialization_types[0]=LMD_TYPE_ERROR (never recorded)         <- producer MISSING
+    specialization_elem_types[0]=ANY
+
+The consumer side is already satisfied — `used_as_container` now works because T19-3 taught
+`gather_evidence_multi` to walk `for` bodies. The producer is the gap:
+`mir_callsite_arg_elem_type` handles a literal array, a static `T[]` type, a direct
+`fill(n, v)` call, and an identifier that names **a parameter of the enclosing function** —
+but has no case for an ordinary **local binding**, which is what `var flags = fill(…)` then
+`sieve(flags, …)` is. So no witness is published and the callee's param stays boxed.
+**T19-4's container half may therefore be much smaller than a general closed-caller analysis:
+teach the recorder to resolve a local binding's element type.** (`sz` in the same call records
+fine as INT, so the machinery around it works.)
+
+**The annotation tax (T19-2) is still live on 5 rows** — typed SLOWER than untyped:
+
+| row | untyped | typed | |
+|---|---|---|---|
+| fannkuch | 0.339 | 0.728 | typed 2.15x slower |
+| bounce | 0.120 | 0.184 | typed 1.53x slower |
+| brainfuck | 318.2 | 405.0 | typed 1.27x slower |
+| cpstak | 0.253 | 0.320 | typed 1.26x slower |
+| knucleotide | 4.428 | 4.866 | typed 1.10x slower |
+
+`bounce2` is fully diagnosed by its helper diff: the declared version has `item_at` **×12
+where untyped has 0** — the annotation *demotes* a read that inference kept inline — plus
+`lambda_int_lane_to_double_c` ×8 (int compares still lowering through `double`),
+`lambda_item_to_int_lane_c` 4→16, `lambda_type_check` ×6 and `lambda_array_set_checked_lane`
+×14. `fannkuch2` is cleaner and more damning: its ONLY differences from untyped are
+`lambda_type_check` ×7, `lambda_int_lane_to_double_c` ×2, `ensure_typed_array` ×3 — and that
+alone costs 2.15x.
+
+**9 rows where annotation buys nothing at all** (0.95–1.05x): revcomp, pidigits, regexredux,
+pnpoly, sumfp, sum, havlak, deltablue, json_gen. Worth an audit of what the typed source fails
+to express, but lower yield than the two tracks above.
+
+**T19-6 residue confirmed** — untyped `richards` (2.7 s, the largest absolute gap in the whole
+corpus) shows `fn_map_set` ×60, `fn_member_by_id` ×49, `lambda_type_check` ×52,
+`lambda_module_name_id_at` ×30, `int2it_lane` ×102.
+
+**Suggested order:** T19-4's local-binding witness first (small, unblocks the 15-row surface,
+consumer already built) → T19-2's `item_at` demotion + `lambda_type_check` elision (fixes the
+categorical-bar violation, and `fannkuch2` isolates it cleanly) → T19-6 records (owns the
+biggest absolute number) → T19-5 store edge.
+
+### T19-4 — Closed-caller specialization (owns sieve/primes/spectralnorm) — **LANDED**
+
+Four changes, two of them fixes to *pre-existing* oracle/emitter disagreements that T19-3
+merely made reachable.
+
+**(a) The call-site witness had no case for a local binding.** `mir_callsite_arg_elem_type`
+resolved a literal array, a static `T[]`, a direct `fill(n, v)` and an identifier naming a
+parameter of the ENCLOSING function — but not `var flags = fill(5000, true)` followed by
+`sieve(flags, sz)`, which is how an array normally reaches a call. Verified by probe: the
+consumer side was already satisfied (`used_as_container=1`, `container_store_type=BOOL`,
+courtesy of T19-3's `for`-walk) while `specialization_types[0]` sat at its never-recorded
+sentinel. Added local-binding resolution (declared array type first, else recurse into the
+initializer, depth-capped). A mutable binding rebound to a different shape is a *speed*
+question, not a soundness one — the witness only picks which native shape to generate, and
+both the callee's body evidence and the call site's carrier check must still agree or the
+call routes to the `_b` entry.
+
+**(b) Unannotated locals never reached the int lane.** The declaration gate required the
+initializer's *boxed carrier* to already read `int`, so `var k = i + i` bound boxed and
+dragged its whole loop into the generic tower. A proven native int tree IS the lane. This is
+not a new kind of binding — `var b = 3` already binds natively and the assignment cascade
+already widens it when a later value does not fit (verified: `var b = 3; b = 1.5` → `1.5`,
+identical on a pre-change binary).
+
+⚠ The decision must have **one owner**. Writing it only at the declaration site broke
+`(let a = 100, let b = a + 1, b)`: the block published a raw lane while the carrier oracle's
+own block-tail resolution still reported the default boxed carrier, and the module read `101`
+as an Item tag. Boxing the block instead broke the opposite direction (`(let t = ints[1], t) + 1`
+→ `inf`, caught by `type_infer_carrier_lanes`). Both are the same mistake — the answer asked
+twice, spelled differently. Extracted `mir_unannotated_native_int_decl()` and call it from
+both the declaration lowering and the oracle.
+
+**(c) The carrier oracle claimed `int / int` and `int % int` were raw lanes.** They are not:
+`transpile_binary_out` returns the `LaneReg` only when the consumer passes `native_int_out`,
+and boxes otherwise — exactly as for ADD/SUB/MUL, which already reported ANY. This stayed
+hidden while both operands were rarely proven int at once; once loop induction variables
+reached the int lane, chart's `ci = i % n_cols` published a boxed Item through an int-typed
+binding and every read saturated to `inf`. div/mod now joins the ADD/SUB/MUL rule. Consumers
+that reopen the lane are unaffected: they ask the LANE WITNESS
+(`mir_native_arithmetic_operand_type`), which still reports INT for the whole tree.
+
+**(d) `INFER_FLOAT_CONTEXT` vetoed closed INT call edges.** A closed edge is a static fact
+about *that parameter*; FLOAT_CONTEXT only says the body mentions a float literal somewhere.
+`eval_A(i, j)` stayed boxed because an unrelated `1.0 /` sits in the same body. Dropping the
+veto outright was measured and **rejected** — spectralnorm 1.87x but brainfuck2 +13%,
+gcbench2 +11%, deriv2 +7%, net geomean only 0.5%. The shipped rule keeps the veto unless the
+parameter's OWN arithmetic uses are int-flavoured (`INFER_ARITH_USE` present, `INFER_FLOAT`
+absent): same spectralnorm win, brainfuck2 regression gone, geomean 0.9% better on its own.
+
+#### Result (release, median-of-5, 61 range rows, vs the post-T19-3 build)
+
+| row | T19-3 | T19-4 | |
+|---|---|---|---|
+| sieve | 0.499 | **0.032** | **15.6x** |
+| paraffins | 1.933 | 0.527 | 3.67x |
+| primes (kostya / larceny) | 66.9 / 67.1 | 19.0 / 19.0 | 3.5x |
+| base64 | 47.76 | 17.07 | 2.80x |
+| spectralnorm | 44.85 | 22.09 | 2.03x |
+| nqueens 1.18x, pnpoly 1.14x, brainfuck2 1.12x, revcomp 1.10x, gcbench2/json2/cd2/cd2_orig 1.05–1.06x, richards/richards2/json/gcbench/deriv2 1.03–1.04x |
+| triangl / pidigits / cpstak2 | | | 1.03–1.04x slower |
+| 39 rows flat | | | **geomean 0.859** |
+
+Untyped `sieve` now **beats** its typed twin (0.032 vs 0.037) and `base64` is at parity. The
+untyped-vs-typed gap closed from 14.3x → 0.89x (sieve), 19.4x → 5.5x (primes), 2.7x → 0.99x
+(base64), 27.9x → 13.7x (spectralnorm). Baseline 3808/3808; mir-emission 59/59, ratchet 16/16,
+js-mir-emission 21/21; test262 0 failures / 0 regressions (one test needed the harness's own
+Phase-4 batch-kill retry). Fixture: `test/lambda/proc/type_infer_native_locals.ls`, whose
+values were checked to be **identical on a binary predating both T19-3 and T19-4** (SI3v2).
+
+**Still open in this track:** the transitive scalar edge. `mul_Av(n, …)` gets no closed-INT
+witness because its caller forwards its own untyped `n`, and `resolve_inferred_type`
+deliberately requires real numeric use so "a param merely passed along stays boxed". A
+forwarding fixpoint would close spectralnorm's remaining 13.7x.
+
 ### T19-4 — Closed-caller scalar lane specialization (owns ray/spectralnorm/fft)
 Extend Tune18's closed-caller witness analysis from array carriers to scalar param **and return** lanes: when every non-escaped direct caller supplies a proven `int`/`float` lane, the raw entry takes `i64`/`d` natively; open/escaped callees keep the boxed entry unchanged [D3.3.1, D3.3.3, D8.3.3]. Combine with T19-1 so an `sx[s]` float-array read counts as a proven producer on the call edge.
 **Acceptance:** untyped ray ≤0.6, spectralnorm ≤2.5, fft ≤0.4, navier_stokes ≤250 ms; untyped `_sphere_intersect` entry shows `d:` for all ten params.

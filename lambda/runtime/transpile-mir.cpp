@@ -2197,6 +2197,8 @@ static bool mir_last_call_returned_boxed(MirTranspiler* mt, AstNode* node) {
 }
 
 
+static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstNamedNode* asn);
+
 static bool mir_module_binding_has_native_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected) {
     if (!mir_argument_is_module_binding(mt, node)) return false;
@@ -6578,6 +6580,9 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                                 memcmp(ident->name->chars, asn->name->chars, ident->name->len) == 0) {
                                 // final local identifiers are not in MIR scope yet
                                 // during type probing; resolve them through this block's declarations.
+                                if (mir_unannotated_native_int_decl(mt, asn)) {
+                                    return LMD_TYPE_INT;
+                                }
                                 return get_effective_type(mt, asn->as);
                             }
                         }
@@ -6695,14 +6700,6 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         TypeId lt = get_effective_type(mt, bi->left);
         TypeId rt = get_effective_type(mt, bi->right);
 
-        // C16 keeps exact int div/mod in the int lane. The native emitter
-        // carries the finite arm and the int poison arm separately, so this
-        // type fact is what prevents a boxed Item round-trip in callers.
-        if ((bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD) &&
-                lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
-            return LMD_TYPE_INT;
-        }
-
         if (bi->op == OPERATOR_TO) {
             // `to` returns a raw Range* container. Reporting ANY here leaves
             // its pointer untagged at the next Item boundary, so `range is
@@ -6729,9 +6726,22 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         }
 
         if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT &&
-            (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
-            // The AST's int result type is too narrow after 53-bit overflow
-            // promotion; MIR must treat the runtime result as a boxed Item.
+            (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+             bi->op == OPERATOR_MUL || bi->op == OPERATOR_IDIV ||
+             bi->op == OPERATOR_MOD)) {
+            // These all compute in the i64 lane but the DEFAULT lowering boxes
+            // on the way out -- transpile_binary_out returns the raw LaneReg
+            // only when the consumer asked for `native_int_out`. The carrier
+            // oracle must describe that default, so it answers ANY; a consumer
+            // that intends to reopen the lane asks the LANE WITNESS instead
+            // (mir_native_arithmetic_operand_type / mir_is_native_int_tree),
+            // which still reports INT for this whole tree.
+            //
+            // div/mod used to claim INT here. That disagreed with its own
+            // emitter and stayed hidden only while both operands were rarely
+            // proven int at once; once loop induction variables reached the
+            // int lane (T19-3/T19-4), `i % n` published a boxed Item through
+            // an int-typed binding and every read of it saturated to `inf`.
             return LMD_TYPE_ANY;
         }
 
@@ -7280,6 +7290,22 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
     if (mir_binary_is_exact_u32_result(bi)) return false;
     return !mir_matches_compact_loop_sub(mt, bi) &&
         !mir_matches_compact_loop_add(mt, bi);
+}
+
+// T19-4: ONE owner for "an unannotated declaration whose initializer is a
+// proven native int tree binds on the int lane". The declaration lowering and
+// the carrier oracle must give the same answer -- asking it in two places with
+// two spellings is exactly what made a block-local `let b = a + 1` publish a
+// raw lane through an oracle that still reported the default boxed carrier,
+// and MIR cannot catch that (a boxed Item and an int lane are both i64).
+static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstNamedNode* asn) {
+    if (!asn || !asn->as || asn->declared_type) return false;
+    AstNode* init = ast_unwrap_primary(asn->as);
+    if (!init || init->node_type != AST_NODE_BINARY) return false;
+    if (!mir_is_native_int_arith(mt, init)) return false;
+    // Only the case the ordinary carrier does not already cover, so this stays
+    // strictly additive to the pre-T19-4 gate.
+    return get_effective_type(mt, asn->as) == LMD_TYPE_ANY;
 }
 
 // A native scalar consumer may prove an entire closed integer tree without
@@ -11657,12 +11683,33 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     predicted_expr_tid = native_u32_initializer
                         ? LMD_TYPE_INT : get_effective_type(mt, asn->as);
                     AstNode* native_initializer = ast_unwrap_primary(asn->as);
-                    bool native_int_initializer = native_initializer &&
+                    // T19-4: a proven native int tree IS the int lane whether or
+                    // not an annotation says so. Requiring the boxed carrier to
+                    // already read `int` asked the wrong oracle -- `i + i`
+                    // answers ANY because the DEFAULT lowering boxes on the way
+                    // out (S4.1.2, D2.2.2) -- so every unannotated `var k = i + i`
+                    // bound boxed and dragged its entire loop into the generic
+                    // numeric tower (fn_add/fn_le/fn_index_assign/is_truthy).
+                    // An unannotated native binding is not a new thing here:
+                    // `var b = 3` already binds on the int lane, and the
+                    // assignment cascade already widens such a binding when a
+                    // later value does not fit its lane.
+                    bool native_int_arith_initializer = native_initializer &&
                         native_initializer->node_type == AST_NODE_BINARY &&
-                        mir_is_native_int_arith(mt, native_initializer) &&
+                        mir_is_native_int_arith(mt, native_initializer);
+                    bool inferred_native_int_initializer =
+                        mir_unannotated_native_int_decl(mt, asn);
+                    bool native_int_initializer = native_int_arith_initializer &&
                         (predicted_expr_tid == LMD_TYPE_INT ||
+                         inferred_native_int_initializer ||
                          (initializer_contract &&
                           initializer_contract->type_id == LMD_TYPE_INT));
+                    // The lane the emitter is about to produce is the binding's
+                    // carrier; leaving the prediction at ANY would register the
+                    // raw i64 as a boxed Item.
+                    if (inferred_native_int_initializer) {
+                        predicted_expr_tid = LMD_TYPE_INT;
+                    }
                     initializer_native_int_lane = native_int_initializer;
                     // A nullable typed-array load can widen the AST result to
                     // `any` while the native arithmetic emitter still owns the
@@ -21628,8 +21675,20 @@ static TypeId resolve_inferred_type(FnParamEvidence* ctx, bool is_proc) {
                 !(ctx->evidence & INFER_CALLSITE_INT)) {
             return LMD_TYPE_FLOAT;
         }
+        // T19-4: a closed INT call edge is a static fact about THIS parameter --
+        // every recorded caller passes a statically `int`-typed argument -- not
+        // the weak arithmetic guess the cd.ls note above warns about.
+        // INFER_FLOAT_CONTEXT only says the body mentions a float literal
+        // SOMEWHERE, which says nothing about this parameter; vetoing on it kept
+        // `eval_A(i, j)` boxed because an unrelated `1.0 /` sits in the same
+        // body. A genuinely conflicting edge (INFER_CALLSITE_FLOAT) still
+        // vetoes, and any unseen caller still enters through the boxed `_b`
+        // entry, so this selects a shape rather than asserting one.
         if ((ctx->evidence & INFER_CALLSITE_INT) &&
-                !(ctx->evidence & (INFER_CALLSITE_FLOAT | INFER_FLOAT_CONTEXT))) {
+                !(ctx->evidence & INFER_CALLSITE_FLOAT) &&
+                (!(ctx->evidence & INFER_FLOAT_CONTEXT) ||
+                 ((ctx->evidence & INFER_ARITH_USE) &&
+                  !(ctx->evidence & INFER_FLOAT)))) {
             return LMD_TYPE_INT;
         }
     }
@@ -24606,7 +24665,8 @@ static TypeId mir_literal_array_element_type(AstNode* arg) {
     return mir_array_type_element_type(arg->type);
 }
 
-static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
+static TypeId mir_callsite_arg_elem_type_at(MirTranspiler* mt, AstNode* arg,
+        int depth) {
     if (!arg) return LMD_TYPE_ANY;
     AstNode* unwrapped = ast_unwrap_primary(arg);
     TypeId static_elem = mir_array_type_element_type(unwrapped ? unwrapped->type : arg->type);
@@ -24649,7 +24709,37 @@ static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
             }
         }
     }
+
+    // T19-4: an ordinary LOCAL binding is how an array normally reaches a call
+    // -- `var flags = fill(5000, true)` and then `sieve(flags, sz)`. The cases
+    // above cover a literal array, a static `T[]`, a direct `fill(n, v)` and an
+    // identifier naming a parameter of the ENCLOSING function, but nothing
+    // resolved a plain local, so the witness stopped at the caller's own frame
+    // and the callee kept a boxed parameter. That costs the whole callee body,
+    // not just the argument: every element read boxes, and every operation on a
+    // boxed element falls to the generic numeric tower (D3.3.1, D3.2.1).
+    //
+    // A mutable binding may be rebound to a differently-shaped array later. That
+    // is a speed question, not a soundness one: this witness only selects which
+    // NATIVE shape to generate, and both the callee's own body evidence
+    // (`used_as_container` + a matching store type) and the call site's carrier
+    // check must still agree -- a mismatch routes to the `_b` entry, which
+    // carries the complete boxed body.
+    if (unwrapped && unwrapped->node_type == AST_NODE_IDENT && depth < 4) {
+        AstIdentNode* ident = (AstIdentNode*)unwrapped;
+        AstNode* binding = ident->entry ? ident->entry->node : NULL;
+        if (binding && binding->node_type == AST_NODE_ASSIGN) {
+            AstNamedNode* named = (AstNamedNode*)binding;
+            TypeId declared = mir_array_type_element_type(named->declared_type);
+            if (declared != LMD_TYPE_ANY) return declared;
+            return mir_callsite_arg_elem_type_at(mt, named->as, depth + 1);
+        }
+    }
     return LMD_TYPE_ANY;
+}
+
+static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
+    return mir_callsite_arg_elem_type_at(mt, arg, 0);
 }
 
 static void mir_callsite_mark_escaped(MirTranspiler* mt, AstFuncNode* fn) {
