@@ -882,8 +882,16 @@ char* err_format(LambdaError* error) {
 }
 
 char* err_format_with_context(LambdaError* error, int context_lines) {
+    return err_format_with_context_labeled(error, context_lines, "error");
+}
+
+// severity-labeled variant: --static-warning downgrades semantic errors to
+// warnings, which must not print as "error[E…]" — the label is the only
+// difference, so one formatter serves both severities.
+char* err_format_with_context_labeled(LambdaError* error, int context_lines,
+        const char* severity_label) {
     if (!error) return err_strdup("(null error)");
-    
+
     char buffer[8192];
     int pos = 0;
     
@@ -902,9 +910,10 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
         }
     }
     
-    // error type and code
-    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "error[E%d]: ", error->code);
-    
+    // severity, type and code
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s[E%d]: ",
+        severity_label, error->code);
+
     // message
     pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s\n",
         error->message ? error->message : err_code_message(error->code));
@@ -1005,6 +1014,12 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
 
 void err_print(LambdaError* error) {
     char* formatted = err_format_with_context(error, 3);
+    fprintf(stderr, "%s", formatted);
+    mem_free(formatted);
+}
+
+void err_print_warning(LambdaError* error) {
+    char* formatted = err_format_with_context_labeled(error, 3, "warning");
     fprintf(stderr, "%s", formatted);
     mem_free(formatted);
 }

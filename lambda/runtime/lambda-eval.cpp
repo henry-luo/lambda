@@ -4134,6 +4134,84 @@ static Item lambda_bind_object_method(TypeMethod* method, Item self) {
     return {.item = (uint64_t)(uintptr_t)bound};
 }
 
+// The single authority for a Path's built-in properties, shared by fn_member
+// (the ANY-typed member lane) and item_attr (the statically-typed lane, which
+// the T0 interpreter and the C transpiler also use). The two used to carry
+// diverging copies — item_attr lacked path/extension/scheme/depth/mode and
+// fn_member lacked is_file and metadata auto-load — so the value of `p.extension`
+// depended on which lane compiled the access (tier mismatch, SI3v2/D3.3.1v2).
+extern "C" Item path_property_get(Path* path, const char* k) {
+    if (!path || !k) return ItemNull;
+
+    // structural properties (always available)
+    if (strcmp(k, "name") == 0) {
+        // return the leaf segment name (e.g. "file.txt")
+        if (path->name) return {.item = s2it(heap_create_name(path->name))};
+        return ItemNull;
+    }
+    if (strcmp(k, "path") == 0) {
+        // return the full OS path string (e.g. "./lib/file.txt")
+        StrBuf* sb = strbuf_new();
+        path_to_os_path(path, sb);
+        String* result = heap_strcpy(sb->str, sb->length);
+        strbuf_free(sb);
+        return {.item = s2it(result)};
+    }
+    if (strcmp(k, "extension") == 0) {
+        // return file extension (e.g. "txt" from "file.txt")
+        if (path->name) {
+            const char* dot = strrchr(path->name, '.');
+            if (dot && dot != path->name) {
+                return {.item = s2it(heap_create_name(dot + 1))};
+            }
+        }
+        return ItemNull;
+    }
+    if (strcmp(k, "scheme") == 0) {
+        const char* scheme_name = path_get_scheme_name(path);
+        if (scheme_name) return {.item = s2it(heap_create_name(scheme_name))};
+        return ItemNull;
+    }
+    if (strcmp(k, "depth") == 0) {
+        return {.item = i2it(path_depth(path))};
+    }
+    if (strcmp(k, "parent") == 0) {
+        // return the parent path (go up one directory level);
+        // path->parent is the next segment up in the linked list
+        if (path->parent && path->parent->parent) return {.path = path->parent};
+        return ItemNull;
+    }
+
+    // metadata properties (require stat'd metadata; loaded on first access)
+    if (strcmp(k, "size") == 0 || strcmp(k, "modified") == 0 ||
+        strcmp(k, "is_dir") == 0 || strcmp(k, "is_file") == 0 ||
+        strcmp(k, "is_link") == 0 || strcmp(k, "mode") == 0) {
+        if (!(path->flags & PATH_FLAG_META_LOADED)) {
+            path_load_metadata(path);
+        }
+        PathMeta* meta = path->meta;
+        if (!meta) {
+            // path doesn't exist or couldn't be stat'd
+            if (strcmp(k, "size") == 0) return {.item = i2it(-1)};  // -1 for unknown/error
+            if (strcmp(k, "modified") == 0 || strcmp(k, "mode") == 0) return ItemNull;
+            return {.item = b2it(false)};  // false for boolean flags
+        }
+        // v5: a byte count is an `int` (the int53 band reaches 9 PB), so it
+        // boxes inline. `box_int64_value` here was a pre-v5 leftover from
+        // 32-bit `int`, and it was the only reason this path could touch the
+        // number stack.
+        if (strcmp(k, "size") == 0) return {.item = i2it(meta->size)};
+        if (strcmp(k, "modified") == 0) return push_k(meta->modified);
+        if (strcmp(k, "is_dir") == 0) return {.item = b2it((meta->flags & PATH_META_IS_DIR) != 0)};
+        if (strcmp(k, "is_file") == 0) return {.item = b2it((meta->flags & PATH_META_IS_DIR) == 0)};
+        if (strcmp(k, "is_link") == 0) return {.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
+        if (strcmp(k, "mode") == 0) return {.item = i2it(meta->mode)};
+    }
+
+    log_debug("path_property_get: unknown path property '%s'", k);
+    return ItemNull;
+}
+
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
 
@@ -4156,62 +4234,7 @@ Item fn_member(Item item, Item key) {
             // path metadata and structural property access
             if (is_text_type_id(key._type_id)) {
                 const char* k = key.get_chars();
-                if (k) {
-
-                    // structural properties (always available)
-                    if (strcmp(k, "name") == 0) {
-                        // return the leaf segment name (e.g. "file.txt")
-                        if (path->name) return {.item = s2it(heap_create_name(path->name))};
-                        return ItemNull;
-                    }
-                    if (strcmp(k, "path") == 0) {
-                        // return the full OS path string (e.g. "./lib/file.txt")
-                        StrBuf* sb = strbuf_new();
-                        path_to_os_path(path, sb);
-                        String* result = heap_strcpy(sb->str, sb->length);
-                        strbuf_free(sb);
-                        return {.item = s2it(result)};
-                    }
-                    if (strcmp(k, "extension") == 0) {
-                        // return file extension (e.g. "txt" from "file.txt")
-                        if (path->name) {
-                            const char* dot = strrchr(path->name, '.');
-                            if (dot && dot != path->name) {
-                                return {.item = s2it(heap_create_name(dot + 1))};
-                            }
-                        }
-                        return ItemNull;
-                    }
-                    if (strcmp(k, "scheme") == 0) {
-                        const char* scheme_name = path_get_scheme_name(path);
-                        if (scheme_name) return {.item = s2it(heap_create_name(scheme_name))};
-                        return ItemNull;
-                    }
-                    if (strcmp(k, "depth") == 0) {
-                        return {.item = i2it(path_depth(path))};
-                    }
-                    if (strcmp(k, "parent") == 0) {
-                        // return the parent path (go up one directory level)
-                        if (path->parent && path->parent->parent) {
-                            // path->parent is the next segment up in the linked list
-                            return {.path = path->parent};
-                        }
-                        return ItemNull;
-                    }
-
-                    // metadata properties (require stat'd metadata)
-                    if (path->meta && (path->flags & PATH_FLAG_META_LOADED)) {
-                        // v5: a byte count is an `int` (the int53 band reaches
-                        // 9 PB), so it boxes inline. `box_int64_value` here was
-                        // a pre-v5 leftover from 32-bit `int`, and it was the
-                        // only reason fn_member could touch the number stack.
-                        if (strcmp(k, "size") == 0) return {.item = i2it(path->meta->size)};
-                        if (strcmp(k, "modified") == 0) return push_k(path->meta->modified);
-                        if (strcmp(k, "is_dir") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_DIR) != 0)};
-                        if (strcmp(k, "is_link") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_LINK) != 0)};
-                        if (strcmp(k, "mode") == 0) return {.item = i2it(path->meta->mode)};
-                    }
-                }
+                if (k) return path_property_get(path, k);
             }
         }
         return ItemNull;

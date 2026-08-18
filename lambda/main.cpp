@@ -1945,6 +1945,12 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
         runtime->no_task_drain = true;
         return true;
     }
+    // relaxed mode: semantic type errors report as warnings and the script
+    // still runs (Lambda is strict by default; SI3v2/TI6 per-surface policy).
+    if (strcmp(arg, "--static-warning") == 0) {
+        runtime->static_warning = true;
+        return true;
+    }
     return false;
 }
 

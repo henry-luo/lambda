@@ -87,6 +87,7 @@ struct Runtime {
     TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
+    bool static_warning; // --static-warning: report semantic type errors as warnings and keep compiling (Lambda relaxed mode)
     unsigned int optimize_level;  // MIR optimization level (0-3, default: 2)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)

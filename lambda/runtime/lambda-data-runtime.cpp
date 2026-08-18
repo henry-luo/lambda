@@ -37,7 +37,6 @@ Item push_k(DateTime val) {
 
 // External: path resolution for iteration (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
-extern "C" void path_load_metadata(Path* path);
 
 // External: interned ASCII char table (implemented in lambda-mem.cpp)
 extern "C" String* get_ascii_char_string(unsigned char ch);
@@ -2811,59 +2810,11 @@ Item item_attr(Item data, const char* key) {
             }
         }
 
-        // path.name - returns the leaf segment name as a string
-        if (strcmp(key, "name") == 0) {
-            if (!path->name) return ItemNull;
-            String* name_str = heap_strcpy((char*)path->name, strlen(path->name));
-            return (Item){.item = s2it(name_str)};
-        }
-
-        // path.parent - returns the parent path (one level up)
-        if (strcmp(key, "parent") == 0) {
-            if (path->parent && path->parent->parent) {
-                return {.path = path->parent};
-            }
-            return ItemNull;
-        }
-
-        // Metadata-based properties - require loading metadata first
-        if (strcmp(key, "is_dir") == 0 || strcmp(key, "is_file") == 0 || strcmp(key, "is_link") == 0 ||
-            strcmp(key, "size") == 0 || strcmp(key, "modified") == 0) {
-            // Load metadata if not already loaded
-            if (!(path->flags & PATH_FLAG_META_LOADED)) {
-                path_load_metadata(path);
-            }
-
-            PathMeta* meta = path->meta;
-            if (!meta) {
-                // Path doesn't exist or couldn't be stat'd
-                if (strcmp(key, "size") == 0) return (Item){.item = i2it(-1)};  // -1 for unknown/error
-                if (strcmp(key, "modified") == 0) return ItemNull;  // null for unknown
-                return (Item){.item = b2it(false)};  // false for boolean flags
-            }
-
-            if (strcmp(key, "is_dir") == 0) {
-                return (Item){.item = b2it((meta->flags & PATH_META_IS_DIR) != 0)};
-            }
-            if (strcmp(key, "is_file") == 0) {
-                return (Item){.item = b2it((meta->flags & PATH_META_IS_DIR) == 0)};
-            }
-            if (strcmp(key, "is_link") == 0) {
-                return (Item){.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
-            }
-            if (strcmp(key, "size") == 0) {
-                // v5: a byte count fits the int53 band, so it boxes inline
-                // (mirrors the path.size arm in fn_member).
-                return (Item){.item = i2it(meta->size)};
-            }
-            if (strcmp(key, "modified") == 0) {
-                return push_k(meta->modified);  // DateTime
-            }
-        }
-
-        // Unknown property
-        log_debug("item_attr: unknown path property '%s'", key);
-        return ItemNull;
+        // Built-in properties come from the shared helper so this lane can
+        // never diverge from fn_member's again: the old inline copy lacked
+        // path/extension/scheme/depth/mode, so the statically-typed lane (and
+        // the T0 interpreter) read null where the ANY lane read real values.
+        return path_property_get(path, key);
     }
     default:
         log_debug("item_attr: unsupported type %d", type_id);

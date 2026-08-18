@@ -601,6 +601,13 @@ typedef struct Transpiler : Script {
     int max_errors;            // threshold (default: 10)
     ArrayList* errors;         // list of LambdaError* (structured errors)
 
+    // relaxed mode (--static-warning): semantic (E2xx) type errors are
+    // recorded here as warnings instead of errors, and compilation proceeds.
+    // Parse/syntax errors are never downgraded. [SI3v2/TI6 per-surface policy]
+    bool static_warning;       // downgrade semantic errors to warnings
+    int warning_count;         // accumulated downgraded-warning count
+    ArrayList* warnings;       // list of LambdaError* (downgraded diagnostics)
+
     // AST build recursion-depth guard — caps build_expr nesting so a pathologically
     // deep source (thousands of nested parens/brackets) reports an error instead of
     // overflowing the stack. Zeroed by the memset that initializes the Transpiler.

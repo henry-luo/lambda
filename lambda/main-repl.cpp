@@ -235,6 +235,8 @@ void print_help() {
     printf("  --no-drain                   - Return without draining spawned tasks\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
     printf("  --dry-run                    - Skip real IO; return fabricated results for network/filesystem ops\n");
+    printf("  --static-warning             - Relaxed mode: report static type errors as warnings and keep running\n");
+    printf("                                 (syntax errors still fail; result may contain error values)\n");
     printf("\nDiagnostic Options (global; place before the subcommand):\n");
     printf("  --mem-dump[=PATH]            - On exit, write the memory-context snapshot as JSON\n");
     printf("                                 (default: ./temp/mem_snapshot.json) and log a MEMCTX leak report\n");

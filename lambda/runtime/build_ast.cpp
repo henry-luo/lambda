@@ -1174,13 +1174,24 @@ static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* se
     }
 }
 
+// relaxed mode (--static-warning): a semantic (E2xx) diagnostic is stored as
+// a warning and does not fail compilation — the script still runs and may
+// produce a result containing error values (SI3v2/TI6 per-surface policy).
+// Parse/syntax failures never reach here, so they are never downgraded.
+static bool record_as_static_warning(Transpiler* tp, LambdaErrorCode code,
+        LambdaError* error) {
+    if (!tp->static_warning || !ERR_IS_SEMANTIC(code)) return false;
+    tp->warning_count++;
+    if (!tp->warnings) tp->warnings = arraylist_new(8);
+    arraylist_append(tp->warnings, error);
+    return true;
+}
+
 // Record a typed semantic error and check if we should continue transpiling.
 // Boundary sites select the specific public diagnostic code; E201 remains the
 // generic declaration/assignment mismatch.
 static void record_type_error_code(Transpiler* tp, int line, LambdaErrorCode code,
         const char* format, ...) {
-    tp->error_count++;
-
     // Format error message
     char error_msg[512];
     va_list args;
@@ -1192,6 +1203,12 @@ static void record_type_error_code(Transpiler* tp, int line, LambdaErrorCode cod
     SourceLocation loc = src_loc(tp->reference, line, 1);
     loc.source = tp->source;
     LambdaError* error = err_create(code, error_msg, &loc);
+
+    if (record_as_static_warning(tp, code, error)) {
+        log_warn("static_warning[E%d] (line %d): %s", code, line, error_msg);
+        return;
+    }
+    tp->error_count++;
 
     // Store in error list if available
     if (tp->errors) {
@@ -1220,8 +1237,6 @@ void record_type_error(Transpiler* tp, int line, const char* format, ...) {
 
 // Record a semantic error with error code
 void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
-    tp->error_count++;
-
     // Get location from TSNode
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
@@ -1239,6 +1254,14 @@ void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, co
         end.row + 1, end.column + 1);
     loc.source = tp->source;
     LambdaError* error = err_create(code, error_msg, &loc);
+
+    if (record_as_static_warning(tp, code, error)) {
+        log_warn("static_warning[E%d] at %s:%u:%u: %s", code,
+            tp->reference ? tp->reference : "<unknown>",
+            start.row + 1, start.column + 1, error_msg);
+        return;
+    }
+    tp->error_count++;
 
     // Store in error list if available
     if (tp->errors) {
@@ -1487,12 +1510,17 @@ static void check_declared_map_literal(Transpiler* tp, AstNamedNode* declaration
     }
 }
 
-static void check_declaration_static_boundary(Transpiler* tp, AstNamedNode* declaration,
+// returns true when the declaration was statically REJECTED (diagnostic
+// recorded) — relaxed mode uses that to drop the annotation contract so the
+// binding keeps its inferred type instead of lying about its representation
+// (SI14: emitting the declared carrier against a rejected value reinterprets
+// bits — the observed symptom was a string pointer printed as an int).
+static bool check_declaration_static_boundary(Transpiler* tp, AstNamedNode* declaration,
         Type* expected, int line) {
-    if (!declaration || !declaration->as || !expected) return;
+    if (!declaration || !declaration->as || !expected) return false;
     if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
         // Range annotations are checked by value membership at the MIR boundary, not by TypeId equality.
-        return;
+        return false;
     }
     Type* actual = declaration->as->type;
     StaticBoundaryResult result = static_boundary_relation(actual, expected);
@@ -1506,12 +1534,13 @@ static void check_declaration_static_boundary(Transpiler* tp, AstNamedNode* decl
         record_type_error(tp, line, "cannot initialize '%.*s' of type %s with %s",
             (int)declaration->name->len, declaration->name->chars,
             expected_name, actual_name);
-        return;
+        return true;
     }
     Type* expected_type = boundary_unwrap_type(expected);
     if (expected_type && expected_type->type_id == LMD_TYPE_MAP) {
         check_declared_map_literal(tp, declaration, (TypeMap*)expected_type, line);
     }
+    return false;
 }
 
 // Forward declaration for closure capture analysis
@@ -3352,17 +3381,25 @@ NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     NameScope* scope = tp->current_scope;
     FIND_VAR_NAME:
     NameEntry* entry = scope->first;
-    int entry_count = 0;
+    // Cycle guard: the old fixed 1000-entry cap fired on legitimately large
+    // module scopes (thousands of top-level lets), silently returning NULL and
+    // leaving idents entry-less — the JIT recovered via its name-keyed global
+    // table, but the T0 interpreter read null (tier mismatch, SI3v2). Use
+    // tortoise-hare so only a genuinely circular entry list bails out.
+    NameEntry* chase = scope->first;
     while (entry) {
-        entry_count++;
-        if (entry_count > 1000) {  // Safety check for infinite loops
-            log_error("ERROR: Too many entries in scope - possible infinite loop in entry list");
-            return NULL;
+        if (chase) {
+            chase = chase->next ? chase->next->next : NULL;
+            if (chase && chase == entry) {
+                log_error("ERROR: circular entry list detected in scope");
+                return NULL;
+            }
         }
 
         StrView entry_name = strview_init(entry->name->chars, entry->name->len);
-        log_debug("checking name: %.*s vs. %.*s",
-            (int)entry_name.length, entry_name.str, (int)var_name.length, var_name.str);
+        // no per-comparison trace here: this loop runs O(scope_size) per lookup
+        // and a large module scope (thousands of lets) turns a per-entry
+        // log_debug into tens of millions of log writes that dominate build time.
         if (strview_eq(&entry_name, &var_name)) {
             break;
         }
@@ -4248,6 +4285,40 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
+// unknown type-name diagnostic with a conceptual-alias suggestion. Names like
+// `int64` appear in docs/prose as concept names but are NOT Lambda annotation
+// syntax (the defined names are the sized forms, e.g. `i64`); without this,
+// the annotation silently became TYPE_ERROR and surfaced later as a confusing
+// E201 "cannot initialize ... of type error".
+// returns the defined syntax for a conceptual alias, or NULL when the name is
+// not a known concept spelling.
+static const char* base_type_alias_suggestion(StrView type_name) {
+    static const struct { const char* concept_name; const char* syntax; } alias_map[] = {
+        {"int64", "i64"}, {"uint64", "u64"},
+        {"int8", "i8"}, {"int16", "i16"}, {"int32", "i32"},
+        {"uint8", "u8"}, {"uint16", "u16"}, {"uint32", "u32"},
+        {"float32", "f32"}, {"float64", "f64"}, {"double", "float"},
+    };
+    for (size_t i = 0; i < sizeof(alias_map) / sizeof(alias_map[0]); i++) {
+        if (strview_equal(&type_name, alias_map[i].concept_name)) {
+            return alias_map[i].syntax;
+        }
+    }
+    return NULL;
+}
+
+static void record_unknown_base_type(Transpiler* tp, TSNode type_node, StrView type_name) {
+    const char* suggestion = base_type_alias_suggestion(type_name);
+    if (suggestion) {
+        record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+            "unknown type '%.*s'; did you mean '%s'?",
+            (int)type_name.length, type_name.str, suggestion);
+        return;
+    }
+    record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+        "unknown type '%.*s'", (int)type_name.length, type_name.str);
+}
+
 // helper: returns Type* for base_type node (used in primary_expr context)
 Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     StrView type_name = ts_node_source(tp, type_node);
@@ -4363,7 +4434,9 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
         return (Type*)&LIT_TYPE_FLOAT;
     }
     else {
-        log_error("Unknown base type: %.*s", (int)type_name.length, type_name.str);
+        // report at the annotation site instead of leaking TYPE_ERROR into a
+        // later E201 boundary message (root cause: name not defined syntax).
+        record_unknown_base_type(tp, type_node, type_name);
         return &TYPE_ERROR;
     }
 }
@@ -5920,9 +5993,25 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     // This ordering is the static-boundary invariant: no later pass has to
     // reconstruct whether a source annotation existed from a TypeId.
     Type* annotation_type = NULL;
+    // an annotation that failed to resolve (e.g. unknown type name) already
+    // reported at its own site; suppress the follow-on boundary E201, which
+    // would only restate the failure as "of type error" against the same line.
+    bool annotation_diagnosed = false;
     if (!is_type_definition && !ts_node_is_null(type_node)) {
+        // count warnings too: in --static-warning mode the unknown-type
+        // diagnostic lands as a warning, and the E201 cascade must still be
+        // suppressed.
+        int diags_before_annotation = tp->error_count + tp->warning_count;
         AstNode* type_expr = build_expr(tp, type_node);
-        if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+        annotation_diagnosed =
+            tp->error_count + tp->warning_count > diags_before_annotation;
+        if (annotation_diagnosed && tp->static_warning) {
+            // relaxed mode: a diagnosed annotation is no contract at all —
+            // keep the initializer's inferred type instead of emitting against
+            // a TYPE_ERROR contract (which the MIR boundary cannot lower).
+            annotation_type = NULL;
+        }
+        else if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
             annotation_type = ((TypeType*)type_expr->type)->type;
             ast_node->declared_type = annotation_type;
         } else if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_RANGE) {
@@ -5931,8 +6020,17 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             ast_node->declared_type = annotation_type;
         } else {
             StrView type_str = ts_node_source(tp, type_node);
-            record_semantic_error(tp, asn_node, ERR_UNDEFINED_TYPE,
-                "invalid type annotation '%.*s'", (int)type_str.length, type_str.str);
+            // conceptual spellings (e.g. float32) can reach this identifier
+            // path instead of build_base_type; suggest the defined name here too.
+            const char* suggestion = base_type_alias_suggestion(type_str);
+            if (suggestion) {
+                record_semantic_error(tp, asn_node, ERR_UNDEFINED_TYPE,
+                    "invalid type annotation '%.*s'; did you mean '%s'?",
+                    (int)type_str.length, type_str.str, suggestion);
+            } else {
+                record_semantic_error(tp, asn_node, ERR_UNDEFINED_TYPE,
+                    "invalid type annotation '%.*s'", (int)type_str.length, type_str.str);
+            }
         }
     }
 
@@ -6027,7 +6125,18 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                     ast_node->type = range_contract && ast_node->as
                         ? ast_node->as->type : annotation_type;
                     int declaration_line = ts_node_start_point(asn_node).row + 1;
-                    check_declaration_static_boundary(tp, ast_node, annotation_type, declaration_line);
+                    if (!annotation_diagnosed) {
+                        bool rejected = check_declaration_static_boundary(tp,
+                            ast_node, annotation_type, declaration_line);
+                        if (rejected && tp->static_warning) {
+                            // relaxed mode: a rejected contract must not drive
+                            // representation — keep the inferred type so the
+                            // binding never reinterprets the value's bits
+                            // (SI14; the warning above already reported it).
+                            ast_node->type = ast_node->as->type;
+                            ast_node->declared_type = NULL;
+                        }
+                    }
 
                     // A declared map type is a semantic root contract, not a
                     // request to overwrite the literal's physical shape. Keep
@@ -6753,7 +6862,9 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         ast_node->type = (Type*)&LIT_TYPE_FLOAT;
     }
     else {
-        log_debug("unknown base type %.*s", (int)type_name.length, type_name.str);
+        // report at the annotation site instead of leaking TYPE_ERROR into a
+        // later E201 boundary message (root cause: name not defined syntax).
+        record_unknown_base_type(tp, type_node, type_name);
         ast_node->type = (Type*)&LIT_TYPE_ERROR;
     }
     log_debug("built base type %.*s, type_id %d", (int)type_name.length, type_name.str,
@@ -7285,9 +7396,10 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
                 set_function_return_contract(fn_type, fn_type->returned, true);
             } else {
                 StrView type_str = ts_node_source(tp, child);
-                log_error("Error: invalid return type '%.*s' - not a valid type",
+                // structured recorder: gets --static-warning downgrade + list
+                record_semantic_error(tp, child, ERR_UNDEFINED_TYPE,
+                    "invalid return type '%.*s' - not a valid type",
                     (int)type_str.length, type_str.str);
-                tp->error_count++;
                 fn_type->returned = &TYPE_ANY;
                 set_function_return_contract(fn_type, &TYPE_ANY, true);
             }
@@ -9275,11 +9387,12 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
                 }
             }
         } else {
-            // invalid type annotation - log error but continue with ANY type
+            // invalid type annotation - record error but continue with ANY type
             StrView type_str = ts_node_source(tp, type_node);
-            log_error("Error: invalid type annotation '%.*s' - not a valid type",
+            // structured recorder: gets --static-warning downgrade + list
+            record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+                "invalid type annotation '%.*s' - not a valid type",
                 (int)type_str.length, type_str.str);
-            tp->error_count++;
             set_param_contract(param_type, &TYPE_ANY_NO_ERROR, false);
         }
     }
@@ -10176,9 +10289,10 @@ static bool apply_function_return_type(Transpiler* tp, TypeFunc* fn_type,
         return true;
     }
     StrView type_str = ts_node_source(tp, type_node);
-    log_error("Error: invalid return type '%.*s' - not a valid type",
+    // structured recorder: gets --static-warning downgrade + list
+    record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+        "invalid return type '%.*s' - not a valid type",
         (int)type_str.length, type_str.str);
-    tp->error_count++;
     fn_type->returned = &TYPE_ANY;
     set_function_return_contract(fn_type, &TYPE_ANY, true);
     return false;

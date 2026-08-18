@@ -2220,6 +2220,7 @@ extern "C" {
     void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func);
     Item item_at(Item data, int64_t index);
     Item item_attr(Item data, const char* key);  // get attribute by name
+    Item path_property_get(Path* path, const char* key);  // built-in Path properties (shared by fn_member/item_attr)
     SymbolKeyList* item_keys(Item data);     // get typed list of Symbol* attribute names
     SymbolKeyList* symbol_key_list_new(int64_t initial_capacity);
     bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol);
