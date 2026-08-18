@@ -321,6 +321,11 @@ char* err_format_with_context(LambdaError* error, int context_lines);
 char* err_format_json(LambdaError* error);
 char* err_format_json_array(LambdaError** errors, int count);
 void err_print(LambdaError* error);
+// severity-labeled formatter/printer: --static-warning prints downgraded
+// semantic errors as "warning[E…]" through the same context formatter.
+char* err_format_with_context_labeled(LambdaError* error, int context_lines,
+    const char* severity_label);
+void err_print_warning(LambdaError* error);
 void err_print_stack_trace(StackFrame* trace);
 
 // Error cleanup

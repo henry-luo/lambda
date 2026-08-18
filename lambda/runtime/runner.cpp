@@ -1364,9 +1364,27 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     transpiler.error_count = 0;
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
     transpiler.errors = arraylist_new(8);  // initialize error list for structured errors
+    // relaxed mode (--static-warning): semantic type errors report as
+    // warnings and compilation proceeds (SI3v2/TI6 per-surface policy)
+    transpiler.static_warning = runtime->static_warning;
+    transpiler.warning_count = 0;
+    transpiler.warnings = NULL;  // created lazily on first downgraded diagnostic
 
     transpile_script(&transpiler, new_script, script_path);
     new_script->is_loading = false;  // loading complete
+
+    // Print downgraded static warnings first (--static-warning relaxed mode);
+    // they never fail the compile, so the script result follows below them.
+    if (transpiler.warnings && transpiler.warnings->length > 0) {
+        fprintf(stderr, "\n");
+        for (int i = 0; i < transpiler.warnings->length; i++) {
+            LambdaError* warning = (LambdaError*)transpiler.warnings->data[i];
+            err_print_warning(warning);
+            fprintf(stderr, "\n");
+        }
+        fprintf(stderr, "%d static warning(s) (--static-warning relaxed mode).\n",
+            transpiler.warnings->length);
+    }
 
     // Print structured errors if any
     if (transpiler.errors && transpiler.errors->length > 0) {

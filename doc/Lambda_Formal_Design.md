@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.25.1 (2026-08-17)
+**Spec version:** 1.26.0 (2026-08-18)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -397,15 +397,36 @@ that carries them.
 
 ### D3.3 Inference
 
-- **D3.3.1** **Inference is unobservable — it buys performance only.**
-  Erasing every inferred type and running boxed must produce identical
-  results; this is a standing invariant (semantics SI3), checked by
-  the boxed-vs-JIT differential harness. [B7]
-- **D3.3.2** Entry-shape inference and body/result inference are
+- **D3.3.1v2** **A type-error-free script's evaluation result is never
+  affected by inference** (revised 2026-08-18; supersedes "inference is
+  unobservable"). For any script with no type error, erasing every
+  inferred type and running boxed must produce identical results; this is
+  the standing invariant (semantics SI3v2), checked by the boxed-vs-JIT
+  differential harness. Inference IS statically observable: improving
+  precision may reject a previously-compiling script at compile time, and
+  the rejection lands **straightaway** — no warn-first transition period.
+  Strictness is per-surface (Type_Infer TI6): the Lambda lane is strict
+  by default (static type errors reject with no result), with
+  `--static-warning` as the explicit per-invocation relaxed mode — the
+  same diagnostics report as warnings, compilation proceeds, and a
+  diagnosed (unresolved or rejected) annotation is dropped to the
+  inferred value type so representation never follows a failed contract
+  (SI14); the LambdaJS lane is lenient by default (static type findings
+  are diagnostics/warnings only; the script still runs and may produce a
+  dynamic result containing error values).
+  What remains absolute is the dynamic half: a script accepted under both
+  the weaker and the stronger inference evaluates identically under both.
+  [B7, TI6]
+- **D3.3.2v2** Entry-shape inference and body/result inference are
   **separate products**: float arithmetic on a parameter does not retype
   the parameter; *inference selects an implementation, it does not create
-  a source contract* — and inference never creates a `^` obligation.
-  [DF12, DF13, TE-13]
+  a source contract*. (Revised 2026-08-18: the former clause "inference
+  never creates a `^` obligation" is retired with D3.3.1v2 — precise
+  inference may surface a previously-hidden error component and thereby
+  create a static containment obligation (E208); it still never changes
+  what an accepted program evaluates to, and never creates a *runtime*
+  obligation that the erased-types execution would not honor.)
+  [DF12, DF13, TE-13, TI6]
 - **D3.3.3** Container element-type **narrowing dies with its binding**:
   a narrowed element type is a property of one binding's scope, never
   written back into the container; the double-box → `ITEM_ERROR` failure
@@ -1090,7 +1111,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   capture/effect → type/representation inference → function planning → MIR
   lowering/finalization/link. Passes declare required/produced facts;
   source contracts remain on the AST and erasable optimization facts remain
-  in ID-keyed side tables (D2.4.1, D3.2.3, D3.3.1). Profiles answer typed
+  in ID-keyed side tables (D2.4.1, D3.2.3, D3.3.1v2). Profiles answer typed
   semantic questions and extension nodes; they do not own alternate pass
   schedules. [U29, U30]
 - **D8.2.6*** Core expression lowering is demand-driven and returns the full
@@ -1129,7 +1150,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D8.3.5** Numeric admission at implicit boundaries is one rule (static
   whole-domain embedding admits + normalizes; dynamic admits iff lossless;
   admission ≠ cast); entry-shape inference and body inference are separate
-  products (D3.3.2). [DF6, DF12, DF13]
+  products (D3.3.2v2). [DF6, DF12, DF13]
 
 ### D8.4 Dispatch policy
 

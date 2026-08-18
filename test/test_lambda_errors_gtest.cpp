@@ -880,6 +880,51 @@ TEST_F(NegativeScriptTest, InvalidTypeAnnotation) {
     ExpectErrorWithoutCrash("test/lambda/negative/invalid_type_annotation.ls");
 }
 
+TEST_F(NegativeScriptTest, ConceptualTypeNamesSuggestDefinedSyntax) {
+    // `int64` is a concept spelling, not annotation syntax; the diagnostic must
+    // point at `i64` and must not cascade an E201 "of type error" message.
+    const char* script = "test/lambda/negative/semantic/type_alias_suggestion.ls";
+    ScriptResult result = run_lambda_script(script);
+    EXPECT_NE(result.exit_code, 0) << "Expected script to fail: " << script;
+    EXPECT_NE(strstr(result.output.c_str(),
+        "unknown type 'int64'; did you mean 'i64'?"), nullptr)
+        << "Expected alias suggestion for: " << script
+        << "\nOutput: " << result.output;
+    // assert on the diagnostic code, not prose — source-context lines echo the
+    // script text, so a prose substring can false-match a comment.
+    EXPECT_EQ(strstr(result.output.c_str(), "error[E201]"), nullptr)
+        << "Unresolved annotation must not cascade an E201 boundary error"
+        << "\nOutput: " << result.output;
+}
+
+TEST_F(NegativeScriptTest, StaticWarningFlagDowngradesSemanticErrorsAndRuns) {
+    // --static-warning (relaxed mode, SI3v2/TI6): the same script that is a
+    // static error by default must run to completion, with the diagnostic
+    // reported as warning[E…] instead of error[E…].
+    const char* script = "test/lambda/negative/semantic/type_alias_suggestion.ls";
+    ScriptResult result;
+    const char* args[] = {LAMBDA_EXE, "run", "--no-log", "--static-warning",
+        script, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.stdout_buf) {
+        result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
+    }
+    result.exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
+
+    EXPECT_EQ(result.exit_code, 0)
+        << "Relaxed mode must run the script\nOutput: " << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        "warning[E204]: unknown type 'int64'; did you mean 'i64'?"), nullptr)
+        << "Diagnostic must appear as a warning\nOutput: " << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "error[E204]"), nullptr)
+        << "Diagnostic must not appear as an error\nOutput: " << result.output;
+    EXPECT_NE(strstr(result.output.c_str(), "1"), nullptr)
+        << "Script body must have produced its result\nOutput: " << result.output;
+}
+
 TEST_F(NegativeScriptTest, StaticAnnotatedDeclarationsRejectKnownMismatches) {
     ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
         "cannot initialize 'wrong_scalar' of type int with string");

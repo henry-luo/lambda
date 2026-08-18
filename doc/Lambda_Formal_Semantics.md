@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 3.0.0 (2026-08-17)
+**Spec version:** 3.1.0 (2026-08-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -86,9 +86,25 @@ harnesses.
 - **SI2 — COW unobservability.** Sharing until first mutation is
   undetectable; `let`-finality holds absolutely; reference identity is not
   observable (no `===`, ever). [S9.1, S5.1.4]
-- **SI3 — Inference unobservability** (the gradual guarantee). Erasing all
-  inferred types and running boxed produces identical results — *inference
-  buys performance only.* [S11.4]
+- **SI3v2 — Inference evaluation-invariance** (the gradual guarantee,
+  revised 2026-08-18). **A script with no type error evaluates identically
+  regardless of inference**: erasing all inferred types and running boxed
+  produces the same results. Inference IS statically observable — improved
+  precision may turn a previously-compiling script into a static compile
+  error, and Lambda rejects **straightaway** (no warn-first transition).
+  The sanctioned observable change is exactly this: a script that carries
+  a type error moves from "runtime soft error, possibly partial results"
+  to "static error, no result" — a rejected script has no evaluation to
+  preserve. Type-error strictness is a per-surface policy: **Lambda is
+  strict by default** (static type errors reject) with an explicit
+  per-invocation opt-out (`lambda --static-warning`) that reports the same
+  findings as warnings and still runs the script; **LambdaJS is lenient**
+  (static type findings are warnings only and the script still runs — a
+  dynamic result containing errors is preferred over no result in
+  browser-style use). In relaxed mode a diagnosed contract never drives
+  representation: an unresolved or rejected annotation falls back to the
+  inferred value type, so the binding never lies about its bits (SI14).
+  [S11.4]
 - **SI4 — Equality laws.** `==` is total (cross-family is `false`, never an
   error) and an equivalence modulo exactly two poison carve-outs (`nan`,
   `error`); numbers tie across all representations;
@@ -127,7 +143,7 @@ harnesses.
   (reassignment keeps the previous value) — never a null-for-failure
   placeholder. Every error value is deliberate; discharge strips error
   constituents from its success type; no boundary silently substitutes
-  `0`, `null`, or reinterpreted bits. (Fault *timing* is exempt from SI3.)
+  `0`, `null`, or reinterpreted bits. (Fault *timing* is exempt from SI3v2.)
   [S7.4, S7.7, S11.4]
 - **SI15 — Schedule invisibility.** `fn` results are identical under any
   schedule, thread count, or backend; builtin reductions are bit-identical
