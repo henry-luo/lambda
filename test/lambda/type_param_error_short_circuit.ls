@@ -13,7 +13,7 @@ fn typed_body(value: int) any { 444 }
 fn typed_int_body(value: int) int { 555 }
 fn explicit_any_body(value: any) any { 222 }
 fn explicit_error_body(value: int | error) any { 223 }
-fn shorthand_error_body(value: int^) any { 224 }
+fn shorthand_error_body(value: int | error) any { 224 }
 fn optional_body(value: int = 999) any { 666 }
 fn variadic_body(value: int, ...) any { 777 }
 
@@ -35,7 +35,7 @@ let dynamic_shorthand = shorthand_error_body
 let dynamic_optional = optional_body
 let closure_body = make_closure()
 let imported_body = imported
-let accepted_value: int^ = source_value_declared(45)
+let accepted_value: int | error = source_value_declared(45)
 
 [
   implicit_body(source_fail(0 - 1)) or 10,

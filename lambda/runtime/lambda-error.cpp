@@ -1558,7 +1558,11 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
         bool is_relation = (op == '<' || op == '>');
         bool is_short_token = (end_byte == start_byte + 1) ||
             (end_byte == start_byte + 2 && source[start_byte + 1] == '=');
-        if (is_relation && is_short_token) {
+        // with the type-pattern scanner the recovered ERROR spans the operand
+        // too ('< "b"'); a space after the relational still means a bare
+        // comparison, never an element tag (tags start with a name character)
+        bool is_spaced_relation = (end_byte > start_byte + 1 && source[start_byte + 1] == ' ');
+        if (is_relation && (is_short_token || is_spaced_relation)) {
             snprintf(msg, sizeof(msg),
                 "'<' and '>' are ambiguous with element syntax at statement level");
             help = "Use parentheses to group the comparison expression, e.g. (\"a\" < \"b\").";

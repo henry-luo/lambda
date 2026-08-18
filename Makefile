@@ -1435,6 +1435,16 @@ type-chart:
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
 
+# Generate a parser from grammar-lambda.js, the official FULL grammar. Test-only:
+# it backs the grammar differential check and never enters the product build.
+generate-grammar-full:
+	@TS_CLI="$(TREE_SITTER_CLI)" ./utils/generate_full_grammar.sh
+
+# Guard the two grammars against drift: they must share every core rule and
+# differ only in the type layer.
+grammar-sync-check:
+	$(PYTHON) -B utils/grammar_sync_check.py
+
 generate-names:
 	$(PYTHON) -B utils/generate_well_known_names.py
 	@echo "Generated NameId catalogs."
