@@ -208,6 +208,105 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 #endif
 }
 
+#if JS_TEST262_FAST_PATHS
+// Test262 harness fast paths, one row per intercepted entry point.
+//
+// `argc` is how many arguments the native takes: the emitter boxes that many
+// call arguments in source order and pads the tail with undefined, which is
+// exactly what the hand-written arms did. Rows are matched on name plus an
+// inclusive [min_args, max_args] window (max_args < 0 means unbounded).
+#define JM_T262_ERROR_LANE   0x1u  // propagate the error lane after the call
+#define JM_T262_VOID_RESULT  0x2u  // discard the result and yield undefined
+#define JM_T262_LOCAL_GUARD  0x4u  // skip when `assert` is a local binding
+#define JM_T262_READBACK_ENV 0x8u  // assert.throws re-enters JS; reload captures
+
+typedef struct JsTest262Intercept {
+    const char* name;
+    uint8_t     len;
+    int8_t      min_args;
+    int8_t      max_args;
+    uint8_t     argc;
+    const char* fn;
+    uint8_t     flags;
+} JsTest262Intercept;
+
+static const JsTest262Intercept js_test262_assert_methods[] = {
+    { "sameValue",    9, 0, -1, 3, "js_assert_same_value",     JM_T262_ERROR_LANE | JM_T262_VOID_RESULT },
+    { "notSameValue", 12, 0, -1, 3, "js_assert_not_same_value", JM_T262_ERROR_LANE | JM_T262_VOID_RESULT },
+    { "compareArray", 12, 0, -1, 3, "js_assert_compare_array",  JM_T262_ERROR_LANE | JM_T262_VOID_RESULT },
+    { "deepEqual",    9, 0, -1, 3, "js_assert_deep_equal",     JM_T262_ERROR_LANE | JM_T262_VOID_RESULT },
+    { "throws",       6, 0, -1, 3, "js_assert_throws",
+      JM_T262_ERROR_LANE | JM_T262_VOID_RESULT | JM_T262_READBACK_ENV },
+    { NULL, 0, 0, 0, 0, NULL, 0 }
+};
+
+static const JsTest262Intercept js_test262_globals[] = {
+    // decimalToPercentHexString appeared twice in the old chain; the second arm
+    // (arg_count == 1, js_decimal_to_percent_hex_string) was unreachable behind
+    // this one and is gone, along with its runtime entry point.
+    { "decimalToPercentHexString", 25, 1, -1, 1, "js_test262_decimal_to_percent_hex_string", 0 },
+    { "verifyProperty",            14, 3, -1, 4, "js_verify_property",
+      JM_T262_ERROR_LANE | JM_T262_VOID_RESULT },
+    { "compareArray",              12, 2,  2, 2, "js_compare_array",       0 },
+    { "assert",                     6, 1,  2, 2, "js_assert_base",
+      JM_T262_ERROR_LANE | JM_T262_VOID_RESULT | JM_T262_LOCAL_GUARD },
+    { "$DONOTEVALUATE",            14, 0, -1, 0, "js_donotevaluate",
+      JM_T262_ERROR_LANE | JM_T262_VOID_RESULT },
+    { "isConstructor",             13, 1,  1, 1, "js_is_constructor",      0 },
+    { "buildString",               11, 1,  1, 1, "js_test262_build_string", 0 },
+    { NULL, 0, 0, 0, 0, NULL, 0 }
+};
+
+static bool jm_name_is(const String* name, const char* lit, int len) {
+    return name && name->len == len && strncmp(name->chars, lit, (size_t)len) == 0;
+}
+
+static const JsTest262Intercept* jm_test262_lookup(const JsTest262Intercept* table,
+                                                   const String* name, int arg_count) {
+    if (!name) return NULL;
+    for (const JsTest262Intercept* r = table; r->name; r++) {
+        if (!jm_name_is(name, r->name, r->len)) continue;
+        if (arg_count < r->min_args) return NULL;
+        if (r->max_args >= 0 && arg_count > r->max_args) return NULL;
+        return r;
+    }
+    return NULL;
+}
+
+// A local `assert` binding (e.g. `const assert = require('assert')`) must beat
+// the harness fast path. Dynamic Function parameters can be MIR locals with no
+// useful scope node, so the MIR var table is checked too.
+static bool jm_test262_assert_is_local(JsMirTranspiler* mt, JsIdentifierNode* id) {
+    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
+    if (!entry) entry = id->entry;
+    if (entry && entry->node) return true;
+    return jm_find_var(mt, "_js_assert") != NULL;
+}
+
+static MIR_reg_t jm_emit_test262_intercept(JsMirTranspiler* mt, JsCallNode* call,
+                                           const JsTest262Intercept* spec) {
+    MIR_reg_t argv[4];
+    JsAstNode* arg = call->arguments;
+    for (uint8_t i = 0; i < spec->argc; i++) {
+        argv[i] = arg ? jm_transpile_box_item(mt, arg) : jm_emit_undefined(mt);
+        if (arg) arg = arg->next;
+    }
+    MIR_reg_t result = 0;
+    switch (spec->argc) {
+    case 0: jm_call_0(mt, spec->fn, MIR_T_I64); break;
+    case 1: result = jm_callr_1(mt, spec->fn, MIR_T_I64, argv[0]); break;
+    case 2: result = jm_callr_2(mt, spec->fn, MIR_T_I64, argv[0], argv[1]); break;
+    case 3: result = jm_callr_3(mt, spec->fn, MIR_T_I64, argv[0], argv[1], argv[2]); break;
+    default: result = jm_callr_4(mt, spec->fn, MIR_T_I64, argv[0], argv[1], argv[2], argv[3]); break;
+    }
+    if (spec->flags & JM_T262_ERROR_LANE) jm_emit_error_lane_propagate_check(mt);
+    if (spec->flags & JM_T262_READBACK_ENV) jm_readback_closure_env(mt);
+    if (spec->flags & JM_T262_VOID_RESULT) return jm_emit_undefined(mt);
+    return result;
+}
+#endif
+
+
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
     TSNode node = call->node;
@@ -2265,6 +2364,40 @@ static bool jm_emit_folded_at_value_site(JsMirTranspiler* mt, const JsFoldVal* f
     *out = jm_box_float_const(mt, fv->num); return true;
 }
 
+// Native binary-op lanes. Register names are load-bearing: they appear in the
+// MIR dumps the emission goldens compare, so they live in the table verbatim.
+typedef struct JsMirFloatArithOp { uint8_t op; MIR_insn_code_t code; const char* reg_name; } JsMirFloatArithOp;
+static const JsMirFloatArithOp js_mir_float_arith_ops[] = {
+    { JS_OP_ADD, MIR_DADD, "add" },
+    { JS_OP_SUB, MIR_DSUB, "sub" },
+    { JS_OP_MUL, MIR_DMUL, "mul" },
+    { JS_OP_DIV, MIR_DDIV, "div" },
+};
+static const JsMirFloatArithOp* jm_float_arith_op(uint8_t op) {
+    for (size_t i = 0; i < sizeof(js_mir_float_arith_ops)/sizeof(js_mir_float_arith_ops[0]); i++)
+        if (js_mir_float_arith_ops[i].op == op) return &js_mir_float_arith_ops[i];
+    return NULL;
+}
+
+typedef struct JsMirCompareOp {
+    uint8_t op; MIR_insn_code_t float_code; MIR_insn_code_t int_code; const char* reg_name;
+} JsMirCompareOp;
+static const JsMirCompareOp js_mir_compare_ops[] = {
+    { JS_OP_LT,        MIR_DLT, MIR_LTS, "lt" },
+    { JS_OP_LE,        MIR_DLE, MIR_LES, "le" },
+    { JS_OP_GT,        MIR_DGT, MIR_GTS, "gt" },
+    { JS_OP_GE,        MIR_DGE, MIR_GES, "ge" },
+    { JS_OP_EQ,        MIR_DEQ, MIR_EQ,  "eq" },
+    { JS_OP_STRICT_EQ, MIR_DEQ, MIR_EQ,  "eq" },
+    { JS_OP_NE,        MIR_DNE, MIR_NE,  "ne" },
+    { JS_OP_STRICT_NE, MIR_DNE, MIR_NE,  "ne" },
+};
+static const JsMirCompareOp* jm_compare_op(uint8_t op) {
+    for (size_t i = 0; i < sizeof(js_mir_compare_ops)/sizeof(js_mir_compare_ops[0]); i++)
+        if (js_mir_compare_ops[i].op == op) return &js_mir_compare_ops[i];
+    return NULL;
+}
+
 MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     if (jm_const_fold_enabled()) {
         JsFoldVal fv;
@@ -2324,42 +2457,16 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
 
         switch (bin->op) {
         // Arithmetic operators
-        case JS_OP_ADD: {
+        // Float arithmetic: both operands to double, double result. The four
+        // ops differ only in opcode and register name, so they are one table.
+        // (DIV previously had a both_int branch byte-identical to its else.)
+        case JS_OP_ADD: case JS_OP_SUB: case JS_OP_MUL: case JS_OP_DIV: {
+            const JsMirFloatArithOp* a = jm_float_arith_op(bin->op);
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
-            MIR_reg_t r = jm_new_reg(mt, "add", MIR_T_D);
-            jm_emit_reg_binary(mt, MIR_DADD, r, fl, fr);
+            MIR_reg_t r = jm_new_reg(mt, a->reg_name, MIR_T_D);
+            jm_emit_reg_binary(mt, a->code, r, fl, fr);
             return r;
-        }
-        case JS_OP_SUB: {
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
-            MIR_reg_t r = jm_new_reg(mt, "sub", MIR_T_D);
-            jm_emit_reg_binary(mt, MIR_DSUB, r, fl, fr);
-            return r;
-        }
-        case JS_OP_MUL: {
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
-            MIR_reg_t r = jm_new_reg(mt, "mul", MIR_T_D);
-            jm_emit_reg_binary(mt, MIR_DMUL, r, fl, fr);
-            return r;
-        }
-        case JS_OP_DIV: {
-            // JS division always produces float (7/2 === 3.5)
-            if (both_int) {
-                MIR_reg_t dl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-                MIR_reg_t dr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
-                MIR_reg_t r = jm_new_reg(mt, "div", MIR_T_D);
-                jm_emit_reg_binary(mt, MIR_DDIV, r, dl, dr);
-                return r;
-            } else {
-                MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-                MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
-                MIR_reg_t r = jm_new_reg(mt, "div", MIR_T_D);
-                jm_emit_reg_binary(mt, MIR_DDIV, r, fl, fr);
-                return r;
-            }
         }
         case JS_OP_MOD: {
             // Use float modulo for both int and float: correctly handles x % 0 → NaN
@@ -2374,59 +2481,17 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
             break;  // power → fall through to boxed runtime (no native MIR op)
 
         // Comparison operators: return native int (0 or 1)
-        case JS_OP_LT: {
+        // Comparisons: native int result; operand lane and opcode follow
+        // use_float. Same shape for all six, so one table row each.
+        case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+        case JS_OP_EQ: case JS_OP_STRICT_EQ:
+        case JS_OP_NE: case JS_OP_STRICT_NE: {
+            const JsMirCompareOp* c = jm_compare_op(bin->op);
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "lt", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLT : MIR_LTS,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-        case JS_OP_LE: {
-            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "le", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLE : MIR_LES,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-        case JS_OP_GT: {
-            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "gt", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGT : MIR_GTS,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-        case JS_OP_GE: {
-            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "ge", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGE : MIR_GES,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-        case JS_OP_EQ:
-        case JS_OP_STRICT_EQ: {
-            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "eq", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DEQ : MIR_EQ,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return r;
-        }
-        case JS_OP_NE:
-        case JS_OP_STRICT_NE: {
-            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
-            MIR_reg_t r = jm_new_reg(mt, "ne", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DNE : MIR_NE,
+            MIR_reg_t r = jm_new_reg(mt, c->reg_name, MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? c->float_code : c->int_code,
                 MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
             return r;
         }
@@ -5541,147 +5606,35 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
 #if JS_TEST262_FAST_PATHS
-    // assert.sameValue(a, b [, msg]) / assert.notSameValue(a, b [, msg])
-    // assert.compareArray(a, b [, msg]) / assert.deepEqual(a, b [, msg])
-    // → native C++ implementation for test262 batch performance.
-    // Limit this to with-preamble mode so ordinary user scripts can freely use a
-    // global `assert` object without the compiler assuming Test262 harness semantics.
-    if (jm_test262_fast_paths_enabled(mt) &&
-        call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-        JsMemberNode* m = (JsMemberNode*)call->callee;
-        if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
-            m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
-            JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "assert", 6) == 0) {
-                // only intercept for test262 global `assert` — skip if `assert` is a local binding
-                // (e.g. `const assert = require('assert')` in Node.js tests)
-                NameEntry* assert_entry = js_scope_lookup(mt->tp, obj->name);
-                if (!assert_entry) assert_entry = obj->entry;
-                char assert_vname[16];
-                snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
-                // Dynamic Function parameters can be MIR locals without a
-                // useful scope node; the Test262 fast path must not bypass them.
-                bool is_local_assert = (assert_entry && assert_entry->node) ||
-                    (jm_find_var(mt, assert_vname) != NULL);
-                const char* native_fn = NULL;
-                if (!is_local_assert) {
-                if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "sameValue", 9) == 0)
-                    native_fn = "js_assert_same_value";
-                else if (prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "notSameValue", 12) == 0)
-                    native_fn = "js_assert_not_same_value";
-                else if (prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "compareArray", 12) == 0)
-                    native_fn = "js_assert_compare_array";
-                else if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "deepEqual", 9) == 0)
-                    native_fn = "js_assert_deep_equal";
-                else if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "throws", 6) == 0)
-                    native_fn = "js_assert_throws";
-                }
-                if (native_fn) {
-                    JsAstNode* a1 = call->arguments;
-                    JsAstNode* a2 = a1 ? a1->next : NULL;
-                    JsAstNode* a3 = a2 ? a2->next : NULL;
-                    MIR_reg_t actual_reg   = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
-                    MIR_reg_t expected_reg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
-                    MIR_reg_t msg_reg = a3
-                        ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
-                    jm_callr_3(mt, native_fn, MIR_T_I64, actual_reg, expected_reg, msg_reg);
-                    jm_emit_error_lane_propagate_check(mt);
-                    if (strcmp(native_fn, "js_assert_throws") == 0) {
-                        jm_readback_closure_env(mt);
-                    }
-                    return jm_emit_undefined(mt);
+    // Test262 harness interception. One row per harness entry point; the two
+    // shapes (assert.<method>(...) and a bare identifier call) share the same
+    // emitter below. Adding a helper is a table row, not another strncmp arm.
+    if (jm_test262_fast_paths_enabled(mt)) {
+        const JsTest262Intercept* spec = NULL;
+        bool needs_assert_guard = false;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* m = (JsMemberNode*)call->callee;
+            if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
+                JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+                if (jm_name_is(obj->name, "assert", 6)) {
+                    spec = jm_test262_lookup(js_test262_assert_methods, prop->name, arg_count);
+                    // only intercept the test262 global `assert`; a local binding
+                    // (e.g. `const assert = require('assert')`) must win
+                    needs_assert_guard = (spec != NULL);
+                    if (needs_assert_guard && jm_test262_assert_is_local(mt, obj))
+                        spec = NULL;
                 }
             }
+        } else if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+            spec = jm_test262_lookup(js_test262_globals, id->name, arg_count);
+            if (spec && (spec->flags & JM_T262_LOCAL_GUARD) &&
+                jm_test262_assert_is_local(mt, id))
+                spec = NULL;
         }
-    }
-
-    // verifyProperty(obj, name, desc [, options]) / compareArray(a, b)
-    // → native C++ standalone function interception for test262 batch mode.
-    if (jm_test262_fast_paths_enabled(mt) &&
-        call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-        if (id->name) {
-            // test262 harness helper: decimalToPercentHexString(n)
-            // This helper is used in tight URI conformance loops to build %XX
-            // fragments. Lowering it in batch-preamble mode keeps the JS engine
-            // behavior unchanged while avoiding millions of harness dispatches.
-            if (id->name->len == 25 &&
-                strncmp(id->name->chars, "decimalToPercentHexString", 25) == 0 &&
-                arg_count >= 1) {
-                MIR_reg_t n_reg = jm_transpile_box_item(mt, call->arguments);
-                return jm_callr_1(mt, "js_test262_decimal_to_percent_hex_string", MIR_T_I64, n_reg);
-            }
-
-            // verifyProperty(obj, name, desc [, options])
-            if (id->name->len == 14 && strncmp(id->name->chars, "verifyProperty", 14) == 0 && arg_count >= 3) {
-                JsAstNode* a1 = call->arguments;
-                JsAstNode* a2 = a1 ? a1->next : NULL;
-                JsAstNode* a3 = a2 ? a2->next : NULL;
-                JsAstNode* a4 = a3 ? a3->next : NULL;
-                MIR_reg_t obj_reg  = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
-                MIR_reg_t name_reg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
-                MIR_reg_t desc_reg = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
-                MIR_reg_t opts_reg = a4 ? jm_transpile_box_item(mt, a4) : jm_emit_undefined(mt);
-                jm_callr_4(mt, "js_verify_property", MIR_T_I64, obj_reg, name_reg, desc_reg, opts_reg);
-                jm_emit_error_lane_propagate_check(mt);
-                return jm_emit_undefined(mt);
-            }
-            // compareArray(a, b)
-            if (id->name->len == 12 && strncmp(id->name->chars, "compareArray", 12) == 0 && arg_count == 2) {
-                JsAstNode* a1 = call->arguments;
-                JsAstNode* a2 = a1 ? a1->next : NULL;
-                MIR_reg_t arr_a = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
-                MIR_reg_t arr_b = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
-                return jm_callr_2(mt, "js_compare_array", MIR_T_I64, arr_a, arr_b);
-            }
-            // assert(mustBeTrue [, message])
-            // only intercept for test262 global `assert` — skip if `assert` is a local binding
-            // (e.g. `const assert = require('assert')` in Node.js tests)
-            if (id->name->len == 6 && strncmp(id->name->chars, "assert", 6) == 0 && arg_count >= 1 && arg_count <= 2) {
-                NameEntry* assert_entry = js_scope_lookup(mt->tp, id->name);
-                if (!assert_entry) assert_entry = id->entry;
-                char assert_vname[16];
-                snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
-                // Dynamic Function parameters can be MIR locals without a
-                // useful scope node; the Test262 fast path must not bypass them.
-                bool is_local = (assert_entry && assert_entry->node) ||
-                    (jm_find_var(mt, assert_vname) != NULL);
-                if (!is_local) {
-                JsAstNode* a1 = call->arguments;
-                JsAstNode* a2 = a1 ? a1->next : NULL;
-                MIR_reg_t cond_reg = jm_transpile_box_item(mt, a1);
-                MIR_reg_t msg_reg  = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
-                jm_callr_2(mt, "js_assert_base", MIR_T_I64, cond_reg, msg_reg);
-                jm_emit_error_lane_propagate_check(mt);
-                return jm_emit_undefined(mt);
-                }
-            }
-            // $DONOTEVALUATE()
-            if (id->name->len == 14 && strncmp(id->name->chars, "$DONOTEVALUATE", 14) == 0) {
-                jm_call_0(mt, "js_donotevaluate", MIR_T_I64);
-                jm_emit_error_lane_propagate_check(mt);
-                return jm_emit_undefined(mt);
-            }
-            // isConstructor(fn) — test262 harness helper
-            if (id->name->len == 13 && strncmp(id->name->chars, "isConstructor", 13) == 0 && arg_count == 1) {
-                JsAstNode* a1 = call->arguments;
-                MIR_reg_t fn_reg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
-                return jm_callr_1(mt, "js_is_constructor", MIR_T_I64, fn_reg);
-            }
-            // decimalToPercentHexString(n) — test262 encoding harness helper
-            if (id->name->len == 25 && strncmp(id->name->chars, "decimalToPercentHexString", 25) == 0 && arg_count == 1) {
-                JsAstNode* a1 = call->arguments;
-                MIR_reg_t n_reg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
-                return jm_callr_1(mt, "js_decimal_to_percent_hex_string", MIR_T_I64, n_reg);
-            }
-            // buildString(args) — test262 RegExp property-escape harness helper
-            if (id->name->len == 11 && strncmp(id->name->chars, "buildString", 11) == 0 && arg_count == 1) {
-                JsAstNode* a1 = call->arguments;
-                MIR_reg_t args_reg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
-                return jm_callr_1(mt, "js_test262_build_string", MIR_T_I64, args_reg);
-            }
-        }
+        if (spec) return jm_emit_test262_intercept(mt, call, spec);
     }
 #endif
 

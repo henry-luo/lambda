@@ -356,7 +356,7 @@ static void js_util_inspect_append_styled(StrBuf* sb, JsInspectContext* ctx,
 
 static bool js_util_inspect_is_object_like(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC ||
+    return type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_FUNC ||
            type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
 }
 
@@ -587,7 +587,7 @@ static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Ite
         js_util_inspect_append_assertion_string(sb, value, assertion_string_limit);
         return;
     }
-    if (assertion_string && get_type_id(value) == LMD_TYPE_ARRAY &&
+    if (assertion_string && is_array_family_type_id(get_type_id(value)) &&
             js_array_length(value) > 50) {
         // AssertionError's property suffix is a compact summary; expanding
         // large actual/expected arrays hides the useful constructor tag.
@@ -629,7 +629,7 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
     js_util_inspect_append_named_value(sb, "code", code, ctx, depth_left, &first, false);
     Item actual = js_get_key_cstr(obj_item, "actual");
     Item expected = js_get_key_cstr(obj_item, "expected");
-    bool multiline_expected = get_type_id(actual) == LMD_TYPE_ARRAY &&
+    bool multiline_expected = is_array_family_type_id(get_type_id(actual)) &&
         js_array_length(actual) > 50 && !js_util_inspect_is_undefined(expected);
     js_util_inspect_append_named_value(sb, "actual", actual,
         ctx, depth_left, &first, true, assertion_string_limit);
@@ -687,7 +687,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_arguments_exotic, (Item value), (j
 static bool js_util_is_arguments_deep_value(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP) return js_class_id(value) == JS_CLASS_ARGUMENTS;
-    if (type == LMD_TYPE_ARRAY) return js_util_is_arguments_exotic(value);
+    if (is_array_family_type_id(type)) return js_util_is_arguments_exotic(value);
     return false;
 }
 
@@ -1025,7 +1025,9 @@ static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int dept
         // Node diagnostics preserve the public [Arguments] label.
         return js_util_inspect_arguments(obj_item, ctx, depth_left);
     }
-    if (tid == LMD_TYPE_ARRAY) return js_util_inspect_array(obj_item, ctx, depth_left);
+    // array-family: an all-numeric array is LMD_TYPE_ARRAY_NUM and would otherwise
+    // fall through to js_json_stringify, printing [1,2] instead of Node's [ 1, 2 ]
+    if (is_array_family_type_id(tid)) return js_util_inspect_array(obj_item, ctx, depth_left);
     if (js_is_typed_array(obj_item)) return js_util_inspect_typed_array(obj_item, ctx, depth_left);
     if (js_util_inspect_is_object_like(obj_item)) return js_util_inspect_object(obj_item, ctx, depth_left);
 
@@ -1319,7 +1321,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_abort_signal, (Item signal), (js_c
 
 static bool js_util_is_resource_object(Item resource) {
     TypeId type = get_type_id(resource);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_OBJECT ||
+    return type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_OBJECT ||
            type == LMD_TYPE_FUNC || type == LMD_TYPE_VMAP || type == LMD_TYPE_ELEMENT;
 }
 
@@ -1432,7 +1434,7 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
     // validate superCtor.prototype
     Item super_proto = js_get_key_cstr(super_item, "prototype");
     TypeId proto_tid = get_type_id(super_proto);
-    if (proto_tid != LMD_TYPE_MAP && proto_tid != LMD_TYPE_ARRAY) {
+    if (proto_tid != LMD_TYPE_MAP && !is_array_family_type_id(proto_tid)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"superCtor.prototype\" property must be of type object. Received undefined");
     }

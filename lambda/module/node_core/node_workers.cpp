@@ -1,6 +1,7 @@
 // node_workers.cpp — node:worker_threads namespace through Jube worker services.
 #include "node_workers.hpp"
 #include "../../jube/jube_registry.h"
+#include "node_core_common.hpp"
 
 #include <cstring>
 
@@ -76,10 +77,15 @@ Item node_workers_namespace(void) {
         (Item){.item = ITEM_TRUE});
     node_workers_set_property(node_workers_root_value(namespace_root), "parentPort", ItemNull);
     node_workers_set_property(node_workers_root_value(namespace_root), "workerData", ItemNull);
-    node_workers_set_method(node_workers_root_value(namespace_root), "MessageChannel",
-        node_workers_host->node->workers->message_channel_new, 0);
-    node_workers_set_method(node_workers_root_value(namespace_root), "MessagePort",
-        node_workers_host->node->workers->message_port_new, 0);
+    // Export the real global constructors rather than minting plain callables:
+    // jube_new_function produces a callable with no construct slot, so
+    // `new require('worker_threads').MessageChannel()` threw "is not a
+    // constructor". Node also guarantees these are the same object as the
+    // globals, so identity must be shared, not just constructibility.
+    node_workers_set_property(node_workers_root_value(namespace_root), "MessageChannel",
+        jube_node_global_property(node_workers_host, "MessageChannel"));
+    node_workers_set_property(node_workers_root_value(namespace_root), "MessagePort",
+        jube_node_global_property(node_workers_host, "MessagePort"));
     node_workers_set_method(node_workers_root_value(namespace_root), "moveMessagePortToContext",
         node_workers_host->node->workers->message_port_move_to_context, 2);
     node_workers_set_method(node_workers_root_value(namespace_root), "receiveMessageOnPort",

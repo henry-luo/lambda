@@ -1798,10 +1798,14 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 // callback context are not represented by the scalar raw ABI.
 // ============================================================================
 
+// Adapter so the shared child-table visitor can drive the callsite scan.
+static void jm_callsite_scan_child(JsAstNode* child, void* ctx) {
+    jm_callsite_scan_node((JsMirTranspiler*)ctx, child);
+}
+
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return;
-    switch (node->node_type) {
-    case JS_AST_NODE_CALL_EXPRESSION: {
+    switch (node->node_type) {    case JS_AST_NODE_CALL_EXPRESSION: {
         JsCallNode* call = (JsCallNode*)node;
         // Recurse into arguments first (depth-first)
         JsAstNode* a = call->arguments;
@@ -1829,17 +1833,6 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
         jm_callsite_scan_node(mt, call->callee);
         break;
     }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        jm_callsite_scan_node(mt, bin->left);
-        jm_callsite_scan_node(mt, bin->right);
-        break;
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        jm_callsite_scan_node(mt, un->operand);
-        break;
-    }
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* asgn = (JsAssignmentNode*)node;
         jm_callsite_scan_node(mt, asgn->right);
@@ -1848,18 +1841,6 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* mem = (JsMemberNode*)node;
         jm_callsite_scan_node(mt, mem->object);
-        break;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* cond = (JsConditionalNode*)node;
-        jm_callsite_scan_node(mt, cond->test);
-        jm_callsite_scan_node(mt, cond->consequent);
-        jm_callsite_scan_node(mt, cond->alternate);
-        break;
-    }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* ret = (JsReturnNode*)node;
-        jm_callsite_scan_node(mt, ret->argument);
         break;
     }
     case JS_AST_NODE_VARIABLE_DECLARATION: {
@@ -1872,38 +1853,6 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
         }
         break;
     }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
-        jm_callsite_scan_node(mt, es->expression);
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_callsite_scan_node(mt, ifn->test);
-        jm_callsite_scan_node(mt, ifn->consequent);
-        jm_callsite_scan_node(mt, ifn->alternate);
-        break;
-    }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        jm_callsite_scan_node(mt, f->init);
-        jm_callsite_scan_node(mt, f->test);
-        jm_callsite_scan_node(mt, f->update);
-        jm_callsite_scan_node(mt, f->body);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        jm_callsite_scan_node(mt, w->test);
-        jm_callsite_scan_node(mt, w->body);
-        break;
-    }
     case JS_AST_NODE_FOR_IN_STATEMENT:
     case JS_AST_NODE_FOR_OF_STATEMENT: {
         JsForInNode* fi = (JsForInNode*)node;
@@ -1911,34 +1860,29 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
         jm_callsite_scan_node(mt, fi->body);
         break;
     }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        jm_callsite_scan_node(mt, sw->discriminant);
-        JsAstNode* c = sw->cases;
-        while (c) { jm_callsite_scan_node(mt, c); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        jm_callsite_scan_node(mt, sc->test);
-        JsAstNode* s = sc->consequent;
-        while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        jm_callsite_scan_node(mt, t->block);
-        jm_callsite_scan_node(mt, t->handler);
-        jm_callsite_scan_node(mt, t->finalizer);
-        break;
-    }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* cc = (JsCatchNode*)node;
         jm_callsite_scan_node(mt, cc->body);
         break;
     }
-    default:
+
+    // Plain traversals delegated to the shared visitor. Listed explicitly, not folded into default: this walker has no case for 31 other kinds (functions, classes, patterns, arrays, templates) and must keep not descending into them.
+    case JS_AST_NODE_BINARY_EXPRESSION:
+    case JS_AST_NODE_UNARY_EXPRESSION:
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
+    case JS_AST_NODE_RETURN_STATEMENT:
+    case JS_AST_NODE_EXPRESSION_STATEMENT:
+    case JS_AST_NODE_IF_STATEMENT:
+    case JS_AST_NODE_BLOCK_STATEMENT:
+    case JS_AST_NODE_FOR_STATEMENT:
+    case JS_AST_NODE_WHILE_STATEMENT:
+    case JS_AST_NODE_SWITCH_STATEMENT:
+    case JS_AST_NODE_SWITCH_CASE:
+    case JS_AST_NODE_TRY_STATEMENT:
+        js_ast_visit_children(node, jm_callsite_scan_child, mt);
         break;
+    default:
+        break; // unchanged
     }
 }
 
