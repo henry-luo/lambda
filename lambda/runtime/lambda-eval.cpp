@@ -667,6 +667,16 @@ static bool range_type_contains_item(TypeRange* range, Item item) {
         start <= value && value <= end;
 }
 
+// One owner for the bad-range-bound diagnosis. The JIT's counted-range lowering
+// (T19-3) re-checks the int53 band itself, because its bounds arrive in the
+// TOTAL int lane where a saturated or null value is an ordinary i64 sentinel;
+// its cold arm reports through here so the message never forks from fn_to's.
+Item fn_range_bound_error(Item item_a, Item item_b) {
+    log_error("fn_to: range bounds must be exact integers or single-codepoint strings, got %s, %s",
+        get_type_name(get_type_id(item_a)), get_type_name(get_type_id(item_b)));
+    return ItemError;
+}
+
 Item fn_to(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     int64_t start = 0;
@@ -727,9 +737,7 @@ Item fn_to(Item item_a, Item item_b) {
         return {.range = range};
     }
     else {
-        log_error("fn_to: range bounds must be exact integers or single-codepoint strings, got %s, %s",
-            get_type_name(get_type_id(item_a)), get_type_name(get_type_id(item_b)));
-        return ItemError;
+        return fn_range_bound_error(item_a, item_b);
     }
 }
 

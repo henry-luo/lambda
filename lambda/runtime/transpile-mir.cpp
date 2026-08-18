@@ -2186,6 +2186,19 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node);
 // one reviewable change. New code calls mir_expr_carrier_type.
 #define get_effective_type mir_expr_carrier_type
 
+// A direct call routed to the boxed/slow entry hands back an Item even when
+// the callee's NATIVE entry returns a raw lane, so `node`'s carrier at this
+// consumer is ANY no matter what the carrier oracle says about the callee.
+// Every consumer that reopens a call result as a native lane must ask this
+// first; the emitter records the fact on the transpiler right after the call.
+static bool mir_last_call_returned_boxed(MirTranspiler* mt, AstNode* node) {
+    return mt && mt->last_call_returned_boxed_item &&
+        mt->last_call_record_node == ast_unwrap_primary(node);
+}
+
+
+static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstNamedNode* asn);
+
 static bool mir_module_binding_has_native_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected) {
     if (!mir_argument_is_module_binding(mt, node)) return false;
@@ -6567,6 +6580,9 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                                 memcmp(ident->name->chars, asn->name->chars, ident->name->len) == 0) {
                                 // final local identifiers are not in MIR scope yet
                                 // during type probing; resolve them through this block's declarations.
+                                if (mir_unannotated_native_int_decl(mt, asn)) {
+                                    return LMD_TYPE_INT;
+                                }
                                 return get_effective_type(mt, asn->as);
                             }
                         }
@@ -6684,14 +6700,6 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         TypeId lt = get_effective_type(mt, bi->left);
         TypeId rt = get_effective_type(mt, bi->right);
 
-        // C16 keeps exact int div/mod in the int lane. The native emitter
-        // carries the finite arm and the int poison arm separately, so this
-        // type fact is what prevents a boxed Item round-trip in callers.
-        if ((bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD) &&
-                lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
-            return LMD_TYPE_INT;
-        }
-
         if (bi->op == OPERATOR_TO) {
             // `to` returns a raw Range* container. Reporting ANY here leaves
             // its pointer untagged at the next Item boundary, so `range is
@@ -6718,9 +6726,22 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         }
 
         if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT &&
-            (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
-            // The AST's int result type is too narrow after 53-bit overflow
-            // promotion; MIR must treat the runtime result as a boxed Item.
+            (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+             bi->op == OPERATOR_MUL || bi->op == OPERATOR_IDIV ||
+             bi->op == OPERATOR_MOD)) {
+            // These all compute in the i64 lane but the DEFAULT lowering boxes
+            // on the way out -- transpile_binary_out returns the raw LaneReg
+            // only when the consumer asked for `native_int_out`. The carrier
+            // oracle must describe that default, so it answers ANY; a consumer
+            // that intends to reopen the lane asks the LANE WITNESS instead
+            // (mir_native_arithmetic_operand_type / mir_is_native_int_tree),
+            // which still reports INT for this whole tree.
+            //
+            // div/mod used to claim INT here. That disagreed with its own
+            // emitter and stayed hidden only while both operands were rarely
+            // proven int at once; once loop induction variables reached the
+            // int lane (T19-3/T19-4), `i % n` published a boxed Item through
+            // an int-typed binding and every read of it saturated to `inf`.
             return LMD_TYPE_ANY;
         }
 
@@ -7269,6 +7290,22 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
     if (mir_binary_is_exact_u32_result(bi)) return false;
     return !mir_matches_compact_loop_sub(mt, bi) &&
         !mir_matches_compact_loop_add(mt, bi);
+}
+
+// T19-4: ONE owner for "an unannotated declaration whose initializer is a
+// proven native int tree binds on the int lane". The declaration lowering and
+// the carrier oracle must give the same answer -- asking it in two places with
+// two spellings is exactly what made a block-local `let b = a + 1` publish a
+// raw lane through an oracle that still reported the default boxed carrier,
+// and MIR cannot catch that (a boxed Item and an int lane are both i64).
+static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstNamedNode* asn) {
+    if (!asn || !asn->as || asn->declared_type) return false;
+    AstNode* init = ast_unwrap_primary(asn->as);
+    if (!init || init->node_type != AST_NODE_BINARY) return false;
+    if (!mir_is_native_int_arith(mt, init)) return false;
+    // Only the case the ordinary carrier does not already cover, so this stays
+    // strictly additive to the pre-T19-4 gate.
+    return get_effective_type(mt, asn->as) == LMD_TYPE_ANY;
 }
 
 // A native scalar consumer may prove an entire closed integer tree without
@@ -8772,6 +8809,10 @@ static bool mir_value_expr_is_boxed(MirTranspiler* mt, AstNode* node) {
 static MIR_reg_t mir_box_evaluated_node(MirTranspiler* mt, AstNode* node,
         MIR_reg_t value, TypeId type_id) {
     AstNode* evaluated = ast_unwrap_primary(node);
+    // A call routed to the boxed entry already handed back an Item, whatever
+    // the callee's native return lane says. Boxing it again reads its tag bits
+    // as the payload -- int 0 comes back out as `inf`.
+    if (mir_last_call_returned_boxed(mt, node)) return value;
     if (type_id == LMD_TYPE_INT && evaluated &&
             (evaluated->node_type == AST_NODE_CONTENT ||
              evaluated->node_type == AST_NODE_LIST)) {
@@ -9031,6 +9072,17 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         mt->in_tail_position = saved_tail;  // ensure correct before then branch
         push_scope(mt);  // isolate branch variables
         MIR_reg_t then_val = transpile_expr(mt, if_node->then);
+        // An arm's value is MOVed into the shared join register below, which
+        // erases the register identity the pair tracking matches on
+        // (`pending_live_item == value`). Resolve HERE, at the producer, exactly
+        // as the condition above does: a tail call in an arm is forwardable only
+        // when its value reaches the return UNCHANGED, and once it feeds a join
+        // it is an ordinary consumer (D5.2.1v3, RV4.1). No corpus script reaches
+        // this today -- the leak that motivated the audit was the declaration
+        // initializer below -- but the epilogue ASSERTS this invariant and
+        // aborts, so close it structurally. Costs nothing when no pair is live.
+        then_val = mir_materialize_pending_reg(mt, then_val,
+            MIR_PENDING_REASON_REP_CONVERSION);
         if (mt->block_returned) {
             // Branch contains a terminal statement (return/break/continue).
             // Code after MIR_RET/TCO is unreachable, but MIR still validates
@@ -9099,6 +9151,9 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     if (if_node->otherwise) {
         push_scope(mt);  // isolate branch variables
         MIR_reg_t else_val = transpile_expr(mt, if_node->otherwise);
+        // Same join-register rule as the `then` arm above.
+        else_val = mir_materialize_pending_reg(mt, else_val,
+            MIR_PENDING_REASON_REP_CONVERSION);
         if (mt->block_returned) {
             // Same as above: terminal in else branch still needs a type-shaped dummy.
             if (result_type == MIR_T_D) {
@@ -9832,6 +9887,39 @@ static void mir_prewiden_loop_bindings(MirTranspiler* mt, AstNode* node,
     }
 }
 
+// T19-3: a `to` bound qualifies for the counted loop when it can be PRODUCED
+// in the int lane -- not when its boxed carrier happens to be `int`. Those are
+// different questions: `int op int` computes entirely in the i64 lane but
+// publishes a boxed Item at ordinary expression boundaries (S4.1.2, D2.2.2),
+// so asking the carrier oracle rejected every `n - 1` / `n * 2` bound and sent
+// otherwise-native loops down the Range + iter_val_at path.
+static bool mir_range_bound_native_int(MirTranspiler* mt, AstNode* bound) {
+    // Both tests are needed. mir_is_native_int_tree opens a nested `n - 1`,
+    // but it bails on a NULL ast_unwrap_primary -- which is what a LEAF
+    // literal like the `2` in `2 to sz` unwraps to -- so the lane witness has
+    // to be asked directly for the non-tree case.
+    return mir_native_arithmetic_operand_type(mt, bound) == LMD_TYPE_INT ||
+        mir_is_native_int_tree(mt, bound);
+}
+
+// A bound needs no runtime band check when its interval is statically known:
+// mir_int_lane_interval only succeeds inside [INT53_MIN, INT53_MAX], and a
+// non-nullable bound cannot arrive as INT_LANE_NULL.
+static bool mir_range_bound_in_band(MirTranspiler* mt, AstNode* bound) {
+    int64_t lower = 0, upper = 0;
+    return !mir_expr_may_be_null(mt, bound) &&
+        mir_int_lane_interval(mt, bound, &lower, &upper);
+}
+
+// Produce a qualifying bound as a raw i64 lane, using the same idiom as the
+// int-arithmetic operands in emit_int_lane_arith: the native producer reopens
+// a closed int tree, and the LANE WITNESS -- not the boxed carrier -- decides
+// whether what it produced still needs normalizing.
+static MIR_reg_t mir_emit_range_bound(MirTranspiler* mt, AstNode* bound) {
+    return emit_int_native_lane_typed(mt, transpile_native_int_expr(mt, bound),
+        mir_native_arithmetic_operand_type(mt, bound)).r;
+}
+
 static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
     // Before push_scope: a binding this body widens is declared OUTSIDE the
@@ -10094,11 +10182,13 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
     // comprehension output, where/order/limit, nested sources, break/continue —
     // is deliberately left on the shared path below.
     AstNode* range_src = ast_unwrap_primary(loop->as);
-    bool counted_range = !key_only && key_filter == 0 &&
-        range_src && range_src->node_type == AST_NODE_BINARY &&
-        ((AstBinaryNode*)range_src)->op == OPERATOR_TO &&
-        get_effective_type(mt, ((AstBinaryNode*)range_src)->left) == LMD_TYPE_INT &&
-        get_effective_type(mt, ((AstBinaryNode*)range_src)->right) == LMD_TYPE_INT;
+    bool is_to_source = range_src && range_src->node_type == AST_NODE_BINARY &&
+        ((AstBinaryNode*)range_src)->op == OPERATOR_TO;
+    // T19-3: admit the bound on whether it is PRODUCIBLE in the int lane, not
+    // on its boxed carrier -- see mir_range_bound_native_int.
+    bool counted_range = !key_only && key_filter == 0 && is_to_source &&
+        mir_range_bound_native_int(mt, ((AstBinaryNode*)range_src)->left) &&
+        mir_range_bound_native_int(mt, ((AstBinaryNode*)range_src)->right);
 
     MIR_reg_t range_start = 0;
     MIR_reg_t boxed_coll = 0;
@@ -10110,16 +10200,54 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         // loop's trip count and induction variable are machine quantities. This
         // is the sanctioned narrowing direction — an iteration bound is not a
         // Lambda `int` value, it is the loop's own arithmetic.
-        MIR_reg_t start_val = emit_machine_index(mt, transpile_expr(mt, range->left),
-            get_effective_type(mt, range->left));
-        MIR_reg_t end_val = emit_machine_index(mt, transpile_expr(mt, range->right),
-            get_effective_type(mt, range->right));
+        MIR_reg_t start_val = mir_emit_range_bound(mt, range->left);
+        MIR_reg_t end_val = mir_emit_range_bound(mt, range->right);
         range_start = new_reg(mt, "range_start", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, range_start), MIR_new_reg_op(mt->ctx, start_val)));
+        len = new_reg(mt, "range_len", MIR_T_I64);
+        // mir_int_lane_interval only succeeds inside the int53 band, so a proven
+        // interval on both bounds IS the band proof; a literal `0 to 49` then
+        // needs no runtime check at all.
+        bool bounds_proven_in_band =
+            mir_range_bound_in_band(mt, range->left) &&
+            mir_range_bound_in_band(mt, range->right);
+
+        // The int lane is TOTAL: a saturated or null bound reaches this loop as
+        // a sentinel parked at an i64 extreme (INT_LANE_NULL/NAN/+-INF), and
+        // `end - start + 1` would wrap it into a plausible trip count and
+        // silently iterate where fn_to raises. Re-check the int53 band that
+        // fn_to checks -- once per loop, not per iteration (S4.8).
+        MIR_label_t l_band_bad = 0;
+        MIR_label_t l_len_done = 0;
+        if (!bounds_proven_in_band) {
+        MIR_reg_t s_lo = new_reg(mt, "range_slo", MIR_T_I64);
+        MIR_reg_t s_hi = new_reg(mt, "range_shi", MIR_T_I64);
+        MIR_reg_t e_lo = new_reg(mt, "range_elo", MIR_T_I64);
+        MIR_reg_t e_hi = new_reg(mt, "range_ehi", MIR_T_I64);
+        MIR_reg_t band = new_reg(mt, "range_band", MIR_T_I64);
+        l_band_bad = new_label(mt);
+        l_len_done = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, s_lo),
+            MIR_new_reg_op(mt->ctx, range_start), MIR_new_int_op(mt->ctx, INT53_MIN)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, s_hi),
+            MIR_new_reg_op(mt->ctx, range_start), MIR_new_int_op(mt->ctx, INT53_MAX)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, e_lo),
+            MIR_new_reg_op(mt->ctx, end_val), MIR_new_int_op(mt->ctx, INT53_MIN)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, e_hi),
+            MIR_new_reg_op(mt->ctx, end_val), MIR_new_int_op(mt->ctx, INT53_MAX)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, band),
+            MIR_new_reg_op(mt->ctx, s_lo), MIR_new_reg_op(mt->ctx, s_hi)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, band),
+            MIR_new_reg_op(mt->ctx, band), MIR_new_reg_op(mt->ctx, e_lo)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, band),
+            MIR_new_reg_op(mt->ctx, band), MIR_new_reg_op(mt->ctx, e_hi)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_band_bad), MIR_new_reg_op(mt->ctx, band)));
+        }
+
         // Mirrors fn_to: length is end - start + 1, and an inverted range is
         // empty rather than negative (lambda-eval.cpp fn_to).
-        len = new_reg(mt, "range_len", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_SUB, MIR_new_reg_op(mt->ctx, len),
             MIR_new_reg_op(mt->ctx, end_val), MIR_new_reg_op(mt->ctx, range_start)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, len),
@@ -10133,6 +10261,22 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
             MIR_new_int_op(mt->ctx, 0)));
         emit_label(mt, l_len_ok);
+        if (!bounds_proven_in_band) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, l_len_done)));
+            // Cold arm: report through fn_to's own diagnosis helper, then
+            // iterate zero times -- which is exactly what the generic path
+            // already does, since iter_len(ItemError) is 0.
+            emit_label(mt, l_band_bad);
+            MIR_reg_t boxed_start = emit_box_int_lane(mt, LaneReg(range_start)).r;
+            MIR_reg_t boxed_end = emit_box_int_lane(mt, LaneReg(end_val)).r;
+            emit_call_2(mt, "fn_range_bound_error", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_start),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_end));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+                MIR_new_int_op(mt->ctx, 0)));
+            emit_label(mt, l_len_done);
+        }
     } else {
         // Evaluate collection
         MIR_reg_t collection = transpile_expr(mt, loop->as);
@@ -11519,6 +11663,15 @@ static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
 
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     AstNode* declare = let_node->declare;
+    // TCO: a DECLARATION's initializer is never in tail position -- the binding
+    // is a side effect of the enclosing expression, not its result. Leaving the
+    // caller's tail flag set made the direct-call emitter hand a shape-2 pair
+    // to the return epilogue (its tail-forward path) for a value that never
+    // reaches a return: `(let text = concat_strings(…), if …)` inside a tail
+    // position then leaked the pair and tripped the D5.2.1v3 epilogue check.
+    // Mirrors transpile_binary_out, which clears the same flag for operands.
+    bool saved_tail_position = mt->in_tail_position;
+    mt->in_tail_position = false;
     while (declare) {
         if (declare->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* asn = (AstNamedNode*)declare;
@@ -11553,12 +11706,33 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     predicted_expr_tid = native_u32_initializer
                         ? LMD_TYPE_INT : get_effective_type(mt, asn->as);
                     AstNode* native_initializer = ast_unwrap_primary(asn->as);
-                    bool native_int_initializer = native_initializer &&
+                    // T19-4: a proven native int tree IS the int lane whether or
+                    // not an annotation says so. Requiring the boxed carrier to
+                    // already read `int` asked the wrong oracle -- `i + i`
+                    // answers ANY because the DEFAULT lowering boxes on the way
+                    // out (S4.1.2, D2.2.2) -- so every unannotated `var k = i + i`
+                    // bound boxed and dragged its entire loop into the generic
+                    // numeric tower (fn_add/fn_le/fn_index_assign/is_truthy).
+                    // An unannotated native binding is not a new thing here:
+                    // `var b = 3` already binds on the int lane, and the
+                    // assignment cascade already widens such a binding when a
+                    // later value does not fit its lane.
+                    bool native_int_arith_initializer = native_initializer &&
                         native_initializer->node_type == AST_NODE_BINARY &&
-                        mir_is_native_int_arith(mt, native_initializer) &&
+                        mir_is_native_int_arith(mt, native_initializer);
+                    bool inferred_native_int_initializer =
+                        mir_unannotated_native_int_decl(mt, asn);
+                    bool native_int_initializer = native_int_arith_initializer &&
                         (predicted_expr_tid == LMD_TYPE_INT ||
+                         inferred_native_int_initializer ||
                          (initializer_contract &&
                           initializer_contract->type_id == LMD_TYPE_INT));
+                    // The lane the emitter is about to produce is the binding's
+                    // carrier; leaving the prediction at ANY would register the
+                    // raw i64 as a boxed Item.
+                    if (inferred_native_int_initializer) {
+                        predicted_expr_tid = LMD_TYPE_INT;
+                    }
                     initializer_native_int_lane = native_int_initializer;
                     // A nullable typed-array load can widen the AST result to
                     // `any` while the native arithmetic emitter still owns the
@@ -11584,8 +11758,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // sentinel. The slow body may also return a non-int at
                 // runtime, so degrading to Item — never unboxing — is the only
                 // representation that keeps inference unobservable (D3.2.1).
-                if (mt->last_call_returned_boxed_item &&
-                        mt->last_call_record_node == ast_unwrap_primary(asn->as)) {
+                if (mir_last_call_returned_boxed(mt, asn->as)) {
                     expr_tid = LMD_TYPE_ANY;
                 }
                 // The AST retains the source annotation explicitly.  Inferring
@@ -12182,6 +12355,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
         }
         declare = declare->next;
     }
+    mt->in_tail_position = saved_tail_position;
 }
 
 // ============================================================================
@@ -12319,10 +12493,14 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         int idx = 0;
         AstNode* item = arr_node->item;
         while (item) {
+            mt->last_call_record_node = NULL;
+            mt->last_call_returned_boxed_item = false;
             MIR_reg_t val = transpile_expr(mt, item);
             // val is native double (MIR_T_D) for float literals/expressions,
             // but may be a boxed Item for captured variables (LMD_TYPE_ANY)
             TypeId val_tid = get_effective_type(mt, item);
+            // ...or for a call routed to the boxed entry; see the int path.
+            if (mir_last_call_returned_boxed(mt, item)) val_tid = LMD_TYPE_ANY;
             if (val_tid == LMD_TYPE_ANY) {
                 // unbox Item to double
                 val = emit_unbox(mt, val, LMD_TYPE_FLOAT);
@@ -12354,9 +12532,16 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             // array_int_set owns an int lane, while the ordinary expression
             // ABI boxes exact div/mod at an Item boundary. Reopen that lane
             // here so a literal or nested operation is not stored as tag bits.
+            mt->last_call_record_node = NULL;
+            mt->last_call_returned_boxed_item = false;
             MIR_reg_t val = val_tid == LMD_TYPE_INT
                 ? transpile_native_int_expr(mt, item)
                 : transpile_expr(mt, item);
+            // A call whose site routed to the boxed entry returned an Item even
+            // though the callee's native entry returns a lane; storing that
+            // Item word as a lane published its tag bits as the element value
+            // (an int 0 read back as `inf`).
+            if (mir_last_call_returned_boxed(mt, item)) val_tid = LMD_TYPE_ANY;
             // val may still be a boxed Item for captured variables
             // (LMD_TYPE_ANY), so unbox only that dynamic representation.
             if (val_tid == LMD_TYPE_ANY) {
@@ -14634,7 +14819,12 @@ static MIR_reg_t emit_generic_array_index_load(MirTranspiler* mt,
                 obj_ident->name->chars);
             MirVarEntry* ov = find_var(mt, oname);
             // mutable bindings need an explicit INT witness before decoding the lane.
-            if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
+            // Module slots have no MirVarEntry witness; their typed read can
+            // still take the boxed slow/oob arm, so publishing that load as a
+            // raw lane would pass Item bits into the return boundary (D2.2.2,
+            // D3.2.1). Keep the result boxed until a live binding proves the
+            // representation end to end.
+            if (ov && ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
         }
 
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
@@ -18358,8 +18548,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
     // slow body produced a boxed Item regardless of its inferred scalar type.
     // Boxing that Item again as an int lane saturates to the inf sentinel
     // (havlak's `footer = build_straight(...)` rebinding).
-    if (mt->last_call_returned_boxed_item &&
-            mt->last_call_record_node == assign_value) {
+    if (mir_last_call_returned_boxed(mt, assign_value)) {
         val_tid = LMD_TYPE_ANY;
     }
     if (compact_loop_native_assignment || native_int_assignment) {
@@ -18947,8 +19136,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // It is exactly what handler/`or` consumers split on; normalizing it
     // through the scalar lane would send the ERROR arm through it2d/it2l and
     // silently destroy the error.
-    if (mt->last_call_returned_boxed_item &&
-            mt->last_call_record_node == ast_unwrap_primary(node)) {
+    if (mir_last_call_returned_boxed(mt, node)) {
         return val;
     }
 
@@ -21284,6 +21472,15 @@ static void find_aliases_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_cou
             find_aliases_multi(wh->body, ctxs, ctx_count);
             break;
         }
+        case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM: {
+            // A loop body is ordinary body code. Skipping it here made every
+            // param used only inside a `for` look unused, which is how an
+            // int-only counter reached the emitter as `any` [T19-3].
+            AstForNode* fr = (AstForNode*)node;
+            find_aliases_multi(fr->let_clause, ctxs, ctx_count);
+            find_aliases_multi(fr->then, ctxs, ctx_count);
+            break;
+        }
         default:
             break;
         }
@@ -21355,6 +21552,36 @@ static void gather_evidence_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_
             AstWhileNode* wh = (AstWhileNode*)node;
             gather_evidence_multi(wh->cond, ctxs, ctx_count);
             gather_evidence_multi(wh->body, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM: {
+            AstForNode* fr = (AstForNode*)node;
+            for (AstNode* lp = fr->loop; lp; lp = lp->next) {
+                AstLoopNode* loop = (AstLoopNode*)lp;
+                AstNode* src = ast_unwrap_primary(loop->as);
+                if (src && src->node_type == AST_NODE_BINARY &&
+                        ((AstBinaryNode*)src)->op == OPERATOR_TO) {
+                    // A range bound is a numeric use: `to` accepts only exact
+                    // integers (or single codepoints), never an arbitrary
+                    // value (S4.8). That is the evidence a closed INT call
+                    // edge needs to settle the param on the int lane [T19-3].
+                    AstBinaryNode* range = (AstBinaryNode*)src;
+                    for (int c = 0; c < ctx_count; c++) {
+                        if (is_tracked_ref(range->left, &ctxs[c]) ||
+                                is_tracked_ref(range->right, &ctxs[c])) {
+                            ctxs[c].evidence |= INFER_NUMERIC_USE;
+                        }
+                    }
+                }
+                gather_evidence_multi(loop->as, ctxs, ctx_count);
+                gather_evidence_multi(loop->on, ctxs, ctx_count);
+            }
+            gather_evidence_multi(fr->let_clause, ctxs, ctx_count);
+            gather_evidence_multi(fr->where, ctxs, ctx_count);
+            gather_evidence_multi(fr->order, ctxs, ctx_count);
+            gather_evidence_multi(fr->limit, ctxs, ctx_count);
+            gather_evidence_multi(fr->offset, ctxs, ctx_count);
+            gather_evidence_multi(fr->then, ctxs, ctx_count);
             break;
         }
         case AST_NODE_RETURN_STAM: {
@@ -21472,13 +21699,32 @@ static TypeId resolve_inferred_type(FnParamEvidence* ctx, bool is_proc) {
     // M2: body evidence alone stops here — see below — but a param every caller
     // in the unit provably feeds a native scalar is not a guess. Require real
     // numeric use too, so a param merely passed along stays boxed.
+    // ⚠ Forwarding a param into another call is deliberately NOT a "real use".
+    // Counting it closes spectralnorm's transitive chain (its `n` reaches
+    // mul_Av/mul_Atv through mul_AtAv) for 1.25x, but a param merely passed
+    // along gains nothing from a native lane and pays an unbox at entry plus a
+    // re-box at the forward: measured geomean 1.02 over 63 rows, with gcbench
+    // +31%, nqueens +29%, binarytrees +26%. A future rule would have to prove
+    // the CALLEE benefits before promoting a forwarding-only param [T19-4].
     if ((ctx->evidence & (INFER_NUMERIC_USE | INFER_ARITH_USE)) != 0) {
         if ((ctx->evidence & INFER_CALLSITE_FLOAT) &&
                 !(ctx->evidence & INFER_CALLSITE_INT)) {
             return LMD_TYPE_FLOAT;
         }
+        // T19-4: a closed INT call edge is a static fact about THIS parameter --
+        // every recorded caller passes a statically `int`-typed argument -- not
+        // the weak arithmetic guess the cd.ls note above warns about.
+        // INFER_FLOAT_CONTEXT only says the body mentions a float literal
+        // SOMEWHERE, which says nothing about this parameter; vetoing on it kept
+        // `eval_A(i, j)` boxed because an unrelated `1.0 /` sits in the same
+        // body. A genuinely conflicting edge (INFER_CALLSITE_FLOAT) still
+        // vetoes, and any unseen caller still enters through the boxed `_b`
+        // entry, so this selects a shape rather than asserting one.
         if ((ctx->evidence & INFER_CALLSITE_INT) &&
-                !(ctx->evidence & (INFER_CALLSITE_FLOAT | INFER_FLOAT_CONTEXT))) {
+                !(ctx->evidence & INFER_CALLSITE_FLOAT) &&
+                (!(ctx->evidence & INFER_FLOAT_CONTEXT) ||
+                 ((ctx->evidence & INFER_ARITH_USE) &&
+                  !(ctx->evidence & INFER_FLOAT)))) {
             return LMD_TYPE_INT;
         }
     }
@@ -24455,7 +24701,8 @@ static TypeId mir_literal_array_element_type(AstNode* arg) {
     return mir_array_type_element_type(arg->type);
 }
 
-static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
+static TypeId mir_callsite_arg_elem_type_at(MirTranspiler* mt, AstNode* arg,
+        int depth) {
     if (!arg) return LMD_TYPE_ANY;
     AstNode* unwrapped = ast_unwrap_primary(arg);
     TypeId static_elem = mir_array_type_element_type(unwrapped ? unwrapped->type : arg->type);
@@ -24498,7 +24745,37 @@ static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
             }
         }
     }
+
+    // T19-4: an ordinary LOCAL binding is how an array normally reaches a call
+    // -- `var flags = fill(5000, true)` and then `sieve(flags, sz)`. The cases
+    // above cover a literal array, a static `T[]`, a direct `fill(n, v)` and an
+    // identifier naming a parameter of the ENCLOSING function, but nothing
+    // resolved a plain local, so the witness stopped at the caller's own frame
+    // and the callee kept a boxed parameter. That costs the whole callee body,
+    // not just the argument: every element read boxes, and every operation on a
+    // boxed element falls to the generic numeric tower (D3.3.1, D3.2.1).
+    //
+    // A mutable binding may be rebound to a differently-shaped array later. That
+    // is a speed question, not a soundness one: this witness only selects which
+    // NATIVE shape to generate, and both the callee's own body evidence
+    // (`used_as_container` + a matching store type) and the call site's carrier
+    // check must still agree -- a mismatch routes to the `_b` entry, which
+    // carries the complete boxed body.
+    if (unwrapped && unwrapped->node_type == AST_NODE_IDENT && depth < 4) {
+        AstIdentNode* ident = (AstIdentNode*)unwrapped;
+        AstNode* binding = ident->entry ? ident->entry->node : NULL;
+        if (binding && binding->node_type == AST_NODE_ASSIGN) {
+            AstNamedNode* named = (AstNamedNode*)binding;
+            TypeId declared = mir_array_type_element_type(named->declared_type);
+            if (declared != LMD_TYPE_ANY) return declared;
+            return mir_callsite_arg_elem_type_at(mt, named->as, depth + 1);
+        }
+    }
     return LMD_TYPE_ANY;
+}
+
+static TypeId mir_callsite_arg_elem_type(MirTranspiler* mt, AstNode* arg) {
+    return mir_callsite_arg_elem_type_at(mt, arg, 0);
 }
 
 static void mir_callsite_mark_escaped(MirTranspiler* mt, AstFuncNode* fn) {
@@ -24556,6 +24833,20 @@ static void mir_callsite_join_elem(CallSiteEntry* e, int pos, TypeId elem) {
 
 static void mir_callsite_join_specialization_type(CallSiteEntry* e, int pos,
         TypeId tid) {
+    // ⚠ KNOWN IMPRECISION, measured and deliberately kept. An argument this pass
+    // cannot type is SKIPPED rather than joined to ANY, so INFER_CALLSITE_INT
+    // means "every call site whose argument was a statically known scalar passed
+    // an int", NOT "every call site passes an int" -- cd's
+    // `rbt_put(tree, key, value)` takes `1`, an array AND a map, and this records
+    // INT. Nothing acts on it today: the resolve-time guards in
+    // resolve_inferred_type reject those shapes. Joining to ANY instead is the
+    // honest rule and was implemented and measured: it costs **geomean 1.038**
+    // over 63 benchmark rows (gcbench +31%, nqueens +30%, binarytrees +28%),
+    // because `ANY` here conflates "genuinely dynamic argument" with "this round
+    // cannot type it yet" and poisons the second case too. Fixing it properly
+    // means separating those two, not flipping this branch [T19-4; see
+    // vibe/Lambda_Impl_Tune19.md]. Do not relax the resolve-time guards while
+    // this stands -- that combination miscompiles cd.
     if (pos < 0 || pos >= e->param_count || pos >= 16 ||
             tid == LMD_TYPE_ANY) {
         return;
