@@ -6528,6 +6528,18 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         (tid == LMD_TYPE_NULL || tid == LMD_TYPE_RAW_POINTER || tid == LMD_TYPE_ANY)) {
         return LMD_TYPE_ARRAY;
     }
+    if (node->node_type == AST_NODE_CONTENT) {
+        // `transpile_content` publishes its tail through
+        // `transpile_content_tail_value`, which sets body_tail_rep =
+        // VALUE_REP_ITEM and returns `transpile_box_item(...)`. The carrier is
+        // therefore a boxed Item regardless of the block's semantic type. The
+        // oracle had no CONTENT case, so it fell through to that semantic type
+        // — which is how a procedural block's `int` last-value reached the
+        // for-expression collector as a raw lane and produced
+        // `[inf, inf, inf]`. MIR cannot catch this: a boxed Item and an int
+        // lane are both i64 registers [T19-1, Impl §17].
+        return LMD_TYPE_ANY;
+    }
     if (node->node_type == AST_NODE_LIST) {
         AstListNode* list = (AstListNode*)node;
         if (list->declare) {

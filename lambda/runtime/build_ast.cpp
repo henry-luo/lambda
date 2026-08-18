@@ -825,7 +825,16 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     case SYS_RESULT_SAME_AS_ARG0:
         // A proven concrete argument keeps its carrier through the operation;
         // an open argument leaves the registry's declared type in force.
-        if (arg0->type_id != LMD_TYPE_ANY) return arg0;
+        // Literal-ness must NOT ride along: `slice("hello", 2)` is not the
+        // literal `"hello"`, and handing back the literal type let consumers
+        // treat the runtime result as a compile-time constant (observed as a
+        // raw String* printed as a number, and `inf`, in slice_two_arg).
+        if (arg0->type_id != LMD_TYPE_ANY) {
+            if (arg0->is_literal || arg0->is_const) {
+                return alloc_type(tp->pool, arg0->type_id, sizeof(Type));
+            }
+            return arg0;
+        }
         break;
     case SYS_RESULT_ARG0_NUMERIC:
         if (lambda_numeric_kind_from_type(arg0) != LAMBDA_NUM_INVALID) return arg0;
@@ -8729,8 +8738,13 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     if (ast_node->key_only) {
         ast_node->type = set_type_any(tp, ANY_LOOP_SRC);
     }
-    else if (expr_type->type_id == LMD_TYPE_ARRAY) {
-        TypeArray* array_type = (TypeArray*)expr_type;
+    else if (expr_type->type_id == LMD_TYPE_ARRAY ||
+            expr_type->type_id == LMD_TYPE_ARRAY_NUM) {
+        // RETRY (§15.6): ARRAY_NUM was excluded while the emit_double_bits
+        // float bug was live, so iterating a typed numeric array produced
+        // `any` while the plain-array form produced its element type.
+        TypeArray* array_type = !is_global_simple_type(expr_type)
+            ? (TypeArray*)expr_type : NULL;
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             ast_node->type = array_type->nested;
         }
@@ -11356,8 +11370,20 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     // procedural block's last-value type leaks its raw lane into the
     // for-expression collector (`[inf, inf, inf]` on
     // `proc_for_expr_content_proc`) — the IP5 carrier class again.
+    // Type the block by what `transpile_content` yields: a procedural block's
+    // LAST value item, a single-item block's sole value, a list only for a
+    // multi-item functional block (whose element types are still unproven, so
+    // it stays open). Safe now that the carrier oracle has a CONTENT case —
+    // the block's CARRIER is a boxed Item, so this semantic type can no longer
+    // be mistaken for a raw lane [Impl §17].
+    bool proc_block = tp->current_scope && tp->current_scope->is_proc;
     if (type->length == 1 && ast_node->item && ast_node->item->type) {
         ast_node->type = ast_node->item->type;
+    } else if (proc_block && type->length > 1) {
+        AstNode* last_value = ast_node->item;
+        while (last_value && last_value->next) last_value = last_value->next;
+        ast_node->type = last_value && last_value->type ? last_value->type
+            : set_type_any(tp, ANY_LIST);
     } else {
         ast_node->type = set_type_any(tp, ANY_LIST);
     }

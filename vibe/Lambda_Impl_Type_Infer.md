@@ -1,7 +1,7 @@
 # Lambda Impl Plan: Structural Type Inference (Decided-but-Unbuilt Backlog)
 
 - **Date:** 2026-08-18
-- **Status:** IP0–IP4 and IP6 IMPLEMENTED; the §10.3 carrier sweep DONE (§14); **TIG1 LANDED** after the defect-1 hunt fixed the underlying emitter bug (§15). IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
+- **Status:** IP0–IP4 and IP6 IMPLEMENTED; carrier sweep DONE (§14); TIG1 LANDED (§15); reverts retried (§16); int-lane audit DONE (§17); the graphviz "regression" resolved as a keyed-sort BUG FIX with stale goldens (§18). Census 28,203 → 22,890; `test_lambda_gtest` 732/732. IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
 - **Design authority:** `vibe/Lambda_Design_Type_Infer.md` (TI1–TI8, TIG1–TIG17); this doc implements only its *decided* items and never resolves an open design question in code — where an open question gates a slice, the interim disposition is stated and the slice stays inside it
 - **Formal authority:** D2.4.1, D2.5.3, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.6.1–D8.6.3; S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1–S11.4.4; SI3v2, SI14
 - **Related:** `vibe/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D3.3
@@ -905,3 +905,221 @@ they were reverted when the float-lane bug was still live. IP7's arm-join
 union is the exception: its blocker is the recursive forward-reference
 placeholder (§13.1), which is a typing-side prerequisite the emitter fix does
 not touch.
+
+
+---
+
+## 16. Retrying the four reverts against the fixed emitter (2026-08-18)
+
+§15.6 predicted that several reverts were collateral damage from the
+`emit_double_bits` float bug rather than independent blockers. Retried; the
+prediction held for half of them.
+
+| Revert | Was | Result |
+|---|---:|---|
+| **ARRAY_NUM iteration** | 113 failures | **LANDED clean.** Iterating a typed numeric array now yields its element type; it was excluded only because the float bug made the element lane unsafe. |
+| **Polymorphic sys-func rows** | 19 failures | **LANDED clean** for `math_median/mean/variance/deviation` (`SYS_RESULT_REAL_TO_FLOAT`) and `abs`/`sign` (`SYS_RESULT_ARG0_NUMERIC`). The original attempt used a flat `float`/`int`, which lied for complex and vector arguments; the polymorphism-aware kinds are the correct spelling. |
+| **`slice`** | 3 failures | **Still blocked — different cause.** A bare `slice("hello", 2)` is correct; `{r: slice("hello", 2)}` inside a MAP LITERAL still corrupts (`inf`, raw pointer). The blocker is the map field-storage path (`LaneStorageDesc`), not the float lane. |
+| **Multi-item content blocks** | 197 failures | **Still blocked — int-lane twin of the float bug.** A procedural block's last-value type reaches the for-expression collector as a raw INT lane while the value is boxed (`[inf, inf, inf]` instead of `[3, 5, 7]`, `proc_for_expr_content_proc`). MIR's verifier CANNOT catch this the way it caught the float case — a boxed Item and an int lane are both i64 registers. |
+
+### 16.1 A correctness fix found along the way
+
+`SYS_RESULT_SAME_AS_ARG0` propagated the argument's **literal-ness**:
+`slice("hello", 2)` returned the *literal* `"hello"` type, letting consumers
+treat a runtime result as a compile-time constant. It now returns a plain
+type of the same TypeId when the argument is literal or const. This is correct
+independently of `slice` and stays even though that row was reverted.
+
+### 16.2 The int-lane blind spot is now the top structural risk
+
+The float bug was found only because MIR's verifier rejects `dmov` with an
+i64 source. The int-lane equivalent — a boxed Item flowing where an int lane
+is expected — produces `inf` or silently wrong numbers with **no verifier
+diagnostic at all**. Two of the four retries above are blocked by exactly
+that, and §14.4's asymmetry note predicted it.
+
+Recommended next step: audit the int-lane consumers the way the float seams
+were audited (`emit_int_native_lane_typed`, `emit_int_lane_arith`, the
+for-expression collector, `emit_index_result_move`'s int arms), looking for
+sites that take a raw register without proving the carrier. There is no test
+that will find these for us.
+
+### 16.3 State
+
+Census **25,558 → 25,344**; `sysfunc_row` 4,699 → 4,650, `compare` 497 → 495,
+`loop_src` unchanged at 252 (the ARRAY_NUM win shows up in the benchmark
+corpus, not the census corpus).
+
+Gates: `test_lambda_gtest` 2 failures (`graphviz_rank_layout`,
+`graphviz_ordering_groups` — both pre-existing, unrelated to inference, they
+fail with and without the member-carrier conversion),
+`test_lambda_errors_gtest` 109/109, `test_mir_emission_gtest` 59/59,
+`test_js_mir_emission_gtest` 21/21, `test_mir_gc_stress_gtest` 88/88,
+`test_js_gtest` (only the pre-existing `lib_tabulator`), both lint rules clean.
+
+**Process note:** `test_lambda_gtest` flakes under parallel load — four
+benchmark rows reported failures in one run and all four passed standalone.
+Always confirm standalone before treating a suite failure as a regression.
+Likewise `make build-test` must be rerun after a merge: a stale harness
+reported 9 phantom MIR-emission failures (`unknown field 'expect_any'`).
+
+
+---
+
+## 17. The int-lane audit (2026-08-18)
+
+§16.2 named the int-lane blind spot as the top structural risk: a boxed Item
+reaching an int-lane consumer produces `inf` or silently wrong numbers with no
+verifier diagnostic, because a boxed Item and an int lane are both i64
+registers.
+
+### 17.1 What the audit found: the entry points are correct by contract
+
+Every int-lane entry point has the same shape —
+
+```c
+static LaneReg emit_int_native_lane_typed(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
+    if (tid == LMD_TYPE_INT) return LaneReg(reg);   // trusts the TypeId
+    ...
+    return emit_unbox_int_lane(mt, BoxedReg(reg));  // boxed Item -> lane
+}
+```
+
+`emit_machine_index` is identical (`if (tid == LMD_TYPE_INT) return value;`).
+The float analogue can check `MIR_reg_type(reg) == MIR_T_D` before trusting;
+the int one cannot, so it trusts the TypeId its caller passes.
+
+Auditing all callers of `emit_int_native_lane_typed`: two use
+`transpile_native_int_expr` (a proven-lane producer), one is gated by
+`value_native_proven`, and the map-field store pair uses
+`get_effective_type(mt, value)` — the carrier oracle. **That last one is
+correct BY CONTRACT**: the oracle's job is exactly to answer "which carrier",
+so trusting it is right.
+
+**Therefore int-lane bugs are not bugs in the consumers. They are MISSING
+ORACLE CASES.** The consumer trusts an oracle that, for some node kinds, was
+silently falling through to the semantic type.
+
+### 17.2 The missing case: AST_NODE_CONTENT
+
+The oracle had cases for ARRAY, BINARY, CALL_EXPR, HANDLER_EXPR, HANDLER_STAM,
+IDENT, INDEX_EXPR, LIST, MATCH_EXPR and PRIMARY — but **not CONTENT**, even
+though `transpile_content` publishes its tail through
+`transpile_content_tail_value`, which sets `body_tail_rep = VALUE_REP_ITEM`
+and returns `transpile_box_item(...)`. A content block's carrier is therefore
+always a boxed Item.
+
+With no case, the oracle returned the block's semantic type. That is exactly
+how a procedural block's `int` last-value reached the for-expression collector
+as a raw lane and produced `[inf, inf, inf]` instead of `[3, 5, 7]`.
+
+Added the CONTENT case (returns `LMD_TYPE_ANY`). It landed clean on its own.
+
+### 17.3 Consequence: multi-item content blocks now land
+
+Retry 4 from §16 — blocked there — **lands on top of the fixed oracle**. A
+procedural block now carries its last value item's type, and a functional
+multi-item block stays open (its element types are still unproven).
+
+`list` census **3,378 → 977**; total **25,344 → 22,890**, the single largest
+drop of the whole effort.
+
+`slice` was retried once more and is still blocked: the map field-storage path
+(`LaneStorageDesc`), unrelated to either lane bug.
+
+### 17.4 The other node kinds are clean
+
+Probed every remaining kind that could box while reporting a scalar type —
+if-expression arms, member reads, unary, for-expression results, nested
+content blocks, and call results — each fed into int arithmetic and a typed
+map store. All produced correct values, so CONTENT was the only gap.
+
+New fixture `test/lambda/proc/type_infer_carrier_lanes.ls` pins all of them by
+value, plus the previously-broken procedural `for` block and the float-lane
+cases from §15. Pinning by VALUE is the point: on the int lane there is no
+verifier to fail, so only a golden can catch a regression.
+
+### 17.5 Gates
+
+`test_lambda_gtest` 2 failures (the pre-existing graphviz pair),
+`test_lambda_errors_gtest` 109/109, `test_mir_emission_gtest` 59/59,
+`test_js_mir_emission_gtest` 21/21, `test_mir_gc_stress_gtest` 88/88, both
+lint rules clean.
+
+### 17.6 The durable lesson
+
+The carrier story has one shape, and it is now stated precisely:
+
+> Emitter consumers may trust the carrier oracle. The oracle must have a case
+> for every node kind whose lowering boxes. A missing case is silent
+> corruption on the int lane and a verifier error on the float lane.
+
+Adding a node kind to the AST, or changing a lowering to box, therefore
+requires checking the oracle. That is a much smaller and more checkable
+obligation than the "audit every consumer" framing this work started with.
+
+
+---
+
+## 18. The graphviz "regression" was a keyed-sort bug FIX (2026-08-18)
+
+`graphviz_rank_layout` and `graphviz_ordering_groups` were the last two
+failures, carried through several sections as "pre-existing, unrelated". They
+were neither: the behavior change is a **fix**, and the goldens were stale.
+
+### 18.1 Establishing that it WAS a change
+
+The archived pre-session release binary (`test/benchmark/exe/lambda-v32-a6192c1086`)
+passes `rank_layout`; the current build does not. So something in this
+session's window changed the output — earlier attribution attempts had only
+ruled out the member-carrier conversion, which fails either way.
+
+### 18.2 Which primitive changed
+
+Decomposing the layout pipeline, `group by … into` produces **identical**
+group order on both binaries. The difference is `sort(array, keyFn)`.
+
+With a key function chosen to DISAGREE with natural order:
+
+| Program | v32 | current | correct |
+|---|---|---|---|
+| `sort([{s:3.0,id:"a"},{s:2.0,id:"b"},{s:1.0,id:"c"}], e => e.s)` | `[a,b,c]` | `[c,b,a]` | **`[c,b,a]`** |
+| `sort([{s:1.0,id:"z"},{s:2.0,id:"a"}], e => e.s)` | `[a,z]` | `[z,a]` | **`[z,a]`** |
+| `sort([{n:3,id:"a"},{n:1,id:"b"}], e => e.n)` | `[a,b]` | `[b,a]` | **`[b,a]`** |
+
+**v32 silently ignored the key function** and fell back to the values' natural
+order. The current build honors it. Note the third row: INT keys were broken
+too, so this was never float-specific.
+
+### 18.3 Why it is fixed now
+
+Most plausibly the §17 `AST_NODE_CONTENT` oracle case. A single-expression
+closure body (`(e) => e.s`) lowers through content, whose carrier is a boxed
+Item; without the oracle case the key value was published as a raw lane and
+the comparator read tag bits instead of the value. That explains both the int
+and float breakage in one mechanism. (Stated as the likely cause rather than a
+proven one — the fix was not made against this symptom.)
+
+### 18.4 Resolution
+
+The graphviz goldens encoded the broken ordering, so they were **regenerated**,
+not worked around. The new `rank_layout` layer order is insertion order, which
+is what `layer_with_order` actually computes — it scores by `float(i)`, the
+insertion index. The old alphabetical order was an artifact of the comparator
+falling back to comparing whole node maps.
+
+New fixture `test/lambda/sort_key_fn_float.ls` pins the fix directly: four
+keyed-sort cases each chosen so that honoring the key gives a different answer
+from natural order, plus a stability check. The same file run on the archived
+v32 binary produces the wrong answer for every case, which is what makes it a
+real regression test rather than a restatement of current behavior.
+
+`test_lambda_gtest` is now **732/732**.
+
+### 18.5 Lesson
+
+A failing golden is a hypothesis, not a verdict. This one was labelled
+"pre-existing, unrelated" for several sections on the strength of one
+bisect that only excluded a single candidate. Confirming against an archived
+binary — cheap, no rebuild — would have identified it immediately, and is the
+right first move whenever a golden disagrees.
