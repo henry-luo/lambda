@@ -14217,6 +14217,12 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // generator callee whose current prototype is read after those parameters.
     js_pending_args_callee = saved_pending_args_callee_root.get();
     js_eval_initializer_context = prev_eval_initializer_context;
+    if (result_home && !uses_local_result_home &&
+            lambda_item_uses_scalar_home(result)) {
+        // D5.3: context-ABI MIR calls ignore the legacy result-home argument;
+        // adopt their transient scalar before the callee activation expires.
+        result = lambda_item_adopt_scalar_home(result, result_home);
+    }
     return js_finish_borrowed_scalar_result(result, uses_local_result_home);
 }
 

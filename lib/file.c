@@ -311,10 +311,10 @@ int write_text_file_atomic(const char* filename, const char* content) {
     }
     fclose(f);
 
-    // atomic rename
-    if (rename(tmp, filename) != 0) {
-        log_error("write_text_file_atomic: rename '%s' -> '%s' failed: %s",
-                  tmp, filename, strerror(errno));
+    // file_rename replaces an existing target on Windows; plain rename does not.
+    if (file_rename(tmp, filename) != 0) {
+        log_error("write_text_file_atomic: rename '%s' -> '%s' failed",
+                  tmp, filename);
         remove(tmp);
         mem_free(tmp);
         return -1;
