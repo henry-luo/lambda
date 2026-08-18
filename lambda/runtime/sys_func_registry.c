@@ -1844,6 +1844,7 @@ JitImport jit_runtime_imports[] = {
     {"target_equal", FPTR(target_equal)},
     {"fn_query", FPTR(fn_query)},
     {"fn_to", FPTR(fn_to)},
+    {"fn_range_bound_error", FPTR(fn_range_bound_error)},
 
     // ========================================================================
     // Field access / indexing

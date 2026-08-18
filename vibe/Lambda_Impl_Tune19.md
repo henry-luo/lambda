@@ -107,9 +107,97 @@ Carry `(static type, lane, nullability, in-band proof)` on every expression resu
 4. A declared `T[]` must never emit a *worse* read than the inferred one — when the witness cannot be proven, fall back to the inferred lowering, not to `item_at` (T19-B).
 **Acceptance:** all 9 rows in §2 within 5% of their untyped twin (categorical bar restored); bounce ≤0.30, fannkuch ≤0.36, splay ≤145, brainfuck ≤320 ms; `mir-check` fixtures assert zero `lambda_int_lane_to_double_c` in an int-compare body and zero `item_at` in a declared-`int[]` read body, with the unproven twins still checking.
 
-### T19-3 — Native counted loops on the inference lane (owns sieve/primes)
+### T19-3 — Native counted loops on the inference lane (owns sieve/primes) — **LANDED**
 `for x in a to b` lowers to a counted loop whenever both bounds carry the int lane, regardless of whether the fact came from an annotation or from inference; `to` only materializes a range object when the result escapes [S7.x range semantics unchanged].
 **Acceptance:** untyped sieve ≤0.06 ms, primes ≤5 ms, mbrot ≤1.0 ms; untyped `sieve` dump contains no `fn_to`/`iter_val_at`.
+
+#### What actually blocked it — three independent defects, none of them "the loop"
+
+The counted-loop lowering already existed. Three separate facts kept it from firing.
+
+**(a) The gate asked the wrong oracle.** It required `get_effective_type(bound) == LMD_TYPE_INT`
+— the *boxed carrier*. But `int ± int` and `int * int` compute entirely in the i64 lane and
+only box at ordinary expression boundaries (`emit_int_lane_arith` returns a `LaneReg`;
+`transpile_binary_out` boxes on the way out unless the consumer asked for `native_int_out`).
+So the carrier oracle answers ANY for them — correctly — and every `0 to n - 1` bound was
+rejected. The gate now asks `mir_native_arithmetic_operand_type` / `mir_is_native_int_tree`,
+the same *lane witness* the int-arithmetic emitter already uses for its own operands, and
+produces the bound with the identical `emit_int_native_lane_typed(transpile_native_int_expr(…))`
+idiom. Note the carrier oracle's stale comment at the `int ± int` case ("too narrow after
+53-bit overflow promotion") describes **v4**: under v5 `int` is int53-total and saturates,
+it does not promote — but the ANY answer is still right, because the *default* lowering boxes.
+
+**(b) Parameter inference never walked `for` loops.** `gather_evidence_multi` and
+`find_aliases_multi` had cases for `if`/`while`/`match`/calls/indexes — and none for
+`AST_NODE_FOR_EXPR`/`AST_NODE_FOR_STAM`. Every param used only inside a loop body looked
+*unused*: untyped `sieve(flags, sz)` gathered evidence `0` for `flags` and only the
+call-site bit for `sz`, so both stayed `any`. Added the missing walk, plus the rule that a
+`to` operand is a numeric use (`to` accepts only exact integers or single codepoints, S4.8) —
+which is what lets a closed `INFER_CALLSITE_INT` edge settle the param on the int lane.
+`sz` now resolves to `int` and untyped sieve is fully counted.
+
+**(c) A raw-lane consumer ignored the boxed-entry protocol.** With (b) landed, `count_in(0, null)`
+started routing to the callee's *boxed* entry while the carrier oracle still reported the
+callee's *native* return lane — so the array-literal builder stored the returned Item word as
+if it were a lane, and `int 0` read back as `inf`. The emitter already records this
+(`last_call_returned_boxed_item` + `last_call_record_node`), and two consumers already
+honoured it; the boxing helper `mir_box_evaluated_node` and the int/float array-literal
+element paths did not. Extracted `mir_last_call_returned_boxed()` and applied it at all of
+them. **This bug pre-dates T19-3** — T19-3 only made it reachable from untyped code.
+
+#### Semantics preserved
+
+The int lane is TOTAL, so a saturated or null bound arrives as a sentinel parked at an i64
+extreme (`INT_LANE_NULL`/`NAN`/`±INF`, all outside ±(2^53−1)); `end - start + 1` would wrap
+one into a plausible trip count and iterate silently where `fn_to` raises. The counted path
+now re-checks the same int53 band `fn_to` checks — **once per loop, not per iteration** — and
+its cold arm reports through `fn_range_bound_error()`, extracted out of `fn_to` so the message
+keeps exactly one owner, then iterates zero times (which is what the generic path already does,
+since `iter_len(ItemError)` is 0). The check is skipped entirely when both bounds have a proven
+static interval, so a literal `0 to 49` emits no check at all. Char ranges (`"a" to "e"`) can
+never enter the counted path — their bounds are not statically `int` — and keep the generic
+Range path. This band check also closes a **pre-existing hole**: the old gate admitted an
+`int`-carrier bound with no band test, so `for i in 0 to saturated_int` looped instead of raising.
+
+Regression fixture: `test/lambda/proc/type_infer_counted_range.ls`.
+
+#### Result
+
+Every benchmark in `awfy`/`kostya`/`larceny` that uses a range is now on the counted path
+except `havlak`/`havlak2`, whose bound is `v.first` — a member read of an untyped param, i.e.
+member-shape inference, not range lowering. Before: `sieve` 1 `fn_to`, `bounce2` 2 (of 3 loops,
+both `0 to ball_count - 1`), and the same shape across the corpus.
+
+Release build, median of 5, 64 range-using rows vs the archived `lambda-v32-a6192c1086` control:
+
+| row | v32 | T19-3 | |
+|---|---|---|---|
+| bounce2 (typed) | 0.803 | **0.184** | **4.4x** |
+| bounce (untyped) | 0.274 | **0.120** | **2.3x** |
+| sieve (untyped) | 0.547 | 0.499 | 1.10x |
+| fannkuch2, deriv2, gcbench2 | | | 1.06–1.07x |
+| queens, base642, brainfuck2, knucleotide2, cpstak2, pnpoly, pnpoly2 | | | 1.03–1.04x |
+| binarytrees2, paraffins2 | | | 1.02x |
+| 46 rows | | | flat (±2%) |
+| nqueens | 1.833 | 1.893 | 0.97x |
+| sieve2 (typed) | 0.033 | 0.035 | 0.94x |
+
+The two slower rows are **not attributable to this change**: `nqueens` contains no `for` and no
+`to` at all, and `sieve2`'s +2 µs sits on a 33 µs total where the added work is one band check
+per *loop entry* (~8 ALU ops, executed once). Both read as build-to-build code-layout variance.
+
+#### Acceptance — corrected
+
+The dump half is **met**: the untyped `sieve` MIR contains no `fn_to` and no `iter_val_at`.
+The timing half was **mis-specified**. `untyped sieve ≤0.06 ms` assumed the range protocol was
+what separated `sieve` (0.547) from `sieve2` (0.033). It is not: with the loop fully counted,
+untyped sieve is 0.499 ms, still 14x its typed twin, because `flags` remains `any` — every
+`flags[i - 1]` read and `flags[k - 1] = false` store stays dynamic. `fill(5000, true)` does not
+publish an `ARRAY_NUM` witness on the call edge, so `infer_param_types_batched`'s container
+branch cannot fire. That is **T19-4** (closed-caller container/scalar witness), not T19-3.
+Restated acceptance for this track: *no `fn_to`/`iter_val_at` in any corpus range loop whose
+bounds are int-producible* — met, with `havlak` the one member-shape exception. The sieve and
+primes timing goals move to T19-4.
 
 ### T19-4 — Closed-caller scalar lane specialization (owns ray/spectralnorm/fft)
 Extend Tune18's closed-caller witness analysis from array carriers to scalar param **and return** lanes: when every non-escaped direct caller supplies a proven `int`/`float` lane, the raw entry takes `i64`/`d` natively; open/escaped callees keep the boxed entry unchanged [D3.3.1, D3.3.3, D8.3.3]. Combine with T19-1 so an `sx[s]` float-array read counts as a proven producer on the call edge.

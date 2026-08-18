@@ -2611,6 +2611,7 @@ extern "C" {
     Item fn_reduce(Item collection, Item func);
 
     Item fn_to(Item a, Item b);
+    Item fn_range_bound_error(Item a, Item b);
 
     // pipe operations
     typedef Item (*PipeMapFn)(Item item, Item index);
