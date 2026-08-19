@@ -3045,10 +3045,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {
                     marker_span->width = marker_prop->width;
-                    marker_span->height = ((marker_prop->loaded_image || marker_prop->is_image_marker) &&
-                                          marker_prop->height > 0.0f) ?
-                        marker_prop->height : max(lycon->block.line_height,
-                                                  marker_prop->line_height);
+                    float marker_content_height =
+                        ((marker_prop->loaded_image || marker_prop->is_image_marker) &&
+                         marker_prop->height > 0.0f) ? marker_prop->height : 0.0f;
+                    // an image marker must retain the line fragment's height so
+                    // its replaced content stays vertically centered with text.
+                    marker_span->height = max(marker_content_height,
+                        max(lycon->block.line_height, marker_prop->line_height));
 
                     if (marker_prop->is_outside) {
                         marker_span->x = marker_prop->reserves_first_line
