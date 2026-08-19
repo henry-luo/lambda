@@ -19,7 +19,14 @@ function comma_sep(rule) {
 function qualified_name($, precedence) {
   return prec.left(precedence, seq(
     choice($.identifier, $.symbol),
-    repeat1(seq('.', choice($.identifier, $.symbol))),
+    // Tree-sitter lowers repeat1 to a helper rule; carry the namespace
+    // precedence into that helper so every `.segment` remains maximal.
+    repeat1(prec.left(precedence, seq(
+      // The path body is external, so the namespace separator also needs
+      // lexical priority at their shared dot; it is valid only in this rule.
+      token(prec(precedence, '.')),
+      choice($.identifier, $.symbol)
+    ))),
   ));
 }
 
@@ -165,11 +172,7 @@ module.exports = {
     ],
 
     conflicts: $ => [
-      // The postfix-chain conflicts that used to sit here became unnecessary
-      // once structural type rules stopped reaching into expression grammar;
-      // generator reports them as such and they cost nothing either way.
       [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
-      [$.dotted_name, $.path_expr],                  // dotted attributes vs rooted path steps
     ],
 
     precedences: $ => [

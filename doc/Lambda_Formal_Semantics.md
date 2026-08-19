@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 7.0.0 (2026-08-19)
+**Spec version:** 8.0.0 (2026-08-19)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -38,7 +38,7 @@ RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
 R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
 C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md)).
-PTH1v2, PTH2v2, PTH3–PTH29
+PTH1v2, PTH2v2, PTH3–PTH15, PTH16v2, PTH17–PTH29
 ([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
 
@@ -212,23 +212,28 @@ harnesses.
   hashing, printing, target resolution, and
   `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1,
   PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
-- **S2.4.3*** Paths, names, symbols, and member expressions use this one
+- **S2.4.3v2*** Paths, names, symbols, and member expressions use this one
   reference scheme but retain distinct evaluation contracts. Paths are
   static root-selected plans and produce lazy target handles; names are
   statically namespace-qualified (`a` may become `ns.a`) and read bindings;
   symbols are static `NameKey` reference values and do not implicitly read
   bindings.
   Member/index expressions apply typed keys to a runtime base and are dynamic.
+  Name-position parsing is maximal: once an element tag or attribute name has
+  the namespace-qualified `ns.name` form, the complete dotted name is consumed
+  before element content is considered, and whitespace does not terminate it.
+  Thus `<svg.rect>` and `<svg .rect>` name the same qualified tag; a relative
+  path child requires the explicit content boundary `<svg; .rect>`.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
-  S5.1.4, S8.2.2, S9.1.5, PTH13–PTH16, PTH20]
+  S5.1.4, S8.2.2, S9.1.5, PTH13–PTH15, PTH16v2, PTH20]
 - **S2.4.4*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
   it never uses mutable process-global bindings or existence/failure-based
   provider fallback. Address resolution performs no I/O; forcing an external
   target is a separate operation with its declared effect/error contract.
-  [S1.10, PTH16–PTH19]
+  [S1.10, PTH16v2, PTH17–PTH19]
 - **S2.4.5v2*** Paths have three root forms: rooted `/.a.b`, relative `.a.b`,
   and absolute `SchemeName...`. Rooted paths qualify logical `/` through the
   active resolver; absolute paths name their provider/authority directly and
@@ -1346,7 +1351,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S2.4.1v2, S2.4.2v3, S2.4.3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path scope on 2026-08-18: logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, and network hostname discovery remain deferred. |
+| S2.4.1v2, S2.4.2v3, S2.4.3v2–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19: maximal namespace-qualified element/attribute names, explicit `;` before a relative-path element child, logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, and network hostname discovery remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |

@@ -20,17 +20,6 @@
 
 const common = require('./grammar-common.js');
 
-// In element/attribute name position, commit to a qualified name before the
-// parser shifts its first segment and can reinterpret the remaining `.name`
-// as a relative path. The external token spans only that first segment; the
-// rest stays structural so the existing dotted_name AST contract is retained.
-function qualifiedName($, precedence) {
-  return prec.left(precedence, seq(
-    alias($.dotted_name_head_token, $.identifier),
-    repeat1(seq('.', choice($.identifier, $.symbol))),
-  ));
-}
-
 // ---------------------------------------------------------------------------
 // Production replacement layer: external scanner tokens. The scanner only
 // finds where each token ENDS; Lambda-side parsers own each interior.
@@ -58,10 +47,10 @@ const productionRuleLayer = {
       seq('.', $.path_body_token),
     ),
 
-    // Qualified element/attribute names need a contextual first-segment token
-    // so `<svg.rect>` cannot become tag `svg` plus relative path `.rect`.
-    _attr_dotted_name: $ => qualifiedName($, 51),
-    dotted_name: $ => qualifiedName($, 49),
+    // S2.4.3v2: a namespace-qualified name is maximal. Its precedence must
+    // exceed primary/path content so `<svg .rect>` remains tag `svg.rect`.
+    _attr_dotted_name: $ => common.qualified_name($, 120),
+    dotted_name: $ => common.qualified_name($, 120),
 
     // Islands are first-class values (`let p = \(d[3])`), so they keep their
     // own token in value position.
@@ -87,11 +76,9 @@ module.exports = grammar({
     $.return_type_token,
     $.view_pattern_token,
     $.path_body_token,
-    $.dotted_name_head_token,
   ],
-  // The production path keeps its introducer in grammar and makes the body an
-  // external token. DOTTED_NAME_HEAD_TOKEN resolves the full grammar's
-  // dotted-name/path ambiguity contextually, so only the query conflict stays.
+  // A maximal structural dotted_name resolves the name/path boundary, so only
+  // the independent query conflict remains.
   conflicts: $ => [
     [$._expr, $.query_expr],
   ],

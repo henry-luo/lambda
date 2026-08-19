@@ -36,9 +36,10 @@ const fullRuleLayer = {
     _primary_type: $ => $.primary_type,
     _char_pattern: $ => $.pattern_island,
 
-    // Qualified names stay structural in the reference parser.
-    _attr_dotted_name: $ => qualified_name($, 51),
-    dotted_name: $ => qualified_name($, 49),
+    // S2.4.3v2: a namespace-qualified name is maximal. Its precedence must
+    // exceed primary/path content so `<svg .rect>` remains tag `svg.rect`.
+    _attr_dotted_name: $ => qualified_name($, 120),
+    dotted_name: $ => qualified_name($, 120),
 
     // S2.4.1v2 admits rooted `/.a` and relative `.a`; bare `/`, bare `.`, and
     // `/a` are retired. Keep `/` and `.` as separate tokens in the rooted form.

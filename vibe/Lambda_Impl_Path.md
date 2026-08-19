@@ -91,7 +91,7 @@ deferred as stated above.
 - Remote file transport and local-network hostname discovery are deferred.
 - This work does not redesign lexical/import namespace selection. Existing
   name qualification feeds the shared typed-key protocol, preserving
-  **PTH16**, but broader namespace work stays separate.
+  **PTH16v2**, but broader namespace work stays separate.
 - Lateral/sibling navigation remains the open issue SO19; only decided root
   and parent axes are included.
 - Vendored Tree-sitter code is not edited. Only `grammar.js` is changed and
@@ -472,7 +472,7 @@ scopes continue to obey **S10.1.3**.
 Static path syntax constructs a normalized `Path` without I/O. Dynamic
 member/index syntax evaluates its base and resolves a key at runtime. Both use
 the same `RefKey` validation and domain-access helper, satisfying
-**S2.4.3** and **PTH20**.
+**S2.4.3v2** and **PTH20**.
 
 Interpreter and MIR Direct lowering must call semantic helpers rather than
 reimplementing layout or normalization:

@@ -2114,16 +2114,32 @@ void* alloc_const(Transpiler* tp, size_t size) {
 // for symbols, strips the surrounding single quotes
 static StrView node_name_text(Transpiler* tp, TSNode node) {
     StrView text = ts_node_source(tp, node);
-    // The production grammar aliases a contextual dotted-name head to an
-    // identifier. Preserve symbol-head semantics by recognizing its source
-    // spelling as well as the ordinary symbol node kind.
-    if ((ts_node_symbol(node) == SYM_SYMBOL ||
-            (text.length >= 2 && text.str[0] == '\'' && text.str[text.length - 1] == '\'')) &&
-            text.length >= 2) {
+    if (ts_node_symbol(node) == SYM_SYMBOL && text.length >= 2) {
         text.str++;
         text.length -= 2;
     }
     return text;
+}
+
+static String* canonical_dotted_name(Transpiler* tp, TSNode dotted_node) {
+    // S2.4.3v2 allows grammar extras around a namespace dot, but whitespace
+    // is not part of the qualified identity; assemble it from segment nodes.
+    StrBuf* canonical = strbuf_new();
+    uint32_t count = ts_node_named_child_count(dotted_node);
+    bool has_segment = false;
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(dotted_node, i);
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol != SYM_IDENT && symbol != SYM_SYMBOL) continue;
+        StrView segment = node_name_text(tp, child);
+        if (has_segment) strbuf_append_char(canonical, '.');
+        strbuf_append_str_n(canonical, segment.str, segment.length);
+        has_segment = true;
+    }
+    String* result = name_pool_create_strview(tp->name_pool,
+        (StrView){.str = canonical->str, .length = canonical->length});
+    strbuf_free(canonical);
+    return result;
 }
 
 // check if a name is a reserved type keyword
@@ -7085,10 +7101,8 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         return (StrView) { .str = NULL, .length = 0 };
     }
     case sym_dotted_name: {
-        // a.b.'c' - return the full text including dots
-        int start_byte = ts_node_start_byte(key_node);
-        int end_byte = ts_node_end_byte(key_node);
-        return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+        String* canonical = canonical_dotted_name(tp, key_node);
+        return (StrView) { .str = canonical->chars, .length = canonical->len };
     }
     case SYM_SYMBOL:  case SYM_STRING: {
         // todo: handle string and symbol escape
@@ -7817,15 +7831,15 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     TSNode first_child = ts_node_named_child(elmt_node, 0);
     TSSymbol first_sym = ts_node_symbol(first_child);
     StrView tag_name = {};
+    String* dotted_tag_name = NULL;
     if (first_sym == SYM_IDENT) {
         tag_name = ts_node_source(tp, first_child);
     } else if (first_sym == SYM_SYMBOL) {
         tag_name = ts_node_source(tp, first_child);
         if (tag_name.length >= 2) { tag_name.str++; tag_name.length -= 2; }
     } else if (first_sym == sym_dotted_name) {
-        int sb = ts_node_start_byte(first_child);
-        int eb = ts_node_end_byte(first_child);
-        tag_name = { .str = tp->source + sb, .length = static_cast<size_t>(eb - sb) };
+        dotted_tag_name = canonical_dotted_name(tp, first_child);
+        tag_name = { .str = dotted_tag_name->chars, .length = dotted_tag_name->len };
     }
 
     // check if tag name resolves to an object type definition
@@ -7914,10 +7928,8 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             type->name.length = pooled_name->len;
         }
         else if (symbol == sym_dotted_name) {  // dotted element name (a.b.'c')
-            int start_byte = ts_node_start_byte(child);
-            int end_byte = ts_node_end_byte(child);
-            StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
-            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            String* pooled_name = dotted_tag_name
+                ? dotted_tag_name : canonical_dotted_name(tp, child);
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
             // look up namespace prefix (first segment) and set TypeElmt.ns

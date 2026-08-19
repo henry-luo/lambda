@@ -33,9 +33,6 @@ enum TokenType {
     VIEW_PATTERN_TOKEN,
     // Everything after the grammar-owned rooted `/` then `.`, or relative `.`.
     PATH_BODY_TOKEN,
-    // First segment of a qualified element/attribute name. This contextual
-    // token prevents the following `.name` from becoming a relative path.
-    DOTTED_NAME_HEAD_TOKEN,
 };
 
 void *tree_sitter_lambda_external_scanner_create(void) {
@@ -637,62 +634,6 @@ static bool scan_path_body_token(TSLexer *lexer) {
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// qualified element/attribute name head
-// ---------------------------------------------------------------------------
-
-static bool scan_qualified_name_segment(TSLexer *lexer) {
-    if (lexer->lookahead == '\'') {
-        return scan_symbol_literal(lexer);
-    }
-    if (!is_identifier_start(lexer->lookahead)) { return false; }
-    char word[16];
-    consume_word(lexer, word, sizeof(word));
-    return true;
-}
-
-// Consume grammar extras only for lookahead after mark_end. These advances
-// must stay non-skipping: Tree-sitter moves the token start on skip advances,
-// which would otherwise clamp the already-marked head to zero width.
-static bool scan_qualified_name_extras(TSLexer *lexer) {
-    for (;;) {
-        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-        if (lexer->lookahead != '/') { return true; }
-        lexer->advance(lexer, false);
-        if (lexer->lookahead == '/') {
-            while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
-                lexer->advance(lexer, false);
-            }
-            continue;
-        }
-        if (lexer->lookahead != '*') { return false; }
-        lexer->advance(lexer, false);
-        int32_t prev = 0;
-        while (!lexer->eof(lexer) && !(prev == '*' && lexer->lookahead == '/')) {
-            prev = lexer->lookahead;
-            lexer->advance(lexer, false);
-        }
-        if (lexer->eof(lexer)) { return false; }
-        lexer->advance(lexer, false);
-    }
-}
-
-static bool scan_dotted_name_head_token(TSLexer *lexer) {
-    // Repeated attributes can request the external token before Tree-sitter's
-    // internal lexer has consumed the post-comma extra space.
-    skip_extras(lexer);
-    if (!scan_qualified_name_segment(lexer)) { return false; }
-    lexer->mark_end(lexer);
-
-    // Look past the returned head without extending it. Tree-sitter consumes
-    // extras between the structural head, dot, and following segment.
-    if (!scan_qualified_name_extras(lexer)) { return false; }
-    if (lexer->lookahead != '.') { return false; }
-    lexer->advance(lexer, false);
-    if (!scan_qualified_name_extras(lexer)) { return false; }
-    return scan_qualified_name_segment(lexer);
-}
-
 bool tree_sitter_lambda_external_scanner_scan(
     void *payload, TSLexer *lexer, const bool *valid_symbols) {
     (void)payload;
@@ -748,11 +689,6 @@ bool tree_sitter_lambda_external_scanner_scan(
 
     if (valid_symbols[PATH_BODY_TOKEN] && scan_path_body_token(lexer)) {
         lexer->result_symbol = PATH_BODY_TOKEN;
-        return true;
-    }
-
-    if (valid_symbols[DOTTED_NAME_HEAD_TOKEN] && scan_dotted_name_head_token(lexer)) {
-        lexer->result_symbol = DOTTED_NAME_HEAD_TOKEN;
         return true;
     }
 
