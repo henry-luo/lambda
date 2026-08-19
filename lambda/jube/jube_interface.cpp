@@ -1015,6 +1015,55 @@ static bool jube_node_is(TSNode node, const char* type) {
 }
 
 // count fn_param children and detect '^' in the return type of a fn_type node
+// With the external type-pattern scanner the attr's type is ONE opaque token
+// (`type_pattern_token`), so fn-typed members are recognized and parsed from
+// the token TEXT: `fn(a: T, b: U) R^E`.
+static bool jube_text_is_fn_type(const char* text) {
+    if (!text) return false;
+    while (*text == ' ' || *text == '\t') text++;
+    if (text[0] != 'f' || text[1] != 'n') return false;
+    const char* p = text + 2;
+    while (*p == ' ' || *p == '\t') p++;
+    return *p == '(' || *p == '\0';
+}
+
+static void jube_parse_fn_type_text(char* text, int* arity, bool* can_raise,
+                                    char** result_type_name) {
+    *arity = 0;
+    *can_raise = false;
+    if (result_type_name) *result_type_name = NULL;
+    char* p = strchr(text, '(');
+    char* close = NULL;
+    if (p) {
+        int depth = 0;
+        for (char* q = p; *q; q++) {
+            if (*q == '(') depth++;
+            else if (*q == ')') { depth--; if (!depth) { close = q; break; } }
+            else if (*q == ',' && depth == 1) (*arity)++;
+        }
+        // one param when the parens are non-empty and hold no top-level comma
+        if (close) {
+            for (char* q = p + 1; q < close; q++) {
+                if (*q != ' ' && *q != '\t') { (*arity)++; break; }
+            }
+        }
+    }
+    char* rest = close ? close + 1 : text;
+    char* raise_marker = strchr(rest, '^');
+    if (raise_marker) {
+        *can_raise = true;
+        *raise_marker = '\0';
+    }
+    while (*rest == ' ' || *rest == '\t') rest++;
+    if (result_type_name && *rest) {
+        // trim trailing spaces
+        char* end = rest + strlen(rest);
+        while (end > rest && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        *result_type_name = jube_strndup(rest, (size_t)(end - rest));
+    }
+    free(text);
+}
+
 static void jube_parse_fn_type(const char* source, TSNode fn_node, int* arity,
                                bool* can_raise, char** result_type_name) {
     *arity = 0;
@@ -1210,7 +1259,16 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             jube_parse_fn_type(source, attr_type, &member->arity, &member->can_raise,
                                &member->result_type_name);
         } else {
-            member->result_type_name = jube_node_text(source, attr_type);
+            char* type_text = jube_node_text(source, attr_type);
+            if (jube_node_is(attr_type, "type_pattern_token") &&
+                    jube_text_is_fn_type(type_text)) {
+                // trimmed grammar: the type is one opaque token — classify from text
+                member->is_method = true;
+                jube_parse_fn_type_text(type_text, &member->arity, &member->can_raise,
+                                        &member->result_type_name);
+            } else {
+                member->result_type_name = type_text;
+            }
         }
         TSNode default_node = ts_node_child_by_field_name(child, "default", 7);
         if (!ts_node_is_null(default_node)) {
