@@ -7,11 +7,11 @@
 // External scanner for tree-sitter-lambda.
 //
 // Besides the contextual `start` keyword, this scanner delimits the type
-// language: a type pattern, a single primary type, and a string/symbol pattern
-// island each arrive at the parser as ONE opaque token. The scanner only finds
-// where such a token ENDS — it never validates the interior. The Lambda side
-// (lambda/runtime/parse_type_pattern.cpp) parses the token's source text into
-// `Type*` directly. See vibe/Lambda_Grammar_Reduce5.md.
+// language and the path sub-DSL: type forms, string/symbol pattern islands,
+// and complete dotted path bodies arrive at the parser as opaque tokens. The
+// scanner only finds where a token ENDS — it never builds runtime objects. The
+// Lambda-side direct parsers consume the source spans. See
+// vibe/Lambda_Grammar_Reduce5.md.
 //
 // The split matters: this file is compiled standalone by the package's language
 // bindings, so it must not reach into the Lambda runtime, and tree-sitter may
@@ -32,6 +32,11 @@ enum TokenType {
     RETURN_TYPE_TOKEN,
     // The complete view/edit model pattern (atom or `|` union).
     VIEW_PATTERN_TOKEN,
+    // Everything after the grammar-owned `/.` or `.` path introducer.
+    PATH_BODY_TOKEN,
+    // First segment of a qualified element/attribute name. This contextual
+    // token prevents the following `.name` from becoming a relative path.
+    DOTTED_NAME_HEAD_TOKEN,
 };
 
 void *tree_sitter_lambda_external_scanner_create(void) {
@@ -74,6 +79,11 @@ static bool is_identifier_continue(int32_t ch) {
 
 static bool is_digit(int32_t ch) {
     return ch >= '0' && ch <= '9';
+}
+
+static bool is_hex_digit(int32_t ch) {
+    return is_digit(ch) || (ch >= 'a' && ch <= 'f') ||
+        (ch >= 'A' && ch <= 'F');
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +134,53 @@ static void consume_quoted(TSLexer *lexer, int32_t quote) {
         lexer->advance(lexer, false);
     }
     if (!lexer->eof(lexer)) { lexer->advance(lexer, false); }  // closing quote
+}
+
+// Mirrors grammar-common.js `symbol`: non-empty, single-line, and restricted
+// to the same simple/Unicode escapes. This is shared by path and qualified-name
+// segments so an opaque scanner token cannot widen the ordinary symbol lexer.
+static bool scan_symbol_literal(TSLexer *lexer) {
+    if (lexer->lookahead != '\'') { return false; }
+    lexer->advance(lexer, false);
+    bool any = false;
+    while (!lexer->eof(lexer) && lexer->lookahead != '\'') {
+        if (lexer->lookahead == '\n' || lexer->lookahead == '\r') { return false; }
+        if (lexer->lookahead != '\\') {
+            any = true;
+            lexer->advance(lexer, false);
+            continue;
+        }
+
+        lexer->advance(lexer, false);
+        int32_t escaped = lexer->lookahead;
+        if (escaped == '\'' || escaped == '\\' || escaped == '/' ||
+                escaped == 'b' || escaped == 'f' || escaped == 'n' ||
+                escaped == 'r' || escaped == 't') {
+            any = true;
+            lexer->advance(lexer, false);
+            continue;
+        }
+        if (escaped != 'u') { return false; }
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == '{') {
+            lexer->advance(lexer, false);
+            if (!is_hex_digit(lexer->lookahead)) { return false; }
+            do { lexer->advance(lexer, false); }
+            while (is_hex_digit(lexer->lookahead));
+            if (lexer->lookahead != '}') { return false; }
+            lexer->advance(lexer, false);
+        }
+        else {
+            for (int i = 0; i < 4; i++) {
+                if (!is_hex_digit(lexer->lookahead)) { return false; }
+                lexer->advance(lexer, false);
+            }
+        }
+        any = true;
+    }
+    if (!any || lexer->lookahead != '\'') { return false; }
+    lexer->advance(lexer, false);
+    return true;
 }
 
 // Read an identifier/keyword into buf (truncated, always NUL-terminated) and
@@ -530,6 +587,113 @@ static bool scan_view_pattern_token(TSLexer *lexer) {
 }
 
 // ---------------------------------------------------------------------------
+// path body
+// ---------------------------------------------------------------------------
+
+// Mirrors one static path segment in grammar-common.js. Bracket expressions
+// stay in the general grammar and therefore terminate this external token.
+static bool scan_path_body_segment(TSLexer *lexer) {
+    if (lexer->lookahead == '~') {
+        lexer->advance(lexer, false);
+        if (lexer->lookahead != '~') { return false; }
+        lexer->advance(lexer, false);
+        return true;
+    }
+    if (lexer->lookahead == '/') {
+        lexer->advance(lexer, false);
+        return true;
+    }
+    if (lexer->lookahead == '*') {
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == '*') { lexer->advance(lexer, false); }
+        return true;
+    }
+    if (lexer->lookahead == '\'') {
+        return scan_symbol_literal(lexer);
+    }
+    if (is_digit(lexer->lookahead)) {
+        do { lexer->advance(lexer, false); } while (is_digit(lexer->lookahead));
+        return true;
+    }
+    if (is_identifier_start(lexer->lookahead)) {
+        char word[16];
+        consume_word(lexer, word, sizeof(word));
+        return true;
+    }
+    return false;
+}
+
+static bool scan_path_body_token(TSLexer *lexer) {
+    if (!scan_path_body_segment(lexer)) { return false; }
+    lexer->mark_end(lexer);
+    while (lexer->lookahead == '.') {
+        lexer->advance(lexer, false);
+        if (!scan_path_body_segment(lexer)) {
+            // A trailing/member dot belongs to the outer expression grammar.
+            return true;
+        }
+        lexer->mark_end(lexer);
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// qualified element/attribute name head
+// ---------------------------------------------------------------------------
+
+static bool scan_qualified_name_segment(TSLexer *lexer) {
+    if (lexer->lookahead == '\'') {
+        return scan_symbol_literal(lexer);
+    }
+    if (!is_identifier_start(lexer->lookahead)) { return false; }
+    char word[16];
+    consume_word(lexer, word, sizeof(word));
+    return true;
+}
+
+// Consume grammar extras only for lookahead after mark_end. These advances
+// must stay non-skipping: Tree-sitter moves the token start on skip advances,
+// which would otherwise clamp the already-marked head to zero width.
+static bool scan_qualified_name_extras(TSLexer *lexer) {
+    for (;;) {
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        if (lexer->lookahead != '/') { return true; }
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == '/') {
+            while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
+                lexer->advance(lexer, false);
+            }
+            continue;
+        }
+        if (lexer->lookahead != '*') { return false; }
+        lexer->advance(lexer, false);
+        int32_t prev = 0;
+        while (!lexer->eof(lexer) && !(prev == '*' && lexer->lookahead == '/')) {
+            prev = lexer->lookahead;
+            lexer->advance(lexer, false);
+        }
+        if (lexer->eof(lexer)) { return false; }
+        lexer->advance(lexer, false);
+    }
+}
+
+static bool scan_dotted_name_head_token(TSLexer *lexer) {
+    // Repeated attributes can request the external token before Tree-sitter's
+    // internal lexer has consumed the post-comma extra space.
+    skip_extras(lexer);
+    if (!scan_qualified_name_segment(lexer)) { return false; }
+    lexer->mark_end(lexer);
+
+    // Look past the returned head without extending it. Tree-sitter consumes
+    // extras between the structural head, dot, and following segment.
+    if (!scan_qualified_name_extras(lexer)) { return false; }
+    if (lexer->lookahead != '.') { return false; }
+    lexer->advance(lexer, false);
+    if (!scan_qualified_name_extras(lexer)) { return false; }
+    return scan_qualified_name_segment(lexer);
+}
+
+// ---------------------------------------------------------------------------
 // contextual `start` keyword (unchanged)
 // ---------------------------------------------------------------------------
 
@@ -628,6 +792,16 @@ bool tree_sitter_lambda_external_scanner_scan(
 
     if (valid_symbols[VIEW_PATTERN_TOKEN] && scan_view_pattern_token(lexer)) {
         lexer->result_symbol = VIEW_PATTERN_TOKEN;
+        return true;
+    }
+
+    if (valid_symbols[PATH_BODY_TOKEN] && scan_path_body_token(lexer)) {
+        lexer->result_symbol = PATH_BODY_TOKEN;
+        return true;
+    }
+
+    if (valid_symbols[DOTTED_NAME_HEAD_TOKEN] && scan_dotted_name_head_token(lexer)) {
+        lexer->result_symbol = DOTTED_NAME_HEAD_TOKEN;
         return true;
     }
 

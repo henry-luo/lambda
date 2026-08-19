@@ -3,8 +3,8 @@
 against drift.
 
 Both compose grammar-common.js, so their cores cannot diverge by construction.
-What CAN drift is the type layer each one carries: the production layer must
-define exactly the seam names the core references, and must not smuggle in
+What CAN drift is the replacement layer each one carries: the production layer
+must define exactly the seam names the core references, and must not smuggle in
 extra rules the full grammar does not have.
 """
 import re
@@ -16,6 +16,13 @@ RULE_RE = re.compile(r'^    ([A-Za-z_][A-Za-z_0-9]*): [\$_]\s*=>', re.M)
 
 # names the shared core references and every type layer must therefore provide
 SEAM = {'_type_pattern', '_primary_type', '_view_atom_type', '_value_island', 'content_type'}
+
+# These complete common rules are intentionally replaced by both the full type
+# layer and/or the production external-token layer. Everything else must remain
+# owned by grammar-common.js.
+RULE_OVERRIDES = {
+    '_attr_dotted_name', 'dotted_name', 'return_type', 'view_pattern', 'path_expr'
+}
 
 
 def layer_rules(path):
@@ -32,7 +39,7 @@ def main():
 
     problems = []
 
-    overlap = core & (prod | full)
+    overlap = (core & (prod | full)) - RULE_OVERRIDES
     if overlap:
         problems.append(f"rules defined in BOTH the core and a type layer: {sorted(overlap)}")
 
@@ -46,7 +53,7 @@ def main():
         # the production layer legitimately adds external token wrappers; flag
         # anything else, which would mean the shipped grammar accepts syntax the
         # normative grammar does not describe
-        non_token = {r for r in extra if 'token' not in r}
+        non_token = {r for r in extra if 'token' not in r and r not in RULE_OVERRIDES}
         if non_token:
             problems.append(f"production-only rules that are not scanner tokens: {sorted(non_token)}")
 

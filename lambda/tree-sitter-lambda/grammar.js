@@ -6,12 +6,10 @@
  * This is the grammar that ships. It shares its core with the official full
  * grammar (`grammar-lambda.js`) through `grammar-common.js`; the difference is
  * the type/path layer below. Full type patterns and string/symbol islands,
- * declaration return contracts, and whole view patterns arrive as opaque
- * tokens from the external scanner (src/scanner.c) and are parsed on the
- * Lambda side by lambda/runtime/parse_type_pattern.cpp. Paths retain their
- * lexical grammar boundary because `/` also means division and `.` also means
- * member access, but Lambda parses every recognized static path directly to
- * AST through lambda/runtime/parse_path_expr.cpp.
+ * declaration return contracts, whole view patterns, and path bodies arrive
+ * as opaque tokens from the external scanner (src/scanner.c). Tree-sitter
+ * retains only the unambiguous `/.` / `.` path introducer; Lambda parses the
+ * full path span directly to AST through lambda/runtime/parse_path_expr.cpp.
  *
  * Read grammar-lambda.js to learn what the type language accepts; it is the
  * normative statement. `make grammar-sync-check` guards the two against drift.
@@ -21,6 +19,17 @@
 /// <reference types="../tree-sitter-dsl.d.ts" />
 
 const common = require('./grammar-common.js');
+
+// In element/attribute name position, commit to a qualified name before the
+// parser shifts its first segment and can reinterpret the remaining `.name`
+// as a relative path. The external token spans only that first segment; the
+// rest stays structural so the existing dotted_name AST contract is retained.
+function qualifiedName($, precedence) {
+  return prec.left(precedence, seq(
+    alias($.dotted_name_head_token, $.identifier),
+    repeat1(seq('.', choice($.identifier, $.symbol))),
+  ));
+}
 
 // ---------------------------------------------------------------------------
 // Type layer: external scanner tokens. The scanner only finds where each token
@@ -44,6 +53,19 @@ const typeLayer = {
     // sub-forms with their own direct AST parsers.
     return_type: $ => $.return_type_token,
     view_pattern: $ => $.view_pattern_token,
+
+    // Keep the introducer in Tree-sitter so ordinary member access and `.123`
+    // floats retain their normal lexical context. The complete dotted body is
+    // one scanner token and is parsed directly into AstPathNode.
+    path_expr: $ => choice(
+      seq('/.', $.path_body_token),
+      seq('.', $.path_body_token),
+    ),
+
+    // Qualified element/attribute names need a contextual first-segment token
+    // so `<svg.rect>` cannot become tag `svg` plus relative path `.rect`.
+    _attr_dotted_name: $ => qualifiedName($, 51),
+    dotted_name: $ => qualifiedName($, 49),
 
     // Islands are first-class values (`let p = \(d[3])`), so they keep their
     // own token in value position.
@@ -69,6 +91,14 @@ module.exports = grammar({
     $.content_type_token,
     $.return_type_token,
     $.view_pattern_token,
+    $.path_body_token,
+    $.dotted_name_head_token,
+  ],
+  // The production path keeps its introducer in grammar and makes the body an
+  // external token. DOTTED_NAME_HEAD_TOKEN resolves the full grammar's
+  // dotted-name/path ambiguity contextually, so only the query conflict stays.
+  conflicts: $ => [
+    [$._expr, $.query_expr],
   ],
   rules: Object.assign({}, common.coreRules, typeLayer),
 });

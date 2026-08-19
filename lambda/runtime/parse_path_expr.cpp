@@ -225,12 +225,14 @@ bool parse_path_static_expr(PathLexer* lx, PathScheme* scheme,
         bool* file_local) {
     if (!parse_path_root_or_scheme(lx, scheme, file_local)) { return false; }
 
-    // `/` and `.` may be roots with no first segment. A scheme has already
-    // consumed its mandatory first `.` segment in parse_path_root_or_scheme.
-    if (*scheme == PATH_SCHEME_LOGICAL && lx->p < lx->end && *lx->p == '.') {
-        if (!parse_path_dot_segment(lx)) { return false; }
+    // S2.4.1v2 requires rooted `/.a` and relative `.a`; accepting a bare root
+    // here would reintroduce the `/` division and `.123` float ambiguities.
+    if (*scheme == PATH_SCHEME_LOGICAL) {
+        if (lx->p >= lx->end || *lx->p != '.' ||
+                !parse_path_dot_segment(lx)) { return false; }
     } else if (*scheme == PATH_SCHEME_REL) {
-        parse_path_static_segment(lx);
+        if (lx->p >= lx->end || is_path_digit(*lx->p) ||
+                !parse_path_static_segment(lx)) { return false; }
     }
 
     for (;;) {

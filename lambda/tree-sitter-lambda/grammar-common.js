@@ -543,13 +543,13 @@ module.exports = {
     path_parent: _ => token(prec(3, '~~')),
     path_root: _ => token(prec(3, '/')),
 
-    // Path expression: a logical root requires the dotted first step (`/.a`)
-    // while a bare `/` remains the root token; relative paths keep `.a`.
+    // Path expression: S2.4.1v2 admits rooted `/.a` and relative `.a` forms;
+    // the retired bare `/`, bare `.`, and `/a` spellings are not path values.
     path_expr: $ => prec.right(choice(
-      seq('/', optional(seq('.', field('field', choice($.identifier, $.symbol,
-        $.integer, $.path_wildcard, $.base_type, $.path_parent))))),
-      seq('.', optional(field('field', choice($.identifier, $.symbol,
-        $.integer, $.path_wildcard, $.base_type, $.path_parent))))
+      seq('/.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent))),
+      seq('.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent, $.path_root)))
     )),
 
     // Member access is the value form of dot syntax; dotted_name is reserved

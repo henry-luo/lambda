@@ -2112,7 +2112,12 @@ void* alloc_const(Transpiler* tp, size_t size) {
 // for symbols, strips the surrounding single quotes
 static StrView node_name_text(Transpiler* tp, TSNode node) {
     StrView text = ts_node_source(tp, node);
-    if (ts_node_symbol(node) == SYM_SYMBOL && text.length >= 2) {
+    // The production grammar aliases a contextual dotted-name head to an
+    // identifier. Preserve symbol-head semantics by recognizing its source
+    // spelling as well as the ordinary symbol node kind.
+    if ((ts_node_symbol(node) == SYM_SYMBOL ||
+            (text.length >= 2 && text.str[0] == '\'' && text.str[text.length - 1] == '\'')) &&
+            text.length >= 2) {
         text.str++;
         text.length -= 2;
     }
