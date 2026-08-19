@@ -77,10 +77,5 @@ module.exports = grammar({
     $.view_pattern_token,
     $.path_body_token,
   ],
-  // A maximal structural dotted_name resolves the name/path boundary, so only
-  // the independent query conflict remains.
-  conflicts: $ => [
-    [$._expr, $.query_expr],
-  ],
   rules: Object.assign({}, common.coreRules, productionRuleLayer),
 });

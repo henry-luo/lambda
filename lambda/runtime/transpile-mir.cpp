@@ -7481,14 +7481,24 @@ static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
         if (binding && binding->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* named = (AstNamedNode*)binding;
-            // A declared int local whose initializer is still typed ANY owns
-            // an Item carrier even inside a dual native body. Reopen that
-            // carrier before a raw typed-array store; the semantic int TypeId
-            // alone does not describe the physical register (D2.2.2,
+            // A declared int local whose carrier is a boxed Item owns that
+            // Item even inside a dual native body. Reopen the carrier before a
+            // raw typed-array store or native call argument; the semantic int
+            // TypeId alone does not describe the physical register (D2.2.2,
             // D3.2.2, D5.2).
+            //
+            // The binding's storage, not its initializer, owns the lane
+            // decision: `var a = 0x67452301` starts in the int lane but a
+            // later `a = t` alias assignment widens the carrier to a boxed
+            // Item for the whole binding. Gating on the initializer's type
+            // left such a local looking like a lane, so its tagged Item was
+            // handed to `rol(num: int, ...)` raw and every SHA-1 round
+            // returned the int-lane poison (crypto_sha1's all-`f` digest).
             MirVarEntry* native_var = find_var(mt, ident->name->chars);
-            if (named->as && get_effective_type(mt, named->as) == LMD_TYPE_ANY &&
-                    (!native_var || native_var->type_id == LMD_TYPE_ANY)) {
+            bool boxed_carrier = native_var
+                ? native_var->type_id == LMD_TYPE_ANY
+                : (named->as && get_effective_type(mt, named->as) == LMD_TYPE_ANY);
+            if (boxed_carrier) {
                 if (mir_argument_is_module_binding(mt, primary)) {
                     // Imported scalar slots are reopened by the module/global
                     // loader before this consumer; applying emit_unbox again

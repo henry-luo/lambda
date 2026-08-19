@@ -171,10 +171,6 @@ module.exports = {
       $._key
     ],
 
-    conflicts: $ => [
-      [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
-    ],
-
     precedences: $ => [
     // value expr precedences
     [
@@ -182,6 +178,7 @@ module.exports = {
       'propagate',
       $.call_expr,
       $.index_expr,
+      'query_expr',
       'member',
       $.primary_expr,
       $.unary_expr,
@@ -211,7 +208,10 @@ module.exports = {
       $.assign_expr,
       $.assign_stam,
     ],
-    [$.attr_binary_expr, $._attr_expr]
+    [$.attr_binary_expr, $._attr_expr],
+    // Named precedence only compares entries in declared orders; make the
+    // postfix query decision explicit against reducing an arrow body `_expr`.
+    ['query_expr', $._expr]
   ]
   },
 
@@ -517,12 +517,14 @@ module.exports = {
     )),
     last_index: _ => token(prec(2, 'last')),
 
-    // Query expression: expr?T (recursive) or expr.?T (direct)
-    query_expr: $ => seq(
+    // S7.6.3v2 puts query access on the left-associative postfix tier. Without
+    // explicit precedence, `() => x?T` is ambiguous between querying inside
+    // the function body and querying the function value after reducing it.
+    query_expr: $ => prec.left('query_expr', seq(
       field('object', $.primary_expr),
       field('op', choice('?', '.?')),
       field('query', $._primary_type),
-    ),
+    )),
 
     // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
