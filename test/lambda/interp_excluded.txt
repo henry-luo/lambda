@@ -16,7 +16,6 @@ test/lambda/arraynum_transform_preserve.ls	node:AST_NODE_ARRAY
 test/lambda/binary_js_bridge.ls	node:AST_NODE_IMPORT
 test/lambda/bitwise_lane_preservation.ls	node:AST_NODE_SYS_FUNC
 test/lambda/compact_typed_arrays.ls	node:AST_NODE_ARRAY
-test/lambda/constrained_type.ls	node:AST_NODE_CONSTRAINED_TYPE
 test/lambda/edit_bridge.ls	node:AST_NODE_VIEW
 test/lambda/eq_total.ls	node:AST_NODE_ARRAY
 test/lambda/for_clauses_test.ls	node:AST_NODE_FOR_EXPR

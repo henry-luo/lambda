@@ -282,17 +282,16 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_ARRAY_TYPE:
     case AST_NODE_MAP_TYPE:
     case AST_NODE_ELMT_TYPE:
+    // P3: the walker resolves the type-list entry and evaluates its `that`
+    // clause only through EvalMode::PREDICATE; raw Type* identity is never
+    // used as a substitute for the constraint.
     case AST_NODE_FUNC_TYPE:
+    case AST_NODE_CONSTRAINED_TYPE:
     // --- P1.3: documents, paths, queries ---
     case AST_NODE_ELEMENT:
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
-    // CONSTRAINED_TYPE stays rejected: lowering resolves a constrained type
-    // through const_type_with_tl(type_index), so the raw node Type* the walker
-    // publishes is a different identity and fn_is answers differently
-    // (test/lambda/constrained_type.ls). Reproducing the type-index lookup is
-    // more code than the construct is worth right now.
     case AST_NODE_SPREAD:
     // --- P1.1: pipes and implicit contexts ---
     case AST_NODE_PIPE:
@@ -601,6 +600,126 @@ bool interp_scan_supported(Script* script, AstNodeType* reject) {
 }
 
 // ---------------------------------------------------------------------------
+// Restricted evaluator modes (P3)
+// ---------------------------------------------------------------------------
+
+// A predicate has no user-code call edge.  This explicit list is deliberately
+// smaller than the ordinary sysfunc surface: every row here is a value reader
+// or scalar/text transform with no I/O, mutation, async, or callback path.
+bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info) {
+    if (mode == EvalMode::RUNTIME) return true;
+    if (!info || info->is_proc || !info->func_ptr || info->is_async) return false;
+    switch (info->fn) {
+    case SYSFUNC_LEN:
+    case SYSFUNC_TYPE:
+    case SYSFUNC_NAME:
+    case SYSFUNC_INT:
+    case SYSFUNC_INT64:
+    case SYSFUNC_FLOAT:
+    case SYSFUNC_DECIMAL:
+    case SYSFUNC_STRING:
+    case SYSFUNC_ABS:
+    case SYSFUNC_ROUND:
+    case SYSFUNC_FLOOR:
+    case SYSFUNC_CEIL:
+    case SYSFUNC_TRUNC:
+    case SYSFUNC_CONTAINS:
+    case SYSFUNC_STARTS_WITH:
+    case SYSFUNC_ENDS_WITH:
+    case SYSFUNC_TRIM:
+    case SYSFUNC_TRIM_START:
+    case SYSFUNC_TRIM_END:
+    case SYSFUNC_LOWER:
+    case SYSFUNC_UPPER:
+        return true;
+    default:
+        return false;
+    }
+}
+
+typedef struct InterpPredicateScan {
+    bool ok;
+} InterpPredicateScan;
+
+static bool interp_predicate_node_supported(AstNode* node);
+
+static void interp_predicate_scan_visit(AstNode* child, void* opaque) {
+    InterpPredicateScan* scan = (InterpPredicateScan*)opaque;
+    if (scan->ok && !interp_predicate_node_supported(child)) scan->ok = false;
+}
+
+static bool interp_predicate_children_supported(AstNode* node) {
+    InterpPredicateScan scan = {true};
+    interp_visit_children(node, interp_predicate_scan_visit, &scan);
+    return scan.ok;
+}
+
+static bool interp_predicate_node_supported(AstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstNode* expr = ((AstPrimaryNode*)node)->expr;
+        return !expr || interp_predicate_node_supported(expr);
+    }
+    case AST_NODE_LITERAL:
+    case AST_NODE_CURRENT_ITEM:
+    case AST_NODE_CURRENT_INDEX:
+    case AST_NODE_TYPE:
+        return true;
+    case AST_NODE_UNARY: {
+        Operator op = ((AstUnaryNode*)node)->op;
+        return (op == OPERATOR_NOT || op == OPERATOR_NEG || op == OPERATOR_POS) &&
+            interp_predicate_children_supported(node);
+    }
+    case AST_NODE_BINARY: {
+        Operator op = ((AstBinaryNode*)node)->op;
+        switch (op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD: case OPERATOR_POW:
+        case OPERATOR_JOIN: case OPERATOR_AND: case OPERATOR_OR:
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+        case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_TO:
+        case OPERATOR_IS: case OPERATOR_IS_NAN: case OPERATOR_IN: case OPERATOR_AT:
+            return interp_predicate_children_supported(node);
+        default:
+            return false;
+        }
+    }
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        return interp_predicate_children_supported(node);
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        // A dotted name is a compile-time key, not a binding read. Dynamic
+        // member keys remain admissible only when their expression is pure.
+        return interp_predicate_node_supported(field->object) &&
+            (!field->field || field->field->node_type == AST_NODE_IDENT ||
+                interp_predicate_node_supported(field->field));
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
+                !interp_eval_mode_allows_sys_func(EvalMode::PREDICATE,
+                    ((AstSysFuncNode*)callee)->fn_info)) return false;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (!interp_predicate_node_supported(arg)) return false;
+        }
+        return true;
+    }
+    default:
+        // No identifiers, containers, assignments, lambdas/procedures,
+        // handlers, pipes, loops, or arbitrary calls cross the predicate
+        // boundary.  This keeps `that` independent of runtime effects (AI17).
+        return false;
+    }
+}
+
+bool interp_predicate_supported(AstNode* predicate) {
+    return interp_predicate_node_supported(predicate);
+}
+
+// ---------------------------------------------------------------------------
 // Slot assignment
 // ---------------------------------------------------------------------------
 
@@ -839,6 +958,25 @@ static uint32_t plan_need(AstNode* node) {
         if (e > best) best = e;   // branches do not stack
         return best;
     }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        uint32_t scrutinee = plan_need(match->scrutinee);
+        uint32_t arms = plan_need_max_siblings((AstNode*)match->first_arm);
+        // eval_match keeps `~`, `~#`, parent, and root live while an arm is
+        // tested, so the arm's own shape starts above those four homes.
+        uint32_t guarded_arms = 4 + arms;
+        return scrutinee > guarded_arms ? scrutinee : guarded_arms;
+    }
+    case AST_NODE_MATCH_ARM: {
+        AstMatchArm* arm = (AstMatchArm*)node;
+        uint32_t pattern = plan_need(arm->pattern);
+        uint32_t body = plan_need(arm->body);
+        return pattern > body ? pattern : body;
+    }
+    case AST_NODE_CONSTRAINED_TYPE:
+        // A constrained pattern holds the current occurrence plus index,
+        // parent, and root while its predicate walks, all before any helper.
+        return 3 + plan_need(((AstConstrainedTypeNode*)node)->constraint);
     case AST_NODE_ARRAY:
     case AST_NODE_SEQ:
     case AST_NODE_CONTENT:

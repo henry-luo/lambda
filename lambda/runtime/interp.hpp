@@ -35,7 +35,9 @@ bool lambda_tier_parse(const char* text, LambdaTier* out);
 // ---------------------------------------------------------------------------
 
 enum class EvalMode : uint8_t {
-    RUNTIME,   // full language; CONST and PREDICATE modes arrive in P3 (AI16/AI17)
+    RUNTIME,    // full language; effects are admitted by the ordinary walker
+    CONST,      // reserved for P3's pass-manager const folder (AI16)
+    PREDICATE,  // pure, fuel-bounded `that` evaluation (AI17)
 };
 
 // The only non-local mechanism for language control flow (AI14); longjmp stays
@@ -127,6 +129,12 @@ struct InterpState {
     uint32_t     depth_limit;
     uint64_t     node_count;     // evaluated nodes, for the measurement report
     bool         depth_exhausted;
+    // Restricted modes consume this per-node budget.  A rejected call or an
+    // exhausted budget is local to the attempt: its caller receives false,
+    // never a partial predicate result (AI16/AI17).
+    uint32_t     mode_fuel;
+    bool         mode_exhausted;
+    bool         mode_rejected;
 };
 
 // Per-run counters printed in the run summary; gates pin `fallback` to 0 on
@@ -159,6 +167,12 @@ bool interp_scan_supported(Script* script, AstNodeType* reject);
 // no captures/imports/properties. Module bindings are read from T0's shared
 // slab; a rejected function remains T0 for semantic safety.
 bool interp_satellite_supported(const AstFuncNode* fn);
+
+// Conservative, effect-free `that` subset.  The caller must reject rather
+// than execute a predicate outside this shape; runtime repeats the call gate
+// as defense in depth when a future AST form reaches eval_call directly.
+bool interp_predicate_supported(AstNode* predicate);
+bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info);
 
 // Human-readable node kind, for fallback diagnostics.
 const char* interp_node_kind_name(AstNodeType kind);

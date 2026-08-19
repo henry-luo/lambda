@@ -1,16 +1,16 @@
 # AST Interpreter — Implementation Plan, Phases P0–P5
 
-**Date:** 2026-08-19 (rev 4 — **P2 vertical slice landed**)
-**Status:** **P0 complete and gated (2026-08-15)**; **P1 substantially landed**; **P2 is in progress**. `LAMBDA_TIER=auto` now runs T0 and promotes eligible definitions to unique, Script-owned MIR satellites at the shared dynamic-call boundary. The verified slice covers self recursion, several satellites in one MIR context, T0 module-slab reads, dynamic calls to another Lambda function, and deferred promotion after a T0 loop backedge. Captures, imported bindings, and named-property/key-table users remain pinned to T0. **P3–P5 are not started**: there is no CONST/PREDICATE restriction/fuel policy, persistent REPL environment, or default-tier flip.
+**Date:** 2026-08-19 (rev 5 — **P3 PREDICATE slice landed**)
+**Status:** **P0 complete and gated (2026-08-15)**; **P1 substantially landed**; **P2 is in progress**. `LAMBDA_TIER=auto` now runs T0 and promotes eligible definitions to unique, Script-owned MIR satellites at the shared dynamic-call boundary. The verified slice covers self recursion, several satellites in one MIR context, T0 module-slab reads, dynamic calls to another Lambda function, and deferred promotion after a T0 loop backedge. Captures, imported bindings, and named-property/key-table users remain pinned to T0. **P3 is in progress:** non-object constrained `is` checks and constrained match arms now run their `that` AST under a pure, fuel-bounded `PREDICATE` mode. CONST folding, validator de-JIT, persistent REPL state, and the default-tier flip remain unimplemented.
 **Design authority:** `doc/Lambda_Formal_Design.md` **D8.1.1v2** (T0 default, tiered execution), D5.1.1/D5.1.2 (side-stack frames), D5.3.2/D5.3.3 (MAY_GC + native rooting contract), D6.2.1/D6.2.3/D6.2.4 (function values, snapshot captures, traced env), D7.2.1/D7.2.2 (module slabs, init transaction), DI14; `doc/Lambda_Formal_Semantics.md` S3.1, S7.7.1/S7.7.2, S7.11.4, S9.1, S11.2.1, SI3.
-**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This revision begins §11's P2 only; P3 (CONST/PREDICATE modes), P4 (REPL persistent env), and P5 (default flip) remain subsequent gates.
+**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This revision continues §11's P2 and lands P3's PREDICATE vertical slice; CONST folding, validator integration, P4 (REPL persistent env), and P5 (default flip) remain subsequent gates.
 **Scope rule:** `LAMBDA_TIER` unset or `jit` remains the existing eager whole-module pipeline (MT7/D8.6.1). `auto` is opt-in T0 plus P2 promotion; it must pin an unsupported function to T0, never recompile the full module as a substitute.
 
 ---
 
 ## 0. Summary
 
-P0 builds the skeleton: the frame-plan pass, side-stack interpreter frames, a walker for the L1 core subset, `LAMBDA_TIER=interp` wiring, and the first measurement report. P1 completes construct coverage to the full Lambda baseline, adds the error/fault channels, module support, and self-tail-call iteration, and re-publishes the report over the full corpus. P2 adds opt-in tier-up without changing `jit`: the definition-site cell counts dynamic entries, emits one function plus its boxed wrapper into a satellite MIR module, then upgrades pre-existing `Function` values in place at the shared dispatcher (D8.1.1v2 §5.1–§5.3). P3/P4/P5 remain gated by their own state and semantics work.
+P0 builds the skeleton: the frame-plan pass, side-stack interpreter frames, a walker for the L1 core subset, `LAMBDA_TIER=interp` wiring, and the first measurement report. P1 completes construct coverage to the full Lambda baseline, adds the error/fault channels, module support, and self-tail-call iteration, and re-publishes the report over the full corpus. P2 adds opt-in tier-up without changing `jit`: the definition-site cell counts dynamic entries, emits one function plus its boxed wrapper into a satellite MIR module, then upgrades pre-existing `Function` values in place at the shared dispatcher (D8.1.1v2 §5.1–§5.3). P3 has started with restricted `that` predicate evaluation; const folding and validator de-JIT remain gated by their own state/ownership work, followed by P4/P5.
 
 Execution model recap (from the design doc, not re-argued here): T0 is boxed-only, calls the same C-ABI runtime helpers as generated code (AI3), lives on the existing side stacks with per-function statically-sized windows (AI4/AI5), and uses `EvalSignal` for statement control flow (AI14). No promotion machinery exists until P2 — in P0/P1 the tier is a per-run, whole-script choice.
 
@@ -45,7 +45,7 @@ Layout-compat constraints on struct edits: `Function::type_id` at offset 0 and `
 - [ ] `interp.hpp` with the structures below; every log line prefixed `interp:` / `frame-plan:` (rule 9); `lib/` types only (rule 3).
 
 ```cpp
-enum class EvalMode : uint8_t { RUNTIME /* CONST, PREDICATE arrive P3 */ };
+enum class EvalMode : uint8_t { RUNTIME, CONST, PREDICATE };
 enum class EvalSignal : uint8_t { NORMAL, RETURNED, BROKE, CONTINUED, ERROR_SKIP };
 // RETURNED / ERROR_SKIP payloads live in the frame's reserved signal slot, never in a C++ local.
 
@@ -227,7 +227,7 @@ Seven defects the differential caught while landing these, all fixed:
 
 ### P1.2 Match, types, patterns
 
-- [ ] `MATCH_EXPR`/`MATCH_ARM`: scrutinee evaluated exactly once (S11.2.1); literal arms via `fn_eq`, type arms via `fn_is`, constrained arms base-only (current shipped behavior — S11.4.6 unchanged; direct predicate eval is P3/AI17).
+- [ ] `MATCH_EXPR`/`MATCH_ARM`: scrutinee evaluated exactly once (S11.2.1); literal arms via `fn_eq`, type arms via `fn_is`, constrained arms run the P3 `PREDICATE` subset after their base check. Generic `fn_is` and validator policy remain base-only under S11.4.6.
 - [ ] Type-expression nodes as values (`TYPE`, `*_TYPE`, `TYPE_STAM`, `CONSTRAINED_TYPE`, `OBJECT_TYPE`) — resolve through the build-time `Type*` graph exactly as lowering does; no interpreter-side type construction.
 - [ ] String/symbol patterns (`STRING_PATTERN`, `SYMBOL_PATTERN`, `PATTERN_SEQ`, `PATTERN_CHAR_CLASS`, `PATTERN_ISLAND`) via the pattern helpers over prepass-compiled pattern constants (in interp-only mode these come from the const pool at build time; the satellite story is AIO12/P2).
 
@@ -298,9 +298,49 @@ dynamic entry — never through on-stack replacement. `interp_auto_tier.ls`
 forces `LAMBDA_JIT_THRESHOLD=100 LAMBDA_JIT_BACKEDGE=2`; its first
 `loop_count(4)` remains T0 and the second entry compiles the sole satellite.
 Full-AST call-site analysis persistence and the complete P2 matrix remain
-open. P3's restricted `CONST`/`PREDICATE` modes, P4's persistent REPL state,
-and P5's default flip are blocked on their stated design gates; `LAMBDA_TIER`
+open. P3's CONST folder and validator de-JIT, P4's persistent REPL state, and
+P5's default flip remain blocked on their stated design gates; `LAMBDA_TIER`
 unset remains `jit`.
+
+### 3.2 P3 — restricted `that` predicates — **vertical slice landed 2026-08-19**
+
+`InterpState` now carries `EvalMode::{RUNTIME, CONST, PREDICATE}` plus a
+per-attempt fuel counter. The live slice enters `PREDICATE` only for non-object
+`AstConstrainedTypeNode` checks reached by `expr is T` or a constrained match
+arm. It binds `~`/`~#`/parent/root through the existing slot-backed context
+stack, decrements `LAMBDA_PREDICATE_FUEL` at each evaluated AST node (default
+`1024`), and rejects/exhausts as a failed predicate rather than publishing a
+partial result. Nested constrained checks share the outer budget.
+
+Admission is fail-closed: `interp_predicate_supported()` permits literals,
+`~`, pure unary/binary/member/index shapes, conditionals, and a narrow
+registered-sysfunc allow-list (including `len`). It rejects identifiers,
+closures/procedures, arbitrary calls, containers, assignments, handlers,
+pipes, loops, async, I/O, and mutation. `eval_call` repeats the allow-list
+check at runtime so a future AST edge cannot silently weaken the boundary.
+This is the AI17 mechanism only: generic `fn_is`, object constraints, and the
+validator retain the S11.4.6 base-only interim; no validator/JIT ownership path
+was changed.
+
+The constrained type expression now resolves through its `type_list` index,
+the same runtime Type* identity lowering emits. `plan_need` reserves the
+context homes around a constrained predicate and match arms, so the new mode
+does not trade predicate correctness for an unrooted Item (D5.3.3).
+
+Verified locally:
+
+| Check | Result |
+|---|---|
+| `test/lambda/constrained_type.ls` under `LAMBDA_TIER=interp` | exact existing golden; zero fallback |
+| new `test/lambda/interp_predicate_mode.ls` under `jit`, `interp`, and `auto` | exact golden `[true, false, true, false, "negative"]`; covers alias `is`, `len(~)`, and constrained match arms |
+| same fixture with `LAMBDA_PREDICATE_FUEL=1` | `[false, false, false, false, "other"]`; bounded checks fail closed without a runtime error |
+| focused `test_interp_gtest` constrained cases | PASS — both moved subset entries, zero fallback |
+| `make build` | PASS (2026-08-19) |
+
+`constrained_type.ls` moved from `interp_excluded.txt` into the zero-fallback
+differential subset, together with the P3-specific fixture. CONST folding and
+validator de-JIT need a pass-manager ownership contract for their AST/Type*
+inputs and are intentionally not claimed by this slice (D8.1.1v2, AI16/AI17).
 
 ## 4. Walker ↔ helper boundary rules (normative for both phases)
 

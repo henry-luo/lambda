@@ -271,6 +271,26 @@ typedef struct AstConstrainedTypeNode : AstNode {
     AstNode *constraint;    // constraint expression (uses ~ to refer to value)
 } AstConstrainedTypeNode;
 
+// Resolve the AST form that carries a constrained type predicate.  A named
+// type is represented by its declaration binding, not by an evaluator-local
+// copy, so both direct `int that …` and `x is Positive` retain the same
+// predicate node (S11.4.6).
+static inline AstConstrainedTypeNode* ast_constrained_type_node(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_CONSTRAINED_TYPE) {
+        return (AstConstrainedTypeNode*)node;
+    }
+    if (node->node_type != AST_NODE_IDENT) return NULL;
+    AstIdentNode* ident = (AstIdentNode*)node;
+    AstNode* declaration = ident->entry ? ident->entry->node : NULL;
+    if (!declaration || declaration->node_type != AST_NODE_ASSIGN ||
+            !((AstNamedNode*)declaration)->is_type_definition) return NULL;
+    AstNode* value = ast_unwrap_primary(((AstNamedNode*)declaration)->as);
+    return value && value->node_type == AST_NODE_CONSTRAINED_TYPE
+        ? (AstConstrainedTypeNode*)value : NULL;
+}
+
 // Loop key filter: controls which entries to iterate
 enum LoopKeyFilter {
     LOOP_KEY_ALL    = 0,  // all entries (default): for k, v in container

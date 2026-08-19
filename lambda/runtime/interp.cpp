@@ -38,6 +38,18 @@ InterpRunStats* interp_run_stats(void) { return &g_interp_stats; }
 void interp_run_stats_reset(void) { memset(&g_interp_stats, 0, sizeof(g_interp_stats)); }
 
 #define INTERP_DEFAULT_DEPTH 10000
+#define INTERP_DEFAULT_PREDICATE_FUEL 1024
+
+// A predicate is a bounded decision, not an unbounded second execution path.
+// Invalid knob values keep the reviewed default rather than weakening the
+// no-effect boundary through an accidental unlimited budget (AI17).
+static uint32_t interp_predicate_fuel_budget(void) {
+    const char* env = getenv("LAMBDA_PREDICATE_FUEL");
+    if (!env || !*env) return INTERP_DEFAULT_PREDICATE_FUEL;
+    long value = strtol(env, NULL, 10);
+    if (value < 1 || value > 1000000L) return INTERP_DEFAULT_PREDICATE_FUEL;
+    return (uint32_t)value;
+}
 
 // ---------------------------------------------------------------------------
 // Frames
@@ -101,6 +113,42 @@ public:
     InterpFrameGuard& operator=(const InterpFrameGuard&) = delete;
 };
 
+// Saves the ordinary runtime mode around an isolated `that` attempt.  Nested
+// constrained checks retain the enclosing fuel counter, so a predicate cannot
+// manufacture a fresh budget by spelling `~ is OtherConstrainedType` (AI17).
+class InterpEvalModeGuard {
+    InterpState* st_;
+    EvalMode saved_mode_;
+    uint32_t saved_fuel_;
+    bool saved_exhausted_;
+    bool saved_rejected_;
+    bool owns_mode_;
+public:
+    InterpEvalModeGuard(InterpState* st, EvalMode mode, uint32_t fuel)
+            : st_(st), saved_mode_(st->mode), saved_fuel_(st->mode_fuel),
+              saved_exhausted_(st->mode_exhausted),
+              saved_rejected_(st->mode_rejected),
+              owns_mode_(st->mode == EvalMode::RUNTIME) {
+        if (!owns_mode_) return;
+        st_->mode = mode;
+        st_->mode_fuel = fuel;
+        st_->mode_exhausted = false;
+        st_->mode_rejected = false;
+    }
+    ~InterpEvalModeGuard() {
+        if (!owns_mode_) return;
+        st_->mode = saved_mode_;
+        st_->mode_fuel = saved_fuel_;
+        st_->mode_exhausted = saved_exhausted_;
+        st_->mode_rejected = saved_rejected_;
+    }
+    bool completed() const {
+        return !st_->mode_exhausted && !st_->mode_rejected;
+    }
+    InterpEvalModeGuard(const InterpEvalModeGuard&) = delete;
+    InterpEvalModeGuard& operator=(const InterpEvalModeGuard&) = delete;
+};
+
 // One frame-relative Item home, held across a child eval or a MAY_GC call.
 class Scratch {
     InterpFrame* f_;
@@ -145,6 +193,8 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node);
 static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded);
 static void exec_declaration(InterpFrame* f, AstNode* node);
 static void interp_note_backedge(InterpFrame* frame);
+static bool interp_eval_constrained_predicate(InterpFrame* f,
+    AstConstrainedTypeNode* constrained, Scratch& subject);
 
 // Raises a statement signal, parking its payload in the frame's reserved slot.
 static inline void interp_signal(InterpFrame* f, EvalSignal signal, Item payload) {
@@ -433,6 +483,24 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
                                         : fn_or(lhs.get(), rhs.get());
     }
 
+    // Whole-module lowering already emits constrained `is` as a base test
+    // followed by the AST predicate.  Do not route it through fn_is: that
+    // helper intentionally retains S11.4.6's base-only generic behavior.
+    AstConstrainedTypeNode* constrained = node->op == OPERATOR_IS
+        ? ast_constrained_type_node(node->right) : NULL;
+    if (constrained) {
+        Item left_value = eval_expr(f, node->left);
+        if (interp_frame_pending(f)) return left_value;
+        Scratch lhs(f);
+        lhs.set(left_value);
+        TypeConstrained* type = (TypeConstrained*)constrained->type;
+        if (!type || !type->base || get_type_id(lhs.get()) != type->base->type_id) {
+            return (Item){.item = b2it(BOOL_FALSE)};
+        }
+        return (Item){.item = b2it(interp_eval_constrained_predicate(f, constrained, lhs)
+            ? BOOL_TRUE : BOOL_FALSE)};
+    }
+
     // The slot is taken *after* the left operand is evaluated: holding it
     // across that recursion would make scratch use proportional to nesting
     // depth, while the plan's cost model is max(need(a), 1 + need(b)).
@@ -597,6 +665,19 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     int argc = injected ? 1 : 0;
     for (AstNode* a = node->argument; a; a = a->next) argc++;
 
+    AstNode* callee = ast_unwrap_primary(node->function);
+    if (f->st->mode != EvalMode::RUNTIME) {
+        SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        if (!interp_eval_mode_allows_sys_func(f->st->mode, info)) {
+            // The static scan keeps this unreachable for admitted predicates;
+            // retain the runtime gate so a new AST edge cannot turn a `that`
+            // clause into an effectful call by omission (AI17).
+            f->st->mode_rejected = true;
+            return ItemError;
+        }
+    }
+
     if (node->interp_self_tail_call && f->fn && f->plan) {
         // Every argument is evaluated *before* any parameter is rebound: an
         // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
@@ -619,8 +700,6 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
         return ItemError;
     }
-
-    AstNode* callee = ast_unwrap_primary(node->function);
 
     // `print` is Lambda-variadic but not C-variadic: lowering emits one
     // pn_print per argument with an explicit " " separator between them, and
@@ -1018,6 +1097,38 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
 // Match
 // ---------------------------------------------------------------------------
 
+// Runs an admitted `that` body with the candidate installed as `~`.  The
+// predicate does not signal a language error when it is unsupported, faults,
+// or exhausts fuel: that check simply fails, as the JIT predicate path's false
+// branch does.  Object constraints remain on their separate S11.4.6 path.
+static bool interp_eval_constrained_predicate(InterpFrame* f,
+        AstConstrainedTypeNode* constrained, Scratch& subject) {
+    if (!constrained || !constrained->constraint ||
+            !interp_predicate_supported(constrained->constraint)) return false;
+
+    InterpEvalModeGuard mode(f->st, EvalMode::PREDICATE,
+        interp_predicate_fuel_budget());
+    Scratch index_slot(f);
+    index_slot.set(ItemNull);
+    Scratch parent_slot(f);
+    Scratch root_slot(f);
+    if (f->st->contexts && f->st->contexts->parent) {
+        parent_slot.set((Item){.item = *f->st->contexts->parent});
+    } else {
+        parent_slot.set(ItemNull);
+    }
+    if (f->st->contexts && f->st->contexts->root) {
+        root_slot.set((Item){.item = *f->st->contexts->root});
+    } else {
+        root_slot.set(subject.get());
+    }
+    InterpContextGuard bound(f->st, subject.home(), index_slot.home(),
+        parent_slot.home(), root_slot.home());
+    Item result = eval_expr(f, constrained->constraint);
+    return !interp_frame_pending(f) && mode.completed() &&
+        is_truthy(result) == BOOL_TRUE;
+}
+
 // One arm's pattern test. Mirrors emit_single_pattern_test: a type pattern uses
 // fn_is, a range pattern fn_in, anything else fn_eq — and a constrained pattern
 // checks its base TypeId then evaluates the `that` clause with `~` bound to the
@@ -1040,26 +1151,7 @@ static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& sc
         TypeConstrained* constrained = (TypeConstrained*)ct->type;
         if (constrained && constrained->base) {
             if (get_type_id(scrut.get()) != constrained->base->type_id) return false;
-            // `~` is the scrutinee while the constraint runs.
-            Scratch index_slot(f);
-            index_slot.set(ItemNull);
-            Scratch parent_slot(f);
-            Scratch root_slot(f);
-            if (f->st->contexts && f->st->contexts->parent) {
-                parent_slot.set((Item){.item = *f->st->contexts->parent});
-            } else {
-                parent_slot.set(ItemNull);
-            }
-            if (f->st->contexts && f->st->contexts->root) {
-                root_slot.set((Item){.item = *f->st->contexts->root});
-            } else {
-                root_slot.set(scrut.get());
-            }
-            InterpContextGuard bound(f->st, scrut.home(), index_slot.home(),
-                parent_slot.home(), root_slot.home());
-            Item ok = eval_expr(f, ct->constraint);
-            if (interp_frame_pending(f)) return false;
-            return is_truthy(ok) == BOOL_TRUE;
+            return interp_eval_constrained_predicate(f, ct, scrut);
         }
     }
 
@@ -1659,6 +1751,13 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     if (!node) return ItemNull;
     f->cur = node;
     f->st->node_count++;
+    if (f->st->mode != EvalMode::RUNTIME) {
+        if (f->st->mode_fuel == 0) {
+            f->st->mode_exhausted = true;
+            return ItemError;
+        }
+        f->st->mode_fuel--;
+    }
 
     switch (node->node_type) {
     case AST_NODE_PRIMARY: {
@@ -2069,6 +2168,13 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // Composite type expressions already carry their resolved Type* on the
         // node; lowering emits that pointer, so the walker publishes it too.
         return interp_ptr_item(node->type);
+    case AST_NODE_CONSTRAINED_TYPE: {
+        AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)node;
+        TypeConstrained* type = (TypeConstrained*)constrained->type;
+        // The type-list entry is the Type* identity lowering publishes; the
+        // build-time AST node is not a runtime type value on its own.
+        return interp_ptr_item(type ? const_type(type->type_index) : &LIT_TYPE_ERROR);
+    }
     case AST_NODE_SYS_FUNC:
         // Bare system functions are first-class identity values. Mirror the
         // MIR `to_sys_fn_named` wrapper so equality and `name(len)` observe the

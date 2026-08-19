@@ -31,6 +31,7 @@ test/lambda/comp_expr.ls	direct
 test/lambda/comp_expr_edge.ls	direct
 test/lambda/complex.ls	direct
 test/lambda/complex_iot_report_html.ls	direct
+test/lambda/constrained_type.ls	direct
 test/lambda/correlation_math.ls	direct
 test/lambda/csv_test.ls	direct
 test/lambda/datetime.ls	direct
@@ -79,6 +80,7 @@ test/lambda/int53_boundary.ls	direct
 test/lambda/int64.ls	direct
 test/lambda/int_promotion.ls	direct
 test/lambda/int_total_c16.ls	direct
+test/lambda/interp_predicate_mode.ls	direct
 test/lambda/io_sqlite_autodetect.ls	direct
 test/lambda/io_sqlite_basic.ls	direct
 test/lambda/io_sqlite_data.ls	direct

@@ -8531,41 +8531,9 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
 
     // Type operators
     if (bi->op == OPERATOR_IS) {
-        // Check if right operand is a constrained type for inline constraint evaluation
-        AstNode* right_node = bi->right;
-        // Unwrap primary node
-        if (right_node->node_type == AST_NODE_PRIMARY) {
-            AstPrimaryNode* pri = (AstPrimaryNode*)right_node;
-            if (pri->expr) right_node = pri->expr;
-        }
-
-        AstConstrainedTypeNode* constrained_node = nullptr;
-        if (right_node->node_type == AST_NODE_CONSTRAINED_TYPE) {
-            constrained_node = (AstConstrainedTypeNode*)right_node;
-        } else if (right_node->type && right_node->type->kind == TYPE_KIND_CONSTRAINED) {
-            if (right_node->node_type == AST_NODE_IDENT) {
-                AstIdentNode* ident = (AstIdentNode*)right_node;
-                if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
-                    AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
-                    if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
-                        constrained_node = (AstConstrainedTypeNode*)type_def->as;
-                    }
-                }
-            }
-        } else if (right_node->type && right_node->type->type_id == LMD_TYPE_TYPE) {
-            TypeType* type_type = (TypeType*)right_node->type;
-            if (type_type->type && type_type->type->kind == TYPE_KIND_CONSTRAINED) {
-                if (right_node->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* ident = (AstIdentNode*)right_node;
-                    if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
-                        AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
-                        if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
-                            constrained_node = (AstConstrainedTypeNode*)type_def->as;
-                        }
-                    }
-                }
-            }
-        }
+        // Both tiers resolve direct and named constrained types through one
+        // AST helper, so the predicate source cannot diverge by tier.
+        AstConstrainedTypeNode* constrained_node = ast_constrained_type_node(bi->right);
 
         if (constrained_node) {
             // Inline constrained type check: base_type_check && constraint_check
