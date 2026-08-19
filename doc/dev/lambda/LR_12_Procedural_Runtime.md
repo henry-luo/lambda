@@ -35,8 +35,10 @@ These builtins are *the* reason a script must be procedural to do IO: they have 
 
 ### 2.1 Cooperative concurrency runtime
 
-The procedural runtime also owns Lambda's level-1 concurrency substrate. The
-front end recognizes contextual `start pn_call(...)` and computes a fixed-point
+The procedural runtime also owns Lambda's level-1 concurrency substrate. Under
+S13.1.1v2, the front end parses `start(target, args, options)` as an ordinary
+system-procedure call, then rewrites the resolved builtin to `AstStartNode` so
+scope ownership and capture checks remain explicit. It computes a fixed-point
 `may_await` closure from async registry entries and procedure call edges;
 indirect `pn` calls are conservative. Only procedures needing task context are
 lowered to the resumable MIR convention. Their suspension points store state

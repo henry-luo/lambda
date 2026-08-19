@@ -1265,7 +1265,7 @@ operations that return `T^E`.
 
 | Function | Result | Behavior |
 |----------|--------|----------|
-| `start worker(args...)` | task handle | Enqueue a child procedure without blocking the parent. `start` is a contextual keyword, not a function. |
+| `start(target, args = [], options = {})` | task handle | Enqueue a child procedure without blocking the parent. It is an ordinary-call builtin `pn` under S13.1.1v2. `target` resolves to a `pn`, `args` is an array, and the options literal accepts `mode: 'task' \| 'thread' \| 'process'`. Task mode is the default and current implementation; isolated modes report not implemented. |
 | `send(handle, value)` | `ok^E` | Append to the target's bounded FIFO mailbox. The default capacity is 1024; a full mailbox returns an error. |
 | `receive()` | `item^E` | Remove the current task's oldest mailbox item, parking while empty. |
 | `wait(handle)` | `T^E` | Park until the task finishes and return its value or error. |
@@ -1284,7 +1284,7 @@ pn worker() {
 }
 
 pn main() {
-    let handle = start worker()
+    let handle = start(worker)
     send(handle, "ready")^
     print(wait(handle)^)       // READY
 }

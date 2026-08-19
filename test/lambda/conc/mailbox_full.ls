@@ -4,7 +4,7 @@ pn worker() {
 }
 
 pn main() {
-    let handle = start worker()
+    let handle = start(worker)
     var index = 0
     while (index < 1024) {
         send(handle, index)^

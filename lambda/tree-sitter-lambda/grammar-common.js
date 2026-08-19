@@ -143,10 +143,6 @@ module.exports = {
       $.comment,
     ],
 
-    externals: $ => [
-      $._start,
-    ],
-
     word: $ => $.identifier,
 
     // an array of hidden rule names for the generated node types
@@ -473,7 +469,6 @@ module.exports = {
       $.handler_expr,
       $.propagate_expr,
       $.call_expr,
-      $.start_expr,
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
@@ -507,12 +502,6 @@ module.exports = {
       field('operand', $.primary_expr),
       '^', '{', field('body', $.content), '}',
       optional(seq('~', '{', field('value', $.content), '}')),
-    )),
-
-    // `_start` is scanned contextually so ordinary identifiers named `start`
-    // remain valid in parameters, fields, bindings, and call positions.
-    start_expr: $ => prec.right(90, seq(
-      $._start, field('operand', $.call_expr),
     )),
 
     // Indexing: arr[i] for 1-D / chained, or arr[i, j, k] for N-D multi-dim
@@ -581,6 +570,7 @@ module.exports = {
     // grammar so member/index builders can compose with it; build_ast enforces
     // that it occurs only in a handler body.
     current_error_expr: _ => prec(0, token('^')),
+
     _at: _ => token(prec(2, 'at')),
     _into: _ => token(prec(2, 'into')),
 

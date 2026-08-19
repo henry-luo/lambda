@@ -5,12 +5,12 @@ pn grandchild() {
 }
 
 pn child() {
-    start grandchild()
+    start(grandchild)
     receive()^
 }
 
 pn main() {
-    let handle = start child()
+    let handle = start(child)
     sleep(1)^
     cancel(handle)
     var value = null

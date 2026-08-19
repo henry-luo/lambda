@@ -2901,10 +2901,6 @@
           "named": true
         },
         {
-          "type": "start_expr",
-          "named": true
-        },
-        {
           "type": "string",
           "named": true
         },
@@ -3120,22 +3116,6 @@
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "start_expr",
-    "named": true,
-    "fields": {
-      "operand": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "call_expr",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {

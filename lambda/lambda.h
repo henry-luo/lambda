@@ -614,6 +614,7 @@ typedef enum SysFunc {
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)
     SYSPROC_SPLICE,          // splice(arr, start, count) - remove count elements at start, in place (procedural)
+    SYSPROC_START,           // start(pn, args?, options?) - launch a scoped child task
     SYSPROC_SEND,
     SYSPROC_RECEIVE,
     SYSPROC_WAIT,

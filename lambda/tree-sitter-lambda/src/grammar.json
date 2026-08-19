@@ -3803,10 +3803,6 @@
           },
           {
             "type": "SYMBOL",
-            "name": "start_expr"
-          },
-          {
-            "type": "SYMBOL",
             "name": "query_expr"
           },
           {
@@ -4029,27 +4025,6 @@
                 "type": "BLANK"
               }
             ]
-          }
-        ]
-      }
-    },
-    "start_expr": {
-      "type": "PREC_RIGHT",
-      "value": 90,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "SYMBOL",
-            "name": "_start"
-          },
-          {
-            "type": "FIELD",
-            "name": "operand",
-            "content": {
-              "type": "SYMBOL",
-              "name": "call_expr"
-            }
           }
         ]
       }
@@ -8880,10 +8855,6 @@
     ]
   ],
   "externals": [
-    {
-      "type": "SYMBOL",
-      "name": "_start"
-    },
     {
       "type": "SYMBOL",
       "name": "type_pattern_token"

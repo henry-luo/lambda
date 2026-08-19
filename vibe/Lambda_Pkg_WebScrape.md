@@ -83,7 +83,7 @@ machinery to close them already exists in-tree.** Evidence, capability-by-capabi
 | **CSS selector engine** | **Full CSS3/4**: type/class/id, all attr operators (`~= ^= $= *= |=`, `i`/`s` flags), `:nth-*`, `:first/last/only-*`, state pseudo-classes, `:is()/:where()/:not()/:has()`, all combinators. Ready-made `selector_matcher_find_all` / `find_first`. | `lambda/input/css/selector_matcher.{hpp,cpp}` |
 | **DOM API (snake_case, to `.ls`)** | `query_selector(_all)`, `matches`, `closest`, `get_element_by_id`, `get_elements_by_tag_name/_class_name`, `get_attribute`, `text_content`, sibling/child navigation — already surfaced to Lambda scripts via the `radiant` module. | `lambda/module/radiant/radiant_dom_bridge.cpp`, `radiant_dom_iface.cpp` |
 | **Native tree query** | `page?<a>` (descendant), `el[<img>]` (child), attribute/value predicates, `that (...)` filters, `|>` map — works directly on `input()` output without any DOM build. | `lambda-eval.cpp` (`fn_query`), `doc/Lambda_Expr_Stam.md` |
-| **Concurrency** | **Real, tested, colorless**: `start worker(args)` → handle, bounded-FIFO mailboxes, `wait`/`select(timeout:)`, `sleep(ms)`, `cancel`, shared libuv loop. Ideal for a crawler worker pool + rate-limit + frontier-as-mailbox. | `lambda/concurrency.cpp`, `test/lambda/conc/` (24 tests) |
+| **Concurrency** | **Real, tested, colorless**: `start(worker, args)` → handle under S13.1.1v2, bounded-FIFO mailboxes, `wait`/`select(timeout:)`, `sleep(ms)`, `cancel`, shared libuv loop. Ideal for a crawler worker pool + rate-limit + frontier-as-mailbox. | `lambda/concurrency.cpp`, `test/lambda/conc/` (25 tests) |
 | **Regex** | RE2-backed string patterns: `\d+`, `[n,m]`, char classes, alternation, anchoring; `find`/`replace`/`split` accept patterns. | `lambda/re2_wrapper.cpp`, `test/lambda/string_pattern.ls` |
 | **Error handling** | `T^E` return types, `raise`, `^` propagation, `let a^err` destructure, errors are falsy (`f() or default`). Fetch/parse/io all raise and enforce handling. | `doc/Lambda_Error_Handling.md` |
 | **Schema validation** | Define record shape in Lambda type syntax, `validate(schema, data)` → `{valid, errors[]}`; element/document schemas too. | `lambda/validator/`, `doc/Lambda_Validator_Guide.md` |
@@ -162,7 +162,7 @@ headless runtime already exist; the work is surfacing them to scripts.
 
 ```
 seed URLs ──▶ [frontier: bounded mailbox + seen-set dedup]
-                   │  (worker pool: N × `start fetch_worker()`; N from autothrottle)
+                   │  (worker pool: N × `start(fetch_worker, args)`; N from autothrottle)
                    ▼
              [session: attach cookies + headers + proxy]
                    ▼
@@ -183,7 +183,7 @@ seed URLs ──▶ [frontier: bounded mailbox + seen-set dedup]
 ### 4.3 Concurrency model (maps 1:1 onto Lambda actors)
 
 - **Frontier** = a bounded FIFO **mailbox** on a coordinator `pn`. Requests are `send()`-ed in; workers `receive()`.
-- **Worker pool** = `N` children via `start fetch_worker(session, sink)`. `N` starts small and is
+- **Worker pool** = `N` children via `start(fetch_worker, [session, sink])`. `N` starts small and is
   adjusted by the **autothrottle** signal (below), Crawlee-style.
 - **Rate limiting** = per-host `sleep(delay)` before each fetch, `delay` from robots crawl-delay or
   a target-configured minimum, plus `math.random` jitter.

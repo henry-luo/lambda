@@ -6,8 +6,8 @@
 
 // External scanner for tree-sitter-lambda.
 //
-// Besides the contextual `start` keyword, this scanner delimits the type
-// language and the path sub-DSL: type forms, string/symbol pattern islands,
+// This scanner delimits the type language and the path sub-DSL: type forms,
+// string/symbol pattern islands,
 // and complete dotted path bodies arrive at the parser as opaque tokens. The
 // scanner only finds where a token ENDS — it never builds runtime objects. The
 // Lambda-side direct parsers consume the source spans. See
@@ -19,7 +19,6 @@
 // free of side effects.
 
 enum TokenType {
-    START,
     TYPE_PATTERN_TOKEN,
     PRIMARY_TYPE_PATTERN_TOKEN,
     PATTERN_ISLAND_TOKEN,
@@ -694,68 +693,19 @@ static bool scan_dotted_name_head_token(TSLexer *lexer) {
     return scan_qualified_name_segment(lexer);
 }
 
-// ---------------------------------------------------------------------------
-// contextual `start` keyword (unchanged)
-// ---------------------------------------------------------------------------
-
-static bool scan_start(TSLexer *lexer) {
-    while (is_space(lexer->lookahead)) {
-        lexer->advance(lexer, true);
-    }
-
-    const char keyword[] = "start";
-    for (unsigned i = 0; keyword[i] != '\0'; i++) {
-        if (lexer->lookahead != keyword[i]) {
-            return false;
-        }
-        lexer->advance(lexer, false);
-    }
-
-    // Reserving a normal literal made `start` unusable as an identifier. Keep
-    // the token contextual by requiring a same-line, named call operand.
-    if (!is_horizontal_space(lexer->lookahead)) {
-        return false;
-    }
-    lexer->mark_end(lexer);
-    do {
-        lexer->advance(lexer, false);
-    } while (is_horizontal_space(lexer->lookahead));
-    if (!is_identifier_start(lexer->lookahead)) {
-        return false;
-    }
-    do {
-        lexer->advance(lexer, false);
-    } while (is_identifier_continue(lexer->lookahead));
-    while (lexer->lookahead == '.') {
-        lexer->advance(lexer, false);
-        if (!is_identifier_start(lexer->lookahead)) {
-            return false;
-        }
-        do {
-            lexer->advance(lexer, false);
-        } while (is_identifier_continue(lexer->lookahead));
-    }
-    while (is_horizontal_space(lexer->lookahead)) {
-        lexer->advance(lexer, false);
-    }
-    if (lexer->lookahead != '(') {
-        return false;
-    }
-
-    return true;
-}
-
 bool tree_sitter_lambda_external_scanner_scan(
     void *payload, TSLexer *lexer, const bool *valid_symbols) {
     (void)payload;
 
-    if (valid_symbols[START] && scan_start(lexer)) {
-        lexer->result_symbol = START;
-        return true;
+    // The retired START probe used to skip leading whitespace before the
+    // island probe ran. Preserve that scanner-entry invariant explicitly;
+    // using skip_extras here would also inspect '/' and steal rooted paths.
+    while (is_space(lexer->lookahead)) {
+        lexer->advance(lexer, true);
     }
 
     // Islands are first-class values. Probe only their unambiguous backslash
-    // prefix: skip_extras would inspect a rooted path's '/', which must remain
+    // prefix: full skip_extras would inspect a rooted path's '/', which must remain
     // available to the complete-path scanner below.
     if (valid_symbols[PATTERN_ISLAND_TOKEN] && lexer->lookahead == '\\' &&
             consume_island(lexer)) {

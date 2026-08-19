@@ -78,9 +78,8 @@ const productionRuleLayer = {
 module.exports = grammar({
   name: "lambda",
   ...common.options,
-  // the scanner's tokens ride alongside the contextual `start` keyword
+  // the scanner owns only the extracted sub-language boundaries
   externals: $ => [
-    $._start,
     $.type_pattern_token,
     $.primary_type_pattern_token,
     $.pattern_island_token,

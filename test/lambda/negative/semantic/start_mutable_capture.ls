@@ -3,5 +3,5 @@ pn main() {
     pn child() {
         print(value)
     }
-    start child()
+    start(child)
 }

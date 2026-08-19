@@ -17872,22 +17872,29 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 static MIR_reg_t transpile_start(MirTranspiler* mt, AstStartNode* start_node) {
     AstCallNode* call = start_node ? start_node->call : NULL;
     if (!call) return emit_null_item_reg(mt);
+    if (start_node->mode != START_MODE_TASK) {
+        // Worker modes require a separate isolate launcher; never degrade an
+        // accepted thread/process request into a same-context task.
+        log_error("concurrency start: unsupported launch mode %d", (int)start_node->mode);
+        return emit_null_item_reg(mt);
+    }
     MIR_reg_t function = transpile_box_item(mt, call->function);
     int function_root = create_gc_root_slot(mt, function);
-    MIR_reg_t args = emit_call_0(mt, "list", MIR_T_P);
-    int args_root = create_pointer_gc_root_slot(mt, args);
-    for (AstNode* arg = call->argument; arg; arg = arg->next) {
-        MIR_reg_t value = transpile_box_item(mt,
-            arg->node_type == AST_NODE_NAMED_ARG ? ((AstNamedNode*)arg)->as : arg);
-        int value_root = create_gc_root_slot(mt, value);
-        function = load_gc_root_slot(mt, function_root, "start_fn");
-        (void)function;
-        args = load_gc_root_slot(mt, args_root, "start_args");
-        value = load_gc_root_slot(mt, value_root, "start_arg");
-        emit_call_void_2(mt, "list_push",
-            MIR_T_P, MIR_new_reg_op(mt->ctx, args),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    MIR_reg_t args;
+    if (call->argument) {
+        MIR_reg_t args_item = transpile_box_item(mt, call->argument);
+        (void)create_gc_root_slot(mt, args_item);
+        // Array literals may lower to packed ArrayNum storage. The task ABI
+        // consumes List::items, so normalize the semantic argument array to a
+        // boxed-value Array instead of reinterpreting a packed payload.
+        args = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_item),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, LMD_TYPE_ANY));
+        emit_return_item_error_if_zero(mt, args);
+    } else {
+        args = emit_call_0(mt, "list", MIR_T_P);
     }
+    int args_root = create_pointer_gc_root_slot(mt, args);
     function = load_gc_root_slot(mt, function_root, "start_fn");
     args = load_gc_root_slot(mt, args_root, "start_args");
     return emit_call_3(mt, "lambda_task_start_function_scoped", MIR_T_I64,
@@ -25133,7 +25140,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
         case AST_NODE_START: {
             AstStartNode* start = (AstStartNode*)node;
             if (mt->prepass_collect_only && start->call) {
-                // `start f(...)` materializes a Function* and invokes it later
+                // `start(f, args)` materializes a Function* and invokes it later
                 // through the public context ABI.  Treating its inner syntax as
                 // an ordinary direct call could elide `_b` and leave the task
                 // dispatcher calling a raw body with a mismatched ABI.

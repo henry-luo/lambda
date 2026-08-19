@@ -1,7 +1,7 @@
 # Lambda Grammar Reduce5: External Scanners for Type, String-Pattern, and Path Sub-DSLs
 
-- **Date:** 2026-08-18
-- **Status:** **TYPE/ISLAND + RETURN/WHOLE-VIEW + PATH-BODY EXTERNAL SEAMS LANDED AND BASELINE-GREEN (2026-08-19).** Production uses first-party external tokens for full type patterns, string/symbol islands, declaration return contracts, whole view patterns, and complete static path bodies. Tree-sitter retains only the `/.` / `.` path introducer; Lambda parses the full path span directly into `AstPathNode`. A contextual qualified-name-head token protects `<svg.rect>` and repeated `svg.width:` attributes without changing ordinary value member/provider syntax. `make test-lambda-baseline` passes 3,812/3,812. Differential full-grammar/span coverage and the optional base-type extraction remain outstanding.
+- **Date:** 2026-08-19
+- **Status:** **TYPE/ISLAND + RETURN/WHOLE-VIEW + PATH-BODY EXTERNAL SEAMS LANDED; CONTEXTUAL `start` RETIRED AND BASELINE-GREEN (2026-08-19).** Production uses first-party external tokens only for the bounded type/pattern/path seams. `start(target, args, options)` now parses through ordinary call grammar and is recognized as a concurrency system `pn` by the AST builder; the `_start` external and `start_expr` grammar node are gone. `make test-lambda-baseline` passes 3,813/3,813 after the call-surface migration. Differential full-grammar/span coverage and the optional base-type extraction remain outstanding.
 - **Design authority:** `vibe/Lambda_Type_Pattern.md` §3 — ledger CT1v2–CT10, ALL decided (that-clause at statement-level slots only; value-annotation `^` dropped; nested map/element pure patterns; parens hold simple patterns; `type_pattern` embeds zero expressions). Formal: S11.1.2 (islands), S11.2.1 (type match), S7.5.1 (raised-channel acknowledgment), S10.1.1/S10.1.3 (unions and lexical `~`), S10.4.1–S10.4.3 (parent navigation), S10.5.1–S10.5.3 (root navigation), D8.1.1v2 (grammar → typed AST pipeline), and SO9.
 - **Scope:** Lambda has three nested sub-DSLs whose interiors do not need Tree-sitter's general expression parser: **type patterns**, **string/symbol patterns**, and **paths**. Reduce5 moves their scanner-safe extents into first-party external C tokens and parses every sub-DSL interior on the Lambda side. For paths, Tree-sitter owns only the `/.` / `.` introducer so division, member access, and `.123` floats remain ordinary grammar decisions. Type patterns have three distinct entry forms: a full type pattern, a restricted view type pattern, and a restricted declaration return type.
 - **Related:** `vibe/Lambda_Grammar_Reduce4.md` (size-campaign method + metrics), `lambda/tree-sitter-lambda/src/scanner.c` (first-party external scanner), Makefile grammar pipeline (`grammar.js → parser.c → ts-enum.h` via pinned CLI + `utils/update_ts_enum.sh`).
@@ -15,7 +15,7 @@
 
 **`grammar-common.js` — the shared core.** Both grammar files `require()` it (the tree-sitter CLI runs under Node, so module sharing works). It contains only rules both parsers actually use: ordinary tokens, expressions, statements, and shared option fragments. Each grammar then adds its replacement layer: complete structural type/view/return/path/qualified-name rules in `grammar-lambda.js`, external-token seams in `grammar.js`. Reference-only support rules such as `occurrence`, `view_pattern_union`, and `return_type_pattern` no longer appear in the production composition. `make grammar-sync-check` requires every shared-core seam in both layers and rejects any rule duplicated between the core and either layer.
 
-**`scanner.c` — first-party end-finder only.** The active tokens, beside contextual `_start`, are `TYPE_PATTERN`, `PRIMARY_TYPE_PATTERN`, `PATTERN_ISLAND`, `CONTENT_TYPE`, `VIEW_PATTERN`, `RETURN_TYPE`, `PATH_BODY`, and `DOTTED_NAME_HEAD`. The last token is a contextual collision shield, not another sub-DSL parser: it spans only the first identifier/symbol of an element/attribute qualified name and leaves the remaining dot/segments structural. `VIEW_ATOM` was removed once whole-view parsing landed. The scanner remains single-pass and stateless — scanner serialization stays empty.
+**`scanner.c` — first-party end-finder only.** The eight active tokens are `TYPE_PATTERN`, `PRIMARY_TYPE_PATTERN`, `PATTERN_ISLAND`, `CONTENT_TYPE`, `VIEW_PATTERN`, `RETURN_TYPE`, `PATH_BODY`, and `DOTTED_NAME_HEAD`. The last token is a contextual collision shield, not another sub-DSL parser: it spans only the first identifier/symbol of an element/attribute qualified name and leaves the remaining dot/segments structural. The contextual `_start` token and `VIEW_ATOM` are removed. The scanner remains single-pass and stateless — scanner serialization stays empty.
 
 **`lambda/runtime/parse_type_pattern.cpp` — the hand parser.** Recursive descent over token source text emits the **same typed AST shapes and attached `Type*` graphs** expected by the runtime; it no longer assumes a `Type*`-only AST is sufficient. Nothing inside an annotation pattern needs expression AST: the `that` predicate stays *outside* the token as a normal CST expression, so the pattern interior remains a pure contract. The target adds narrow `parse_view_pattern_text`, `parse_return_type_text`, and `parse_path_expr_text` entry points rather than broadening one parser until it accidentally consumes a surrounding Lambda construct.
 
@@ -127,7 +127,7 @@ Acceptance: production build byte-stable; `generate-grammar-full` produces a wor
 
 Grammar edits (`grammar.js` composition only; `grammar-lambda.js` keeps the full rules):
 
-- Initial externals: `[$._start, $.type_pattern_token, $.primary_type_pattern_token, $.pattern_island_token]`. The landed slice also added `content_type_token` and `view_atom_token`; its current complete list is in §0.
+- Historical initial externals: `[$._start, $.type_pattern_token, $.primary_type_pattern_token, $.pattern_island_token]`. The landed type slice also added `content_type_token` and `view_atom_token`; `_start` was retired in the third activation and `VIEW_ATOM` was retired when whole-view scanning landed. The current complete list is in §0.
 - `constrained_type` base → `$.type_pattern_token`. `query_expr` query field → `$.primary_type_pattern_token` (preserves `data?int | x` value-union precedence — the primary variant never consumes `|`). `view_pattern` atoms → `$.view_atom_token` (atoms are `element_type | identifier | base_type`, all primaries; keep the grammar-level `|` union between atom tokens until GR5-P3 replaces the whole form). `primary_expr`'s `$.pattern_island` → `$.pattern_island_token`.
 - Drop the type layer from the trimmed composition: `primary_type`, `unary_type`, `binary_type`, `negation_type`, `nullable_array_type`, `occurrence_type`, `range_type`, `list_type`, `array_type`, `map_type`/`map_type_item`, `element_type`/`pattern_attr_type`, `fn_type`/`fn_param`, `pattern_island` and the whole island sub-grammar (`pattern_unary_type`, `pattern_occurrence_type`, `pattern_negation_type`, `concat_type`, `string_binary_type`, `grouped_type`, `pattern_char_class`, `_pattern_expr`), plus the type-expr precedence block and related conflicts. Bare `occurrence`/`occurrence_count` remained during initial staging while production return types used them; GR5-P2 later moved all four return-support rules into the reference layer.
 - Regenerate; `ts-enum.h` picks up the token syms.
@@ -215,7 +215,7 @@ Acceptance: grammar generates cleanly; corpus files tokenize with expected spans
 - Extend `make grammar-sync-check` so its allow-list names the new form tokens and the removed full-rule inventories. The full grammar remains normative surface syntax and test-only generated artifacts stay under `./temp/`.
 - Preserve `[$.dotted_name, $.path_expr]` in the full/reference conflict configuration. Production overrides the conflict list because its contextual qualified-name head resolves that ambiguity before `.name` can become a path.
 
-**Implementation:** `grammar-common.js` now has 109 genuinely shared rules. `grammar-lambda.js` owns the 41-rule structural replacement layer, including full qualified names, paths, view unions, occurrences, and return contracts. `grammar.js` owns only nine scanner-backed seam rules. The sync guard rejects overlap between the shared core and either layer and requires all nine seam names in both.
+**Implementation:** `grammar-common.js` now has 108 genuinely shared rules after `start_expr` was removed. `grammar-lambda.js` owns the 41-rule structural replacement layer, including full qualified names, paths, view unions, occurrences, and return contracts. `grammar.js` owns nine production replacement rules backed by eight external tokens (the path introducer/body composition accounts for the extra rule). The sync guard rejects overlap between the shared core and either layer and requires all nine seam names in both.
 
 ### GR5-P2 — Extract declaration return types: landed
 
@@ -259,7 +259,7 @@ Acceptance: grammar generates cleanly; corpus files tokenize with expected spans
 - Re-measure the generated production parser and `libtree-sitter-lambda.a` with the same compiler flags, recording scanner object growth as well as parse-table reduction. A size regression or semantic mismatch rolls the individual seam back to the full grammar while the other landed seams remain intact.
 - Update this document, the grammar header comments, and user-facing type/path references with the actual landed boundary. Revise formal specification text only if accepted language or semantics change; cite the affected S# ruling in the change.
 
-**Measured production result (2026-08-19):** after `make generate-grammar` and a forced grammar-archive rebuild, with rooted `/.` represented as separate `'/'`, `'.'` tokens, the landed external boundary is `parser.c` **6,998,990** bytes, `parser.o` **968,768** bytes, `scanner.o` **19,448** bytes, and `libtree-sitter-lambda.a` **988,760** bytes. It has 4,881 states, 818 large states, 221 symbols, 110 tokens, and nine external symbols (including `_start`). Compared with the immediately preceding combined-`'/.'` grammar, the split removes one symbol, one token, and 448 generated-C bytes, while adding 30 states, four large states, and 1,240 parser-object bytes. Physically relocating reference-only rules remains a compiled-parser no-op; the later introducer-token decision accounts for this table delta. Focused rooted/relative/provider paths, `.123`, member access, division, path indexing, and namespace fixtures are green. `make test-lambda-baseline` passes Input 2,104/2,104 plus Lambda Runtime 1,708/1,708, total **3,812/3,812**. `base_type_token` remains deferred because its experimental fixed-vocabulary scanner collided with broader statement candidates. The differential/AST-shape work listed in GR5-P5/P6 remains deliberately outstanding follow-up.
+**Measured production result (2026-08-19):** after `make generate-grammar` and the contextual-start removal, the landed external boundary is `parser.c` **6,850,715** bytes, `parser.o` **950,336** bytes, `scanner.o` **18,536** bytes, and `libtree-sitter-lambda.a` **969,416** bytes. It has 4,851 states, 804 large states, 219 symbols, 109 tokens, and eight external symbols. Removing `_start` plus `start_expr` saves 148,275 generated-C bytes, 18,432 parser-object bytes, 912 scanner-object bytes, and 19,344 archive bytes from the prior path landing; it also removes 30 states, 14 large states, two symbols, one token, and one external. The fresh close-out passes Input 2,104/2,104 plus Lambda Runtime 1,709/1,709, total **3,813/3,813**. `base_type_token` remains deferred because its experimental fixed-vocabulary scanner collided with broader statement candidates. The differential/AST-shape work listed in GR5-P5/P6 remains deliberately outstanding follow-up.
 
 ## Second activation (2026-08-19) — landed
 
@@ -273,6 +273,51 @@ Defects found and fixed on the way to green, each with the constraint it reveale
 - **Symbols are `Symbol` (ns before chars), not `String`** — allocating the right struct but filling through `String::chars` puts the characters at the wrong offset, and every symbol comparison reads garbage (`case 'info':` matched nothing).
 - **Alias references wrap in a plain `TypeType`** — `match_arm_is_error_handler` blind-casts an arm's type as `(TypeType*)`, so a raw `TypePattern` (whose second word is `pattern_index`) reads a small int as a pointer — SEGV. `build_identifier` always wrapped type/pattern definitions; the hand parser now does the same.
 - **The Jube interface reader walks the raw CST**: `jube_node_is(attr_type, "fn_type")` classified fn-typed members. With one opaque token it classifies from the token TEXT (`jube_text_is_fn_type` + `jube_parse_fn_type_text` in `jube_interface.cpp`). This single dependency took down the whole radiant/graphviz/mermaid/structurizr cluster (43 tests) via "field binding lacks a getter".
+
+## Third activation (2026-08-19) — contextual `start` retired
+
+The final production external that was not an end-finder belonged to concurrency:
+`_start` scanned a contextual word and fed the dedicated grammar node
+`start_expr: 'start' call_expr`. That special surface could express only a target
+call. Adding launch policy would have required a second bespoke option grammar,
+despite maps and positional arguments already being ordinary Lambda syntax.
+
+S13.1.1v2–S13.1.3v2 therefore replace the keyword with the concurrency system
+procedure `start(target, args = [], options = {})`. The accepted task forms are
+`start(child)`, `start(child, [value])`, and
+`start(child, [value], {mode: 'task'})`. The options literal reserves
+`'thread'` and `'process'`; those modes currently fail explicitly with E501
+instead of silently running as a same-context task.
+
+The grammar reduction is deliberately paired with a semantic intrinsic:
+
+- `grammar-common.js` no longer declares `start_expr` or places it in
+  `primary_expr`; `grammar.js` and `scanner.c` no longer declare or scan
+  `_start`; generated `ts-enum.h` no longer exposes `SYM_START_EXPR`.
+- `start` is registered as a variadic system `pn`, so its source is an ordinary
+  `call_expr`. After normal name resolution and argument construction,
+  `build_ast.cpp` rewrites only the unshadowed system procedure into
+  `AstStartNode`. Structured ownership, scope-exit join/cancel, escape marking,
+  and the K13 mutable-capture rejection therefore retain their existing node
+  instead of being inferred later from a generic call.
+- Literal argument arrays reuse the ordinary user-call parameter validator.
+  MIR accepts a general array value and normalizes packed `ArrayNum` storage to
+  the boxed `List::items` launch ABI; directly reinterpreting `[index]` as a
+  `List*` was the root cause of the initial one-argument task crash.
+- Removing `_start` exposed an accidental scanner dependency: its failed probe
+  had been skipping whitespace before a following first-class `\(...)` pattern
+  island. The scanner entry now owns that whitespace invariant explicitly while
+  deliberately not invoking the slash-aware extras scanner, which would steal
+  rooted paths. The full baseline caught both affected island fixtures.
+- Existing concurrency fixtures were migrated mechanically from
+  `start child(a, b)` to `start(child, [a, b])`. Focused proof covers omitted
+  args, one packed-int argument, explicit `{mode: 'task'}`, scope exit, existing
+  negative capture/context/target checks, and an unsupported-mode diagnostic.
+
+Measured against the immediately prior production grammar, this activation
+reduces the generated parser/archive by the amounts recorded above. More
+importantly, adding launch policy no longer grows the grammar: new policy fields
+belong to the options map and the `start` semantic validator, not Tree-sitter.
 - **Scanner refinements**: `fn` joined `to` as a pattern-continuation word (`fn(a: int) int` is one token); the content/view name-decline generalized from bare words to any lone name-like atom, covering quoted field names (`'type': string`); view/edit patterns scan ONLY a bare word or one balanced `<...>` element, so a view body `{` can never be swallowed as a map pattern. The return scanner now rejects first-atom statement/control words such as `else`; it cannot consume `else {` while the GLR parser is recovering a declaration boundary. It also rejects a type connective with no RHS atom, which prevents the expression pipeline `parts |> join("")` from being tokenized as a bare alias return type; `grammar_reduce5_scanner` pins this boundary.
 - **Diagnostic parity** (predicted as R4): conceptual base-type spellings (`int64`) fail with the canonical suggestion via the promoted `record_unknown_base_type`; genuinely unknown names stay LENIENT (ANY + warning) so `?unknown` queries degrade gracefully — both behaviors are load-bearing in the negative suites; island char classes reject shadowing bindings ("pattern class 'd' is reserved…"); and the `'<' ambiguous with element syntax` hint now recognizes the trimmed grammar's wider ERROR span (`< "b"`, not a lone `<`).
 
@@ -304,8 +349,9 @@ Defects found and fixed on the way to green, each with the constraint it reveale
 | **SC4 ACTIVE (landed 2026-08-19)** | **7,360,111** | **1,033,408** | **5,032** | **903** | 225 | 2 |
 | GR5 return/view production | 7,318,818 | 1,015,848 | 5,003 | 903 | 219 | 2 |
 | **GR5 path body + qualified-name shield + split rooted tokens (2026-08-19)** | **6,998,990** | **968,768** | **4,881** | **818** | **221** | **1** |
+| **GR5 contextual `start` retired (2026-08-19)** | **6,850,715** | **950,336** | **4,851** | **804** | **219** | **1** |
 
-GR5's current deltas versus the pre-campaign baseline are **parser.c −21.5%, parser.o −26.1%, states −23.7%**. Its archive is 988,760 bytes versus the same-build fresh SC4 archive of 1,044,432 bytes (−55,672 bytes, −5.3%); the archive includes the scanner growth for type/view/return end-finders, `path_body_token`, and the qualified-name collision shield. Production AST construction no longer rebuilds return/occurrence/view interiors from a Tree-sitter CST and no longer walks rooted/relative path interiors to construct `AstPathNode`.
+GR5's current deltas versus the pre-campaign baseline are **parser.c −23.1%, parser.o −27.5%, states −24.2%**. Its archive is 969,416 bytes versus the same-build fresh SC4 archive of 1,044,432 bytes (−75,016 bytes, −7.2%); the archive includes the scanner growth for type/view/return end-finders, `path_body_token`, and the qualified-name collision shield, but no contextual-start scanner. Production AST construction no longer rebuilds return/occurrence/view interiors from a Tree-sitter CST and no longer walks rooted/relative path interiors to construct `AstPathNode`.
 
 SC1 is the `that`-hoist plus the `value_error_type` deletion: **−8.3% source, −7.5% object, −9.1% states**, and four of the six declared GLR conflicts became unnecessary once the type layer stopped reaching into the expression grammar (removed; they measured identically either way). SC2 is a verified no-op — identical numbers across all five counters, which is the strongest available evidence that factoring the grammar into `grammar-common.js` + a type layer changed no language. SC3 measured on the parked grammar: **−17.4% source, −21.5% object, −21.4% states against baseline.**
 

@@ -3,7 +3,7 @@ pn child() {
     return 9
 }
 pn make_child() {
-    let handle = start child()
+    let handle = start(child)
     return handle
 }
 

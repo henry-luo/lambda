@@ -923,6 +923,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false,
      C_RET_DOUBLE, C_ARG_ITEM, "pn_clock", FPTR(pn_clock), NULL, NULL, false, 0},
 
+    // `start` uses ordinary call grammar but remains a compiler intrinsic so
+    // structured ownership and capture checks stay visible in AstStartNode.
+    {SYSPROC_START, "start", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_start", NULL, NULL, NULL, false, 0, false},
+
     {SYSPROC_SEND, "send", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_RETITEM, C_ARG_ITEM, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
 

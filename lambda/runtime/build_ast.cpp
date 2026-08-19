@@ -47,6 +47,8 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
+static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
+    TSNode diagnostic_node, int arg_count);
 
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol, AstNode* prebuilt_as);
@@ -2970,6 +2972,162 @@ static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_coun
     return NULL;
 }
 
+static bool start_option_name_is(AstNamedNode* option, const char* name) {
+    size_t length = strlen(name);
+    return option && option->name && option->name->len == (int)length &&
+        memcmp(option->name->chars, name, length) == 0;
+}
+
+static const char* start_literal_symbol(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || !node->type || node->type->type_id != LMD_TYPE_SYMBOL ||
+            !node->type->is_literal) return NULL;
+    Symbol* symbol = (Symbol*)((TypeSymbol*)node->type)->string;
+    return symbol ? symbol->chars : NULL;
+}
+
+static bool parse_start_options(Transpiler* tp, AstNode* options,
+        TSNode call_node, StartMode* mode) {
+    *mode = START_MODE_TASK;
+    if (!options) return true;
+    AstNode* root = ast_unwrap_primary(options);
+    if (!root || root->node_type != AST_NODE_MAP) {
+        record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            "`start` options must be a map literal");
+        return false;
+    }
+
+    bool saw_mode = false;
+    bool valid = true;
+    for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "`start` options cannot use spread fields");
+            valid = false;
+            continue;
+        }
+        AstNamedNode* option = (AstNamedNode*)item;
+        if (!start_option_name_is(option, "mode")) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "unknown `start` option '%.*s'",
+                option->name ? option->name->len : 0,
+                option->name ? option->name->chars : "");
+            valid = false;
+            continue;
+        }
+        if (saw_mode) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "duplicate `start` option 'mode'");
+            valid = false;
+            continue;
+        }
+        saw_mode = true;
+        const char* value = start_literal_symbol(option->as);
+        if (!value) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "`start` option 'mode' must be the literal symbol 'task', 'thread', or 'process'");
+            valid = false;
+        } else if (strcmp(value, "task") == 0) {
+            *mode = START_MODE_TASK;
+        } else if (strcmp(value, "thread") == 0) {
+            *mode = START_MODE_THREAD;
+        } else if (strcmp(value, "process") == 0) {
+            *mode = START_MODE_PROCESS;
+        } else {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "invalid `start` mode '%s'; expected 'task', 'thread', or 'process'", value);
+            valid = false;
+        }
+    }
+
+    if (valid && *mode != START_MODE_TASK) {
+        const char* value = *mode == START_MODE_THREAD ? "thread" : "process";
+        record_semantic_error(tp, call_node, ERR_NOT_IMPLEMENTED,
+            "`start` mode '%s' is not implemented yet; use 'task'", value);
+        valid = false;
+    }
+    return valid;
+}
+
+static AstNode* build_start_call(Transpiler* tp, AstCallNode* source_call,
+        TSNode call_node, int arg_count) {
+    AstStartNode* start = (AstStartNode*)alloc_ast_node(
+        tp, AST_NODE_START, call_node, sizeof(AstStartNode));
+    start->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
+    start->owner_scope = tp->current_scope;
+    start->mode = START_MODE_TASK;
+
+    if (arg_count < 1 || arg_count > 3) {
+        record_semantic_error(tp, call_node, ERR_ARGUMENT_COUNT_MISMATCH,
+            "`start` expects 1 to 3 arguments, got %d", arg_count);
+        start->type = &TYPE_ERROR;
+        return (AstNode*)start;
+    }
+
+    AstNode* target = source_call->argument;
+    AstNode* args = target ? target->next : NULL;
+    AstNode* options = args ? args->next : NULL;
+    for (AstNode* arg = target; arg; arg = arg->next) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "`start` uses positional arguments: start(pn, args, options)");
+            start->type = &TYPE_ERROR;
+            return (AstNode*)start;
+        }
+    }
+    if (target) target->next = NULL;
+    if (args) args->next = NULL;
+    if (options) options->next = NULL;
+
+    TypeFunc* fn_type = target && target->type && target->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)target->type : NULL;
+    if (!fn_type || !fn_type->is_proc) {
+        record_semantic_error(tp, call_node, ERR_INVALID_CALL,
+            "`start` first argument must resolve to a procedure (pn)");
+        start->type = &TYPE_ERROR;
+    }
+
+    AstNode* args_root = args ? ast_unwrap_primary(args) : NULL;
+    if (args && (!args->type || args->type->type_id != LMD_TYPE_ARRAY)) {
+        record_semantic_error(tp, call_node, ERR_ARGUMENT_TYPE_MISMATCH,
+            "`start` second argument must be an argument array");
+        start->type = &TYPE_ERROR;
+    }
+    if (!parse_start_options(tp, options, call_node, &start->mode)) {
+        start->type = &TYPE_ERROR;
+    }
+
+    AstCallNode* target_call = (AstCallNode*)alloc_ast_node(
+        tp, AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
+    target_call->function = target;
+    target_call->argument = args;
+    target_call->type = fn_type ? function_call_result_type(tp, fn_type) : &TYPE_ERROR;
+    target_call->can_raise = fn_type ? fn_type->can_raise : false;
+    start->call = target_call;
+
+    if (fn_type && args_root && args_root->node_type == AST_NODE_ARRAY) {
+        AstArrayNode* literal_args = (AstArrayNode*)args_root;
+        for (AstNode* item = literal_args->item; item; item = item->next) {
+            if (item->node_type == AST_NODE_ASSIGN) {
+                record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                    "`start` argument arrays cannot contain declarations");
+                start->type = &TYPE_ERROR;
+                return (AstNode*)start;
+            }
+        }
+        AstCallNode validation_call = *target_call;
+        validation_call.argument = literal_args->item;
+        if (!validate_lambda_call_arguments(tp, &validation_call, call_node,
+                (int)((TypeArray*)literal_args->type)->length)) {
+            start->type = &TYPE_ERROR;
+        }
+    }
+    return (AstNode*)start;
+}
+
 static bool validate_lambda_argument_limit(Transpiler* tp, TSNode node,
         int count, const char* subject) {
     if (count <= LAMBDA_MAX_FUNCTION_ARGS) return true;
@@ -2977,6 +3135,111 @@ static bool validate_lambda_argument_limit(Transpiler* tp, TSNode node,
         "%s count %d exceeds Core Lambda limit %d; use a rest parameter or an array/map",
         subject, count, LAMBDA_MAX_FUNCTION_ARGS);
     return false;
+}
+
+static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
+        TSNode diagnostic_node, int arg_count) {
+    if (!call || !call->function || !call->function->type ||
+            call->function->type->type_id != LMD_TYPE_FUNC) return true;
+
+    TypeFunc* func_type = (TypeFunc*)call->function->type;
+    TypeParam* expected_param = func_type->param;
+    AstNode* arg = call->argument;
+    int arg_index = 0;
+    int line = ts_node_start_point(diagnostic_node).row + 1;
+    String* var_arg_roots[64];
+    int var_arg_root_count = 0;
+    bool parameter_short_circuits_error = false;
+
+    // A statically resolved function cannot manufacture missing values. The
+    // validator is shared by direct calls and start(pn, literal_args), keeping
+    // launch syntax from weakening the ordinary call contract.
+    if (ast_called_function_signature_ready(call->function) &&
+            (arg_count < func_type->required_param_count ||
+             (!func_type->is_variadic && arg_count > func_type->param_count))) {
+        record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
+            "function expects %d%s argument%s, got %d",
+            func_type->required_param_count,
+            func_type->is_variadic ? " or more" : "",
+            func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
+            arg_count);
+        if (!should_continue_transpiling(tp)) {
+            call->type = &TYPE_ERROR;
+            return false;
+        }
+    }
+
+    while (arg && expected_param) {
+        if (expected_param->is_var_param) {
+            AstIdentNode* root = compound_root_ident(arg);
+            if (!root || !root->entry || !root->entry->is_mutable) {
+                record_semantic_error(tp, diagnostic_node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "argument %d for `var` parameter must be a mutable `var` binding",
+                    arg_index + 1);
+                if (!should_continue_transpiling(tp)) {
+                    call->type = &TYPE_ERROR;
+                    return false;
+                }
+            } else {
+                for (int i = 0; i < var_arg_root_count; i++) {
+                    if (same_name_string(var_arg_roots[i], root->name)) {
+                        record_semantic_error(tp, diagnostic_node, ERR_IMMUTABLE_ASSIGNMENT,
+                            "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                            arg_index + 1);
+                        break;
+                    }
+                }
+                if (var_arg_root_count < 64) {
+                    var_arg_roots[var_arg_root_count++] = root->name;
+                }
+            }
+            if (!type_exact_match(arg->type, expected_param)) {
+                Type* full_type = parameter_boundary_type(expected_param);
+                char expected_name[128];
+                char actual_name[128];
+                lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
+                lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
+                record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
+                    "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
+                    arg_index + 1, expected_name, actual_name);
+                if (!should_continue_transpiling(tp)) {
+                    call->type = &TYPE_ERROR;
+                    return false;
+                }
+            }
+        }
+        Type* full_type = parameter_boundary_type(expected_param);
+        if (expected_param->contract_type &&
+                !lambda_type_accepts_error(expected_param->contract_type) &&
+                lambda_type_accepts_error(arg->type)) {
+            parameter_short_circuits_error = true;
+        }
+        StaticBoundaryResult relation = lambda_type_accepts_error(arg->type)
+            ? static_parameter_boundary_relation(arg->type, full_type)
+            : static_boundary_relation(arg->type, full_type);
+        bool compatible = relation != STATIC_BOUNDARY_REJECTED;
+        if (!compatible) compatible = typed_array_argument_compatible(arg, full_type);
+        if (arg->type && !compatible) {
+            char expected_name[128];
+            char actual_name[128];
+            lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
+            lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
+            record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
+                "argument %d expected %s, got %s",
+                arg_index + 1, expected_name, actual_name);
+            if (!should_continue_transpiling(tp)) {
+                call->type = &TYPE_ERROR;
+                return false;
+            }
+        }
+        arg = arg->next;
+        expected_param = expected_param->next;
+        arg_index++;
+    }
+    if (parameter_short_circuits_error) {
+        call->type = lambda_type_union_normalized(tp->pool, call->type, &TYPE_ERROR);
+    }
+    return true;
 }
 
 static bool resolve_imported_module_method(Transpiler* tp, TSNode object_node,
@@ -3254,6 +3517,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         log_debug("build sys call");
         if (sys_func_info->is_proc) {
             if (!tp->current_scope->is_proc) {
+                if (sys_func_info->fn == SYSPROC_START) {
+                    record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                        "`start` is only allowed inside a procedure (pn)");
+                    ast_node->type = &TYPE_ERROR;
+                    return (AstNode*)ast_node;
+                }
                 const char* fn_name = is_method_call ? method_name.str : func_name.str;
                 int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
                 record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
@@ -3362,6 +3631,13 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
 
+    if (sys_func_info && sys_func_info->fn == SYSPROC_START) {
+        // The ordinary call surface must still become a distinct semantic node:
+        // scope-exit joins, return escape, and mutable-capture rejection all
+        // depend on recognizing task creation after grammar has forgotten it.
+        return build_start_call(tp, ast_node, call_node, arg_count);
+    }
+
     bool has_named_arguments = false;
     for (AstNode* call_arg = ast_node->argument; call_arg; call_arg = call_arg->next) {
         if (call_arg->node_type == AST_NODE_NAMED_ARG) {
@@ -3425,115 +3701,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
-    // Validate argument types against parameter types (for user-defined functions)
-    if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
-        TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
-        TypeParam* expected_param = func_type->param;
-        AstNode* arg = ast_node->argument;
-        int arg_index = 0;
-        int line = ts_node_start_point(call_node).row + 1;
-        String* var_arg_roots[64];
-        int var_arg_root_count = 0;
-        bool parameter_short_circuits_error = false;
-
-        // A statically resolved function cannot manufacture missing values.
-        // The old emitter padded absent native parameters with zero/null before
-        // their contracts ran, which made arity a representation-dependent bug.
-        if (ast_called_function_signature_ready(ast_node->function) &&
-                (arg_count < func_type->required_param_count ||
-                 (!func_type->is_variadic && arg_count > func_type->param_count))) {
-            record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
-                "function expects %d%s argument%s, got %d",
-                func_type->required_param_count,
-                func_type->is_variadic ? " or more" : "",
-                func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
-                arg_count);
-            if (!should_continue_transpiling(tp)) {
-                ast_node->type = &TYPE_ERROR;
-                return (AstNode*)ast_node;
-            }
-        }
-
-        while (arg && expected_param) {
-            if (expected_param->is_var_param) {
-                AstIdentNode* root = compound_root_ident(arg);
-                if (!root || !root->entry || !root->entry->is_mutable) {
-                    record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
-                        "argument %d for `var` parameter must be a mutable `var` binding",
-                        arg_index + 1);
-                    if (!should_continue_transpiling(tp)) {
-                        ast_node->type = &TYPE_ERROR;
-                        return (AstNode*)ast_node;
-                    }
-                } else {
-                    for (int i = 0; i < var_arg_root_count; i++) {
-                        if (same_name_string(var_arg_roots[i], root->name)) {
-                            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
-                                "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
-                                arg_index + 1);
-                            break;
-                        }
-                    }
-                    if (var_arg_root_count < 64) {
-                        var_arg_roots[var_arg_root_count++] = root->name;
-                    }
-                }
-                if (!type_exact_match(arg->type, expected_param)) {
-                    Type* full_type = parameter_boundary_type(expected_param);
-                    char expected_name[128];
-                    char actual_name[128];
-                    lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
-                    lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
-                    record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
-                        "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
-                        arg_index + 1,
-                        expected_name, actual_name);
-                    if (!should_continue_transpiling(tp)) {
-                        ast_node->type = &TYPE_ERROR;
-                        return (AstNode*)ast_node;
-                    }
-                }
-            }
-            Type* full_type = parameter_boundary_type(expected_param);
-            if (expected_param->contract_type &&
-                    !lambda_type_accepts_error(expected_param->contract_type) &&
-                    lambda_type_accepts_error(arg->type)) {
-                // The caller preserves this error before invoking the raw
-                // body. Retain that ordinary ItemError result in the call's
-                // type so downstream native lowering stays boxed.
-                parameter_short_circuits_error = true;
-            }
-            StaticBoundaryResult relation = lambda_type_accepts_error(arg->type)
-                ? static_parameter_boundary_relation(arg->type, full_type)
-                : static_boundary_relation(arg->type, full_type);
-            bool compatible = relation != STATIC_BOUNDARY_REJECTED;
-            if (!compatible) {
-                compatible = typed_array_argument_compatible(arg, full_type);
-            }
-            if (arg->type && !compatible) {
-                // Extended contracts use the internal `type` tag. Format the
-                // full contract so a rejected union names its usable arms.
-                char expected_name[128];
-                char actual_name[128];
-                lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
-                lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
-                record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
-                    "argument %d expected %s, got %s",
-                    arg_index + 1,
-                    expected_name, actual_name);
-                if (!should_continue_transpiling(tp)) {
-                    ast_node->type = &TYPE_ERROR;
-                    return (AstNode*)ast_node;
-                }
-            }
-            arg = arg->next;
-            expected_param = expected_param->next;
-            arg_index++;
-        }
-        if (parameter_short_circuits_error) {
-            ast_node->type = lambda_type_union_normalized(tp->pool,
-                ast_node->type, &TYPE_ERROR);
-        }
+    if (!validate_lambda_call_arguments(tp, ast_node, call_node, arg_count)) {
+        return (AstNode*)ast_node;
     }
 
     log_debug("end building call expr type: %p, %d, is_const:%d, can_raise:%d, propagate:%d",
@@ -9039,49 +9208,6 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
     return (AstNode*)ast_node;
 }
 
-static AstNode* build_start_expr(Transpiler* tp, TSNode start_node) {
-    AstStartNode* ast_node = (AstStartNode*)alloc_ast_node(
-        tp, AST_NODE_START, start_node, sizeof(AstStartNode));
-    ast_node->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
-    ast_node->owner_scope = tp->current_scope;
-
-    // The contextual scanner admits `start` only before a named call operand;
-    // accepting that spawn effect in an fn would violate the fn/pn boundary.
-    if (!tp->current_scope || !tp->current_scope->is_proc) {
-        record_semantic_error(tp, start_node, ERR_PROC_IN_FN,
-            "`start` is only allowed inside a procedure (pn)");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    TSNode operand_node = ts_node_child_by_field_id(start_node, FIELD_OPERAND);
-    AstNode* operand = build_expr(tp, operand_node);
-    log_debug("concurrency start AST: operand syntax=%s ast=%d",
-        ts_node_type(operand_node), operand ? (int)operand->node_type : -1);
-    if (operand && operand->node_type == AST_NODE_PRIMARY) {
-        operand = ((AstPrimaryNode*)operand)->expr;
-        log_debug("concurrency start AST: unwrapped primary ast=%d",
-            operand ? (int)operand->node_type : -1);
-    }
-    if (!operand || operand->node_type != AST_NODE_CALL_EXPR) {
-        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
-            "`start` operand must be a procedure call");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    ast_node->call = (AstCallNode*)operand;
-    AstNode* callee = ast_node->call->function;
-    TypeFunc* fn_type = callee && callee->type && callee->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)callee->type : NULL;
-    if (!fn_type || !fn_type->is_proc) {
-        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
-            "`start` operand must resolve to a procedure (pn) call");
-        ast_node->type = &TYPE_ERROR;
-    }
-    return (AstNode*)ast_node;
-}
-
 typedef struct ReturnBoundaryScan {
     Transpiler* tp;
     Type* expected;
@@ -10960,8 +11086,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return (AstNode*)nav;
     }
     case SYM_CALL_EXPR:
-        // `start_expr` names its call operand directly instead of routing it
-        // through primary_expr, so the shared call builder must accept both.
         return build_call_expr(tp, expr_node, symbol);
     case SYM_HANDLER_EXPR:
         return build_handler(tp, expr_node, false);
@@ -11140,8 +11264,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
         return build_named_argument(tp, expr_node);
-    case SYM_START_EXPR:
-        return build_start_expr(tp, expr_node);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;

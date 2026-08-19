@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 6.0.0 (2026-08-18)
+**Spec version:** 7.0.0 (2026-08-19)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1188,25 +1188,29 @@ the last write.* [Features R1–R5]
 
 ## S13 Concurrency
 
-*One keyword, two tiers. Concurrency enters a program through exactly one
-word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
+*One procedure, two tiers. Explicit concurrency enters a program through one
+ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
 
 ### S13.1 Tasks and workers
 
-- **S13.1.1** `start` is the only concurrency keyword — contextual, legal
-  only where an expression begins inside a `pn`, operand a `pn` call.
-  Everything else (`wait`, `send`, `receive`, `select`, `worker`, `cancel`,
-  `self`) is a builtin `pn`. **`async` and `await` do not exist.** [K12]
-- **S13.1.2** Calls are **colorless**: `f(x)` synchronously yields the value
-  and may suspend invisibly (`f(x)` ≡ `wait(start f(x))` minus the handle);
+- **S13.1.1v2** `start` is a builtin `pn`, not a keyword. It uses ordinary call
+  grammar as `start(target, args = [], options = {})`, is legal only inside a
+  `pn`, and requires `target` to resolve to a `pn`. `args` is an array; the
+  compiler-recognized `options` literal accepts `mode: 'task' | 'thread' |
+  'process'` and defaults to `'task'`. Everything else (`wait`, `send`,
+  `receive`, `select`, `cancel`, `self`) is also a builtin `pn`.
+  **`async` and `await` do not exist.** [K12v2]
+- **S13.1.2v2** Calls are **colorless**: `f(x)` synchronously yields the value
+  and may suspend invisibly (`f(x)` ≡ `wait(start(f, [x]))` minus the handle);
   may-suspend-ness is inferred and never observable. Every Lambda `pn`
   exposed to JS is uniformly Promise-returning; a Lambda resume is a
   macrotask. [K16]
-- **S13.1.3*** Two tiers, one handle vocabulary: tasks (`start f(x)`, shared
-  context) and workers (`start worker(spec, isolation: 'thread'|'process')`,
-  share-nothing isolate; default `'thread'`). Handles are uniform:
+- **S13.1.3v2*** Two tiers, one handle vocabulary: tasks
+  (`start(f, [x])`, shared context) and isolated workers
+  (`start(f, [x], {mode: 'thread' | 'process'})`, share-nothing isolate).
+  Handles are uniform:
   awaitable, sendable-to, selectable, cancellable; they compare by identity
-  and only the concurrency builtins operate on them. [K11, K31]
+  and only the concurrency builtins operate on them. [K11, K31v2]
 - **S13.1.4** **The capture rule**: a `start` operand must not capture
   `var`s by reference — compile error. Tasks communicate only via messages
   and immutable values; consequence: **thread count is semantically
@@ -1370,7 +1374,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
 | S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
-| S13.1.3 | Tasks fully implemented (2026-07-15); the worker tier (thread/process isolation) is pending — process first, thread gated on the isolate-state audit and open item O-D. |
+| S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
