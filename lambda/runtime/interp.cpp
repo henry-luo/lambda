@@ -11,7 +11,9 @@
 #include "runtime-state.h"
 #include "recovery_frame.h"
 #include "heap_api.h"
+#include "type_contract.hpp"
 #include "../../lib/log.h"
+#include "../../lib/url.h"
 #include <stdlib.h>
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
@@ -39,6 +41,8 @@ void interp_run_stats_reset(void) { memset(&g_interp_stats, 0, sizeof(g_interp_s
 
 #define INTERP_DEFAULT_DEPTH 10000
 #define INTERP_DEFAULT_PREDICATE_FUEL 1024
+#define INTERP_DEFAULT_CONST_FUEL 1024
+#define INTERP_CONST_FRAME_SLOTS 4096
 
 // A predicate is a bounded decision, not an unbounded second execution path.
 // Invalid knob values keep the reviewed default rather than weakening the
@@ -49,6 +53,21 @@ static uint32_t interp_predicate_fuel_budget(void) {
     long value = strtol(env, NULL, 10);
     if (value < 1 || value > 1000000L) return INTERP_DEFAULT_PREDICATE_FUEL;
     return (uint32_t)value;
+}
+
+// a constant fold is a bounded compiler attempt, not a second unbounded
+// evaluator. Invalid knobs retain the reviewed default just as predicates do.
+static uint32_t interp_const_fuel_budget(void) {
+    const char* env = getenv("LAMBDA_CONST_FUEL");
+    if (!env || !*env) return INTERP_DEFAULT_CONST_FUEL;
+    long value = strtol(env, NULL, 10);
+    if (value < 1 || value > 1000000L) return INTERP_DEFAULT_CONST_FUEL;
+    return (uint32_t)value;
+}
+
+static bool interp_const_fold_enabled(void) {
+    const char* env = getenv("LAMBDA_CONST_FOLD");
+    return !env || env[0] != '0' || env[1] != '\0';
 }
 
 // ---------------------------------------------------------------------------
@@ -87,9 +106,14 @@ public:
         frame_.env_count = env_count;
         frame_.slot_count = (uint32_t)slots;
         uint32_t named = plan ? (uint32_t)plan->param_count + plan->local_count : 0;
-        frame_.signal_index = named;
-        frame_.scratch_base = named + 1;
+        frame_.vargs_index = plan && plan->vargs_index != UINT16_MAX
+            ? plan->vargs_index : UINT32_MAX;
+        frame_.signal_index = named + (frame_.vargs_index != UINT32_MAX ? 1 : 0);
+        frame_.scratch_base = frame_.signal_index + 1;
         frame_.scratch_top = frame_.scratch_base;
+        if (frame_.vargs_index != UINT32_MAX) {
+            frame_.slots[frame_.vargs_index] = ITEM_NULL;
+        }
         frame_.slots[frame_.signal_index] = ITEM_NULL;   // zero before publish
         frame_.signal = EvalSignal::NORMAL;
         frame_.caller = st->top;
@@ -111,6 +135,55 @@ public:
 
     InterpFrameGuard(const InterpFrameGuard&) = delete;
     InterpFrameGuard& operator=(const InterpFrameGuard&) = delete;
+};
+
+// The dynamic-call adapter materializes a variadic rest list before it enters
+// T0. Keep that List rooted in the callee frame while `current_vargs` exposes
+// it to `varg()`: Context itself is not a GC root (D5.1.1).
+static bool interp_set_frame_vargs(InterpFrame* frame, Item rest) {
+    if (!frame || frame->vargs_index == UINT32_MAX ||
+            frame->vargs_index >= frame->slot_count) {
+        log_error("interp: variadic frame has no rest-list root");
+        return false;
+    }
+    TypeId tid = get_type_id(rest);
+    if (rest.item != ITEM_NULL && tid != LMD_TYPE_ARRAY) {
+        log_error("interp: variadic rest argument is not a list (type %d)",
+            (int)tid);
+        return false;
+    }
+    if (rest.item == ITEM_NULL) {
+        // The shared adapter uses null as its no-rest transport sentinel, but
+        // a Lambda `varg()` observes an empty Array. Materialize it in this
+        // rooted frame slot before any body allocation can run.
+        List* empty = list();
+        if (!empty) return false;
+        rest = (Item){.item = (uint64_t)(uintptr_t)empty};
+    }
+    frame->slots[frame->vargs_index] = rest.item;
+    (void)set_vargs((List*)(uintptr_t)rest.item);
+    return true;
+}
+
+class InterpVargsGuard {
+    List* previous_;
+    bool active_;
+
+public:
+    InterpVargsGuard(InterpFrame* frame, Item rest) : previous_(NULL), active_(false) {
+        if (!frame || frame->vargs_index == UINT32_MAX) return;
+        previous_ = frame->st && frame->st->ctx ? frame->st->ctx->current_vargs : NULL;
+        if (!interp_set_frame_vargs(frame, rest)) return;
+        active_ = true;
+    }
+
+    ~InterpVargsGuard() {
+        if (active_) restore_vargs(previous_);
+    }
+
+    bool valid() const { return active_; }
+    InterpVargsGuard(const InterpVargsGuard&) = delete;
+    InterpVargsGuard& operator=(const InterpVargsGuard&) = delete;
 };
 
 // Saves the ordinary runtime mode around an isolated `that` attempt.  Nested
@@ -350,6 +423,37 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
     if ((uint32_t)entry->slot < f->scratch_base) f->slots[entry->slot] = value.item;
 }
 
+// A declared compact numeric lane has a canonical Item representation even
+// when static checking already accepted an ordinary numeric source. Root the
+// source while the shared coercion helper can allocate, or a u64 result may
+// outlive the caller's unrooted local across its number-home allocation.
+static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
+        Type* declared_type) {
+    if (!f || item_is_error(value)) return value;
+    Type* target = unwrap_simple_type_type(declared_type);
+    if (!target || (target->type_id != LMD_TYPE_NUM_SIZED &&
+            target->type_id != LMD_TYPE_UINT64)) return value;
+    Scratch source_root(f);
+    source_root.set(value);
+    if (target->type_id == LMD_TYPE_NUM_SIZED) {
+        return coerce_num_sized(source_root.get(),
+            (int64_t)type_num_sized_kind(target));
+    }
+    return coerce_uint64(source_root.get());
+}
+
+static Item interp_eval_cow_path_key(InterpFrame* f, AstNode* key_node,
+        bool is_member) {
+    AstNode* key = ast_unwrap_primary(key_node);
+    if (is_member && key && key->node_type == AST_NODE_IDENT) {
+        // a dotted segment is a literal property key, never a binding read.
+        AstIdentNode* name = (AstIdentNode*)key;
+        return (Item){.item = s2it(heap_create_name(name->name->chars,
+            name->name->len))};
+    }
+    return eval_expr(f, key_node);
+}
+
 // ---------------------------------------------------------------------------
 // Literals
 // ---------------------------------------------------------------------------
@@ -551,9 +655,65 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
 // Calls
 // ---------------------------------------------------------------------------
 
+static Item interp_rejected_parameter_error(const TypeFunc* signature,
+        const Item* args, int argc);
+static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
+        InterpFrame* caller, NameEntry* const* borrowed_entries);
+
+bool interp_native_sys_item_supported(const SysFuncInfo* info) {
+    if (!info || info->c_arg_conv != C_ARG_NATIVE) return false;
+    switch (info->fn) {
+    case SYSFUNC_BAND:
+    case SYSFUNC_BOR:
+    case SYSFUNC_BXOR:
+    case SYSFUNC_SHL:
+    case SYSFUNC_SHR:
+        return info->arg_count == 2;
+    case SYSFUNC_BNOT:
+        return info->arg_count == 1;
+    default:
+        return false;
+    }
+}
+
+// MIR keeps an all-`int` bitwise call in a machine lane, but routes every
+// other lane through these Item helpers. The raw registry ABI cannot preserve
+// a sized or bigint result, so keep that split at the interpreter boundary.
+static Item eval_native_sys_item_call(const SysFuncInfo* info, const Item* args,
+        int argc, Type* result_type) {
+    if (!interp_native_sys_item_supported(info) || !args || argc != info->arg_count) {
+        log_error("interp: unsupported native system function call");
+        return ItemError;
+    }
+
+    bool int_result = result_type && result_type->type_id == LMD_TYPE_INT;
+    switch (info->fn) {
+    case SYSFUNC_BAND:
+        return int_result ? int2it_i64(fn_band(_barg(args[0]), _barg(args[1])))
+            : fn_band_item(args[0], args[1]);
+    case SYSFUNC_BOR:
+        return int_result ? int2it_i64(fn_bor(_barg(args[0]), _barg(args[1])))
+            : fn_bor_item(args[0], args[1]);
+    case SYSFUNC_BXOR:
+        return int_result ? int2it_i64(fn_bxor(_barg(args[0]), _barg(args[1])))
+            : fn_bxor_item(args[0], args[1]);
+    case SYSFUNC_BNOT:
+        return int_result ? int2it_i64(fn_bnot(_barg(args[0]))) : fn_bnot_item(args[0]);
+    case SYSFUNC_SHL:
+        return int_result ? int2it_i64_or_error(fn_shl(_barg(args[0]), _barg(args[1])))
+            : fn_shl_item(args[0], args[1]);
+    case SYSFUNC_SHR:
+        return int_result ? int2it_i64_or_error(fn_shr(_barg(args[0]), _barg(args[1])))
+            : fn_shr_item(args[0], args[1]);
+    default:
+        return ItemError;
+    }
+}
+
 // Direct C call through the registry entry, using the same result boxing MIR
 // lowering selects from sysfunc_c_ret_type_id. Same registry, both tiers.
-static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
+static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
+        int argc, Type* result_type) {
     if (!info || !info->func_ptr) {
         log_error("interp: system function '%s' has no entry point",
             info && info->name ? info->name : "<null>");
@@ -562,19 +722,19 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
     void* fp = (void*)info->func_ptr;
     TypeId c_ret = sysfunc_c_ret_type_id(info);
 
+    if (sysfunc_params_reject_error(info)) {
+        for (int i = 0; i < argc; i++) {
+            if (item_is_error(args[i])) {
+                // MIR returns a rejected system-call error from this activation
+                // before a local handler can turn it into ordinary content.
+                interp_signal(f, EvalSignal::RETURNED, args[i]);
+                return args[i];
+            }
+        }
+    }
+
     if (info->c_arg_conv == C_ARG_NATIVE) {
-        // The bitwise/shift family takes machine words, not Items. `_barg` is
-        // the same safe unbox emit_bitwise_i64_arg routes non-integer operands
-        // through, so both tiers narrow identically.
-        int64_t raw[4];
-        for (int i = 0; i < argc && i < 4; i++) raw[i] = _barg(args[i]);
-        int64_t out =
-            argc == 1 ? ((int64_t(*)(int64_t))fp)(raw[0]) :
-            argc == 2 ? ((int64_t(*)(int64_t, int64_t))fp)(raw[0], raw[1]) :
-            argc == 3 ? ((int64_t(*)(int64_t, int64_t, int64_t))fp)(raw[0], raw[1], raw[2]) :
-                        ((int64_t(*)(int64_t, int64_t, int64_t, int64_t))fp)(
-                            raw[0], raw[1], raw[2], raw[3]);
-        return c_ret == LMD_TYPE_INT ? (Item){.item = i2it(out)} : box_int64_value(out);
+        return eval_native_sys_item_call(info, args, argc, result_type);
     }
 
     if (info->c_ret_type == C_RET_RETITEM) {
@@ -660,12 +820,46 @@ static Item eval_sys_call(SysFuncInfo* info, const Item* args, int argc) {
 #undef SYS_DISPATCH
 }
 
+// a direct checked map store emits emit_return_if_item_error before the generic
+// proc-side-effect lowering sees it. Keep that early return in T0 too: losing
+// the failed candidate here would let a rejected typed write look successful.
+static bool interp_direct_typed_map_assignment(AstNode* node) {
+    if (!node || (node->node_type != AST_NODE_INDEX_ASSIGN_STAM &&
+            node->node_type != AST_NODE_MEMBER_ASSIGN_STAM)) return false;
+    AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)node;
+    AstCowPath path = {};
+    if (!ast_collect_cow_path(&path, assignment->object) || path.count != 0 ||
+            !path.root || path.root->node_type != AST_NODE_IDENT) return false;
+    NameEntry* root = ((AstIdentNode*)path.root)->entry;
+    return root && ast_declared_type_is_map(root->declared_type);
+}
+
+// T0 discards procedural statement values in content blocks just as MIR does.
+// preserve a failure before that discard when the enclosing procedure exposes
+// an error channel, or a direct checked map store already owns that boundary.
+static void interp_propagate_proc_side_effect_error(InterpFrame* f,
+        AstNode* node, Item value) {
+    if (!f || !node || !item_is_error(value) ||
+            !side_effect_result_can_error(node->node_type)) return;
+    TypeFunc* signature = f->fn ? (TypeFunc*)((AstNode*)f->fn)->type : NULL;
+    if (interp_direct_typed_map_assignment(node) ||
+            (signature && signature->type_id == LMD_TYPE_FUNC && signature->can_raise)) {
+        interp_signal(f, EvalSignal::RETURNED, value);
+    }
+}
+
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
-    int argc = injected ? 1 : 0;
-    for (AstNode* a = node->argument; a; a = a->next) argc++;
+    int source_argc = 0;
+    for (AstNode* a = node->argument; a; a = a->next) source_argc++;
+    int argc = source_argc + (injected ? 1 : 0);
 
     AstNode* callee = ast_unwrap_primary(node->function);
+    AstFuncNode* direct_fn = ast_direct_call_function(node);
+    bool has_named_args = ast_call_has_named_args(node);
+    TypeFunc* direct_signature = direct_fn && ((AstNode*)direct_fn)->type &&
+            ((AstNode*)direct_fn)->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)((AstNode*)direct_fn)->type : NULL;
     if (f->st->mode != EvalMode::RUNTIME) {
         SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
@@ -678,27 +872,103 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         }
     }
 
+    if (argc > LAMBDA_MAX_FUNCTION_ARGS) {
+        log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
+        return ItemError;
+    }
     if (node->interp_self_tail_call && f->fn && f->plan) {
         // Every argument is evaluated *before* any parameter is rebound: an
         // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
         // the slots as we go would feed the new n into acc.
         uint16_t params = f->plan->param_count;
-        RootSpan next_args((size_t)(argc > 0 ? argc : 1));
+        RootSpan next_args((size_t)(params > 0 ? params : 1));
         uint64_t* words = next_args.words();
-        int i = 0;
-        for (AstNode* a = node->argument; a; a = a->next, i++) {
-            words[i] = eval_expr(f, a).item;
+        AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        if (has_named_args) {
+            ast_resolve_call_args(node->argument, direct_fn, source_argc, resolved_args);
+        }
+        AstNode* positional = node->argument;
+        AstNamedNode* parameter = f->fn->param;
+        for (int i = 0; i < (int)params; i++) {
+            AstNode* value_node = has_named_args ? resolved_args[i] : positional;
+            if (!has_named_args && positional) positional = positional->next;
+            if (value_node) {
+                words[i] = eval_expr(f, value_node).item;
+            } else {
+                TypeParam* type_param = parameter && parameter->type &&
+                    parameter->type->kind == TYPE_KIND_PARAM
+                    ? (TypeParam*)parameter->type : NULL;
+                words[i] = type_param && type_param->default_value
+                    ? eval_expr(f, type_param->default_value).item : ITEM_NULL;
+            }
             if (interp_frame_pending(f)) return ItemNull;
+            if (parameter) {
+                Item coerced = interp_coerce_declared_numeric(f,
+                    (Item){.item = words[i]}, parameter->declared_type);
+                words[i] = coerced.item;
+            }
+            if (parameter) parameter = (AstNamedNode*)((AstNode*)parameter)->next;
+        }
+        TypeFunc* current_signature = f->fn && ((AstNode*)f->fn)->type &&
+                ((AstNode*)f->fn)->type->type_id == LMD_TYPE_FUNC
+            ? (TypeFunc*)((AstNode*)f->fn)->type : NULL;
+        Item rejected = interp_rejected_parameter_error(current_signature,
+            (const Item*)(void*)words, params);
+        if (item_is_error(rejected)) {
+            // Tail iteration skips lambda_dynamic_call, so it must preserve
+            // the same rejected-parameter exit before the callee body sees it.
+            interp_signal(f, EvalSignal::RETURNED, rejected);
+            return rejected;
         }
         for (int p = 0; p < (int)params; p++) {
-            f->slots[p] = p < argc ? words[p] : ITEM_NULL;
+            f->slots[p] = words[p];
         }
+        // MIR's self-tail loop has no write to its hidden `_vargs` parameter:
+        // it rebinds fixed slots only, so the initial rest-list remains the
+        // activation's `varg()` view for every iteration.
         f->signal = EvalSignal::TAIL_CALL;
         return ItemNull;
     }
-    if (argc > LAMBDA_MAX_FUNCTION_ARGS) {
-        log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
-        return ItemError;
+
+    int named_param_count = argc;
+    if (has_named_args) {
+        if (injected || !direct_fn) {
+            // Named operands are reordered against a Lambda declaration; a
+            // dynamic or injected call has no equivalent positional ABI.
+            log_error("interp: named arguments need a direct Lambda call");
+            return ItemError;
+        }
+        named_param_count = 0;
+        for (AstNamedNode* param = direct_fn->param; param;
+                param = (AstNamedNode*)((AstNode*)param)->next) {
+            named_param_count++;
+        }
+        if (direct_signature && direct_signature->is_variadic &&
+                source_argc > named_param_count) {
+            // ast_resolve_call_args keeps source positions after the fixed
+            // formals for the rest-list builder that both tiers already use.
+            named_param_count = source_argc;
+        }
+        if (named_param_count > LAMBDA_MAX_FUNCTION_ARGS) {
+            log_error("interp: named call has %d parameters, limit is %d",
+                named_param_count, LAMBDA_MAX_FUNCTION_ARGS);
+            return ItemError;
+        }
+    }
+
+    if (!injected && source_argc == 1 && callee &&
+            callee->node_type == AST_NODE_TYPE) {
+        Type* target_type = ((AstNode*)node)->type;
+        if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
+                target_type->type_id == LMD_TYPE_UINT64)) {
+            Item source = eval_expr(f, node->argument);
+            if (interp_frame_pending(f)) return ItemNull;
+            // A type AST evaluates to a Type value, not a Function.  MIR
+            // intercepts these one-argument calls and uses the shared numeric
+            // coercion helpers, so T0 must do likewise before dynamic call
+            // dispatch treats the Type value as a non-callable target.
+            return interp_coerce_declared_numeric(f, source, target_type);
+        }
     }
 
     // `print` is Lambda-variadic but not C-variadic: lowering emits one
@@ -727,6 +997,31 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     }
 
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* sinfo = ((AstSysFuncNode*)callee)->fn_info;
+        AstNode* owner_arg = !injected ? ast_unwrap_primary(node->argument) : NULL;
+        NameEntry* owner_entry = owner_arg && owner_arg->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)owner_arg)->entry : NULL;
+        if (sinfo && owner_entry && !owner_entry->import &&
+                (sinfo->fn == SYSPROC_PUSH || sinfo->fn == SYSPROC_SPLICE)) {
+            // MIR evaluates the non-owner operands before it detaches a shared
+            // binding. Calling pn_push/pn_splice directly mutated both aliases;
+            // use the shared COW entries and publish their replacement root.
+            RootSpan value_args((size_t)(argc - 1));
+            uint64_t* values = value_args.words();
+            AstNode* value_node = node->argument->next;
+            for (int i = 0; value_node; value_node = value_node->next, i++) {
+                values[i] = eval_expr(f, value_node).item;
+                if (interp_frame_pending(f)) return ItemNull;
+            }
+            Item owner = interp_read_binding(f, owner_entry);
+            Item replacement = sinfo->fn == SYSPROC_PUSH
+                ? pn_push_cow(owner, (Item){.item = values[0]})
+                : pn_splice_cow(owner, (Item){.item = values[0]},
+                    (Item){.item = values[1]});
+            if (item_is_error(replacement)) return replacement;
+            interp_write_binding(f, owner_entry, replacement);
+            return replacement;
+        }
         // Arguments must all be rooted before the C entry runs: the entry may
         // allocate, and an earlier argument would otherwise be unreachable.
         RootSpan arg_roots((size_t)(argc > 0 ? argc : 1));
@@ -736,14 +1031,14 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         for (AstNode* a = node->argument; a; a = a->next, i++) {
             words[i] = eval_expr(f, a).item;
         }
-        SysFuncInfo* sinfo = ((AstSysFuncNode*)callee)->fn_info;
         // `map()` / `map([k, v, …])` carry no boxed entry point: lowering emits
         // vmap_new / vmap_from_array directly (transpile-mir.cpp), so the walker
         // calls the same two helpers rather than going through the dispatch.
         if (sinfo && sinfo->fn == SYSFUNC_VMAP_NEW) {
             return argc == 0 ? vmap_new() : vmap_from_array((Item){.item = words[0]});
         }
-        Item sresult = eval_sys_call(sinfo, (const Item*)(void*)words, argc);
+        Item sresult = eval_sys_call(f, sinfo, (const Item*)(void*)words, argc,
+            node->type);
         // floor/ceil/round/trunc/abs preserve their argument's lane: the boxed
         // helper always yields float, while lowering unboxes that result by the
         // *call node's* static type (POST_PROCESS_UNBOX, transpile-mir.cpp), so
@@ -763,12 +1058,23 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     fn_slot.set(callee_value);
     if (item_is_error(fn_slot.get())) return fn_slot.get();
 
-    RootSpan arg_roots((size_t)(argc > 0 ? argc : 1));
+    int dispatch_argc = has_named_args ? named_param_count : argc;
+    RootSpan arg_roots((size_t)(dispatch_argc > 0 ? dispatch_argc : 1));
     uint64_t* words = arg_roots.words();
     int i = 0;
-    if (injected) words[i++] = injected->item;
-    for (AstNode* a = node->argument; a; a = a->next, i++) {
-        words[i] = eval_expr(f, a).item;
+    if (has_named_args) {
+        AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        ast_resolve_call_args(node->argument, direct_fn, source_argc, resolved_args);
+        for (i = 0; i < dispatch_argc; i++) {
+            words[i] = resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
+                ITEM_MISSING_ARGUMENT;
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+    } else {
+        if (injected) words[i++] = injected->item;
+        for (AstNode* a = node->argument; a; a = a->next, i++) {
+            words[i] = eval_expr(f, a).item;
+        }
     }
 
     Item callee_item = fn_slot.get();
@@ -778,15 +1084,39 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return ItemError;
     }
     Function* fn = (Function*)(uintptr_t)callee_item.item;
+    if (!injected && ast_type_func_has_var_parameter(direct_signature)) {
+        NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed)) {
+            log_error("interp: unsupported direct `var` argument layout");
+            return ItemError;
+        }
+        for (int index = 0; index < dispatch_argc; index++) {
+            NameEntry* entry = borrowed[index];
+            Item owner = (Item){.item = words[index]};
+            if (!entry || !entry->cow_owned ||
+                    !is_container_type_id(get_type_id(owner))) {
+                continue;
+            }
+            // MIR detaches a borrowed COW root before entering a `var` callee:
+            // the callee has no replacement channel until return, so delaying
+            // this copy would let its first store mutate the caller's alias.
+            Item private_owner = cow_prepare_write(owner);
+            if (item_is_error(private_owner)) return private_owner;
+            words[index] = private_owner.item;
+            interp_write_binding(f, entry, private_owner);
+        }
+        return interp_call_with_borrowed(fn, (const Item*)(void*)words,
+            dispatch_argc, f, borrowed);
+    }
     // Every callee — interpreted or native — reaches its body through the
     // single dynamic dispatch point (AI7). Routing interpreted calls through it
     // too is what gives them the shared arity check plus the optional/rest
     // adapter, instead of a second, divergent argument protocol.
     List args = {};
-    args.length = argc;
+    args.length = dispatch_argc;
     args.items = (Item*)(void*)words;
     uint64_t result_home = 0;
-    return fn_call_into(fn, argc ? &args : NULL, &result_home);
+    return fn_call_into(fn, dispatch_argc ? &args : NULL, &result_home);
 }
 
 // ---------------------------------------------------------------------------
@@ -888,12 +1218,17 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
     case LMD_TYPE_INT:   return INTERP_ARRAY_INT;
     case LMD_TYPE_FLOAT: return INTERP_ARRAY_FLOAT;
     case LMD_TYPE_UINT64:
-    case LMD_TYPE_NUM_SIZED:
-        // Sized/u64 element selection depends on lowering's per-item effective
-        // type, not on the AST array type alone; the pre-scan routes these
-        // literals to the JIT rather than risk a different element width.
-        (void)sized_elem;
+        // A generic container read intentionally normalizes a small u64 to
+        // int, while MIR's typed-index path keeps its raw u64 lane. Do not
+        // admit this carrier until T0 has that direct indexed-read contract.
         return INTERP_ARRAY_GENERIC;
+    case LMD_TYPE_NUM_SIZED:
+        // The AST records the homogeneous NumSized subtype on `nested`; using
+        // that same witness is required so T0 does not widen a u8[]/f32[]
+        // literal to a generic array before its typed-array boundary.
+        *sized_elem = num_sized_to_elem_type(
+            type_num_sized_kind(arr_type->nested));
+        return INTERP_ARRAY_SIZED;
     default:
         return INTERP_ARRAY_GENERIC;
     }
@@ -980,6 +1315,7 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
             AstNamedNode* named = (AstNamedNode*)item;
             Item bound = eval_expr(f, named->as);
             if (interp_frame_pending(f)) return acc.get();
+            bound = interp_coerce_declared_numeric(f, bound, named->declared_type);
             interp_write_binding(f, named->entry, bound);
             continue;
         }
@@ -1065,12 +1401,91 @@ public:
     InterpErrorContextGuard& operator=(const InterpErrorContextGuard&) = delete;
 };
 
+// `last` derives from the innermost subscript owner. The owner is a frame slot
+// so evaluating an arithmetic index cannot leave a movable container in a C++
+// local across fn_len's allocation-capable integer boxing path.
+class InterpLastIndexGuard {
+    InterpState* st_;
+    uint64_t* previous_;
+public:
+    InterpLastIndexGuard(InterpState* st, uint64_t* item)
+            : st_(st), previous_(st ? st->last_index_item : NULL) {
+        if (st_) st_->last_index_item = item;
+    }
+    ~InterpLastIndexGuard() {
+        if (st_) st_->last_index_item = previous_;
+    }
+    InterpLastIndexGuard(const InterpLastIndexGuard&) = delete;
+    InterpLastIndexGuard& operator=(const InterpLastIndexGuard&) = delete;
+};
+
+// A native fault abandons every C++ activation below this helper.  The
+// recovery checkpoint restores the side stacks; restore the interpreter-only
+// chains as well before the handler observes the resulting Error Item.
+static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression) {
+    if (!f || !f->st || !expression) return ItemError;
+    InterpState* st = f->st;
+    LambdaRecoveryFrame* recovery = lambda_recovery_frame_begin_for(
+        (Context*)st->ctx, LAMBDA_RECOVERY_CAP_LOCAL_FAULT);
+    if (!recovery) {
+        (void)lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
+        return ItemError;
+    }
+
+    InterpFrame* saved_top = st->top;
+    InterpContext* saved_contexts = st->contexts;
+    InterpErrorContext* saved_errors = st->errors;
+    uint64_t* saved_last_index_item = st->last_index_item;
+    uint32_t saved_depth = st->depth;
+    List* saved_vargs = st->ctx ? st->ctx->current_vargs : NULL;
+    uint32_t saved_scratch_top = f->scratch_top;
+    EvalSignal saved_signal = f->signal;
+    uint64_t saved_signal_payload = f->slots[f->signal_index];
+    const AstNode* saved_cur = f->cur;
+
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery)) {
+        Item fault = ItemError;
+        if (lambda_recovery_frame_restore_landing(recovery)) {
+            fault = lambda_recovery_frame_fault_item((Context*)st->ctx, recovery);
+        } else {
+            log_error("interp: local fault recovery landing invariant failed");
+        }
+        lambda_recovery_frame_end(recovery);
+        st->top = saved_top;
+        st->contexts = saved_contexts;
+        st->errors = saved_errors;
+        st->last_index_item = saved_last_index_item;
+        st->depth = saved_depth;
+        // A native longjmp skips the abandoned variadic frame's destructor.
+        // Restore the enclosing call's varg() binding before its handler runs.
+        if (st->ctx) st->ctx->current_vargs = saved_vargs;
+        f->scratch_top = saved_scratch_top;
+        f->signal = saved_signal;
+        f->slots[f->signal_index] = saved_signal_payload;
+        f->cur = saved_cur;
+        return fault;
+    }
+    if (!lambda_recovery_frame_arm(recovery)) {
+        log_error("interp: failed to arm local fault recovery frame");
+        lambda_recovery_frame_end(recovery);
+        return ItemError;
+    }
+
+    Item result = eval_expr(f, expression);
+    lambda_recovery_frame_end(recovery);
+    return result;
+}
+
 // One handler evaluation owns one operand completion. The error arm is a
 // local branch on that completion; it does not use a recovery boundary and a
 // failure produced by the body remains the body's own returned outcome.
 static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
     Scratch operand(f);
-    operand.set(eval_expr(f, handler->operand));
+    bool local_fault_operand = handler->is_statement && f->fn &&
+        f->fn->node_type == AST_NODE_PROC;
+    operand.set(local_fault_operand
+        ? interp_eval_local_fault_operand(f, handler->operand)
+        : eval_expr(f, handler->operand));
     if (interp_frame_pending(f)) return operand.get();
 
     Item operand_value = operand.get();
@@ -1228,7 +1643,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
             return eval_call(f, (AstCallNode*)target, &piped);
         }
         if (target && target->node_type == AST_NODE_SYS_FUNC) {
-            return eval_sys_call(((AstSysFuncNode*)target)->fn_info, &piped, 1);
+            return eval_sys_call(f, ((AstSysFuncNode*)target)->fn_info, &piped, 1,
+                node->type);
         }
         // A first-class callable on the right: apply it to the piped value.
         Item callee = eval_expr(f, node->right);
@@ -1341,11 +1757,16 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop);
 static bool interp_for_emit(ForCtx* fc) {
     InterpFrame* f = fc->f;
     for (AstNode* decl = fc->node->let_clause; decl; decl = decl->next) {
-        if (decl->node_type != AST_NODE_ASSIGN) continue;
-        AstNamedNode* named = (AstNamedNode*)decl;
-        Item bound = eval_expr(f, named->as);
-        if (interp_frame_pending(f)) return false;
-        interp_write_binding(f, named->entry, bound);
+        if (decl->node_type == AST_NODE_ASSIGN) {
+            AstNamedNode* named = (AstNamedNode*)decl;
+            Item bound = eval_expr(f, named->as);
+            if (interp_frame_pending(f)) return false;
+            bound = interp_coerce_declared_numeric(f, bound, named->declared_type);
+            interp_write_binding(f, named->entry, bound);
+        } else if (decl->node_type == AST_NODE_DECOMPOSE) {
+            exec_declaration(f, decl);
+            if (interp_frame_pending(f)) return false;
+        }
     }
     if (fc->node->where) {
         Item keep = eval_expr(f, fc->node->where);
@@ -1418,6 +1839,30 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
     if (!result_demanded) return ItemNull;
 
     Array* out = (Array*)(uintptr_t)out_slot.get().item;
+    if (for_node->offset || for_node->limit) {
+        Scratch selected(f);
+        selected.set(out_slot.get());
+        if (for_node->offset) {
+            Item offset = eval_expr(f, for_node->offset);
+            if (interp_frame_pending(f)) return ItemNull;
+            Scratch offset_slot(f);
+            offset_slot.set(offset);
+            selected.set(fn_drop(selected.get(), offset_slot.get()));
+            if (item_is_error(selected.get())) return selected.get();
+        }
+        if (for_node->limit) {
+            Item limit = eval_expr(f, for_node->limit);
+            if (interp_frame_pending(f)) return ItemNull;
+            Scratch limit_slot(f);
+            limit_slot.set(limit);
+            // MIR applies unordered windows after the complete stream, so an
+            // early exit would incorrectly suppress body effects on later rows.
+            selected.set(for_node->limit_from_end
+                ? fn_take_last(selected.get(), limit_slot.get())
+                : fn_take(selected.get(), limit_slot.get()));
+        }
+        return selected.get();
+    }
     Item result = array_end(out);
     // array_end reports an all-empty comprehension as spreadable-null; a
     // top-level for-expression yields a real empty array instead.
@@ -1558,6 +2003,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             } else if (is_side_effect_stam(item->node_type)) {
                 Item side_effect = eval_expr(f, item);
                 interp_propagate_handler_error(f, item, side_effect);
+                interp_propagate_proc_side_effect_error(f, item, side_effect);
             } else if (item == last_value) {
                 result = eval_expr(f, item);
             } else if (item->node_type == AST_NODE_FOR_STAM) {
@@ -1565,6 +2011,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             } else {
                 Item side_effect = eval_expr(f, item);   // side effect only
                 interp_propagate_handler_error(f, item, side_effect);
+                interp_propagate_proc_side_effect_error(f, item, side_effect);
             }
             // break / continue / return / error-skip abandon the rest of the
             // block; the enclosing loop or call frame consumes the signal.
@@ -1587,6 +2034,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
         if (is_side_effect_stam(item->node_type)) {
             Item side_effect = eval_expr(f, item);
             interp_propagate_handler_error(f, item, side_effect);
+            interp_propagate_proc_side_effect_error(f, item, side_effect);
             if (interp_frame_pending(f)) return acc.get();
             continue;
         }
@@ -1609,7 +2057,11 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
             AstNamedNode* named = (AstNamedNode*)decl;
             Item bound = eval_expr(f, named->as);
             if (interp_frame_pending(f)) return bound;
+            bound = interp_coerce_declared_numeric(f, bound, named->declared_type);
             interp_write_binding(f, named->entry, bound);
+        } else if (decl->node_type == AST_NODE_DECOMPOSE) {
+            exec_declaration(f, decl);
+            if (interp_frame_pending(f)) return ItemNull;
         }
     }
     int val_count = 0;
@@ -1640,6 +2092,32 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
 // Declarations
 // ---------------------------------------------------------------------------
 
+static bool interp_exec_decompose(InterpFrame* f, AstDecomposeNode* dec) {
+    if (!f || !dec || !dec->as || dec->name_count < 1 || !dec->entries) {
+        log_error("interp: malformed decomposition declaration");
+        return false;
+    }
+    Scratch source(f);
+    source.set(eval_expr(f, dec->as));
+    if (interp_frame_pending(f)) return false;
+    for (int i = 0; i < dec->name_count; i++) {
+        NameEntry* entry = dec->entries[i];
+        String* name = dec->names ? dec->names[i] : NULL;
+        if (!entry || !name) {
+            log_error("interp: decomposition target %d has no binding", i);
+            return false;
+        }
+        // MIR evaluates the source once, then extracts positional values with
+        // item_at or named values with item_attr. Keep the source in a scratch
+        // root across every extraction because either helper can allocate.
+        Item value = dec->is_named
+            ? item_attr(source.get(), name->chars)
+            : item_at(source.get(), i);
+        interp_write_binding(f, entry, value);
+    }
+    return true;
+}
+
 static void exec_declaration(InterpFrame* f, AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_TYPE_STAM:
@@ -1652,6 +2130,10 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
     case AST_NODE_PUB_STAM:
     case AST_NODE_VAR_STAM: {
         for (AstNode* decl = ((AstLetNode*)node)->declare; decl; decl = decl->next) {
+            if (decl->node_type == AST_NODE_DECOMPOSE) {
+                if (!interp_exec_decompose(f, (AstDecomposeNode*)decl)) return;
+                continue;
+            }
             if (decl->node_type != AST_NODE_ASSIGN) continue;
             AstNamedNode* named = (AstNamedNode*)decl;
             Item value = eval_expr(f, named->as);
@@ -1674,8 +2156,17 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                     ? named->as->type->type_id : LMD_TYPE_ANY;
                 TypeId var_tid = named->declared_type
                     ? named->declared_type->type_id : LMD_TYPE_ANY;
-                if (src && src->cow_owned &&
-                        ast_expr_may_return_container(named->as, init_tid, var_tid)) {
+                if (ast_declared_type_is_open_any_array(named->declared_type)) {
+                    // a repeated `any` annotation is carried as a TypeUnary,
+                    // not LMD_TYPE_ARRAY. Restore its runtime container shape
+                    // before the alias boundary, or COW would leave both
+                    // annotated bindings pointing at the mutable same array.
+                    var_tid = LMD_TYPE_ARRAY;
+                }
+                bool declared_open_any_array =
+                    ast_declared_type_is_open_any_array(named->declared_type);
+                if (src && src->cow_owned && (declared_open_any_array ||
+                        ast_expr_may_return_container(named->as, init_tid, var_tid))) {
                     // cow_bind_var may detach a copy, so it is a safepoint: the
                     // operand has to be reachable from a frame slot, not a C++
                     // local, or a collection during the clone frees it.
@@ -1692,10 +2183,14 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                     value = push_d((double)it2l(value));
                 }
             }
+            value = interp_coerce_declared_numeric(f, value, decl_type);
             interp_write_binding(f, named->entry, value);
         }
         break;
     }
+    case AST_NODE_DECOMPOSE:
+        (void)interp_exec_decompose(f, (AstDecomposeNode*)node);
+        break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
     case AST_NODE_PROC: {
@@ -1768,6 +2263,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
         NameEntry* entry = ident->entry;
+        // An unresolved identifier is an error value, not null: MIR emits the
+        // same ItemError carrier so a surrounding handler can recover it.
+        if (!entry) return ItemError;
         // A name bound by `type T = …` is a compile-time binding: it denotes
         // the Type* its declaration built, not a slab slot (which a type
         // declaration never writes). Lowering makes the same distinction in
@@ -1801,6 +2299,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_CURRENT_INDEX:
         return f->st->contexts
             ? (Item){.item = *f->st->contexts->index} : ItemNull;
+    case AST_NODE_LAST_INDEX:
+        if (!f->st->last_index_item) {
+            log_error("interp: `last` used outside a subscript");
+            return ItemError;
+        }
+        return int2it_i64(fn_len((Item){.item = *f->st->last_index_item}) - 1);
     case AST_NODE_CURRENT_ERROR:
         return f->st->errors
             ? (Item){.item = *f->st->errors->error} : ItemError;
@@ -1863,6 +2367,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item object_value = eval_expr(f, field->object);
         Scratch obj(f);
         obj.set(object_value);
+        InterpLastIndexGuard last_scope(f->st, obj.home());
         Item index_value = eval_expr(f, field->field);
         Scratch index_slot(f);
         index_slot.set(index_value);
@@ -2020,14 +2525,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item value = eval_expr(f, assign->value);
         if (interp_frame_pending(f)) return ItemNull;
         AstNode* rhs = ast_unwrap_primary(assign->value);
-        if (item_is_error(value) && rhs &&
-                rhs->node_type != AST_NODE_CURRENT_ERROR &&
-                rhs->node_type != AST_NODE_CURRENT_ITEM) {
-            // A fresh failure on the RHS is a completion of the assignment;
-            // only an explicit handler binding (`x = ^`/`x = ~`) consumes the
-            // current arm value as data (S7.6.1).
-            return value;
-        }
+        bool fresh_rhs_error = item_is_error(value) && rhs &&
+            rhs->node_type != AST_NODE_CURRENT_ERROR &&
+            rhs->node_type != AST_NODE_CURRENT_ITEM;
         NameEntry* target = assign->target_entry;
         if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
             target = ((AstIdentNode*)assign->left)->entry;
@@ -2036,8 +2536,16 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             log_error("interp: assignment target has no binding");
             return ItemError;
         }
+        if (fresh_rhs_error && target->declared_type &&
+                !lambda_type_accepts_error(target->declared_type)) {
+            // A checked binding rejects a fresh RHS error before publishing it,
+            // but an untyped binding must retain that ItemError so a later
+            // error-excluding `var` call short-circuits before COW mutation.
+            return value;
+        }
+        value = interp_coerce_declared_numeric(f, value, target->declared_type);
         interp_write_binding(f, target, value);
-        return ItemNull;
+        return fresh_rhs_error ? value : ItemNull;
     }
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM: {
@@ -2045,53 +2553,98 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // binding. The *_cow helpers own S9.1.2: they hand back the owner to
         // publish, which is a fresh private copy when the old one was shared,
         // so COW stays unobservable without the walker reasoning about sharing.
-        // Nested paths (`a.b.c = v`) have their own path-set lowering and are
-        // rejected by the pre-scan until that slice lands.
+        // Nested paths use cow_path_set below, which detaches and relinks the
+        // complete owner spine before its replacement root is published.
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
-        AstNode* target = ast_unwrap_primary(ca->object);
-        NameEntry* root = target && target->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)target)->entry : NULL;
+        AstCowPath path = {};
+        bool has_path = ast_collect_cow_path(&path, ca->object);
+        NameEntry* root = has_path && path.root &&
+                path.root->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)path.root)->entry : NULL;
         if (!root) {
             log_error("interp: compound assignment target is not a simple binding");
             return ItemError;
         }
-        Scratch owner(f);
-        owner.set(interp_read_binding(f, root));
 
-        Item key;
-        if (node->node_type == AST_NODE_MEMBER_ASSIGN_STAM &&
-                ca->key && ca->key->node_type == AST_NODE_IDENT) {
-            // A dotted field name is a static key, as on the read side.
-            AstIdentNode* name = (AstIdentNode*)ca->key;
-            key = (Item){.item = s2it(heap_create_name(name->name->chars,
-                name->name->len))};
-        } else {
-            key = eval_expr(f, ca->key);
-            if (interp_frame_pending(f)) return ItemNull;
+        if (path.count > 0) {
+            // MIR snapshots the RHS before resolving a COW owner spine. A
+            // nested key or child detach can allocate, so hold both the value
+            // and every collected key in frame slots before cow_path_set.
+            Scratch value_slot(f);
+            value_slot.set(eval_expr(f, ca->value));
+            if (interp_frame_pending(f)) return value_slot.get();
+
+            Scratch path_slot(f);
+            path_slot.set(interp_ptr_item(array_plain()));
+            for (int i = 0; i < path.count; i++) {
+                Scratch key_slot(f);
+                key_slot.set(interp_eval_cow_path_key(f, path.segment[i],
+                    path.is_member[i]));
+                if (interp_frame_pending(f)) return key_slot.get();
+                Array* keys = (Array*)(uintptr_t)path_slot.get().item;
+                if (!keys) return ItemError;
+                array_push(keys, key_slot.get());
+            }
+            Scratch terminal_slot(f);
+            terminal_slot.set(interp_eval_cow_path_key(f, ca->key,
+                node->node_type == AST_NODE_MEMBER_ASSIGN_STAM));
+            if (interp_frame_pending(f)) return terminal_slot.get();
+            Array* keys = (Array*)(uintptr_t)path_slot.get().item;
+            if (!keys) return ItemError;
+            array_push(keys, terminal_slot.get());
+
+            Scratch owner_slot(f);
+            owner_slot.set(interp_read_binding(f, root));
+            Item replacement = cow_path_set(owner_slot.get(), path_slot.get(),
+                value_slot.get());
+            if (item_is_error(replacement)) return replacement;
+            interp_write_binding(f, root, replacement);
+            return ItemNull;
         }
-        Scratch key_slot(f);
-        key_slot.set(key);
-
+        // A RHS call can detach and publish this same root through a `var`
+        // parameter. Mirror MIR's COW branch: root lookup happens only after
+        // the RHS and key have completed, never from a stale pre-call owner.
+        Scratch value_slot(f);
         Item value = eval_expr(f, ca->value);
         if (interp_frame_pending(f)) return ItemNull;
-        Scratch value_slot(f);
         value_slot.set(value);
+
+        Scratch key_slot(f);
+        key_slot.set(interp_eval_cow_path_key(f, ca->key,
+            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM));
+        if (interp_frame_pending(f)) return ItemNull;
+
+        Scratch owner(f);
+        owner.set(interp_read_binding(f, root));
 
         // Dispatch on the owner's runtime type, not the syntax: `m["k"] = v`
         // is an INDEX_ASSIGN over a map, and lowering picks the setter by owner
         // type too. Each *_cow entry rejects a mismatched owner itself.
         Item replacement;
-        switch (get_type_id(owner.get())) {
-        case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_ELEMENT:
-            replacement = array_set_cow(owner.get(), it2l(key_slot.get()),
-                value_slot.get());
-            break;
-        case LMD_TYPE_VMAP:
-            replacement = vmap_set_cow(owner.get(), key_slot.get(), value_slot.get());
-            break;
-        default:
-            replacement = map_set_cow(owner.get(), key_slot.get(), value_slot.get());
-            break;
+        if (ast_declared_type_is_map(root->declared_type)) {
+            // a typed map write validates a detached candidate before it is
+            // visible. Explicit `var` parameters were detached at the caller
+            // boundary, so their private root can use the in-place contract.
+            const char* boundary = node->node_type == AST_NODE_MEMBER_ASSIGN_STAM
+                ? "typed map member assignment" : "typed map computed assignment";
+            replacement = root->is_var_param
+                ? lambda_map_set_checked_inplace(owner.get(), key_slot.get(),
+                    value_slot.get(), root->declared_type, boundary)
+                : lambda_map_set_checked(owner.get(), key_slot.get(),
+                    value_slot.get(), root->declared_type, boundary);
+        } else {
+            switch (get_type_id(owner.get())) {
+            case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_ELEMENT:
+                replacement = array_set_cow(owner.get(), it2l(key_slot.get()),
+                    value_slot.get());
+                break;
+            case LMD_TYPE_VMAP:
+                replacement = vmap_set_cow(owner.get(), key_slot.get(), value_slot.get());
+                break;
+            default:
+                replacement = map_set_cow(owner.get(), key_slot.get(), value_slot.get());
+                break;
+            }
         }
         if (item_is_error(replacement)) return replacement;
         // Publish the (possibly new) owner back at its binding.
@@ -2213,7 +2766,28 @@ static void interp_note_backedge(InterpFrame* frame) {
     }
 }
 
-extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
+static Item interp_rejected_parameter_error(const TypeFunc* signature,
+        const Item* args, int argc) {
+    if (!signature || !args) return ItemNull;
+    const TypeParam* param = signature->param;
+    for (int index = 0; param && index < argc; param = param->next, index++) {
+        if (param->contract_type && !lambda_type_accepts_error(param->contract_type) &&
+                item_is_error(args[index])) {
+            // Reject before frame entry: MIR preserves this ItemError at the
+            // caller boundary, so the callee cannot turn it into a value.
+            return args[index];
+        }
+    }
+    return ItemNull;
+}
+
+typedef struct InterpBorrowedCall {
+    InterpFrame* caller;
+    NameEntry* entries[LAMBDA_MAX_FUNCTION_ARGS];
+} InterpBorrowedCall;
+
+static Item interp_call_internal(Function* fn, const Item* args, int argc,
+        const InterpBorrowedCall* borrowed) {
     InterpState* st = interp_current_state();
     if (!st) {
         log_error("interp: no interpreter state for an interpreted call");
@@ -2227,6 +2801,9 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
             fn->name ? fn->name : "<anonymous>");
         return ItemError;
     }
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
+    Item rejected = interp_rejected_parameter_error(signature, args, argc);
+    if (item_is_error(rejected)) return rejected;
     if (st->depth == 0) {
         // The interpreter budget is a language/runtime completion, not the
         // native stack-fault carve-out. Return it through this call frame so a
@@ -2241,12 +2818,23 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
 
     st->depth--;
     Item result = ItemNull;
+    TypeId escaped_scalar_type = LMD_TYPE_NULL;
+    uint64_t escaped_scalar_payload = 0;
+    Item borrowed_values[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    TypeId borrowed_scalar_types[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    uint64_t borrowed_scalar_payloads[LAMBDA_MAX_FUNCTION_ARGS] = {};
     {
         InterpFrameGuard guard(st, fn_node, module, &fn_node->analysis->frame_plan,
             (Item*)fn->closure_env, fn->closure_field_count);
         if (!guard.valid()) { st->depth++; return ItemError; }
         InterpFrame* frame = guard.frame();
         uint16_t params = fn_node->analysis->frame_plan.param_count;
+        bool is_variadic = signature && signature->type_id == LMD_TYPE_FUNC &&
+            signature->is_variadic;
+        Item rest = is_variadic && argc > (int)params
+            ? args[params] : ItemNull;
+        InterpVargsGuard vargs(frame, rest);
+        if (is_variadic && !vargs.valid()) return ItemError;
         int index = 0;
         for (AstNamedNode* p = fn_node->param; p && index < (int)params;
                 p = (AstNamedNode*)((AstNode*)p)->next, index++) {
@@ -2258,6 +2846,7 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
                 AstNode* fallback = param_type ? param_type->default_value : NULL;
                 value = fallback ? eval_expr(frame, fallback) : ItemNull;
             }
+            value = interp_coerce_declared_numeric(frame, value, p->declared_type);
             frame->slots[index] = value.item;
         }
 
@@ -2280,13 +2869,76 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
         // An explicit `return` unwinds to exactly this boundary and its payload
         // is the call's value; the signal never escapes the activation.
         if (frame->signal == EvalSignal::RETURNED) result = interp_signal_payload(frame);
-        // Re-home before the guard restores the callee's number watermark:
-        // a wide scalar living in this frame's extent must move into the
-        // caller's before its home dies.
-        result = scalar_storage_read(result, false);
+        if (borrowed && borrowed->caller) {
+            for (int index = 0; index < (int)params; index++) {
+                if (!borrowed->entries[index]) continue;
+                Item value = (Item){.item = frame->slots[index]};
+                TypeId type = get_type_id(value);
+                borrowed_scalar_types[index] = type;
+                if (type == LMD_TYPE_INT64) {
+                    borrowed_scalar_payloads[index] = (uint64_t)value.get_int64();
+                    borrowed_values[index] = ItemNull;
+                } else if (type == LMD_TYPE_UINT64) {
+                    borrowed_scalar_payloads[index] = value.get_uint64();
+                    borrowed_values[index] = ItemNull;
+                } else {
+                    borrowed_values[index] = scalar_storage_read(value, false);
+                }
+            }
+        }
+        // A u64/i64 Item points into the callee's number extent. Capturing
+        // its payload before that extent closes, then boxing after the guard,
+        // preserves both lifetime and its observable numeric type; the generic
+        // scalar reader intentionally narrows small u64 values for property
+        // reads, which is wrong at a function return boundary.
+        escaped_scalar_type = get_type_id(result);
+        if (escaped_scalar_type == LMD_TYPE_INT64) {
+            escaped_scalar_payload = (uint64_t)result.get_int64();
+            result = ItemNull;
+        } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
+            escaped_scalar_payload = result.get_uint64();
+            result = ItemNull;
+        } else {
+            escaped_scalar_type = LMD_TYPE_NULL;
+            result = scalar_storage_read(result, false);
+        }
+    }
+    if (escaped_scalar_type == LMD_TYPE_INT64) {
+        result = box_int64_value((int64_t)escaped_scalar_payload);
+    } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
+        result = box_uint64_value(escaped_scalar_payload);
+    }
+    if (borrowed && borrowed->caller) {
+        for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
+            NameEntry* entry = borrowed->entries[index];
+            if (!entry) continue;
+            Item value = borrowed_scalar_types[index] == LMD_TYPE_INT64
+                ? box_int64_value((int64_t)borrowed_scalar_payloads[index])
+                : borrowed_scalar_types[index] == LMD_TYPE_UINT64
+                    ? box_uint64_value(borrowed_scalar_payloads[index])
+                    : borrowed_values[index];
+            // The callee frame owns its param slot, but a `var` argument is
+            // the caller's mutable root. Publish after the callee extent
+            // closes so a wide scalar cannot retain a dead number-stack home.
+            interp_write_binding(borrowed->caller, entry, value);
+        }
     }
     st->depth++;
     return result;
+}
+
+static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
+        InterpFrame* caller, NameEntry* const* borrowed_entries) {
+    InterpBorrowedCall borrowed = {};
+    borrowed.caller = caller;
+    for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
+        borrowed.entries[index] = borrowed_entries ? borrowed_entries[index] : NULL;
+    }
+    return interp_call_internal(fn, args, argc, &borrowed);
+}
+
+extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
+    return interp_call_internal(fn, args, argc, NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -2295,6 +2947,127 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
 
 static __thread InterpState* g_interp_state = NULL;
 static InterpState* interp_current_state(void) { return g_interp_state; }
+
+// const accepts only literal scalar syntax. The same eval_expr walker still
+// performs the operation, but this narrow admission guarantees a fold cannot
+// read a binding, call user code, allocate a container, or publish an effect.
+static bool interp_const_node_supported(AstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstNode* expr = ((AstPrimaryNode*)node)->expr;
+        if (expr) return interp_const_node_supported(expr);
+        if (!node->type || !node->type->is_literal) return false;
+        switch (node->type->type_id) {
+        case LMD_TYPE_NULL:
+        case LMD_TYPE_BOOL:
+        case LMD_TYPE_INT:
+        case LMD_TYPE_FLOAT:
+        case LMD_TYPE_FLOAT64:
+            return true;
+        default:
+            return false;
+        }
+    }
+    case AST_NODE_UNARY: {
+        Operator op = ((AstUnaryNode*)node)->op;
+        return (op == OPERATOR_NOT || op == OPERATOR_NEG || op == OPERATOR_POS) &&
+            interp_const_node_supported(((AstUnaryNode*)node)->operand);
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        switch (binary->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD: case OPERATOR_POW:
+        case OPERATOR_AND: case OPERATOR_OR:
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+        case OPERATOR_GT: case OPERATOR_GE:
+            return interp_const_node_supported(binary->left) &&
+                interp_const_node_supported(binary->right);
+        default:
+            return false;
+        }
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        return branch->cond && branch->then &&
+            interp_const_node_supported(branch->cond) &&
+            interp_const_node_supported(branch->then) &&
+            (!branch->otherwise || interp_const_node_supported(branch->otherwise));
+    }
+    default:
+        return false;
+    }
+}
+
+// fold facts deliberately carry only tagged immediate values. Float and all
+// pointer-backed results may be valid during the attempt but must not survive
+// its side-stack lifetime or enter cacheable MIR as a stale address (DI14).
+static bool interp_const_result_is_immediate(Item result) {
+    switch (get_type_id(result)) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_INT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool interp_const_fold_script(Transpiler* tp) {
+    if (!tp || !tp->ast_index.nodes || !tp->ast_index.facts ||
+            !context || !interp_const_fold_enabled()) {
+        return true;
+    }
+
+    // The pass owns a throwaway frame rather than borrowing a runtime frame:
+    // every intermediate is rooted while helpers run, and its side-stack
+    // extent disappears after each fold attempt (D5.3.3).
+    FnFramePlan plan = {};
+    plan.scratch_depth = INTERP_CONST_FRAME_SLOTS - 1;
+    plan.total_slots = INTERP_CONST_FRAME_SLOTS;
+    plan.planned = true;
+
+    InterpState st = {};
+    st.ctx = context;
+    st.runtime = tp->runtime;
+    st.mode = EvalMode::CONST;
+    st.depth_limit = 1;
+    st.depth = 1;
+    InterpState* saved_state = g_interp_state;
+    g_interp_state = &st;
+
+    for (uint32_t id = 0; id < tp->ast_index.count; id++) {
+        AstNode* node = tp->ast_index.nodes[id];
+        AstNodeFacts* facts = &tp->ast_index.facts[id];
+        facts->flags &= ~AST_NODE_FACT_CONST_FOLDED;
+        facts->folded_item = ITEM_NULL;
+        if (!node || node->node_type == AST_NODE_PRIMARY ||
+                !interp_const_node_supported(node)) continue;
+
+        st.mode_fuel = interp_const_fuel_budget();
+        st.mode_exhausted = false;
+        st.mode_rejected = false;
+        {
+            InterpFrameGuard guard(&st, NULL, (Script*)tp, &plan, NULL, 0);
+            if (!guard.valid()) continue;
+            // a fold attempt is not a user-visible execution boundary. Contain
+            // an unexpected native fault and leave this AST fact empty instead
+            // of letting a compiler optimization alter program completion.
+            Item result = interp_eval_local_fault_operand(guard.frame(), node);
+            if (interp_frame_pending(guard.frame()) || item_is_error(result) ||
+                    st.mode_exhausted || st.mode_rejected ||
+                    !interp_const_result_is_immediate(result) || !node->type ||
+                    get_type_id(result) != node->type->type_id) {
+                continue;
+            }
+            facts->folded_item = result.item;
+            facts->flags |= AST_NODE_FACT_CONST_FOLDED;
+        }
+    }
+    g_interp_state = saved_state;
+    return true;
+}
 
 static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallback) {
     const char* env = getenv(env_name);
@@ -2396,20 +3169,8 @@ static uint32_t interp_depth_budget(void) {
 // Runs one module's top level in its own frame. Used for every module in the
 // import cone and for the main script, so an initializer sees exactly the same
 // environment either way.
-static Item interp_execute_module(Runner* runner, InterpState* st, Script* script,
-                                  bool run_main) {
-    AstScript* root = (AstScript*)script->ast_root;
-    if (!root) return ItemNull;
-
-
-    if (!lambda_module_state_prepare(script->module_state_id,
-            script->interp_slab_count)) {
-        log_error("interp: could not prepare module slab for '%s'", script->reference);
-        return ItemError;
-    }
-    runner->context->consts = script->const_list ? script->const_list->data : NULL;
-    runner->context->type_list = script->type_list;
-
+static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
+        Script* script, AstNode* first, bool run_main) {
     InterpFrameGuard guard(st, NULL, script, &script->interp_plan, NULL, 0);
     if (!guard.valid()) return ItemError;
     InterpFrame* frame = guard.frame();
@@ -2422,15 +3183,20 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     // AST_SCRIPT rather than inside a content list, so definitions have to be
     // hoisted and bound here too — evaluating one as an expression would build
     // an anonymous closure and leave its name unbound (build_content's pass 1).
-    for (AstNode* item = root->child; item; item = item->next) {
+    for (AstNode* item = first; item; item = item->next) {
         if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                 item->node_type == AST_NODE_FUNC_EXPR) {
             exec_declaration(frame, item);
         }
     }
-    for (AstNode* item = root->child; item; item = item->next) {
-        if (item->node_type == AST_NODE_CONTENT || item->node_type == AST_NODE_LIST) {
+    for (AstNode* item = first; item; item = item->next) {
+        if (item->node_type == AST_NODE_CONTENT) {
             tail.set(eval_content(frame, (AstListNode*)item, true));
+        } else if (item->node_type == AST_NODE_LIST) {
+            // a lexical list carries `(let …, body)` bindings in `declare`;
+            // eval_content ignores that chain, leaving its body to read empty
+            // slots. Preserve the AST's block kind at the module boundary.
+            tail.set(eval_list(frame, (AstListNode*)item));
         } else if (is_declaration_node(item->node_type)) {
             bool hoisted = item->node_type == AST_NODE_FUNC ||
                 item->node_type == AST_NODE_PROC || item->node_type == AST_NODE_FUNC_EXPR;
@@ -2462,7 +3228,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
         // inner loop. Calling it twice ran the whole procedure twice
         // (test/lambda/pdf/phase2_font.ls printed its result twice).
         bool called_main = false;
-        for (AstNode* item = root->child; item && !called_main; item = item->next) {
+        for (AstNode* item = first; item && !called_main; item = item->next) {
             AstNode* stmt = item;
             if (stmt->node_type == AST_NODE_CONTENT) stmt = ((AstListNode*)stmt)->item;
             for (; stmt; stmt = stmt->next) {
@@ -2492,6 +3258,34 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     return result;
 }
 
+static Item interp_execute_module(Runner* runner, InterpState* st, Script* script,
+                                  bool run_main) {
+    AstScript* root = (AstScript*)script->ast_root;
+    if (!root) return ItemNull;
+    if (!lambda_module_state_prepare(script->module_state_id,
+            script->interp_slab_count)) {
+        log_error("interp: could not prepare module slab for '%s'", script->reference);
+        return ItemError;
+    }
+    runner->context->consts = script->const_list ? script->const_list->data : NULL;
+    runner->context->type_list = script->type_list;
+    return interp_execute_top_level_nodes(runner, st, script, root->child, run_main);
+}
+
+static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
+        AstNode* fragment) {
+    Script* script = runner ? runner->script : NULL;
+    if (!script || !fragment) return ItemError;
+    if (!lambda_module_state_prepare(script->module_state_id,
+            script->interp_slab_count)) {
+        log_error("interp: could not prepare REPL module slab for '%s'", script->reference);
+        return ItemError;
+    }
+    runner->context->consts = script->const_list ? script->const_list->data : NULL;
+    runner->context->type_list = script->type_list;
+    return interp_execute_top_level_nodes(runner, st, script, fragment, false);
+}
+
 // Module initialization is transactional (D7.2.2/S7.7.6): a fault inside an
 // initializer lands on its own barrier, resets the partial module slab, then
 // forwards to the still-armed execution boundary, so a half-initialized module
@@ -2504,6 +3298,7 @@ static Item interp_run_module_init(Runner* runner, InterpState* st, Script* modu
         lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
         return ItemError;
     }
+    List* saved_vargs = runner->context ? runner->context->current_vargs : NULL;
     if (LAMBDA_RECOVERY_FRAME_SETJMP(barrier)) {
         LambdaFaultReason reason = LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT;
         LambdaErrorCode prior = ERR_OK;
@@ -2514,6 +3309,7 @@ static Item interp_run_module_init(Runner* runner, InterpState* st, Script* modu
             log_error("interp: module transaction landing invariant failed");
         }
         lambda_recovery_frame_end(barrier);
+        if (runner->context) runner->context->current_vargs = saved_vargs;
         lambda_module_state_reset();
         st->top = NULL;   // frames above the landing are abandoned wholesale
         lambda_recovery_frame_raise_fault(reason, prior);
@@ -2552,10 +3348,16 @@ static Item interp_execute(Runner* runner, InterpState* st) {
         runner->context->run_main);
 }
 
-Item interp_run_script(Runner* runner, bool run_main) {
+static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragment) {
     if (!runner || !runner->script || !runner->context) return ItemError;
     Script* script = runner->script;
     runner->context->run_main = run_main;
+    if (!runner->context->cwd) {
+        // T0 bypasses the JIT output wrapper, which normally owns this URL at
+        // one execution boundary; REPL fragments therefore recreate it here.
+        runner->context->cwd = get_current_dir();
+    }
+    List* saved_vargs = runner->context->current_vargs;
 
     InterpState st = {};
     st.ctx = runner->context;
@@ -2589,6 +3391,7 @@ Item interp_run_script(Runner* runner, bool run_main) {
         // frame above it is abandoned wholesale, which is safe because frames
         // own no resource beyond those two watermarks.
         st.top = NULL;
+        runner->context->current_vargs = saved_vargs;
         result = recovered;
     } else if (!lambda_recovery_frame_arm(boundary)) {
         log_error("interp: failed to arm the execution recovery frame");
@@ -2596,17 +3399,35 @@ Item interp_run_script(Runner* runner, bool run_main) {
         result = lambda_recovery_publish_fault_item((Context*)runner->context,
             LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
     } else {
-        result = interp_execute(runner, &st);
+        result = repl_fragment
+            ? interp_execute_repl_fragment(runner, &st, repl_fragment)
+            : interp_execute(runner, &st);
         lambda_recovery_frame_end(boundary);
     }
 
     g_interp_state = saved;
+    // A fault landing bypasses C++ destructors. Restore the runner-level
+    // binding unconditionally so a later REPL/history execution cannot see
+    // an abandoned callee's rest list.
+    runner->context->current_vargs = saved_vargs;
     runner->context->result = result;
     if (runner->context->heap) runner->context->heap->result_root = result.item;
+    if (runner->context->cwd) {
+        url_destroy(runner->context->cwd);
+        runner->context->cwd = NULL;
+    }
     g_interp_stats.scripts_executed++;
     g_interp_stats.nodes_evaluated += st.node_count;
     log_notice("interp: executed script='%s' nodes=%llu depth_used=%u",
         script->reference ? script->reference : "<none>",
         (unsigned long long)st.node_count, st.depth_limit - st.depth);
     return result;
+}
+
+Item interp_run_script(Runner* runner, bool run_main) {
+    return interp_run_nodes(runner, run_main, NULL);
+}
+
+Item interp_run_repl_fragment(Runner* runner, AstNode* fragment) {
+    return interp_run_nodes(runner, false, fragment);
 }

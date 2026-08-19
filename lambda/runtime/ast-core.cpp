@@ -144,6 +144,7 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->facts[id].inferred_type = NULL;
     index->facts[id].representation = VALUE_REP_NONE;
     index->facts[id].flags = 0;
+    index->facts[id].folded_item = ITEM_NULL;
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
     return id;
@@ -297,6 +298,32 @@ bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* 
 
 bool ast_index_build(AstIndex* index, AstNode* root) {
     return ast_index_build_profile(index, root, NULL);
+}
+
+bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
+        const LangProfile* profile) {
+    if (!index || !root) return false;
+    // A fragment can share a declaration node with an earlier AST edge. Do
+    // not rebuild the table: its IDs/facts are the identity held by promoted
+    // definitions and by the P3 const pass.
+    if (ast_index_find(index, root) != AST_NODE_ID_INVALID) return true;
+    AstIndexWalk walk = {index, AST_FUNCTION_ID_INVALID, profile, false};
+    AstNodeId id = ast_index_add(index, root, parent, walk.owner_function);
+    if (id == AST_NODE_ID_INVALID) return false;
+    bool is_function = root->node_type == AST_NODE_FUNC ||
+        root->node_type == AST_NODE_FUNC_EXPR || root->node_type == AST_NODE_PROC ||
+        root->node_type == AST_NODE_ARROW_FUNC || root->node_type == AST_NODE_METHOD;
+    if (is_function) {
+        AstFunctionId function_id = ast_index_add_function(index, root);
+        if (function_id == AST_FUNCTION_ID_INVALID) return false;
+        index->owner_functions[id] = function_id;
+        walk.owner_function = function_id;
+    }
+    ast_visit_core_children(root, ast_index_visit, &walk);
+    if (profile && profile->visit_ext_children) {
+        profile->visit_ext_children(root, ast_index_visit, &walk);
+    }
+    return !walk.failed;
 }
 
 void ast_index_destroy(AstIndex* index) {

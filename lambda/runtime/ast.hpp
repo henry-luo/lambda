@@ -291,6 +291,136 @@ static inline AstConstrainedTypeNode* ast_constrained_type_node(AstNode* node) {
         ? (AstConstrainedTypeNode*)value : NULL;
 }
 
+// direct Lambda calls share their target and argument layout between MIR and
+// T0. Keeping the lookup here prevents either tier from silently treating a
+// named operand as positional when a call has a static definition.
+static inline AstFuncNode* ast_direct_call_function(AstCallNode* call) {
+    AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
+    if (!function || function->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)function)->entry;
+    AstNode* node = entry ? entry->node : NULL;
+    if (!node || (node->node_type != AST_NODE_FUNC &&
+            node->node_type != AST_NODE_FUNC_EXPR &&
+            node->node_type != AST_NODE_PROC)) return NULL;
+    return (AstFuncNode*)node;
+}
+
+static inline bool ast_call_has_named_args(const AstCallNode* call) {
+    for (AstNode* arg = call ? call->argument : NULL; arg; arg = arg->next) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) return true;
+    }
+    return false;
+}
+
+static inline void ast_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node,
+        int arg_count, AstNode** resolved_args) {
+    if (!resolved_args) return;
+    bool has_named_args = false;
+    AstNode* arg = arg_list;
+    while (arg) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
+        arg = arg->next;
+    }
+
+    if (has_named_args && fn_node) {
+        int positional_idx = 0;
+        for (arg = arg_list; arg; arg = arg->next) {
+            if (arg->node_type == AST_NODE_NAMED_ARG) {
+                AstNamedNode* named_arg = (AstNamedNode*)arg;
+                int param_idx = 0;
+                for (AstNamedNode* param = fn_node->param; param;
+                        param = (AstNamedNode*)((AstNode*)param)->next, param_idx++) {
+                    if (param->name && named_arg->name &&
+                            param->name->len == named_arg->name->len &&
+                            memcmp(param->name->chars, named_arg->name->chars,
+                                param->name->len) == 0) {
+                        if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) {
+                            resolved_args[param_idx] = named_arg->as;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS &&
+                        resolved_args[positional_idx]) {
+                    positional_idx++;
+                }
+                if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) {
+                    resolved_args[positional_idx++] = arg;
+                }
+            }
+        }
+        return;
+    }
+
+    arg = arg_list;
+    for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+        resolved_args[i] = arg;
+        arg = arg->next;
+    }
+}
+
+// A `var` parameter borrows the caller's binding rather than receiving a
+// value copy. Direct T0 calls use these resolved entries to publish the
+// callee's replacement root back into that exact caller slot on return.
+static inline bool ast_type_func_has_var_parameter(const TypeFunc* signature) {
+    if (!signature || signature->type_id != LMD_TYPE_FUNC) return false;
+    for (const TypeParam* param = signature->param; param; param = param->next) {
+        if (param->is_var_param) return true;
+    }
+    return false;
+}
+
+// `any[]` is still a declaration contract, but its element boundary accepts
+// every Item. T0's ordinary COW setter therefore supplies the full contract;
+// only a narrower element type needs the checked-store runtime entry.
+static inline bool ast_declared_type_is_open_any_array(Type* declared) {
+    if (!declared || declared->type_id != LMD_TYPE_TYPE ||
+            declared->kind != TYPE_KIND_UNARY ||
+            ((TypeUnary*)declared)->op != OPERATOR_REPEAT) {
+        return false;
+    }
+    Type* element = type_field_unwrap_simple_decl(((TypeUnary*)declared)->operand);
+    return element && element->type_id == LMD_TYPE_ANY;
+}
+
+static inline bool ast_declared_type_is_map(Type* declared) {
+    Type* semantic = type_field_unwrap_simple_decl(declared);
+    return semantic && semantic->type_id == LMD_TYPE_MAP;
+}
+
+static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
+        const TypeFunc* signature, NameEntry** entries) {
+    AstFuncNode* target = ast_direct_call_function(call);
+    if (!target || !signature || !entries || signature->is_variadic ||
+            signature->param_count < 0 ||
+            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS ||
+            signature->required_param_count != signature->param_count) {
+        return false;
+    }
+
+    int source_count = 0;
+    for (AstNode* arg = call->argument; arg; arg = arg->next) source_count++;
+    if (source_count != signature->param_count) return false;
+
+    AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    ast_resolve_call_args(call->argument, target, source_count, resolved);
+    const TypeParam* param = signature->param;
+    for (int index = 0; index < signature->param_count; index++, param = param->next) {
+        entries[index] = NULL;
+        if (!param || !param->is_var_param) continue;
+        AstNode* argument = ast_unwrap_primary(resolved[index]);
+        if (!argument || argument->node_type != AST_NODE_IDENT) return false;
+        NameEntry* entry = ((AstIdentNode*)argument)->entry;
+        if (!entry || entry->import) return false;
+        for (int prior = 0; prior < index; prior++) {
+            if (entries[prior] == entry) return false;
+        }
+        entries[index] = entry;
+    }
+    return true;
+}
+
 // Loop key filter: controls which entries to iterate
 enum LoopKeyFilter {
     LOOP_KEY_ALL    = 0,  // all entries (default): for k, v in container
@@ -515,6 +645,7 @@ static inline bool is_declaration_node(int node_type) {
     switch (node_type) {
     case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM:
     case AST_NODE_TYPE_STAM: case AST_NODE_VAR_STAM:
+    case AST_NODE_DECOMPOSE:
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
     case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
@@ -545,6 +676,21 @@ static inline bool is_side_effect_stam(int node_type) {
     }
 }
 
+// A can-raise procedural body must preserve failures from these discarded
+// statements. Both execution tiers use this predicate before throwing away a
+// statement result, so an OOB store cannot become a successful no-op (S7.1.1).
+static inline bool side_effect_result_can_error(int node_type) {
+    switch (node_type) {
+    case AST_NODE_ASSIGN_STAM:
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_PIPE_FILE_STAM:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // A control-flow node in a content block that is not the block's value
 // expression runs for its side effects only. Shared so both tiers decide
 // "does this `for` / `if` / `while` contribute a value here?" identically.
@@ -557,6 +703,11 @@ static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_va
 
 typedef Item (*main_func_t)(Context*);
 typedef struct MIR_context *MIR_context_t;
+struct Transpiler;
+
+// Builds one P4 REPL input against an already populated module scope. The
+// caller owns the parsed tree for the lifetime of the returned AST fragment.
+AstNode* build_repl_fragment(Transpiler* tp, TSNode document_node);
 
 // Script extends Input to inherit unified memory management
 struct Script : Input {
@@ -607,6 +758,15 @@ struct Script : Input {
     bool interp_supported;          // pre-scan found only P0/P1-covered kinds
     AstNodeType interp_reject_kind; // first unsupported kind, for the log line
     uint32_t interp_satellite_count; // unique MIR satellite image sequence
+
+    // P4 keeps each incrementally parsed REPL fragment alive because every
+    // AstNode retains Tree-sitter spans into its source tree. `source` aliases
+    // repl_source->str in that mode and must not be freed independently.
+    StrBuf* repl_source;
+    ArrayList* repl_syntax_trees;
+    // Append cursor makes retained REPL history O(fragment) to extend rather
+    // than re-walking every prior top-level node on each completed input.
+    AstNode* repl_last_top_level;
 };
 
 typedef struct Runtime Runtime;

@@ -788,6 +788,15 @@ void run_repl(Runtime *runtime) {
     StrBuf *last_output = strbuf_new_cap(256);    // last output for incremental display
     char *line;
     int exec_count = 0;
+    InterpReplSession interp_session = {};
+    // P4 is opt-in through the existing interpreter tiers. The shipped JIT
+    // REPL retains its historical whole-history behavior until P5 flips the
+    // default execution policy (D8.1.1v2).
+    bool persistent_interp = lambda_tier_selected() != LAMBDA_TIER_JIT &&
+        interp_repl_session_init(&interp_session, runtime);
+    if (lambda_tier_selected() != LAMBDA_TIER_JIT && !persistent_interp) {
+        log_error("interp-repl: falling back to historical REPL execution");
+    }
 
     while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
         // Skip empty lines when not in multi-line mode
@@ -817,6 +826,13 @@ void run_repl(Runtime *runtime) {
             if (strcmp(line, "clear") == 0) {
                 strbuf_reset(repl_history);
                 strbuf_reset(last_output);
+                if (persistent_interp) {
+                    interp_repl_session_destroy(&interp_session);
+                    persistent_interp = interp_repl_session_init(&interp_session, runtime);
+                    if (!persistent_interp) {
+                        log_error("interp-repl: failed to reset persistent session");
+                    }
+                }
                 printf("REPL history cleared\n");
                 mem_free(line);
                 continue;
@@ -843,6 +859,23 @@ void run_repl(Runtime *runtime) {
             print_repl_syntax_error(runtime->parser, pending_input->str);
             printf("Input discarded.\n");
             strbuf_reset(pending_input);
+            continue;
+        }
+
+        if (persistent_interp) {
+            Item result = interp_repl_session_eval(&interp_session, pending_input->str);
+            strbuf_reset(pending_input);
+            if (get_type_id(result) == LMD_TYPE_ERROR) {
+                // The session restores its slab and AST append transaction
+                // before returning an error, so the next input sees the last
+                // successful environment rather than a partially evaluated cell.
+                printf("Error during execution. Last input rolled back.\n");
+                continue;
+            }
+            StrBuf* output = strbuf_new_cap(256);
+            print_root_item(output, result);
+            if (output->length > 0) printf("%s", output->str);
+            strbuf_free(output);
             continue;
         }
 
@@ -900,6 +933,7 @@ void run_repl(Runtime *runtime) {
     // Cleanup command line editor
     lambda_repl_cleanup();
 
+    interp_repl_session_destroy(&interp_session);
     strbuf_free(repl_history);
     strbuf_free(pending_input);
     strbuf_free(last_output);

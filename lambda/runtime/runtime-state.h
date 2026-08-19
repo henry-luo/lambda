@@ -34,7 +34,24 @@ extern bool g_dry_run;
 // calls them from a repeated variable path.
 struct LambdaModuleState;
 struct PropertyKeySpec;
+typedef struct LambdaModuleStateSnapshot {
+    Item* vars;
+    uint64_t* payloads;
+    uint32_t count;
+    bool roots_registered;
+} LambdaModuleStateSnapshot;
 bool lambda_module_state_prepare(uint32_t module_id, uint32_t var_count);
+// Interpreter REPL modules append bindings after their first entry. This
+// grows the precise root range while preserving the existing slot values.
+bool lambda_module_state_grow_vars(uint32_t module_id, uint32_t var_count);
+bool lambda_module_state_snapshot(uint32_t module_id,
+                                  LambdaModuleStateSnapshot* snapshot);
+bool lambda_module_state_restore(uint32_t module_id,
+                                 const LambdaModuleStateSnapshot* snapshot);
+void lambda_module_state_snapshot_dispose(LambdaModuleStateSnapshot* snapshot);
+// Retire one dynamically-owned module without disturbing unrelated modules.
+// REPL `clear` uses this before discarding its append-only Script.
+void lambda_module_state_release(uint32_t module_id);
 bool lambda_module_state_prepare_layout(const struct LambdaModuleLayout* layout);
 bool lambda_module_state_link_property_keys(uint32_t module_id,
     const struct PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size);

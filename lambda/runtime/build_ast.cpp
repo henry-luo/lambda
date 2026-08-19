@@ -6152,7 +6152,10 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         AstNode* item = build_expr(tp, child);
         if (item) {
             log_debug("build_list: got item with node_type %d", item->node_type);
-            if (item->node_type == AST_NODE_ASSIGN) {
+            if (item->node_type == AST_NODE_ASSIGN ||
+                    item->node_type == AST_NODE_DECOMPOSE) {
+                // A decomposition binds names in this lexical list scope just
+                // like an assignment; it must stay out of value items.
                 AstNode* declare = item;
                 log_debug("got declare type %d", declare->node_type);
                 if (prev_declare == NULL) {
@@ -6514,6 +6517,8 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
     ast_node->name_count = name_count;
     ast_node->is_named = is_named;
     ast_node->names = (String**)pool_calloc(tp->pool, sizeof(String*) * name_count);
+    ast_node->entries = (NameEntry**)pool_calloc(tp->pool,
+        sizeof(NameEntry*) * name_count);
 
     // Collect all names
     cursor = ts_tree_cursor_new(asn_node);
@@ -6592,6 +6597,11 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
         var_node->type = projected ? projected : set_type_any(tp, ANY_DECOMPOSE);
         var_node->as = nullptr;
         push_name(tp, var_node, NULL);
+        // `AstDecomposeNode` has no AstNamedNode-compatible payload for a
+        // target entry. Retain the entry created by the canonical name pass so
+        // every consumer uses its planned storage rather than re-looking up a
+        // shadowable source spelling at evaluation time.
+        ast_node->entries[i] = tp->current_scope->last;
     }
 
     return (AstNode*)ast_node;
@@ -12339,4 +12349,54 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     }
     log_debug("build script child: %p", ast_node->child);
     return (AstNode*)ast_node;
+}
+
+AstNode* build_repl_fragment(Transpiler* tp, TSNode document_node) {
+    if (!tp || ts_node_is_null(document_node) ||
+            ts_node_symbol(document_node) != sym_document) {
+        return NULL;
+    }
+    // The existing module scope is the REPL's persistent environment. Do not
+    // build a second AstScript/global scope: later inputs must resolve the
+    // same NameEntry and therefore the same module slab slot (D7.2.1).
+    NameScope* saved_scope = tp->current_scope;
+    AstNode* first = NULL;
+    AstNode* last = NULL;
+    for (TSNode child = ts_node_named_child(document_node, 0);
+            !ts_node_is_null(child); child = ts_node_next_named_sibling(child)) {
+        AstNode* fragment = NULL;
+        switch (ts_node_symbol(child)) {
+        case SYM_CONTENT:
+            fragment = build_content(tp, child, true, true);
+            break;
+        case SYM_IMPORT_MODULE:
+            // Import cones are sealed when their module states are built. An
+            // appended import needs the Script-scoped dependency transaction,
+            // so P4 rejects it rather than give an existing session a mixed
+            // lifetime graph (D7.2.2/D8.1.1v2).
+            record_semantic_error(tp, child, ERR_SYNTAX_ERROR,
+                "imports are not supported after a REPL session starts");
+            break;
+        case SYM_COMMENT:
+            break;
+        default:
+            record_semantic_error(tp, child, ERR_SYNTAX_ERROR,
+                "unsupported top-level REPL fragment '%s'", ts_node_type(child));
+            break;
+        }
+        if (!fragment) continue;
+        AstNode* tail = fragment;
+        while (tail->next) tail = tail->next;
+        if (!first) first = fragment;
+        else last->next = fragment;
+        last = tail;
+    }
+    tp->current_scope = saved_scope;
+    if (tp->error_count == 0) {
+        for (AstNode* item = first; item; item = item->next) {
+            validate_top_level_enforcing_calls(tp, item);
+            validate_top_level_cross_frame_binding_reads(tp, item);
+        }
+    }
+    return first;
 }

@@ -90,7 +90,8 @@ typedef struct LambdaModuleState {
     NameId* property_keys;
     void* consts;
     void* type_list;
-    uint32_t var_count;
+    uint32_t var_count;      // live module slots visible to generated code
+    uint32_t var_capacity;   // root-range/storage capacity; may exceed var_count in REPL
     uint32_t property_key_count;
     uint32_t module_id;
     bool vars_registered;

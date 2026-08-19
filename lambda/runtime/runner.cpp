@@ -29,6 +29,7 @@
 #include "template_state.h"
 #include "edit_bridge.h"
 #include "interp.hpp"
+#include "runtime-state.h"
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
@@ -695,6 +696,51 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
     memcpy(script, tp, sizeof(Script));
 }
 
+// a parent that falls back to MIR cannot link a dependency that was already
+// admitted to T0: MIR imports require the child's generated symbols. Demote
+// the complete loaded cone in post-order before compiling that parent.
+static bool interp_force_jit_script(Script* script, Runtime* runtime) {
+    if (!script || !runtime) return false;
+    if (script->direct_imports) {
+        for (int i = 0; i < script->direct_imports->length; i++) {
+            Script* dep = (Script*)script->direct_imports->data[i];
+            if (!interp_force_jit_script(dep, runtime)) return false;
+        }
+    }
+    if (script->jit_context) return true;
+    if (!script->interp_supported) {
+        log_error("interp: fallback dependency '%s' has no executable tier",
+            script->reference ? script->reference : "<unknown>");
+        return false;
+    }
+
+    Transpiler tp = {};
+    memcpy(&tp, script, sizeof(Script));
+    tp.runtime = runtime;
+    script->interp_supported = false;
+    script->interp_planned = false;
+    compile_script_as_mir_direct(&tp, script, script->reference, NULL, NULL,
+        NULL, NULL, NULL, NULL);
+    if (!script->jit_context) {
+        log_error("interp: failed to lower fallback dependency '%s' to MIR",
+            script->reference ? script->reference : "<unknown>");
+        return false;
+    }
+    interp_run_stats()->scripts_fallback++;
+    log_notice("interp: demoted dependency file=%s to MIR fallback",
+        script->reference ? script->reference : "<unknown>");
+    return true;
+}
+
+static bool interp_force_jit_import_cone(Transpiler* tp) {
+    if (!tp || !tp->direct_imports) return true;
+    for (int i = 0; i < tp->direct_imports->length; i++) {
+        Script* dep = (Script*)tp->direct_imports->data[i];
+        if (!interp_force_jit_script(dep, tp->runtime)) return false;
+    }
+    return true;
+}
+
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
         log_error("Error: Source code is NULL");
@@ -871,6 +917,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         interp_run_stats()->scripts_fallback++;
         log_notice("interp: fallback file=%s reason=node:%s",
             script_path, interp_node_kind_name(reject));
+        if (!interp_force_jit_import_cone(tp)) return;
     }
 
     // compile the AST directly to MIR; this is the only supported Lambda backend.
@@ -1471,6 +1518,253 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     return script;
 }
 
+static TSPoint repl_source_point(const char* source, size_t length) {
+    TSPoint point = {0, 0};
+    for (size_t i = 0; i < length; i++) {
+        if (source[i] == '\n') {
+            point.row++;
+            point.column = 0;
+        } else {
+            point.column++;
+        }
+    }
+    return point;
+}
+
+static void repl_restore_scope(NameScope* scope, NameEntry* first,
+        NameEntry* last) {
+    if (!scope) return;
+    scope->first = first;
+    scope->last = last;
+    if (last) last->next = NULL;
+}
+
+static void repl_restore_source(Script* script, size_t length) {
+    if (!script || !script->repl_source) return;
+    script->repl_source->length = length;
+    script->repl_source->str[length] = '\0';
+    script->source = script->repl_source->str;
+}
+
+static void repl_free_transpiler_errors(ArrayList* errors) {
+    if (!errors) return;
+    for (int i = 0; i < errors->length; i++) {
+        err_free((LambdaError*)errors->data[i]);
+    }
+    arraylist_free(errors);
+}
+
+void interp_repl_session_destroy(InterpReplSession* session) {
+    if (!session) return;
+    Runtime* runtime = session->runner.runtime;
+    Script* script = session->runner.script;
+    if (runtime && script) {
+        // Each REPL Script receives a unique module id. Releasing its exact
+        // root before freeing the Script prevents `clear` from pinning its
+        // former bindings until the whole Runtime exits (D5.3.3).
+        lambda_module_state_release(script->module_state_id);
+        int index = script->index;
+        runtime_free_script(runtime, script, true);
+        if (runtime->scripts && index >= 0 && index < runtime->scripts->length) {
+            runtime->scripts->data[index] = NULL;
+        }
+    }
+    memset(session, 0, sizeof(*session));
+}
+
+bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
+    if (!session || !runtime) return false;
+    interp_repl_session_destroy(session);
+
+    // The normal loader owns AST/pool initialization. Build the empty session
+    // through its T0 branch even when the shell's default remains eager JIT.
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_INTERP);
+    Script* script = load_script(runtime, "<repl-session>", "", false);
+    lambda_tier_set(saved_tier);
+    if (!script || !script->interp_supported) {
+        log_error("interp-repl: could not create initial interpreter module");
+        return false;
+    }
+    script->repl_source = strbuf_new_cap(256);
+    script->repl_syntax_trees = arraylist_new(8);
+    if (!script->repl_source || !script->repl_syntax_trees) {
+        log_error("interp-repl: could not allocate retained source state");
+        // The bootstrap source still has Script ownership until both retained
+        // buffers exist; clear partial replacements before common teardown.
+        if (script->repl_source) {
+            strbuf_free(script->repl_source);
+            script->repl_source = NULL;
+        }
+        if (script->repl_syntax_trees) {
+            arraylist_free(script->repl_syntax_trees);
+            script->repl_syntax_trees = NULL;
+        }
+        runner_init(runtime, &session->runner);
+        session->runner.script = script;
+        interp_repl_session_destroy(session);
+        return false;
+    }
+    // `load_script` owns the empty bootstrap buffer; source thereafter aliases
+    // the growable session buffer and runtime_free_script frees it as one unit.
+    mem_free((void*)script->source);
+    script->source = script->repl_source->str;
+
+    runner_init(runtime, &session->runner);
+    session->runner.script = script;
+    runner_setup_context(&session->runner);
+    if (!session->runner.context || !lambda_module_state_prepare(
+            script->module_state_id, script->interp_slab_count)) {
+        log_error("interp-repl: could not prepare persistent module slab");
+        interp_repl_session_destroy(session);
+        return false;
+    }
+    session->initialized = true;
+    return true;
+}
+
+Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
+    if (!session || !session->initialized || !session->runner.runtime ||
+            !session->runner.script || !source) return ItemError;
+    Script* script = session->runner.script;
+    AstScript* root = (AstScript*)script->ast_root;
+    if (!root || !script->repl_source || !script->repl_syntax_trees) return ItemError;
+
+    TSTree* tree = lambda_parse_source(session->runner.runtime->parser, source);
+    if (!tree || ts_node_has_error(ts_tree_root_node(tree))) {
+        if (tree) ts_tree_delete(tree);
+        log_error("interp-repl: parser rejected completed input");
+        return ItemError;
+    }
+
+    size_t saved_source_length = script->repl_source->length;
+    size_t prefix_length = saved_source_length;
+    if (prefix_length) {
+        strbuf_append_char(script->repl_source, '\n');
+        prefix_length++;
+    }
+    strbuf_append_str(script->repl_source, source);
+    script->source = script->repl_source->str;
+
+    // Fragment trees are parsed independently for O(size-of-input) latency.
+    // Shift their spans into the append-only source before AST construction so
+    // literal readers always see Script::source at the node's byte range.
+    TSInputEdit edit = {};
+    edit.start_byte = 0;
+    edit.old_end_byte = 0;
+    edit.new_end_byte = (uint32_t)prefix_length;
+    edit.start_point = {0, 0};
+    edit.old_end_point = {0, 0};
+    edit.new_end_point = repl_source_point(script->repl_source->str, prefix_length);
+    ts_tree_edit(tree, &edit);
+
+    NameScope* globals = root->global_vars;
+    NameEntry* saved_scope_first = globals ? globals->first : NULL;
+    NameEntry* saved_scope_last = globals ? globals->last : NULL;
+    int saved_const_count = script->const_list ? script->const_list->length : 0;
+    int saved_type_count = script->type_list ? script->type_list->length : 0;
+    uint32_t saved_slab_count = script->interp_slab_count;
+
+    Transpiler tp = {};
+    memcpy(&tp, script, sizeof(Script));
+    tp.parser = session->runner.runtime->parser;
+    tp.runtime = session->runner.runtime;
+    tp.current_scope = globals;
+    tp.max_errors = session->runner.runtime->max_errors > 0
+        ? session->runner.runtime->max_errors : 10;
+    tp.errors = arraylist_new(4);
+    AstNode* fragment = build_repl_fragment(&tp, ts_tree_root_node(tree));
+    if (tp.error_count != 0 || !fragment) {
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        repl_restore_source(script, saved_source_length);
+        // Fragment diagnostics are not owned by the retained Script pool.
+        // Release them before rolling the temporary declaration state back.
+        repl_free_transpiler_errors(tp.errors);
+        ts_tree_delete(tree);
+        return ItemError;
+    }
+    repl_free_transpiler_errors(tp.errors);
+
+    // The whole-program pre-scan is intentionally fail-closed. Running it on
+    // a temporary root admits only a fragment that T0 can execute; imports and
+    // other unsupported new forms leave the existing session untouched.
+    AstScript scan_root = {};
+    scan_root.node_type = AST_SCRIPT;
+    scan_root.child = fragment;
+    Script scan_script = {};
+    scan_script.ast_root = (AstNode*)&scan_root;
+    scan_script.profile = script->profile;
+    AstNodeType reject = AST_NODE_NULL;
+    bool supported = interp_scan_supported(&scan_script, &reject);
+    bool planned = supported && interp_plan_repl_fragment(script, fragment);
+    bool slab_grown = planned && lambda_module_state_grow_vars(
+        script->module_state_id, script->interp_slab_count);
+    if (!supported || !planned || !slab_grown) {
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        // A failed grow cannot publish the planned count: the next execution
+        // would otherwise ask the sealed module state for slots it never got.
+        if (!slab_grown) script->interp_slab_count = saved_slab_count;
+        repl_restore_source(script, saved_source_length);
+        ts_tree_delete(tree);
+        log_error("interp-repl: rejected fragment node=%s",
+            interp_node_kind_name(reject));
+        return ItemError;
+    }
+
+    AstNode* prior_last = script->repl_last_top_level;
+    AstNode* fragment_last = fragment;
+    while (fragment_last->next) fragment_last = fragment_last->next;
+    if (prior_last) prior_last->next = fragment;
+    else root->child = fragment;
+    if (!ast_index_append_profile(&script->ast_index, fragment,
+            (AstNode*)root, script->profile)) {
+        if (prior_last) prior_last->next = NULL;
+        else root->child = NULL;
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+        repl_restore_source(script, saved_source_length);
+        ts_tree_delete(tree);
+        return ItemError;
+    }
+
+    LambdaModuleStateSnapshot snapshot = {};
+    if (!lambda_module_state_snapshot(script->module_state_id, &snapshot)) {
+        if (prior_last) prior_last->next = NULL;
+        else root->child = NULL;
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+        repl_restore_source(script, saved_source_length);
+        ts_tree_delete(tree);
+        return ItemError;
+    }
+    Item result = interp_run_repl_fragment(&session->runner, fragment);
+    if (item_is_error(result)) {
+        lambda_module_state_restore(script->module_state_id, &snapshot);
+        if (prior_last) prior_last->next = NULL;
+        else root->child = NULL;
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+        repl_restore_source(script, saved_source_length);
+        lambda_module_state_snapshot_dispose(&snapshot);
+        ts_tree_delete(tree);
+        return result;
+    }
+    lambda_module_state_snapshot_dispose(&snapshot);
+    script->repl_last_top_level = fragment_last;
+    arraylist_append(script->repl_syntax_trees, tree);
+    return result;
+}
+
 void runner_init(Runtime *runtime, Runner* runner) {
     memset(runner, 0, sizeof(Runner));
     runner->runtime = runtime;
@@ -1516,6 +1810,12 @@ void runner_setup_context(Runner* runner) {
     ctx->type_info = type_info;
     ctx->consts = runner->script->const_list->data;
     ctx->result = ItemNull;  // exec result
+    if (ctx->cwd) {
+        // A new REPL session may replace an unexecuted predecessor; its CWD
+        // never reached the normal execution-boundary cleanup in that case.
+        url_destroy(ctx->cwd);
+        ctx->cwd = NULL;
+    }
     ctx->cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context (use shared fixed-precision context for runtime)
     ctx->decimal_ctx = decimal_fixed_context();
@@ -1793,7 +2093,15 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         runtime_script_index_delete_script(runtime, script);
     }
     if (script->reference) mem_free((void*)script->reference);
-    if (script->source) mem_free((void*)script->source);
+    if (script->repl_syntax_trees) {
+        for (int i = 0; i < script->repl_syntax_trees->length; i++) {
+            TSTree* tree = (TSTree*)script->repl_syntax_trees->data[i];
+            if (tree) ts_tree_delete(tree);
+        }
+        arraylist_free(script->repl_syntax_trees);
+    }
+    if (script->repl_source) strbuf_free(script->repl_source);
+    else if (script->source) mem_free((void*)script->source);
     if (script->directory) mem_free((void*)script->directory);
     if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
     // The T0 load path keeps the indexed AST alive for the Script's lifetime
@@ -1933,6 +2241,12 @@ void runtime_cleanup(Runtime* runtime) {
         if (!eval_context_thread_initialize(cleanup_owner)) return;
         if (cleanup_owner->js_state &&
                 !js_runtime_state_thread_initialize(cleanup_owner)) return;
+        if (cleanup_owner->cwd) {
+            // A session can end before its first execution; unlike the JIT
+            // output path, that leaves its per-execution cwd URL to cleanup.
+            url_destroy(cleanup_owner->cwd);
+            cleanup_owner->cwd = NULL;
+        }
     }
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
