@@ -248,6 +248,10 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->x_height    = measure_x_height(handle, scale, m->ascender);
     m->cap_height  = measure_cap_height(handle, scale, m->ascender);
     m->space_width = measure_space_width(handle);
+    m->average_char_width = m->space_width;
+    if (os2t && os2t->avg_char_width > 0) {
+        m->average_char_width = os2t->avg_char_width * scale;
+    }
 
     // em_size from FontTables head
     if (head && head->units_per_em > 0) {

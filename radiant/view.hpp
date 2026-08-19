@@ -489,7 +489,8 @@ typedef struct TextShadow TextShadow;
 // tier-2: view-pool, rebuilt each relayout
 struct FontProp {
     char* family;  // font family name
-    float font_size;  // font size in pixels, scaled by pixel_ratio
+    float font_size;  // computed font size in CSS pixels
+    float used_zoom;  // effective CSS zoom applied to used font metrics
     // CSS Inline 3 initial letters retain their computed font size for em-based
     // properties while glyph layout uses the size derived from parent metrics.
     float initial_letter_computed_font_size;
@@ -508,6 +509,7 @@ struct FontProp {
     bool font_size_from_medium;  // true if font_size originates from the CSS 'medium' keyword (initial value)
     // derived font properties
     float space_width;  // width of a space character of the current font
+    float average_char_width;  // primary font average character width
     float ascender;    // font ascender in pixels
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
@@ -521,11 +523,17 @@ struct FontProp {
     float text_underline_offset;      // CSS text-underline-offset in px (0 = auto)
 };
 
+inline float font_prop_used_size(const FontProp* fp) {
+    if (!fp) return 0.0f;
+    float zoom = fp->used_zoom > 0.0f ? fp->used_zoom : 1.0f;
+    return fp->font_size * zoom;
+}
+
 // build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
 inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
     FontStyleDesc sd = {};
     sd.family  = fp->family;
-    sd.size_px = fp->font_size;
+    sd.size_px = font_prop_used_size(fp);
 
     // Use numeric weight if set, otherwise map from CssEnum keyword
     if (fp->font_weight_numeric > 0) {
@@ -1027,6 +1035,18 @@ typedef struct {
     int stop_count;
 } ConicGradient;
 
+// CSS image value used by list-style-image.  URL images keep their source
+// string; gradient images keep the already-resolved gradient object so marker
+// sizing and painting use the same value produced by the style cascade.
+// tier-2: view-pool, rebuilt each relayout
+typedef struct {
+    GradientType gradient_type;
+    char* url;
+    LinearGradient* linear_gradient;
+    RadialGradient* radial_gradient;
+    ConicGradient* conic_gradient;
+} ListStyleImage;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Color color; // background color
@@ -1384,14 +1404,20 @@ inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide si
 // tier-2: view-pool, rebuilt each relayout
 typedef struct MarkerProp {
     CssEnum marker_type;     // CSS_VALUE_DISC, CSS_VALUE_CIRCLE, CSS_VALUE_SQUARE, CSS_VALUE_DECIMAL, etc.
-    float width;             // Fixed marker width (typically ~1.4em = 22px at 16px font)
+    float width;             // Marker inline advance, including an image separator when present
+    float content_width;     // Painted image width; zero for text and bullet markers
     float height;            // Used marker box height; image markers can exceed line-height
+    float line_height;       // Marker font's normal inline-box height
+    float ascender;          // Marker font normal-line ascender
+    float descender;         // Marker font normal-line descender
     float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
     char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
-    char* image_url;         // list-style-image URL (data URI or external URL)
+    ListStyleImage image;     // list-style-image URL or gradient
     ImageSurface* loaded_image; // cached loaded image for layout and render
+    bool is_image_marker;     // true for a valid image without URL intrinsic size
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
     bool reserves_first_line; // outside marker has no parent list gutter to occupy
+    bool has_explicit_content; // ::marker content overrides the list-style marker
 } MarkerProp;
 
 /**
@@ -1424,6 +1450,7 @@ typedef struct BlockProp {
     bool legacy_align_center_blocks;  // HTML align=center compatibility: center block/table descendants
     CssEnum legacy_block_align;  // HTML align compatibility for block/table descendants
     CssEnum direction;  // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
+    CssEnum unicode_bidi;  // CSS Writing Modes: unicode-bidi embedding mode
     WritingMode writing_mode;  // CSS Writing Modes: the element’s own block/inline axes
     float zoom;  // CSS Viewport 1: local zoom factor; effective zoom multiplies ancestors
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
@@ -1437,7 +1464,7 @@ typedef struct BlockProp {
     CssEnum given_min_height_type, given_max_height_type;
     CssEnum list_style_type;
     CssEnum list_style_position;  // inside, outside
-    char* list_style_image;         // URL or none
+    ListStyleImage list_style_image;
     char* list_style_type_string;   // custom string marker (CSS Lists 3 §4.1)
     char* counter_reset;            // counter names and values
     char* counter_increment;        // counter names and values
