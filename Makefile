@@ -177,15 +177,15 @@ UPDATE_TS_ENUM_SCRIPT = ./utils/update_ts_enum.sh
 # builds fail offline before compilation begins.
 TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 
-# Auto-generate parser and ts-enum.h when grammar.js changes
-$(TS_ENUM_H): $(GRAMMAR_JS)
-	@echo "Grammar changed, regenerating parser and ts-enum.h..."
-	@cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate
-	$(UPDATE_TS_ENUM_SCRIPT)
-	@echo "Updated ts-enum.h from grammar changes"
-
-$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
+# Generate parser outputs once before deriving the symbol enum.  Independent
+# recipes used to run `tree-sitter generate` concurrently, allowing the header
+# and linked parser archive to retain different symbol-number layouts.
+$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+
+$(TS_ENUM_H): $(PARSER_C) $(UPDATE_TS_ENUM_SCRIPT)
+	$(UPDATE_TS_ENUM_SCRIPT)
+	@echo "Updated ts-enum.h from parser generation"
 
 # Tree-sitter library targets
 # Build from source on all platforms

@@ -4331,10 +4331,13 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
         const char* srcdoc = block->get_attribute("srcdoc");
         const char* src = block->get_attribute("src");
         if ((srcdoc && *srcdoc) || (src && *src)) {
+            LayoutContentBox iframe_content = layout_content_box(block);
+            // The embedded viewport is the iframe content box; using the outer
+            // border box creates false overflow and an inner scrollbar.
             int iframe_width = block->width > 0 ?
-                (int)block->width : (int)lycon->ui_context->window_width; // INT_CAST_OK: iframe viewport expects int
+                (int)iframe_content.width : (int)lycon->ui_context->window_width; // INT_CAST_OK: iframe viewport expects int
             int iframe_height = block->height > 0 ?
-                (int)block->height : (int)lycon->ui_context->window_height; // INT_CAST_OK: iframe viewport expects int
+                (int)iframe_content.height : (int)lycon->ui_context->window_height; // INT_CAST_OK: iframe viewport expects int
             lycon->ui_context->iframe_depth++;
             if (srcdoc && *srcdoc) {
                 doc = load_iframe_srcdoc_doc(lycon, srcdoc,

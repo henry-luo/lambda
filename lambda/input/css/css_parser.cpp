@@ -473,6 +473,16 @@ int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_coun
     return pos;
 }
 
+bool css_selector_group_parse_consumed_all(const CssToken* tokens, int pos,
+                                           int token_count) {
+    if (!tokens || pos < 0 || token_count <= 0) return false;
+    pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+    // Selector API inputs are complete token streams, not nested-rule
+    // preludes: accepting trailing tokens turns an invalid selector into a
+    // silent partial match instead of the required SyntaxError.
+    return pos < token_count && tokens[pos].type == CSS_TOKEN_EOF;
+}
+
 // Forward declaration
 static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool);
 static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, Pool* pool);

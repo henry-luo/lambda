@@ -5096,11 +5096,15 @@ struct MultiValue {
     const CssValue* style;
 };
 
-void set_multi_value(MultiValue* mv, const CssValue* value) {
+void set_multi_value(LayoutContext* lycon, MultiValue* mv, const CssValue* value) {
     if (!mv || !value) return;
+    value = resolve_var_function(lycon, value);
+    if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER) {
         mv->length = (CssValue*)value;
-    } else if (value->type == CSS_VALUE_TYPE_COLOR) {
+    // Border shorthand colors such as rgba() are function values; otherwise
+    // they fall through to currentcolor and paint as an opaque black border.
+    } else if (css_value_is_background_color_candidate(value)) {
         mv->color = (CssValue*)value;
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
@@ -5126,7 +5130,7 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
     else if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
-            set_multi_value(mv, item);
+            set_multi_value(lycon, mv, item);
         }
     }
 }
@@ -5140,7 +5144,7 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
     BorderProp* border = layout_ensure_border(lycon, span);
     RadiantBorderSide refs = radiant_border_side(border, side);
     MultiValue parts = {0};
-    set_multi_value(&parts, value);
+    set_multi_value(lycon, &parts, value);
     // Physical and logical aliases must share cascade and none/hidden width semantics.
     bool style_applied = parts.style && specificity >= *refs.style_specificity;
     bool hidden_style = false;

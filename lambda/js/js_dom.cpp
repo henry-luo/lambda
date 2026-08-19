@@ -4892,7 +4892,13 @@ static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* po
     int pos = 0;
     // DOM selector APIs take selector lists; parsing only one selector drops comma-separated
     // alternatives used by editor hit-testing such as closest("td, th").
-    return css_parse_selector_group_from_tokens(tokens, &pos, (int)token_count, pool);
+    CssSelectorGroup* group = css_parse_selector_group_from_tokens(
+        tokens, &pos, (int)token_count, pool);
+    if (!group || group->selector_count == 0 ||
+        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
+        return nullptr;
+    }
+    return group;
 }
 
 static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
@@ -14346,7 +14352,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return ItemNull;
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         // CSS Selectors defines :scope relative to the Element query receiver.
@@ -14372,7 +14378,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         arr->length = 0;
         arr->capacity = 0;
 
-        if (!selector_group) return (Item){.array = arr};
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         // Keep :scope anchored to this Element for relative selector queries.
@@ -14396,7 +14402,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return (Item){.item = ITEM_FALSE};
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         MatchResult result;
@@ -14412,7 +14418,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return ItemNull;
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         MatchResult mresult;
@@ -15790,6 +15796,7 @@ extern "C" void js_dom_install_collection_globals(void) {
     for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
         _install_iface(global, collection_ifaces[i]);
     }
+    _install_iface(global, "CSSNestedDeclarations");
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_xpath_evaluator(global);

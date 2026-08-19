@@ -917,8 +917,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 return;
             }
 
-            float flex_width = flex_item->width;
-            float flex_height = flex_item->height;
+            float flex_border_width = flex_item->width;
+            float flex_border_height = flex_item->height;
+            LayoutContentBox iframe_content = layout_content_box(flex_item);
 
             if (!(flex_item->embed && flex_item->embedp()->doc)) {
                 const char *src_value = flex_item->get_attribute("src");
@@ -926,7 +927,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     lycon->ui_context->iframe_depth++;
 
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
-                        (int)flex_width, (int)flex_height, // INT_CAST_OK: viewport API expects int
+                        // The embedded viewport excludes the flex item's border and padding.
+                        (int)iframe_content.width, (int)iframe_content.height, // INT_CAST_OK: viewport API expects int
                         lycon->ui_context->pixel_ratio);
                     if (doc) {
                         radiant_document_ensure_state(doc, "layout_flex_iframe");
@@ -936,8 +938,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                         flex_item->embed->doc = doc;
                         if (doc->html_root) {
                             layout_iframe_embedded_doc(lycon, doc,
-                                (int)flex_width, // INT_CAST_OK: viewport API expects int
-                                (int)flex_height); // INT_CAST_OK: viewport API expects int
+                                (int)iframe_content.width, // INT_CAST_OK: iframe viewport expects int
+                                (int)iframe_content.height); // INT_CAST_OK: iframe viewport expects int
                         }
                         lycon->ui_context->iframe_depth--;
                     } else {
@@ -968,8 +970,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 }
             }
             // CRITICAL: Restore the flex-determined dimensions
-            flex_item->width = flex_width;
-            flex_item->height = flex_height;
+            flex_item->width = flex_border_width;
+            flex_item->height = flex_border_height;
         }
     } else {
         // CRITICAL FIX: Generate pseudo-element content for flex items with ::before/::after

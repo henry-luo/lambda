@@ -10,6 +10,7 @@
 #include "js_runtime.h"
 #include "js_class.h"
 #include "js_object_meta.h"
+#include "../runtime/lambda-root-frame.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
@@ -528,6 +529,24 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
     return wrapper;
 }
 
+static Item wrap_nested_declarations(CssRule* rule, Pool* pool) {
+    RootFrame roots(5);
+    Rooted<Item> result_root(roots,
+        js_new_object_with_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
+    Rooted<Item> style_root(roots, wrap_rule_decl(rule, pool));
+    Rooted<Item> global_root(roots, js_get_global_this());
+    Rooted<Item> ctor_root(roots,
+        js_get_key_cstr(global_root.get(), "CSSNestedDeclarations"));
+    Rooted<Item> proto_root(roots, js_get_key_cstr(ctor_root.get(), "prototype"));
+    // Class metadata does not participate in ordinary instanceof; CSSOM
+    // wrappers must inherit the realm's exposed interface prototype.
+    if (get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
+        js_set_prototype(result_root.get(), proto_root.get());
+    }
+    js_set_key_cstr(result_root.get(), "style", style_root.get());
+    return result_root.get();
+}
+
 static CssRule* unwrap_rule_decl(Item item) {
     return (CssRule*)js_cssom_unwrap_host(item, js_is_rule_style_decl);
 }
@@ -832,11 +851,7 @@ extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
         for (size_t i = 0; i < nr_count; i++) {
             if (!nr[i]) continue;
             if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
-                Item style_decl = wrap_rule_decl(nr[i], pool);
-                Item nd_obj = js_new_object_with_class(JS_CLASS_CSS_NESTED_DECLARATIONS);
-                Item style_key = make_string_item("style");
-                js_set_key_default(nd_obj, style_key, style_decl);
-                array_push(arr, nd_obj);
+                array_push(arr, wrap_nested_declarations(nr[i], pool));
             } else {
                 array_push(arr, js_cssom_wrap_rule(nr[i], pool));
             }

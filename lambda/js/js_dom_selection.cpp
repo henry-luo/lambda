@@ -1260,10 +1260,13 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     if (!state->selectionchange_pending) return ItemNull;
     state->selectionchange_pending = false;
     state->selection_event_seq = state->selection_mutation_seq;
-    Item ev = js_create_event("selectionchange", /*bubbles=*/false,
-                              /*cancelable=*/false);
-    Item doc_item = js_get_document_object_value();
-    js_dom_dispatch_event(doc_item, ev);
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots, js_create_event("selectionchange",
+        /*bubbles=*/false, /*cancelable=*/false));
+    // The document wrapper allocates after Event construction; retain the
+    // queued selectionchange Event until dispatch takes its own exact roots.
+    Rooted<Item> document_root(roots, js_get_document_object_value());
+    js_dom_dispatch_event(document_root.get(), event_root.get());
     return ItemNull;
 }
 JS_FORWARD_STATIC_ITEM(js_dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))
