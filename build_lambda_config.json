@@ -4438,6 +4438,21 @@
             "icon": "🐑"
           },
           {
+            "source": "test/test_lambda_parser_poc_gtest.cpp",
+            "name": "Lambda C Parser POC Tests",
+            "additional_sources": [
+              "lambda/runtime/parser/lambda_lexer.c",
+              "lambda/runtime/parser/lambda_parser.c"
+            ],
+            "binary": "test_lambda_parser_poc_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "🔤"
+          },
+          {
             "source": "test/test_lambda_concurrency_gtest.cpp",
             "name": "Lambda Concurrency Runtime Tests",
             "dependencies": [
