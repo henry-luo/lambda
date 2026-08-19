@@ -7481,14 +7481,24 @@ static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
         if (binding && binding->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* named = (AstNamedNode*)binding;
-            // A declared int local whose initializer is still typed ANY owns
-            // an Item carrier even inside a dual native body. Reopen that
-            // carrier before a raw typed-array store; the semantic int TypeId
-            // alone does not describe the physical register (D2.2.2,
+            // A declared int local whose carrier is a boxed Item owns that
+            // Item even inside a dual native body. Reopen the carrier before a
+            // raw typed-array store or native call argument; the semantic int
+            // TypeId alone does not describe the physical register (D2.2.2,
             // D3.2.2, D5.2).
+            //
+            // The binding's storage, not its initializer, owns the lane
+            // decision: `var a = 0x67452301` starts in the int lane but a
+            // later `a = t` alias assignment widens the carrier to a boxed
+            // Item for the whole binding. Gating on the initializer's type
+            // left such a local looking like a lane, so its tagged Item was
+            // handed to `rol(num: int, ...)` raw and every SHA-1 round
+            // returned the int-lane poison (crypto_sha1's all-`f` digest).
             MirVarEntry* native_var = find_var(mt, ident->name->chars);
-            if (named->as && get_effective_type(mt, named->as) == LMD_TYPE_ANY &&
-                    (!native_var || native_var->type_id == LMD_TYPE_ANY)) {
+            bool boxed_carrier = native_var
+                ? native_var->type_id == LMD_TYPE_ANY
+                : (named->as && get_effective_type(mt, named->as) == LMD_TYPE_ANY);
+            if (boxed_carrier) {
                 if (mir_argument_is_module_binding(mt, primary)) {
                     // Imported scalar slots are reopened by the module/global
                     // loader before this consumer; applying emit_unbox again
@@ -17872,22 +17882,29 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 static MIR_reg_t transpile_start(MirTranspiler* mt, AstStartNode* start_node) {
     AstCallNode* call = start_node ? start_node->call : NULL;
     if (!call) return emit_null_item_reg(mt);
+    if (start_node->mode != START_MODE_TASK) {
+        // Worker modes require a separate isolate launcher; never degrade an
+        // accepted thread/process request into a same-context task.
+        log_error("concurrency start: unsupported launch mode %d", (int)start_node->mode);
+        return emit_null_item_reg(mt);
+    }
     MIR_reg_t function = transpile_box_item(mt, call->function);
     int function_root = create_gc_root_slot(mt, function);
-    MIR_reg_t args = emit_call_0(mt, "list", MIR_T_P);
-    int args_root = create_pointer_gc_root_slot(mt, args);
-    for (AstNode* arg = call->argument; arg; arg = arg->next) {
-        MIR_reg_t value = transpile_box_item(mt,
-            arg->node_type == AST_NODE_NAMED_ARG ? ((AstNamedNode*)arg)->as : arg);
-        int value_root = create_gc_root_slot(mt, value);
-        function = load_gc_root_slot(mt, function_root, "start_fn");
-        (void)function;
-        args = load_gc_root_slot(mt, args_root, "start_args");
-        value = load_gc_root_slot(mt, value_root, "start_arg");
-        emit_call_void_2(mt, "list_push",
-            MIR_T_P, MIR_new_reg_op(mt->ctx, args),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    MIR_reg_t args;
+    if (call->argument) {
+        MIR_reg_t args_item = transpile_box_item(mt, call->argument);
+        (void)create_gc_root_slot(mt, args_item);
+        // Array literals may lower to packed ArrayNum storage. The task ABI
+        // consumes List::items, so normalize the semantic argument array to a
+        // boxed-value Array instead of reinterpreting a packed payload.
+        args = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_item),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, LMD_TYPE_ANY));
+        emit_return_item_error_if_zero(mt, args);
+    } else {
+        args = emit_call_0(mt, "list", MIR_T_P);
     }
+    int args_root = create_pointer_gc_root_slot(mt, args);
     function = load_gc_root_slot(mt, function_root, "start_fn");
     args = load_gc_root_slot(mt, args_root, "start_args");
     return emit_call_3(mt, "lambda_task_start_function_scoped", MIR_T_I64,
@@ -25133,7 +25150,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
         case AST_NODE_START: {
             AstStartNode* start = (AstStartNode*)node;
             if (mt->prepass_collect_only && start->call) {
-                // `start f(...)` materializes a Function* and invokes it later
+                // `start(f, args)` materializes a Function* and invokes it later
                 // through the public context ABI.  Treating its inner syntax as
                 // an ordinary direct call could elide `_b` and leave the task
                 // dispatcher calling a raw body with a mismatched ABI.

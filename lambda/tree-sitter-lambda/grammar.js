@@ -5,12 +5,13 @@
  *
  * This is the grammar that ships. It shares its core with the official full
  * grammar (`grammar-lambda.js`) through `grammar-common.js`; the difference is
- * the type layer below, where the whole type-pattern sub-language — type
- * patterns, string/symbol islands and all — arrives as opaque tokens from the
- * external scanner (src/scanner.c) and is parsed on the Lambda side by
- * lambda/runtime/parse_type_pattern.cpp.
+ * the replacement layer below. Full type patterns and string/symbol islands,
+ * declaration return contracts, whole view patterns, and path bodies arrive
+ * as opaque tokens from the external scanner (src/scanner.c). Tree-sitter
+ * retains only the unambiguous `/.` / `.` path introducer; Lambda parses the
+ * full path span directly to AST through lambda/runtime/parse_path_expr.cpp.
  *
- * Read grammar-lambda.js to learn what the type language accepts; it is the
+ * Read grammar-lambda.js for the complete structural surface grammar; it is the
  * normative statement. `make grammar-sync-check` guards the two against drift.
  */
 
@@ -20,24 +21,40 @@
 const common = require('./grammar-common.js');
 
 // ---------------------------------------------------------------------------
-// Type layer: external scanner tokens. The scanner only finds where each token
-// ENDS; the interior is parsed by the Lambda-side hand parser.
+// Production replacement layer: external scanner tokens. The scanner only
+// finds where each token ENDS; Lambda-side parsers own each interior.
 // ---------------------------------------------------------------------------
-const typeLayer = {
+const productionRuleLayer = {
     // Annotation-position type pattern: `int`, `{a: int, b: [string]}`,
     // `fn(a: int) int`, `\(d[3])`, unions, occurrences — everything except the
     // `that` predicate, which the parser owns (CT1v2).
     _type_pattern: $ => $.type_pattern_token,
 
-    // A single primary type: the `?T` query operand and view-pattern atoms.
+    // A single primary type: the `?T` query operand and view-pattern primaries.
     // Never consumes `|`, so `data?int | other` keeps `| other` as the value
     // union it is.
     _primary_type: $ => $.primary_type_pattern_token,
-    _view_atom_type: $ => $.view_atom_token,
+    // Declaration return contracts and view model patterns are bounded type
+    // sub-forms with their own direct AST parsers.
+    return_type: $ => $.return_type_token,
+    view_pattern: $ => $.view_pattern_token,
+
+    // Keep the two rooted introducer characters as separate Tree-sitter tokens
+    // so `/` retains its ordinary operator identity and `.` starts the path.
+    // The complete dotted body is one scanner token parsed into AstPathNode.
+    path_expr: $ => choice(
+      seq('/', '.', $.path_body_token),
+      seq('.', $.path_body_token),
+    ),
+
+    // S2.4.3v2: a namespace-qualified name is maximal. Its precedence must
+    // exceed primary/path content so `<svg .rect>` remains tag `svg.rect`.
+    _attr_dotted_name: $ => common.qualified_name($, 120),
+    dotted_name: $ => common.qualified_name($, 120),
 
     // Islands are first-class values (`let p = \(d[3])`), so they keep their
     // own token in value position.
-    _value_island: $ => $.pattern_island_token,
+    _char_pattern: $ => $.pattern_island_token,
 
     // Element/object content schema: a comma-separated list of patterns.
     // Content items use their own token so a bare field name (`type T { a: int }`)
@@ -50,14 +67,15 @@ const typeLayer = {
 module.exports = grammar({
   name: "lambda",
   ...common.options,
-  // the scanner's tokens ride alongside the contextual `start` keyword
+  // the scanner owns only the extracted sub-language boundaries
   externals: $ => [
-    $._start,
     $.type_pattern_token,
     $.primary_type_pattern_token,
     $.pattern_island_token,
     $.content_type_token,
-    $.view_atom_token,
+    $.return_type_token,
+    $.view_pattern_token,
+    $.path_body_token,
   ],
-  rules: Object.assign({}, common.coreRules, typeLayer),
+  rules: Object.assign({}, common.coreRules, productionRuleLayer),
 });

@@ -75,7 +75,24 @@
         "merged_at": "2026-08-06T20:22:39",
         "cells": 56,
         "note": "C2MIR measured separately with the same three-run, 180s, 10s-cooldown matrix."
+      },
+      {
+        "engines": [
+          "c2mir"
+        ],
+        "source": "test/benchmark/run_c2mir_benchmarks.py",
+        "source_started_at": "2026-08-19",
+        "source_runs": 3,
+        "note": "Back-patched 12 rows whose native C ports did not exist during this session (awfy/cd, awfy/deltablue, awfy/havlak, awfy/json, awfy/richards, beng/pidigits, jetstream/crypto_sha1, jetstream/cube3d, jetstream/navier_stokes, jetstream/raytrace3d, jetstream/splay, larceny/deriv); all other C2MIR cells are this session's own. C2MIR measures native C ports through lambda/mir/c2m and does not depend on the Lambda binary; its cells are stable to within a few percent across the v18-v33 sessions."
       }
+    ],
+    "suite_order": [
+      "r7rs",
+      "awfy",
+      "beng",
+      "kostya",
+      "larceny",
+      "jetstream"
     ]
   },
   "r7rs": {
@@ -1021,7 +1038,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1048,13 +1065,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 255.714,
       "lambdajs": 1672.380125,
       "quickjs": 191.72,
       "nodejs": 46.558375,
-      "c2mir": null
+      "c2mir": 31.164062
     },
     "json": {
       "category": "macro",
@@ -1065,7 +1087,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1092,13 +1114,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 2.657,
       "lambdajs": 44.949125,
       "quickjs": 11.02,
       "nodejs": 2.644042,
-      "c2mir": null
+      "c2mir": 0.277832
     },
     "deltablue": {
       "category": "macro",
@@ -1109,7 +1136,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1136,13 +1163,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 100.903,
       "lambdajs": 954.753625,
       "quickjs": 100.22,
       "nodejs": 11.644583,
-      "c2mir": null
+      "c2mir": 1.168213
     },
     "havlak": {
       "category": "macro",
@@ -1153,7 +1185,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1180,13 +1212,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 53.641,
       "lambdajs": 43672.719042,
       "quickjs": 3289.043,
       "nodejs": 98.302542,
-      "c2mir": null
+      "c2mir": 1.88501
     },
     "cd": {
       "category": "macro",
@@ -1197,7 +1234,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1224,13 +1261,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 641.438,
       "lambdajs": 9610.033625,
       "quickjs": 962.845,
       "nodejs": 35.915209,
-      "c2mir": null
+      "c2mir": 15.600098
     }
   },
   "beng": {
@@ -1439,7 +1481,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1466,13 +1508,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 0.302,
       "lambdajs": 0.312,
       "quickjs": 0.132,
       "nodejs": 2.138458,
-      "c2mir": null
+      "c2mir": 0.047119
     },
     "regexredux": {
       "category": "regex",
@@ -2075,7 +2122,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -2102,13 +2149,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 16.328,
       "lambdajs": 95.803958,
       "quickjs": 58.84,
       "nodejs": 3.706792,
-      "c2mir": null
+      "c2mir": 2.919189
     },
     "diviter": {
       "category": "iterative",
@@ -2513,7 +2565,7 @@
         "lambdajs": "ok",
         "quickjs": "exit_1",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -2540,13 +2592,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 13.42,
       "lambdajs": 673.452,
       "quickjs": null,
       "nodejs": 17.761,
-      "c2mir": null
+      "c2mir": 0.523193
     },
     "navier_stokes": {
       "category": "numeric",
@@ -2557,7 +2614,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -2584,13 +2641,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 288.378,
       "lambdajs": 709.818,
       "quickjs": 98.667,
       "nodejs": 14.078,
-      "c2mir": null
+      "c2mir": 48.36499
     },
     "splay": {
       "category": "data",
@@ -2601,7 +2663,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -2628,13 +2690,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 229.938,
       "lambdajs": 476.285,
       "quickjs": 146.058,
       "nodejs": 19.756,
-      "c2mir": null
+      "c2mir": 20.380859
     },
     "hashmap": {
       "category": "data",
@@ -2694,7 +2761,7 @@
         "lambdajs": "ok",
         "quickjs": "ok",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -2721,13 +2788,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 297.198,
       "lambdajs": 1713.165,
       "quickjs": 217.525,
       "nodejs": 8.643,
-      "c2mir": null
+      "c2mir": 2.699951
     },
     "raytrace3d": {
       "category": "3d",
@@ -2738,7 +2810,7 @@
         "lambdajs": "ok",
         "quickjs": "exit_1",
         "nodejs": "ok",
-        "c2mir": "missing_port"
+        "c2mir": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -2765,13 +2837,18 @@
           "status_counts": {
             "ok": 3
           }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
         }
       },
       "mir_typed": 157.957,
       "lambdajs": 1038.527,
       "quickjs": null,
       "nodejs": 18.21,
-      "c2mir": null
+      "c2mir": 2.205078
     }
   }
 }

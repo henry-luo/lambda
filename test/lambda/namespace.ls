@@ -12,6 +12,12 @@ import xlink: 'http://www.w3.org/1999/xlink'
 <svg.rect>
 <svg.circle>
 
+"1a. namespaced element tag is greedy across whitespace"
+<svg .rect>
+
+"1b. explicit content boundary admits relative path child"
+<svg; .rect>
+
 "2. namespaced attributes (desugared to sub-maps)"
 <svg.rect svg.width: 100, svg.height: 50>
 <image xlink.href: "#id">

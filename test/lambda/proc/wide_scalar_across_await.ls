@@ -16,7 +16,7 @@ pn child() {
 pn main() {
     let before_int = wide_int()
     let before_float = wide_float()
-    let handle = start child()
+    let handle = start(child)
     let after = wait(handle)^
     // values captured before the suspension must be unchanged after it, and
     // must still be usable as wide operands rather than as tag bits

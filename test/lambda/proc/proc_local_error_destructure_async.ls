@@ -8,7 +8,7 @@ pn child() {
 pn main() {
     let value = 7
     let err = null
-    let handle = start child()
+    let handle = start(child)
     let result = wait(handle)^
     print([value, err is error, result])
 }

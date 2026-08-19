@@ -6,7 +6,7 @@ pn worker() {
 }
 
 pn main() {
-    let handle = start worker()
+    let handle = start(worker)
     send(handle, "a")^
     send(handle, "b")^
     send(handle, "c")^

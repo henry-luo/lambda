@@ -167,6 +167,7 @@ endif
 # grammar.js -> parser.c -> ts-enum.h -> C/C++ source files
 # When grammar.js is modified, the parser and enum header are automatically regenerated
 GRAMMAR_JS = lambda/tree-sitter-lambda/grammar.js
+GRAMMAR_COMMON_JS = lambda/tree-sitter-lambda/grammar-common.js
 PARSER_C = lambda/tree-sitter-lambda/src/parser.c
 GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
@@ -180,7 +181,7 @@ TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 # Generate parser outputs once before deriving the symbol enum.  Independent
 # recipes used to run `tree-sitter generate` concurrently, allowing the header
 # and linked parser archive to retain different symbol-number layouts.
-$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS)
+$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS) $(GRAMMAR_COMMON_JS)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 $(TS_ENUM_H): $(PARSER_C) $(UPDATE_TS_ENUM_SCRIPT)

@@ -63,3 +63,9 @@ len(page?<div>?<p>)    // 1 (<p> inside inner div)
 // === 9. Query with pipe ===
 "--- query + pipe ---"
 page?<p> |> len(~)      // content length of each <p>
+
+// === 10. Query binds inside an unparenthesized arrow body ===
+"--- query precedence ---"
+let query_fn = () => [1, "a", 2]?int
+type(query_fn)
+query_fn()

@@ -5,6 +5,7 @@
 #include "type_contract.hpp"
 #include "type_build.hpp"
 #include "parse_type_pattern.hpp"
+#include "parse_path_expr.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
 #include "../jube/jube_language.h"
@@ -44,11 +45,10 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 #define MAX_BUILD_DEPTH 1000
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
-AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
-AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node);
-AstNode* build_return_type_pattern(Transpiler* tp, TSNode node);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
+static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
+    TSNode diagnostic_node, int arg_count);
 
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol, AstNode* prebuilt_as);
@@ -2121,6 +2121,27 @@ static StrView node_name_text(Transpiler* tp, TSNode node) {
     return text;
 }
 
+static String* canonical_dotted_name(Transpiler* tp, TSNode dotted_node) {
+    // S2.4.3v2 allows grammar extras around a namespace dot, but whitespace
+    // is not part of the qualified identity; assemble it from segment nodes.
+    StrBuf* canonical = strbuf_new();
+    uint32_t count = ts_node_named_child_count(dotted_node);
+    bool has_segment = false;
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(dotted_node, i);
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol != SYM_IDENT && symbol != SYM_SYMBOL) continue;
+        StrView segment = node_name_text(tp, child);
+        if (has_segment) strbuf_append_char(canonical, '.');
+        strbuf_append_str_n(canonical, segment.str, segment.length);
+        has_segment = true;
+    }
+    String* result = name_pool_create_strview(tp->name_pool,
+        (StrView){.str = canonical->str, .length = canonical->length});
+    strbuf_free(canonical);
+    return result;
+}
+
 // check if a name is a reserved type keyword
 bool is_type_keyword(StrView name) {
     static const char* type_keywords[] = {
@@ -2452,6 +2473,17 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
 
         // first recurse to check if the object is a path
         int scheme = collect_path_segments_if_path(tp, object_node, segments);
+        if (scheme < 0) {
+            // `file./` remains an absolute provider path even though `/` is
+            // now a member field rather than a separate navigation CST node.
+            StrView object_source = ts_node_source(tp, object_node);
+            if (ts_node_symbol(object_node) == SYM_IDENT &&
+                    object_source.length == 4 &&
+                    strncmp(object_source.str, "file", 4) == 0 &&
+                    ts_node_symbol(field_node) == SYM_PATH_ROOT) {
+                scheme = PATH_SCHEME_FILE;
+            }
+        }
         if (scheme >= 0) {
             StrView source = ts_node_source(tp, node);
             if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
@@ -2464,25 +2496,6 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
             return scheme;
         }
         return -1;  // not a path
-    }
-    else if (symbol == SYM_NAV_EXPR) {
-        TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
-        TSNode op_node = ts_node_child_by_field_id(node, FIELD_OPERATION);
-        int scheme = collect_path_segments_if_path(tp, object_node, segments);
-        if (scheme < 0) {
-            StrView object_source = ts_node_source(tp, object_node);
-            if (ts_node_symbol(object_node) == SYM_IDENT &&
-                    object_source.length == 4 &&
-                    strncmp(object_source.str, "file", 4) == 0 &&
-                    ts_node_symbol(op_node) == SYM_PATH_ROOT) {
-                scheme = PATH_SCHEME_FILE;
-            }
-        }
-        if (scheme >= 0) {
-            append_path_segment(tp, op_node, segments);
-            return scheme;
-        }
-        return -1;
     }
     else if (symbol == SYM_PRIMARY_EXPR) {
         // unwrap primary_expr
@@ -2500,41 +2513,19 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
 static AstNode* build_path_expr(Transpiler* tp, TSNode node, PathScheme scheme, ArrayList* segments) {
     log_debug("build_path_expr: scheme=%d, segment_count=%d", scheme, segments->length);
 
-    AstPathNode* path_node = (AstPathNode*)alloc_ast_node(tp, AST_NODE_PATH_EXPR, node, sizeof(AstPathNode));
-    path_node->scheme = scheme;
     StrView source = ts_node_source(tp, node);
-    path_node->file_local = scheme == PATH_SCHEME_FILE && source.length >= 6 &&
+    bool file_local = scheme == PATH_SCHEME_FILE && source.length >= 6 &&
         strncmp(source.str, "file./", 6) == 0;
     int first_segment = 0;
-    path_node->authority = NULL;
-    if (scheme == PATH_SCHEME_FILE && !path_node->file_local && segments->length > 0) {
-        AstPathSegment* authority = (AstPathSegment*)segments->data[0];
-        if (authority->type == LPATH_SEG_NORMAL && authority->name) {
-            path_node->authority = authority->name;
+    String* authority = NULL;
+    if (scheme == PATH_SCHEME_FILE && !file_local && segments->length > 0) {
+        AstPathSegment* authority_segment = (AstPathSegment*)segments->data[0];
+        if (authority_segment->type == LPATH_SEG_NORMAL && authority_segment->name) {
+            authority = authority_segment->name;
             first_segment = 1;
         }
     }
-    path_node->segment_count = segments->length - first_segment;
-
-    // allocate array for segments in the pool
-    if (path_node->segment_count > 0) {
-        path_node->segments = (AstPathSegment*)pool_calloc(tp->pool,
-            path_node->segment_count * sizeof(AstPathSegment));
-        for (int i = 0; i < path_node->segment_count; i++) {
-            AstPathSegment* src = (AstPathSegment*)segments->data[i + first_segment];
-            path_node->segments[i] = *src;
-            if (src->name) {
-                log_debug("  segment[%d]: %.*s (type=%d)", i, (int)src->name->len, src->name->chars, src->type);
-            } else {
-                log_debug("  segment[%d]: <wildcard> (type=%d)", i, src->type);
-            }
-        }
-    } else {
-        path_node->segments = NULL;
-    }
-
-    path_node->type = &TYPE_PATH;
-    return (AstNode*)path_node;
+    return build_static_path_ast(tp, node, scheme, authority, segments, first_segment);
 }
 
 
@@ -2859,14 +2850,34 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     return (AstNode*)ast_node;
 }
 
+static AstNode* build_navigation_expr(Transpiler* tp, TSNode node);
+
 // Left-recursive member chains place member_expr directly in object; both CST
 // entry paths must preserve the same path-versus-field interpretation.
 static AstNode* build_member_expr(Transpiler* tp, TSNode member_node) {
+    StrView source = ts_node_source(tp, member_node);
+    AstNode* direct_path = try_parse_path_expr_text(tp, source.str,
+        source.str + source.length, member_node);
+    if (direct_path) {
+        // Provider schemes begin as identifiers, so their CST is a member
+        // chain; prefer the shared text parser before treating it as a field.
+        return direct_path;
+    }
+
     ArrayList* segments = arraylist_new(8);
     int scheme = collect_path_segments_if_path(tp, member_node, segments);
-    AstNode* result = scheme >= 0 ?
-        build_path_expr(tp, member_node, (PathScheme)scheme, segments) :
-        build_field_expr(tp, member_node, AST_NODE_MEMBER_EXPR);
+    TSNode field_node = ts_node_child_by_field_id(member_node, FIELD_FIELD);
+    TSSymbol field_symbol = ts_node_symbol(field_node);
+    AstNode* result = NULL;
+    if (scheme >= 0) {
+        result = build_path_expr(tp, member_node, (PathScheme)scheme, segments);
+    }
+    else if (field_symbol == SYM_PATH_PARENT || field_symbol == SYM_PATH_ROOT) {
+        result = build_navigation_expr(tp, member_node);
+    }
+    else {
+        result = build_field_expr(tp, member_node, AST_NODE_MEMBER_EXPR);
+    }
     arraylist_free(segments);
     return result;
 }
@@ -2980,6 +2991,162 @@ static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_coun
     return NULL;
 }
 
+static bool start_option_name_is(AstNamedNode* option, const char* name) {
+    size_t length = strlen(name);
+    return option && option->name && option->name->len == (int)length &&
+        memcmp(option->name->chars, name, length) == 0;
+}
+
+static const char* start_literal_symbol(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || !node->type || node->type->type_id != LMD_TYPE_SYMBOL ||
+            !node->type->is_literal) return NULL;
+    Symbol* symbol = (Symbol*)((TypeSymbol*)node->type)->string;
+    return symbol ? symbol->chars : NULL;
+}
+
+static bool parse_start_options(Transpiler* tp, AstNode* options,
+        TSNode call_node, StartMode* mode) {
+    *mode = START_MODE_TASK;
+    if (!options) return true;
+    AstNode* root = ast_unwrap_primary(options);
+    if (!root || root->node_type != AST_NODE_MAP) {
+        record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            "`start` options must be a map literal");
+        return false;
+    }
+
+    bool saw_mode = false;
+    bool valid = true;
+    for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "`start` options cannot use spread fields");
+            valid = false;
+            continue;
+        }
+        AstNamedNode* option = (AstNamedNode*)item;
+        if (!start_option_name_is(option, "mode")) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "unknown `start` option '%.*s'",
+                option->name ? option->name->len : 0,
+                option->name ? option->name->chars : "");
+            valid = false;
+            continue;
+        }
+        if (saw_mode) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "duplicate `start` option 'mode'");
+            valid = false;
+            continue;
+        }
+        saw_mode = true;
+        const char* value = start_literal_symbol(option->as);
+        if (!value) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "`start` option 'mode' must be the literal symbol 'task', 'thread', or 'process'");
+            valid = false;
+        } else if (strcmp(value, "task") == 0) {
+            *mode = START_MODE_TASK;
+        } else if (strcmp(value, "thread") == 0) {
+            *mode = START_MODE_THREAD;
+        } else if (strcmp(value, "process") == 0) {
+            *mode = START_MODE_PROCESS;
+        } else {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "invalid `start` mode '%s'; expected 'task', 'thread', or 'process'", value);
+            valid = false;
+        }
+    }
+
+    if (valid && *mode != START_MODE_TASK) {
+        const char* value = *mode == START_MODE_THREAD ? "thread" : "process";
+        record_semantic_error(tp, call_node, ERR_NOT_IMPLEMENTED,
+            "`start` mode '%s' is not implemented yet; use 'task'", value);
+        valid = false;
+    }
+    return valid;
+}
+
+static AstNode* build_start_call(Transpiler* tp, AstCallNode* source_call,
+        TSNode call_node, int arg_count) {
+    AstStartNode* start = (AstStartNode*)alloc_ast_node(
+        tp, AST_NODE_START, call_node, sizeof(AstStartNode));
+    start->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
+    start->owner_scope = tp->current_scope;
+    start->mode = START_MODE_TASK;
+
+    if (arg_count < 1 || arg_count > 3) {
+        record_semantic_error(tp, call_node, ERR_ARGUMENT_COUNT_MISMATCH,
+            "`start` expects 1 to 3 arguments, got %d", arg_count);
+        start->type = &TYPE_ERROR;
+        return (AstNode*)start;
+    }
+
+    AstNode* target = source_call->argument;
+    AstNode* args = target ? target->next : NULL;
+    AstNode* options = args ? args->next : NULL;
+    for (AstNode* arg = target; arg; arg = arg->next) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) {
+            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                "`start` uses positional arguments: start(pn, args, options)");
+            start->type = &TYPE_ERROR;
+            return (AstNode*)start;
+        }
+    }
+    if (target) target->next = NULL;
+    if (args) args->next = NULL;
+    if (options) options->next = NULL;
+
+    TypeFunc* fn_type = target && target->type && target->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)target->type : NULL;
+    if (!fn_type || !fn_type->is_proc) {
+        record_semantic_error(tp, call_node, ERR_INVALID_CALL,
+            "`start` first argument must resolve to a procedure (pn)");
+        start->type = &TYPE_ERROR;
+    }
+
+    AstNode* args_root = args ? ast_unwrap_primary(args) : NULL;
+    if (args && (!args->type || args->type->type_id != LMD_TYPE_ARRAY)) {
+        record_semantic_error(tp, call_node, ERR_ARGUMENT_TYPE_MISMATCH,
+            "`start` second argument must be an argument array");
+        start->type = &TYPE_ERROR;
+    }
+    if (!parse_start_options(tp, options, call_node, &start->mode)) {
+        start->type = &TYPE_ERROR;
+    }
+
+    AstCallNode* target_call = (AstCallNode*)alloc_ast_node(
+        tp, AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
+    target_call->function = target;
+    target_call->argument = args;
+    target_call->type = fn_type ? function_call_result_type(tp, fn_type) : &TYPE_ERROR;
+    target_call->can_raise = fn_type ? fn_type->can_raise : false;
+    start->call = target_call;
+
+    if (fn_type && args_root && args_root->node_type == AST_NODE_ARRAY) {
+        AstArrayNode* literal_args = (AstArrayNode*)args_root;
+        for (AstNode* item = literal_args->item; item; item = item->next) {
+            if (item->node_type == AST_NODE_ASSIGN) {
+                record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+                    "`start` argument arrays cannot contain declarations");
+                start->type = &TYPE_ERROR;
+                return (AstNode*)start;
+            }
+        }
+        AstCallNode validation_call = *target_call;
+        validation_call.argument = literal_args->item;
+        if (!validate_lambda_call_arguments(tp, &validation_call, call_node,
+                (int)((TypeArray*)literal_args->type)->length)) {
+            start->type = &TYPE_ERROR;
+        }
+    }
+    return (AstNode*)start;
+}
+
 static bool validate_lambda_argument_limit(Transpiler* tp, TSNode node,
         int count, const char* subject) {
     if (count <= LAMBDA_MAX_FUNCTION_ARGS) return true;
@@ -2987,6 +3154,111 @@ static bool validate_lambda_argument_limit(Transpiler* tp, TSNode node,
         "%s count %d exceeds Core Lambda limit %d; use a rest parameter or an array/map",
         subject, count, LAMBDA_MAX_FUNCTION_ARGS);
     return false;
+}
+
+static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
+        TSNode diagnostic_node, int arg_count) {
+    if (!call || !call->function || !call->function->type ||
+            call->function->type->type_id != LMD_TYPE_FUNC) return true;
+
+    TypeFunc* func_type = (TypeFunc*)call->function->type;
+    TypeParam* expected_param = func_type->param;
+    AstNode* arg = call->argument;
+    int arg_index = 0;
+    int line = ts_node_start_point(diagnostic_node).row + 1;
+    String* var_arg_roots[64];
+    int var_arg_root_count = 0;
+    bool parameter_short_circuits_error = false;
+
+    // A statically resolved function cannot manufacture missing values. The
+    // validator is shared by direct calls and start(pn, literal_args), keeping
+    // launch syntax from weakening the ordinary call contract.
+    if (ast_called_function_signature_ready(call->function) &&
+            (arg_count < func_type->required_param_count ||
+             (!func_type->is_variadic && arg_count > func_type->param_count))) {
+        record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
+            "function expects %d%s argument%s, got %d",
+            func_type->required_param_count,
+            func_type->is_variadic ? " or more" : "",
+            func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
+            arg_count);
+        if (!should_continue_transpiling(tp)) {
+            call->type = &TYPE_ERROR;
+            return false;
+        }
+    }
+
+    while (arg && expected_param) {
+        if (expected_param->is_var_param) {
+            AstIdentNode* root = compound_root_ident(arg);
+            if (!root || !root->entry || !root->entry->is_mutable) {
+                record_semantic_error(tp, diagnostic_node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "argument %d for `var` parameter must be a mutable `var` binding",
+                    arg_index + 1);
+                if (!should_continue_transpiling(tp)) {
+                    call->type = &TYPE_ERROR;
+                    return false;
+                }
+            } else {
+                for (int i = 0; i < var_arg_root_count; i++) {
+                    if (same_name_string(var_arg_roots[i], root->name)) {
+                        record_semantic_error(tp, diagnostic_node, ERR_IMMUTABLE_ASSIGNMENT,
+                            "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                            arg_index + 1);
+                        break;
+                    }
+                }
+                if (var_arg_root_count < 64) {
+                    var_arg_roots[var_arg_root_count++] = root->name;
+                }
+            }
+            if (!type_exact_match(arg->type, expected_param)) {
+                Type* full_type = parameter_boundary_type(expected_param);
+                char expected_name[128];
+                char actual_name[128];
+                lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
+                lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
+                record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
+                    "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
+                    arg_index + 1, expected_name, actual_name);
+                if (!should_continue_transpiling(tp)) {
+                    call->type = &TYPE_ERROR;
+                    return false;
+                }
+            }
+        }
+        Type* full_type = parameter_boundary_type(expected_param);
+        if (expected_param->contract_type &&
+                !lambda_type_accepts_error(expected_param->contract_type) &&
+                lambda_type_accepts_error(arg->type)) {
+            parameter_short_circuits_error = true;
+        }
+        StaticBoundaryResult relation = lambda_type_accepts_error(arg->type)
+            ? static_parameter_boundary_relation(arg->type, full_type)
+            : static_boundary_relation(arg->type, full_type);
+        bool compatible = relation != STATIC_BOUNDARY_REJECTED;
+        if (!compatible) compatible = typed_array_argument_compatible(arg, full_type);
+        if (arg->type && !compatible) {
+            char expected_name[128];
+            char actual_name[128];
+            lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
+            lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
+            record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
+                "argument %d expected %s, got %s",
+                arg_index + 1, expected_name, actual_name);
+            if (!should_continue_transpiling(tp)) {
+                call->type = &TYPE_ERROR;
+                return false;
+            }
+        }
+        arg = arg->next;
+        expected_param = expected_param->next;
+        arg_index++;
+    }
+    if (parameter_short_circuits_error) {
+        call->type = lambda_type_union_normalized(tp->pool, call->type, &TYPE_ERROR);
+    }
+    return true;
 }
 
 static bool resolve_imported_module_method(Transpiler* tp, TSNode object_node,
@@ -3264,6 +3536,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         log_debug("build sys call");
         if (sys_func_info->is_proc) {
             if (!tp->current_scope->is_proc) {
+                if (sys_func_info->fn == SYSPROC_START) {
+                    record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                        "`start` is only allowed inside a procedure (pn)");
+                    ast_node->type = &TYPE_ERROR;
+                    return (AstNode*)ast_node;
+                }
                 const char* fn_name = is_method_call ? method_name.str : func_name.str;
                 int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
                 record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
@@ -3372,6 +3650,13 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
 
+    if (sys_func_info && sys_func_info->fn == SYSPROC_START) {
+        // The ordinary call surface must still become a distinct semantic node:
+        // scope-exit joins, return escape, and mutable-capture rejection all
+        // depend on recognizing task creation after grammar has forgotten it.
+        return build_start_call(tp, ast_node, call_node, arg_count);
+    }
+
     bool has_named_arguments = false;
     for (AstNode* call_arg = ast_node->argument; call_arg; call_arg = call_arg->next) {
         if (call_arg->node_type == AST_NODE_NAMED_ARG) {
@@ -3435,115 +3720,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
-    // Validate argument types against parameter types (for user-defined functions)
-    if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
-        TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
-        TypeParam* expected_param = func_type->param;
-        AstNode* arg = ast_node->argument;
-        int arg_index = 0;
-        int line = ts_node_start_point(call_node).row + 1;
-        String* var_arg_roots[64];
-        int var_arg_root_count = 0;
-        bool parameter_short_circuits_error = false;
-
-        // A statically resolved function cannot manufacture missing values.
-        // The old emitter padded absent native parameters with zero/null before
-        // their contracts ran, which made arity a representation-dependent bug.
-        if (ast_called_function_signature_ready(ast_node->function) &&
-                (arg_count < func_type->required_param_count ||
-                 (!func_type->is_variadic && arg_count > func_type->param_count))) {
-            record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
-                "function expects %d%s argument%s, got %d",
-                func_type->required_param_count,
-                func_type->is_variadic ? " or more" : "",
-                func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
-                arg_count);
-            if (!should_continue_transpiling(tp)) {
-                ast_node->type = &TYPE_ERROR;
-                return (AstNode*)ast_node;
-            }
-        }
-
-        while (arg && expected_param) {
-            if (expected_param->is_var_param) {
-                AstIdentNode* root = compound_root_ident(arg);
-                if (!root || !root->entry || !root->entry->is_mutable) {
-                    record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
-                        "argument %d for `var` parameter must be a mutable `var` binding",
-                        arg_index + 1);
-                    if (!should_continue_transpiling(tp)) {
-                        ast_node->type = &TYPE_ERROR;
-                        return (AstNode*)ast_node;
-                    }
-                } else {
-                    for (int i = 0; i < var_arg_root_count; i++) {
-                        if (same_name_string(var_arg_roots[i], root->name)) {
-                            record_semantic_error(tp, call_node, ERR_IMMUTABLE_ASSIGNMENT,
-                                "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
-                                arg_index + 1);
-                            break;
-                        }
-                    }
-                    if (var_arg_root_count < 64) {
-                        var_arg_roots[var_arg_root_count++] = root->name;
-                    }
-                }
-                if (!type_exact_match(arg->type, expected_param)) {
-                    Type* full_type = parameter_boundary_type(expected_param);
-                    char expected_name[128];
-                    char actual_name[128];
-                    lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
-                    lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
-                    record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
-                        "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
-                        arg_index + 1,
-                        expected_name, actual_name);
-                    if (!should_continue_transpiling(tp)) {
-                        ast_node->type = &TYPE_ERROR;
-                        return (AstNode*)ast_node;
-                    }
-                }
-            }
-            Type* full_type = parameter_boundary_type(expected_param);
-            if (expected_param->contract_type &&
-                    !lambda_type_accepts_error(expected_param->contract_type) &&
-                    lambda_type_accepts_error(arg->type)) {
-                // The caller preserves this error before invoking the raw
-                // body. Retain that ordinary ItemError result in the call's
-                // type so downstream native lowering stays boxed.
-                parameter_short_circuits_error = true;
-            }
-            StaticBoundaryResult relation = lambda_type_accepts_error(arg->type)
-                ? static_parameter_boundary_relation(arg->type, full_type)
-                : static_boundary_relation(arg->type, full_type);
-            bool compatible = relation != STATIC_BOUNDARY_REJECTED;
-            if (!compatible) {
-                compatible = typed_array_argument_compatible(arg, full_type);
-            }
-            if (arg->type && !compatible) {
-                // Extended contracts use the internal `type` tag. Format the
-                // full contract so a rejected union names its usable arms.
-                char expected_name[128];
-                char actual_name[128];
-                lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
-                lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
-                record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
-                    "argument %d expected %s, got %s",
-                    arg_index + 1,
-                    expected_name, actual_name);
-                if (!should_continue_transpiling(tp)) {
-                    ast_node->type = &TYPE_ERROR;
-                    return (AstNode*)ast_node;
-                }
-            }
-            arg = arg->next;
-            expected_param = expected_param->next;
-            arg_index++;
-        }
-        if (parameter_short_circuits_error) {
-            ast_node->type = lambda_type_union_normalized(tp->pool,
-                ast_node->type, &TYPE_ERROR);
-        }
+    if (!validate_lambda_call_arguments(tp, ast_node, call_node, arg_count)) {
+        return (AstNode*)ast_node;
     }
 
     log_debug("end building call expr type: %p, %d, is_const:%d, can_raise:%d, propagate:%d",
@@ -4618,25 +4796,13 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
 
 static AstNode* build_navigation_expr(Transpiler* tp, TSNode node) {
     TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
-    TSNode operation_node = ts_node_child_by_field_id(node, FIELD_OPERATION);
+    TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
     AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
         AST_NODE_NAVIGATION_EXPR, node, sizeof(AstNavigationNode));
     nav->object = build_expr(tp, object_node);
-    nav->root = ts_node_symbol(operation_node) == SYM_PATH_ROOT;
+    nav->root = ts_node_symbol(field_node) == SYM_PATH_ROOT;
     nav->type = nav->object ? nav->object->type : &TYPE_ANY;
     return (AstNode*)nav;
-}
-
-// Provider roots such as file./ are complete static paths even without a
-// following key; ordinary value./ remains dynamic navigation.
-static AstNode* build_navigation_or_path_expr(Transpiler* tp, TSNode node) {
-    ArrayList* segments = arraylist_new(8);
-    int scheme = collect_path_segments_if_path(tp, node, segments);
-    AstNode* result = scheme >= 0
-        ? build_path_expr(tp, node, (PathScheme)scheme, segments)
-        : build_navigation_expr(tp, node);
-    arraylist_free(segments);
-    return result;
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
@@ -4786,19 +4952,20 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_PATH_EXPR) {
-        // path_expr: (/ | . | ..) with optional field
-        ArrayList* segments = arraylist_new(8);
-        int scheme = collect_path_segments_if_path(tp, child, segments);
-        ast_node->expr = build_path_expr(tp, child, (PathScheme)scheme, segments);
+        // The production grammar keeps only the ambiguous logical-root '/'
+        // structural; the direct parser owns the complete static path span.
+        StrView source = ts_node_source(tp, child);
+        ast_node->expr = parse_path_expr_text(tp, source.str,
+            source.str + source.length, child);
+        if (!ast_node->expr) {
+            ast_node->expr = alloc_ast_node(tp, AST_NODE_PATH_EXPR, child,
+                sizeof(AstNode));
+            ast_node->expr->type = &TYPE_PATH;
+        }
         ast_node->type = ast_node->expr->type;
-        arraylist_free(segments);
     }
     else if (symbol == SYM_MEMBER_EXPR) {
         ast_node->expr = build_member_expr(tp, child);
-        ast_node->type = ast_node->expr->type;
-    }
-    else if (symbol == SYM_NAV_EXPR) {
-        ast_node->expr = build_navigation_or_path_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_CURRENT_PARENT_EXPR) {
@@ -4818,15 +4985,23 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
         TSNode field_node = ts_node_child_by_field_id(child, FIELD_FIELD);
 
-        // Check if the object is a path expression
+        // A static path is now opaque to Tree-sitter, so reconstruct its base
+        // directly from the object's source before using the legacy CST walk.
+        // This preserves every static segment before the dynamic bracket.
+        StrView object_source = ts_node_source(tp, object_node);
+        AstNode* direct_path = try_parse_path_expr_text(tp, object_source.str,
+            object_source.str + object_source.length, object_node);
+
+        // Check if the object is a path expression in the full grammar.
         ArrayList* segments = arraylist_new(8);
         int scheme = collect_path_segments_if_path(tp, object_node, segments);
 
-        if (scheme >= 0) {
+        if (direct_path || scheme >= 0) {
             // It's a path subscript expression: path[expr]
             // Build it as a special AST_NODE_PATH_INDEX_EXPR
             AstPathIndexNode* path_idx = (AstPathIndexNode*)alloc_ast_node(tp, AST_NODE_PATH_INDEX_EXPR, child, sizeof(AstPathIndexNode));
-            path_idx->base_path = build_path_expr(tp, object_node, (PathScheme)scheme, segments);
+            path_idx->base_path = direct_path ? direct_path :
+                build_path_expr(tp, object_node, (PathScheme)scheme, segments);
             path_idx->segment_expr = build_expr(tp, field_node);
             path_idx->type = &TYPE_PATH;  // result is still a path
             ast_node->expr = (AstNode*)path_idx;
@@ -6926,10 +7101,8 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         return (StrView) { .str = NULL, .length = 0 };
     }
     case sym_dotted_name: {
-        // a.b.'c' - return the full text including dots
-        int start_byte = ts_node_start_byte(key_node);
-        int end_byte = ts_node_end_byte(key_node);
-        return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+        String* canonical = canonical_dotted_name(tp, key_node);
+        return (StrView) { .str = canonical->chars, .length = canonical->len };
     }
     case SYM_SYMBOL:  case SYM_STRING: {
         // todo: handle string and symbol escape
@@ -7447,27 +7620,7 @@ AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;
 }
 
-// Build a return_occurrence_type: (base_type | identifier) occurrence?
-// This is a simplified type used only in return type context to avoid map_type ambiguity
-AstNode* build_return_occurrence_type(Transpiler* tp, TSNode node) {
-    log_debug("build return occurrence type");
-    uint32_t child_count = ts_node_named_child_count(node);
-    if (child_count == 0) {
-        // anonymous children only — try first child
-        TSNode child = ts_node_child(node, 0);
-        return build_expr(tp, child);
-    }
-    // Check if there's an occurrence modifier
-    TSNode first = ts_node_named_child(node, 0);
-    if (child_count == 1) {
-        // just base_type or identifier, no occurrence
-        return build_expr(tp, first);
-    }
-    // Has occurrence: treat like occurrence_type
-    return build_occurrence_type(tp, node);
-}
-
-static AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
+AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
         AstNode* left, AstNode* right, Type* left_type, Type* right_type,
         Operator op, StrView op_str) {
     AstBinaryNode* binary = (AstBinaryNode*)alloc_ast_node(tp,
@@ -7486,52 +7639,6 @@ static AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
     arraylist_append(tp->type_list, binary->type);
     type->type_index = tp->type_list->length - 1;
     return binary;
-}
-
-// Build a return_type_pattern: return_occurrence_type (('|'|'&'|'!') return_occurrence_type)*
-// If single type, delegates. If multiple, builds a binary type chain.
-AstNode* build_return_type_pattern(Transpiler* tp, TSNode node) {
-    log_debug("build return type pattern");
-    // Collect all 'type' field children
-    uint32_t count = ts_node_child_count(node);
-    
-    // First type child
-    TSNode first_type = ts_node_child_by_field_id(node, FIELD_TYPE);
-    if (ts_node_is_null(first_type)) {
-        log_error("return type pattern: no type children");
-        return NULL;
-    }
-    
-    AstNode* result = build_return_occurrence_type(tp, first_type);
-    
-    // Check for operator + type pairs
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_child(node, i);
-        StrView child_str = ts_node_source(tp, child);
-        if (child_str.length == 1 && (child_str.str[0] == '|' || child_str.str[0] == '&' || child_str.str[0] == '!')) {
-            // next named sibling should be the right type
-            i++;
-            while (i < count) {
-                TSNode right_child = ts_node_child(node, i);
-                if (ts_node_is_named(right_child)) {
-                    AstNode* right = build_return_occurrence_type(tp, right_child);
-                    Operator op = OPERATOR_UNION;
-                    if (child_str.str[0] == '&') op = OPERATOR_OR;
-                    else if (child_str.str[0] == '!') op = OPERATOR_EXCLUDE;
-                    // Type expressions carry a TypeType wrapper in the AST;
-                    // a binary contract must retain the wrapped value types.
-                    // Storing the wrappers made `int | error` behave as the
-                    // meta-type `type` at every downstream boundary.
-                    AstBinaryNode* bin = build_registered_binary_type(tp, node,
-                        result, right, result->type, right->type, op, child_str);
-                    result = (AstNode*)bin;
-                    break;
-                }
-                i++;
-            }
-        }
-    }
-    return result;
 }
 
 // Helper function to parse occurrence count from string like "[]", "[2]", "[2, 5]", "[2+]"
@@ -7593,222 +7700,28 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
 }
 
-static Type* build_declared_error_type(Transpiler* tp, TSNode error_node) {
-    Type* error_type = &TYPE_ERROR;
-    if (!ts_node_is_null(error_node)) {
-        // error_node is an error_type_pattern: 'error' | '.' | identifier
-        TSSymbol error_symbol = ts_node_symbol(error_node);
-        StrView error_str = ts_node_source(tp, error_node);
-
-        if (error_symbol == SYM_RETURN_TYPE_PATTERN) {
-            // Get the actual child: 'error', '.', or identifier
-            TSNode child = ts_node_child(error_node, 0);
-            if (!ts_node_is_null(child)) {
-                error_symbol = ts_node_symbol(child);
-                error_str = ts_node_source(tp, child);
-            }
-        }
-
-        // Check what kind of error type pattern we have
-        if (strview_equal(&error_str, "error")) {
-            // 'error' keyword - use base error type
-            error_type = &TYPE_ERROR;
-        } else if (error_symbol == sym_identifier) {
-            // Named error type - look it up
-            AstNode* error_type_expr = build_expr(tp, error_node);
-            if (error_type_expr && error_type_expr->type && error_type_expr->type->type_id == LMD_TYPE_TYPE) {
-                error_type = ((TypeType*)error_type_expr->type)->type;
-            } else {
-                log_error("Error: invalid error type '%.*s' - not a valid type",
-                    (int)error_str.length, error_str.str);
-                error_type = &TYPE_ERROR;
-            }
-        } else {
-            // Fallback - treat as generic error
-            error_type = &TYPE_ERROR;
-        }
-    }
-    return error_type;
-}
-
-// Build return type node with optional error type: T or T^E or T^
-// Returns a TypeType wrapping TypeFunc with the return type info
-AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
-    log_debug("build return type");
-
-    // Get the "ok" field (required - the success return type)
-    TSNode ok_node = ts_node_child_by_field_id(return_type_node, field_ok);
-    if (ts_node_is_null(ok_node)) {
-        log_error("Error: return type missing success type");
-        return NULL;
-    }
-
-    AstNode* ok_type_expr = build_expr(tp, ok_node);
-    if (!ok_type_expr) {
-        log_error("Error: failed to parse success return type");
-        return NULL;
-    }
-
-    // Validate that ok_type_expr is actually a type (TypeType)
-    Type* ok_type = NULL;
-    if (ok_type_expr->type && ok_type_expr->type->type_id == LMD_TYPE_TYPE) {
-        ok_type = ((TypeType*)ok_type_expr->type)->type;
-    } else {
-        StrView type_str = ts_node_source(tp, ok_node);
-        log_error("Error: invalid return type '%.*s' - not a valid type",
-            (int)type_str.length, type_str.str);
-        ok_type = set_type_any(tp, ANY_ERROR_RECOVERY);
-    }
-
-    // Check for optional error type: T^E or T^
-    TSNode error_node = ts_node_child_by_field_id(return_type_node, field_error);
-    Type* error_type = NULL;
-    bool can_raise = false;
-
-    // Check if there's a ^ in the return type (either T^E or T^.)
-    // The ^ token indicates the function can raise errors
-    TSTreeCursor cursor = ts_tree_cursor_new(return_type_node);
-    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
-    while (has_child) {
-        TSNode child = ts_tree_cursor_current_node(&cursor);
-        StrView child_str = ts_node_source(tp, child);
-        if (child_str.length == 1 && child_str.str[0] == '^') {
-            can_raise = true;
-            break;
-        }
-        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-
-    if (!ts_node_is_null(error_node)) {
-        error_type = build_declared_error_type(tp, error_node);
-        can_raise = true;
-    } else if (can_raise) {
-        // T^ - any error type (inferred)
-        error_type = &TYPE_ERROR;
-    }
-
-    // Create a temporary structure to hold the return type info
-    // We'll return the ok_type_expr with additional info attached via a wrapper
-    // For now, we'll use a special approach: store error_type info in the type list
-    // and return the ok_type_expr augmented with metadata
-
-    // Store the error type and can_raise info in a custom way
-    // For function declarations, the caller (build_func) will extract this info
-    // We'll use a TypeFunc wrapper to carry the return type + error type info
-    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, return_type_node, sizeof(AstFuncNode));
+AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
+        Type* returned, Type* error_type, bool can_raise) {
+    // Both grammar paths must carry exactly this compact TypeFunc contract;
+    // build_func reads it before replacing the wrapper with the declared fn.
+    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE,
+        node, sizeof(AstFuncNode));
     wrapper_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     ((TypeType*)wrapper_node->type)->type = (Type*)fn_type_info;
 
-    fn_type_info->returned = ok_type;
-    fn_type_info->inferred_return = ok_type;
-    set_function_return_contract(fn_type_info, ok_type, true);
+    fn_type_info->returned = returned;
+    fn_type_info->inferred_return = returned;
+    set_function_return_contract(fn_type_info, returned, true);
     fn_type_info->error_type = error_type;
     fn_type_info->can_raise = can_raise;
 
     log_debug("return type: ok=%d, error=%d, can_raise=%d",
-        ok_type ? ok_type->type_id : -1,
+        returned ? returned->type_id : -1,
         error_type ? error_type->type_id : -1,
         can_raise);
 
     return (AstNode*)wrapper_node;
-}
-
-static void find_occurrence_nodes(TSNode type_node, TSNode* operand_out, TSNode* operator_out) {
-    TSNode operand_node = ts_node_child_by_field_id(type_node, FIELD_OPERAND);
-    TSNode operator_node = ts_node_child_by_field_id(type_node, FIELD_OPERATOR);
-
-    // return_occurrence_type has an optional named `occurrence` child. Tree-sitter
-    // may select the production without preserving its optional field map, so
-    // recover the two structural children instead of treating a valid `T?`
-    // contract as a malformed node.
-    uint32_t child_count = ts_node_named_child_count(type_node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        TSNode child = ts_node_named_child(type_node, i);
-        if (ts_node_symbol(child) == sym_occurrence) {
-            if (ts_node_is_null(operator_node)) operator_node = child;
-        } else if (ts_node_is_null(operand_node)) {
-            operand_node = child;
-        }
-    }
-
-    *operand_out = operand_node;
-    *operator_out = operator_node;
-}
-
-AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
-    log_debug("build occurrence type");
-    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
-    ((TypeType*)ast_node->type)->type = (Type*)type;
-
-    // initialize occurrence counts to defaults
-    type->min_count = 0;
-    type->max_count = -1;
-
-    TSNode operand_node = {0};
-    TSNode op_node = {0};
-    find_occurrence_nodes(occurrence_node, &operand_node, &op_node);
-    if (ts_node_is_null(op_node) || ts_node_is_null(operand_node)) {
-        record_semantic_error(tp, occurrence_node, ERR_INVALID_LITERAL,
-            "occurrence type requires both an operand and modifier");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-    TSSymbol op_symbol = ts_node_symbol(op_node);
-    StrView op = ts_node_source(tp, op_node);
-    ast_node->op_str = op;
-
-    // The op_node is the 'occurrence' node which is a choice of '?', '+', '*', or occurrence_count
-    // When it's occurrence_count, we need to check the first child or the source text
-    // Check if op_symbol is 'occurrence' (the parent choice) and if it contains occurrence_count
-    if (op_symbol == sym_occurrence) {
-        // Get the first child which should be the actual choice
-        TSNode actual_op = ts_node_child(op_node, 0);
-        if (!ts_node_is_null(actual_op)) {
-            op_symbol = ts_node_symbol(actual_op);
-            log_debug("occurrence child symbol: %d (SYM_OCCURRENCE_COUNT=%d)", op_symbol, SYM_OCCURRENCE_COUNT);
-        }
-    }
-
-    log_debug("build occurrence: op_symbol=%d, SYM_OCCURRENCE_COUNT=%d, op='%.*s'",
-              op_symbol, SYM_OCCURRENCE_COUNT, (int)op.length, op.str);
-
-    if (op_symbol == SYM_OCCURRENCE_COUNT) {
-        // Handle [n], [n, m], [n+] syntax
-        ast_node->op = OPERATOR_REPEAT;
-        parse_occurrence_count(op, &type->min_count, &type->max_count);
-        log_debug("occurrence count: %.*s -> min=%d, max=%d", (int)op.length, op.str, type->min_count, type->max_count);
-    } else if (strview_equal(&op, "?")) {
-        ast_node->op = OPERATOR_OPTIONAL;
-        type->min_count = 0;
-        type->max_count = 1;
-    } else if (strview_equal(&op, "+")) {
-        ast_node->op = OPERATOR_ONE_MORE;
-        type->min_count = 1;
-        type->max_count = -1;
-    } else if (strview_equal(&op, "*")) {
-        ast_node->op = OPERATOR_ZERO_MORE;
-        type->min_count = 0;
-        type->max_count = -1;
-    } else {
-        log_debug("unknown operator: %.*s", (int)op.length, op.str);
-    }
-
-    type->op = ast_node->op;
-
-    ast_node->operand = build_expr(tp, operand_node);
-    type->operand = ast_node->operand->type;
-
-    // Register the type in the type list for runtime access
-    arraylist_append(tp->type_list, type);
-    type->type_index = tp->type_list->length - 1;
-    log_debug("occurrence type index: %d, op=%d, min=%d, max=%d", type->type_index, type->op, type->min_count, type->max_count);
-
-    // log_debug("built occurrence type with modifier '%c' for base type %d", modifier, node_type->type->type_id);
-    return (AstNode*)ast_node;
 }
 
 // todo: build reference type
@@ -7918,15 +7831,15 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     TSNode first_child = ts_node_named_child(elmt_node, 0);
     TSSymbol first_sym = ts_node_symbol(first_child);
     StrView tag_name = {};
+    String* dotted_tag_name = NULL;
     if (first_sym == SYM_IDENT) {
         tag_name = ts_node_source(tp, first_child);
     } else if (first_sym == SYM_SYMBOL) {
         tag_name = ts_node_source(tp, first_child);
         if (tag_name.length >= 2) { tag_name.str++; tag_name.length -= 2; }
     } else if (first_sym == sym_dotted_name) {
-        int sb = ts_node_start_byte(first_child);
-        int eb = ts_node_end_byte(first_child);
-        tag_name = { .str = tp->source + sb, .length = static_cast<size_t>(eb - sb) };
+        dotted_tag_name = canonical_dotted_name(tp, first_child);
+        tag_name = { .str = dotted_tag_name->chars, .length = dotted_tag_name->len };
     }
 
     // check if tag name resolves to an object type definition
@@ -8015,10 +7928,8 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             type->name.length = pooled_name->len;
         }
         else if (symbol == sym_dotted_name) {  // dotted element name (a.b.'c')
-            int start_byte = ts_node_start_byte(child);
-            int end_byte = ts_node_end_byte(child);
-            StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
-            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            String* pooled_name = dotted_tag_name
+                ? dotted_tag_name : canonical_dotted_name(tp, child);
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
             // look up namespace prefix (first segment) and set TypeElmt.ns
@@ -9285,49 +9196,6 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
     ast_node->type = ast_node->as ? ast_node->as->type : &TYPE_ANY;
 
     log_debug("named argument: %s", ast_node->name);
-    return (AstNode*)ast_node;
-}
-
-static AstNode* build_start_expr(Transpiler* tp, TSNode start_node) {
-    AstStartNode* ast_node = (AstStartNode*)alloc_ast_node(
-        tp, AST_NODE_START, start_node, sizeof(AstStartNode));
-    ast_node->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
-    ast_node->owner_scope = tp->current_scope;
-
-    // The contextual scanner admits `start` only before a named call operand;
-    // accepting that spawn effect in an fn would violate the fn/pn boundary.
-    if (!tp->current_scope || !tp->current_scope->is_proc) {
-        record_semantic_error(tp, start_node, ERR_PROC_IN_FN,
-            "`start` is only allowed inside a procedure (pn)");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    TSNode operand_node = ts_node_child_by_field_id(start_node, FIELD_OPERAND);
-    AstNode* operand = build_expr(tp, operand_node);
-    log_debug("concurrency start AST: operand syntax=%s ast=%d",
-        ts_node_type(operand_node), operand ? (int)operand->node_type : -1);
-    if (operand && operand->node_type == AST_NODE_PRIMARY) {
-        operand = ((AstPrimaryNode*)operand)->expr;
-        log_debug("concurrency start AST: unwrapped primary ast=%d",
-            operand ? (int)operand->node_type : -1);
-    }
-    if (!operand || operand->node_type != AST_NODE_CALL_EXPR) {
-        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
-            "`start` operand must be a procedure call");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    ast_node->call = (AstCallNode*)operand;
-    AstNode* callee = ast_node->call->function;
-    TypeFunc* fn_type = callee && callee->type && callee->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)callee->type : NULL;
-    if (!fn_type || !fn_type->is_proc) {
-        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
-            "`start` operand must resolve to a procedure (pn) call");
-        ast_node->type = &TYPE_ERROR;
-    }
     return (AstNode*)ast_node;
 }
 
@@ -11132,6 +11000,34 @@ static AstNode* build_primary_type_pattern_token(Transpiler* tp, TSNode node) {
     return built;
 }
 
+static AstNode* build_return_type_token(Transpiler* tp, TSNode node) {
+    StrView src = ts_node_source(tp, node);
+    AstNode* built = parse_return_type_text(tp, src.str, src.str + src.length, node);
+    if (built) { return built; }
+    return build_function_return_contract_node(tp, node, &TYPE_ERROR,
+        &TYPE_ERROR, false);
+}
+
+static AstNode* build_return_type(Transpiler* tp, TSNode node) {
+    // `return_type` remains the fielded grammar wrapper; its entire interior
+    // is now one token, so parse the wrapper span without inspecting children.
+    StrView src = ts_node_source(tp, node);
+    AstNode* built = parse_return_type_text(tp, src.str, src.str + src.length, node);
+    if (built) { return built; }
+    return build_function_return_contract_node(tp, node, &TYPE_ERROR,
+        &TYPE_ERROR, false);
+}
+
+static AstNode* build_view_pattern_token(Transpiler* tp, TSNode node) {
+    StrView src = ts_node_source(tp, node);
+    AstNode* built = parse_view_pattern_text(tp, src.str, src.str + src.length, node);
+    if (built) { return built; }
+    AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node,
+        sizeof(AstTypeNode));
+    err->type = (Type*)&LIT_TYPE_ERROR;
+    return (AstNode*)err;
+}
+
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // depth guard: bail (NULL, the existing error convention) before the recursion
     // can overflow the stack on deeply nested source.
@@ -11168,8 +11064,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_expr(tp, expr_node);
     case SYM_MEMBER_EXPR:
         return build_member_expr(tp, expr_node);
-    case SYM_NAV_EXPR:
-        return build_navigation_or_path_expr(tp, expr_node);
     case SYM_CURRENT_PARENT_EXPR: {
         AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
             AST_NODE_NAVIGATION_EXPR, expr_node, sizeof(AstNavigationNode));
@@ -11181,8 +11075,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return (AstNode*)nav;
     }
     case SYM_CALL_EXPR:
-        // `start_expr` names its call operand directly instead of routing it
-        // through primary_expr, so the shared call builder must accept both.
         return build_call_expr(tp, expr_node, symbol);
     case SYM_HANDLER_EXPR:
         return build_handler(tp, expr_node, false);
@@ -11352,18 +11244,15 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case sym_pattern_island_token:
         return build_type_pattern_token(tp, expr_node);
     case sym_primary_type_pattern_token:
-    case sym_view_atom_token:
         return build_primary_type_pattern_token(tp, expr_node);
+    case sym_return_type_token:
+        return build_return_type_token(tp, expr_node);
+    case sym_view_pattern_token:
+        return build_view_pattern_token(tp, expr_node);
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
-    case SYM_RETURN_TYPE_PATTERN:
-        return build_return_type_pattern(tp, expr_node);
-    case SYM_RETURN_OCCURRENCE_TYPE:
-        return build_return_occurrence_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
         return build_named_argument(tp, expr_node);
-    case SYM_START_EXPR:
-        return build_start_expr(tp, expr_node);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;

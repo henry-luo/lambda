@@ -389,7 +389,7 @@ and accidental IO becomes a build failure rather than a code-review miss.
 ### T1 under worker-thread isolation (added 2026-07-26 — concurrency K31)
 
 Tier-2 workers may run as **thread isolates in the runtime process**
-(`start worker(spec, isolation: 'thread')`, `Lambda_Design_Concurrency.md`
+(`start(target, args, {mode: 'thread'})`, S13.1.1v2 and `Lambda_Design_Concurrency.md`
 §10.3). This does not change the trust tiers, but it does change what T1
 admission has to check, in two ways:
 

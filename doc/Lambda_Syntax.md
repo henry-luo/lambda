@@ -289,6 +289,16 @@ import svg: 'http://www.w3.org/2000/svg'
 <span>
 ```
 
+Namespaced names are greedy in element name positions (S2.4.3v2). Once the
+parser sees the `ns.name` form, it consumes the complete dotted name before it
+considers element content; whitespace does not disambiguate the two forms.
+Consequently `<svg.rect>` and `<svg .rect>` both name the qualified `svg.rect`
+tag. Use the explicit content separator when a relative path is the child:
+
+```lambda
+<svg; .rect>              // tag svg, relative-path child .rect
+```
+
 ### Namespaced Attributes (Sub-Map Desugaring)
 
 Attribute names can use `ns.attr` syntax. At compile time, dotted attribute keys are **desugared into sub-maps** — the namespace prefix becomes a map-valued attribute containing the local keys:

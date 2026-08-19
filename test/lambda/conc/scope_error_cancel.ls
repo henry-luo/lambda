@@ -2,7 +2,7 @@ pn child() {
     print("late")
 }
 pn fail() int^error {
-    start child()
+    start(child)
     print("before")
     raise error("boom")
 }

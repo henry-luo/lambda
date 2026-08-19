@@ -4,7 +4,7 @@ pn child() {
 }
 
 pn main() {
-    let handle = start child()
+    let handle = start(child)
     var first = null
     wait(handle, timeout: 1) ^ { first = ^ } ~ { first = ~ }
     print(first is error)

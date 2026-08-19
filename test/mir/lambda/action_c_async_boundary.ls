@@ -7,7 +7,7 @@ pn delayed_value() {
 }
 
 pn main() {
-    let handle = start delayed_value()
+    let handle = start(delayed_value)
     let value = wait(handle)^
     print(string(value) ++ "\n")
 }

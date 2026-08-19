@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 6.0.0 (2026-08-18)
+**Spec version:** 8.0.0 (2026-08-19)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -38,7 +38,7 @@ RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
 R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
 C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md)).
-PTH1v2, PTH2v2, PTH3–PTH29
+PTH1v2, PTH2v2, PTH3–PTH15, PTH16v2, PTH17–PTH29
 ([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
 
@@ -212,23 +212,28 @@ harnesses.
   hashing, printing, target resolution, and
   `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1,
   PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
-- **S2.4.3*** Paths, names, symbols, and member expressions use this one
+- **S2.4.3v2*** Paths, names, symbols, and member expressions use this one
   reference scheme but retain distinct evaluation contracts. Paths are
   static root-selected plans and produce lazy target handles; names are
   statically namespace-qualified (`a` may become `ns.a`) and read bindings;
   symbols are static `NameKey` reference values and do not implicitly read
   bindings.
   Member/index expressions apply typed keys to a runtime base and are dynamic.
+  Name-position parsing is maximal: once an element tag or attribute name has
+  the namespace-qualified `ns.name` form, the complete dotted name is consumed
+  before element content is considered, and whitespace does not terminate it.
+  Thus `<svg.rect>` and `<svg .rect>` name the same qualified tag; a relative
+  path child requires the explicit content boundary `<svg; .rect>`.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
-  S5.1.4, S8.2.2, S9.1.5, PTH13–PTH16, PTH20]
+  S5.1.4, S8.2.2, S9.1.5, PTH13–PTH15, PTH16v2, PTH20]
 - **S2.4.4*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
   it never uses mutable process-global bindings or existence/failure-based
   provider fallback. Address resolution performs no I/O; forcing an external
   target is a separate operation with its declared effect/error contract.
-  [S1.10, PTH16–PTH19]
+  [S1.10, PTH16v2, PTH17–PTH19]
 - **S2.4.5v2*** Paths have three root forms: rooted `/.a.b`, relative `.a.b`,
   and absolute `SchemeName...`. Rooted paths qualify logical `/` through the
   active resolver; absolute paths name their provider/authority directly and
@@ -1188,25 +1193,29 @@ the last write.* [Features R1–R5]
 
 ## S13 Concurrency
 
-*One keyword, two tiers. Concurrency enters a program through exactly one
-word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
+*One procedure, two tiers. Explicit concurrency enters a program through one
+ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
 
 ### S13.1 Tasks and workers
 
-- **S13.1.1** `start` is the only concurrency keyword — contextual, legal
-  only where an expression begins inside a `pn`, operand a `pn` call.
-  Everything else (`wait`, `send`, `receive`, `select`, `worker`, `cancel`,
-  `self`) is a builtin `pn`. **`async` and `await` do not exist.** [K12]
-- **S13.1.2** Calls are **colorless**: `f(x)` synchronously yields the value
-  and may suspend invisibly (`f(x)` ≡ `wait(start f(x))` minus the handle);
+- **S13.1.1v2** `start` is a builtin `pn`, not a keyword. It uses ordinary call
+  grammar as `start(target, args = [], options = {})`, is legal only inside a
+  `pn`, and requires `target` to resolve to a `pn`. `args` is an array; the
+  compiler-recognized `options` literal accepts `mode: 'task' | 'thread' |
+  'process'` and defaults to `'task'`. Everything else (`wait`, `send`,
+  `receive`, `select`, `cancel`, `self`) is also a builtin `pn`.
+  **`async` and `await` do not exist.** [K12v2]
+- **S13.1.2v2** Calls are **colorless**: `f(x)` synchronously yields the value
+  and may suspend invisibly (`f(x)` ≡ `wait(start(f, [x]))` minus the handle);
   may-suspend-ness is inferred and never observable. Every Lambda `pn`
   exposed to JS is uniformly Promise-returning; a Lambda resume is a
   macrotask. [K16]
-- **S13.1.3*** Two tiers, one handle vocabulary: tasks (`start f(x)`, shared
-  context) and workers (`start worker(spec, isolation: 'thread'|'process')`,
-  share-nothing isolate; default `'thread'`). Handles are uniform:
+- **S13.1.3v2*** Two tiers, one handle vocabulary: tasks
+  (`start(f, [x])`, shared context) and isolated workers
+  (`start(f, [x], {mode: 'thread' | 'process'})`, share-nothing isolate).
+  Handles are uniform:
   awaitable, sendable-to, selectable, cancellable; they compare by identity
-  and only the concurrency builtins operate on them. [K11, K31]
+  and only the concurrency builtins operate on them. [K11, K31v2]
 - **S13.1.4** **The capture rule**: a `start` operand must not capture
   `var`s by reference — compile error. Tasks communicate only via messages
   and immutable values; consequence: **thread count is semantically
@@ -1342,7 +1351,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S2.4.1v2, S2.4.2v3, S2.4.3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path scope on 2026-08-18: logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, and network hostname discovery remain deferred. |
+| S2.4.1v2, S2.4.2v3, S2.4.3v2–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19: maximal namespace-qualified element/attribute names, explicit `;` before a relative-path element child, logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, and network hostname discovery remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
@@ -1370,7 +1379,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
 | S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
-| S13.1.3 | Tasks fully implemented (2026-07-15); the worker tier (thread/process isolation) is pending — process first, thread gated on the isolate-state audit and open item O-D. |
+| S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |

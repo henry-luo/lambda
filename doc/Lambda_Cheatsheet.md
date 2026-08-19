@@ -461,10 +461,12 @@ pn advance(pos: float[], vel: float[], n: int) { ... }
 pn worker() { return receive()^ }
 
 pn main() {
-    let h = start worker()       // scoped child, opaque identity handle
+    let h = start(worker)        // scoped child, opaque identity handle
     send(h, "job")^             // bounded FIFO mailbox (default 1024)
     print(wait(h)^)              // wait for T^E result
 }
+
+start(worker, [job], {mode: 'task'})  // args array + launch options (S13.1.1v2)
 
 wait(h, timeout: 10)             // timeout does not cancel h
 select(h1, h2, timeout: 100)^    // first completed handle
