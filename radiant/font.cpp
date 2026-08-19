@@ -72,7 +72,7 @@ static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
     }
 #endif
     return family_matches &&
-        handle_size == fprop->font_size &&
+        handle_size == font_prop_used_size(fprop) &&
         handle_weight == weight &&
         handle_slant == slant;
 }
@@ -85,6 +85,8 @@ static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
     if (!m) return;
 
     fprop->space_width = resolved_space_width(uicon, handle, style);
+    fprop->average_char_width = m->average_char_width > 0.0f
+        ? m->average_char_width : fprop->space_width;
     float lh_asc, lh_desc;
     font_get_normal_lh_split(handle, &lh_asc, &lh_desc);
     fprop->ascender = lh_asc;
@@ -98,7 +100,7 @@ static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
 
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     fbox->style = fprop;
-    fbox->current_font_size = fprop->font_size;
+    fbox->current_font_size = font_prop_used_size(fprop);
     fbox->font_handle = NULL;
 
     if (!uicon || !uicon->font_ctx) {
@@ -130,7 +132,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     FontStyleDesc style = {};
     style.family  = family;
-    style.size_px = fprop->font_size;
+    style.size_px = font_prop_used_size(fprop);
     style.weight  = fw;
     style.slant   = fs;
 

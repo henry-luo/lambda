@@ -269,8 +269,46 @@ static bool image_is_generated_content_child(ViewBlock* block) {
     return tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0);
 }
 
+static bool layout_set_broken_image_alt_fallback(LayoutContext* lycon,
+                                                  ViewBlock* block,
+                                                  bool preserve_specified_size) {
+    if (!lycon || !block) return false;
+    const char* alt_text = block->get_attribute("alt");
+    if (!alt_text || alt_text[0] == '\0') return false;
+    if (!block->embed) block->ensure_embed(lycon);
+    if (!block->embed) return false;
+
+    block->embed->broken_alt_fallback = true;
+    TextIntrinsicWidths alt_widths = measure_text_intrinsic_widths(
+        lycon, alt_text, strlen(alt_text),
+        get_element_text_transform(block->as_element()),
+        get_element_font_variant(block->as_element()));
+    float line_height = lycon->block.line_height;
+    if (line_height <= 0.0f) {
+        line_height = lycon->font.current_font_size > 0.0f ?
+            lycon->font.current_font_size * 1.2f : 16.0f;
+    }
+    float alt_width = 16.0f + alt_widths.max_content;
+    bool block_level_fallback = block->display.outer == CSS_VALUE_BLOCK ||
+        block->display.outer == CSS_VALUE_LIST_ITEM;
+    // CSS 2.1 §10.3.3: an auto-width block-level replaced box fills its
+    // containing block; only inline fallback uses the measured alt width.
+    if (preserve_specified_size) {
+        if (!layout_axis_has_given_size(block, true)) {
+            lycon->block.given_width = block_level_fallback ? -1.0f : alt_width;
+        }
+        if (!layout_axis_has_given_size(block, false)) {
+            lycon->block.given_height = max(16.0f, line_height);
+        }
+    } else {
+        lycon->block.given_width = block_level_fallback ? -1.0f : alt_width;
+        lycon->block.given_height = max(16.0f, line_height);
+    }
+    return true;
+}
+
 static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
-                                                          DomElement* element,
+                                                           DomElement* element,
                                                           float intrinsic_width,
                                                           float intrinsic_height);
 
@@ -1001,7 +1039,7 @@ static void pseudo_append_child(DomElement* parent, DomNode* child) {
 }
 
 static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) {
-    if (!pseudo_elem || !pseudo_elem->doc || !text || !text[0]) return;
+    if (!pseudo_elem || !pseudo_elem->doc || !text) return;
     size_t text_len = strlen(text);
     DomText* text_node = DomText::create_copy(text, text_len, pseudo_elem);
     if (!text_node) return;
@@ -1165,6 +1203,11 @@ static inline void margin_to_chain(float margin, float* out_pos, float* out_neg)
 // CSS 2.1 §8.3.1: Check if a block's margin chain has non-trivial components
 static inline bool has_margin_chain(BoundaryProp* bound) {
     return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
+}
+
+static View* layout_rendered_first_placed_child(ViewBlock* block) {
+    return block ? static_cast<View*>(layout_rendered_first_child_node(block->as_element()))
+                 : nullptr;
 }
 
 static void get_self_margin_chain(ViewBlock* block, float margin_top,
@@ -1427,24 +1470,10 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->display.inner = CSS_VALUE_FLOW;
     StyleTree* pseudo_styles = is_before ? parent->pseudo_style(PSEUDO_STYLE_BEFORE) : parent->pseudo_style(PSEUDO_STYLE_AFTER);
     if (pseudo_styles && pseudo_styles->tree) {
-        AvlNode* display_node = avl_tree_search(pseudo_styles->tree, CSS_PROPERTY_DISPLAY);
-        if (display_node) {
-            StyleNode* style_node = (StyleNode*)display_node->declaration;
-            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                CssValue* val = style_node->winning_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                    if (val->data.keyword == CSS_VALUE_BLOCK) {
-                        pseudo_elem->display.outer = CSS_VALUE_BLOCK;
-                    } else if (val->data.keyword == CSS_VALUE_INLINE_BLOCK) {
-                        pseudo_elem->display.outer = CSS_VALUE_INLINE_BLOCK;
-                    } else if (val->data.keyword == CSS_VALUE_TABLE) {
-                        pseudo_elem->display.outer = CSS_VALUE_BLOCK;
-                        pseudo_elem->display.inner = CSS_VALUE_TABLE;
-                    }
-                }
-            }
-        }
         dom_element_borrow_specified_style(pseudo_elem, pseudo_styles);
+        // Generated pseudo boxes use the same display cascade as authored elements;
+        // resolving only a few keyword cases left display:list-item pseudos inline.
+        pseudo_elem->display = resolve_display_value(pseudo_elem);
     }
     bool has_counter_content = false;
     if (pseudo_styles) {
@@ -1462,10 +1491,10 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     }
     bool materialized_children = has_counter_content ? false :
         pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
-    if (!materialized_children && content && *content) {
+    if (!materialized_children && ((content && *content) || has_counter_content)) {
         log_info("%s [PSEUDO] Creating fallback text node for pseudo-element, content_len=%zu, first_byte=0x%02x", parent->source_loc(),
-            strlen(content), (unsigned char)*content);
-        pseudo_append_text_child(pseudo_elem, content);
+            content ? strlen(content) : 0, content ? (unsigned char)*content : 0);
+        pseudo_append_text_child(pseudo_elem, content ? content : "");
     } else if (!materialized_children) {
         log_info("%s [PSEUDO] NOT creating text node: content=%p, first_byte=%s", parent->source_loc(),
             (void*)content, content ? ((*content) ? "nonzero" : "ZERO") : "NULL");
@@ -1478,21 +1507,47 @@ static const char* resolve_pseudo_generated_content(LayoutContext* lycon,
                                                     bool is_before) {
     if (!lycon || !element) return nullptr;
     PseudoElementType pseudo = is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER;
-    bool pushed_scope = is_before && lycon->counter_context &&
-        element->pseudo_style(PSEUDO_STYLE_BEFORE);
-    if (pushed_scope) {
-        counter_push_scope(lycon->counter_context);
-        apply_pseudo_counter_ops(lycon, element->pseudo_style(PSEUDO_STYLE_BEFORE));
+    // CSS Lists 3 §4.4.1: generated content takes its counters from its
+    // flattened-tree position, so resolve it when the pseudo box is laid out.
+    return dom_element_get_pseudo_element_content(element, pseudo);
+}
+
+void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
+                                                DomElement* pseudo_element) {
+    if (!lycon || !lycon->counter_context || !pseudo_element ||
+        !pseudo_element->parent || !pseudo_element->parent->is_element()) {
+        return;
     }
-    const char* content = lycon->counter_context
-        ? dom_element_get_pseudo_element_content_with_counters(
-            element, pseudo, lycon->counter_context, lycon->scratch.arena)
-        : nullptr;
-    if (!content) content = dom_element_get_pseudo_element_content(element, pseudo);
-    if (pushed_scope) {
-        counter_pop_scope_propagate(lycon->counter_context, false);
+    bool is_before = pseudo_element->tag_name &&
+        strcmp(pseudo_element->tag_name, "::before") == 0;
+    bool is_after = pseudo_element->tag_name &&
+        strcmp(pseudo_element->tag_name, "::after") == 0;
+    if (!is_before && !is_after) return;
+
+    DomElement* origin = lam::dom_as<DOM_NODE_ELEMENT>(pseudo_element->parent);
+    PseudoElementType pseudo = is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER;
+    StyleTree* style = origin->pseudo_style(
+        is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER);
+    apply_pseudo_counter_ops(lycon, style);
+    const char* content = dom_element_get_pseudo_element_content_with_counters(
+        origin, pseudo, lycon->counter_context, lycon->scratch.arena);
+    if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
+    if (!content) content = "";
+
+    DomNode* first = pseudo_element->first_child;
+    if (first && first->is_text()) {
+        DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
+        size_t content_len = strlen(content);
+        String* text_string = dom_document_create_string(
+            pseudo_element->doc, content, content_len);
+        if (text_string) {
+            dom_text_adopt_document_string(
+                text_node, pseudo_element->doc, text_string);
+            text_node->rect = nullptr;
+        }
+    } else if (content[0]) {
+        pseudo_append_text_child(pseudo_element, content);
     }
-    return content;
 }
 
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block) {
@@ -1704,7 +1759,7 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 
 static View* margin_collapse_last_in_flow_child(ViewBlock* block) {
     View* last = nullptr;
-    for (View* child = static_cast<View*>(block->first_child); child;
+    for (View* child = layout_rendered_first_placed_child(block); child;
          child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type && child->is_block()) {
             ViewBlock* candidate = lam::view_require_block(child);
@@ -1787,7 +1842,7 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
     if (has_border_bottom || has_padding_bottom) return 0;
     if (block_context_establishes_bfc(block)) return 0;
     if (layout_axis_has_given_size(block, false)) return 0;
-    if (!block->first_child) return 0;
+    if (!layout_rendered_first_placed_child(block)) return 0;
     View* last_in_flow = margin_collapse_last_in_flow_child(block);
     // CSS 2.1 §9.2.1.1: Inline content between/after block children is wrapped
     View* effective_last = margin_collapse_effective_last_child(last_in_flow);
@@ -3037,6 +3092,7 @@ static float layout_horizontal_flow_extent(ViewBlock* parent,
     for (View* child = lam::view_require_element(parent)->first_placed_child();
          child; child = child->next()) {
         if (!child->view_type || (margin_box_mode && !child->is_block())) continue;
+        if (layout_marker_is_outside(child)) continue;
         if (child->is_block() &&
             layout_block_is_out_of_flow(lam::view_require_block(child))) continue;
         if (margin_box_mode) {
@@ -3659,6 +3715,37 @@ static void layout_update_axis_overflow(LayoutContext* lycon, ViewBlock* block,
     }
 }
 
+static bool layout_list_item_has_visible_marker(ViewBlock* block) {
+    if (!block) return false;
+    if (block->pseudo_style(PSEUDO_STYLE_MARKER)) {
+        CssDeclaration* content_decl = style_tree_get_declaration(
+            block->pseudo_style(PSEUDO_STYLE_MARKER), CSS_PROPERTY_CONTENT);
+        if (content_decl && content_decl->value &&
+            content_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            content_decl->value->data.keyword == CSS_VALUE_NONE) {
+            return false;
+        }
+    }
+    // A generated marker is the used box-tree state after counter/style
+    // resolution; retain it even when the HTML table UA pass left the inherited
+    // list-style field at its default sentinel.
+    if (block->pseudo && block->pseudo->marker) return true;
+    if (block->blk && block->block_mut()->list_style_type == CSS_VALUE_NONE) {
+        return false;
+    }
+    return true;
+}
+
+static float layout_list_item_marker_line_height(LayoutContext* lycon) {
+    if (!lycon) return 18.0f;
+    float line_height = lycon->block.line_height;
+    if (line_height <= 0.0f) {
+        line_height = lycon->font.current_font_size > 0.0f
+            ? lycon->font.current_font_size * 1.2f : 18.0f;
+    }
+    return line_height;
+}
+
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     float flow_width, flow_height;
     bool preserved_empty_vertical_multicol_line = false;
@@ -3724,28 +3811,23 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             preserved_empty_vertical_multicol_line = true;
         }
     }
-    // CSS 2.1 §12.5: List-items with visible markers generate at least one line box,
-    if (block->view_type == RDT_VIEW_LIST_ITEM) {
+    // CSS 2.1 §12.5: List-items with visible markers generate at least one line box.
+    // Float blockification changes view_type to block, so the display role is the
+    // invariant that preserves the empty marker line for blockified list items.
+    if (block->display.list_item) {
         float content_area_height = lycon->block.advance_y -
             layout_axis_decoration_start(block->bound, LAYOUT_AXIS_Y);
         if (content_area_height <= 0) {
-            bool has_marker = true;
-            if (block->blk && block->block_mut()->list_style_type == CSS_VALUE_NONE) {
-                has_marker = false;
-            }
-            if (has_marker && block->pseudo_style(PSEUDO_STYLE_MARKER)) {
-                CssDeclaration* content_decl = style_tree_get_declaration(
-                    block->pseudo_style(PSEUDO_STYLE_MARKER), CSS_PROPERTY_CONTENT);
-                if (content_decl && content_decl->value) {
-                    CssValue* cv = content_decl->value;
-                    if (cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NONE) {
-                        has_marker = false;
-                    }
-                }
-            }
-            if (has_marker) {
-                float min_line_height = lycon->block.line_height;
-                if (min_line_height <= 0) min_line_height = lycon->font.current_font_size > 0 ? lycon->font.current_font_size * 1.2f : 18.0f;
+            bool has_marker = layout_list_item_has_visible_marker(block);
+            // HTML fieldsets use a special principal box whose empty used height
+            // is its resolved border/padding box; the generic list-item line floor
+            // would add an anonymous 18px content line that browsers do not create.
+            bool fieldset_has_empty_principal_box = block->tag_id == MARKUP_NAME_FIELDSET;
+            bool button_has_anonymous_content_box = block->tag_id == MARKUP_NAME_BUTTON &&
+                block->display.inner == CSS_VALUE_FLOW_ROOT;
+            if (has_marker && !fieldset_has_empty_principal_box &&
+                !button_has_anonymous_content_box) {
+                float min_line_height = layout_list_item_marker_line_height(lycon);
                 flow_height += min_line_height;
                 block->content_height += min_line_height;
             }
@@ -3894,7 +3976,14 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->ensure_block(lycon)->initial_letter_trimmed_start_contribution =
             lycon->block.initial_letter_trimmed_start_contribution;
     }
-    if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
+    bool is_button_auto_width = block->tag_id == MARKUP_NAME_BUTTON &&
+        block->display.inner == CSS_VALUE_FLOW_ROOT &&
+        block->display.outer != CSS_VALUE_INLINE_BLOCK;
+    bool is_inline_block_layout = display == CSS_VALUE_INLINE_BLOCK ||
+        block->view_type == RDT_VIEW_INLINE_BLOCK || is_button_auto_width;
+    if (is_inline_block_layout && lycon->block.given_width < 0) {
+        // CSS Display 3: an inline flow-root is represented by an inline-block
+        // view for used sizing even though its computed outer display stays inline.
         // CSS 2.1 §10.3.9: inline-block auto width uses the shrink-to-fit
         // available width; otherwise short inline-blocks incorrectly stretch.
         float available_width = block->width;
@@ -4094,6 +4183,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             }
             block->height = final_height;
         }
+        bool list_item_table = block->tag_id == MARKUP_NAME_TABLE &&
+            block->display.list_item;
+        if (list_item_table && block->height <= 0.0f &&
+            layout_list_item_has_visible_marker(block)) {
+            // CSS Display keeps the list-item marker in the principal flow;
+            // a zero-height table grid must not discard that marker line.
+            float marker_height = layout_list_item_marker_line_height(lycon);
+            block->height = layout_border_size_from_content_box(
+                block, marker_height, false);
+            block->content_height = marker_height;
+        }
     }
     if (block->scroller) {
         if (block->scroll()->intrinsic_gutter_width > 0.0f) {
@@ -4123,6 +4223,19 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (float_border_box_height > block->height) {
             block->height = layout_apply_min_max_axis(block, float_border_box_height, false, true);
         }
+    }
+    // CSS Values 4 permits approximating used values outside the layout range;
+    // clamp the aggregate border box because separately clamped padding sides
+    // can otherwise produce a box beyond the engine's coordinate invariant.
+    float bounded_width = layout_clamp_dimension(block->width);
+    float bounded_height = layout_clamp_dimension(block->height);
+    if (bounded_width != block->width || bounded_height != block->height) {
+        block->width = bounded_width;
+        block->height = bounded_height;
+        block->content_width = max(
+            block->width - layout_boundary_padding_border_axis(block->bound, true), 0.0f);
+        block->content_height = max(
+            block->height - layout_boundary_padding_border_axis(block->bound, false), 0.0f);
     }
     if (block->scroller && block->scroll_mut()->has_clip) {
         set_block_scroller_clip(block);
@@ -4587,6 +4700,32 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 
+static DisplayValue layout_button_used_display(DomElement* element,
+                                                DisplayValue computed) {
+    if (!element || element->tag() != MARKUP_NAME_BUTTON ||
+        computed.outer == CSS_VALUE_NONE || computed.outer == CSS_VALUE_CONTENTS) {
+        return computed;
+    }
+    // HTML Rendering §15.5.3: buttons preserve flex/grid, use inline-block for
+    // an inline outer type, and otherwise establish a flow-root for children.
+    if (computed.inner == CSS_VALUE_FLEX || computed.inner == CSS_VALUE_GRID) {
+        return computed;
+    }
+    computed.list_item = false;
+    if (computed.outer == CSS_VALUE_LIST_ITEM) {
+        // HTML button layout replaces the list-item principal box with a
+        // flow-root; the browser therefore does not expose a marker box here.
+        computed.outer = CSS_VALUE_BLOCK;
+    } else if (computed.outer == CSS_VALUE_INLINE ||
+               computed.outer == CSS_VALUE_INLINE_BLOCK) {
+        computed.outer = CSS_VALUE_INLINE_BLOCK;
+    } else {
+        computed.outer = CSS_VALUE_BLOCK;
+    }
+    computed.inner = CSS_VALUE_FLOW_ROOT;
+    return computed;
+}
+
 static CssEnum get_element_float_value(DomElement* elem) {
     if (!elem) return CSS_VALUE_NONE;
     if (elem->position) {
@@ -4772,6 +4911,9 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
         }
         if (!first_float_node) {
             DisplayValue display = resolve_display_value(child);
+            if (elem->tag() == MARKUP_NAME_BUTTON) {
+                display = layout_button_used_display(elem, display);
+            }
             if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK) {
                 has_inline_content = true;
                 for (DomNode* text_node = elem->first_child; text_node; text_node = text_node->next_sibling) {
@@ -4914,7 +5056,13 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         return;
     }
     if (block->is_element()) {
-        layout_materialize_pseudo_content(lycon, block, true, true);
+        layout_materialize_pseudo_content(lycon, block, true,
+            block->tag() != MARKUP_NAME_BUTTON);
+        if (block->tag() == MARKUP_NAME_BUTTON) {
+            // button layout consumes display:list-item as flow-root behavior;
+            // its anonymous button content must not acquire a list marker line.
+            block->display.list_item = false;
+        }
     }
     // Buttons are form controls for intrinsic sizing but their CSS flow inner
     // box still owns authored children; treating them as replaced drops that subtree.
@@ -5009,7 +5157,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         layout_form_control(lycon, block);
     } else {  // layout block child content
         DomNode *child = nullptr;
-        if (block->is_element()) { child = block->first_child; }
+        if (block->is_element()) {
+            child = layout_render_child_list(block->as_element());
+        }
         if (child) {
             // CSS 2.1 §17.2.1: Orphaned table-internal elements (table-row, table-cell, etc.)
             bool is_orphaned_table_internal =
@@ -5060,7 +5210,13 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             CssEnum child_float = get_element_float_value(child_elem);
                             child_is_floated = child_float == CSS_VALUE_LEFT || child_float == CSS_VALUE_RIGHT;
                         }
-                        if (lycon->doc && lycon->doc->incremental_layout
+                        // HTML button layout's anonymous content box does not
+                        // create a line for indentation-only DOM whitespace.
+                        bool suppress_button_whitespace = block->tag() == MARKUP_NAME_BUTTON &&
+                            child->is_text() && !layout_text_node_has_content(child);
+                        if (suppress_button_whitespace) {
+                            child->layout_height_contribution = 0.0f;
+                        } else if (lycon->doc && lycon->doc->incremental_layout
                             && child->is_element() && !child->layout_dirty
                             && !child_is_floated
                             && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
@@ -5473,11 +5629,25 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     if (block->blk) lycon->block.text_align = block->block()->text_align;
     if (block->blk) lycon->block.text_align_last = block->block()->text_align_last;
     // CSS 2.1 §9.2.1: Propagate direction to block context
-    if (block->blk) lycon->block.direction = block->block()->direction;
+    if (block->blk) {
+        lycon->block.direction = block->block()->direction;
+        bool has_outside_marker = block->display.list_item && block->pseudo &&
+            block->pseudo->marker_generated && block->pseudo->marker &&
+            block->pseudo->marker->blk &&
+            reinterpret_cast<MarkerProp*>(block->pseudo->marker->blk)->is_outside;
+        if (block->block()->unicode_bidi == CSS_VALUE_PLAINTEXT &&
+            !has_outside_marker) {
+            // CSS Writing Modes §2.2: plaintext derives the paragraph base
+            // direction from the first strong character in the content.
+            lycon->block.direction = layout_resolve_plaintext_direction(
+                lam::dom_require<DOM_NODE_ELEMENT>(block), lycon->block.direction);
+        }
+    }
     lycon->line.vertical_align = CSS_VALUE_BASELINE;
 
     line_reset(lycon);
     if (block->font) {
+        block->font->used_zoom = layout_effective_zoom((View*)block);
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
     // CSS Text 3 §4.2: save the block container's font for tab-size calculation.
@@ -5588,6 +5758,17 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                bool use_central_baseline,
                                                bool reverse_inline_axis) {
     while (view) {
+        if (view->view_type == RDT_VIEW_MARKER) {
+            float logical_inline_offset = view->x - surrogate_inline_origin;
+            float logical_y = view->y - surrogate_block_origin + physical_block_origin;
+            float logical_width = view->width;
+            float logical_height = view->height;
+            view->x = mode == WM_VERTICAL_RL
+                ? block_extent - logical_y - logical_height : logical_y;
+            view->y = physical_inline_origin + logical_inline_offset;
+            view->width = logical_height;
+            view->height = logical_width;
+        }
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
@@ -5832,7 +6013,7 @@ bool layout_block_is_self_collapsing(ViewBlock* vb) {
     if (vb->display.inner == CSS_VALUE_FLOW_ROOT ||
         vb->display.inner == CSS_VALUE_FLEX ||
         vb->display.inner == CSS_VALUE_GRID) return false;
-    View* child = lam::view_require_element(vb)->first_placed_child();
+    View* child = layout_rendered_first_placed_child(vb);
     while (child) {
         if (child->is_block()) {
             ViewBlock* cvb = lam::view_require_block(child);
@@ -6736,15 +6917,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
         }
         else if (!has_src_attr) {
-            if (image_is_generated_content_child(block) && block->embed) {
-                block->embed->broken_alt_fallback = false;
-            }
-            float fallback = image_is_generated_content_child(block) ? 16.0f : 0.0f;
-            for (LayoutAxis axis : layout_axes()) {
-                bool horizontal = layout_axis_is_horizontal(axis);
-                if (!layout_axis_has_given_size(block, horizontal)) {
-                    if (horizontal) lycon->block.given_width = fallback;
-                    else lycon->block.given_height = fallback;
+            // HTML replaced-element fallback also applies when src is omitted;
+            // otherwise an alt-bearing list item contributes no line box.
+            bool has_explicit_size = layout_axis_has_given_size(block, true) ||
+                layout_axis_has_given_size(block, false);
+            if (has_explicit_size || !layout_set_broken_image_alt_fallback(lycon, block, true)) {
+                if (image_is_generated_content_child(block) && block->embed) {
+                    block->embed->broken_alt_fallback = false;
+                }
+                float fallback = image_is_generated_content_child(block) ? 16.0f : 0.0f;
+                for (LayoutAxis axis : layout_axes()) {
+                    bool horizontal = layout_axis_is_horizontal(axis);
+                    if (!layout_axis_has_given_size(block, horizontal)) {
+                        if (horizontal) lycon->block.given_width = fallback;
+                        else lycon->block.given_height = fallback;
+                    }
                 }
             }
         }
@@ -6783,21 +6970,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 !has_author_display;
             if (alt_text && alt_text[0] != '\0' &&
                 (!has_explicit_dimension || default_inline_alt_fallback)) {
-                if (!block->embed) {
-                    block->ensure_embed(lycon);
-                }
-                block->embed->broken_alt_fallback = true;
-                TextIntrinsicWidths alt_widths = measure_text_intrinsic_widths(
-                    lycon, alt_text, strlen(alt_text),
-                    get_element_text_transform(block->as_element()),
-                    get_element_font_variant(block->as_element()));
-                float line_height = lycon->block.line_height;
-                if (line_height <= 0.0f) {
-                    line_height = lycon->font.current_font_size > 0.0f ?
-                        lycon->font.current_font_size * 1.2f : 16.0f;
-                }
-                lycon->block.given_width = 16.0f + alt_widths.max_content;
-                lycon->block.given_height = max(16.0f, line_height);
+                layout_set_broken_image_alt_fallback(lycon, block, false);
             } else {
                 if (block->embed) {
                     block->embed->broken_alt_fallback = false;
@@ -7028,7 +7201,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                           block->block()->given_width_type == CSS_VALUE__UNDEF;
     bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && has_auto_width;
     // CSS 2.1 §10.3.9: Inline-blocks with auto width use shrink-to-fit.
-    bool is_inline_block_auto_width = (block->view_type == RDT_VIEW_INLINE_BLOCK) &&
+    bool is_button_auto_width = block->tag() == MARKUP_NAME_BUTTON &&
+        block->display.inner == CSS_VALUE_FLOW_ROOT &&
+        block->display.outer != CSS_VALUE_INLINE_BLOCK &&
+        lycon->block.given_width < 0 && has_auto_width;
+    bool is_inline_block_auto_width = (block->view_type == RDT_VIEW_INLINE_BLOCK ||
+        is_button_auto_width) &&
         lycon->block.given_width < 0 && has_auto_width && !is_float_auto_width;
     // A definite descendant width must not inherit that measurement mode: the
     bool descendant_width_is_definite = lycon->block.given_width >= 0.0f;
@@ -7858,7 +8036,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool quirky_container_bottom = is_quirky_container(block, lycon);
     if (block && !layout_block_inline_axis_is_vertical(block) &&
         !has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse &&
-        !has_explicit_height && block->first_child) {
+        !has_explicit_height && layout_rendered_first_placed_child(block)) {
         // CSS 2.2 Section 8.3.1: An empty block allows margins to collapse "through" it when:
         View* last_in_flow = margin_collapse_last_in_flow_child(block);
         // CSS 2.2 Section 8.3.1: Margins collapse through self-collapsing blocks
@@ -8118,6 +8296,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         elmt));
     block->display = display;
     dom_node_resolve_style(elmt, lycon);
+    if (elmt->is_element() && elmt->as_element()->tag() == MARKUP_NAME_BUTTON) {
+        // HTML Rendering §15.5.3: button layout is a used-value transformation;
+        // keep the computed display on DomElement, but lay out the principal box
+        // as flow-root so authored children form the anonymous button content.
+        display = layout_button_used_display(elmt->as_element(),
+            resolve_display_value(elmt));
+        block->display = display;
+    }
     if (display.inner == RDT_DISPLAY_REPLACED &&
         layout_element_is_replaced(block->as_element()) &&
         is_table_internal_display(block->display.inner)) {
@@ -8814,7 +9000,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             } else if (block->bound) {
                 // Skip floats AND empty zero-height blocks (CSS 2.2 Section 8.3.1)
-                View* first_in_flow_child = block->parent_view()->first_placed_child();
+                DomElement* shadow_formatting_parent =
+                    layout_shadow_formatting_parent((DomNode*)block);
+                bool first_shadow_child = shadow_formatting_parent &&
+                    layout_rendered_first_child_node(
+                        shadow_formatting_parent->shadow_root_element()) == (DomNode*)block;
+                ViewElement* collapse_parent_view = shadow_formatting_parent
+                    ? (ViewElement*)shadow_formatting_parent : block->parent_view();
+                View* first_in_flow_child = first_shadow_child
+                    ? static_cast<View*>(block)
+                    : (collapse_parent_view
+                        ? collapse_parent_view->first_placed_child() : nullptr);
                 while (first_in_flow_child) {
                     if (first_in_flow_child->view_type == RDT_VIEW_MARKER) {
                         View* next = static_cast<View*>(first_in_flow_child->next_sibling);
@@ -8883,7 +9079,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // CSS Box 4 §margin-trim: block-start trims the first child's block-start
                     // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
                     bool has_clearance = (lycon->block.saved_clear_y >= 0);
-                    ViewBlock* parent = (block->parent && block->parent->is_block()) ? lam::view_require_block(static_cast<View*>(block->parent)) : NULL;
+                    ViewBlock* parent = nullptr;
+                    if (first_shadow_child) {
+                        parent = collapse_parent_view && collapse_parent_view->is_block()
+                            ? lam::view_require_block(collapse_parent_view) : nullptr;
+                    } else if (block->parent && block->parent->is_block()) {
+                        parent = lam::view_require_block(static_cast<View*>(block->parent));
+                    }
                     bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
                     float parent_decoration_top = layout_axis_decoration_start(
                         parent && parent->bound ? parent->boundary() : nullptr, LAYOUT_AXIS_Y);

@@ -6095,6 +6095,7 @@ static bool js_dom_form_named_getter_reserved_name(const char* prop);
     X(SET_SELECTION_RANGE,       "setSelectionRange") \
     X(SHEET,                     "sheet") \
     X(SIZE,                      "size") \
+    X(SLOT,                      "slot") \
     X(SPELLCHECK,                "spellcheck") \
     X(SRCDOC,                    "srcdoc") \
     X(STEP,                      "step") \
@@ -8866,6 +8867,13 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                                         : s2it(heap_create_name(""))};
     }
 
+    // HTMLElement.slot reflects the content attribute and controls default
+    // versus named-slot assignment in the Shadow DOM flattened tree.
+    if (prop_id == JS_DOM_PROP_SLOT) {
+        const char* slot_name = elem->get_attribute("slot");
+        return js_name_item(slot_name ? slot_name : "");
+    }
+
     if (js_dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_TRANSFORM) {
         return js_dom_svg_get_transform_list(elem);
     }
@@ -10168,6 +10176,15 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
         }
+        return value;
+    }
+
+    if (prop_id == JS_DOM_PROP_SLOT) {
+        const char* slot_name = js_dom_to_attr_cstr(value);
+        const char* old_value = elem->get_attribute("slot");
+        elem->set_attribute("slot", slot_name ? slot_name : "");
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                               elem->parent, "slot", old_value);
         return value;
     }
 
@@ -12952,6 +12969,9 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
     if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
+    if (layout_noscript_content_suppressed(elem)) {
+        return js_dom_make_rect_object(0.0, 0.0, 0.0, 0.0);
+    }
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
@@ -12966,6 +12986,9 @@ extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return js_array_new(0);
     if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
+    if (layout_noscript_content_suppressed(elem)) {
+        return js_array_new(0);
+    }
 
     float abs_x = 0.0f;
     float abs_y = 0.0f;

@@ -768,6 +768,11 @@ static float table_cell_line_box_height_for_view(View* view, float cell_line_hei
     float view_height = view->height;
     cell_line_height = table_resolve_cell_line_height(
         view, cell_line_height, line_height_is_normal, parent_font_size, cell_font);
+    if (!line_height_is_normal && cell_line_height > 0.0f) {
+        // CSS Inline: an explicit line-height owns the line box; glyph ink may
+        // overflow it and must not enlarge an auto table row.
+        return cell_line_height;
+    }
     return max(cell_line_height > 0.0f ? cell_line_height : 0.0f, view_height);
 }
 
@@ -789,7 +794,9 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
             bool noted_rect = false;
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                float rect_line_height = max(line_height, rect->height);
+                float rect_line_height = line_height_is_normal
+                    ? max(line_height, rect->height) : line_height;
+                if (rect_line_height <= 0.0f) rect_line_height = rect->height;
                 table_note_cell_content_extent(extent, rect->y, rect->y + rect_line_height);
                 table_note_cell_line_position(extent, rect->y, rect_line_height);
                 noted_rect = true;
@@ -7147,7 +7154,11 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         if (needs_table) {
             // and table-child repair share inheritance and pool ownership.
             DisplayValue parent_display = resolve_display_value((void*)parent);
-            bool parent_is_inline = (parent_display.outer == CSS_VALUE_INLINE);
+            bool parent_is_inline = parent_display.outer == CSS_VALUE_INLINE &&
+                parent_display.inner != CSS_VALUE_FLOW_ROOT;
+            // CSS Display 3: an inline flow-root is an atomic block container;
+            // orphaned table-internal children therefore need block-level table
+            // fixup rather than an inline-table wrapper in its inline run.
             table_wrapper = create_anonymous_table_element(
                 lycon, parent, CSS_VALUE_TABLE, "::anon-table");
             if (table_wrapper) {

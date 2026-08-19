@@ -1445,11 +1445,12 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
             arg_idx = 1;
         } else if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
             CssEnum kw = first_arg->data.keyword;
-            if (kw == CSS_VALUE_TOP) angle = 0.0f;
-            else if (kw == CSS_VALUE_RIGHT) angle = 90.0f;
-            else if (kw == CSS_VALUE_BOTTOM) angle = 180.0f;
-            else if (kw == CSS_VALUE_LEFT) angle = 270.0f;
-            arg_idx = 1;
+            // A named color is also a keyword; only consume the first
+            // argument when it is actually a gradient direction.
+            if (kw == CSS_VALUE_TOP) { angle = 0.0f; arg_idx = 1; }
+            else if (kw == CSS_VALUE_RIGHT) { angle = 90.0f; arg_idx = 1; }
+            else if (kw == CSS_VALUE_BOTTOM) { angle = 180.0f; arg_idx = 1; }
+            else if (kw == CSS_VALUE_LEFT) { angle = 270.0f; arg_idx = 1; }
         } else if (first_arg->type == CSS_VALUE_TYPE_LIST) {
             bool has_top = false, has_bottom = false;
             bool has_left = false, has_right = false;
@@ -1470,7 +1471,7 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
             else if (has_right) angle = 90.0f;
             else if (has_bottom) angle = 180.0f;
             else if (has_left) angle = 270.0f;
-            arg_idx = 1;
+            if (has_top || has_bottom || has_left || has_right) arg_idx = 1;
         }
     }
     lg->angle = angle;
@@ -3048,8 +3049,11 @@ static bool css_display_list_value(const CssValue* value, bool is_replaced,
 
     if (has_list_item) {
         out_display->list_item = true;
+        // CSS Display 3: `inline list-item` remains an inline-level principal
+        // box; treating it as inline-block changes line participation and breaks
+        // marker placement for every following sibling.
         out_display->outer = outer == CSS_VALUE_INLINE
-            ? CSS_VALUE_INLINE_BLOCK : CSS_VALUE_LIST_ITEM;
+            ? CSS_VALUE_INLINE : CSS_VALUE_LIST_ITEM;
         out_display->inner = inner == CSS_VALUE_FLOW_ROOT
             ? CSS_VALUE_FLOW_ROOT
             : (is_replaced && inner == CSS_VALUE_FLOW
@@ -3094,7 +3098,7 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
         MARKUP_NAME_EMBED};
     static const NameId hidden_tags[] = {
         MARKUP_NAME_SCRIPT, MARKUP_NAME_STYLE, MARKUP_NAME_HEAD, MARKUP_NAME_TITLE,
-        MARKUP_NAME_META, MARKUP_NAME_LINK, MARKUP_NAME_BASE, MARKUP_NAME_NOSCRIPT,
+        MARKUP_NAME_META, MARKUP_NAME_LINK, MARKUP_NAME_BASE,
         MARKUP_NAME_TEMPLATE, MARKUP_NAME_MAP, MARKUP_NAME_AREA, MARKUP_NAME_RP,
         MARKUP_NAME_DATALIST};
     static const NameId flow_block_tags[] = {
@@ -3111,6 +3115,9 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     if (layout_tag_in_list(tag_id, hidden_tags,
                            sizeof(hidden_tags) / sizeof(*hidden_tags))) {
         return {CSS_VALUE_NONE, CSS_VALUE_NONE};
+    }
+    if (layout_noscript_content_suppressed(dom_elem)) {
+        return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
     }
     if (tag_id == MARKUP_NAME_LI || tag_id == MARKUP_NAME_SUMMARY) {
         DisplayValue display = {CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW};
@@ -3331,11 +3338,14 @@ static void resolve_current_font_size(LayoutContext* lycon) {
         font = lam::dom_require<DOM_NODE_TEXT>(lycon->view)->font;
     }
     if (font && font->font_size > 0.0f) {
-        lycon->font.current_font_size = font->font_size;
+        // CSS Viewport 1 applies zoom to used font metrics; line boxes must not
+        // fall back to the unzoomed computed size after the font is resolved.
+        lycon->font.current_font_size = font_prop_used_size(font);
         return;
     }
     lycon->font.current_font_size = lycon->font.style &&
-        lycon->font.style->font_size > 0.0f ? lycon->font.style->font_size : 16.0f;
+        lycon->font.style->font_size > 0.0f
+        ? font_prop_used_size(lycon->font.style) : 16.0f;
 }
 
 // evaluate calc() terms with precedence and nested parentheses.
@@ -3545,14 +3555,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = num * lycon->root_font_size;
             break;
         case CSS_UNIT_EM:
-            if (effective_property == CSS_PROPERTY_FONT_SIZE) {
-                result = num * lycon->font.style->font_size;
-            } else {
-                if (lycon->font.current_font_size < 0) {
-                    resolve_current_font_size(lycon);
-                }
-                result = num * lycon->font.current_font_size;
-            }
+            // Font-relative lengths resolve against the computed font size;
+            // zoom is applied once below at used-value time.
+            result = num * (lycon->font.style && lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size);
             break;
         case CSS_UNIT_VW:
             // viewport width percentage (result in CSS logical pixels)
@@ -3577,18 +3583,16 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         case CSS_UNIT_EX: {
-            if (lycon->font.current_font_size < 0) {
-                resolve_current_font_size(lycon);
-            }
             float x_height_ratio = font_get_x_height_ratio(lycon->font.font_handle);
-            result = num * lycon->font.current_font_size * x_height_ratio;
+            float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size;
+            result = num * font_size * x_height_ratio;
             break;
         }
         case CSS_UNIT_CH: {
             // CSS Values 4 §6.1.1: equal to the advance width of the "0" (zero) glyph
-            if (lycon->font.current_font_size < 0) {
-                resolve_current_font_size(lycon);
-            }
+            float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size;
             if (lycon->font.font_handle) {
                 FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
                 LoadedGlyph* zero_glyph = font_load_glyph(lycon->font.font_handle, &style, (uint32_t)'0', false);
@@ -3596,6 +3600,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f)
                         ? lycon->ui_context->pixel_ratio : 1.0f;
                     float advance = zero_glyph->advance_x / pixel_ratio;
+                    float zoom = layout_effective_zoom(lycon->view);
+                    if (zoom > 0.0f) advance /= zoom;
                     if (lycon->font.style && lycon->font.style->font_size > 0.0f &&
                         lycon->font.current_font_size > 0.0f &&
                         lycon->font.style->font_size != lycon->font.current_font_size) {
@@ -3603,10 +3609,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     }
                     result = num * advance;
                 } else {
-                    result = num * lycon->font.current_font_size * 0.5f;
+                    result = num * font_size * 0.5f;
                 }
             } else {
-                result = num * lycon->font.current_font_size * 0.5f;
+                result = num * font_size * 0.5f;
             }
             break;
         }
@@ -3620,6 +3626,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         double percentage = value->data.percentage.value;
         if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
             result = percentage * lycon->font.style->font_size / 100.0;
+            if (effective_property == CSS_PROPERTY_LINE_HEIGHT) {
+                result *= layout_effective_zoom(lycon->view);
+            }
         } else if (effective_property == CSS_PROPERTY_LETTER_SPACING) {
             // CSS Text 4 defines spacing percentages against the current font
             if (lycon->font.current_font_size < 0) {
@@ -3804,7 +3813,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
         break;
     }
-    if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result)) {
+    if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
+        effective_property != CSS_PROPERTY_FONT_SIZE) {
         // CSS Viewport 1 applies effective zoom to every resolved CSS length,
         result *= layout_effective_zoom(lycon->view);
     }
@@ -5365,8 +5375,9 @@ static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
         span->blk->list_style_type = CSS_VALUE_NONE;
     }
     if (!list_member || type_already_set) {
-        span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-        str_copy(span->block()->list_style_image, 5, "none", 4);
+        span->blk->list_style_image = {};
+        span->blk->list_style_image.url = (char*)alloc_prop(lycon, 5);
+        str_copy(span->block()->list_style_image.url, 5, "none", 4);
     }
 }
 
@@ -5401,10 +5412,28 @@ static const char* css_list_style_image_url(const CssValue* value) {
 static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
                                        const CssValue* value) {
     const char* url = css_list_style_image_url(value);
-    if (!url) return false;
-    size_t length = strlen(url);
-    span->blk->list_style_image = (char*)alloc_prop(lycon, length + 1);
-    str_copy(span->block()->list_style_image, length + 1, url, length);
+    if (url) {
+        size_t length = strlen(url);
+        span->blk->list_style_image = {};
+        span->blk->list_style_image.url = (char*)alloc_prop(lycon, length + 1);
+        str_copy(span->block()->list_style_image.url, length + 1, url, length);
+        return true;
+    }
+
+    GradientType gradient_type = css_background_gradient_type(value);
+    if (gradient_type == GRADIENT_NONE) return false;
+
+    ListStyleImage image = {};
+    image.gradient_type = gradient_type;
+    bool resolved = gradient_type == GRADIENT_LINEAR
+        ? resolve_linear_gradient_value(lycon, value, &image.linear_gradient)
+        : gradient_type == GRADIENT_RADIAL
+            ? resolve_radial_gradient_value(lycon, value, &image.radial_gradient)
+            : resolve_conic_gradient_value(lycon, value, &image.conic_gradient);
+    if (!resolved) return false;
+    // CSS Images gradients have no intrinsic dimensions; retain the resolved
+    // image so list markers can apply the image-marker default object size.
+    span->blk->list_style_image = image;
     return true;
 }
 
@@ -6661,6 +6690,29 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
+        case CSS_PROPERTY_UNICODE_BIDI: {
+            BlockProp* target = block ? block->ensure_block(lycon) : nullptr;
+            if (!target && lycon->view->is_element()) {
+                ViewSpan* inline_span = lam::view_require_element(lycon->view);
+                target = inline_span ? inline_span->ensure_block(lycon) : nullptr;
+            }
+            if (!target || value->type != CSS_VALUE_TYPE_KEYWORD) break;
+            CssEnum bidi_value = value->data.keyword;
+            if (bidi_value == CSS_VALUE_INHERIT) {
+                DomElement* dom_elem = lam::dom_require_element(lycon->view);
+                target->unicode_bidi = find_inherited_block_keyword(
+                    dom_elem, CSS_PROPERTY_UNICODE_BIDI, false, false,
+                    CSS_VALUE_NORMAL);
+            } else if (bidi_value == CSS_VALUE_NORMAL ||
+                       bidi_value == CSS_VALUE_EMBED ||
+                       bidi_value == CSS_VALUE_ISOLATE ||
+                       bidi_value == CSS_VALUE_BIDI_OVERRIDE ||
+                       bidi_value == CSS_VALUE_ISOLATE_OVERRIDE ||
+                       bidi_value == CSS_VALUE_PLAINTEXT) {
+                target->unicode_bidi = bidi_value;
+            }
+            break;
+        }
         case CSS_PROPERTY_TEXT_INDENT: {
             if (!block) break;
             block->ensure_block(lycon);
@@ -7786,8 +7838,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (!css_store_list_style_image(lycon, span, value)) {
                 if (value->type != CSS_VALUE_TYPE_KEYWORD) break;
                 if (value->data.keyword == CSS_VALUE_NONE) {
-                    span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-                    str_copy(span->block()->list_style_image, 5, "none", 4);
+                    span->blk->list_style_image = {};
+                    span->blk->list_style_image.url = (char*)alloc_prop(lycon, 5);
+                    str_copy(span->block()->list_style_image.url, 5, "none", 4);
                 }
             }
             break;
@@ -7805,7 +7858,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                         if (parent->block()->list_style_position) {
                             span->blk->list_style_position = parent->blk->list_style_position;
                         }
-                        if (parent->block()->list_style_image) {
+                        if (parent->block()->list_style_image.url ||
+                            parent->block()->list_style_image.gradient_type != GRADIENT_NONE) {
                             span->blk->list_style_image = parent->blk->list_style_image;
                         }
                         break;
@@ -8045,6 +8099,16 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             block->blk->contain_inline_size = contains_inline_size;
             block->blk->contain_positioning =
                 css_contain_value_establishes_positioning_cb(value);
+            break;
+        }
+        case CSS_PROPERTY_CONTAINER_TYPE: {
+            if (!block || !value) break;
+            block->ensure_block(lycon);
+            // CSS Containment: container-type:size maps to size containment;
+            // otherwise the contained box's auto size still grows from content.
+            block->blk->contain_size = css_value_has_identifier(value, "size");
+            block->blk->contain_inline_size = css_value_has_identifier(
+                value, "inline-size");
             break;
         }
         case CSS_PROPERTY_CONTENT_VISIBILITY: {

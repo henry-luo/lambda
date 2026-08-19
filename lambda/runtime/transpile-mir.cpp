@@ -115,10 +115,18 @@ typedef struct MirPropertyKeyEntry {
 struct MirTranspiler {
     // Input
     AstScript* script;
+    // indexed facts stay separate from the immutable AST. CONST uses this
+    // table only while lowering, then the normal Script teardown releases it.
+    const AstIndex* ast_index;
     const char* source;
     Runtime* runtime;
     bool is_main;
     int script_index;
+    // P2 satellite lowering uses the T0 Script's already planned module slab
+    // rather than allocating eager MIR `_gvar_*` references. Calls to any
+    // definition except this target are dynamic through those Function slots.
+    Script* interp_module_owner;
+    AstFuncNode* satellite_target;
 
     // Pattern type list (shared with Script's type_list for const_pattern access)
     ArrayList* type_list;
@@ -680,17 +688,6 @@ static bool mir_inferred_native_argument_proven(MirTranspiler* mt,
 }
 
 
-
-static AstFuncNode* mir_direct_call_function(AstCallNode* call) {
-    AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
-    if (!function || function->node_type != AST_NODE_IDENT) return NULL;
-    NameEntry* entry = ((AstIdentNode*)function)->entry;
-    AstNode* node = entry ? entry->node : NULL;
-    if (!node || (node->node_type != AST_NODE_FUNC &&
-            node->node_type != AST_NODE_FUNC_EXPR &&
-            node->node_type != AST_NODE_PROC)) return NULL;
-    return (AstFuncNode*)node;
-}
 
 // A forwarded pair is published from fixed MIR registers at the shared
 // epilogue. Multiple source returns cannot safely share those registers: one
@@ -2672,6 +2669,8 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
 }
 
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
+        MIR_reg_t* out);
 
 static MIR_reg_t emit_variadic_args(MirTranspiler* mt, AstNode** resolved_args,
         int expected_params, int arg_count) {
@@ -4577,16 +4576,8 @@ static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
     return boxed;
 }
 
-static MIR_reg_t load_module_var_ref(MirTranspiler* mt, MIR_reg_t ref_addr,
-        TypeId tid) {
-    MIR_reg_t module_id = new_reg(mt, "import_module_id", MIR_T_I64);
-    MIR_reg_t slot = new_reg(mt, "import_slot", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, module_id),
-        MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, ref_addr, 0, 1)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, slot),
-        MIR_new_mem_op(mt->ctx, MIR_T_U32, sizeof(uint32_t), ref_addr, 0, 1)));
+static MIR_reg_t load_module_var_slots(MirTranspiler* mt, MIR_reg_t module_id,
+        MIR_reg_t slot, TypeId tid) {
     MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, table),
@@ -4609,6 +4600,41 @@ static MIR_reg_t load_module_var_ref(MirTranspiler* mt, MIR_reg_t ref_addr,
         return emit_unbox(mt, boxed, tid);
     }
     return boxed;
+}
+
+static MIR_reg_t load_module_var_ref(MirTranspiler* mt, MIR_reg_t ref_addr,
+        TypeId tid) {
+    MIR_reg_t module_id = new_reg(mt, "import_module_id", MIR_T_I64);
+    MIR_reg_t slot = new_reg(mt, "import_slot", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, module_id),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, ref_addr, 0, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, slot),
+        MIR_new_mem_op(mt->ctx, MIR_T_U32, sizeof(uint32_t), ref_addr, 0, 1)));
+    return load_module_var_slots(mt, module_id, slot, tid);
+}
+
+// A T0 import has no generated `_gvar_*` descriptor to link against. A
+// satellite instead embeds the already-planned owner identity and slab slot,
+// so it shares the same per-context binding without creating a mixed MIR cone.
+static MIR_reg_t load_interp_import_var(MirTranspiler* mt, NameEntry* entry,
+        TypeId tid) {
+    if (!mt || !mt->interp_module_owner ||
+            !interp_satellite_import_supported(entry)) {
+        return 0;
+    }
+    Script* owner = entry->import_owner;
+    if (!owner->interp_supported || !owner->interp_planned) return 0;
+    MIR_reg_t module_id = new_reg(mt, "t0_import_module_id", MIR_T_I64);
+    MIR_reg_t slot = new_reg(mt, "t0_import_slot", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, module_id),
+        MIR_new_int_op(mt->ctx, (int64_t)owner->module_state_id)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, slot),
+        MIR_new_int_op(mt->ctx, (int64_t)entry->slot)));
+    return load_module_var_slots(mt, module_id, slot, tid);
 }
 #pragma clang diagnostic pop
 
@@ -4978,48 +5004,6 @@ static MIR_reg_t emit_closure_capture_env(MirTranspiler* mt,
     return env_reg;
 }
 
-static void mir_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node,
-        int arg_count, AstNode** resolved_args) {
-    bool has_named_args = false;
-    AstNode* arg = arg_list;
-    while (arg) {
-        if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
-        arg = arg->next;
-    }
-
-    if (has_named_args && fn_node) {
-        int positional_idx = 0;
-        arg = arg_list;
-        while (arg) {
-            if (arg->node_type == AST_NODE_NAMED_ARG) {
-                AstNamedNode* named_arg = (AstNamedNode*)arg;
-                int param_idx = 0;
-                AstNamedNode* param = fn_node->param;
-                while (param) {
-                    if (param->name && named_arg->name &&
-                        param->name->len == named_arg->name->len &&
-                        memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
-                        if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[param_idx] = named_arg->as;
-                        break;
-                    }
-                    param_idx++;
-                    param = (AstNamedNode*)((AstNode*)param)->next;
-                }
-            } else {
-                while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS && resolved_args[positional_idx]) positional_idx++;
-                if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[positional_idx++] = arg;
-            }
-            arg = arg->next;
-        }
-    } else {
-        arg = arg_list;
-        for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-            resolved_args[i] = arg;
-            arg = arg->next;
-        }
-    }
-}
-
 static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         TypeId native_consumer_tid);
 static MIR_reg_t transpile_expr_with_map_contract(MirTranspiler* mt,
@@ -5386,7 +5370,9 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             // Only use the function reference path if the function is NOT stored
             // as a captured variable (closures store captured functions as vars)
             MirVarEntry* cap_var = find_var(mt, name_buf);
-            if (!cap_var) {
+            bool satellite_dynamic_target = mt->satellite_target &&
+                entry_node != (AstNode*)mt->satellite_target;
+            if (!cap_var && !satellite_dynamic_target) {
                 goto function_reference;
             }
         }
@@ -5433,6 +5419,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
     // Check if this is an imported variable (pub var from another module)
     if (ident->entry && ident->entry->import) {
         AstNode* entry_node = ident->entry->node;
+        TypeId entry_tid = entry_node && entry_node->type
+            ? entry_node->type->type_id : LMD_TYPE_ANY;
+        MIR_reg_t t0_import = load_interp_import_var(mt, ident->entry, entry_tid);
+        if (t0_import) return t0_import;
         if (mir_is_type_definition_binding(entry_node) && entry_node->type) {
             // Named types are compile-time symbols, not module variables; emit
             // their type-list value so nested option maps can carry the contract.
@@ -7244,24 +7234,6 @@ static MIR_reg_t emit_machine_count(MirTranspiler* mt, AstNode* node) {
 // sysfunc_c_ret_type_id lives in sys_func_registry.h — the T0 interpreter
 // selects the same result boxing from the same table.
 
-// Formal semantics 7.7: most value sys funcs declare their parameters as
-// `any - error`, so an error argument is rejected at the CALL BOUNDARY rather
-// than being absorbed into a plausible value. Search and ordinal calls may
-// still return null for a successful operation with no answer.
-static bool sysfunc_params_reject_error(SysFuncInfo* info) {
-    if (!info) return false;
-    switch (info->fn) {
-    case SYSFUNC_LEN:
-    case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF: case SYSFUNC_ORD:
-    case SYSFUNC_STRING: case SYSFUNC_SYMBOL: case SYSFUNC_NAME:
-    // typed string results must reject input errors before POST_PROCESS_UNBOX
-    case SYSFUNC_NORMALIZE: case SYSFUNC_NORMALIZE2:
-        return true;
-    default:
-        return false;
-    }
-}
-
 // The MIR register class a sys func's C result lands in.
 static MIR_type_t sysfunc_c_ret_mir_type(TypeId c_ret_tid) {
     // v5: a sys func's C return mirrors its declared Lambda type, and `int` is
@@ -8534,41 +8506,9 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
 
     // Type operators
     if (bi->op == OPERATOR_IS) {
-        // Check if right operand is a constrained type for inline constraint evaluation
-        AstNode* right_node = bi->right;
-        // Unwrap primary node
-        if (right_node->node_type == AST_NODE_PRIMARY) {
-            AstPrimaryNode* pri = (AstPrimaryNode*)right_node;
-            if (pri->expr) right_node = pri->expr;
-        }
-
-        AstConstrainedTypeNode* constrained_node = nullptr;
-        if (right_node->node_type == AST_NODE_CONSTRAINED_TYPE) {
-            constrained_node = (AstConstrainedTypeNode*)right_node;
-        } else if (right_node->type && right_node->type->kind == TYPE_KIND_CONSTRAINED) {
-            if (right_node->node_type == AST_NODE_IDENT) {
-                AstIdentNode* ident = (AstIdentNode*)right_node;
-                if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
-                    AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
-                    if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
-                        constrained_node = (AstConstrainedTypeNode*)type_def->as;
-                    }
-                }
-            }
-        } else if (right_node->type && right_node->type->type_id == LMD_TYPE_TYPE) {
-            TypeType* type_type = (TypeType*)right_node->type;
-            if (type_type->type && type_type->type->kind == TYPE_KIND_CONSTRAINED) {
-                if (right_node->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* ident = (AstIdentNode*)right_node;
-                    if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
-                        AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
-                        if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
-                            constrained_node = (AstConstrainedTypeNode*)type_def->as;
-                        }
-                    }
-                }
-            }
-        }
+        // Both tiers resolve direct and named constrained types through one
+        // AST helper, so the predicate source cannot diverge by tier.
+        AstConstrainedTypeNode* constrained_node = ast_constrained_type_node(bi->right);
 
         if (constrained_node) {
             // Inline constrained type check: base_type_check && constraint_check
@@ -12612,7 +12552,12 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     AstNode* item = arr_node->item;
     while (item) {
-        MIR_reg_t val = transpile_expr(mt, item);
+        // Generic array storage owns Items. Consume an immediate CONST fact
+        // before emitting a native-lane expression so its tagged carrier
+        // cannot cross this boundary as an unboxed arithmetic result.
+        MIR_reg_t boxed = 0;
+        bool const_folded = mir_emit_const_folded_item(mt, item, &boxed);
+        MIR_reg_t val = const_folded ? 0 : transpile_expr(mt, item);
 
         // let bindings are transparent - evaluate for side effect but don't push to array
         if (item->node_type == AST_NODE_ASSIGN) {
@@ -12624,7 +12569,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
         if (item->node_type == AST_NODE_PIPE) {
             // pipe/that/where exprs in array literals spread their array results
-            MIR_reg_t boxed = mir_box_evaluated_node(mt, item, val, val_tid);
+            if (!const_folded) boxed = mir_box_evaluated_node(mt, item, val, val_tid);
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
@@ -12633,7 +12578,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
         } else if (has_spreadable) {
             // When any child is spreadable, use array_push_spread for ALL children
-            MIR_reg_t boxed = mir_box_evaluated_node(mt, item, val, val_tid);
+            if (!const_folded) boxed = mir_box_evaluated_node(mt, item, val, val_tid);
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
@@ -12649,7 +12594,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         } else {
-            MIR_reg_t boxed = mir_box_evaluated_node(mt, item, val, val_tid);
+            if (!const_folded) boxed = mir_box_evaluated_node(mt, item, val, val_tid);
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
@@ -12781,18 +12726,6 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
 
 // is_proc_flow_side_effect_node lives in ast.hpp — the T0 walker makes the
 // same value-or-side-effect call for content-block items.
-
-static bool side_effect_result_can_error(int node_type) {
-    switch (node_type) {
-    case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_PIPE_FILE_STAM:
-        return true;
-    default:
-        return false;
-    }
-}
 
 static MIR_reg_t transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
     AstNode* tail_value = ast_unwrap_primary(node);
@@ -13147,7 +13080,7 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
         TypeFunc* function_type = function_expr && function_expr->type &&
             function_expr->type->type_id == LMD_TYPE_FUNC
             ? (TypeFunc*)function_expr->type : NULL;
-        AstFuncNode* function = function_type ? NULL : mir_direct_call_function(call);
+        AstFuncNode* function = function_type ? NULL : ast_direct_call_function(call);
         if (!function_type && function && function->type &&
                 function->type->type_id == LMD_TYPE_FUNC) {
             function_type = (TypeFunc*)function->type;
@@ -13186,7 +13119,7 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
     }
     if (primary->node_type != AST_NODE_CALL_EXPR) return value_type;
 
-    AstFuncNode* function = mir_direct_call_function((AstCallNode*)primary);
+    AstFuncNode* function = ast_direct_call_function((AstCallNode*)primary);
     if (!function || !function->type || function->type->type_id != LMD_TYPE_FUNC) {
         return value_type;
     }
@@ -16407,7 +16340,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         AstNode* entry_node = ident->entry ? ident->entry->node : nullptr;
 
         // Handle imported function calls (from another module compiled via C transpiler)
-        if (ident->entry && ident->entry->import && entry_node &&
+        if (ident->entry && ident->entry->import &&
+            !(mt->interp_module_owner &&
+              interp_satellite_import_supported(ident->entry)) && entry_node &&
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
              entry_node->node_type == AST_NODE_PROC)) {
@@ -16438,7 +16373,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             while (arg) { arg_count++; arg = arg->next; }
 
             AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-            mir_resolve_call_args(call_node->argument, fn_node, arg_count, resolved_args);
+            ast_resolve_call_args(call_node->argument, fn_node, arg_count, resolved_args);
 
             // Get expected param count
             int expected_params = arg_count;
@@ -16605,7 +16540,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         MirVarEntry* ident_var = find_var(mt, ident_name_str);
         bool is_fn_variable = (ident_var != nullptr);
 
-        if (!is_fn_variable && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
+        bool satellite_dynamic_target = mt->satellite_target && entry_node &&
+            (entry_node->node_type == AST_NODE_FUNC ||
+             entry_node->node_type == AST_NODE_FUNC_EXPR ||
+             entry_node->node_type == AST_NODE_PROC) &&
+            entry_node != (AstNode*)mt->satellite_target;
+        if (!is_fn_variable && !satellite_dynamic_target && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
             entry_node->node_type == AST_NODE_FUNC_EXPR ||
             entry_node->node_type == AST_NODE_PROC)) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
@@ -16625,7 +16565,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (local_func) fn_mangled = raw_name;
         }
 
-        if (fn_mangled && (local_func || entry_node)) {
+        if (!satellite_dynamic_target && fn_mangled && (local_func || entry_node)) {
             log_debug("mir: DIRECT call '%s' local_func=%p entry_type=%d",
                 fn_mangled, (void*)local_func,
                 entry_node ? entry_node->node_type : -1);
@@ -16754,7 +16694,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 ast_unwrap_primary(candidate_arg) &&
                 ast_unwrap_primary(candidate_arg)->node_type == AST_NODE_CALL_EXPR
                 ? (AstCallNode*)ast_unwrap_primary(candidate_arg) : NULL;
-            AstFuncNode* producer = mir_direct_call_function(producer_call);
+            AstFuncNode* producer = ast_direct_call_function(producer_call);
             if (local_func && fn_def && producer_call &&
                     mir_region_consumer_candidate(fn_def, producer) &&
                     mir_region_producer_candidate(producer)) {
@@ -16784,7 +16724,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (expected_params == 0 && !call_is_variadic) expected_params = arg_count;
 
             AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-            mir_resolve_call_args(call_node->argument, fn_def, arg_count, resolved_args);
+            ast_resolve_call_args(call_node->argument, fn_def, arg_count, resolved_args);
 
             // Phase 4: Check if target function has a native version for optimized calling
             NativeFuncInfo* call_nfi = fn_mangled ? find_native_func_info(mt, fn_mangled) : nullptr;
@@ -18900,6 +18840,9 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         return null_r;
     }
 
+    MIR_reg_t folded = 0;
+    if (mir_emit_const_folded_item(mt, node, &folded)) return folded;
+
     if (mir_is_type_value_node(node)) {
         // Type* is a direct-pointer Item: its Type header already starts with
         // LMD_TYPE_TYPE. Adding a high-byte tag would make the carrier
@@ -19647,6 +19590,33 @@ static AstNode* mir_navigation_direct_parent(AstNode* node) {
     AstFieldNode* field = (AstFieldNode*)node;
     return mir_navigation_chain_has_current(field->object)
         ? field->object : NULL;
+}
+
+// a CONST fact is an immediate Item, so materializing it at the generic value
+// boundary preserves the tagged representation expected by callers.
+static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
+        MIR_reg_t* out) {
+    if (!mt || !mt->ast_index || !node || !node->type || !out) return false;
+    AstNode* evaluated = ast_unwrap_primary(node);
+    if (!evaluated || !evaluated->type) return false;
+    AstNodeId id = ast_index_find(mt->ast_index, evaluated);
+    if (id == AST_NODE_ID_INVALID || id >= mt->ast_index->count) return false;
+    const AstNodeFacts* facts = &mt->ast_index->facts[id];
+    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
+
+    Item value = {.item = facts->folded_item};
+    TypeId type_id = get_type_id(value);
+    if (type_id != evaluated->type->type_id) return false;
+    if (type_id != LMD_TYPE_INT && type_id != LMD_TYPE_BOOL &&
+            type_id != LMD_TYPE_NULL) {
+        return false;
+    }
+    MIR_reg_t result = new_reg(mt, "const_fold", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_uint_op(mt->ctx, value.item)));
+    *out = result;
+    return true;
 }
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
@@ -21972,7 +21942,7 @@ static bool mir_recursive_call_arguments_prove_native(MirTranspiler* mt,
     int arg_count = 0;
     for (AstNode* arg = call->argument; arg; arg = arg->next) arg_count++;
     AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    mir_resolve_call_args(call->argument, analysis_fn, arg_count, resolved_args);
+    ast_resolve_call_args(call->argument, analysis_fn, arg_count, resolved_args);
     TypeParam* param_type = analysis_fn->type &&
         analysis_fn->type->type_id == LMD_TYPE_FUNC
         ? ((TypeFunc*)analysis_fn->type)->param : NULL;
@@ -25419,6 +25389,35 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
     }
 }
 
+// Satellites share the T0 module slab. Reconstruct only the lowering map from
+// its already-planned NameEntries; no `_gvar_*` BSS exists here because those
+// eager-module slots have a different numbering and omit function values.
+static void prepass_create_interp_module_vars(MirTranspiler* mt,
+        Script* module_owner) {
+    AstScript* root = module_owner ? (AstScript*)module_owner->ast_root : NULL;
+    NameScope* globals = root ? root->global_vars : NULL;
+    if (!mt || !globals) return;
+    for (NameEntry* entry = globals->first; entry; entry = entry->next) {
+        if (!entry->storage_assigned || entry->binding_storage != BINDING_STORAGE_MODULE ||
+                entry->import || !entry->name) {
+            continue;
+        }
+        AstNode* node = entry->node;
+        TypeId type_id = node && node->type ? node->type->type_id : LMD_TYPE_ANY;
+        if (node && (node->node_type == AST_NODE_FUNC ||
+                node->node_type == AST_NODE_FUNC_EXPR ||
+                node->node_type == AST_NODE_PROC)) {
+            type_id = LMD_TYPE_FUNC;
+        }
+        GlobalVarEntry global = {};
+        global.name = mir_em_persist_cstr(&mt->em, entry->name->chars).str;
+        global.slot = (uint32_t)entry->slot;
+        global.type_id = type_id;
+        global.mir_type = type_to_mir(type_id);
+        hashmap_set(mt->global_vars, &global);
+    }
+}
+
 // ============================================================================
 // Pre-pass: compile string/symbol pattern definitions
 // Walks AST to find pattern defs and compiles them to RE2 regex,
@@ -26041,11 +26040,40 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
 // AST root transpilation
 // ============================================================================
 
-void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
-                       ArrayList* type_list, ArrayList* const_list,
-                       Pool* script_pool, NamePool* name_pool,
-                       ArrayList** out_property_keys) {
+typedef struct MirModuleNames {
+    const char* module;
+    const char* consts_bss;
+    const char* layout_bss;
+    const char* type_list_bss;
+    const char* property_specs_bss;
+} MirModuleNames;
+
+typedef struct MirModuleArtifacts {
+    MIR_item_t consts_bss;
+    MIR_item_t layout_bss;
+    MIR_item_t type_list_bss;
+} MirModuleArtifacts;
+
+static const MirModuleNames MIR_DEFAULT_MODULE_NAMES = {
+    "lambda_script", "_mod_consts_ptr", "_mod_layout",
+    "_mod_type_list_ptr", "_mod_property_specs",
+};
+
+static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
+                                    const char* source, ArrayList* type_list,
+                                    ArrayList* const_list, Pool* script_pool,
+                                    NamePool* name_pool,
+                                    const MirModuleNames* module_names,
+                                    ArrayList** out_property_keys,
+                                    MirModuleArtifacts* out_artifacts,
+                                    Script* interp_module_owner,
+                                    AstFuncNode* satellite_target,
+                                    const AstIndex* ast_index) {
     log_notice("transpile AST to MIR (direct)");
+
+    const MirModuleNames* names = module_names ? module_names :
+        &MIR_DEFAULT_MODULE_NAMES;
+    if (out_artifacts) memset(out_artifacts, 0, sizeof(*out_artifacts));
 
     MirTranspiler mt;
     memset(&mt, 0, sizeof(mt));
@@ -26062,6 +26090,9 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.em.convert_rep = lambda_convert_rep;
     mt.em.lookup_import_metadata = lambda_lookup_import_metadata;
     mt.script = script;
+    mt.ast_index = ast_index;
+    mt.interp_module_owner = interp_module_owner;
+    mt.satellite_target = satellite_target;
     mt.source = source;
     mt.is_main = true;
     mt.type_list = type_list;
@@ -26080,22 +26111,27 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     if (out_property_keys) *out_property_keys = NULL;
 
     // Create module
-    mt.module = MIR_new_module(ctx, "lambda_script");
+    mt.module = MIR_new_module(ctx, names->module);
 
     // Pre-pass: compile string/symbol patterns
     prepass_compile_patterns(&mt, script->child);
 
-    // Pre-pass: create BSS items for module-level variables
-    prepass_create_global_vars(&mt, script->child);
+    // A satellite reconstructs the existing interpreter slab mapping. Eager
+    // lowering keeps its dedicated BSS references and numbering unchanged.
+    if (mt.interp_module_owner) {
+        prepass_create_interp_module_vars(&mt, mt.interp_module_owner);
+    } else {
+        prepass_create_global_vars(&mt, script->child);
+    }
 
     // MIR may relocate its BSS item table while new BSS entries are added.
     // Create every global-reference BSS first, then retain these module BSS
     // handles for generated code; otherwise generated code can load metadata
     // through a stale MIR item after the compiler has released its tables.
-    mt.consts_bss = MIR_new_bss(ctx, "_mod_consts_ptr", 8);
+    mt.consts_bss = MIR_new_bss(ctx, names->consts_bss, 8);
     mt.em.consts_bss = mt.consts_bss;
-    mt.module_layout_bss = MIR_new_bss(ctx, "_mod_layout", sizeof(LambdaModuleLayout));
-    mt.type_list_bss = MIR_new_bss(ctx, "_mod_type_list_ptr", 8);
+    mt.module_layout_bss = MIR_new_bss(ctx, names->layout_bss, sizeof(LambdaModuleLayout));
+    mt.type_list_bss = MIR_new_bss(ctx, names->type_list_bss, 8);
 
     // M2: collect every call site and escaping reference before any inference
     // runs, so params with a closed, uniformly-typed caller set can be narrowed.
@@ -26294,7 +26330,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         if (bytes_size > UINT32_MAX) {
             log_error("module-key-link: property key image is too large");
         } else {
-            MIR_new_bss(ctx, "_mod_property_specs", bytes_size);
+            MIR_new_bss(ctx, names->property_specs_bss, bytes_size);
         }
     }
 
@@ -26319,8 +26355,135 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
     hashmap_free(mt.callsite_info);
+    if (out_artifacts) {
+        out_artifacts->consts_bss = mt.consts_bss;
+        out_artifacts->layout_bss = mt.module_layout_bss;
+        out_artifacts->type_list_bss = mt.type_list_bss;
+    }
     if (out_property_keys) *out_property_keys = mt.property_keys;
     else if (mt.property_keys) arraylist_free(mt.property_keys);
+}
+
+static int lambda_const_fold_compiler_pass(void* opaque) {
+    return interp_const_fold_script((Transpiler*)opaque) ? 1 : 0;
+}
+
+void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
+                       ArrayList* type_list, ArrayList* const_list,
+                       Pool* script_pool, NamePool* name_pool,
+                       ArrayList** out_property_keys) {
+    transpile_mir_ast_named(ctx, script, source, type_list, const_list,
+        script_pool, name_pool, &MIR_DEFAULT_MODULE_NAMES,
+        out_property_keys, NULL, NULL, NULL, NULL);
+}
+
+// P2's satellite has its own BSS symbols even though it shares the Script's
+// MIR context. `find_import` is context-wide (not module-qualified), so using
+// the eager module's `_mod_*` names would bind a later function to the first
+// satellite's image after a relink. Stable names make every satellite retain
+// its own immutable layout while all of them address the same EvalContext slab.
+static bool make_satellite_module_names(Script* script, uint32_t sequence,
+        MirModuleNames* out) {
+    if (!script || !script->name_pool || !out) return false;
+    char module[96];
+    char consts[96];
+    char layout[96];
+    char types[96];
+    char keys[96];
+    snprintf(module, sizeof(module), "lambda_sat_%u", sequence);
+    snprintf(consts, sizeof(consts), "_sat_%u_consts", sequence);
+    snprintf(layout, sizeof(layout), "_sat_%u_layout", sequence);
+    snprintf(types, sizeof(types), "_sat_%u_type_list", sequence);
+    snprintf(keys, sizeof(keys), "_sat_%u_property_specs", sequence);
+    String* module_name = name_pool_create_len(script->name_pool, module, strlen(module));
+    String* consts_name = name_pool_create_len(script->name_pool, consts, strlen(consts));
+    String* layout_name = name_pool_create_len(script->name_pool, layout, strlen(layout));
+    String* types_name = name_pool_create_len(script->name_pool, types, strlen(types));
+    String* keys_name = name_pool_create_len(script->name_pool, keys, strlen(keys));
+    if (!module_name || !consts_name || !layout_name || !types_name || !keys_name) return false;
+    out->module = module_name->chars;
+    out->consts_bss = consts_name->chars;
+    out->layout_bss = layout_name->chars;
+    out->type_list_bss = types_name->chars;
+    out->property_specs_bss = keys_name->chars;
+    return true;
+}
+
+bool compile_ast_function_satellite(Runtime* runtime, Script* script,
+        const AstFuncNode* fn, void** out_boxed_entry) {
+    if (out_boxed_entry) *out_boxed_entry = NULL;
+    if (!runtime || !script || !fn || !fn->analysis || !out_boxed_entry ||
+            !interp_satellite_supported(fn)) {
+        return false;
+    }
+    if (!script->jit_context) {
+        script->jit_context = jit_init(runtime->optimize_level);
+        script->mir_gen_initialized = true;
+        if (!script->jit_context) {
+            log_error("interp-tier: could not create satellite MIR context");
+            return false;
+        }
+    }
+
+    MirModuleNames names = {};
+    if (!make_satellite_module_names(script, ++script->interp_satellite_count,
+            &names)) {
+        log_error("interp-tier: could not allocate satellite symbol names");
+        return false;
+    }
+
+    // `AstFuncNode::next` is the module declaration chain. The temporary root
+    // must contain exactly this definition or a promotion would accidentally
+    // lower the rest of the module again.
+    AstFuncNode satellite_fn = *fn;
+    satellite_fn.next = NULL;
+    AstScript satellite_root = {};
+    satellite_root.node_type = AST_SCRIPT;
+    satellite_root.child = (AstNode*)&satellite_fn;
+    AstScript* source_root = (AstScript*)script->ast_root;
+    satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
+
+    MirModuleArtifacts artifacts = {};
+    ArrayList* property_keys = NULL;
+    transpile_mir_ast_named(script->jit_context, &satellite_root, script->source,
+        script->type_list, script->const_list, script->pool, script->name_pool,
+        &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
+        &script->ast_index);
+    if (property_keys && property_keys->length != 0) {
+        // The eligibility scan should make this unreachable. Refuse publication
+        // if it ever drifts instead of giving satellites unequal key layouts.
+        log_error("interp-tier: satellite unexpectedly emitted property keys");
+        arraylist_free(property_keys);
+        return false;
+    }
+    if (property_keys) arraylist_free(property_keys);
+
+    MIR_link(script->jit_context, MIR_set_gen_interface, import_resolver);
+    StrBuf* entry_name = strbuf_new_cap(96);
+    write_fn_name_ex(entry_name, (AstFuncNode*)fn, NULL, "_b");
+    void* entry = entry_name ? jit_gen_func(script->jit_context, entry_name->str) : NULL;
+    if (entry_name) strbuf_free(entry_name);
+    if (!entry || !artifacts.consts_bss || !artifacts.consts_bss->addr ||
+            !artifacts.type_list_bss || !artifacts.type_list_bss->addr ||
+            !artifacts.layout_bss || !artifacts.layout_bss->addr) {
+        log_error("interp-tier: satellite link did not publish its immutable BSS");
+        return false;
+    }
+
+    *(void**)artifacts.consts_bss->addr = script->const_list
+        ? script->const_list->data : NULL;
+    *(void**)artifacts.type_list_bss->addr = script->type_list;
+    LambdaModuleLayout* layout = (LambdaModuleLayout*)artifacts.layout_bss->addr;
+    memset(layout, 0, sizeof(*layout));
+    layout->module_id = script->module_state_id;
+    // Satellites observe the exact T0 slab, including function-value slots.
+    layout->var_count = script->interp_slab_count;
+
+    *out_boxed_entry = entry;
+    log_notice("interp-tier: satellite compiled function='%s' image=%u",
+        fn->name ? fn->name->chars : "<anonymous>",
+        (unsigned)script->interp_satellite_count);
+    return true;
 }
 
 // ============================================================================
@@ -26582,6 +26745,21 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     // borrow a different live context and restore the caller afterward.
     if (!eval_context_thread_initialize(template_context)) return;
 
+    // const runs after index construction and under the thread-bound evaluator
+    // context its shared walker needs. A failed/no-op attempt leaves no fact,
+    // so it cannot change source semantics or force a JIT fallback (D8.1.1v2).
+    CompilerPassManager pass_manager;
+    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
+        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED | COMPILER_FACT_INDEXED);
+    CompilerPassSpec const_fold_pass = {"const-fold", COMPILER_FACT_INDEXED,
+        COMPILER_FACT_ANALYZED, lambda_const_fold_compiler_pass};
+    if (!compiler_pass_manager_add(&pass_manager, &const_fold_pass) ||
+            !compiler_pass_manager_run(&pass_manager, tp)) {
+        log_error("const-fold: pass manager rejected module '%s'",
+            script_path ? script_path : "<unknown>");
+        return;
+    }
+
     // Ensure template registry exists for post-JIT template registration
     if (!g_template_registry) {
         g_template_registry = template_registry_new();
@@ -26654,8 +26832,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 #endif
 
     ArrayList* property_keys = NULL;
-    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
-        tp->pool, tp->name_pool, &property_keys);
+    transpile_mir_ast_named(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
+        tp->pool, tp->name_pool, &MIR_DEFAULT_MODULE_NAMES, &property_keys,
+        NULL, NULL, NULL, &tp->ast_index);
     uint64_t mir_module_count = 0;
     uint64_t mir_function_count = 0;
     uint64_t mir_instruction_count = 0;

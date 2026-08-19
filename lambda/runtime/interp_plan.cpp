@@ -240,6 +240,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_IF_EXPR:
     case AST_NODE_LET_STAM:
     case AST_NODE_ASSIGN:
+    case AST_NODE_DECOMPOSE:
     case AST_NODE_CALL_EXPR:
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -282,22 +283,22 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_ARRAY_TYPE:
     case AST_NODE_MAP_TYPE:
     case AST_NODE_ELMT_TYPE:
+    // P3: the walker resolves the type-list entry and evaluates its `that`
+    // clause only through EvalMode::PREDICATE; raw Type* identity is never
+    // used as a substitute for the constraint.
     case AST_NODE_FUNC_TYPE:
+    case AST_NODE_CONSTRAINED_TYPE:
     // --- P1.3: documents, paths, queries ---
     case AST_NODE_ELEMENT:
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
-    // CONSTRAINED_TYPE stays rejected: lowering resolves a constrained type
-    // through const_type_with_tl(type_index), so the raw node Type* the walker
-    // publishes is a different identity and fn_is answers differently
-    // (test/lambda/constrained_type.ls). Reproducing the type-index lookup is
-    // more code than the construct is worth right now.
     case AST_NODE_SPREAD:
     // --- P1.1: pipes and implicit contexts ---
     case AST_NODE_PIPE:
     case AST_NODE_CURRENT_ITEM:
     case AST_NODE_CURRENT_INDEX:
+    case AST_NODE_LAST_INDEX:
     case AST_NODE_PATH_EXPR:
     case AST_NODE_PATH_INDEX_EXPR:
     case AST_NODE_NAVIGATION_EXPR:
@@ -305,6 +306,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM:
     case AST_NODE_CURRENT_ERROR:
+    case AST_NODE_NAMED_ARG:
         return true;
     default:
         return false;
@@ -351,6 +353,25 @@ typedef struct ScanCtx {
     AstNodeType reject;
 } ScanCtx;
 
+// An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
+// Follow plain alias declarations so that `var b: any[] = a; b[0] = ...` does
+// not admit a generic COW setter for a shape it cannot preserve.
+static bool interp_binding_is_ndim_array(NameEntry* entry, int depth) {
+    if (!entry || depth >= AST_COW_PATH_MAX || !entry->node ||
+            entry->node->node_type != AST_NODE_ASSIGN) {
+        return false;
+    }
+    AstNode* init = ast_unwrap_primary(((AstNamedNode*)entry->node)->as);
+    if (!init) return false;
+    if (init->node_type == AST_NODE_IDENT) {
+        return interp_binding_is_ndim_array(((AstIdentNode*)init)->entry, depth + 1);
+    }
+    if (init->node_type != AST_NODE_ARRAY) return false;
+    int64_t shape[AST_COW_PATH_MAX] = {};
+    ArrayNumElemType element = ELEM_INT;
+    return detect_ndim_literal(init, shape, AST_COW_PATH_MAX, &element, true) >= 2;
+}
+
 static void interp_scan_visit(AstNode* node, void* ctx) {
     ScanCtx* sc = (ScanCtx*)ctx;
     if (!sc->ok || !node) return;
@@ -358,6 +379,57 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         sc->ok = false;
         sc->reject = node->node_type;
         return;
+    }
+    if (node->node_type == AST_NODE_PIPE) {
+        AstBinaryNode* pipe = (AstBinaryNode*)node;
+        AstNode* right = ast_unwrap_primary(pipe->right);
+        if (pipe->op == OPERATOR_PIPE && right &&
+                right->node_type == AST_NODE_CALL_EXPR &&
+                ast_call_has_named_args((AstCallNode*)right)) {
+            // The aggregate pipe injects one positional argument outside the
+            // call AST. Keep named calls on JIT until T0 has that merged ABI.
+            sc->ok = false;
+            sc->reject = AST_NODE_NAMED_ARG;
+            return;
+        }
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        AstFuncNode* direct = ast_direct_call_function(call);
+        if (ast_call_has_named_args(call) && !direct) {
+            // Dynamic and system dispatch expose positional Item operands only;
+            // only a resolved Lambda definition supplies a formal layout.
+            sc->ok = false;
+            sc->reject = AST_NODE_NAMED_ARG;
+            return;
+        }
+        TypeFunc* signature = direct && ((AstNode*)direct)->type &&
+                ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
+            ? (TypeFunc*)((AstNode*)direct)->type : NULL;
+        if (ast_type_func_has_var_parameter(signature)) {
+            NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+            if (!ast_direct_call_var_parameter_entries(call, signature, borrowed)) {
+                // A `var` argument is a caller-owned writable binding. T0 can
+                // publish a replacement only for an exact direct identifier;
+                // a dynamic, optional, variadic, aliased, or expression
+                // argument has no equivalent write-back target.
+                sc->ok = false;
+                sc->reject = AST_NODE_CALL_EXPR;
+                return;
+            }
+        } else if (!direct) {
+            AstNode* callee = ast_unwrap_primary(call->function);
+            TypeFunc* dynamic_signature = callee && callee->type &&
+                    callee->type->type_id == LMD_TYPE_FUNC
+                ? (TypeFunc*)callee->type : NULL;
+            if (ast_type_func_has_var_parameter(dynamic_signature)) {
+                // lambda_dynamic_call intentionally rejects mutable borrows;
+                // retain whole-script fallback before that ABI boundary.
+                sc->ok = false;
+                sc->reject = AST_NODE_CALL_EXPR;
+                return;
+            }
+        }
     }
     // AI11/AI12: suspension-capable and view-bearing definitions bypass T0
     // entirely until P2's first-call satellite compile exists.
@@ -371,66 +443,39 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             sc->reject = node->node_type;
             return;
         }
-        TypeFunc* signature = (TypeFunc*)node->type;
-        // A variadic definition binds its rest arguments to `varg()`, which the
-        // generated wrapper installs from a trailing physical parameter. The
-        // walker has no vararg context yet, so those definitions stay on JIT.
-        if (signature && signature->type_id == LMD_TYPE_FUNC && signature->is_variadic) {
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
-        // A `var` parameter is an inout binding: the callee's writes have to be
-        // published back into the caller's binding on return. lambda_dynamic_call
-        // refuses these outright ("dynamic dispatch of a function with `var`
-        // parameters is deferred") and the walker has no write-back either, so a
-        // mutation would simply be lost (test/lambda/proc/var_param.ls).
-        if (signature && signature->type_id == LMD_TYPE_FUNC) {
-            for (TypeParam* param = signature->param; param; param = param->next) {
-                if (param->is_var_param) {
-                    sc->ok = false;
-                    sc->reject = node->node_type;
-                    return;
-                }
-            }
-        }
     }
-    // N-D numeric literals become one shaped ArrayNum via array_num_new_ndim;
-    // building them the generic way would diverge silently, so the whole
-    // script falls back instead.
+    // eval_array uses the AST's homogeneous NumSized witness for compact
+    // literals. Full-width u64 remains excluded: generic container reads
+    // normalize a small u64 without MIR's typed raw-index lane.
     if (node->node_type == AST_NODE_ARRAY) {
         TypeArray* arr_type = (TypeArray*)node->type;
         if (arr_type && arr_type->nested &&
-                (arr_type->nested->type_id == LMD_TYPE_UINT64 ||
-                 arr_type->nested->type_id == LMD_TYPE_NUM_SIZED)) {
+                arr_type->nested->type_id == LMD_TYPE_UINT64) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
         }
-        // Nested array literals are handled: a uniform numeric nest folds into
-        // one shaped ArrayNum (detect_ndim_literal), and anything else builds
-        // generically. Only the sized/u64 element widths above stay rejected.
     }
-    // A compound assignment through a nested path (`a.b.c = v`) has its own
-    // COW path-set lowering; only a plain binding root is covered here.
-    // `a[i] = v` / `a.f = v` through a plain binding root: the *_cow helpers
-    // own the sharing decision (S9.1.2) and the walker publishes whatever owner
-    // they hand back, so no mark inspection happens here. The marks themselves
-    // come from cow_bind_var at the aliasing binding, exactly as lowering does.
-    // Still gated: a nested path (`a.b.c = v`), which has its own path-set
-    // lowering, and a declared map/array contract, whose checked setters
+    // `a[i] = v`, `a.f = v`, and nested paths through a plain binding root use
+    // cow_path_set: it owns every detach/relink decision (S9.1.2), while T0
+    // only publishes its replacement root. The alias mark comes from
+    // cow_bind_var at the binding boundary, exactly as lowering does. Still
+    // gated: a declared map/array contract, whose checked setters
     // validate the full occurrence contract before installing a replacement.
     if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
             node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
         AstCowPath path = {};
-        AstNode* root = ast_unwrap_primary(ca->object);
-        NameEntry* entry = root && root->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)root)->entry : NULL;
-        // Two shapes reach this syntax but not this lowering: a masked or
+        // ca->object is only the immediate parent on a nested write; use the
+        // collected root or `h[0][0] = v` would be rejected before T0 runs it.
+        bool has_path = ast_collect_cow_path(&path, ca->object);
+        NameEntry* entry = has_path && path.root &&
+                path.root->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)path.root)->entry : NULL;
+        // two shapes reach this syntax but not this lowering: a masked or
         // sliced write (`arr[arr gt 25] = 0`, where the key is a mask, not an
-        // index) and element mutation (`el.attr = v`, which lowering routes
-        // through its own edit bridge rather than the map setter).
+        // index) and element mutation (`el.attr = v`, whose distinct attribute
+        // and child layouts need their own checked T0 bridge before admission).
         AstNode* root_init = entry && entry->node &&
             entry->node->node_type == AST_NODE_ASSIGN
             ? ((AstNamedNode*)entry->node)->as : NULL;
@@ -440,10 +485,21 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             (ca->key && ca->key->type &&
              (ca->key->type->type_id == LMD_TYPE_INT ||
               ca->key->type->type_id == LMD_TYPE_INT64));
-        if (!ast_collect_cow_path(&path, ca->object) || path.count != 0 ||
-                !entry || entry->import || element_root || !indexed_key ||
+        bool open_any_array = entry &&
+            ast_declared_type_is_open_any_array(entry->declared_type);
+        bool direct_typed_map = path.count == 0 && entry &&
+            ast_declared_type_is_map(entry->declared_type);
+        bool ndim_row_write = path.count == 0 &&
+            interp_binding_is_ndim_array(entry, 0);
+        if (!has_path || !entry || entry->import ||
+                element_root || !indexed_key || ndim_row_write ||
                 (entry->node && entry->node->node_type == AST_NODE_ASSIGN &&
-                 ((AstNamedNode*)entry->node)->declared_type)) {
+                 ((AstNamedNode*)entry->node)->declared_type &&
+                 !open_any_array && !direct_typed_map)) {
+            // an `any[]` root has no narrower element contract to validate,
+            // a checked map setter protects its direct field contract, but an
+            // N-D root needs row-aware assignment; array_set_cow only preserves
+            // a scalar leaf and must not silently narrow that row.
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -473,7 +529,12 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // is implemented; these clauses stay on the JIT until their slices land.
     if (node->node_type == AST_NODE_FOR_EXPR || node->node_type == AST_NODE_FOR_STAM) {
         AstForNode* fr = (AstForNode*)node;
-        if (fr->group || fr->order || fr->limit || fr->offset) {
+        // Unordered window clauses lower after the complete stream, so their
+        // body effects are independent of the selected output. Admit only the
+        // expression form; ordered/grouped and statement forms need distinct
+        // control-flow handling before they can leave the JIT.
+        if (fr->group || fr->order ||
+                ((fr->limit || fr->offset) && node->node_type != AST_NODE_FOR_EXPR)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -504,8 +565,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // A native-scalar type annotation on a binding is a coercion boundary:
     // lowering unboxes the initializer into the declared lane and reboxes it,
     // so `let pairs: float = 7 div 2` yields a float where the boxed walker
-    // would keep the int. Declaration-boundary contracts are P1.4; until then
-    // an annotated binding routes the whole script to the JIT.
+    // would keep the int. T0 preserves an already-established compact scalar
+    // witness; dynamic numeric admission and typed-array conversion stay on
+    // the JIT until their checked-boundary slice lands.
     if (node->node_type == AST_NODE_ASSIGN) {
         Type* declared = ((AstNamedNode*)node)->declared_type;
         if (declared) {
@@ -521,12 +583,30 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             // float, so the walker must coerce (interp_coerce_declared).
             // The rest keep lane-propagating arithmetic that the boxed helpers
             // do not reproduce, so they stay gated.
-            case LMD_TYPE_INT64: case LMD_TYPE_UINT64:
+            case LMD_TYPE_INT64:
             case LMD_TYPE_FLOAT64: case LMD_TYPE_NUM_SIZED:
             case LMD_TYPE_DECIMAL:
-                sc->ok = false;
-                sc->reject = node->node_type;
-                return;
+                // A compact scalar RHS already carries the exact Item witness
+                // (for example i8(...) or a sized literal). A typed compact
+                // array needs `ensure_sized_array`, so it remains excluded.
+                if (declared->type_id == LMD_TYPE_ARRAY) {
+                    sc->ok = false;
+                    sc->reject = node->node_type;
+                    return;
+                }
+                if (tid != LMD_TYPE_NUM_SIZED) {
+                    sc->ok = false;
+                    sc->reject = node->node_type;
+                    return;
+                }
+                break;
+            case LMD_TYPE_UINT64:
+                if (declared->type_id == LMD_TYPE_ARRAY) {
+                    sc->ok = false;
+                    sc->reject = node->node_type;
+                    return;
+                }
+                break;
             default:
                 break;
             }
@@ -539,13 +619,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // A variadic sys func (arg_count -1) has bespoke per-call lowering —
         // `print` for instance emits one pn_print per argument with separators —
         // so there is no generic dispatch to mirror yet.
-        // C_ARG_NATIVE (the bitwise/shift family) is still rejected: the call
-        // itself marshals correctly through `_barg`, but lowering boxes the raw
-        // i64 result by the *call node's* effective type — `int`, `i64`, `u32`,
-        // … — and reproducing that lane choice is type-inference work, not
-        // dispatch work. Interpreting it would report `int64` where the JIT
-        // reports `u32` (test/lambda/sized_numeric_bitwise_go), so the script
-        // falls back until the lane is modelled.
+        // The native bitwise rows are admitted only through the shared
+        // Item-level wrapper policy. It preserves the static all-int fast path
+        // while the existing runtime helpers retain sized/full/bigint lanes.
+        if (interp_native_sys_item_supported(info)) {
+            interp_visit_children(node, interp_scan_visit, ctx);
+            return;
+        }
         // `print` is the one Lambda-variadic entry the walker implements
         // directly (one pn_print per argument, as lowering emits); the other
         // variadic rows still have no generic dispatch to mirror.
@@ -601,6 +681,126 @@ bool interp_scan_supported(Script* script, AstNodeType* reject) {
 }
 
 // ---------------------------------------------------------------------------
+// Restricted evaluator modes (P3)
+// ---------------------------------------------------------------------------
+
+// A predicate has no user-code call edge.  This explicit list is deliberately
+// smaller than the ordinary sysfunc surface: every row here is a value reader
+// or scalar/text transform with no I/O, mutation, async, or callback path.
+bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info) {
+    if (mode == EvalMode::RUNTIME) return true;
+    if (!info || info->is_proc || !info->func_ptr || info->is_async) return false;
+    switch (info->fn) {
+    case SYSFUNC_LEN:
+    case SYSFUNC_TYPE:
+    case SYSFUNC_NAME:
+    case SYSFUNC_INT:
+    case SYSFUNC_INT64:
+    case SYSFUNC_FLOAT:
+    case SYSFUNC_DECIMAL:
+    case SYSFUNC_STRING:
+    case SYSFUNC_ABS:
+    case SYSFUNC_ROUND:
+    case SYSFUNC_FLOOR:
+    case SYSFUNC_CEIL:
+    case SYSFUNC_TRUNC:
+    case SYSFUNC_CONTAINS:
+    case SYSFUNC_STARTS_WITH:
+    case SYSFUNC_ENDS_WITH:
+    case SYSFUNC_TRIM:
+    case SYSFUNC_TRIM_START:
+    case SYSFUNC_TRIM_END:
+    case SYSFUNC_LOWER:
+    case SYSFUNC_UPPER:
+        return true;
+    default:
+        return false;
+    }
+}
+
+typedef struct InterpPredicateScan {
+    bool ok;
+} InterpPredicateScan;
+
+static bool interp_predicate_node_supported(AstNode* node);
+
+static void interp_predicate_scan_visit(AstNode* child, void* opaque) {
+    InterpPredicateScan* scan = (InterpPredicateScan*)opaque;
+    if (scan->ok && !interp_predicate_node_supported(child)) scan->ok = false;
+}
+
+static bool interp_predicate_children_supported(AstNode* node) {
+    InterpPredicateScan scan = {true};
+    interp_visit_children(node, interp_predicate_scan_visit, &scan);
+    return scan.ok;
+}
+
+static bool interp_predicate_node_supported(AstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstNode* expr = ((AstPrimaryNode*)node)->expr;
+        return !expr || interp_predicate_node_supported(expr);
+    }
+    case AST_NODE_LITERAL:
+    case AST_NODE_CURRENT_ITEM:
+    case AST_NODE_CURRENT_INDEX:
+    case AST_NODE_TYPE:
+        return true;
+    case AST_NODE_UNARY: {
+        Operator op = ((AstUnaryNode*)node)->op;
+        return (op == OPERATOR_NOT || op == OPERATOR_NEG || op == OPERATOR_POS) &&
+            interp_predicate_children_supported(node);
+    }
+    case AST_NODE_BINARY: {
+        Operator op = ((AstBinaryNode*)node)->op;
+        switch (op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD: case OPERATOR_POW:
+        case OPERATOR_JOIN: case OPERATOR_AND: case OPERATOR_OR:
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+        case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_TO:
+        case OPERATOR_IS: case OPERATOR_IS_NAN: case OPERATOR_IN: case OPERATOR_AT:
+            return interp_predicate_children_supported(node);
+        default:
+            return false;
+        }
+    }
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        return interp_predicate_children_supported(node);
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        // A dotted name is a compile-time key, not a binding read. Dynamic
+        // member keys remain admissible only when their expression is pure.
+        return interp_predicate_node_supported(field->object) &&
+            (!field->field || field->field->node_type == AST_NODE_IDENT ||
+                interp_predicate_node_supported(field->field));
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
+                !interp_eval_mode_allows_sys_func(EvalMode::PREDICATE,
+                    ((AstSysFuncNode*)callee)->fn_info)) return false;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (!interp_predicate_node_supported(arg)) return false;
+        }
+        return true;
+    }
+    default:
+        // No identifiers, containers, assignments, lambdas/procedures,
+        // handlers, pipes, loops, or arbitrary calls cross the predicate
+        // boundary.  This keeps `that` independent of runtime effects (AI17).
+        return false;
+    }
+}
+
+bool interp_predicate_supported(AstNode* predicate) {
+    return interp_predicate_node_supported(predicate);
+}
+
+// ---------------------------------------------------------------------------
 // Slot assignment
 // ---------------------------------------------------------------------------
 
@@ -611,6 +811,7 @@ typedef struct PlanCtx {
     uint32_t param_count;
     uint32_t max_scratch;
     BindingStorage storage;   // REGISTER inside functions, MODULE at top level
+    bool is_variadic;
     bool failed;
 } PlanCtx;
 
@@ -839,6 +1040,25 @@ static uint32_t plan_need(AstNode* node) {
         if (e > best) best = e;   // branches do not stack
         return best;
     }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        uint32_t scrutinee = plan_need(match->scrutinee);
+        uint32_t arms = plan_need_max_siblings((AstNode*)match->first_arm);
+        // eval_match keeps `~`, `~#`, parent, and root live while an arm is
+        // tested, so the arm's own shape starts above those four homes.
+        uint32_t guarded_arms = 4 + arms;
+        return scrutinee > guarded_arms ? scrutinee : guarded_arms;
+    }
+    case AST_NODE_MATCH_ARM: {
+        AstMatchArm* arm = (AstMatchArm*)node;
+        uint32_t pattern = plan_need(arm->pattern);
+        uint32_t body = plan_need(arm->body);
+        return pattern > body ? pattern : body;
+    }
+    case AST_NODE_CONSTRAINED_TYPE:
+        // A constrained pattern holds the current occurrence plus index,
+        // parent, and root while its predicate walks, all before any helper.
+        return 3 + plan_need(((AstConstrainedTypeNode*)node)->constraint);
     case AST_NODE_ARRAY:
     case AST_NODE_SEQ:
     case AST_NODE_CONTENT:
@@ -938,8 +1158,10 @@ static void plan_finish(PlanCtx* pc) {
     plan->param_count = (uint16_t)pc->param_count;
     uint32_t named = pc->next_slot;
     plan->local_count = (uint16_t)(named - pc->param_count);
+    plan->vargs_index = pc->is_variadic ? (uint16_t)named : UINT16_MAX;
     plan->scratch_depth = (uint16_t)pc->max_scratch;
-    uint32_t total = named + 1 /* signal slot */ + pc->max_scratch;
+    uint32_t total = named + (pc->is_variadic ? 1 : 0) + 1 /* signal slot */ +
+        pc->max_scratch;
     if (total > UINT16_MAX) { pc->failed = true; return; }
     plan->total_slots = (uint16_t)total;
     plan->planned = true;
@@ -955,6 +1177,9 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     pc.script = outer->script;
     pc.plan = &fn->analysis->frame_plan;
     pc.storage = BINDING_STORAGE_REGISTER;
+    TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
+    pc.is_variadic = signature && signature->type_id == LMD_TYPE_FUNC &&
+        signature->is_variadic;
 
     // Parameters are the first entries pushed into the function scope, so the
     // scope walk gives them slots 0..n-1 in declaration order. push_name never
@@ -1060,6 +1285,7 @@ bool interp_plan_script(Script* script) {
     script->interp_slab_count = module_slots;
     script->interp_plan.param_count = 0;
     script->interp_plan.local_count = 0;
+    script->interp_plan.vargs_index = UINT16_MAX;
     script->interp_plan.total_slots = (uint16_t)(1 + pc.max_scratch);
     script->interp_planned = true;
 
@@ -1068,4 +1294,114 @@ bool interp_plan_script(Script* script) {
         (unsigned)module_slots, (unsigned)pc.max_scratch,
         (unsigned)script->interp_plan.total_slots);
     return true;
+}
+
+bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
+    if (!script || !script->ast_root || !fragment || !script->interp_planned) {
+        return false;
+    }
+    AstScript* root = (AstScript*)script->ast_root;
+    PlanCtx pc = {};
+    pc.script = script;
+    pc.plan = &script->interp_plan;
+    pc.storage = BINDING_STORAGE_MODULE;
+    // Earlier cells hold persistent closures and values in these slots. Start
+    // after them so appending a REPL cell cannot renumber a live binding.
+    pc.next_slot = script->interp_slab_count;
+    pc.max_scratch = script->interp_plan.scratch_depth;
+    plan_assign_scope(&pc, root->global_vars);
+    for (AstNode* item = fragment; item; item = item->next) plan_walk(item, &pc);
+    uint32_t need = plan_need(fragment);
+    if (need + 1 > pc.max_scratch) pc.max_scratch = need + 1;
+    if (pc.failed || pc.next_slot > UINT16_MAX || pc.max_scratch > UINT16_MAX - 1) {
+        log_error("frame-plan: REPL fragment exceeds module/frame slot budget");
+        return false;
+    }
+    script->interp_slab_count = pc.next_slot;
+    if (pc.max_scratch > script->interp_plan.scratch_depth) {
+        script->interp_plan.scratch_depth = (uint16_t)pc.max_scratch;
+        script->interp_plan.total_slots = (uint16_t)(1 + pc.max_scratch);
+    }
+    log_debug("frame-plan: REPL fragment module_slots=%u scratch=%u",
+        (unsigned)script->interp_slab_count,
+        (unsigned)script->interp_plan.scratch_depth);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// P2 satellite eligibility
+// ---------------------------------------------------------------------------
+
+// Satellites reuse T0's planned module slab, but do not yet carry closure
+// environments, imported module references, or the Script-wide property-key
+// image. Each rejected definition remains on the same T0 semantics path
+// (D8.1.1v2 §5.2-§5.3).
+typedef struct SatelliteScanCtx {
+    bool ok;
+} SatelliteScanCtx;
+
+bool interp_satellite_import_supported(const NameEntry* entry) {
+    if (!entry || !entry->import || entry->import->is_cross_lang ||
+            !entry->import_owner || !entry->storage_assigned ||
+            entry->binding_storage != BINDING_STORAGE_MODULE || entry->slot < 0) {
+        return false;
+    }
+    // The target module must already be a planned T0 module; the satellite
+    // embeds this stable module id and slot rather than asking MIR to link a
+    // missing generated import symbol.
+    return entry->import_owner->interp_supported &&
+        entry->import_owner->interp_planned;
+}
+
+static void interp_scan_satellite_node(AstNode* node, void* opaque) {
+    SatelliteScanCtx* sc = (SatelliteScanCtx*)opaque;
+    if (!node || !sc->ok) return;
+
+    switch (node->node_type) {
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC:
+    case AST_NODE_ARROW_FUNC:
+        // Nested definitions need an explicit cross-satellite closure contract.
+        sc->ok = false;
+        return;
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_OBJECT_TYPE:
+    case AST_NODE_VIEW:
+        // Named properties depend on the Script-wide sealed key table, which
+        // is not yet shared by satellites.
+        sc->ok = false;
+        return;
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        NameEntry* entry = ident->entry;
+        if (!entry) break;
+        if (entry->import && !interp_satellite_import_supported(entry)) {
+            sc->ok = false;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    if (sc->ok) interp_visit_children(node, interp_scan_satellite_node, sc);
+}
+
+bool interp_satellite_supported(const AstFuncNode* fn) {
+    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_async ||
+            fn->is_generator || fn->analysis->may_await ||
+            fn->analysis->needs_task_context) {
+        return false;
+    }
+    TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
+    if (ast_type_func_has_var_parameter(signature)) {
+        // T0's direct-borrow path publishes a replacement into its active
+        // caller frame. A satellite has only the boxed dynamic ABI, which
+        // deliberately has no mutable-borrow write-back channel.
+        return false;
+    }
+    SatelliteScanCtx sc = {true};
+    interp_scan_satellite_node((AstNode*)fn->body, &sc);
+    return sc.ok;
 }

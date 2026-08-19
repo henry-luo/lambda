@@ -36,9 +36,18 @@ bool CounterContext::init(Arena* backing_arena) {
     arena = backing_arena;
     current_scope = nullptr;
     scope_stack = nullptr;
+    frame_stack = nullptr;
     void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
     if (!stack_mem) return false;
     scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside CounterContext::init.
+    void* frame_mem = mem_alloc(sizeof(lam::ArrayList<CounterFrame>), MEM_CAT_LAYOUT);
+    if (!frame_mem) {
+        scope_stack->~ArrayList<CounterScope*>();
+        mem_free(scope_stack);
+        scope_stack = nullptr;
+        return false;
+    }
+    frame_stack = new (frame_mem) lam::ArrayList<CounterFrame>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of frame_stack inside CounterContext::init.
     // Create root scope
     push_scope();
 
@@ -67,146 +76,109 @@ void CounterContext::destroy() {
         mem_free(scope_stack);
         scope_stack = nullptr;
     }
+    if (frame_stack) {
+        frame_stack->~ArrayList<CounterFrame>();
+        mem_free(frame_stack);
+        frame_stack = nullptr;
+    }
     current_scope = nullptr;
 
 }
 
-void counter_push_scope(CounterContext* ctx) {
+void counter_push_scope(CounterContext* ctx, bool pseudo_scope) {
     if (!ctx) return;
-    ctx->push_scope();
+    ctx->push_scope(pseudo_scope);
 }
 
-void CounterContext::push_scope() {
+void CounterContext::push_scope(bool pseudo_scope) {
     // Allocate new scope
     CounterScope* scope = (CounterScope*)arena_alloc(arena, sizeof(CounterScope));
     if (!scope) return;
     // Create hash map for counters in this scope
     scope->counters = counter_new(16);
     scope->parent = current_scope;
-    // Push onto stack
+    scope->owner_depth = current_scope && frame_stack ? (int)frame_stack->size() : -1;
+    scope->pseudo_scope = pseudo_scope;
+    scope->reset_replaces_sibling = false;
+    scope->pseudo_reset_for_descendants = false;
+    // Keep all allocated scopes for destruction; frame_stack owns nesting boundaries.
     if (scope_stack) {
         scope_stack->append(scope);
     }
 
+    if (!current_scope) {
+        current_scope = scope;
+        return;
+    }
+
+    if (frame_stack) {
+        CounterFrame frame = {current_scope, scope};
+        frame_stack->append(frame);
+    }
     current_scope = scope;
 }
 
 void CounterContext::pop_scope() {
-    if (!scope_stack) return;
-
-    size_t size = scope_stack->size();
-    if (size <= 1) {
-        // Don't pop root scope
-        return;
-    }
-    // Free the hash map before removing
-    CounterScope* scope = (*scope_stack)[size - 1];
-    if (scope && scope->counters) {
-        hashmap_free(scope->counters);
-    }
-    // Pop from stack
-    scope_stack->remove(size - 1);
-    // Update current scope to parent
-    if (size > 1) {
-        current_scope = (*scope_stack)[size - 2];
-    } else {
-        current_scope = nullptr;
-    }
+    if (!frame_stack || frame_stack->size() == 0) return;
+    size_t index = frame_stack->size() - 1;
+    CounterFrame frame = (*frame_stack)[index];
+    frame_stack->remove(index);
+    current_scope = frame.entry_scope;
 }
 
-void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
+void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets,
+                                 bool preserve_reset_scope) {
     if (!ctx || !ctx->scope_stack) return;
-    ctx->pop_scope_propagate(propagate_resets);
+    ctx->pop_scope_propagate(propagate_resets, preserve_reset_scope);
 }
 
-void CounterContext::pop_scope_propagate(bool propagate_resets) {
-    if (!scope_stack) return;
+void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_reset_scope) {
+    if (!frame_stack || frame_stack->size() == 0) return;
 
-    size_t size = scope_stack->size();
-    if (size <= 1) return;
+    size_t index = frame_stack->size() - 1;
+    CounterFrame frame = (*frame_stack)[index];
+    CounterScope* scope = frame.element_scope;
+    CounterScope* entry = frame.entry_scope;
+    bool has_reset = false;
 
-    CounterScope* scope = (*scope_stack)[size - 1];
-    CounterScope* parent = (size > 1) ? (*scope_stack)[size - 2] : nullptr;
-    // Propagate counters from popped scope to parent.
-    // CSS 2.1 §12.4.1: "The scope of a counter starts at the first element in the
-    // document that has a 'counter-reset' for that counter, and includes the element's
-    // descendants and its subsequent siblings and their descendants."
-    //
-    // When propagate_resets=true (regular elements): counter-reset counters propagate
-    // so subsequent siblings can see them. But we must NOT overwrite the parent's own
-    // (non-propagated) counter of the same name — that would break nesting.
-    //
-    // When propagate_resets=false (pseudo-elements): counter-reset counters do NOT
-    // propagate, keeping them scoped to the pseudo-element per CSS spec.
-    if (scope && scope->counters && parent && parent->counters) {
+    if (scope && scope->counters) {
         size_t iter = 0;
         void* item;
         while (hashmap_iter(scope->counters, &iter, &item)) {
             CounterValue* cv = (CounterValue*)item;
-
-            if (cv->created_by_reset && !propagate_resets) {
-                // Pseudo-element scope: don't propagate counter-reset counters
-                continue;
+            if (cv->created_by_reset) {
+                has_reset = true;
             }
+        }
 
-            CounterValue search_key = {cv->name, 0, false, false};
-            CounterValue* parent_cv = (CounterValue*)hashmap_get(parent->counters, &search_key);
-            if (parent_cv) {
-                if (cv->created_by_reset && parent_cv->created_by_reset) {
-                    // Parent has a counter with same name from a reset — child's
-                    // counter-reset creates a nested scope, don't overwrite
-                    continue;
+        // A counter created by increment/set without an inherited instance belongs
+        // to this element's temporary scope; expose it to following siblings when
+        // the element did not create a nested reset scope of its own.
+        if (propagate_resets && !has_reset && entry && entry->counters) {
+            iter = 0;
+            while (hashmap_iter(scope->counters, &iter, &item)) {
+                CounterValue* cv = (CounterValue*)item;
+                if (cv->created_by_reset) continue;
+                CounterValue search_key = {cv->name, 0, false, false};
+                CounterValue* entry_cv = (CounterValue*)hashmap_get(entry->counters, &search_key);
+                if (entry_cv) {
+                    entry_cv->value = cv->value;
+                    entry_cv->propagated = true;
+                } else {
+                    CounterValue propagated = {cv->name, cv->value, true, false};
+                    hashmap_set(entry->counters, &propagated);
                 }
-                if (cv->created_by_reset && parent_cv->propagated) {
-                    // Parent inherited this counter from ancestor — child's
-                    // counter-reset creates a nested scope, don't propagate
-                    continue;
-                }
-                // Update existing parent counter value (propagated or increment-created)
-                parent_cv->value = cv->value;
-                parent_cv->propagated = true;
-            } else {
-                // Parent scope doesn't have this counter. For counter-reset counters,
-                // check if ANY ancestor scope has this counter name — if so, the child
-                // created a nested scope and shouldn't propagate upward.
-                if (cv->created_by_reset) {
-                    bool ancestor_has_counter = false;
-                    for (size_t si = size - 2; si > 0; si--) {
-                        CounterScope* ancestor = (*scope_stack)[si - 1];
-                        if (ancestor && ancestor->counters) {
-                            CounterValue* anc_cv = (CounterValue*)hashmap_get(ancestor->counters, &search_key);
-                            if (anc_cv) {
-                                ancestor_has_counter = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (ancestor_has_counter) {
-                        continue;
-                    }
-                }
-                // No ancestor has this counter — propagate so siblings see it
-                CounterValue new_cv;
-                new_cv.name = cv->name;
-                new_cv.value = cv->value;
-                new_cv.propagated = true;
-                new_cv.created_by_reset = cv->created_by_reset;
-                hashmap_set(parent->counters, &new_cv);
             }
         }
     }
-    // Free the hash map before removing
-    if (scope && scope->counters) {
-        hashmap_free(scope->counters);
-    }
-    // Pop from stack
-    scope_stack->remove(size - 1);
-    // Update current scope to parent
-    if (size > 1) {
-        current_scope = (*scope_stack)[size - 2];
-    } else {
-        current_scope = nullptr;
-    }
+
+    // CSS Lists 3 §4.4.1: retain a generated counter scope only while it is the
+    // preceding flattened-tree source for the originating element's children.
+    bool preserve_scope = preserve_reset_scope ||
+        (scope && (scope->reset_replaces_sibling ||
+                   scope->pseudo_reset_for_descendants));
+    current_scope = (propagate_resets && has_reset && preserve_scope) ? scope : entry;
+    frame_stack->remove(index);
 }
 // Counter Parsing Helpers
 
@@ -310,6 +282,15 @@ static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key)
     return nullptr;
 }
 
+static CounterScope* counter_find_scope(CounterScope* scope,
+                                        CounterValue* search_key) {
+    while (scope) {
+        if (hashmap_get(scope->counters, search_key)) return scope;
+        scope = scope->parent;
+    }
+    return nullptr;
+}
+
 static void counter_create(CounterScope* scope, char* name, int value,
                            bool created_by_reset) {
     CounterValue counter = {name, value, false, created_by_reset};
@@ -341,18 +322,36 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
         CounterValue* existing = (CounterValue*)hashmap_get(ctx->current_scope->counters, &search_key);
 
         if (!existing) {
-            // Before creating: check if parent scope has a propagated counter
-            // with the same name. If so, remove it — this is a sibling counter-reset
-            // replacing the previous sibling's counter (CSS 2.1 §12.4.1).
-            if (ctx->current_scope->parent && ctx->current_scope->parent->counters) {
-                CounterValue* parent_cv = (CounterValue*)hashmap_get(
-                    ctx->current_scope->parent->counters, &search_key);
-                if (parent_cv && parent_cv->propagated) {
-                    hashmap_delete(ctx->current_scope->parent->counters, &search_key);
-                }
+            CounterScope* inherited_scope = nullptr;
+            if (ctx->current_scope->pseudo_scope) {
+                inherited_scope = counter_find_scope(ctx->current_scope->parent,
+                                                     &search_key);
+            }
+            CounterScope* previous_sibling = ctx->current_scope->parent;
+            CounterValue* previous_value = previous_sibling && previous_sibling->counters
+                ? (CounterValue*)hashmap_get(previous_sibling->counters, &search_key)
+                : nullptr;
+            if (previous_value &&
+                (previous_value->propagated ||
+                 previous_sibling->owner_depth == ctx->current_scope->owner_depth)) {
+                // CSS Lists 3 §4.4.2: a reset replaces a preceding-sibling
+                // instance, but must leave an ancestor-created instance intact.
+                hashmap_delete(previous_sibling->counters, &search_key);
+                ctx->current_scope->reset_replaces_sibling = true;
             }
             // Create new counter
             counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], true);
+            // CSS Lists 3 §4.4.1: a pseudo reset remains the value source for
+            // descendants only when its originating element inherited that
+            // counter from the preceding flattened-tree sibling.
+            // the active parent scope is the preceding sibling when the lookup
+            // lands exactly one scope below the pseudo's originating element.
+            bool retain_pseudo_reset = ctx->current_scope->pseudo_scope &&
+                inherited_scope && ctx->current_scope->parent &&
+                inherited_scope == ctx->current_scope->parent->parent;
+            if (retain_pseudo_reset) {
+                ctx->current_scope->pseudo_reset_for_descendants = true;
+            }
         } else {
             // Update existing counter value
             existing->value = parsed.values[i];
@@ -368,12 +367,12 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
     for (int i = 0; i < parsed.count; i++) {
 
         int increment = parsed.values[i];
-        // Search for counter in current and parent scopes
+        // CSS Lists 3 §4.2/§4.4.1: use the inherited counter instance when the
+        // element has not created a nearer reset scope.
         CounterValue search_key = {parsed.names[i], 0, false, false};
         CounterValue* cv = counter_find(ctx->current_scope, &search_key);
 
         if (!cv) {
-            // Counter doesn't exist - create it in current scope with value 0 + increment
             counter_create(ctx->current_scope, parsed.names[i], increment, false);
         } else {
             cv->value += increment;
@@ -407,19 +406,9 @@ void counter_set(CounterContext* ctx, const char* counter_spec) {
 
 int counter_get_value(CounterContext* ctx, const char* name) {
     if (!ctx || !ctx->current_scope || !name) return 0;
-    // Search for counter in current and parent scopes
-    CounterScope* scope = ctx->current_scope;
     CounterValue search_key = {name, 0, false, false};
-
-    while (scope) {
-        CounterValue* cv = (CounterValue*)hashmap_get(scope->counters, &search_key);
-        if (cv) {
-            return cv->value;
-        }
-        scope = scope->parent;
-    }
-
-    return 0;  // Counter not found, return 0
+    CounterValue* cv = counter_find(ctx->current_scope, &search_key);
+    return cv ? cv->value : 0;
 }
 
 void counter_get_all_values(CounterContext* ctx, const char* name, int** values, int* count) {

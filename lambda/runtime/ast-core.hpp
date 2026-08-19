@@ -299,12 +299,15 @@ struct NameEntry {
 };
 
 // Static activation shape for one interpreted function (or module top level).
-// Slot layout: [ params | locals | signal | scratch ] — see interp.hpp.
+// Slot layout: [ params | locals | vargs? | signal | scratch ] — see interp.hpp.
 typedef struct FnFramePlan {
     uint16_t param_count;
     uint16_t local_count;
+    // A variadic function keeps its adapter-owned rest list rooted for the
+    // whole body. UINT16_MAX means this frame has no variadic binding.
+    uint16_t vargs_index;
     uint16_t scratch_depth;   // max Items live across a child eval / MAY_GC call
-    uint16_t total_slots;     // params + locals + 1 (signal) + scratch
+    uint16_t total_slots;     // params + locals + vargs? + 1 (signal) + scratch
     bool planned;
 } FnFramePlan;
 
@@ -357,7 +360,16 @@ typedef struct AstNodeFacts {
     Type* inferred_type;
     ValueRep representation;
     uint32_t flags;
+    // const pass results are immediate Items only. Pointer-backed values stay
+    // out of this table so an AST fact cannot become a MIR-cache relocation
+    // dependency (D8.1.1v2 / DI14).
+    uint64_t folded_item;
 } AstNodeFacts;
+
+enum AstNodeFactFlags : uint32_t {
+    AST_NODE_FACT_NONE = 0,
+    AST_NODE_FACT_CONST_FOLDED = 1u << 0,
+};
 
 #ifdef __cplusplus
 extern "C" {
@@ -365,6 +377,10 @@ extern "C" {
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
 bool ast_index_build(AstIndex* index, AstNode* root);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+// Adds a newly retained AST fragment without invalidating the stable IDs and
+// analysis facts already published for earlier REPL inputs (D8.2.4).
+bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
+                              const LangProfile* profile);
 void ast_index_destroy(AstIndex* index);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
 #ifdef __cplusplus
@@ -592,6 +608,9 @@ typedef struct AstAssignNode : AstNode {
 // for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
 typedef struct AstDecomposeNode : AstNode {
     String** names;
+    // `names` is source-facing; T0 binds through these resolved entries so a
+    // decomposed target uses the same planned slot as later identifier reads.
+    NameEntry** entries;
     int name_count;
     AstNode *as;
     bool is_named;
@@ -1026,6 +1045,24 @@ typedef struct FnVariantAnalysis {
     FnValueAnalysis* values;
     int value_count;
 } FnVariantAnalysis;
+
+// P2 tier-up state belongs to the definition site, rather than to individual
+// Function values: aliases of one `fn` must observe the same immutable native
+// entry once it is published (D8.1.1v2 §5.1).
+typedef enum FnPromotionState {
+    FN_PROMOTION_INTERP,
+    FN_PROMOTION_COMPILING,
+    FN_PROMOTION_COMPILED,
+    FN_PROMOTION_PINNED_INTERP,
+} FnPromotionState;
+
+typedef struct FnPromotionCell {
+    FnPromotionState state;
+    uint32_t call_count;
+    uint32_t backedge_count;
+    void* boxed_entry;
+} FnPromotionCell;
+
 typedef struct FnAnalysis {
     FnCapture* captures;
     FnParamEvidence* evidence;
@@ -1049,6 +1086,9 @@ typedef struct FnAnalysis {
     // carry it: push_name deliberately writes no AstNamedNode-only field
     // because that alias is `vars` on a function and the join pointer on a loop.
     NameEntry* decl_entry;
+    // T0/T1 transition state. The Script owns the AST and all generated
+    // satellites, so this cell has the same lifetime as its definition.
+    FnPromotionCell promotion;
 } FnAnalysis;
 
 static inline FnVariantAnalysis* fn_analysis_variant(

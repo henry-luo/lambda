@@ -3365,6 +3365,12 @@ bool render_filter_apply_with_backend(const RenderBackendCaps* caps,
 // ===== render_background.hpp =====
 // Background rendering functions
 void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_list_marker_linear_gradient(RenderContext* rdcon,
+                                        LinearGradient* gradient, Rect rect);
+void render_list_marker_radial_gradient(RenderContext* rdcon,
+                                        RadialGradient* gradient, Rect rect);
+void render_list_marker_conic_gradient(RenderContext* rdcon,
+                                       ConicGradient* gradient, Rect rect);
 
 // Box shadow rendering
 void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect);

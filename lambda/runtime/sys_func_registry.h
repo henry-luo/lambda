@@ -291,6 +291,23 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     }
 }
 
+// S7.6/S7.7 call-boundary policy shared by MIR lowering and T0. These rows
+// accept ordinary values only; an ItemError must reach the caller's handler
+// before a C helper can reinterpret it as an optional/default argument.
+static inline bool sysfunc_params_reject_error(const SysFuncInfo* info) {
+    if (!info) return false;
+    switch (info->fn) {
+    case SYSFUNC_LEN:
+    case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF: case SYSFUNC_ORD:
+    case SYSFUNC_STRING: case SYSFUNC_SYMBOL: case SYSFUNC_NAME:
+    case SYSFUNC_NORMALIZE: case SYSFUNC_NORMALIZE2:
+    case SYSFUNC_SPLIT: case SYSFUNC_SPLIT3:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Math entries whose result is float regardless of argument type. The rest of
 // the native-math family (floor/ceil/round/trunc/abs …) preserve their
 // argument's type instead, so their result lane depends on type inference —

@@ -1517,7 +1517,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         }
 
         if (strcmp(tag, "b") == 0 || strcmp(tag, "i") == 0 ||
-            strcmp(tag, "em") == 0 || strcmp(tag, "strong") == 0 || strcmp(tag, "span") == 0 ||
+            strcmp(tag, "em") == 0 || strcmp(tag, "strong") == 0 ||
             strcmp(tag, "code") == 0 || strcmp(tag, "small") == 0 || strcmp(tag, "big") == 0 ||
             strcmp(tag, "u") == 0 || strcmp(tag, "s") == 0 || strcmp(tag, "strike") == 0 ||
             strcmp(tag, "font") == 0 || strcmp(tag, "tt") == 0) {

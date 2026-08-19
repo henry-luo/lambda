@@ -20,14 +20,43 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     float x = rdcon->block.x + marker->x;
     float y = rdcon->block.y + marker->y;
     float width = marker_prop->width;
+    float content_width = marker_prop->content_width > 0.0f
+        ? marker_prop->content_width : width;
     float bullet_size = marker_prop->bullet_size;
     CssEnum marker_type = marker_prop->marker_type;
     Color color = rdcon->color;
+    const FontMetrics* marker_metrics = rdcon->font.font_handle
+        ? font_get_metrics(rdcon->font.font_handle) : NULL;
+    float marker_font_size = marker_metrics
+        ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
 
 
-    if (marker_prop->image_url && strcmp(marker_prop->image_url, "none") != 0) {
+    if (marker_prop->is_image_marker) {
+        Rect image_rect = {
+            x, y + (marker->height - marker_prop->height) / 2.0f,
+            content_width, marker_prop->height
+        };
+        switch (marker_prop->image.gradient_type) {
+            case GRADIENT_LINEAR:
+                render_list_marker_linear_gradient(
+                    rdcon, marker_prop->image.linear_gradient, image_rect);
+                return;
+            case GRADIENT_RADIAL:
+                render_list_marker_radial_gradient(
+                    rdcon, marker_prop->image.radial_gradient, image_rect);
+                return;
+            case GRADIENT_CONIC:
+                render_list_marker_conic_gradient(
+                    rdcon, marker_prop->image.conic_gradient, image_rect);
+                return;
+            default:
+                break;
+        }
+    }
+
+    if (marker_prop->image.url && strcmp(marker_prop->image.url, "none") != 0) {
         if (!marker_prop->loaded_image) {
-            marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image_url);
+            marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image.url);
         }
         if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
             float iw, ih;
@@ -47,11 +76,16 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         ImageSurface* img = marker_prop->loaded_image;
         if (img && img->pixels && img->width > 0 && img->height > 0) {
             image_surface_ensure_decoded(img, img->width, img->height);
-            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
-            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float img_w = (float)img->width;
-            float img_h = (float)img->height;
-            float ix = x + width - font_size - img_w / 2.0f;
+            // Paint the decoded source into the used marker box; raw pixels
+            // would leave intrinsic images unzoomed after layout scales them.
+            float img_w = content_width > 0.0f ? content_width : (float)img->width;
+            float img_h = marker_prop->height > 0.0f ? marker_prop->height : (float)img->height;
+            float ix = x;
+            if (marker_prop->is_outside) {
+                // outside image markers align to the font-relative marker field;
+                // placing them at the box start incorrectly anchors post-image space.
+                ix = x + width - marker_font_size - img_w / 2.0f;
+            }
             float iy = y + marker->height / 2.0f - img_h / 2.0f;
             // display-list image replay expects decoded dimensions and uint32_t row stride.
             int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
@@ -62,10 +96,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         }
     }
 
-    const FontMetrics* marker_metrics = rdcon->font.font_handle
-        ? font_get_metrics(rdcon->font.font_handle) : NULL;
-    float marker_font_size = marker_metrics
-        ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
     float marker_cx = x + width - marker_font_size;
     float marker_cy = y + marker->height / 2.0f;
 

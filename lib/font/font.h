@@ -127,6 +127,7 @@ typedef struct FontMetrics {
     float x_height;             // height of lowercase 'x'
     float cap_height;           // height of uppercase letters
     float space_width;          // advance width of U+0020 SPACE
+    float average_char_width;   // OS/2 average character width, in CSS pixels
     float em_size;              // units per em (typically 1000 or 2048)
     float underline_position;   // underline position below baseline (positive = down)
     float underline_thickness;  // underline stroke thickness

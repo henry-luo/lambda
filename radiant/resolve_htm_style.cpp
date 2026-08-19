@@ -163,10 +163,9 @@ static void apply_html_text_align_attribute(LayoutContext* lycon, DomNode* eleme
 static void apply_html_form_control_font(LayoutContext* lycon, ViewBlock* block) {
     // Chrome UA form controls share this Arial medium-derived override.
     FontProp* font = block->ensure_font(lycon);
-    // CSS Viewport 1 zoom scales the UA font used to paint the native control;
-    // authored font-size declarations are scaled separately by CSS resolution.
-    float zoom = layout_effective_zoom((View*)block);
-    apply_html_font_size(font, 13.3333f * zoom, false);
+    // Keep the UA font at its computed size; FontProp::used_zoom applies CSS
+    // Viewport zoom once when the native control is measured and painted.
+    apply_html_font_size(font, 13.3333f, false);
     radiant_retain_font_family(font, lam::GcPtr<char>((char*)"Arial"));
 }
 
@@ -674,48 +673,11 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
         lycon, block, get_parent_table_rules(cell_node), is_header);
 }
 
-// HTML5 §14.3.4: Walk the element's descendants to find the first strong character.
-// Skip <script>, <style>, and elements with their own dir attribute.
-static int find_first_strong_in_node(DomNode* node) {
-    if (!node) return 0;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (!text->text || text->length == 0) return 0;
-        const char* p = text->text;
-        const char* end = p + text->length;
-        while (p < end) {
-            uint32_t cp;
-            int bytes = str_utf8_decode(p, (size_t)(end - p), &cp);
-            if (bytes <= 0) { p++; continue; }
-            int cls = utf_bidi_strong_class(cp);
-            if (cls != 0) return cls;
-            p += bytes;
-        }
-        return 0;
-    }
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        // Skip <script>, <style> — they don't contribute to dir="auto" detection
-        NameId tag = elem->tag_id;
-        if (tag == MARKUP_NAME_SCRIPT || tag == MARKUP_NAME_STYLE) return 0;
-        // Skip elements that have their own dir attribute — per HTML spec,
-        // they establish their own directionality and don't contribute to parent's auto
-        const char* child_dir = elem->get_attribute("dir");
-        if (child_dir) return 0;
-        // Recurse into children
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            int result = find_first_strong_in_node(child);
-            if (result != 0) return result;
-        }
-    }
-    return 0;
-}
-
 // Resolve dir="auto" by finding the first strong directional character.
 // Returns CSS_VALUE_RTL or CSS_VALUE_LTR.
 static CssEnum resolve_dir_auto(DomElement* elmt) {
     for (DomNode* child = elmt->first_child; child; child = child->next_sibling) {
-        int result = find_first_strong_in_node(child);
+        int result = layout_find_first_strong_direction(child, true);
         if (result > 0) return CSS_VALUE_RTL;
         if (result < 0) return CSS_VALUE_LTR;
     }
@@ -888,6 +850,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case MARKUP_NAME_UL:  case MARKUP_NAME_OL:  case MARKUP_NAME_MENU:
+    {
         block->ensure_block(lycon);
         block->ensure_boundary(lycon);
         // margin: 1em 0; padding: 0 0 0 40px;
@@ -922,13 +885,32 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->blk->list_style_type = CSS_VALUE_DECIMAL;
             }
             if (!is_nested) {
+                float ua_zoom = layout_effective_zoom((View*)block);
                 radiant_spacing_set_pair(&block->boundary_mut()->margin,
-                    CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
+                    CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM,
+                    lycon->font.style->font_size * ua_zoom);
             }
         }
-        *radiant_spacing_value(&block->boundary_mut()->padding, CSS_BOX_SIDE_LEFT) = 40;
-        *radiant_spacing_specificity(&block->boundary_mut()->padding, CSS_BOX_SIDE_LEFT) = -1;
+        CssEnum direction = layout_specified_keyword(
+            elmt->as_element(), CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+        const char* dir_attr = elmt->get_attribute("dir");
+        if (dir_attr && str_ieq_const(dir_attr, strlen(dir_attr), "rtl")) {
+            // HTML §3.2.6: dir=rtl maps to direction before the UA list
+            // padding-inline-start rule is applied.
+            direction = CSS_VALUE_RTL;
+        } else if (dir_attr && str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
+            direction = CSS_VALUE_LTR;
+        }
+        if (direction != CSS_VALUE_RTL) direction = CSS_VALUE_LTR;
+        CssBoxSide inline_start = direction == CSS_VALUE_RTL
+            ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT;
+        // CSS Writing Modes: the list UA rule is padding-inline-start; a
+        // physical left default would remain in RTL and inflate the list box.
+        *radiant_spacing_value(&block->boundary_mut()->padding, inline_start) =
+            40.0f * layout_effective_zoom((View*)block);
+        *radiant_spacing_specificity(&block->boundary_mut()->padding, inline_start) = -1;
         break;
+    }
     case MARKUP_NAME_CENTER:
         block->ensure_block(lycon);
         block->blk->text_align = CSS_VALUE_CENTER;

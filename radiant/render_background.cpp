@@ -468,6 +468,21 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
     scratch_free(&rdcon->scratch, stops);
 }
 
+void render_list_marker_linear_gradient(RenderContext* rdcon,
+                                        LinearGradient* gradient, Rect rect) {
+    render_linear_gradient_tile(rdcon, nullptr, gradient, rect, rect);
+}
+
+void render_list_marker_radial_gradient(RenderContext* rdcon,
+                                        RadialGradient* gradient, Rect rect) {
+    render_radial_gradient(rdcon, nullptr, gradient, rect);
+}
+
+void render_list_marker_conic_gradient(RenderContext* rdcon,
+                                       ConicGradient* gradient, Rect rect) {
+    render_conic_gradient(rdcon, nullptr, gradient, rect);
+}
+
 /**
  * Interpolate between two colors
  */

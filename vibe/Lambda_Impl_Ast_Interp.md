@@ -1,16 +1,16 @@
-# AST Interpreter — Implementation Plan, Phases P0–P1
+# AST Interpreter — Implementation Plan, Phases P0–P5
 
-**Date:** 2026-08-15 (rev 2 — **P0 landed**)
-**Status:** **P0 complete and gated (2026-08-15)**; **P1 partially landed** — see §3.0 for the slice-by-slice state. The §6 measurement report is published and reviewed. Exit gate of the P0→P1 arc is that report plus the full-baseline differential + GC-stress gates (§7); P0's own gate G0 is recorded in §2.7.
+**Date:** 2026-08-19 (rev 21 — **P1 declared-numeric binding and error-value slice**)
+**Status:** **P0 complete and gated (2026-08-15)**; **P1 remains partial** (the committed partition awaits a clean post-slice full sweep). T0 now constructs inferred homogeneous compact `NumSized` literals (`i8[]`, `u8[]`, `f16[]`, `f32[]`, and peers) in the same `ArrayNum` carrier as MIR; direct one-argument sized-numeric/`u64` type calls and every admitted declared scalar binding use the same coercion helpers as MIR. Full-width `u64[]` remains pinned because its generic index-read boundary needs MIR's raw-lane contract. A fresh procedural-only differential sweep reports 108 exact matches, 34 counted fallbacks, and 0 mismatches/timeouts; the global partition still awaits its one clean full-corpus sweep. `LAMBDA_TIER=auto` now runs T0 and promotes eligible definitions to unique, Script-owned MIR satellites at the shared dynamic-call boundary. The verified slice covers self recursion, several satellites in one MIR context, T0 module-slab reads, dynamic calls to another Lambda function, deferred promotion after a T0 loop backedge, and pre-planned Lambda-import slab reads/calls. Captures, cross-language/type imports, and named-property/key-table users remain pinned to T0. **P3 is in progress:** non-object constrained `is` checks and constrained match arms run their `that` AST under pure, fuel-bounded `PREDICATE`; the JIT pass manager folds admitted pure literal scalar subtrees to immediate `Item` facts at safe generic-value boundaries. **P4 has a persistent-REPL vertical slice:** `interp` and `auto` retain one Script, append and execute only a completed fragment, grow module slots/root storage geometrically, and roll failed fragments back. Imports after session start remain rejected. Validator de-JIT and P5's default-tier flip remain unimplemented.
 **Design authority:** `doc/Lambda_Formal_Design.md` **D8.1.1v2** (T0 default, tiered execution), D5.1.1/D5.1.2 (side-stack frames), D5.3.2/D5.3.3 (MAY_GC + native rooting contract), D6.2.1/D6.2.3/D6.2.4 (function values, snapshot captures, traced env), D7.2.1/D7.2.2 (module slabs, init transaction), DI14; `doc/Lambda_Formal_Semantics.md` S3.1, S7.7.1/S7.7.2, S7.11.4, S9.1, S11.2.1, SI3.
-**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This plan implements §11's P0 and P1 exactly; P2 (tiering/satellites), P3 (CONST/PREDICATE modes), P4 (REPL persistent env), P5 (default flip) are **out of scope here** and get their own plan revisions.
-**Scope rule:** P0/P1 never touch MIR lowering, emission, or the default execution path — `LAMBDA_TIER` unset or `jit` must remain byte-identical to today (MT7/D8.6.1 untouched by construction).
+**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This revision adds a narrow P1 declared-numeric binding and error-value assignment slice alongside numeric type-call coercion and compact-NumSized array construction, and continues §11's P2, P3's PREDICATE plus immediate-scalar CONST vertical slices, and P4's persistent-REPL vertical slice; validator integration and P5 (default flip) remain subsequent gates.
+**Scope rule:** `LAMBDA_TIER` unset or `jit` remains the existing eager whole-module pipeline (MT7/D8.6.1). `auto` is opt-in T0 plus P2 promotion; it must pin an unsupported function to T0, never recompile the full module as a substitute.
 
 ---
 
 ## 0. Summary
 
-P0 builds the skeleton: the frame-plan pass, side-stack interpreter frames, a walker for the L1 core subset, `LAMBDA_TIER=interp` wiring, and the first measurement report. P1 completes construct coverage to the full Lambda baseline, adds the error/fault channels, module support, and self-tail-call iteration, and re-publishes the report over the full corpus. The arc ends when: (g-a) `make test-lambda-baseline` is green under both tiers with the committed exclusion list at zero silent fallbacks, (g-b) the GC-stress/ASan run is clean, and (g-c) the turnaround/memory report in §6 is published with all required cells filled and reviewed.
+P0 builds the skeleton: the frame-plan pass, side-stack interpreter frames, a walker for the L1 core subset, `LAMBDA_TIER=interp` wiring, and the first measurement report. P1 completes construct coverage to the full Lambda baseline, adds the error/fault channels, module support, and self-tail-call iteration, and re-publishes the report over the full corpus. P2 adds opt-in tier-up without changing `jit`: the definition-site cell counts dynamic entries, emits one function plus its boxed wrapper into a satellite MIR module, then upgrades pre-existing `Function` values in place at the shared dispatcher (D8.1.1v2 §5.1–§5.3). P3 now has restricted `that` predicate evaluation and immediate-scalar CONST folding. P4 retains one interpreter Script for a REPL session, parses/builds/indexes only appended fragments, executes only those nodes, and makes a failed completed input atomic; validator de-JIT remains gated by its separate `Type*`/validator ownership work, followed by P5.
 
 Execution model recap (from the design doc, not re-argued here): T0 is boxed-only, calls the same C-ABI runtime helpers as generated code (AI3), lives on the existing side stacks with per-function statically-sized windows (AI4/AI5), and uses `EvalSignal` for statement control flow (AI14). No promotion machinery exists until P2 — in P0/P1 the tier is a per-run, whole-script choice.
 
@@ -34,6 +34,8 @@ Execution model recap (from the design doc, not re-argued here): T0 is boxed-onl
 | `test/interp/gen_bench.py`, `test/interp/repl_bench.py` **(new)** | measurement drivers; all outputs under `./temp/` (rule 2) |
 | `Makefile` targets | `make test-lambda-interp` (subset in P0, full matrix in P1), `make interp-bench` |
 
+P2 additions in rev 4: `FnAnalysis::promotion` carries the def-site state/counters/boxed entry; `lambda_dynamic_invoke_by_count` is the only upgrade point; `transpile-mir.cpp` has a uniquely named satellite-module lowering path; and `test/lambda/interp_auto_tier.ls` differentially exercises self recursion, multiple satellite images, a module-slab scalar, a cross-satellite dynamic call, and backedge-marked next-entry promotion. The satellite map reads `NameEntry::slot` from the frame-plan slab instead of eager `_gvar_*` BSS numbering, which excludes function values and would address different storage.
+
 Layout-compat constraints on struct edits: `Function::type_id` at offset 0 and `closure_field_count` at offset 2 are poked by generated code (`transpile-mir.cpp:20095–20135`) — new fields go at the **end** only; `NameEntry`/`FnAnalysis` are pool-calloc'd, so zero-init is the correct "no plan" state.
 
 ## 2. P0 — skeleton + first evidence
@@ -43,7 +45,7 @@ Layout-compat constraints on struct edits: `Function::type_id` at offset 0 and `
 - [ ] `interp.hpp` with the structures below; every log line prefixed `interp:` / `frame-plan:` (rule 9); `lib/` types only (rule 3).
 
 ```cpp
-enum class EvalMode : uint8_t { RUNTIME /* CONST, PREDICATE arrive P3 */ };
+enum class EvalMode : uint8_t { RUNTIME, CONST, PREDICATE };
 enum class EvalSignal : uint8_t { NORMAL, RETURNED, BROKE, CONTINUED, ERROR_SKIP };
 // RETURNED / ERROR_SKIP payloads live in the frame's reserved signal slot, never in a C++ local.
 
@@ -175,7 +177,7 @@ The other half is that `type T = …` binds nothing at run time, so a type name 
 
 ### 3.0.1 Why a mixed-tier import cone is refused
 
-Both tiers keep module globals in the per-context slab (`EvalContext::module_states`), but they *number* it independently: the JIT assigns slots in `prepass_create_global_vars` during lowering, the frame-plan pass assigns its own. A module compiled by one tier and read by the other would therefore resolve the right slab and the wrong slot — a silent wrong-value read, not a crash. The pre-scan closes this by refusing an import whose target is not itself `interp_supported`, so a cone is interpretable whole or not at all.
+Both tiers keep module globals in the per-context slab (`EvalContext::module_states`), but they *number* it independently: the JIT assigns slots in `prepass_create_global_vars` during lowering, the frame-plan pass assigns its own. A module compiled by one tier and read by the other would therefore resolve the right slab and the wrong slot — a silent wrong-value read, not a crash. The pre-scan refuses an import whose target is not itself `interp_supported`, so a cone is interpretable whole or not at all. If a parent later falls back to MIR after a child was tentatively planned for T0, the loader now demotes that loaded child cone in post-order before linking the parent; MIR therefore never imports a T0 module with no generated symbol context.
 
 This is visible in the corpus: `test/lambda/import.ls` falls back because its dependency `func.ls` needs `AST_NODE_TYPE` (P1.2). Of the 163 remaining `IMPORT` fallbacks, most are this transitive gate rather than anything missing in the module machinery itself — they should clear as P1.2/P1.3 land.
 
@@ -201,11 +203,75 @@ One real T0 defect surfaced, found only because the sweep compares `run` mode to
 
 | Slice | State | What landed |
 |---|---|---|
-| P1.4 procedural + errors | **partial** | `EvalSignal` plumbing on `InterpFrame` (payload in the reserved slot); `VAR_STAM`, `ASSIGN_STAM` to a named binding, `WHILE_STAM`/`DO_WHILE_STAM`, `BREAK`/`CONTINUE`, explicit `RETURN`; `RAISE_STAM`/`RAISE_EXPR`; `AstCallNode::propagate` (`f(...)^`); `INDEX_ASSIGN_STAM`/`MEMBER_ASSIGN_STAM` through `array_set_cow`/`map_set_cow` for a plain-binding root; `run`-mode `pn main()` invocation. **Not yet:** nested COW paths (`a.b.c = v`), declaration-boundary skip (S7.7.2), `HANDLER_EXPR`/`HANDLER_STAM`, `CURRENT_ERROR`, self-tail-call iteration |
-| P1.1 comprehensions | **partial** | `FOR_EXPR`/`FOR_STAM` core: nested `AstLoopNode` chains, key/value and index binding, `key_filter`, `key_only`, the `let` clause, `where`, and the spreadable output stream. **Not yet:** `group`/`order`/`limit`/`offset` clauses and equi-joins (rejected by the pre-scan), `PIPE`, implicit contexts (`~`, `~#`, `last`) |
+| P1.4 procedural + errors | **partial** | `EvalSignal` plumbing on `InterpFrame` (payload in the reserved slot); `VAR_STAM`, `ASSIGN_STAM` to a named binding, `WHILE_STAM`/`DO_WHILE_STAM`, `BREAK`/`CONTINUE`, explicit `RETURN`; `RAISE_STAM`/`RAISE_EXPR`; `AstCallNode::propagate` (`f(...)^`); root and nested `INDEX_ASSIGN_STAM`/`MEMBER_ASSIGN_STAM` through COW helpers, including direct typed-map replacement validation and fixed-arity direct `var`-parameter write-back for a mutable binding; direct `push`/`splice` replacement publication; expression/statement handlers with `CURRENT_ERROR`; local native-fault recovery; self-tail-call iteration; variadic Lambda `varg()` scope; compact scalar declaration witnesses, canonical declared sized-numeric/`u64` binding stores, and direct sized-numeric/`u64` coercion calls; inferred compact `NumSized` array literals; and run-mode `pn main()`. **Not yet:** deferred declaration-boundary skip (S7.7.2), `PIPE_FILE_STAM`, N-D row writes, full-width `u64[]` literal/index lanes, and the remaining procedural AST families. |
+| P1.1 comprehensions | **partial** | `FOR_EXPR`/`FOR_STAM` core: nested `AstLoopNode` chains, key/value and index binding, `key_filter`, `key_only`, the single-binding `let` clause, `where`, the spreadable output stream, `PIPE`/`where`, and slot-backed `~`/`~#` contexts. `LAST_INDEX` is admitted for an ordinary subscript and uses the innermost rooted owner (S10.1.3); expression-form unordered `limit`, `limit last`, and `offset` are full-stream post-selections. **Not yet:** `group`/`order`, window clauses on a procedural `FOR_STAM`, and equi-joins (rejected by the pre-scan). |
 | P1.5 modules | **landed** | `IMPORT`/`PUB_STAM`; the import cone recorded on the T0 load path; post-order module init, each under its own `TRANSACTION_BARRIER` with `lambda_module_state_reset()` on abandonment (D7.2.2/S7.7.6); per-module slabs through `EvalContext::module_states`; cross-module resolution against the *declaring* Script via `NameEntry::import_owner`. **Deliberately excluded:** mixed-tier cones and cross-language (Jube) imports |
 | P1.2 types | **partial** | Type expressions as values (`TYPE`, `BINARY_TYPE`, `UNARY_TYPE`, `CONTENT_TYPE`, `LIST_TYPE`, `ARRAY_TYPE`, `MAP_TYPE`, `ELMT_TYPE`, `FUNC_TYPE`), `TYPE_STAM` declarations, and type names used as values. Identity selection is shared with lowering through `lambda_type_node_singleton` (ast.hpp). **Not yet:** `MATCH_EXPR`/`MATCH_ARM`, string/symbol patterns, `CONSTRAINED_TYPE`, `OBJECT_TYPE` |
-| P1.3 | not started | elements, paths & queries |
+| P1.3 documents, paths, queries | **partial** | Elements, paths and queries already execute in the admitted subset. Positional/named `DECOMPOSE` is admitted; object-literal/type forms remain excluded. A named argument is admitted only for a statically resolved Lambda definition; system, dynamic and pipe-injected calls remain positional-only. |
+
+### 3.0.3 Current P1 increment — 2026-08-19 (rev 6)
+
+- **Subscript and stream-window `last` are now T0-native.** `InterpState::last_index_item` points at the current rooted subscript owner while the index expression evaluates, and `AST_NODE_LAST_INDEX` computes `len(owner) - 1`. The guard restores nested ownership and the local-fault landing restores it too, so a recovered handler cannot retain a dead frame slot. This is the innermost-context rule of **S10.1.3**; `test/lambda/interp_last_index.ls` covers scalar arithmetic, empty, nested, and string cases. Unordered `for` expressions complete their stream before applying `fn_drop`, `fn_take`, or `fn_take_last`, matching MIR without dropping prior body effects; `phase2_last_index.ls` and `interp_for_window.ls` are admitted.
+- **Statically resolved named calls are now T0-native.** `ast_direct_call_function()` and `ast_resolve_call_args()` are shared by MIR and T0 (rule 13), so reordered and defaulted direct Lambda calls use the same parameter layout. T0 sends the private missing-argument marker for omitted parameter slots and resolves the default in `interp_call`, matching the generated wrapper boundary. Dynamic/system calls and aggregate-pipe injection stay excluded because their ABI is positional; this preserves the tier boundary required by **D8.1.1v2**. `test/lambda/interp_named_args.ls` covers all-named, reordered, mixed positional/named, and omitted-default calls.
+- **The current error/fault boundary matches the shipped P1 behavior.** Rejected system-call operands return from the activation before a local handler can turn them into content; discarded procedural side effects publish their error through the procedure channel; a `LOCAL_FAULT` recovery frame lets a procedural handler catch an actual native-stack fault. These retain error-as-value and declaration-boundary distinctions in **S7.7.1/S7.7.2**, while procedure control stays scoped by **S12.1.2**.
+- **Evidence.** `make build -j8` passed (0 errors). The named-call, subscript-`last`, unordered-window, and `phase2_last_index` differential rows pass with `fallback=0`; `phase2_last_index.ls` has entered the committed subset. Before the stream-window slice, a full `make test-lambda-interp` ran 367 tests: 364 passed, and `radiant_poc_uaf`, `decorations_basic`, and `drawing_block_integration` each lacked a parsed interpreter summary in that long run. Each passed immediately when rerun alone through the same GTest command, so that prior full gate is recorded as **flaky/unverified**, not passed.
+
+### 3.0.4 Variadic Lambda increment — 2026-08-19 (rev 7)
+
+- **The existing shared dynamic adapter remains the one argument marshaller.** It already transforms semantic extra operands into a trailing physical `List*`. T0 now gives each variadic `FnFramePlan` a dedicated rooted rest slot, installs it through `set_vargs()`, and restores the enclosing activation after a nested call. The adapter's null no-rest transport becomes a rooted empty list at T0 entry, because source `varg()` observes `[]`, never its ABI sentinel. This is the boxed shared-boundary discipline of **D8.1.1v2**; no second rest-argument protocol was introduced.
+- **Tail/error parity is explicit.** MIR self-tail lowering rebinds fixed formal slots but retains its activation's hidden `_vargs` list, so T0 preserves that same list across tail iterations. The direct tail path also runs the shared rejected-parameter check before rebinding, preventing a rejected `ItemError` from entering the body; that restores the boundary behavior required by **S7.7.1**. Local, module, and top-level fault landings restore `current_vargs`, because a native longjmp bypasses the callee's C++ cleanup.
+- **Scope and evidence.** `func_param.ls`, `func_param2.ls`, `transpile_error_ret_types.ls`, `type_enforcement_dynamic_call.ls`, and `type_param_error_short_circuit.ls` moved from explicit exclusions into the zero-fallback differential subset. New `interp_variadic.ls` covers empty/many rest lists, nested variadic restoration, direct named/mixed fixed-plus-rest calls, and the JIT-defined tail-rest invariant. `make build -j8` passed (0 errors), and the focused subset, walker, frame-plan, and fallback GTests pass.
+
+### 3.0.5 Compact scalar witness and numeric type-call coercion — 2026-08-19 (rev 20)
+
+- **Direct numeric type calls use the shared coercion contract.** For a one-argument `AST_NODE_TYPE` callee whose resolved call type is `NUM_SIZED` or `UINT64`, T0 roots the source and invokes `coerce_num_sized` or `coerce_uint64`, exactly as MIR does. A type AST evaluates to a `Type` value rather than a callable `Function`; intercepting the call before dynamic dispatch prevents that representation detail from becoming an `ItemError` while retaining the runtime's conversion, overflow, and ownership behavior (D8.1.1v2, D5.3.3). Scalar `NUM_SIZED`/`UINT64` annotations can therefore use sized literals, existing typed values, or these explicit conversion calls. T0 also constructs an inferred homogeneous `NUM_SIZED` literal directly in the matching `ArrayNum` carrier (§3.0.12). Dynamic typed-array conversion and the remaining declaration-boundary forms stay gated; a declaration annotation is not treated as an implicit wrapping cast, so dynamic admission/skip behavior remains a dedicated **S7.7.2** slice.
+- **Wide scalar returns retain type identity.** Before an interpreted call closes its number-stack extent, T0 copies `int64`/`uint64` payload bits and reboxes them in the caller extent. This prevents `scalar_storage_read()`'s intentional small-`u64` property-read narrowing from changing `type(identity(100u64))` to `int`; the call boundary now meets the side-stack ownership requirement in **D5.1.1/D5.3.3**.
+- **Evidence.** `in_container.ls`, `len_err_propagation.ls`, and `sized_numeric_type_annot.ls` previously moved from explicit exclusions into the zero-fallback differential subset. The direct `sized_numeric_annotation_edges.ls` probe now also matches its JIT golden with `executed=1 fallback=0` under normal T0, forced-GC (`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`), and `auto` with `LAMBDA_JIT_THRESHOLD=2`; it exercises scalar wrapping, parameter/return lanes, `u64`, and its terminal `u8[]` declaration. `make build -j8` passes with 0 errors. Both committed partition files await one clean final-binary full sweep.
+
+### 3.0.6 Assignment-row audit — 2026-08-19 (rev 9)
+
+- **Seven legacy `AST_NODE_ASSIGN` exclusions were stale.** `input_raise_error.ls`, `json_empty_key.ls`, `parse.ls`, `parse_error_convention.ls`, `raise_arm_native_return.ls`, `proc_hex_literals.ls`, and `proc_local_equality_fault.ls` all now pre-scan and execute entirely in T0; no broad declaration-contract gate was removed for this audit. Their error values remain ordinary data until their established handler/raise boundary, in accordance with **S7.7.1**, while `input`/`parse` keep their existing `C_RET_RETITEM` adapter behavior.
+- **Evidence.** Each direct `LAMBDA_TIER=interp` run reported `executed=1 fallback=0`; all seven rows have moved to the committed differential subset and match JIT under `interp` and `auto`. The remaining assignment exclusions still represent separately gated work, including dynamic typed-array conversion and deferred declaration-boundary handling.
+
+### 3.0.7 Decomposition increment — 2026-08-19 (rev 11)
+
+- **Positional and named decomposition are T0-native.** `AstDecomposeNode` now retains the resolved `NameEntry` created by the existing name pass. T0 evaluates the source once into a scratch root, then uses the same `item_at` (positional) or `item_attr` (named) runtime helper as MIR for each target, publishing into the planned binding slot. Retaining the source root across each helper call enforces the MAY_GC ownership rule in **D5.1.1/D5.3.3** and avoids shadow-sensitive runtime name lookup.
+- **Lexical-list invariant and evidence.** Module execution now preserves `AST_NODE_LIST` as a lexical list instead of routing it through content evaluation, which ignores its `declare` chain. This keeps `(let a, b = pair, body)` in the same planned slots that its body reads, as required by the tier-correct execution boundary in **D8.1.1v2**. `interp_decompose.ls` covers positional and named lexical blocks; `for_decompose.ls` covers positional/named targets with comprehensions; and `math_random.ls` repeatedly binds wide scalar pairs. All three run with `executed=1 fallback=0` in the committed differential subset. The grammar's `for` let-clause accepts one binding only, so no multi-target form exists there. Object literals, patterns, grouping, ordering, and joins remain separate P1 exclusions.
+
+### 3.0.8 Import-cone fallback repair — 2026-08-19 (rev 12)
+
+- **Post-order demotion preserves the one-tier invariant.** A parent that is rejected by T0 can have already loaded a supported dependency during AST building. Before the parent lowers to MIR, T0 now recursively lowers each such direct dependency and its imports, deepest first, and marks it non-interpretable. This prevents MIR from linking against a planned-only child with no JIT context, and preserves the no-mixed-cone rule of **D8.1.1v2** and module initialization boundary of **D7.2.2**.
+- **Evidence.** `test/lambda/graph_layout.ls`, an existing explicit exclusion, now completes under `LAMBDA_TIER=interp` with `executed=0` and a counted fallback instead of aborting during MIR import resolution. `InterpFallback.ExcludedScriptsAreCountedNotInterpreted` covers that row in its sampled exclusion gate.
+
+### 3.0.9 Nested COW mutation increment — 2026-08-19 (rev 13)
+
+- **Nested writes retain the complete COW spine.** T0 collects the resolved root and every intermediate key, roots the RHS and keys before the MAY_GC `cow_path_set` call, then publishes the returned root to the planned binding. This gives `a.b.c = v` the same detach-and-relink behavior as MIR, keeping sharing unobservable under **S9.1.2** while respecting side-stack rooting in **D5.1.1/D5.3.3**.
+- **Owner-mutating system calls use their COW entries.** Direct `push` and `splice` calls now evaluate non-owner operands before the owner is detached, invoke `pn_push_cow`/`pn_splice_cow`, and publish their replacement binding. Calling the native entry directly mutated both aliases, so this aligns statement and call mutation paths with **S9.1.2**.
+- **Evidence.** Existing `test/lambda/proc/cow_alias.ls` and `proc_param_type_infer.ls` now run as zero-fallback `run`-mode differential rows. Together they cover direct and nested array/map aliases, `push`, `splice`, and repeated nested map updates through untyped procedural parameters; T0 output is byte-identical to JIT under both `interp` and `auto`.
+
+### 3.0.10 Direct `var`-parameter COW increment — 2026-08-19 (rev 14)
+
+- **A direct mutable argument retains its caller write-back target.** T0 admits a fixed-arity direct call only when every `var` operand resolves to a distinct, non-imported mutable identifier. A COW-owned container root is detached and published before entering the callee, then the callee's final parameter value is re-homed after its frame closes and written back to that caller binding. This matches the mutable-borrow boundary of **S9.1.2** and the frame/number-stack ownership rules in **D5.1.1/D5.3.3**; dynamic, optional, variadic, aliased, and expression operands remain fail-closed because the boxed dispatcher has no write-back ABI.
+- **Satellites stay pinned to T0.** A satellite can be entered only through the boxed dynamic ABI, so a definition with `var` parameters cannot tier up until that ABI gains an explicit mutable-borrow channel. This preserves the tier boundary of **D8.1.1v2**.
+- **N-D row writes remain excluded.** `cow_ordering.ls` exposed that the generic COW array setter operates on scalar leaves, while an outer `ArrayNum` index replaces a row view. The pre-scan now recognizes direct aliases of an N-D literal and falls that script back rather than narrowing a row to a scalar. `test/lambda/proc/var_param.ls` is the committed zero-fallback `run`-mode coverage for the supported one-dimensional `any[]` path; it matches JIT under both `interp` and `auto`.
+
+### 3.0.11 Typed-map COW and checked-write increment — 2026-08-19 (rev 15)
+
+- **Direct typed-map writes now use the same checked candidate boundary as MIR.** A root `INDEX_ASSIGN_STAM` or `MEMBER_ASSIGN_STAM` whose resolved binding has a map contract calls `lambda_map_set_checked`; a detached `var` root uses its in-place variant. The candidate is validated before publication, preserving the sharing and mutable-borrow rule of **S9.1.2**; its owner/key/value remain rooted across the MAY_GC helper call under **D5.1.1/D5.3.3**.
+- **A rejected direct store is a completion even for an unannotated `pn`.** MIR emits `emit_return_if_item_error` at this checked-store boundary before generic procedural side-effect lowering. T0 now preserves that error rather than discarding it with the statement result, while an enclosing handler still gets first access to its error value. This maintains error-as-value and handler placement in **S7.7.1** and the shared tier boundary in **D8.1.1v2**.
+- **Evidence.** `type_enforcement_map_cow.ls`, `type_enforcement_union_map_cow.ls`, `type_enforcement_var_inout.ls`, and nullable native/i64/sized map rows moved to the committed zero-fallback `run`-mode subset: all match JIT under `interp` and `auto`. The existing negative `type_enforcement_map_write.ls` now exits `1` in both tiers and emits the same E201 checked-member-write diagnostic (apart from T0's run summary). Nested typed-map paths remain explicit exclusions.
+
+### 3.0.12 Compact NumSized literal construction — 2026-08-19 (rev 19)
+
+- **T0 now selects the identical compact carrier for inferred homogeneous `NumSized` literals.** `eval_array` reads the already-resolved element subtype on `AstArrayNode::type`, selects `array_num_new(ELEM_*, count)`, and publishes each evaluated Item through `array_num_set_item`. That reuses the allocation, storage, and scalar-conversion helpers MIR uses rather than reconstructing compact-number semantics in the walker (D8.1.1v2, D5.3.3).
+- **The boundary is intentionally narrower than typed-array support.** A declared/dynamic typed-array conversion still needs the full checked `ensure_sized_array` declaration boundary. Full-width `u64` also remains pre-scan rejected: a generic container read deliberately normalizes a small `u64` to `int`, whereas MIR uses a typed raw-index lane. Retagging the read after the fact would hide that representation-contract gap and violate the differential rule (SI3).
+- **Evidence.** Existing `test/lambda/compact_typed_arrays.ls` now executes entirely under `LAMBDA_TIER=interp` with byte-identical golden output (`executed=1 fallback=0`), including the `u8[]` annotation whose literal already has the required compact witness. The same run passes with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. `sized_numeric_collections.ls` is verified as a counted `AST_NODE_ARRAY` fallback because it contains `u64[]`; it is not added to the supported partition. The scalar-conversion and annotated-`u8[]` edge coverage is also now exact in `sized_numeric_annotation_edges.ls` (§3.0.5). `make build -j8` passes with 0 errors. Both partition files remain untouched until one clean final-binary full sweep regenerates them together.
+
+### 3.0.13 Declared numeric bindings and error-valued assignment — 2026-08-19 (rev 21)
+
+- **All admitted compact numeric binding boundaries now canonicalize through the shared runtime helper.** T0 uses one rooted `interp_coerce_declared_numeric` path for declaration lists, lexical/array/`for` declaration forms, direct reassignment, interpreted parameter entry, and self-tail parameter rebinding. It unwraps the recorded source contract and calls `coerce_num_sized` or `coerce_uint64`; it never reimplements wrapping or overflow locally. This restores the carrier that MIR establishes before later typed arithmetic, and keeps a helper-allocated wide result reachable under **D5.1.1/D5.3.3** and the common-tier rule in **D8.1.1v2**.
+- **Error-valued assignment distinguishes open from checked bindings.** A fresh RHS error is retained in an untyped mutable binding, so an implicit error-excluding `var` parameter rejects it before COW preparation. A declared contract that excludes error still returns before publication. This matches error-as-value/check placement in **S7.7.1** without letting a failed assignment silently turn into an unrelated `null` mutation.
+- **Evidence.** `proc_map_type_change.ls` now matches JIT under T0, including its `u32`-annotated declaration/reassignment that formerly became a floating value; `proc_type_param_error_short_circuit.ls` likewise matches, retaining the rejected `source_fail()` value so its `var` call produces `50`/`60` rather than mutating the binding. Both are exact under forced-GC. A fresh stable-binary `python3 test/interp/tier_sweep.py --dir test/lambda/proc --jobs 2 --timeout 45` reports **142 scripts: 108 match, 34 fallback, 0 mismatch, 0 timeout**. This is diagnostic evidence only: the committed partition files remain unchanged pending their required full-corpus sweep. `make build -j8` passes with 0 errors.
 
 Seven defects the differential caught while landing these, all fixed:
 
@@ -221,17 +287,18 @@ Seven defects the differential caught while landing these, all fixed:
 
 - [ ] `FOR_EXPR`/`FOR_STAM` with the full clause set (`AstForNode`: `where/group/order/limit/limit_from_end/offset/then`; `AstLoopNode` joins incl. `join_keys`/`key_filter`/`key_only`/`optional`), `LOOP`, `ORDER_SPEC`, `GROUP_CLAUSE`, `JOIN_KEY`; accumulators/group tables through the same container/sort helpers as lowering (S6 total order lives in the helpers).
 - [ ] `PIPE` (+ `where` filter form), pipe argument injection.
-- [ ] Implicit contexts as slot-backed stacks in `InterpState` (`~`, `~#`, `last`; innermost-wins per S10.1.3), mirroring the transpiler's build-time context (`last_index_object` behavior); `CURRENT_ITEM`, `CURRENT_INDEX`, `LAST_INDEX` read them.
+- [x] Implicit contexts as slot-backed stacks in `InterpState` (`~`, `~#`, `last`; innermost-wins per S10.1.3), mirroring the transpiler's build-time context (`last_index_object` behavior); `CURRENT_ITEM`, `CURRENT_INDEX`, `LAST_INDEX` read them. Unordered expression-form `FOR` windows use the full stream before `offset`/first/last selection.
 
 ### P1.2 Match, types, patterns
 
-- [ ] `MATCH_EXPR`/`MATCH_ARM`: scrutinee evaluated exactly once (S11.2.1); literal arms via `fn_eq`, type arms via `fn_is`, constrained arms base-only (current shipped behavior — S11.4.6 unchanged; direct predicate eval is P3/AI17).
+- [ ] `MATCH_EXPR`/`MATCH_ARM`: scrutinee evaluated exactly once (S11.2.1); literal arms via `fn_eq`, type arms via `fn_is`, constrained arms run the P3 `PREDICATE` subset after their base check. Generic `fn_is` and validator policy remain base-only under S11.4.6.
 - [ ] Type-expression nodes as values (`TYPE`, `*_TYPE`, `TYPE_STAM`, `CONSTRAINED_TYPE`, `OBJECT_TYPE`) — resolve through the build-time `Type*` graph exactly as lowering does; no interpreter-side type construction.
 - [ ] String/symbol patterns (`STRING_PATTERN`, `SYMBOL_PATTERN`, `PATTERN_SEQ`, `PATTERN_CHAR_CLASS`, `PATTERN_ISLAND`) via the pattern helpers over prepass-compiled pattern constants (in interp-only mode these come from the const pool at build time; the satellite story is AIO12/P2).
 
 ### P1.3 Documents, paths, queries
 
-- [ ] `ELEMENT`/`CONTENT_TYPE`/`ELMT_TYPE`, `OBJECT_LITERAL`, `DECOMPOSE`, `SPREAD`, `NAMED_ARG`.
+- [ ] `ELEMENT`/`CONTENT_TYPE`/`ELMT_TYPE`, `OBJECT_LITERAL`, `SPREAD`. Object forms remain excluded.
+- [x] Positional/named `DECOMPOSE`, including lexical list blocks. `NAMED_ARG` is complete only for a statically resolved direct Lambda call (rev 6), not positional system/dynamic/pipe calls.
 - [ ] `PATH_EXPR`/`PATH_INDEX_EXPR`/`PARENT_EXPR`/`QUERY_EXPR` via the `path_*`/query helpers.
 
 ### P1.4 Procedural + error/fault channels
@@ -261,6 +328,169 @@ Seven defects the differential caught while landing these, all fixed:
 | G1.2 GC stress | Full interp baseline clean under stress knobs + ASan build; no `AutoAssertNoGC` aborts; forced-GC run confirms every helper call is treated as a safepoint |
 | G1.3 non-regression | Default mode still byte-identical (no lowering diffs); `make test` green; plan-pass cost ≤ 5% of the `ast` phase on the suite (reported) |
 | G1.4 **measurement report** | §6 re-published over the full corpus; every corpus item where interp mode is net-slower end-to-end is explained (exec-dominated) with its projected P2 outcome |
+
+### 3.1 P2 — opt-in satellite tier-up — **in progress 2026-08-19**
+
+The implemented unit is one definition plus its generated `_b` wrapper. Its
+`FnAnalysis::promotion` starts in `INTERP`, increments at the single dynamic
+dispatcher, compiles synchronously at `LAMBDA_JIT_THRESHOLD` (default `3`),
+then publishes `boxed_entry` before upgrading each observed `Function` value
+to the ordinary context-owning boxed ABI. A compiler failure pins that
+definition to T0; it never changes the current run to whole-module JIT
+(D8.1.1v2 §5.1–§5.3, DI14).
+
+Each satellite has unique module and metadata BSS names because `find_import`
+is context-wide. Its global lowering map is reconstructed from the T0
+frame-plan's `NameEntry::slot` values and its `LambdaModuleLayout::var_count`
+is the complete interpreter slab size. Therefore scalar module reads and
+cross-satellite calls use the same per-`EvalContext` state as T0; no eager
+`_gvar_*` numbering is reused.
+
+A satellite may also read a planned Lambda import without linking that
+module's MIR image. The imported `NameEntry` already resolves at frame-plan
+time to its T0 owner Script and slot, so satellite lowering embeds that
+immutable `{module_id, slot}` pair and reads the per-context slab directly.
+Imported function calls deliberately continue through the boxed dynamic
+dispatcher, which observes the provider's current T0-or-promoted `Function`
+entry; no imported direct wrapper symbol or mixed T0/MIR cone is created
+(D7.2.1, D8.1.1v2, D5.3.3).
+
+Verified with `test/lambda/interp_auto_tier.ls` and threshold `3`:
+
+| Tier | Result | Evidence |
+|---|---|---|
+| `interp` | `[3, 4, 5, 6, 10, 5, 6, 7, 4, 2]` | T0 only, zero fallback |
+| `auto` | same | four satellite images: self-recursive `count_down`/`sum_down`, plus `bridge` reading module `offset` and dynamically invoking `shifted` |
+| `jit` | same | existing eager whole-module control |
+
+`test/lambda/interp_auto_import.ls` adds the T0-import boundary: its provider
+exports `offset` and `shift`, while the importing `hot` function reads both.
+Under `auto` with `LAMBDA_JIT_THRESHOLD=2`, the provider `shift` and importing
+`hot` each publish one satellite, returning `[21, 22, 23, 24]` exactly under
+`jit`, `interp`, `auto`, and forced-GC `auto`. The importer satellite reads
+the provider's slab Function dynamically; it never resolves `mN._shift_b_*`.
+
+Still pinned to T0: captures/nested definitions, cross-language or type-only
+imports, and named-property or object/view code, because their environment or
+key-table artifacts are not yet Script-scoped satellite inputs. `LAMBDA_JIT_BACKEDGE` now defaults to
+`1024`: a T0 `while` or comprehension continuation increments the active
+definition's counter, and crossing it permits compilation only on a later
+dynamic entry — never through on-stack replacement. `interp_auto_tier.ls`
+forces `LAMBDA_JIT_THRESHOLD=100 LAMBDA_JIT_BACKEDGE=2`; its first
+`loop_count(4)` remains T0 and the second entry compiles the sole satellite.
+Full-AST call-site analysis persistence and the complete P2 matrix remain
+open. P3's validator de-JIT, P4's persistent REPL state, and P5's default flip
+remain blocked on their stated design gates; `LAMBDA_TIER`
+unset remains `jit`.
+
+### 3.2 P3 — restricted `that` predicates + immediate-scalar CONST folding — **vertical slices landed 2026-08-19**
+
+`InterpState` now carries `EvalMode::{RUNTIME, CONST, PREDICATE}` plus a
+per-attempt fuel counter. The live slice enters `PREDICATE` only for non-object
+`AstConstrainedTypeNode` checks reached by `expr is T` or a constrained match
+arm. It binds `~`/`~#`/parent/root through the existing slot-backed context
+stack, decrements `LAMBDA_PREDICATE_FUEL` at each evaluated AST node (default
+`1024`), and rejects/exhausts as a failed predicate rather than publishing a
+partial result. Nested constrained checks share the outer budget.
+
+Admission is fail-closed: `interp_predicate_supported()` permits literals,
+`~`, pure unary/binary/member/index shapes, conditionals, and a narrow
+registered-sysfunc allow-list (including `len`). It rejects identifiers,
+closures/procedures, arbitrary calls, containers, assignments, handlers,
+pipes, loops, async, I/O, and mutation. `eval_call` repeats the allow-list
+check at runtime so a future AST edge cannot silently weaken the boundary.
+This is the AI17 mechanism only: generic `fn_is`, object constraints, and the
+validator retain the S11.4.6 base-only interim; no validator/JIT ownership path
+was changed.
+
+The constrained type expression now resolves through its `type_list` index,
+the same runtime Type* identity lowering emits. `plan_need` reserves the
+context homes around a constrained predicate and match arms, so the new mode
+does not trade predicate correctness for an unrooted Item (D5.3.3).
+
+The CONST slice runs as a `const-fold` compiler pass after indexed AST
+construction and after the canonical `EvalContext` is bound. It reuses
+`eval_expr` in `EvalMode::CONST`, with `LAMBDA_CONST_FUEL` (default `1024`) and
+an exact `LAMBDA_CONST_FOLD=0` off switch. Admission is deliberately narrower
+than PREDICATE: literal null/bool/int/float syntax; `not`, unary sign; scalar
+arithmetic, comparisons, `and`/`or`; and an all-literal `if`. Calls, bindings,
+containers, reads, mutation, and pointer-backed results are rejected. Every
+attempt runs in a throwaway side-stack frame and contains an unexpected native
+fault; failed, rejected, exhausted, or non-immediate attempts leave no fact.
+
+Facts store only tagged null/bool/int words in `AstIndex`, never a pointer or a
+number-stack home. Lowering consumes a fact only at a known generic-`Item`
+boundary (the generic array path and `transpile_box_item`); it emits the full
+tagged word rather than a native arithmetic lane. This preserves D5.3.3's
+rooting/representation boundary and DI14's cache-relocation rule. The slice is
+therefore a safe P3 implementation increment, not a claim that all pure AST
+shapes or all lowering boundaries fold yet (D8.1.1v2, AI16).
+
+Verified locally:
+
+| Check | Result |
+|---|---|
+| `test/lambda/constrained_type.ls` under `LAMBDA_TIER=interp` | exact existing golden; zero fallback |
+| new `test/lambda/interp_predicate_mode.ls` under `jit`, `interp`, and `auto` | exact golden `[true, false, true, false, "negative"]`; covers alias `is`, `len(~)`, and constrained match arms |
+| same fixture with `LAMBDA_PREDICATE_FUEL=1` | `[false, false, false, false, "other"]`; bounded checks fail closed without a runtime error |
+| new `test/lambda/interp_const_fold.ls`, JIT fold on versus `LAMBDA_CONST_FOLD=0` | exact golden `[42, true, true, 13]` in both modes; fold-on MIR contains four canonical tagged immediates while fold-off retains arithmetic/control-flow lowering |
+| `P0Subset/InterpSubsetTest.MatchesGoldenWithoutFallback/interp_const_fold` | PASS — exact golden under T0 with zero fallback |
+| focused `test_interp_gtest` constrained cases | PASS — both moved subset entries, zero fallback |
+| `make build` | PASS (2026-08-19) |
+
+`constrained_type.ls` moved from `interp_excluded.txt` into the zero-fallback
+differential subset, together with the P3 predicate and CONST fixtures. The
+CONST pass now owns its indexed-AST/EvalContext seam; validator de-JIT remains
+unimplemented because its `TypeObject::constraint` ownership and validator
+entry routing have not yet been moved off JIT (D8.1.1v2, AI16/AI17).
+
+### 3.3 P4 — persistent interpreter REPL — **vertical slice landed 2026-08-19**
+
+`LAMBDA_TIER=interp` and `LAMBDA_TIER=auto` now create one empty T0 Script
+when the REPL starts. A completed input is parsed as its own Tree-sitter tree,
+then shifted into the session's append-only source before `build_repl_fragment`
+builds it against the retained global `NameScope`. The session retains every
+fragment tree for the Script lifetime, appends only the new indexed AST nodes,
+assigns slots only to newly introduced bindings, and runs only the fragment's
+top-level nodes. Existing definitions and module-slot values therefore stay
+live without re-parsing, rebuilding, or re-executing the preceding history
+(D8.1.1v2, D7.2.1).
+
+The Script stores its top-level append cursor, so linking a new fragment does
+not scan earlier history. The module slab uses geometric storage growth while
+registering its one owned GC-root range before retiring the old range; its
+logical `var_count` stays exact for interpreter and satellite slot checks
+(D5.3.3). Each completed input snapshots the live slots before execution. An
+AST/build/plan rejection or an error Item restores the name-scope tail,
+const/type-list lengths, source length, AST index, and slab values, then drops
+the fragment tree. `clear` releases the old module's exact root and Script
+before constructing a clean session. Imports after the session begins are
+deliberately rejected: the incremental REPL transaction has no cone
+load/initialization-and-rollback protocol yet, even though a fully planned T0
+module can now supply a P2 satellite binding (D7.2.2).
+
+This is a REPL vertical slice, not P5: unset and `LAMBDA_TIER=jit` retain the
+historical whole-history REPL, and no latency table is claimed until the
+release-build C3 driver measures it. The normal interpreter differential gate
+also remains an independent P1 status signal, not evidence for this stateful
+interactive path.
+
+Verified locally:
+
+| Check | Result |
+|---|---|
+| persistent `let x = 40` → `x + 2` → `fn add(y) => x + y` → `add(3)` under `interp` | PASS — `42`, then `43`; four fragment executions and zero fallback |
+| same session with forced collection (`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`) | PASS — retained array binding and function return `42`, `43` |
+| propagated runtime error in `let y = fail()^`, then `x`/`y` | PASS — `x` remains `40`; the failed binding is absent |
+| `clear`, then read former `x` | PASS — former binding is absent; no invalid free or retained module root |
+| `auto` session, threshold 2, two calls to `add` | PASS — one satellite compiles and returns `41`, `42`; `clear` then discards the session safely |
+| `make build -j8` | PASS (2026-08-19) |
+
+`make test-lambda-interp` was started after the P4 work. Its focused walker and
+frame-plan groups passed, but later `make build` invocations replaced
+`lambda.exe` while the long-running subprocess gate was still launching
+cases. That run is invalid as an acceptance result and must be restarted from
+a stable binary; it is not evidence of P4 or P2 coverage loss.
 
 ## 4. Walker ↔ helper boundary rules (normative for both phases)
 

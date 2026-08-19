@@ -1090,9 +1090,13 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
         return lambda_dynamic_invoke_host_adapter(fn, args, count, caller);
     }
     if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
-        // The single tier-dispatch point (AI7): `args` is already the rooted
-        // span the adapter built, which is exactly what interp_call needs.
-        return interp_call(fn, args, count);
+        // T0 values retain the source entry until this one dispatch boundary.
+        // Upgrade before selecting a C prototype: a published satellite uses
+        // the ordinary generated boxed ABI, while a cold/pinned definition
+        // must keep the exact interpreter call path (D8.1.1v2 §5.3).
+        if (!interp_promote_function_if_hot(fn)) {
+            return interp_call(fn, args, count);
+        }
     }
     // This is the Core boxed ABI dispatch; hosted native callbacks use the
     // shared Item-only switch in hosted-call-dispatch.hpp above.

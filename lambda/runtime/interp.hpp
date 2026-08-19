@@ -20,7 +20,7 @@
 typedef enum LambdaTier {
     LAMBDA_TIER_JIT = 0,   // today's eager whole-module MIR Direct pipeline
     LAMBDA_TIER_INTERP,    // T0 only, never promote
-    LAMBDA_TIER_AUTO,      // T0 + per-function promotion (P2; P0/P1 fall back to JIT)
+    LAMBDA_TIER_AUTO,      // T0 + per-function satellite promotion (P2)
 } LambdaTier;
 
 // Parsed once at startup from LAMBDA_TIER; unset or `jit` keeps the shipped
@@ -35,7 +35,9 @@ bool lambda_tier_parse(const char* text, LambdaTier* out);
 // ---------------------------------------------------------------------------
 
 enum class EvalMode : uint8_t {
-    RUNTIME,   // full language; CONST and PREDICATE modes arrive in P3 (AI16/AI17)
+    RUNTIME,    // full language; effects are admitted by the ordinary walker
+    CONST,      // pass-manager const folder: pure, fuel-bounded, no effects (AI16)
+    PREDICATE,  // pure, fuel-bounded `that` evaluation (AI17)
 };
 
 // The only non-local mechanism for language control flow (AI14); longjmp stays
@@ -65,6 +67,7 @@ struct InterpState;
 // Slot window layout, matching FnFramePlan (ast-core.hpp):
 //   [ 0 .. param_count )                          parameters
 //   [ param_count .. param_count+local_count )    locals (block scopes flattened)
+//   [ vargs_index ] (variadic functions only)     adapter-owned rest-list root
 //   [ signal_index ]                              RETURNED / ERROR_SKIP payload
 //   [ scratch_base .. total_slots )               operand scratch
 struct InterpFrame {
@@ -78,6 +81,7 @@ struct InterpFrame {
     uint32_t            slot_count;
     uint32_t            scratch_base;
     uint32_t            scratch_top; // debug-checked <= slot_count
+    uint32_t            vargs_index; // UINT32_MAX when this frame is not variadic
     uint32_t            signal_index;
     // The pending statement signal for this activation (AI14). Its payload —
     // a RETURNED value or an ERROR_SKIP error — lives in slots[signal_index],
@@ -122,11 +126,20 @@ struct InterpState {
     InterpFrame* top;
     InterpContext* contexts;
     InterpErrorContext* errors;
+    // The current subscript owner for a nested `last` expression. This points
+    // at a live frame slot and is restored when that subscript completes.
+    uint64_t*    last_index_item;
     EvalMode     mode;
     uint32_t     depth;          // remaining recursion budget
     uint32_t     depth_limit;
     uint64_t     node_count;     // evaluated nodes, for the measurement report
     bool         depth_exhausted;
+    // Restricted modes consume this per-node budget.  A rejected call or an
+    // exhausted budget is local to the attempt: its caller receives false,
+    // never a partial predicate result (AI16/AI17).
+    uint32_t     mode_fuel;
+    bool         mode_exhausted;
+    bool         mode_rejected;
 };
 
 // Per-run counters printed in the run summary; gates pin `fallback` to 0 on
@@ -139,6 +152,13 @@ typedef struct InterpRunStats {
     double   exec_ms;
 } InterpRunStats;
 
+// P4 owns one Script for the lifetime of an interactive session. New inputs
+// append only their own typed AST fragment and execute only that fragment.
+typedef struct InterpReplSession {
+    Runner runner;
+    bool initialized;
+} InterpReplSession;
+
 InterpRunStats* interp_run_stats(void);
 void interp_run_stats_reset(void);
 
@@ -150,10 +170,36 @@ void interp_run_stats_reset(void);
 // FnAnalysis plus the Script's own top-level plan. Idempotent per Script.
 // Returns false only on an internal invariant failure.
 bool interp_plan_script(Script* script);
+// Extends a planned module with one REPL AST fragment. Existing slots and
+// frame shapes remain immutable; only new module bindings receive new slots.
+bool interp_plan_repl_fragment(Script* script, AstNode* fragment);
 
 // Whole-AST pre-scan: true when every reachable node kind is covered by the
 // current walker. On false, `*reject` receives the first unsupported kind.
 bool interp_scan_supported(Script* script, AstNodeType* reject);
+
+// True only for the currently implemented P2 satellite boundary: non-async,
+// no captures/properties and only planned Lambda imports. Module bindings are
+// read from T0's shared slab; a rejected function remains T0 for semantic
+// safety.
+bool interp_satellite_supported(const AstFuncNode* fn);
+// True when an imported binding has a planned T0 owner and a stable module
+// slab slot. Satellite lowering uses this predicate before embedding that
+// `{module_id, slot}` pair instead of linking a generated import symbol.
+bool interp_satellite_import_supported(const NameEntry* entry);
+
+// Conservative, effect-free `that` subset.  The caller must reject rather
+// than execute a predicate outside this shape; runtime repeats the call gate
+// as defense in depth when a future AST form reaches eval_call directly.
+bool interp_predicate_supported(AstNode* predicate);
+bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info);
+// the P3 pass-manager entry evaluates pure literal subtrees in CONST mode and
+// publish only immediate results into the indexed AST fact table.
+bool interp_const_fold_script(Transpiler* tp);
+// True for the native-word registry rows whose Item-level wrappers are shared
+// with MIR's non-native bitwise lowering. The scanner and evaluator use one
+// policy so an admitted native call cannot reach an unimplemented ABI arm.
+bool interp_native_sys_item_supported(const SysFuncInfo* info);
 
 // Human-readable node kind, for fallback diagnostics.
 const char* interp_node_kind_name(AstNodeType kind);
@@ -173,10 +219,25 @@ Item interp_call(Function* fn, const Item* args, int argc);
 }
 #endif
 
+// Called by the shared dynamic dispatcher immediately before invoking a T0
+// function. On success it upgrades that Function in place to its published
+// boxed MIR entry and returns true; on a miss/pinned definition it returns
+// false and the dispatcher executes interp_call normally. T0 loop backedges
+// mark the definition for promotion at a later entry; no frame is replaced
+// while it is active (no OSR, D8.1.1v2 §5.1).
+bool interp_promote_function_if_hot(Function* fn);
+
 // Executes an already-loaded, already-planned Script under T0. Arms the
 // EXECUTION_BOUNDARY recovery frame, opens the module top-level frame, and
 // returns the script result (or a fault Item).
 Item interp_run_script(Runner* runner, bool run_main);
+// Executes one already planned P4 REPL fragment against the Script's existing
+// persistent module slab; earlier top-level nodes are not re-run.
+Item interp_run_repl_fragment(Runner* runner, AstNode* fragment);
+
+bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime);
+void interp_repl_session_destroy(InterpReplSession* session);
+Item interp_repl_session_eval(InterpReplSession* session, const char* source);
 
 // Creates a cold Function value for a definition site: entry_abi
 // LAMBDA_INTERPRETED, ptr NULL, def = fn_node. Captures are snapshotted by
