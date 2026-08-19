@@ -122,15 +122,15 @@ function _attr_content_type($) {
 
 // ---------------------------------------------------------------------------
 // Shared core. Consumed by BOTH grammar-lambda.js (the official full grammar)
-// and grammar.js (the production grammar, whose type layer is external scanner
-// tokens). Every rule outside the type-pattern sub-language lives here, so the
-// two grammars differ only in that layer.
+// and grammar.js (the optimized production grammar). This object contains only
+// rules both parsers use. Each grammar supplies its own replacement layer for
+// type forms, qualified names, and paths: structural rules in the reference
+// grammar, external-token seams in production.
 //
-// Seam: the core references four names each type layer must define —
-//   _type_pattern   the annotation-position type pattern
-//   _primary_type   a single primary type (query_expr operand, view atoms)
-//   pattern_island  a string/symbol pattern island in value position
-//   content_type    element/object content schema
+// Seam names referenced by the shared core:
+//   _type_pattern, _primary_type, _char_pattern, content_type
+//   return_type, view_pattern, path_expr
+//   _attr_dotted_name, dotted_name
 // ---------------------------------------------------------------------------
 
 module.exports = {
@@ -160,8 +160,7 @@ module.exports = {
       // size they were before the grammar was split (they cost ~850 large
       // states and 240KB of parser.o otherwise)
       $._primary_type,
-      $._view_atom_type,
-      $._value_island,
+      $._char_pattern,
       $._non_null_literal,
       $._parenthesized_expr,
       $._arguments,
@@ -171,7 +170,7 @@ module.exports = {
 
     conflicts: $ => [
       // The postfix-chain conflicts that used to sit here became unnecessary
-      // once the type layer stopped reaching into the expression grammar; the
+      // once structural type rules stopped reaching into expression grammar;
       // generator reports them as such and they cost nothing either way.
       [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
       [$.dotted_name, $.path_expr],                  // dotted attributes vs rooted path steps
@@ -219,9 +218,8 @@ module.exports = {
   },
 
 
-  // Precedences naming type-layer rules. Only the full grammar has those
-  // rules; the production grammar's type layer is a scanner token, which
-  // needs no precedence relation.
+  // Precedences naming reference-only type rules. Production scanner tokens
+  // need no corresponding precedence relation.
   typePrecedences: $ => [
     [
       $.range_type,
@@ -337,6 +335,7 @@ module.exports = {
       $.fn_expr_stam,
       $.type_stam,
     ),
+
     _content_expr: $ => choice(
       repeat1(choice($.string, $.map, $.element)),
       $.handler_expr,
@@ -362,6 +361,7 @@ module.exports = {
       $.apply_stam,
       prec.right('statement_end', seq($._content_expr, choice(token(prec(10, /\r\n|\n/)), ';'))),
     ),
+
     content: $ => choice(
       seq(
         repeat1($._statement),
@@ -382,11 +382,17 @@ module.exports = {
       $.binary,
       $.named_value,
     ),
+
     _key: $ => choice($.symbol, $.identifier, $.base_type, $.last_index, '*'),
+
     map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
+
     map: $ => seq( '{', comma_sep($.map_item), '}' ),
+
     array: $ => seq( '[', comma_sep($._expr), ']'),
+
     range: $ => seq( $._expr, 'to', $._expr ),
+
     attr_binary_expr: $ => choice(
       ...binary_expr($, true),
     ),
@@ -402,14 +408,8 @@ module.exports = {
 
     // Attribute names may be qualified keys such as svg.width.
     attr_name: $ => choice(alias($._attr_dotted_name, $.dotted_name), $._key),
-    _attr_dotted_name: $ => qualified_name($, 51),
     attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
 
-    // Dotted name: arbitrary depth dotted segments
-    // Each segment is an identifier or symbol: a.b.'c'.d
-    // Keep this below primary/member expressions in value positions; it is a
-    // qualified name for element and attribute positions, not a primary expr.
-    dotted_name: $ => qualified_name($, 49),
     element: $ => seq('<',
       choice($.dotted_name, $.symbol, $.identifier),
       optional(
@@ -434,6 +434,7 @@ module.exports = {
       ),
       ')',
     ),
+
     _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
@@ -463,7 +464,7 @@ module.exports = {
       $.map,
       $.element,
       $.base_type,  // includes null
-      $._value_island, // inline string/symbol type pattern
+      $._char_pattern, // inline string/symbol character pattern
       $.identifier,
       $.index_expr,
       $.path_expr,   // / or . paths with optional segment
@@ -481,13 +482,15 @@ module.exports = {
       $.current_error_expr, // ^ inside an active error-handler body
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
+
     _arguments: $ => seq(
       '(', comma_sep( field('argument', choice($.named_argument, $._expr)) ), ')',
     ),
+
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, 'import')),
       $._arguments,
-  )),
+    )),
 
     // propagation owns its caret at the same postfix-primary tier as member
     // access; wider operands must be parenthesized before this rule applies.
@@ -531,9 +534,6 @@ module.exports = {
       field('query', $._primary_type),
     ),
 
-    // Path prefix: / or . for rooted/relative path expressions.
-    _path_prefix: _ => token(choice('/', '.')),
-
     // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
     var_param_marker: _ => token(prec(3, 'var')),
@@ -542,15 +542,6 @@ module.exports = {
     // postfix root step; both share member precedence.
     path_parent: _ => token(prec(3, '~~')),
     path_root: _ => token(prec(3, '/')),
-
-    // Path expression: S2.4.1v2 admits rooted `/.a` and relative `.a` forms;
-    // the retired bare `/`, bare `.`, and `/a` spellings are not path values.
-    path_expr: $ => prec.right(choice(
-      seq('/.', field('field', choice($.identifier, $.symbol,
-        $.integer, $.path_wildcard, $.base_type, $.path_parent))),
-      seq('.', field('field', choice($.identifier, $.symbol,
-        $.integer, $.path_wildcard, $.base_type, $.path_parent, $.path_root)))
-    )),
 
     // Member access is the value form of dot syntax; dotted_name is reserved
     // for qualified element and attribute names.
@@ -602,6 +593,7 @@ module.exports = {
         field('operand', $._expr),
       )),
     ),
+
     identifier: _ => {
       // ECMAScript 2023-compliant identifier regex:
       // const identifierRegex = /^[$_\p{ID_Start}][$_\u200C\u200D\p{ID_Continue}]*$/u;
@@ -665,21 +657,6 @@ module.exports = {
       // zero or more event handlers
       repeat(field('handler', $.event_handler)),
     ),
-
-    // View pattern: element or type name (identifier / base_type).
-    // map_type is intentionally excluded to avoid ambiguity with the body {}.
-    // Atom: element_type | identifier | base_type (with optional occurrence)
-    // Union: atom | atom | ...
-    _view_pattern_atom: $ => $._view_atom_type,
-    view_pattern: $ => choice(
-      $._view_pattern_atom,
-      alias($.view_pattern_union, $.binary_type),
-    ),
-    view_pattern_union: $ => prec.left('set_union', seq(
-      field('left', $._view_pattern_atom),
-      field('operator', '|'),
-      field('right', choice($._view_pattern_atom, alias($.view_pattern_union, $.binary_type))),
-    )),
 
     // State declarations: state name: val, name: val, ...
     state_decl: $ => seq(
@@ -959,18 +936,6 @@ module.exports = {
 
     // Type Definitions: ----------------------------------
 
-    // Occurrence modifiers for types: ?, +, *, [], [n], [n, m], [n+]
-    occurrence: $ => choice('?', '+', '*', $.occurrence_count),
-
-    // Occurrence count: [] (any), [n] (exact), [n, m] (range), [n+] (unbounded)
-    // Higher precedence than primary_type to prefer occurrence over array_type
-    occurrence_count: $ => prec(2, choice(
-      seq('[', ']'),                                 // any count: T[]
-      seq('[', $.integer, ']'),                      // exactly n: T[5]
-      seq('[', $.integer, ',', $.integer, ']'),      // n to m: T[2, 5]
-      seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
-    )),
-
     // Keep type-only keywords in one token; `type` remains separate because it
     // starts declarations, while the builder distinguishes the other spellings.
     _base_type_kw: _ => token(prec(1, choice(
@@ -1013,34 +978,6 @@ module.exports = {
       'that', field('constraint', $._expr),
     )),
 
-    // Keep these field names aligned with occurrence_type: the AST builder
-    // reuses the occurrence constructor for return `T?` contracts. Without
-    // them it receives a null operator node and dereferences it while building
-    // a valid nullable return annotation.
-    return_occurrence_type: $ => seq(
-      field('operand', choice($.base_type, $.identifier)),
-      optional(field('operator', $.occurrence)),
-    ),
-
-    // Simple type pattern for return types
-    // This restriction avoids ambiguity with map_type in fn () T { ... }
-    return_type_pattern: $ => prec.left(seq(
-      field('type', $.return_occurrence_type),
-      repeat(seq(choice('|', '&', '!'), field('type', $.return_occurrence_type)))
-    )),
-
-    // Return type with optional error type: T or T^ or T^E
-    // T^ means function may return any error (shorthand for T | error)
-    // T^E means function returns T on success, E on error (E must be simple)
-    // simplified return_type substantially reduced the parser size
-    return_type: $ => prec.right(seq(
-      field('ok', $.return_type_pattern),
-      optional(seq(
-        '^',
-        optional(field('error', $.return_type_pattern))
-      ))
-    )),
-    
     type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as',
       $._annotation_type)),
 

@@ -30,9 +30,9 @@ enum TokenType {
     CONTENT_TYPE_TOKEN,
     // The declaration-only `T (^ E)?` type sub-form.
     RETURN_TYPE_TOKEN,
-    // The complete view/edit model pattern (atom or `|` union).
+    // The complete view/edit model pattern (primary or `|` union).
     VIEW_PATTERN_TOKEN,
-    // Everything after the grammar-owned `/.` or `.` path introducer.
+    // Everything after the grammar-owned rooted `/` then `.`, or relative `.`.
     PATH_BODY_TOKEN,
     // First segment of a qualified element/attribute name. This contextual
     // token prevents the following `.name` from becoming a relative path.
@@ -545,7 +545,8 @@ static bool scan_return_type_token(TSLexer *lexer) {
     return length == 5 && strcmp(word, "state") == 0;
 }
 
-static bool scan_view_atom(TSLexer *lexer) {
+// Mirrors grammar-lambda.js `_view_pattern_primary` inside the opaque token.
+static bool scan_view_pattern_primary(TSLexer *lexer) {
     if (lexer->lookahead == '<') {
         int depth = 0;
         do {
@@ -566,7 +567,7 @@ static bool scan_view_atom(TSLexer *lexer) {
 static bool scan_view_pattern_token(TSLexer *lexer) {
     skip_extras(lexer);
     bool first_is_word = is_identifier_start(lexer->lookahead);
-    if (!scan_view_atom(lexer)) { return false; }
+    if (!scan_view_pattern_primary(lexer)) { return false; }
     lexer->mark_end(lexer);
 
     // `view name: Pattern` must leave the leading name to the ordinary
@@ -579,7 +580,7 @@ static bool scan_view_pattern_token(TSLexer *lexer) {
     while (lexer->lookahead == '|') {
         lexer->advance(lexer, false);
         while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-        if (!scan_view_atom(lexer)) { return true; }
+        if (!scan_view_pattern_primary(lexer)) { return true; }
         lexer->mark_end(lexer);
         while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
     }

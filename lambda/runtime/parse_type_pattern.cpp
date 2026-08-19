@@ -1014,7 +1014,7 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
     return left;
 }
 
-AstNode* parse_view_pattern_atom(Lexer* lx) {
+AstNode* parse_view_pattern_primary(Lexer* lx) {
     skip_space(lx);
     if (lx->p < lx->end && *lx->p == '<') {
         lx->p++;
@@ -1023,18 +1023,18 @@ AstNode* parse_view_pattern_atom(Lexer* lx) {
     StrView word = peek_word(lx);
     if (!word.length || word_is(word, "fn") || word_is(word, "true") ||
             word_is(word, "false")) {
-        fail(lx, "expected a view pattern atom");
+        fail(lx, "expected a view pattern primary");
         return NULL;
     }
     return parse_primary(lx);
 }
 
 AstNode* parse_view_pattern(Lexer* lx) {
-    AstNode* left = parse_view_pattern_atom(lx);
+    AstNode* left = parse_view_pattern_primary(lx);
     if (!left) { return NULL; }
     while (at(lx, '|')) {
         const char* op_text = lx->p++;
-        AstNode* right = parse_view_pattern_atom(lx);
+        AstNode* right = parse_view_pattern_primary(lx);
         if (!right) { return NULL; }
         left = (AstNode*)build_registered_binary_type(lx->tp, lx->origin,
             left, right, left->type, right->type, OPERATOR_UNION,

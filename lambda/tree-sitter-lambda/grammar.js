@@ -5,13 +5,13 @@
  *
  * This is the grammar that ships. It shares its core with the official full
  * grammar (`grammar-lambda.js`) through `grammar-common.js`; the difference is
- * the type/path layer below. Full type patterns and string/symbol islands,
+ * the replacement layer below. Full type patterns and string/symbol islands,
  * declaration return contracts, whole view patterns, and path bodies arrive
  * as opaque tokens from the external scanner (src/scanner.c). Tree-sitter
  * retains only the unambiguous `/.` / `.` path introducer; Lambda parses the
  * full path span directly to AST through lambda/runtime/parse_path_expr.cpp.
  *
- * Read grammar-lambda.js to learn what the type language accepts; it is the
+ * Read grammar-lambda.js for the complete structural surface grammar; it is the
  * normative statement. `make grammar-sync-check` guards the two against drift.
  */
 
@@ -32,33 +32,29 @@ function qualifiedName($, precedence) {
 }
 
 // ---------------------------------------------------------------------------
-// Type layer: external scanner tokens. The scanner only finds where each token
-// ENDS; the interior is parsed by the Lambda-side hand parser.
+// Production replacement layer: external scanner tokens. The scanner only
+// finds where each token ENDS; Lambda-side parsers own each interior.
 // ---------------------------------------------------------------------------
-const typeLayer = {
+const productionRuleLayer = {
     // Annotation-position type pattern: `int`, `{a: int, b: [string]}`,
     // `fn(a: int) int`, `\(d[3])`, unions, occurrences — everything except the
     // `that` predicate, which the parser owns (CT1v2).
     _type_pattern: $ => $.type_pattern_token,
 
-    // A single primary type: the `?T` query operand and view-pattern atoms.
+    // A single primary type: the `?T` query operand and view-pattern primaries.
     // Never consumes `|`, so `data?int | other` keeps `| other` as the value
     // union it is.
     _primary_type: $ => $.primary_type_pattern_token,
-    // Retained only because grammar-common.js names the full-grammar helper.
-    // Production view_pattern below supersedes every reachable use.
-    _view_atom_type: $ => $.primary_type_pattern_token,
-
     // Declaration return contracts and view model patterns are bounded type
     // sub-forms with their own direct AST parsers.
     return_type: $ => $.return_type_token,
     view_pattern: $ => $.view_pattern_token,
 
-    // Keep the introducer in Tree-sitter so ordinary member access and `.123`
-    // floats retain their normal lexical context. The complete dotted body is
-    // one scanner token and is parsed directly into AstPathNode.
+    // Keep the two rooted introducer characters as separate Tree-sitter tokens
+    // so `/` retains its ordinary operator identity and `.` starts the path.
+    // The complete dotted body is one scanner token parsed into AstPathNode.
     path_expr: $ => choice(
-      seq('/.', $.path_body_token),
+      seq('/', '.', $.path_body_token),
       seq('.', $.path_body_token),
     ),
 
@@ -69,7 +65,7 @@ const typeLayer = {
 
     // Islands are first-class values (`let p = \(d[3])`), so they keep their
     // own token in value position.
-    _value_island: $ => $.pattern_island_token,
+    _char_pattern: $ => $.pattern_island_token,
 
     // Element/object content schema: a comma-separated list of patterns.
     // Content items use their own token so a bare field name (`type T { a: int }`)
@@ -100,5 +96,5 @@ module.exports = grammar({
   conflicts: $ => [
     [$._expr, $.query_expr],
   ],
-  rules: Object.assign({}, common.coreRules, typeLayer),
+  rules: Object.assign({}, common.coreRules, productionRuleLayer),
 });

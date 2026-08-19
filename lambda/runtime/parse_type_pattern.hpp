@@ -25,7 +25,7 @@
 // TSNode. Returns NULL on a syntax error, after recording it against `origin`.
 AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin, const char* end, TSNode origin);
 
-// Parse a single primary type — the `?T` query operand and view-pattern atoms.
+// Parse a single primary type — the `?T` query operand and view-pattern primaries.
 // Never consumes a top-level `|`, so a following union stays a value union.
 AstNode* parse_primary_type_text(Transpiler* tp, const char* begin, const char* end, TSNode origin);
 

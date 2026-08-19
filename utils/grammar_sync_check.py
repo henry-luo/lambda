@@ -14,46 +14,43 @@ from pathlib import Path
 PKG = Path(__file__).resolve().parent.parent / 'lambda' / 'tree-sitter-lambda'
 RULE_RE = re.compile(r'^    ([A-Za-z_][A-Za-z_0-9]*): [\$_]\s*=>', re.M)
 
-# names the shared core references and every type layer must therefore provide
-SEAM = {'_type_pattern', '_primary_type', '_view_atom_type', '_value_island', 'content_type'}
-
-# These complete common rules are intentionally replaced by both the full type
-# layer and/or the production external-token layer. Everything else must remain
-# owned by grammar-common.js.
-RULE_OVERRIDES = {
-    '_attr_dotted_name', 'dotted_name', 'return_type', 'view_pattern', 'path_expr'
+# names the shared core references and both replacement layers must provide
+SEAM = {
+    '_type_pattern', '_primary_type', '_char_pattern', 'content_type',
+    '_attr_dotted_name', 'dotted_name', 'return_type', 'view_pattern',
+    'path_expr',
 }
 
 
-def layer_rules(path):
+def layer_rules(path, marker):
     src = path.read_text()
-    start = src.index('TypeLayer = {') if 'TypeLayer = {' in src else src.index('typeLayer = {')
+    start = src.index(marker)
     return set(RULE_RE.findall(src[start:]))
 
 
 def main():
-    prod = layer_rules(PKG / 'grammar.js')
-    full = layer_rules(PKG / 'grammar-lambda.js')
+    prod = layer_rules(PKG / 'grammar.js', 'productionRuleLayer = {')
+    full = layer_rules(PKG / 'grammar-lambda.js', 'fullRuleLayer = {')
     common = (PKG / 'grammar-common.js').read_text()
     core = set(RULE_RE.findall(common[common.index('coreRules: {'):]))
 
     problems = []
 
-    overlap = (core & (prod | full)) - RULE_OVERRIDES
+    overlap = core & (prod | full)
     if overlap:
-        problems.append(f"rules defined in BOTH the core and a type layer: {sorted(overlap)}")
+        problems.append(f"rules defined in BOTH the core and a replacement layer: {sorted(overlap)}")
 
     for name, rules in (('production', prod), ('full', full)):
         missing = {s for s in SEAM if s not in rules and s not in core}
         if missing:
-            problems.append(f"{name} type layer is missing seam rules: {sorted(missing)}")
+            problems.append(f"{name} replacement layer is missing seam rules: {sorted(missing)}")
 
     extra = prod - full
     if extra:
         # the production layer legitimately adds external token wrappers; flag
         # anything else, which would mean the shipped grammar accepts syntax the
         # normative grammar does not describe
-        non_token = {r for r in extra if 'token' not in r and r not in RULE_OVERRIDES}
+        non_token = {r for r in extra if 'token' not in r}
         if non_token:
             problems.append(f"production-only rules that are not scanner tokens: {sorted(non_token)}")
 
@@ -64,7 +61,7 @@ def main():
         return 1
 
     print(f"grammar sync check OK — core {len(core)} rules; "
-          f"type layer: full {len(full)}, production {len(prod)}")
+          f"replacement layers: full {len(full)}, production {len(prod)}")
     return 0
 
 
