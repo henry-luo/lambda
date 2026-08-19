@@ -270,8 +270,9 @@ on click(evt) {
 
 // Main app: edit template manages file list and active file
 edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", drag_item: null, drag_source: "" {
-  let dir_listing = input(data_dir) ^ { ^ }
-  let json_files = if (dir_listing != null) [] else for (f in dir_listing where ends_with(f.name, ".json")) f
+  // The error-handler migration must preserve a successful directory listing.
+  let dir_listing = input(data_dir) ^ { [] }
+  let json_files = for (f in dir_listing where ends_with(f.name, ".json")) f
   let file_names = for (f in json_files) replace(f.name, ".json", "")
 
   // auto-select first file if none active
@@ -695,8 +696,9 @@ on begin_drag(evt) {
 on complete_drop(evt) {
   if (drag_item != null and drag_source != evt.target_list) {
     let active_path = data_dir ++ eff_active ++ ".json"
-    let data = input(active_path, 'json') ^ { ^ }
-    if (data == null) {
+    // A read failure has no list to move; only mutate successfully loaded data.
+    let data = input(active_path, 'json') ^ { null }
+    if (data != null) {
       // Remove item from source list, add to target list
       let new_lists = for (lst in data.lists)
         if (lst.name == drag_source) {

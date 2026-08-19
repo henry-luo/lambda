@@ -1564,6 +1564,8 @@ void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt) {
     jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
 }
 
+void jm_transpile_statement_list_with_using(JsMirTranspiler* mt, JsAstNode* first);
+
 void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -1583,6 +1585,9 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 
     // v23b: unified condition handling
     MIR_reg_t test_cond = jm_transpile_condition(mt, wh->test);
+    // keep each fallible edge before its control-flow join: a later loop body
+    // register is not defined when this condition exits on the first test.
+    jm_emit_error_lane_propagate_check(mt);
     jm_emit_branch(mt, MIR_BF, l_end, test_cond);
 
     // Body
@@ -1591,11 +1596,7 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, wh->body);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)wh->body;
-            JsAstNode* s = blk->statements;
-            while (s) {
-                jm_transpile_statement(mt, s);
-                s = s->next;
-            }
+            jm_transpile_statement_list_with_using(mt, blk->statements);
             jm_pop_scope(mt);
         } else {
             jm_transpile_statement(mt, wh->body);
@@ -1603,7 +1604,9 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     }
 
     jm_emit_jmp(mt, l_test);
-    jm_emit_label(mt, l_end);
+    // all fallible body and condition edges route before this normal exit, so
+    // no following statement may inspect a body register skipped on entry.
+    jm_emit_label_with_state(mt, l_end, JS_ERROR_LANE_CLEAN);
 
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
@@ -1810,9 +1813,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     jm_emit_label(mt, l_test);
 
-    // If the prior fallible operation returned an ERROR Item, leave the loop.
-    jm_emit_error_lane_guard(mt, l_end);
-
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous iteration.
     jm_scope_env_reload_vars(mt);
@@ -1838,6 +1838,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         } else {
             // v23b: unified condition handling (native numeric + raw facades + fallback)
             MIR_reg_t test_cond = jm_transpile_condition(mt, for_node->test);
+            // keep each fallible edge before its control-flow join: a later
+            // update register is not defined when this condition exits first.
+            jm_emit_error_lane_propagate_check(mt);
             jm_emit_branch(mt, MIR_BF, l_end, test_cond);
         }
     }
@@ -1848,8 +1851,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, for_node->body);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)for_node->body;
-            JsAstNode* s = blk->statements;
-            while (s) { jm_transpile_statement(mt, s); s = s->next; }
+            jm_transpile_statement_list_with_using(mt, blk->statements);
             jm_pop_scope(mt);
         } else {
             jm_transpile_statement(mt, for_node->body);
@@ -1870,11 +1872,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         } else {
             jm_transpile_box_item(mt, for_node->update);
         }
-        // v23c: route an ERROR Item returned by the update through the active
-        // try context. There is no stale ambient exception to inspect.
-        if (mt->try_ctx_depth > 0 && !jm_is_native_type(jm_get_effective_type(mt, for_node->update))) {
-            jm_emit_error_lane_propagate_check(mt);
-        }
+        // Route the update immediately. Deferring this to the next test would
+        // inspect an update register that does not exist on a zero-iteration exit.
+        jm_emit_error_lane_propagate_check(mt);
         if (init_is_lexical_decl && for_lexical_init_name &&
                 for_lexical_init_name[0] && mt->last_closure_has_env) {
             jm_scope_env_reload_vars(mt);
@@ -1888,7 +1888,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     }
 
     jm_emit_jmp(mt, l_test);
-    jm_emit_label(mt, l_end);
+    // all fallible body, update, and test edges route before this normal exit.
+    jm_emit_label_with_state(mt, l_end, JS_ERROR_LANE_CLEAN);
 
     if (init_is_var && for_var_init_name && for_var_init_name[0]) {
         JsMirVarEntry* init_var = jm_find_var(mt, for_var_init_name);
@@ -2403,8 +2404,7 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, dw->body);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)dw->body;
-            JsAstNode* s = blk->statements;
-            while (s) { jm_transpile_statement(mt, s); s = s->next; }
+            jm_transpile_statement_list_with_using(mt, blk->statements);
             jm_pop_scope(mt);
         } else {
             jm_transpile_statement(mt, dw->body);
@@ -2417,10 +2417,12 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     if (dw->test) {
         // v23b: unified condition handling
         MIR_reg_t truthy = jm_transpile_condition(mt, dw->test);
+        jm_emit_error_lane_propagate_check(mt);
         jm_emit_branch(mt, MIR_BT, l_body, truthy);
     }
 
-    jm_emit_label(mt, l_end);
+    // the test's abrupt path has already been routed before normal completion.
+    jm_emit_label_with_state(mt, l_end, JS_ERROR_LANE_CLEAN);
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
 }
@@ -3142,8 +3144,6 @@ static void jm_emit_using_dispose_decl(JsMirTranspiler* mt, JsVariableDeclaratio
         (void)jm_callr_1(mt, "js_using_dispose", MIR_T_I64, resources[i]);
     }
 }
-
-void jm_transpile_statement_list_with_using(JsMirTranspiler* mt, JsAstNode* first);
 
 static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
         JsVariableDeclarationNode* using_decl) {

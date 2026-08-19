@@ -11314,8 +11314,12 @@ static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
     float viewport_width = js_dom_svg_attribute_number(elem, "width", 0.0f);
     float viewport_height = js_dom_svg_attribute_number(elem, "height", 0.0f);
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
-        // hit-testing runs for Lambda template documents without a JS realm;
-        // querying a temporary DOMRect here dereferenced that absent realm.
+        // hit-testing already has committed CSS geometry; flushing through the
+        // generic DOM path can rebuild this element before the second axis.
+        if (viewport_width <= 0.0f) viewport_width = elem->width;
+        if (viewport_height <= 0.0f) viewport_height = elem->height;
+    }
+    if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
         if (viewport_width <= 0.0f) {
             viewport_width = (float)js_dom_geometry_dimension(elem, true);
         }

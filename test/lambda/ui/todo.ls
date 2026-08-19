@@ -256,7 +256,9 @@ on delete_item(evt) {
 <body
   <div class:"container"
     <div class:"header"
-      <h1 data.title>
+      // dynamic element content needs the child separator; without it the
+      // parser treats `data` as an attribute and rejects the member access.
+      <h1; data.title>
       <p "Reactive UI — click to toggle, × to delete">
     >
     <div class:"content"
