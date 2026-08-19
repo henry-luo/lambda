@@ -1,7 +1,7 @@
 # Lambda Grammar Reduce5: External Scanners for Type, String-Pattern, and Path Sub-DSLs
 
 - **Date:** 2026-08-19
-- **Status:** **TYPE/ISLAND + RETURN/WHOLE-VIEW + PATH-BODY EXTERNAL SEAMS LANDED; CONTEXTUAL `start` RETIRED AND BASELINE-GREEN (2026-08-19).** Production uses first-party external tokens only for the bounded type/pattern/path seams. `start(target, args, options)` now parses through ordinary call grammar and is recognized as a concurrency system `pn` by the AST builder; the `_start` external and `start_expr` grammar node are gone. `make test-lambda-baseline` passes 3,813/3,813 after the call-surface migration. Differential full-grammar/span coverage and the optional base-type extraction remain outstanding.
+- **Status:** **TYPE/ISLAND + RETURN/WHOLE-VIEW + PATH-BODY EXTERNAL SEAMS LANDED; CONTEXTUAL `start` RETIRED; NAVIGATION UNIFIED INTO MEMBERS; BASELINE-GREEN (2026-08-19).** Production uses first-party external tokens only for the bounded type/pattern/path seams. `start(target, args, options)` now parses through ordinary call grammar and is recognized as a concurrency system `pn` by the AST builder; the `_start` external and `start_expr` grammar node are gone. `path_parent` / `path_root` are now `member_expr.field` alternatives rather than a parallel `nav_expr` chain. Differential full-grammar/span coverage and the optional base-type extraction remain outstanding.
 - **Design authority:** `vibe/Lambda_Type_Pattern.md` §3 — ledger CT1v2–CT10, ALL decided (that-clause at statement-level slots only; value-annotation `^` dropped; nested map/element pure patterns; parens hold simple patterns; `type_pattern` embeds zero expressions). Formal: S11.1.2 (islands), S11.2.1 (type match), S7.5.1 (raised-channel acknowledgment), S10.1.1/S10.1.3 (unions and lexical `~`), S10.4.1–S10.4.3 (parent navigation), S10.5.1–S10.5.3 (root navigation), D8.1.1v2 (grammar → typed AST pipeline), and SO9.
 - **Scope:** Lambda has three nested sub-DSLs whose interiors do not need Tree-sitter's general expression parser: **type patterns**, **string/symbol patterns**, and **paths**. Reduce5 moves their scanner-safe extents into first-party external C tokens and parses every sub-DSL interior on the Lambda side. For paths, Tree-sitter owns only the `/.` / `.` introducer so division, member access, and `.123` floats remain ordinary grammar decisions. Type patterns have three distinct entry forms: a full type pattern, a restricted view type pattern, and a restricted declaration return type.
 - **Related:** `vibe/Lambda_Grammar_Reduce4.md` (size-campaign method + metrics), `lambda/tree-sitter-lambda/src/scanner.c` (first-party external scanner), Makefile grammar pipeline (`grammar.js → parser.c → ts-enum.h` via pinned CLI + `utils/update_ts_enum.sh`).
@@ -13,7 +13,7 @@
 
 **`grammar.js` — the trimmed production grammar.** Generates the shipped `src/parser.c`. Its full annotation type-patterns, value-position string/symbol islands, whole view patterns, declaration return types, and complete dotted path bodies are external tokens. The grammar keeps the two path introducers and all ordinary statements/expressions. Qualified element/attribute names retain their structural `dotted_name` rule, but their first segment is contextual external token `dotted_name_head_token` so the parser commits before a following `.name` can be shifted as a relative path.
 
-**`grammar-common.js` — the shared core.** Both grammar files `require()` it (the tree-sitter CLI runs under Node, so module sharing works). It contains only rules both parsers actually use: ordinary tokens, expressions, statements, and shared option fragments. Each grammar then adds its replacement layer: complete structural type/view/return/path/qualified-name rules in `grammar-lambda.js`, external-token seams in `grammar.js`. Reference-only support rules such as `occurrence`, `view_pattern_union`, and `return_type_pattern` no longer appear in the production composition. `make grammar-sync-check` requires every shared-core seam in both layers and rejects any rule duplicated between the core and either layer.
+**`grammar-common.js` — the shared core.** Both grammar files `require()` it (the tree-sitter CLI runs under Node, so module sharing works). It contains only rules both parsers actually use: ordinary tokens, expressions, statements, and shared option fragments. Each grammar then adds its replacement layer: complete structural type/view/return/path/qualified-name rules in `grammar-lambda.js`, external-token seams in `grammar.js`. Reference-only support rules such as `occurrence`, `view_pattern_union`, and `return_type_pattern` no longer appear in the production composition. `member_expr` is the sole postfix-dot chain: its `field` is an ordinary key or the special `path_parent` / `path_root` navigation operation. `make grammar-sync-check` requires every shared-core seam in both layers and rejects any rule duplicated between the core and either layer; Makefile regeneration explicitly depends on both `grammar.js` and the imported `grammar-common.js`.
 
 **`scanner.c` — first-party end-finder only.** The eight active tokens are `TYPE_PATTERN`, `PRIMARY_TYPE_PATTERN`, `PATTERN_ISLAND`, `CONTENT_TYPE`, `VIEW_PATTERN`, `RETURN_TYPE`, `PATH_BODY`, and `DOTTED_NAME_HEAD`. The last token is a contextual collision shield, not another sub-DSL parser: it spans only the first identifier/symbol of an element/attribute qualified name and leaves the remaining dot/segments structural. The contextual `_start` token and `VIEW_ATOM` are removed. The scanner remains single-pass and stateless — scanner serialization stays empty.
 
@@ -58,7 +58,7 @@ Every scanner-safe sub-DSL has two deliberately separate responsibilities: `scan
 | `view_pattern` / `view_pattern_union` | `view_pattern_token` | `parse_view_pattern_text` | Existing atom/union node shapes consumed by view/edit construction |
 | `return_type` / `return_type_pattern` | `return_type_token` | `parse_return_type_text` | Existing `TypeFunc` success/error contract representation |
 | static rooted/relative path body | `path_body_token` after separate `'/'`, `'.'` rooted tokens or a relative `'.'` | `parse_path_expr_text` over the complete outer span | `AstPathNode` with static `AstPathSegment[]` |
-| provider path selected by member/navigation outer AST | ordinary identifier/member grammar | `try_parse_path_expr_text` | Same `AstPathNode`; no provider-specific grammar expansion |
+| provider path selected by a member outer AST | ordinary identifier/member grammar | `try_parse_path_expr_text` | Same `AstPathNode`; no provider-specific grammar expansion |
 
 The direct path parser represents a **complete static path**, not merely the old initial `path_expr` leaf. The scanner and direct parser map to these reference rules:
 
@@ -259,7 +259,7 @@ Acceptance: grammar generates cleanly; corpus files tokenize with expected spans
 - Re-measure the generated production parser and `libtree-sitter-lambda.a` with the same compiler flags, recording scanner object growth as well as parse-table reduction. A size regression or semantic mismatch rolls the individual seam back to the full grammar while the other landed seams remain intact.
 - Update this document, the grammar header comments, and user-facing type/path references with the actual landed boundary. Revise formal specification text only if accepted language or semantics change; cite the affected S# ruling in the change.
 
-**Measured production result (2026-08-19):** after `make generate-grammar` and the contextual-start removal, the landed external boundary is `parser.c` **6,850,715** bytes, `parser.o` **950,336** bytes, `scanner.o` **18,536** bytes, and `libtree-sitter-lambda.a` **969,416** bytes. It has 4,851 states, 804 large states, 219 symbols, 109 tokens, and eight external symbols. Removing `_start` plus `start_expr` saves 148,275 generated-C bytes, 18,432 parser-object bytes, 912 scanner-object bytes, and 19,344 archive bytes from the prior path landing; it also removes 30 states, 14 large states, two symbols, one token, and one external. The fresh close-out passes Input 2,104/2,104 plus Lambda Runtime 1,709/1,709, total **3,813/3,813**. `base_type_token` remains deferred because its experimental fixed-vocabulary scanner collided with broader statement candidates. The differential/AST-shape work listed in GR5-P5/P6 remains deliberately outstanding follow-up.
+**Measured production result (2026-08-19):** after `make generate-grammar`, contextual-start removal, and navigation/member unification, the landed external boundary is `parser.c` **6,796,457** bytes, `parser.o` **941,368** bytes, `scanner.o` **18,536** bytes, and `libtree-sitter-lambda.a` **960,448** bytes. It has 4,842 states, 784 large states, 218 symbols, 109 tokens, and eight external symbols. The navigation merge alone saves 54,258 generated-C bytes, 8,968 parser-object/archive bytes, nine states, 20 large states, and one symbol from the contextual-`start` grammar; it adds no scanner code or external token. The preceding `_start`/`start_expr` removal remains the separately recorded 148,275 generated-C-byte reduction. Focused static-path, provider-root, parent-navigation, and root-navigation fixtures pass. `base_type_token` remains deferred because its experimental fixed-vocabulary scanner collided with broader statement candidates. The differential/AST-shape work listed in GR5-P5/P6 remains deliberately outstanding follow-up.
 
 ## Second activation (2026-08-19) — landed
 
@@ -321,6 +321,37 @@ belong to the options map and the `start` semantic validator, not Tree-sitter.
 - **Scanner refinements**: `fn` joined `to` as a pattern-continuation word (`fn(a: int) int` is one token); the content/view name-decline generalized from bare words to any lone name-like atom, covering quoted field names (`'type': string`); view/edit patterns scan ONLY a bare word or one balanced `<...>` element, so a view body `{` can never be swallowed as a map pattern. The return scanner now rejects first-atom statement/control words such as `else`; it cannot consume `else {` while the GLR parser is recovering a declaration boundary. It also rejects a type connective with no RHS atom, which prevents the expression pipeline `parts |> join("")` from being tokenized as a bare alias return type; `grammar_reduce5_scanner` pins this boundary.
 - **Diagnostic parity** (predicted as R4): conceptual base-type spellings (`int64`) fail with the canonical suggestion via the promoted `record_unknown_base_type`; genuinely unknown names stay LENIENT (ANY + warning) so `?unknown` queries degrade gracefully — both behaviors are load-bearing in the negative suites; island char classes reject shadowing bindings ("pattern class 'd' is reserved…"); and the `'<' ambiguous with element syntax` hint now recognizes the trimmed grammar's wider ERROR span (`< "b"`, not a lone `<`).
 
+## Fourth activation (2026-08-19) — navigation merged into `member_expr`
+
+`nav_expr` duplicated the same left-recursive postfix chain as `member_expr`:
+both had an `object`, a dot, and a one-step suffix. The only distinction was that
+the navigation node put `path_parent` (`~~`) and `path_root` (`/`) under an
+`operation` field while ordinary member access put keys under `field`. The merge
+makes `path_parent` and `path_root` two more `member_expr.field` alternatives.
+It does not alter source syntax or semantics: S10.4.1–S10.4.3 still define
+postfix parent navigation, S10.5.1–S10.5.3 still define postfix root navigation,
+and S2.4.1v2–S2.4.5v2 still define their path forms.
+
+- The grammar now has one `member_expr` CST node. Its ordinary-field and
+  navigation-field alternatives deliberately retain their former precedence
+  tiers: collapsing them to one tier made attribute binary expressions stop at
+  `cfg` and reject the following `.field`. `primary_expr`, `ts-enum.h`,
+  `grammar.json`, and `node-types.json` no longer carry `nav_expr` or
+  `field_operation`.
+- `build_member_expr` first preserves static provider/path recognition, then
+  classifies a special field as `AstNavigationNode`; ordinary fields continue
+  through `build_field_expr`. This ordering is required for `file./` to remain
+  a static file-provider root instead of a dynamic root operation.
+- The regular regeneration target now depends on `grammar-common.js`; before
+  this correction, editing the imported shared grammar could leave generated
+  parser artifacts stale unless callers forced the target.
+- `make generate-grammar`, `make grammar-sync-check` (107 shared rules; full
+  layer 41, production layer 9), full-reference generation, and direct
+  `path_v2`, `parent_access`, and `path` fixtures pass. The retained
+  navigation precedence restores the affected chart, math, Mermaid, and
+  Graphviz parse trees; the clean close-out is Input 2,104/2,104 plus Lambda
+  Runtime 1,709/1,709, total **3,813/3,813**.
+
 ## Open issues to follow up
 
 - **IS1 — a member expression cannot be element content.** `<h1 data.title>` does not parse: the element's `content` captures the bare identifier `data` and `.title` lands in an ERROR node (`(element (identifier) (content (primary_expr (identifier))) (ERROR (identifier)))`). PRE-EXISTING and unrelated to this campaign — verified by stashing every local change and rebuilding, where it fails identically. It is the direct cause of 18 `test_ui_automation_gtest` failures (all `todo*` plus two `editable_editors_prosemirror_*`), which reach it through `test/lambda/ui/todo.ls:259`. Suspected cause: inside an element, `.` can start `path_expr` instead of continuing a `member_expr`; the full grammar still declares a `[$.dotted_name, $.path_expr]` conflict in that neighbourhood. Consequence for planning: `make test-radiant-baseline` is NOT green on master (it also carries 12 pre-existing render pixel regressions in filters/iframes/form controls), so it cannot be used as a pass/fail gate for this work — compare failure SETS instead.
@@ -350,8 +381,9 @@ belong to the options map and the `start` semantic validator, not Tree-sitter.
 | GR5 return/view production | 7,318,818 | 1,015,848 | 5,003 | 903 | 219 | 2 |
 | **GR5 path body + qualified-name shield + split rooted tokens (2026-08-19)** | **6,998,990** | **968,768** | **4,881** | **818** | **221** | **1** |
 | **GR5 contextual `start` retired (2026-08-19)** | **6,850,715** | **950,336** | **4,851** | **804** | **219** | **1** |
+| **GR5 navigation as member fields (2026-08-19)** | **6,796,457** | **941,368** | **4,842** | **784** | **218** | **1** |
 
-GR5's current deltas versus the pre-campaign baseline are **parser.c −23.1%, parser.o −27.5%, states −24.2%**. Its archive is 969,416 bytes versus the same-build fresh SC4 archive of 1,044,432 bytes (−75,016 bytes, −7.2%); the archive includes the scanner growth for type/view/return end-finders, `path_body_token`, and the qualified-name collision shield, but no contextual-start scanner. Production AST construction no longer rebuilds return/occurrence/view interiors from a Tree-sitter CST and no longer walks rooted/relative path interiors to construct `AstPathNode`.
+GR5's current deltas versus the pre-campaign baseline are **parser.c −23.7%, parser.o −28.2%, states −24.4%**. Its archive is 960,448 bytes versus the same-build fresh SC4 archive of 1,044,432 bytes (−83,984 bytes, −8.0%); the archive includes the scanner growth for type/view/return end-finders, `path_body_token`, and the qualified-name collision shield, but no contextual-start scanner. Production AST construction no longer rebuilds return/occurrence/view interiors from a Tree-sitter CST and no longer walks rooted/relative path interiors to construct `AstPathNode`.
 
 SC1 is the `that`-hoist plus the `value_error_type` deletion: **−8.3% source, −7.5% object, −9.1% states**, and four of the six declared GLR conflicts became unnecessary once the type layer stopped reaching into the expression grammar (removed; they measured identically either way). SC2 is a verified no-op — identical numbers across all five counters, which is the strongest available evidence that factoring the grammar into `grammar-common.js` + a type layer changed no language. SC3 measured on the parked grammar: **−17.4% source, −21.5% object, −21.4% states against baseline.**
 

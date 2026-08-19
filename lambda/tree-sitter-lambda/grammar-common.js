@@ -180,7 +180,6 @@ module.exports = {
       $.call_expr,
       $.index_expr,
       'member',
-      $.nav_expr,
       $.primary_expr,
       $.unary_expr,
       // statement end: linebreak terminates statement before binary operators can continue
@@ -465,7 +464,6 @@ module.exports = {
       $.index_expr,
       $.path_expr,   // / or . paths with optional segment
       $.member_expr,
-      $.nav_expr,     // expr.~~ / expr./ navigation
       $.handler_expr,
       $.propagate_expr,
       $.call_expr,
@@ -533,22 +531,22 @@ module.exports = {
     path_root: _ => token(prec(3, '/')),
 
     // Member access is the value form of dot syntax; dotted_name is reserved
-    // for qualified element and attribute names.
-    // member access must bind before a call so qualified calls stay intact
+    // for qualified element and attribute names. Keep the normal-field and
+    // navigation-field precedence alternatives in this one CST node: the
+    // latter preserves the old postfix parse state for attributes such as
+    // `x: cfg.offset` without retaining a separate nav_expr node.
+    // Member access must bind before a call so qualified calls stay intact
     // when their argument list is parsed inside a procedural block.
-    member_expr: $ => prec.left(110, seq(
-      field('object', choice($.primary_expr, $.member_expr, $.nav_expr)), '.',
-      field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
-    )),
-
-    // Root/parent access after an expression. Keep the operation as a named
-    // child so the AST can distinguish it from an ordinary member named
-    // `parent`.
-    nav_expr: $ => prec.left('member', seq(
-      field('object', choice($.primary_expr, $.member_expr, $.nav_expr)),
-      '.',
-      field('operation', choice($.path_parent, $.path_root))
-    )),
+    member_expr: $ => choice(
+      prec.left(110, seq(
+        field('object', choice($.primary_expr, $.member_expr)), '.',
+        field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
+      )),
+      prec.left('member', seq(
+        field('object', choice($.primary_expr, $.member_expr)), '.',
+        field('field', choice($.path_parent, $.path_root))
+      ))
+    ),
 
     // Bare `~~` is the contextual parent atom and lowers to `~.~~`.
     current_parent_expr: _ => token(prec(4, '~~')),

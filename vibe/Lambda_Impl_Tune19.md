@@ -15,6 +15,12 @@
 | MIR (typed)/Node geo | 1.26x | 1.06x | — | **0.85x** |
 | MIR (typed)/C2MIR geo (47 rows) | 6.70x | 5.70x | — | **4.39x** |
 
+⚠ Those C2MIR figures are on the **47-row** basis that was all that existed at the time. After
+the §7.6 back-patch every session is measurable over all 59 rows, and the level is ~25% worse
+throughout (Result26 8.29x, Result30 6.79x, Result32 **5.46x**). Use the §7.6 table for any
+cross-round comparison; the 47-row numbers here are kept only as the record of what was quoted
+at v32.
+
 Paired v31→v32 on the same 59 rows: untyped geomean **0.951**, typed geomean **0.839**. Tune18's E-slices are real and they landed where the doc said they landed (base64 typed 46.0→17.9, fast_diff typed 412→160, quicksort typed 4.78→1.10, ray typed 0.83→0.33, sumfp 0.318→0.071 on both lanes). Nine typed rows regressed ≥10% in the same window (ack +21%, brainfuck +15%, tak +15%, triangl +14%, cpstak +13%, fib +12%, fft +11%, bounce +10%, crypto_sha1 +10%, hashmap +10%) — the E5/E6 range-fact and root-frame work bought the array/string rows and charged the scalar-recursion rows.
 
 The typed/C2MIR distribution is now bimodal, not a smear:
@@ -517,6 +523,25 @@ mechanism as a first-class gap, not just an absolute-time concern. On this basis
 ladder becomes: baseline 5.34x/0.83x → tax kill 5.00x/0.78x → +store edge 4.77x/0.74x →
 +records(§7.3 targets) 4.61x/0.72x → +strings@3x 3.57x/0.55x; driving every macro row to 3x
 of its C cell reaches **2.91x/0.45x**.
+
+**Back-patched across every prior session (2026-08-19).** The same 12 rows were missing in
+Result18/21/22/23/25–32. Because C2MIR measures native C ports through `lambda/mir/c2m` and
+does not depend on the Lambda binary — and its cells are stable to a few percent across all
+13 sessions (hashmap 2.73–3.65, ack 11.68–12.44, gcbench 69.9–75.5 ms) — the one 2026-08-19
+median set legitimately fills the gap in each, and every patched file records that provenance
+in `_metadata.merged_engines`. The full-coverage trend is therefore now apples-to-apples:
+
+| | R18 | R21 | R22 | R23 | R25 | R26 | R27 | R28 | R29 | R30 | R31 | R32 | **R33** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| typed/C2MIR (all rows) | 10.78x | 16.22x | 13.01x | 11.19x | 8.73x | 8.29x | 8.26x | 6.87x | 7.13x | 6.79x | 6.66x | 5.46x | **5.34x** |
+| typed/Node | 2.10x | 2.85x | 2.27x | 1.91x | 1.32x | 1.26x | 1.26x | 1.07x | 0.99x | 1.06x | 1.04x | 0.85x | **0.83x** |
+
+The shape of the trend is unchanged — steady improvement, with the Tune17/18 rounds (R28→R32)
+doing the heavy lifting — but every level is ~25% worse than the 47-row basis reported at the
+time. Reports whose C2MIR column was never present (Result19/20/24) were left alone: those
+sessions recorded no C2MIR at all, and filling them would fabricate a session rather than
+complete one. `Overall_Result.md` (2026-02-21) is also out of scope — its "C2MIR" is the
+retired `lambda --c2mir` transpiler measured by whole-process wall clock, a different quantity.
 
 Caveat recorded in `C2MIR_COVERAGE.md`: `crypto_sha1.ls` currently computes a WRONG digest
 on the Lambda engine (all-ones saturation; the `.ls`-asserted digest was independently

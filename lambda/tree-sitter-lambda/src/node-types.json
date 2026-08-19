@@ -2382,6 +2382,14 @@
             "named": true
           },
           {
+            "type": "path_parent",
+            "named": true
+          },
+          {
+            "type": "path_root",
+            "named": true
+          },
+          {
             "type": "path_wildcard",
             "named": true
           },
@@ -2397,10 +2405,6 @@
         "types": [
           {
             "type": "member_expr",
-            "named": true
-          },
-          {
-            "type": "nav_expr",
             "named": true
           },
           {
@@ -2463,44 +2467,6 @@
           },
           {
             "type": "unary_expr",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "nav_expr",
-    "named": true,
-    "fields": {
-      "object": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "member_expr",
-            "named": true
-          },
-          {
-            "type": "nav_expr",
-            "named": true
-          },
-          {
-            "type": "primary_expr",
-            "named": true
-          }
-        ]
-      },
-      "operation": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "path_parent",
-            "named": true
-          },
-          {
-            "type": "path_root",
             "named": true
           }
         ]
@@ -2862,10 +2828,6 @@
         },
         {
           "type": "named_value",
-          "named": true
-        },
-        {
-          "type": "nav_expr",
           "named": true
         },
         {

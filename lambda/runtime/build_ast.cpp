@@ -2457,6 +2457,17 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
 
         // first recurse to check if the object is a path
         int scheme = collect_path_segments_if_path(tp, object_node, segments);
+        if (scheme < 0) {
+            // `file./` remains an absolute provider path even though `/` is
+            // now a member field rather than a separate navigation CST node.
+            StrView object_source = ts_node_source(tp, object_node);
+            if (ts_node_symbol(object_node) == SYM_IDENT &&
+                    object_source.length == 4 &&
+                    strncmp(object_source.str, "file", 4) == 0 &&
+                    ts_node_symbol(field_node) == SYM_PATH_ROOT) {
+                scheme = PATH_SCHEME_FILE;
+            }
+        }
         if (scheme >= 0) {
             StrView source = ts_node_source(tp, node);
             if (source.length >= 2 && source.str[0] == '.' && source.str[1] == '.') {
@@ -2469,25 +2480,6 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
             return scheme;
         }
         return -1;  // not a path
-    }
-    else if (symbol == SYM_NAV_EXPR) {
-        TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
-        TSNode op_node = ts_node_child_by_field_id(node, FIELD_OPERATION);
-        int scheme = collect_path_segments_if_path(tp, object_node, segments);
-        if (scheme < 0) {
-            StrView object_source = ts_node_source(tp, object_node);
-            if (ts_node_symbol(object_node) == SYM_IDENT &&
-                    object_source.length == 4 &&
-                    strncmp(object_source.str, "file", 4) == 0 &&
-                    ts_node_symbol(op_node) == SYM_PATH_ROOT) {
-                scheme = PATH_SCHEME_FILE;
-            }
-        }
-        if (scheme >= 0) {
-            append_path_segment(tp, op_node, segments);
-            return scheme;
-        }
-        return -1;
     }
     else if (symbol == SYM_PRIMARY_EXPR) {
         // unwrap primary_expr
@@ -2842,6 +2834,8 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     return (AstNode*)ast_node;
 }
 
+static AstNode* build_navigation_expr(Transpiler* tp, TSNode node);
+
 // Left-recursive member chains place member_expr directly in object; both CST
 // entry paths must preserve the same path-versus-field interpretation.
 static AstNode* build_member_expr(Transpiler* tp, TSNode member_node) {
@@ -2856,9 +2850,18 @@ static AstNode* build_member_expr(Transpiler* tp, TSNode member_node) {
 
     ArrayList* segments = arraylist_new(8);
     int scheme = collect_path_segments_if_path(tp, member_node, segments);
-    AstNode* result = scheme >= 0 ?
-        build_path_expr(tp, member_node, (PathScheme)scheme, segments) :
-        build_field_expr(tp, member_node, AST_NODE_MEMBER_EXPR);
+    TSNode field_node = ts_node_child_by_field_id(member_node, FIELD_FIELD);
+    TSSymbol field_symbol = ts_node_symbol(field_node);
+    AstNode* result = NULL;
+    if (scheme >= 0) {
+        result = build_path_expr(tp, member_node, (PathScheme)scheme, segments);
+    }
+    else if (field_symbol == SYM_PATH_PARENT || field_symbol == SYM_PATH_ROOT) {
+        result = build_navigation_expr(tp, member_node);
+    }
+    else {
+        result = build_field_expr(tp, member_node, AST_NODE_MEMBER_EXPR);
+    }
     arraylist_free(segments);
     return result;
 }
@@ -4777,33 +4780,13 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
 
 static AstNode* build_navigation_expr(Transpiler* tp, TSNode node) {
     TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
-    TSNode operation_node = ts_node_child_by_field_id(node, FIELD_OPERATION);
+    TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
     AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
         AST_NODE_NAVIGATION_EXPR, node, sizeof(AstNavigationNode));
     nav->object = build_expr(tp, object_node);
-    nav->root = ts_node_symbol(operation_node) == SYM_PATH_ROOT;
+    nav->root = ts_node_symbol(field_node) == SYM_PATH_ROOT;
     nav->type = nav->object ? nav->object->type : &TYPE_ANY;
     return (AstNode*)nav;
-}
-
-// Provider roots such as file./ are complete static paths even without a
-// following key; ordinary value./ remains dynamic navigation.
-static AstNode* build_navigation_or_path_expr(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
-    AstNode* direct_path = try_parse_path_expr_text(tp, source.str,
-        source.str + source.length, node);
-    if (direct_path) {
-        // `file./` is a complete provider path although its CST is nav_expr.
-        return direct_path;
-    }
-
-    ArrayList* segments = arraylist_new(8);
-    int scheme = collect_path_segments_if_path(tp, node, segments);
-    AstNode* result = scheme >= 0
-        ? build_path_expr(tp, node, (PathScheme)scheme, segments)
-        : build_navigation_expr(tp, node);
-    arraylist_free(segments);
-    return result;
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
@@ -4967,10 +4950,6 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }
     else if (symbol == SYM_MEMBER_EXPR) {
         ast_node->expr = build_member_expr(tp, child);
-        ast_node->type = ast_node->expr->type;
-    }
-    else if (symbol == SYM_NAV_EXPR) {
-        ast_node->expr = build_navigation_or_path_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_CURRENT_PARENT_EXPR) {
@@ -11073,8 +11052,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_expr(tp, expr_node);
     case SYM_MEMBER_EXPR:
         return build_member_expr(tp, expr_node);
-    case SYM_NAV_EXPR:
-        return build_navigation_or_path_expr(tp, expr_node);
     case SYM_CURRENT_PARENT_EXPR: {
         AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
             AST_NODE_NAVIGATION_EXPR, expr_node, sizeof(AstNavigationNode));

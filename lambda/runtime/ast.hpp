@@ -55,7 +55,6 @@ extern "C" {
 #define SYM_PATH_PARENT sym_path_parent
 #define SYM_PATH_ROOT sym_path_root
 #define SYM_PATH_EXPR sym_path_expr
-#define SYM_NAV_EXPR sym_nav_expr
 #define SYM_CURRENT_PARENT_EXPR sym_current_parent_expr
 
 // Pipe expression current item references (pipe is now part of binary_expr)
@@ -154,7 +153,6 @@ extern "C" {
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
 #define FIELD_OPERATOR field_operator
-#define FIELD_OPERATION field_operation
 #define FIELD_OPERAND field_operand
 #define FIELD_ALIAS field_alias
 #define FIELD_MODULE field_module
