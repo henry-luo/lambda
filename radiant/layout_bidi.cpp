@@ -60,20 +60,13 @@ typedef struct BidiLineCounts {
 static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
 #if RDT_HAS_FRIBIDI
     FriBidiCharType type = fribidi_get_bidi_type((FriBidiChar)codepoint);
-    return type == FRIBIDI_TYPE_RTL || type == FRIBIDI_TYPE_AL ||
-           type == FRIBIDI_TYPE_LRE || type == FRIBIDI_TYPE_RLE ||
-           type == FRIBIDI_TYPE_LRO || type == FRIBIDI_TYPE_RLO ||
-           type == FRIBIDI_TYPE_PDF || type == FRIBIDI_TYPE_LRI ||
-           type == FRIBIDI_TYPE_RLI || type == FRIBIDI_TYPE_FSI ||
-           type == FRIBIDI_TYPE_PDI;
+    // format controls have no visual fragments; a controls-only LTR line must
+    // retain its logical TextRect order instead of swapping zero-width ranges.
+    return !text_codepoint_has_zero_advance(codepoint) &&
+           (type == FRIBIDI_TYPE_RTL || type == FRIBIDI_TYPE_AL);
 #else
-    // explicit embedding controls still need visual reordering when the
-    // optional FriBidi dependency is unavailable in the native build.
-    return codepoint == 0x202A || codepoint == 0x202B ||
-           codepoint == 0x202C || codepoint == 0x202D ||
-           codepoint == 0x202E || codepoint == 0x2066 ||
-           codepoint == 0x2067 || codepoint == 0x2068 ||
-           codepoint == 0x2069 || utf_bidi_strong_class(codepoint) == 1;
+    return !text_codepoint_has_zero_advance(codepoint) &&
+           utf_bidi_strong_class(codepoint) == 1;
 #endif
 }
 
@@ -408,8 +401,9 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         max_x[i] = -FLT_MAX;
     }
     for (int i = 0; i < char_count; i++) {
-        if (chars[i].width <= 0.0f &&
-            !text_codepoint_has_zero_advance(chars[i].codepoint)) continue;
+        // format controls participate in UAX #9 ordering but do not contribute
+        // visual bounds.
+        if (chars[i].width <= 0.0f) continue;
         int slot = -1;
         for (int rect_index = 0; rect_index < rect_count; rect_index++) {
             if (rects[rect_index].rect == chars[i].rect) {
