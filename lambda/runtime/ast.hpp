@@ -55,7 +55,6 @@ extern "C" {
 #define SYM_PATH_PARENT sym_path_parent
 #define SYM_PATH_ROOT sym_path_root
 #define SYM_PATH_EXPR sym_path_expr
-#define SYM_NAV_EXPR sym_nav_expr
 #define SYM_CURRENT_PARENT_EXPR sym_current_parent_expr
 
 // Pipe expression current item references (pipe is now part of binary_expr)
@@ -93,8 +92,6 @@ extern "C" {
 #define SYM_FN_TYPE sym_fn_type
 #define SYM_RANGE_TYPE sym_range_type
 #define SYM_RETURN_TYPE sym_return_type
-#define SYM_RETURN_TYPE_PATTERN sym_return_type_pattern
-#define SYM_RETURN_OCCURRENCE_TYPE sym_return_occurrence_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_CONSTRAINED_TYPE sym_constrained_type
@@ -127,7 +124,6 @@ extern "C" {
 
 #define SYM_COMMENT sym_comment
 #define SYM_NAMED_ARGUMENT sym_named_argument
-#define SYM_START_EXPR sym_start_expr
 
 // View/Edit template symbols
 #define SYM_VIEW_STAM sym_view_stam
@@ -157,7 +153,6 @@ extern "C" {
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
 #define FIELD_OPERATOR field_operator
-#define FIELD_OPERATION field_operation
 #define FIELD_OPERAND field_operand
 #define FIELD_ALIAS field_alias
 #define FIELD_MODULE field_module
@@ -240,7 +235,6 @@ typedef struct AstPathSegment {
 
 typedef struct AstPathNode : AstNode {
     PathScheme scheme;           // logical, file, http, https, sys, or relative
-    bool file_local;              // `file./` rather than `file.hostname`
     String* authority;            // named file authority, if present
     int segment_count;           // number of path segments
     AstPathSegment* segments;    // array of segment info (allocated in pool)

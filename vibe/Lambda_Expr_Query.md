@@ -548,25 +548,35 @@ optional(field('propagate', '^')),
 #### New query rule
 
 ```javascript
-// query_expr at same precedence level as member_expr (inside primary_expr):
-query_expr: $ => seq(
+// S7.6.3v2: query is left-associative postfix access beside member access.
+precedences: $ => [[
+    $.call_expr,
+    $.index_expr,
+    'query_expr',
+    'member',
+    $.primary_expr,
+    // ... lower tiers ...
+], [
+    // `() => x?T` is `() => (x?T)`, not `(() => x)?T`.
+    'query_expr', $._expr,
+]],
+
+query_expr: $ => prec.left('query_expr', seq(
     field('object', $.primary_expr),
-    '?',
-    field('query', $.primary_type),
-),
+    field('op', choice('?', '.?')),
+    field('query', $._primary_type),
+)),
 
 // Add to primary_expr choices (alongside member_expr, index_expr):
 $.query_expr,
-
-// Direct-level query variant: .?
-direct_query_expr: $ => seq(
-    field('object', $.primary_expr),
-    '.?',
-    field('query', $.primary_type),
-),
 ```
 
-Note: `query_expr` takes `primary_type` on the right, **not** `_type_expr`. This means `that` constraints are not allowed inline — they must be wrapped in parentheses or declared as a named type (see Section 10.5).
+The two query forms share one CST node; the AST builder derives `direct` from
+the `op` field. The explicit named precedence replaces the former
+`[$._expr, $.query_expr]` GLR conflict and makes the arrow-body boundary
+deterministic. `query_expr` takes a primary type on the right, **not** a full
+type expression. This means `that` constraints are not allowed inline — they
+must be wrapped in parentheses or declared as a named type (see Section 10.5).
 
 ### 9.3 AST Node
 
@@ -796,4 +806,3 @@ Lambda's current model is clean: `?` finds (returns a list), `|` transforms. Two
 ### Decision
 
 **Deferred.** The explicit pipe syntax `html?<div> | ~.class` is concise enough and avoids all ambiguity. If user demand or real-world usage patterns strongly favor the auto-map form, it can be revisited — potentially with a distinct operator or syntax to avoid the concerns above.
-

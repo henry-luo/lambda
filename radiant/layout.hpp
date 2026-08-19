@@ -17,6 +17,14 @@
 #include <math.h>
 
 typedef struct LayoutContext LayoutContext;
+
+// HTML noscript text remains script-visible, but with scripting enabled the
+// element represents nothing and therefore must not create a CSS text box.
+inline bool layout_noscript_content_suppressed(const DomElement* element) {
+    return element && element->tag_id == MARKUP_NAME_NOSCRIPT && element->doc &&
+        element->doc->html_scripting_enabled;
+}
+
 // CSS Inline 3 §7.3 initial-letter value after resolving the size and sink.
 // `raised` also covers the equivalent explicit sink of one line.
 struct InitialLetterInfo {
@@ -1041,24 +1049,38 @@ typedef struct CounterValue {
 typedef struct CounterScope {
     HashMap* counters;
     CounterScope* parent;
+    int owner_depth;
+    bool pseudo_scope;
+    bool reset_replaces_sibling;
+    bool pseudo_reset_for_descendants;
 } CounterScope;
+// tier-3: layout-transient, valid within pass
+typedef struct CounterFrame {
+    CounterScope* entry_scope;
+    CounterScope* element_scope;
+} CounterFrame;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterContext {
     Arena* arena;
     CounterScope* current_scope;
+    // owns every scope allocated during this layout pass
     lam::ArrayList<CounterScope*>* scope_stack;
+    // tracks element/pseudo boundaries separately from the active counter chain
+    lam::ArrayList<CounterFrame>* frame_stack;
 
     bool init(Arena* backing_arena);
     void destroy();
-    void push_scope();
+    void push_scope(bool pseudo_scope = false);
     void pop_scope();
-    void pop_scope_propagate(bool propagate_resets = false);
+    void pop_scope_propagate(bool propagate_resets = false,
+                             bool preserve_reset_scope = false);
 } CounterContext;
 
 CounterContext* counter_context_create(Arena* arena);
 void counter_context_destroy(CounterContext* ctx);
-void counter_push_scope(CounterContext* ctx);
-void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false);
+void counter_push_scope(CounterContext* ctx, bool pseudo_scope = false);
+void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false,
+                                 bool preserve_reset_scope = false);
 void counter_reset(CounterContext* ctx, const char* counter_spec);
 void counter_increment(CounterContext* ctx, const char* counter_spec);
 void counter_set(CounterContext* ctx, const char* counter_spec);
@@ -1470,6 +1492,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
 void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem);
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display);
+bool layout_marker_is_outside(View* view);
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
@@ -3331,6 +3354,8 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker = false,
                                        bool create_first_letter = false);
+void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
+                                                DomElement* pseudo_element);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
                                 int iframe_width, int iframe_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
@@ -3521,15 +3546,29 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon);
+void line_consume_trailing_collapsible_space(LayoutContext* lycon,
+                                             bool trim_text_bounds,
+                                             bool update_ancestor_bounds);
 void line_align(LayoutContext* lycon);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
+int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
+CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
+// CSS Shadow DOM: return the tree that supplies a host's rendered children;
+// light-DOM children remain the DOM/API tree and are projected at <slot>.
+DomNode* layout_render_child_list(DomElement* element);
+DomNode* layout_rendered_first_child_node(DomElement* element);
+// CSS Shadow DOM: expose the host as the formatting parent of a direct
+// shadow-tree child while preserving the fragment's DOM parentage.
+DomElement* layout_shadow_formatting_parent(DomNode* node);
+bool layout_is_shadow_slot(DomNode* node);
+void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot);
 DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
@@ -3931,6 +3970,7 @@ void view_vertical_align(LayoutContext* lycon, View* view);
 // this same projection; keeping it here prevents each layout phase from
 // maintaining a subtly different recursive walker.
 void layout_shift_view_tree(View* view, float offset_x, float offset_y);
+void layout_shift_view_tree_geometry(View* view, float offset_x, float offset_y);
 void layout_shift_view_children(View* view, float offset_x, float offset_y);
 // Shift inline descendants while preserving block-child local coordinates.
 // Relative and sticky inline positioning use this narrower projection.
@@ -4036,6 +4076,8 @@ void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
+                                                bool include_inline_table = false);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);
 // CSS text-transform

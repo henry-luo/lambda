@@ -235,8 +235,10 @@ pn main() {
 #### Concurrency
 
 `pn` concurrency is colorless: suspending callees do not add syntax to their
-callers. `start` launches a scoped child and returns a task handle; the remaining
-operations are builtins.
+callers. Under S13.1.1v2, the builtin
+`start(target, args = [], options = {})` launches a scoped child and returns a
+task handle; `args` is an array and `options.mode` is `'task'`, `'thread'`, or
+`'process'` (only task mode is implemented currently).
 
 ```lambda
 pn worker() {
@@ -245,7 +247,7 @@ pn worker() {
 }
 
 pn main() {
-    let handle = start worker()
+    let handle = start(worker)
     send(handle, "job")^
     print(wait(handle)^)
 }

@@ -126,21 +126,21 @@ Standard rung inventory for v1 (each a PL6 transducer):
 
 ## 6. Layer 0: raw-byte process spawn (PL8) — the real CLI-pipeline enabler
 
-Today `start worker("child.ls", args, isolation: 'process')` — spelled `start process("child.ls", args)` in its sugar form (K31) — speaks **Mark over the pipe** (K5/K29c) — Lambda-child⇄Lambda-parent messaging. A CLI-kind pipeline means piping through `grep`, `sort`, `ffmpeg` — arbitrary external commands that speak bytes.
+Under S13.1.1v2/K31v2, `start(child_main, args, {mode: 'process'})` speaks **Mark over the pipe** (K5/K29c) — Lambda-child⇄Lambda-parent messaging. A CLI-kind pipeline means piping through `grep`, `sort`, `ffmpeg` — arbitrary external commands that speak bytes.
 
-**PL8 — A second spawn mode: the raw-byte process.** Same `start` keyword, same handle model, different pipe discipline:
+**PL8 — A second process discipline: the raw-byte process.** Same `start(...)` system procedure and handle model, different pipe discipline:
 
 - the child's stdin is a **binary sink** and its stdout/stderr are **binary sources** (live-I/O streams in the PD10 taxonomy, `pn`-only, one-shot);
 - no Mark encoding, no message framing — the runtime moves bytes;
 - the handle completes with the exit status as `T^E` (nonzero exit / signal death = error value — `pipefail` on by default, inverting the Unix mistake called out in §11.6.1), **after** stdout/stderr streams complete (the K20e signal-ordering guarantee, transliterated);
 - **EPIPE/SIGPIPE maps onto K26**: downstream closing its end cancels the upstream writer through the ordinary pipeline-scope cancellation — the doc already calls K26 "SIGPIPE's structured descendant," so the plumbing is designed; only the spawn surface is new;
-- surface spelling open (O-PL2): a distinct builtin (`start exec("ffmpeg", [...])`) vs an option on `process(...)`. Distinct builtin currently preferred — the two modes have different contracts (message mailbox vs three byte streams) and K20's "one noun per concept" argues against overloading.
+- surface spelling open (O-PL2): launch the `exec` system `pn` through `start(exec, [command, args], {mode: 'process'})`, with a byte-pipe option, versus a separate handle-returning `exec(...)`. The two modes have different contracts (message mailbox vs three byte streams), so K20's "one noun per concept" still argues against hiding the distinction.
 
 Illustrative composition (all three kinds in one pipeline):
 
 ```lambda
 pn main() {
-    let x = start exec("ffmpeg", ["-i", "in.mp4", "-f", "wav", "-"])   // raw-byte child (PL8)
+    let x = start(exec, ["ffmpeg", ["-i", "in.mp4", "-f", "wav", "-"]], {mode: 'process'})
     stream("in.mp4") |> send_to(x.stdin)                               // binary pipeline in
     stream(x.stdout)                                                   // binary pipeline out
     |> frames(prefix: 'u32le')                                         // → binary records (PL6)
@@ -203,7 +203,7 @@ Sequencing guard (K17/K27 verbatim): build the byte-mode core under the Lambda e
 ## 11. Open items
 
 - **O-PL1** — text-source surface: framing option on `stream()` (`stream(path, 'lines')`) vs stage-only (`|> lines()`) vs both.
-- **O-PL2** — raw-byte spawn spelling: `start exec(...)` builtin (preferred) vs option on `process(...)`; stderr default (stream vs inherit); env/cwd option surface.
+- **O-PL2** — raw-byte spawn spelling: `start(exec, [...], {mode: 'process', ...})` versus a separate handle-returning `exec(...)`; stderr default (stream vs inherit); env/cwd option surface.
 - **O-PL3** — live-I/O `tee()`: needed for the WHATWG face; a small Layer-1 fan-out buffer with joint backpressure (slowest-reader bound) — design when the Web-Streams face lands.
 - **O-PL4** — stateless byte-map fusion: whether provably-stateless transducers can lose their K23 anchor status. Deferred; v1 rule stays simple.
 - **O-PL5** — `binary` literal/API ergonomics after PL5 (slicing surface on binary *values*, `len`/indexing/iteration semantics) — belongs with the PL5 representation work. **Includes the latent literal-decode defect (§4): `b'\x…'`/`b'\64…'` must decode hex/base64 to bytes at const-build time; today the raw source text is stored, inconsistent with file-read binaries which hold real bytes. Implementation plan: `Lambda_Impl_Binary.md` (B1–B8, Phases 1–6 — decode fix + copy-bridge to JS Uint8Array/Buffer; zero-copy convergence stays PL5-gated).**

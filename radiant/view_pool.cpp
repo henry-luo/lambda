@@ -26,6 +26,15 @@ static const char* flex_enum_name(CssEnum value, const char* fallback) {
     return info && info->name ? (const char*)info->name : fallback;
 }
 
+static const char* inline_list_item_display_name(DisplayValue display) {
+    if (!display.list_item || display.outer != CSS_VALUE_INLINE ||
+        (display.inner != CSS_VALUE_FLOW && display.inner != CSS_VALUE_FLOW_ROOT)) {
+        return nullptr;
+    }
+    return display.inner == CSS_VALUE_FLOW_ROOT
+        ? "inline flow-root list-item" : "inline list-item";
+}
+
 // Helper function to get view type name for JSON
 const char* View::view_name() {
     switch (this->view_type) {
@@ -1373,6 +1382,11 @@ static float text_rect_client_height(ViewText* text, TextRect* rect) {
     if (!rect) return 0.0f;
     float height = rect->height;
     ViewBlock* block = text ? layout_nearest_block_ancestor(text->parent_view()) : nullptr;
+    if (block && layout_block_inline_axis_is_vertical(block)) {
+        // CSS Writing Modes maps the text advance into the physical height;
+        // do not replace that mapped glyph extent with horizontal line-height.
+        return height;
+    }
     const CssValue* line_height = block && block->blk
         ? block->block()->line_height : nullptr;
     bool normal_line_height = !line_height ||
@@ -1423,7 +1437,8 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         // HTML5 §4.5.27: <wbr> is a line break opportunity with no visual box → (0,0,0,0)
         bool is_unrendered_option = (elem->tag() == MARKUP_NAME_OPTION || elem->tag() == MARKUP_NAME_OPTGROUP)
                                     && elem->width == 0 && elem->height == 0;
-        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
+        if (layout_noscript_content_suppressed(elem) ||
+            elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
             || elem->tag() == MARKUP_NAME_WBR) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
@@ -2293,7 +2308,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
             (parent_elem->display.inner == CSS_VALUE_FLEX ||
              parent_elem->display.inner == CSS_VALUE_GRID);
     }
-    if (block->display.inner == CSS_VALUE_GRID) {
+    const char* inline_list_item_display = inline_list_item_display_name(block->display);
+    if (inline_list_item_display) {
+        // CSS Display 3: serialize the computed multi-keyword list-item value;
+        // its used atomic view role must not replace the CSSOM display value.
+        display = inline_list_item_display;
+    } else if (block->display.inner == CSS_VALUE_GRID) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
         display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-grid" : "grid";
@@ -2840,7 +2860,8 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->display.outer == CSS_VALUE_CONTENTS) {
         strbuf_append_str(buf, "\"display\": \"contents\"");
     } else {
-        strbuf_append_str(buf, "\"display\": \"inline\"");
+        const char* display = inline_list_item_display_name(span->display);
+        strbuf_append_format(buf, "\"display\": \"%s\"", display ? display : "inline");
     }
 
     // Add inline properties if available

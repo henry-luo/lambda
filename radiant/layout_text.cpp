@@ -1741,6 +1741,63 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
     }
 }
 
+static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
+                                                       TextRect* text_rect);
+
+void line_consume_trailing_collapsible_space(LayoutContext* lycon,
+                                             bool trim_text_bounds,
+                                             bool update_ancestor_bounds) {
+    if (!lycon) return;
+    // CSS 2.1 §16.6.1: collapsible trailing spaces do not occupy inline
+    // space before the next inline item, even when no line break is forced.
+    if (lycon->line.trailing_space_width > 0 && lycon->line.last_text_rect) {
+        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
+            lycon->line.last_text_view, lycon->line.last_text_rect);
+        float trim_amount = preserve_vertical_gap ? 0.0f :
+            lycon->line.trailing_space_width;
+        if (trim_text_bounds) {
+            lycon->line.last_text_rect->width -= trim_amount;
+        }
+        lycon->line.advance_x -= trim_amount;
+        lycon->line.trailing_space_width = 0;
+        if (trim_text_bounds && !preserve_vertical_gap &&
+            lycon->line.last_text_rect->width <= 0.01f && lycon->line.last_text_view) {
+            record_collapsed_line_fragment_for_inline_ancestors(
+                lycon, lycon->line.last_text_view, lycon->line.last_text_rect);
+        }
+        if (update_ancestor_bounds && lycon->line.last_text_view) {
+            propagate_text_trim(lycon->line.last_text_view, trim_amount);
+        }
+        lycon->line.committed_trailing_rect = nullptr;
+        lycon->line.committed_trailing_view = nullptr;
+        lycon->line.committed_trailing_space = 0;
+    } else if (lycon->line.committed_trailing_space > 0 &&
+               lycon->line.committed_trailing_rect) {
+        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
+            lycon->line.committed_trailing_view,
+            lycon->line.committed_trailing_rect);
+        float trim_amount = preserve_vertical_gap ? 0.0f :
+            lycon->line.committed_trailing_space;
+        if (trim_text_bounds) {
+            lycon->line.committed_trailing_rect->width -= trim_amount;
+        }
+        lycon->line.advance_x -= trim_amount;
+        if (trim_text_bounds && !preserve_vertical_gap &&
+            lycon->line.committed_trailing_rect->width <= 0.01f &&
+            lycon->line.committed_trailing_view) {
+            record_collapsed_line_fragment_for_inline_ancestors(
+                lycon, lycon->line.committed_trailing_view,
+                lycon->line.committed_trailing_rect);
+        }
+        if (update_ancestor_bounds && lycon->line.committed_trailing_view) {
+            propagate_text_trim(lycon->line.committed_trailing_view, trim_amount);
+        }
+        lycon->line.committed_trailing_rect = nullptr;
+        lycon->line.committed_trailing_view = nullptr;
+        lycon->line.committed_trailing_space = 0;
+    }
+}
+
 /**
  * Recursively fix height of collapsed inline spans on a line with visible content.
  * Empty inline elements contribute their line-height strut to line layout, but
@@ -1856,50 +1913,7 @@ static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
 }
 
 void line_break(LayoutContext* lycon) {
-    // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
-    if (lycon->line.trailing_space_width > 0 && lycon->line.last_text_rect) {
-        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
-            lycon->line.last_text_view, lycon->line.last_text_rect);
-        float trim_amount = preserve_vertical_gap ? 0.0f :
-            lycon->line.trailing_space_width;
-        lycon->line.last_text_rect->width -= trim_amount;
-        lycon->line.advance_x -= trim_amount;
-        lycon->line.trailing_space_width = 0;
-        if (!preserve_vertical_gap &&
-            lycon->line.last_text_rect->width <= 0.01f && lycon->line.last_text_view) {
-            record_collapsed_line_fragment_for_inline_ancestors(
-                lycon, lycon->line.last_text_view, lycon->line.last_text_rect);
-        }
-        if (lycon->line.last_text_view) {
-            propagate_text_trim(lycon->line.last_text_view, trim_amount);
-        }
-        lycon->line.committed_trailing_rect = NULL;
-        lycon->line.committed_trailing_view = NULL;
-        lycon->line.committed_trailing_space = 0;
-    }
-    // CSS 2.1 §16.6.1: Cross-node trailing space trimming. When a text rect
-    else if (lycon->line.committed_trailing_space > 0 && lycon->line.committed_trailing_rect) {
-        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
-            lycon->line.committed_trailing_view,
-            lycon->line.committed_trailing_rect);
-        float trim_amount = preserve_vertical_gap ? 0.0f :
-            lycon->line.committed_trailing_space;
-        lycon->line.committed_trailing_rect->width -= trim_amount;
-        lycon->line.advance_x -= trim_amount;
-        if (!preserve_vertical_gap &&
-            lycon->line.committed_trailing_rect->width <= 0.01f &&
-            lycon->line.committed_trailing_view) {
-            record_collapsed_line_fragment_for_inline_ancestors(
-                lycon, lycon->line.committed_trailing_view,
-                lycon->line.committed_trailing_rect);
-        }
-        if (lycon->line.committed_trailing_view) {
-            propagate_text_trim(lycon->line.committed_trailing_view, trim_amount);
-        }
-        lycon->line.committed_trailing_rect = NULL;
-        lycon->line.committed_trailing_view = NULL;
-        lycon->line.committed_trailing_space = 0;
-    }
+    line_consume_trailing_collapsible_space(lycon, true, true);
     // CSS Text 3 §4.1.3: Hanging spaces (U+3000, pre-wrap spaces) at end of line
     if (lycon->line.hanging_space_width > 0) {
         float hang_trim = lycon->line.hanging_space_text_trim;
@@ -3013,6 +3027,7 @@ static void mark_line_non_space(Linebox* line) {
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
     auto t_start = high_resolution_clock::now();
 
+
     unsigned char* next_ch;  ViewText* text_view = null;
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
@@ -3948,6 +3963,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+
 
     auto t_end = high_resolution_clock::now();
     g_text_layout_time += duration<double, std::milli>(t_end - t_start).count();

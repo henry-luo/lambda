@@ -112,7 +112,7 @@ slow body are necessary.
   admission through `lambda_numeric_boundary_admit`; an admitted `int` at a
   declared `float` boundary reaches the raw body as a float Item/carrier.
 - Escaping through `Function*`, imports, exports, or `start` keeps `_b`
-  available. `start f(...)` is escaped because task dispatch invokes a public
+  available. `start(f, args)` is escaped because task dispatch invokes a public
   context ABI rather than the raw ABI.
 
 `pn`/`var` params, closures, methods, variadics, typed arrays, and async/task

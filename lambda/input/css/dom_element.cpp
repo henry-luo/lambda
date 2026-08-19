@@ -2094,7 +2094,19 @@ bool DomElement::append_child(DomElement* child) {
     log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent_backing->length);
 
     // Update DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already linked)
-    if (!parent->doc->input->ui_mode) {
+    bool is_shadow_root = parent->tag_name &&
+        strcmp(parent->tag_name, "#document-fragment") == 0 &&
+        parent->shadow_host_element() != nullptr;
+    bool child_is_linked = false;
+    for (DomNode* current = parent->first_child; current; current = current->next_sibling) {
+        if (current == (DomNode*)child) {
+            child_is_linked = true;
+            break;
+        }
+    }
+    if (!parent->doc->input->ui_mode || (is_shadow_root && !child_is_linked)) {
+        // ShadowRoot's backing relinker omits detached fragment children in UI mode;
+        // preserve the DOM chain so flattened-tree layout can discover the template.
         dom_append_to_sibling_chain(parent, child);
     }
 

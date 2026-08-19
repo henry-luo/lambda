@@ -6,6 +6,6 @@ pn child() {
 }
 
 pn main() {
-    let handle = start child()
+    let handle = start(child)
     print(wait(toPromise(handle))^)
 }

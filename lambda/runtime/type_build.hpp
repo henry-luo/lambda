@@ -33,6 +33,17 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
 // Declare a fn type's return contract.
 void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit);
 
+// Construct the declaration-level return contract wrapper shared by the CST
+// builder and the external-token parser.
+AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
+        Type* returned, Type* error_type, bool can_raise);
+
+// Construct a registered binary type with raw TypeBinary operands. Return
+// contracts use this rather than the general pattern binary constructor.
+AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
+        AstNode* left, AstNode* right, Type* left_type, Type* right_type,
+        Operator op, StrView op_str);
+
 // Allocate an AST node. Defined in build_ast.cpp; promoted because pattern
 // islands are the one type form whose AST must survive to MIR transpilation,
 // so the hand parser has to build real nodes for them.

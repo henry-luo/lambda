@@ -2022,6 +2022,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
     }
     dom_doc->document_charset = detected_charset;
+    // HTML parsing always runs with scripting enabled in the layout loader;
+    // retain that mode so noscript can suppress only its rendered contents.
+    dom_doc->html_scripting_enabled = true;
 
     // Extract viewport meta tag values before building DOM tree
     extract_viewport_meta(html_root, dom_doc);

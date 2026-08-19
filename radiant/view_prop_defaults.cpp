@@ -9,6 +9,7 @@ static BlockProp make_block_prop_default() {
     value.text_align = CSS_VALUE_START;
     value.align_content = CSS_VALUE__UNDEF;
     value.direction = CSS_VALUE_LTR;
+    value.unicode_bidi = CSS_VALUE_NORMAL;
     value.writing_mode = WM_HORIZONTAL_TB;
     value.zoom = 1.0f;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
@@ -43,6 +44,7 @@ static BlockProp make_block_prop_default() {
 static FontProp make_font_prop_default() {
     FontProp value = {};
     value.font_size = 16.0f;
+    value.used_zoom = 1.0f;
     value.initial_letter_computed_font_size = 0.0f;
     value.font_style = CSS_VALUE_NORMAL;
     value.font_weight = CSS_VALUE_NORMAL;

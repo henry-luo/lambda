@@ -1248,12 +1248,17 @@ TEST_F(NegativeScriptTest, SemanticError_StartOutsideProcedure) {
 
 TEST_F(NegativeScriptTest, SemanticError_StartRequiresProcedureCall) {
     ExpectErrorMessage("test/lambda/negative/semantic/start_non_pn.ls",
-        "`start` operand must resolve to a procedure (pn) call");
+        "`start` first argument must resolve to a procedure (pn)");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_StartRejectsMutableCapture) {
     ExpectErrorMessage("test/lambda/negative/semantic/start_mutable_capture.ls",
         "`start` cannot capture mutable var 'value'");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_StartRejectsUnsupportedMode) {
+    ExpectErrorMessage("test/lambda/negative/semantic/start_unsupported_mode.ls",
+        "`start` mode 'thread' is not implemented yet; use 'task'");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {

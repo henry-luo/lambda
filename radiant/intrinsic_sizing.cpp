@@ -2054,6 +2054,16 @@ static bool intrinsic_element_is_atomic_inline(DomElement* element) {
     if (layout_element_is_replaced(element)) return true;
 
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    if ((element->display.inner == CSS_VALUE_FLOW_ROOT ||
+         view->display.inner == CSS_VALUE_FLOW_ROOT) &&
+        (element->display.outer == CSS_VALUE_INLINE ||
+         element->display.outer == CSS_VALUE_INLINE_BLOCK ||
+         view->display.outer == CSS_VALUE_INLINE ||
+         view->display.outer == CSS_VALUE_INLINE_BLOCK)) {
+        // CSS Display 3: `inline flow-root` is an atomic inline whose children
+        // are measured as block-flow content, not as one inline run.
+        return true;
+    }
     if (view->display.outer == CSS_VALUE_INLINE_BLOCK ||
         view->display.outer == CSS_VALUE_INLINE_FLEX ||
         view->display.outer == CSS_VALUE_INLINE_GRID ||
@@ -2249,6 +2259,102 @@ static bool intrinsic_pseudo_needs_intrinsic_materialization(DomElement* element
     // Block-level generated boxes are real in-flow children for intrinsic sizing;
     // deferring their materialization until normal layout drops their contribution.
     return !intrinsic_pseudo_style_is_inline(pseudo_styles);
+}
+
+static bool intrinsic_list_item_has_table_ancestor(DomElement* element) {
+    for (DomNode* ancestor = element ? element->parent : nullptr;
+         ancestor; ancestor = ancestor->parent) {
+        if (!ancestor->is_element()) continue;
+        DisplayValue display = resolve_display_value(ancestor);
+        // A list inside an existing table cell already sizes against that cell;
+        // only content entering an anonymous cell from a row/group needs the
+        // marker contribution at this level.
+        if (display.inner == CSS_VALUE_TABLE_CELL) {
+            return layout_element_is_anonymous_table_fixup(ancestor->as_element());
+        }
+        if (display.inner == CSS_VALUE_TABLE ||
+            display.inner == CSS_VALUE_TABLE_ROW ||
+            layout_display_is_table_row_group(display.inner)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static float intrinsic_list_item_marker_width(LayoutContext* lycon,
+                                              ViewBlock* view_block) {
+    if (view_block && view_block->pseudo && view_block->pseudo->marker &&
+        view_block->pseudo->marker->blk) {
+        MarkerProp* marker = reinterpret_cast<MarkerProp*>(
+            view_block->pseudo->marker->blk);
+        if (marker->width > 0.0f) return marker->width;
+    }
+    float font_size = 16.0f;
+    if (view_block && view_block->font && view_block->fontp()->font_size > 0.0f) {
+        font_size = view_block->fontp()->font_size;
+    } else if (lycon && lycon->font.current_font_size > 0.0f) {
+        font_size = lycon->font.current_font_size;
+    }
+    return font_size * 1.375f;
+}
+
+static bool intrinsic_css_list_position_is_inside(const CssValue* value,
+                                                  bool* found) {
+    if (!value || !found) return false;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (intrinsic_css_list_position_is_inside(value->data.list.values[i], found)) {
+                return true;
+            }
+            if (*found) return false;
+        }
+        return false;
+    }
+    const char* name = nullptr;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+        name = value->data.custom_property.name;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        name = info ? info->name : nullptr;
+    }
+    if (!name || (strcmp(name, "inside") != 0 && strcmp(name, "outside") != 0)) {
+        return false;
+    }
+    *found = true;
+    return strcmp(name, "inside") == 0;
+}
+
+static bool intrinsic_list_item_marker_is_inside(DomElement* element,
+                                                 ViewBlock* view_block) {
+    for (DomNode* node = element; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* node_element = node->as_element();
+        ViewBlock* node_view = node == element
+            ? view_block
+            : lam::unsafe_view_block_element_storage(node_element);
+        if (node_view && node_view->blk &&
+            node_view->block()->list_style_position != 0) {
+            // CSS Lists 3 §3.5: inside markers are inline content and therefore
+            // belong to the list item's intrinsic inline-size contribution.
+            return node_view->block()->list_style_position == 1;
+        }
+        // Intrinsic measurement can run before the cascade populates BlockProp;
+        // read the inherited declaration directly instead of treating inside as outside.
+        if (!node_element->specified_style) continue;
+        CssPropertyCode properties[] = {
+            CSS_PROPERTY_LIST_STYLE_POSITION, CSS_PROPERTY_LIST_STYLE
+        };
+        for (CssPropertyCode property : properties) {
+            CssDeclaration* declaration = style_tree_get_declaration(
+                node_element->specified_style, property);
+            if (!declaration || !declaration->value) continue;
+            bool found = false;
+            bool inside = intrinsic_css_list_position_is_inside(
+                declaration->value, &found);
+            if (found) return inside;
+        }
+    }
+    return false;
 }
 
 static void intrinsic_materialize_pseudo_content(LayoutContext* lycon, DomElement* element) {
@@ -2711,7 +2817,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
-
     if (!content_only && !intrinsic_percentage_width_is_indefinite(lycon) &&
         element->styles_resolved() && element->has_cached_intrinsic_widths()) {
         assert(element->layout_cache);
@@ -2733,7 +2838,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     IntrinsicFontScope temp_font_guard(lycon, saved_font);
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
-
     NameId intrinsic_tag = element->tag();
     bool intrinsic_needs_resolved_style =
         intrinsic_tag == MARKUP_NAME_BUTTON || intrinsic_tag == MARKUP_NAME_INPUT ||
@@ -4394,6 +4498,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         ? intrinsic_element_line_height(lycon, element, view_block) : 0.0f;
     float vertical_block_axis_sum = 0.0f;
     bool has_inline_content = false;
+    bool has_in_flow_block_child = false;
     bool inline_run_ends_with_collapsible_space = false;
     float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
     float nonfirst_inline_min_max = 0.0f;  // Max min-content of non-first inline children (for neg text-indent)
@@ -4658,6 +4763,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         bool is_inline = false;
         bool child_is_float = false;
 
+        if (child->is_element() &&
+            layout_marker_is_outside(static_cast<View*>(child->as_element()))) {
+            continue;
+        }
+
         // CSS 2.1 §1.3: Comment nodes generate no boxes and do not participate in layout
         if (child->is_comment()) {
             continue;
@@ -4755,7 +4865,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             // Table-cell boxes inside inline content are wrapped in anonymous
                             // inline-table boxes, so preceding collapsed spaces still render.
                             has_inline_after = is_inline_level_element(next->as_element()) ||
-                                (is_inline_level_element(element) && node_is_table_cell_like(next));
+                                (is_inline_level_element(element) &&
+                                 !intrinsic_element_is_atomic_inline(element) &&
+                                 node_is_table_cell_like(next));
                         }
                     }
                     bool has_following_boundary = propagates_inline_edge_space &&
@@ -4918,7 +5030,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_inline = true;  // Text nodes are always inline (unless in flex container)
         } else if (child->is_element()) {
             DomElement* child_elem = child->as_element();
-
             // CSS 2.1 §9.2.4: Skip display:none children — they generate no boxes
             ViewBlock* child_vb = lam::unsafe_view_block_element_storage(child_elem);
             // A style-only measurement can leave the cached display empty; query the
@@ -4934,7 +5045,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
 
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-
             if (is_grid_container) {
                 // Auto-track grids use the normal child walk; retain the grid
                 // item's explicit minimum in that path as well.
@@ -4952,7 +5062,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // the inline max-content run used by shrink-to-fit sizing.
             child_is_float = layout_element_is_floated(child_elem);
             is_inline = !child_is_float && (is_inline_level_element(child_elem) ||
-                (is_inline_level_element(element) && node_is_table_cell_like(child)));
+                (is_inline_level_element(element) &&
+                 !intrinsic_element_is_atomic_inline(element) &&
+                 node_is_table_cell_like(child)));
 
             if (is_inline && element_inline_axis_is_vertical) {
                 // With a definite vertical inline-size, inline descendants that
@@ -5171,6 +5283,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         } else {
             // Block-level child encountered
+            if (!child_is_float) {
+                has_in_flow_block_child = true;
+            }
 
             // Detect if this block child is floated BEFORE flushing inline content.
             // CSS 2.1 §9.5: Floats don't break inline flow — inline content wraps
@@ -5254,42 +5369,24 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         sizes.max_content += total_gap;
     }
 
-    // CSS 2.1 §12.5.1: For display:list-item with list-style-position:inside,
-    // the marker box is the first inline box in the principal block box.
-    // It contributes to the intrinsic width as inline content.
+    // CSS Lists 3 §3: marker content contributes to the list item's intrinsic
+    // inline size when the list item participates in shrink-to-fit sizing.
     if (view_block->display.outer == CSS_VALUE_LIST_ITEM) {
-        bool is_inside_position = false;
         bool has_marker = true;  // default list-style-type is 'disc'
 
-        // Check list-style-position — it's an inherited property, so walk up
-        // the ancestor chain if not found directly on this element.
-        if (view_block->blk && view_block->block_mut()->list_style_position == 1) {  // 1 = inside
-            is_inside_position = true;
-        } else {
-            // Walk ancestor chain looking for list-style-position (inherited property)
-            for (DomNode* anc = static_cast<DomNode*>(element); anc; anc = anc->parent) {
-                if (!anc->is_element()) continue;
-                DomElement* anc_elem = anc->as_element();
-                // Check resolved blk first (if available)
-                ViewBlock* anc_view = lam::unsafe_view_block_element_storage(anc_elem);
-                if (anc_view->blk && anc_view->block_mut()->list_style_position == 1) {
-                    is_inside_position = true;
+        bool marker_has_shrink_to_fit_ancestor = false;
+        for (DomNode* anc = static_cast<DomNode*>(element); anc; anc = anc->parent) {
+            if (!anc->is_element()) continue;
+            DomElement* anc_elem = anc->as_element();
+            ViewBlock* anc_view = lam::unsafe_view_block_element_storage(anc_elem);
+            if (!anc_view) continue;
+            if (layout_element_is_floated(anc_elem)) {
+                bool auto_width = !anc_view->blk ||
+                    anc_view->block()->given_width_type == CSS_VALUE_AUTO ||
+                    anc_view->block()->given_width_type == CSS_VALUE__UNDEF;
+                if (auto_width) {
+                    marker_has_shrink_to_fit_ancestor = true;
                     break;
-                }
-                if (anc_view->blk && anc_view->block_mut()->list_style_position == 2) {
-                    break;  // explicitly 'outside'
-                }
-                // Check specified style
-                if (anc_elem->specified_style) {
-                    CssDeclaration* lsp_decl = style_tree_get_declaration(
-                        anc_elem->specified_style, CSS_PROPERTY_LIST_STYLE_POSITION);
-                    if (lsp_decl && lsp_decl->value && lsp_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum lsp_val = lsp_decl->value->data.keyword;
-                        if (lsp_val == 1) {  // 1 = inside
-                            is_inside_position = true;
-                        }
-                        break;  // found an explicit value, stop searching
-                    }
                 }
             }
         }
@@ -5322,17 +5419,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        if (is_inside_position && has_marker) {
-            // Marker width = font_size * 1.375 (matching layout_block.cpp marker creation)
-            float font_size = 16.0f;  // default
-            if (view_block->font && view_block->fontp()->font_size > 0) {
-                font_size = view_block->fontp()->font_size;
-            } else if (lycon->font.current_font_size > 0) {
-                font_size = lycon->font.current_font_size;
-            }
-            float marker_width = font_size * 1.375f;
+        bool marker_is_inside = intrinsic_list_item_marker_is_inside(element, view_block);
+        bool marker_has_table_ancestor = intrinsic_list_item_has_table_ancestor(element);
+        if (has_marker &&
+            ((marker_is_inside && !has_in_flow_block_child) ||
+             (marker_has_shrink_to_fit_ancestor && !has_in_flow_block_child) ||
+             marker_has_table_ancestor)) {
+            // CSS Tables sizes anonymous cells from all in-flow descendants;
+            // outside markers contribute only in the shrink-to-fit/table paths.
+            float marker_width = intrinsic_list_item_marker_width(lycon, view_block);
 
-            // The marker is the first inline box — add to inline content accumulators
+            // The marker participates in the list item's intrinsic inline size.
             has_inline_content = true;
             inline_max_sum += marker_width;
             inline_min_sum = max(inline_min_sum, marker_width);

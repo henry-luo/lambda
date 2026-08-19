@@ -431,9 +431,16 @@ typedef struct AstHandlerNode : AstNode {
     int async_fault_state;
 } AstHandlerNode;
 
+typedef enum StartMode {
+    START_MODE_TASK = 0,
+    START_MODE_THREAD,
+    START_MODE_PROCESS,
+} StartMode;
+
 typedef struct AstStartNode : AstNode {
     AstCallNode* call;
     NameScope* owner_scope;
+    StartMode mode;
     bool escapes;
 } AstStartNode;
 

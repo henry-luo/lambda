@@ -319,12 +319,15 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         bool has_css_font = form_control_has_specified_font(block) ||
             !font->font_size_from_medium;
         float font_size = font->font_size;
-        // Width: cols × char_width + scrollbar_reserve
+        // Width: ceil(cols × average character width) + scrollbar reserve.
+        // HTML rendering §15.5 and Blink's textarea algorithm use the primary
+        // font average metric, not the advance of U+0020.
         float char_w;
         float scrollbar_reserve;
         if (has_css_font) {
-            // CSS specifies font — use space_width if available, else approximate
-            char_w = (font->space_width > 0) ? font->space_width : font_size * 0.60f;
+            char_w = font->average_char_width > 0.0f
+                ? roundf(font->average_char_width)
+                : (font->space_width > 0.0f ? roundf(font->space_width) : roundf(font_size * 0.60f));
             scrollbar_reserve = 16.0f;
         } else {
             // UA default: Chrome monospace ~13.333px, char width ≈ 8px
@@ -332,7 +335,7 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
             char_w = ta_font * 0.60f;
             scrollbar_reserve = 16.0f;
         }
-        float content_w = cols * char_w + scrollbar_reserve;
+        float content_w = ceilf(cols * char_w) + scrollbar_reserve;
         form->intrinsic_width = content_w * pr;
         // Height: rows × the same used line-height that establishes editable baselines.
         float line_ht = textarea_used_line_height(lycon, block, font, has_css_font);

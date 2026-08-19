@@ -3,8 +3,8 @@
 against drift.
 
 Both compose grammar-common.js, so their cores cannot diverge by construction.
-What CAN drift is the type layer each one carries: the production layer must
-define exactly the seam names the core references, and must not smuggle in
+What CAN drift is the replacement layer each one carries: the production layer
+must define exactly the seam names the core references, and must not smuggle in
 extra rules the full grammar does not have.
 """
 import re
@@ -14,19 +14,23 @@ from pathlib import Path
 PKG = Path(__file__).resolve().parent.parent / 'lambda' / 'tree-sitter-lambda'
 RULE_RE = re.compile(r'^    ([A-Za-z_][A-Za-z_0-9]*): [\$_]\s*=>', re.M)
 
-# names the shared core references and every type layer must therefore provide
-SEAM = {'_type_pattern', '_primary_type', '_view_atom_type', '_value_island', 'content_type'}
+# names the shared core references and both replacement layers must provide
+SEAM = {
+    '_type_pattern', '_primary_type', '_char_pattern', 'content_type',
+    '_attr_dotted_name', 'dotted_name', 'return_type', 'view_pattern',
+    'path_expr',
+}
 
 
-def layer_rules(path):
+def layer_rules(path, marker):
     src = path.read_text()
-    start = src.index('TypeLayer = {') if 'TypeLayer = {' in src else src.index('typeLayer = {')
+    start = src.index(marker)
     return set(RULE_RE.findall(src[start:]))
 
 
 def main():
-    prod = layer_rules(PKG / 'grammar.js')
-    full = layer_rules(PKG / 'grammar-lambda.js')
+    prod = layer_rules(PKG / 'grammar.js', 'productionRuleLayer = {')
+    full = layer_rules(PKG / 'grammar-lambda.js', 'fullRuleLayer = {')
     common = (PKG / 'grammar-common.js').read_text()
     core = set(RULE_RE.findall(common[common.index('coreRules: {'):]))
 
@@ -34,12 +38,12 @@ def main():
 
     overlap = core & (prod | full)
     if overlap:
-        problems.append(f"rules defined in BOTH the core and a type layer: {sorted(overlap)}")
+        problems.append(f"rules defined in BOTH the core and a replacement layer: {sorted(overlap)}")
 
     for name, rules in (('production', prod), ('full', full)):
         missing = {s for s in SEAM if s not in rules and s not in core}
         if missing:
-            problems.append(f"{name} type layer is missing seam rules: {sorted(missing)}")
+            problems.append(f"{name} replacement layer is missing seam rules: {sorted(missing)}")
 
     extra = prod - full
     if extra:
@@ -57,7 +61,7 @@ def main():
         return 1
 
     print(f"grammar sync check OK — core {len(core)} rules; "
-          f"type layer: full {len(full)}, production {len(prod)}")
+          f"replacement layers: full {len(full)}, production {len(prod)}")
     return 0
 
 

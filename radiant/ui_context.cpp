@@ -218,11 +218,15 @@ int UiContext::init(bool next_headless) {
     // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 CSS pixels - layout operates in CSS logical pixels
+    // fontprop::used_zoom precedes the initial-letter field; keep the default
+    // font's computed weight aligned with the aggregate layout.
     default_font = (FontProp){default_font_times_new_roman, 16.0f, // 16px (CSS logical pixels)
+        1.0f, // default CSS zoom
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     default_font.font_size_from_medium = true;
     legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
+        1.0f, // default CSS zoom
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     legacy_default_font.font_size_from_medium = true;

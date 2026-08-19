@@ -9,8 +9,8 @@
  *
  * It is NOT the grammar the product ships. `grammar.js` is the optimized
  * production grammar: it shares this file's core (via grammar-common.js) and
- * replaces the type layer below with external scanner tokens, which a hand
- * parser reads (see vibe/Lambda_Impl_Type_Scanner.md). The two grammars must
+ * replaces the reference-only rule layer below with external scanner tokens,
+ * which Lambda-side parsers read (see vibe/Lambda_Grammar_Reduce5.md). The two grammars must
  * accept the same language; `make test-grammar-diff` checks that.
  *
  * Generated artifacts from this file are test-only and live under ./temp/.
@@ -20,19 +20,76 @@
 /// <reference types="../tree-sitter-dsl.d.ts" />
 
 const common = require('./grammar-common.js');
-const { linebreak, comma_sep, comma_sep1, type_pattern, _attr_content_type } = common;
+const {
+  linebreak, comma_sep, comma_sep1, qualified_name, type_pattern,
+  _attr_content_type,
+} = common;
 
 // ---------------------------------------------------------------------------
-// The type-pattern sub-language. This is the half that grammar.js replaces
-// with scanner tokens; everything else comes from grammar-common.js.
+// Reference-only structural rules. Production replaces every seam named here
+// with external tokens; grammar-common.js contains only genuinely shared rules.
 // ---------------------------------------------------------------------------
-const fullTypeLayer = {
+const fullRuleLayer = {
     // --- seam ---------------------------------------------------------------
-    // The four names grammar-common.js references. In this grammar they expand
-    // to the real type rules below; in grammar.js they are scanner tokens.
+    // Names grammar-common.js references. In this grammar they expand to full
+    // structural rules; grammar.js supplies scanner-backed replacements.
     _primary_type: $ => $.primary_type,
-    _view_atom_type: $ => choice($.element_type, $.identifier, $.base_type),
-    _value_island: $ => $.pattern_island,
+    _char_pattern: $ => $.pattern_island,
+
+    // S2.4.3v2: a namespace-qualified name is maximal. Its precedence must
+    // exceed primary/path content so `<svg .rect>` remains tag `svg.rect`.
+    _attr_dotted_name: $ => qualified_name($, 120),
+    dotted_name: $ => qualified_name($, 120),
+
+    // S2.4.1v2 admits rooted `/.a` and relative `.a`; bare `/`, bare `.`, and
+    // `/a` are retired. Keep `/` and `.` as separate tokens in the rooted form.
+    path_expr: $ => prec.right(choice(
+      seq('/', '.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent))),
+      seq('.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent, $.path_root)))
+    )),
+
+    // View pattern: element or type name (identifier / base_type). map_type is
+    // intentionally excluded to avoid ambiguity with the view body `{}`.
+    _view_pattern_primary: $ => choice($.element_type, $.identifier, $.base_type),
+
+    view_pattern: $ => choice(
+      $._view_pattern_primary,
+      alias($.view_pattern_union, $.binary_type),
+    ),
+
+    view_pattern_union: $ => prec.left('set_union', seq(
+      field('left', $._view_pattern_primary),
+      field('operator', '|'),
+      field('right', choice($._view_pattern_primary,
+        alias($.view_pattern_union, $.binary_type))),
+    )),
+
+    // Occurrence modifiers are consumed only by the full type/return rules.
+    occurrence: $ => choice('?', '+', '*', $.occurrence_count),
+    occurrence_count: $ => prec(2, choice(
+      seq('[', ']'),
+      seq('[', $.integer, ']'),
+      seq('[', $.integer, ',', $.integer, ']'),
+      seq('[', $.integer, '+', ']'),
+    )),
+
+    // Restricted return contracts: T, T^, or T^E. Field names intentionally
+    // align with occurrence_type so the reference AST builder can reuse it.
+    return_occurrence_type: $ => seq(
+      field('operand', choice($.base_type, $.identifier)),
+      optional(field('operator', $.occurrence)),
+    ),
+    return_type_pattern: $ => prec.left(seq(
+      field('type', $.return_occurrence_type),
+      repeat(seq(choice('|', '&', '!'),
+        field('type', $.return_occurrence_type)))
+    )),
+    return_type: $ => prec.right(seq(
+      field('ok', $.return_type_pattern),
+      optional(seq('^', optional(field('error', $.return_type_pattern))))
+    )),
 
 
     // list_type for tuple types and pattern grouping
@@ -209,5 +266,5 @@ module.exports = grammar({
   // the shared core carries only the value-expression precedences; the type
   // tiers below need their own
   precedences: $ => [...common.options.precedences($), ...common.typePrecedences($)],
-  rules: Object.assign({}, common.coreRules, fullTypeLayer),
+  rules: Object.assign({}, common.coreRules, fullRuleLayer),
 });

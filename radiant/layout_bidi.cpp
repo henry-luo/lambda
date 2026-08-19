@@ -19,6 +19,7 @@
 // inline-edge fragments together, which is why a text-only reorder is wrong.
 typedef struct BidiCharFragment {
     ViewText* text;
+    View* atomic_view;
     TextRect* rect;
     int rect_slot;
     int logical_index;
@@ -81,8 +82,53 @@ static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_numb
            text->text_data();
 }
 
+static uint32_t bidi_marker_representative_codepoint(CssEnum direction) {
+    // CSS Writing Modes: an isolated marker follows its inherited direction
+    // for bidi ordering, even when its content mixes strong LTR and RTL text.
+    return direction == CSS_VALUE_RTL ? 0x0627 : 0x0041;
+}
+
+int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
+    if (!node) return 0;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (!text->text || text->length == 0) return 0;
+        const char* cursor = text->text;
+        const char* end = cursor + text->length;
+        while (cursor < end) {
+            uint32_t codepoint = 0;
+            int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+            if (bytes <= 0) { cursor++; continue; }
+            int strong_class = utf_bidi_strong_class(codepoint);
+            if (strong_class != 0) return strong_class;
+            cursor += bytes;
+        }
+        return 0;
+    }
+    if (!node->is_element()) return 0;
+    DomElement* element = node->as_element();
+    if (element->tag_id == MARKUP_NAME_SCRIPT ||
+        element->tag_id == MARKUP_NAME_STYLE ||
+        (element->tag_name && strcmp(element->tag_name, "::marker") == 0)) {
+        return 0;
+    }
+    if (skip_explicit_dir && element->get_attribute("dir")) return 0;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        int strong_class = layout_find_first_strong_direction(child, skip_explicit_dir);
+        if (strong_class != 0) return strong_class;
+    }
+    return 0;
+}
+
+CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback) {
+    int strong_class = layout_find_first_strong_direction(element, false);
+    if (strong_class > 0) return CSS_VALUE_RTL;
+    if (strong_class < 0) return CSS_VALUE_LTR;
+    return fallback;
+}
+
 static void bidi_count_views(View* view, int line_number, int depth,
-                             BidiLineCounts* counts) {
+                             CssEnum direction, BidiLineCounts* counts) {
     auto visit = [&](View* current, int current_depth) -> bool {
         if (current->view_type == RDT_VIEW_NONE) return false;
         if (current->view_type == RDT_VIEW_TEXT) {
@@ -110,6 +156,16 @@ static void bidi_count_views(View* view, int line_number, int depth,
             counts->spans++;
             if (current_depth > counts->max_depth) counts->max_depth = current_depth;
             return true;
+        }
+        if (current->view_type == RDT_VIEW_MARKER) {
+            MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
+            if (marker && !marker->is_outside && marker->width > 0.0f) {
+                counts->chars++;
+                counts->has_bidi_trigger = counts->has_bidi_trigger ||
+                    bidi_codepoint_triggers_reorder(
+                        bidi_marker_representative_codepoint(direction));
+            }
+            return false;
         }
         if (current->view_type != RDT_VIEW_BR) counts->has_atomic = true;
         return false;
@@ -147,7 +203,8 @@ static bool bidi_is_collapsible_space(uint32_t codepoint) {
 static void bidi_fill_views(View* view, int line_number, int depth,
                             BidiCharFragment* chars, BidiRectInfo* rects,
                             BidiSpanInfo* spans, int* char_cursor,
-                            int* rect_cursor, int* span_cursor) {
+                            int* rect_cursor, int* span_cursor,
+                            CssEnum direction) {
     for (View* current = view; current; current = current->next()) {
         if (current->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(current)) {
             continue;
@@ -202,8 +259,24 @@ static void bidi_fill_views(View* view, int line_number, int depth,
             span_info->left_edge = bidi_span_edge_width(span_info->span, true);
             span_info->right_edge = bidi_span_edge_width(span_info->span, false);
             bidi_fill_views(span_info->span->first_child, line_number, depth + 1,
-                            chars, rects, spans, char_cursor, rect_cursor, span_cursor);
+                            chars, rects, spans, char_cursor, rect_cursor, span_cursor,
+                            direction);
             span_info->logical_end = *char_cursor - 1;
+            continue;
+        }
+        if (current->view_type == RDT_VIEW_MARKER) {
+            MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
+            if (marker && !marker->is_outside && marker->width > 0.0f) {
+                BidiCharFragment* fragment = &chars[(*char_cursor)++];
+                fragment->text = nullptr;
+                fragment->atomic_view = current;
+                fragment->rect = nullptr;
+                fragment->rect_slot = -1;
+                fragment->logical_index = *char_cursor - 1;
+                fragment->codepoint = bidi_marker_representative_codepoint(direction);
+                fragment->width = marker->width;
+                fragment->visual_x = 0.0f;
+            }
             continue;
         }
     }
@@ -278,7 +351,8 @@ static float bidi_line_origin(BidiCharFragment* chars, BidiSpanInfo* spans,
                               int char_count, int span_count) {
     for (int i = 0; i < char_count; i++) {
         if (chars[i].width <= 0.0f) continue;
-        float origin = chars[i].rect->x;
+        float origin = chars[i].atomic_view
+            ? chars[i].atomic_view->x : chars[i].rect->x;
         for (int span_index = 0; span_index < span_count; span_index++) {
             BidiSpanInfo* span = &spans[span_index];
             if (i >= span->logical_start && i <= span->logical_end) {
@@ -310,6 +384,9 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         int logical = visual_to_logical[visual];
         if (logical >= 0 && logical < char_count) {
             chars[logical].visual_x = cursor;
+            if (chars[logical].atomic_view) {
+                chars[logical].atomic_view->x = cursor;
+            }
             if (chars[logical].width > 0.0f) cursor += chars[logical].width;
         }
 
@@ -376,7 +453,8 @@ void layout_bidi_line(LayoutContext* lycon) {
     if (!root) return;
 
     BidiLineCounts counts = {};
-    bidi_count_views(root, lycon->block.line_number, 0, &counts);
+    bidi_count_views(root, lycon->block.line_number, 0,
+                     lycon->block.direction, &counts);
     // Ordinary LTR lines already have correct fragment geometry; UAX #9 must
     // only rewrite lines whose bidi data can change visual order.
     if (counts.chars <= 0 || counts.rects <= 0 || counts.has_atomic ||
@@ -392,13 +470,17 @@ void layout_bidi_line(LayoutContext* lycon) {
         &lycon->scratch, sizeof(int) * counts.chars);
     int* levels = (int*)scratch_alloc(
         &lycon->scratch, sizeof(int) * counts.chars);
-    if (!chars || !rects || !spans || !visual_to_logical || !levels) return;
+    // A block's anonymous inline content can have no inline-span records;
+    // zero-count scratch storage is valid and must not suppress bidi placement.
+    if (!chars || !rects || (counts.spans > 0 && !spans) ||
+        !visual_to_logical || !levels) return;
 
     int char_cursor = 0;
     int rect_cursor = 0;
     int span_cursor = 0;
     bidi_fill_views(root, lycon->block.line_number, 0, chars, rects, spans,
-                    &char_cursor, &rect_cursor, &span_cursor);
+                    &char_cursor, &rect_cursor, &span_cursor,
+                    lycon->block.direction);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
     bidi_scale_rect_widths(chars, rects, counts.rects);
 
