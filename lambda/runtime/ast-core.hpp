@@ -1019,6 +1019,24 @@ typedef struct FnVariantAnalysis {
     FnValueAnalysis* values;
     int value_count;
 } FnVariantAnalysis;
+
+// P2 tier-up state belongs to the definition site, rather than to individual
+// Function values: aliases of one `fn` must observe the same immutable native
+// entry once it is published (D8.1.1v2 §5.1).
+typedef enum FnPromotionState {
+    FN_PROMOTION_INTERP,
+    FN_PROMOTION_COMPILING,
+    FN_PROMOTION_COMPILED,
+    FN_PROMOTION_PINNED_INTERP,
+} FnPromotionState;
+
+typedef struct FnPromotionCell {
+    FnPromotionState state;
+    uint32_t call_count;
+    uint32_t backedge_count;
+    void* boxed_entry;
+} FnPromotionCell;
+
 typedef struct FnAnalysis {
     FnCapture* captures;
     FnParamEvidence* evidence;
@@ -1042,6 +1060,9 @@ typedef struct FnAnalysis {
     // carry it: push_name deliberately writes no AstNamedNode-only field
     // because that alias is `vars` on a function and the join pointer on a loop.
     NameEntry* decl_entry;
+    // T0/T1 transition state. The Script owns the AST and all generated
+    // satellites, so this cell has the same lifetime as its definition.
+    FnPromotionCell promotion;
 } FnAnalysis;
 
 static inline FnVariantAnalysis* fn_analysis_variant(

@@ -1069,3 +1069,59 @@ bool interp_plan_script(Script* script) {
         (unsigned)script->interp_plan.total_slots);
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// P2 satellite eligibility
+// ---------------------------------------------------------------------------
+
+// Satellites reuse T0's planned module slab, but do not yet carry closure
+// environments, imported module references, or the Script-wide property-key
+// image. Each rejected definition remains on the same T0 semantics path
+// (D8.1.1v2 §5.2-§5.3).
+typedef struct SatelliteScanCtx {
+    bool ok;
+} SatelliteScanCtx;
+
+static void interp_scan_satellite_node(AstNode* node, void* opaque) {
+    SatelliteScanCtx* sc = (SatelliteScanCtx*)opaque;
+    if (!node || !sc->ok) return;
+
+    switch (node->node_type) {
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC:
+    case AST_NODE_ARROW_FUNC:
+        // Nested definitions need an explicit cross-satellite closure contract.
+        sc->ok = false;
+        return;
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_OBJECT_TYPE:
+    case AST_NODE_VIEW:
+        // Named properties depend on the Script-wide sealed key table, which
+        // is not yet shared by satellites.
+        sc->ok = false;
+        return;
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        NameEntry* entry = ident->entry;
+        if (!entry) break;
+        if (entry->import) sc->ok = false;
+        break;
+    }
+    default:
+        break;
+    }
+    if (sc->ok) interp_visit_children(node, interp_scan_satellite_node, sc);
+}
+
+bool interp_satellite_supported(const AstFuncNode* fn) {
+    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_async ||
+            fn->is_generator || fn->analysis->may_await ||
+            fn->analysis->needs_task_context) {
+        return false;
+    }
+    SatelliteScanCtx sc = {true};
+    interp_scan_satellite_node((AstNode*)fn->body, &sc);
+    return sc.ok;
+}

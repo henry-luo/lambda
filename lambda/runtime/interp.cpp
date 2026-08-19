@@ -144,6 +144,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
 static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded);
 static void exec_declaration(InterpFrame* f, AstNode* node);
+static void interp_note_backedge(InterpFrame* frame);
 
 // Raises a statement signal, parking its payload in the frame's reserved slot.
 static inline void interp_signal(InterpFrame* f, EvalSignal signal, Item payload) {
@@ -1300,6 +1301,7 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
         ok = interp_for_level(fc, (AstLoopNode*)((AstNode*)loop)->next);
         if (f->signal == EvalSignal::BROKE) { interp_clear_loop_signal(f); break; }
         if (f->signal == EvalSignal::CONTINUED) { interp_clear_loop_signal(f); ok = true; }
+        if (ok && i + 1 < length) interp_note_backedge(f);
     }
     if (keys) symbol_key_list_free(keys);
     return ok && !interp_frame_pending(f);
@@ -2019,6 +2021,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 if (item_is_error(cond)) return cond;
                 if (!is_truthy(cond)) break;
             }
+            interp_note_backedge(f);
         }
         return ItemNull;   // loops are statements; their value is never used
     }
@@ -2091,6 +2094,18 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
 // ---------------------------------------------------------------------------
 
 static InterpState* interp_current_state(void);
+
+// Loop counters belong to the active definition, but promotion is deferred
+// until its next entry: an interpreter frame can never be materialized into a
+// satellite's native locals (no OSR, D8.1.1v2 §5.1).
+static void interp_note_backedge(InterpFrame* frame) {
+    if (!frame || !frame->fn || lambda_tier_selected() != LAMBDA_TIER_AUTO ||
+            !frame->fn->analysis) return;
+    FnPromotionCell* cell = &frame->fn->analysis->promotion;
+    if (cell->state == FN_PROMOTION_INTERP && cell->backedge_count != UINT32_MAX) {
+        cell->backedge_count++;
+    }
+}
 
 extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
     InterpState* st = interp_current_state();
@@ -2174,6 +2189,95 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
 
 static __thread InterpState* g_interp_state = NULL;
 static InterpState* interp_current_state(void) { return g_interp_state; }
+
+static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallback) {
+    const char* env = getenv(env_name);
+    if (!env || !*env) return fallback;
+    char* end = NULL;
+    unsigned long value = strtoul(env, &end, 10);
+    if (end == env || *end != '\0' || value > UINT32_MAX) return fallback;
+    return (uint32_t)value;
+}
+
+static uint32_t interp_jit_threshold(void) {
+    return interp_promotion_threshold("LAMBDA_JIT_THRESHOLD", 3);
+}
+
+static uint32_t interp_jit_backedge_threshold(void) {
+    return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 1024);
+}
+
+static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
+        void* entry) {
+    if (!fn || !def || !entry) return;
+    // Publish the native pointer before the ABI byte: every later dispatcher
+    // either sees the old T0 pair or a complete boxed entry (D8.1.1v2 §5.3).
+    fn->ptr = (fn_ptr)entry;
+    lambda_function_mark_mir_context_abi(fn);
+    if (def->node_type == AST_NODE_PROC) {
+        lambda_function_mark_lambda_boxed_procedure(fn);
+    } else {
+        lambda_function_mark_lambda_boxed_function(fn);
+    }
+    FnVariantAnalysis* public_variant = def->analysis
+        ? fn_analysis_variant(def->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
+    uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    if (public_variant) {
+        public_shape = public_variant->result.shape == RETURN_SHAPE_ITEM
+            ? LAMBDA_MIR_PUBLIC_RETURN_ITEM
+            : public_variant->result.shape == RETURN_SHAPE_ITEM_SCALAR
+                ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION
+                : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+    }
+    lambda_function_mark_mir_public_return_shape(fn, public_shape);
+}
+
+bool interp_promote_function_if_hot(Function* fn) {
+    if (!fn || fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED ||
+            lambda_tier_selected() != LAMBDA_TIER_AUTO) {
+        return false;
+    }
+    InterpState* st = interp_current_state();
+    const AstFuncNode* def = (const AstFuncNode*)fn->def;
+    Script* script = fn->def_module;
+    if (!st || !st->runtime || !def || !script || !def->analysis) return false;
+
+    FnPromotionCell* cell = &def->analysis->promotion;
+    if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
+        interp_upgrade_function_entry(fn, def, cell->boxed_entry);
+        return true;
+    }
+    if (cell->state == FN_PROMOTION_PINNED_INTERP ||
+            cell->state == FN_PROMOTION_COMPILING) {
+        return false;
+    }
+    if (cell->call_count != UINT32_MAX) cell->call_count++;
+    if (cell->call_count < interp_jit_threshold() &&
+            cell->backedge_count < interp_jit_backedge_threshold()) return false;
+    if (!interp_satellite_supported(def)) {
+        // A pinned definition is a declared interpreter policy, never a
+        // fallback to a different module compilation path.
+        cell->state = FN_PROMOTION_PINNED_INTERP;
+        log_debug("interp-tier: pinned function='%s' reason=satellite-boundary",
+            def->name ? def->name->chars : "<anonymous>");
+        return false;
+    }
+
+    cell->state = FN_PROMOTION_COMPILING;
+    void* entry = NULL;
+    if (!compile_ast_function_satellite(st->runtime, script, def, &entry) || !entry) {
+        // Promotion failure is not user-visible execution failure: the source
+        // was already accepted by T0, so retain that semantic implementation.
+        cell->state = FN_PROMOTION_PINNED_INTERP;
+        log_error("interp-tier: satellite compile failed function='%s'; pinned to T0",
+            def->name ? def->name->chars : "<anonymous>");
+        return false;
+    }
+    cell->boxed_entry = entry;
+    cell->state = FN_PROMOTION_COMPILED;
+    interp_upgrade_function_entry(fn, def, entry);
+    return true;
+}
 
 static uint32_t interp_depth_budget(void) {
     const char* env = getenv("LAMBDA_INTERP_DEPTH");

@@ -819,7 +819,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // T0 (D8.1.1v2): stop after the AST passes and interpret. A script whose
     // pre-scan finds a kind the walker cannot execute falls back to the whole
     // module JIT path below, counted and logged — never silently half-run (R4).
-    if (lambda_tier_selected() == LAMBDA_TIER_INTERP) {
+    if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
+            lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
         if (profiling || compiler_timing) profile_get_time(&plan0);
         // `direct_imports` is normally filled inside compile_script_as_mir_direct,

@@ -586,6 +586,7 @@ struct Script : Input {
     bool interp_planned;            // frame-plan pass has run for this Script
     bool interp_supported;          // pre-scan found only P0/P1-covered kinds
     AstNodeType interp_reject_kind; // first unsupported kind, for the log line
+    uint32_t interp_satellite_count; // unique MIR satellite image sequence
 };
 
 typedef struct Runtime Runtime;

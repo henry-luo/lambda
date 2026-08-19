@@ -1,16 +1,16 @@
-# AST Interpreter — Implementation Plan, Phases P0–P1
+# AST Interpreter — Implementation Plan, Phases P0–P5
 
-**Date:** 2026-08-15 (rev 2 — **P0 landed**)
-**Status:** **P0 complete and gated (2026-08-15)**; **P1 partially landed** — see §3.0 for the slice-by-slice state. The §6 measurement report is published and reviewed. Exit gate of the P0→P1 arc is that report plus the full-baseline differential + GC-stress gates (§7); P0's own gate G0 is recorded in §2.7.
+**Date:** 2026-08-19 (rev 4 — **P2 vertical slice landed**)
+**Status:** **P0 complete and gated (2026-08-15)**; **P1 substantially landed**; **P2 is in progress**. `LAMBDA_TIER=auto` now runs T0 and promotes eligible definitions to unique, Script-owned MIR satellites at the shared dynamic-call boundary. The verified slice covers self recursion, several satellites in one MIR context, T0 module-slab reads, dynamic calls to another Lambda function, and deferred promotion after a T0 loop backedge. Captures, imported bindings, and named-property/key-table users remain pinned to T0. **P3–P5 are not started**: there is no CONST/PREDICATE restriction/fuel policy, persistent REPL environment, or default-tier flip.
 **Design authority:** `doc/Lambda_Formal_Design.md` **D8.1.1v2** (T0 default, tiered execution), D5.1.1/D5.1.2 (side-stack frames), D5.3.2/D5.3.3 (MAY_GC + native rooting contract), D6.2.1/D6.2.3/D6.2.4 (function values, snapshot captures, traced env), D7.2.1/D7.2.2 (module slabs, init transaction), DI14; `doc/Lambda_Formal_Semantics.md` S3.1, S7.7.1/S7.7.2, S7.11.4, S9.1, S11.2.1, SI3.
-**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This plan implements §11's P0 and P1 exactly; P2 (tiering/satellites), P3 (CONST/PREDICATE modes), P4 (REPL persistent env), P5 (default flip) are **out of scope here** and get their own plan revisions.
-**Scope rule:** P0/P1 never touch MIR lowering, emission, or the default execution path — `LAMBDA_TIER` unset or `jit` must remain byte-identical to today (MT7/D8.6.1 untouched by construction).
+**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This revision begins §11's P2 only; P3 (CONST/PREDICATE modes), P4 (REPL persistent env), and P5 (default flip) remain subsequent gates.
+**Scope rule:** `LAMBDA_TIER` unset or `jit` remains the existing eager whole-module pipeline (MT7/D8.6.1). `auto` is opt-in T0 plus P2 promotion; it must pin an unsupported function to T0, never recompile the full module as a substitute.
 
 ---
 
 ## 0. Summary
 
-P0 builds the skeleton: the frame-plan pass, side-stack interpreter frames, a walker for the L1 core subset, `LAMBDA_TIER=interp` wiring, and the first measurement report. P1 completes construct coverage to the full Lambda baseline, adds the error/fault channels, module support, and self-tail-call iteration, and re-publishes the report over the full corpus. The arc ends when: (g-a) `make test-lambda-baseline` is green under both tiers with the committed exclusion list at zero silent fallbacks, (g-b) the GC-stress/ASan run is clean, and (g-c) the turnaround/memory report in §6 is published with all required cells filled and reviewed.
+P0 builds the skeleton: the frame-plan pass, side-stack interpreter frames, a walker for the L1 core subset, `LAMBDA_TIER=interp` wiring, and the first measurement report. P1 completes construct coverage to the full Lambda baseline, adds the error/fault channels, module support, and self-tail-call iteration, and re-publishes the report over the full corpus. P2 adds opt-in tier-up without changing `jit`: the definition-site cell counts dynamic entries, emits one function plus its boxed wrapper into a satellite MIR module, then upgrades pre-existing `Function` values in place at the shared dispatcher (D8.1.1v2 §5.1–§5.3). P3/P4/P5 remain gated by their own state and semantics work.
 
 Execution model recap (from the design doc, not re-argued here): T0 is boxed-only, calls the same C-ABI runtime helpers as generated code (AI3), lives on the existing side stacks with per-function statically-sized windows (AI4/AI5), and uses `EvalSignal` for statement control flow (AI14). No promotion machinery exists until P2 — in P0/P1 the tier is a per-run, whole-script choice.
 
@@ -33,6 +33,8 @@ Execution model recap (from the design doc, not re-argued here): T0 is boxed-onl
 | `test/lambda/interp_p0_subset.txt`, `test/lambda/interp_excluded.txt` **(new)** | committed subset/exclusion lists (§5) |
 | `test/interp/gen_bench.py`, `test/interp/repl_bench.py` **(new)** | measurement drivers; all outputs under `./temp/` (rule 2) |
 | `Makefile` targets | `make test-lambda-interp` (subset in P0, full matrix in P1), `make interp-bench` |
+
+P2 additions in rev 4: `FnAnalysis::promotion` carries the def-site state/counters/boxed entry; `lambda_dynamic_invoke_by_count` is the only upgrade point; `transpile-mir.cpp` has a uniquely named satellite-module lowering path; and `test/lambda/interp_auto_tier.ls` differentially exercises self recursion, multiple satellite images, a module-slab scalar, a cross-satellite dynamic call, and backedge-marked next-entry promotion. The satellite map reads `NameEntry::slot` from the frame-plan slab instead of eager `_gvar_*` BSS numbering, which excludes function values and would address different storage.
 
 Layout-compat constraints on struct edits: `Function::type_id` at offset 0 and `closure_field_count` at offset 2 are poked by generated code (`transpile-mir.cpp:20095–20135`) — new fields go at the **end** only; `NameEntry`/`FnAnalysis` are pool-calloc'd, so zero-init is the correct "no plan" state.
 
@@ -261,6 +263,44 @@ Seven defects the differential caught while landing these, all fixed:
 | G1.2 GC stress | Full interp baseline clean under stress knobs + ASan build; no `AutoAssertNoGC` aborts; forced-GC run confirms every helper call is treated as a safepoint |
 | G1.3 non-regression | Default mode still byte-identical (no lowering diffs); `make test` green; plan-pass cost ≤ 5% of the `ast` phase on the suite (reported) |
 | G1.4 **measurement report** | §6 re-published over the full corpus; every corpus item where interp mode is net-slower end-to-end is explained (exec-dominated) with its projected P2 outcome |
+
+### 3.1 P2 — opt-in satellite tier-up — **in progress 2026-08-19**
+
+The implemented unit is one definition plus its generated `_b` wrapper. Its
+`FnAnalysis::promotion` starts in `INTERP`, increments at the single dynamic
+dispatcher, compiles synchronously at `LAMBDA_JIT_THRESHOLD` (default `3`),
+then publishes `boxed_entry` before upgrading each observed `Function` value
+to the ordinary context-owning boxed ABI. A compiler failure pins that
+definition to T0; it never changes the current run to whole-module JIT
+(D8.1.1v2 §5.1–§5.3, DI14).
+
+Each satellite has unique module and metadata BSS names because `find_import`
+is context-wide. Its global lowering map is reconstructed from the T0
+frame-plan's `NameEntry::slot` values and its `LambdaModuleLayout::var_count`
+is the complete interpreter slab size. Therefore scalar module reads and
+cross-satellite calls use the same per-`EvalContext` state as T0; no eager
+`_gvar_*` numbering is reused.
+
+Verified with `test/lambda/interp_auto_tier.ls` and threshold `3`:
+
+| Tier | Result | Evidence |
+|---|---|---|
+| `interp` | `[3, 4, 5, 6, 10, 5, 6, 7, 4, 2]` | T0 only, zero fallback |
+| `auto` | same | four satellite images: self-recursive `count_down`/`sum_down`, plus `bridge` reading module `offset` and dynamically invoking `shifted` |
+| `jit` | same | existing eager whole-module control |
+
+Still pinned to T0: captures/nested definitions, imports, and named-property
+or object/view code, because their environment/key-table artifacts are not
+yet Script-scoped satellite inputs. `LAMBDA_JIT_BACKEDGE` now defaults to
+`1024`: a T0 `while` or comprehension continuation increments the active
+definition's counter, and crossing it permits compilation only on a later
+dynamic entry — never through on-stack replacement. `interp_auto_tier.ls`
+forces `LAMBDA_JIT_THRESHOLD=100 LAMBDA_JIT_BACKEDGE=2`; its first
+`loop_count(4)` remains T0 and the second entry compiles the sole satellite.
+Full-AST call-site analysis persistence and the complete P2 matrix remain
+open. P3's restricted `CONST`/`PREDICATE` modes, P4's persistent REPL state,
+and P5's default flip are blocked on their stated design gates; `LAMBDA_TIER`
+unset remains `jit`.
 
 ## 4. Walker ↔ helper boundary rules (normative for both phases)
 

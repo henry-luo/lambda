@@ -20,7 +20,7 @@
 typedef enum LambdaTier {
     LAMBDA_TIER_JIT = 0,   // today's eager whole-module MIR Direct pipeline
     LAMBDA_TIER_INTERP,    // T0 only, never promote
-    LAMBDA_TIER_AUTO,      // T0 + per-function promotion (P2; P0/P1 fall back to JIT)
+    LAMBDA_TIER_AUTO,      // T0 + per-function satellite promotion (P2)
 } LambdaTier;
 
 // Parsed once at startup from LAMBDA_TIER; unset or `jit` keeps the shipped
@@ -155,6 +155,11 @@ bool interp_plan_script(Script* script);
 // current walker. On false, `*reject` receives the first unsupported kind.
 bool interp_scan_supported(Script* script, AstNodeType* reject);
 
+// True only for the currently implemented P2 satellite boundary: non-async,
+// no captures/imports/properties. Module bindings are read from T0's shared
+// slab; a rejected function remains T0 for semantic safety.
+bool interp_satellite_supported(const AstFuncNode* fn);
+
 // Human-readable node kind, for fallback diagnostics.
 const char* interp_node_kind_name(AstNodeType kind);
 
@@ -172,6 +177,14 @@ Item interp_call(Function* fn, const Item* args, int argc);
 #ifdef __cplusplus
 }
 #endif
+
+// Called by the shared dynamic dispatcher immediately before invoking a T0
+// function. On success it upgrades that Function in place to its published
+// boxed MIR entry and returns true; on a miss/pinned definition it returns
+// false and the dispatcher executes interp_call normally. T0 loop backedges
+// mark the definition for promotion at a later entry; no frame is replaced
+// while it is active (no OSR, D8.1.1v2 §5.1).
+bool interp_promote_function_if_hot(Function* fn);
 
 // Executes an already-loaded, already-planned Script under T0. Arms the
 // EXECUTION_BOUNDARY recovery frame, opens the module top-level frame, and

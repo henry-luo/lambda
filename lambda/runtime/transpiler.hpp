@@ -209,6 +209,12 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                    uint64_t* out_mir_function_count = nullptr,
                                    uint64_t* out_mir_instruction_count = nullptr);
 
+// P2: compile one T0-supported definition into a Script-owned MIR satellite.
+// Its module bindings are read from the existing T0 slab; the resulting
+// address has the normal generated boxed ABI.
+bool compile_ast_function_satellite(Runtime* runtime, Script* script,
+                                    const AstFuncNode* fn, void** out_boxed_entry);
+
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
 // Shared by the MIR Direct handoff and the T0 plan-only load path.
 void script_adopt_transpiler(Script* script, Transpiler* tp);

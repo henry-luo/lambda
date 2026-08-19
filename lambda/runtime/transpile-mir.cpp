@@ -119,6 +119,11 @@ struct MirTranspiler {
     Runtime* runtime;
     bool is_main;
     int script_index;
+    // P2 satellite lowering uses the T0 Script's already planned module slab
+    // rather than allocating eager MIR `_gvar_*` references. Calls to any
+    // definition except this target are dynamic through those Function slots.
+    Script* interp_module_owner;
+    AstFuncNode* satellite_target;
 
     // Pattern type list (shared with Script's type_list for const_pattern access)
     ArrayList* type_list;
@@ -5386,7 +5391,9 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             // Only use the function reference path if the function is NOT stored
             // as a captured variable (closures store captured functions as vars)
             MirVarEntry* cap_var = find_var(mt, name_buf);
-            if (!cap_var) {
+            bool satellite_dynamic_target = mt->satellite_target &&
+                entry_node != (AstNode*)mt->satellite_target;
+            if (!cap_var && !satellite_dynamic_target) {
                 goto function_reference;
             }
         }
@@ -16595,7 +16602,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         MirVarEntry* ident_var = find_var(mt, ident_name_str);
         bool is_fn_variable = (ident_var != nullptr);
 
-        if (!is_fn_variable && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
+        bool satellite_dynamic_target = mt->satellite_target && entry_node &&
+            (entry_node->node_type == AST_NODE_FUNC ||
+             entry_node->node_type == AST_NODE_FUNC_EXPR ||
+             entry_node->node_type == AST_NODE_PROC) &&
+            entry_node != (AstNode*)mt->satellite_target;
+        if (!is_fn_variable && !satellite_dynamic_target && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
             entry_node->node_type == AST_NODE_FUNC_EXPR ||
             entry_node->node_type == AST_NODE_PROC)) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
@@ -16615,7 +16627,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (local_func) fn_mangled = raw_name;
         }
 
-        if (fn_mangled && (local_func || entry_node)) {
+        if (!satellite_dynamic_target && fn_mangled && (local_func || entry_node)) {
             log_debug("mir: DIRECT call '%s' local_func=%p entry_type=%d",
                 fn_mangled, (void*)local_func,
                 entry_node ? entry_node->node_type : -1);
@@ -25402,6 +25414,35 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
     }
 }
 
+// Satellites share the T0 module slab. Reconstruct only the lowering map from
+// its already-planned NameEntries; no `_gvar_*` BSS exists here because those
+// eager-module slots have a different numbering and omit function values.
+static void prepass_create_interp_module_vars(MirTranspiler* mt,
+        Script* module_owner) {
+    AstScript* root = module_owner ? (AstScript*)module_owner->ast_root : NULL;
+    NameScope* globals = root ? root->global_vars : NULL;
+    if (!mt || !globals) return;
+    for (NameEntry* entry = globals->first; entry; entry = entry->next) {
+        if (!entry->storage_assigned || entry->binding_storage != BINDING_STORAGE_MODULE ||
+                entry->import || !entry->name) {
+            continue;
+        }
+        AstNode* node = entry->node;
+        TypeId type_id = node && node->type ? node->type->type_id : LMD_TYPE_ANY;
+        if (node && (node->node_type == AST_NODE_FUNC ||
+                node->node_type == AST_NODE_FUNC_EXPR ||
+                node->node_type == AST_NODE_PROC)) {
+            type_id = LMD_TYPE_FUNC;
+        }
+        GlobalVarEntry global = {};
+        global.name = mir_em_persist_cstr(&mt->em, entry->name->chars).str;
+        global.slot = (uint32_t)entry->slot;
+        global.type_id = type_id;
+        global.mir_type = type_to_mir(type_id);
+        hashmap_set(mt->global_vars, &global);
+    }
+}
+
 // ============================================================================
 // Pre-pass: compile string/symbol pattern definitions
 // Walks AST to find pattern defs and compiles them to RE2 regex,
@@ -26024,11 +26065,39 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
 // AST root transpilation
 // ============================================================================
 
-void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
-                       ArrayList* type_list, ArrayList* const_list,
-                       Pool* script_pool, NamePool* name_pool,
-                       ArrayList** out_property_keys) {
+typedef struct MirModuleNames {
+    const char* module;
+    const char* consts_bss;
+    const char* layout_bss;
+    const char* type_list_bss;
+    const char* property_specs_bss;
+} MirModuleNames;
+
+typedef struct MirModuleArtifacts {
+    MIR_item_t consts_bss;
+    MIR_item_t layout_bss;
+    MIR_item_t type_list_bss;
+} MirModuleArtifacts;
+
+static const MirModuleNames MIR_DEFAULT_MODULE_NAMES = {
+    "lambda_script", "_mod_consts_ptr", "_mod_layout",
+    "_mod_type_list_ptr", "_mod_property_specs",
+};
+
+static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
+                                    const char* source, ArrayList* type_list,
+                                    ArrayList* const_list, Pool* script_pool,
+                                    NamePool* name_pool,
+                                    const MirModuleNames* module_names,
+                                    ArrayList** out_property_keys,
+                                    MirModuleArtifacts* out_artifacts,
+                                    Script* interp_module_owner,
+                                    AstFuncNode* satellite_target) {
     log_notice("transpile AST to MIR (direct)");
+
+    const MirModuleNames* names = module_names ? module_names :
+        &MIR_DEFAULT_MODULE_NAMES;
+    if (out_artifacts) memset(out_artifacts, 0, sizeof(*out_artifacts));
 
     MirTranspiler mt;
     memset(&mt, 0, sizeof(mt));
@@ -26045,6 +26114,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.em.convert_rep = lambda_convert_rep;
     mt.em.lookup_import_metadata = lambda_lookup_import_metadata;
     mt.script = script;
+    mt.interp_module_owner = interp_module_owner;
+    mt.satellite_target = satellite_target;
     mt.source = source;
     mt.is_main = true;
     mt.type_list = type_list;
@@ -26063,22 +26134,27 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     if (out_property_keys) *out_property_keys = NULL;
 
     // Create module
-    mt.module = MIR_new_module(ctx, "lambda_script");
+    mt.module = MIR_new_module(ctx, names->module);
 
     // Pre-pass: compile string/symbol patterns
     prepass_compile_patterns(&mt, script->child);
 
-    // Pre-pass: create BSS items for module-level variables
-    prepass_create_global_vars(&mt, script->child);
+    // A satellite reconstructs the existing interpreter slab mapping. Eager
+    // lowering keeps its dedicated BSS references and numbering unchanged.
+    if (mt.interp_module_owner) {
+        prepass_create_interp_module_vars(&mt, mt.interp_module_owner);
+    } else {
+        prepass_create_global_vars(&mt, script->child);
+    }
 
     // MIR may relocate its BSS item table while new BSS entries are added.
     // Create every global-reference BSS first, then retain these module BSS
     // handles for generated code; otherwise generated code can load metadata
     // through a stale MIR item after the compiler has released its tables.
-    mt.consts_bss = MIR_new_bss(ctx, "_mod_consts_ptr", 8);
+    mt.consts_bss = MIR_new_bss(ctx, names->consts_bss, 8);
     mt.em.consts_bss = mt.consts_bss;
-    mt.module_layout_bss = MIR_new_bss(ctx, "_mod_layout", sizeof(LambdaModuleLayout));
-    mt.type_list_bss = MIR_new_bss(ctx, "_mod_type_list_ptr", 8);
+    mt.module_layout_bss = MIR_new_bss(ctx, names->layout_bss, sizeof(LambdaModuleLayout));
+    mt.type_list_bss = MIR_new_bss(ctx, names->type_list_bss, 8);
 
     // M2: collect every call site and escaping reference before any inference
     // runs, so params with a closed, uniformly-typed caller set can be narrowed.
@@ -26277,7 +26353,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         if (bytes_size > UINT32_MAX) {
             log_error("module-key-link: property key image is too large");
         } else {
-            MIR_new_bss(ctx, "_mod_property_specs", bytes_size);
+            MIR_new_bss(ctx, names->property_specs_bss, bytes_size);
         }
     }
 
@@ -26302,8 +26378,130 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
     hashmap_free(mt.callsite_info);
+    if (out_artifacts) {
+        out_artifacts->consts_bss = mt.consts_bss;
+        out_artifacts->layout_bss = mt.module_layout_bss;
+        out_artifacts->type_list_bss = mt.type_list_bss;
+    }
     if (out_property_keys) *out_property_keys = mt.property_keys;
     else if (mt.property_keys) arraylist_free(mt.property_keys);
+}
+
+void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
+                       ArrayList* type_list, ArrayList* const_list,
+                       Pool* script_pool, NamePool* name_pool,
+                       ArrayList** out_property_keys) {
+    transpile_mir_ast_named(ctx, script, source, type_list, const_list,
+        script_pool, name_pool, &MIR_DEFAULT_MODULE_NAMES,
+        out_property_keys, NULL, NULL, NULL);
+}
+
+// P2's satellite has its own BSS symbols even though it shares the Script's
+// MIR context. `find_import` is context-wide (not module-qualified), so using
+// the eager module's `_mod_*` names would bind a later function to the first
+// satellite's image after a relink. Stable names make every satellite retain
+// its own immutable layout while all of them address the same EvalContext slab.
+static bool make_satellite_module_names(Script* script, uint32_t sequence,
+        MirModuleNames* out) {
+    if (!script || !script->name_pool || !out) return false;
+    char module[96];
+    char consts[96];
+    char layout[96];
+    char types[96];
+    char keys[96];
+    snprintf(module, sizeof(module), "lambda_sat_%u", sequence);
+    snprintf(consts, sizeof(consts), "_sat_%u_consts", sequence);
+    snprintf(layout, sizeof(layout), "_sat_%u_layout", sequence);
+    snprintf(types, sizeof(types), "_sat_%u_type_list", sequence);
+    snprintf(keys, sizeof(keys), "_sat_%u_property_specs", sequence);
+    String* module_name = name_pool_create_len(script->name_pool, module, strlen(module));
+    String* consts_name = name_pool_create_len(script->name_pool, consts, strlen(consts));
+    String* layout_name = name_pool_create_len(script->name_pool, layout, strlen(layout));
+    String* types_name = name_pool_create_len(script->name_pool, types, strlen(types));
+    String* keys_name = name_pool_create_len(script->name_pool, keys, strlen(keys));
+    if (!module_name || !consts_name || !layout_name || !types_name || !keys_name) return false;
+    out->module = module_name->chars;
+    out->consts_bss = consts_name->chars;
+    out->layout_bss = layout_name->chars;
+    out->type_list_bss = types_name->chars;
+    out->property_specs_bss = keys_name->chars;
+    return true;
+}
+
+bool compile_ast_function_satellite(Runtime* runtime, Script* script,
+        const AstFuncNode* fn, void** out_boxed_entry) {
+    if (out_boxed_entry) *out_boxed_entry = NULL;
+    if (!runtime || !script || !fn || !fn->analysis || !out_boxed_entry ||
+            !interp_satellite_supported(fn)) {
+        return false;
+    }
+    if (!script->jit_context) {
+        script->jit_context = jit_init(runtime->optimize_level);
+        script->mir_gen_initialized = true;
+        if (!script->jit_context) {
+            log_error("interp-tier: could not create satellite MIR context");
+            return false;
+        }
+    }
+
+    MirModuleNames names = {};
+    if (!make_satellite_module_names(script, ++script->interp_satellite_count,
+            &names)) {
+        log_error("interp-tier: could not allocate satellite symbol names");
+        return false;
+    }
+
+    // `AstFuncNode::next` is the module declaration chain. The temporary root
+    // must contain exactly this definition or a promotion would accidentally
+    // lower the rest of the module again.
+    AstFuncNode satellite_fn = *fn;
+    satellite_fn.next = NULL;
+    AstScript satellite_root = {};
+    satellite_root.node_type = AST_SCRIPT;
+    satellite_root.child = (AstNode*)&satellite_fn;
+    AstScript* source_root = (AstScript*)script->ast_root;
+    satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
+
+    MirModuleArtifacts artifacts = {};
+    ArrayList* property_keys = NULL;
+    transpile_mir_ast_named(script->jit_context, &satellite_root, script->source,
+        script->type_list, script->const_list, script->pool, script->name_pool,
+        &names, &property_keys, &artifacts, script, (AstFuncNode*)fn);
+    if (property_keys && property_keys->length != 0) {
+        // The eligibility scan should make this unreachable. Refuse publication
+        // if it ever drifts instead of giving satellites unequal key layouts.
+        log_error("interp-tier: satellite unexpectedly emitted property keys");
+        arraylist_free(property_keys);
+        return false;
+    }
+    if (property_keys) arraylist_free(property_keys);
+
+    MIR_link(script->jit_context, MIR_set_gen_interface, import_resolver);
+    StrBuf* entry_name = strbuf_new_cap(96);
+    write_fn_name_ex(entry_name, (AstFuncNode*)fn, NULL, "_b");
+    void* entry = entry_name ? jit_gen_func(script->jit_context, entry_name->str) : NULL;
+    if (entry_name) strbuf_free(entry_name);
+    if (!entry || !artifacts.consts_bss || !artifacts.consts_bss->addr ||
+            !artifacts.type_list_bss || !artifacts.type_list_bss->addr ||
+            !artifacts.layout_bss || !artifacts.layout_bss->addr) {
+        log_error("interp-tier: satellite link did not publish its immutable BSS");
+        return false;
+    }
+
+    *(void**)artifacts.consts_bss->addr = script->const_list
+        ? script->const_list->data : NULL;
+    *(void**)artifacts.type_list_bss->addr = script->type_list;
+    LambdaModuleLayout* layout = (LambdaModuleLayout*)artifacts.layout_bss->addr;
+    memset(layout, 0, sizeof(*layout));
+    layout->module_id = script->module_state_id;
+    // Satellites observe the exact T0 slab, including function-value slots.
+    layout->var_count = script->interp_slab_count;
+
+    *out_boxed_entry = entry;
+    log_notice("interp-tier: satellite compiled function='%s' image=%u",
+        fn->name ? fn->name->chars : "<anonymous>",
+        (unsigned)script->interp_satellite_count);
+    return true;
 }
 
 // ============================================================================

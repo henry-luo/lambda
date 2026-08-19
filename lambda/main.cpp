@@ -1905,9 +1905,9 @@ static int node_runner_main(int argc, char** argv) {
 }
 
 // LAMBDA_TIER selects the execution tier (D8.1.1v2). Unset or `jit` keeps the
-// shipped eager whole-module pipeline bit-for-bit; `interp` runs T0. `auto`
-// (T0 + per-function promotion) needs the P2 promotion machinery, so it is
-// accepted and reported but still runs as `jit`.
+// shipped eager whole-module pipeline bit-for-bit; `interp` runs T0 and
+// `auto` starts in T0, promoting eligible functions through P2's
+// satellite entry path.
 static void apply_lambda_tier_env(void) {
     const char* text = getenv("LAMBDA_TIER");
     if (!text || !text[0]) return;
@@ -1915,10 +1915,6 @@ static void apply_lambda_tier_env(void) {
     if (!lambda_tier_parse(text, &tier)) {
         log_warn("interp: unrecognized LAMBDA_TIER='%s'; using jit", text);
         return;
-    }
-    if (tier == LAMBDA_TIER_AUTO) {
-        log_notice("interp: LAMBDA_TIER=auto needs per-function promotion (P2); using jit");
-        tier = LAMBDA_TIER_JIT;
     }
     lambda_tier_set(tier);
 }
@@ -1932,7 +1928,6 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
     if (strncmp(arg, "--tier=", 7) == 0) {
         LambdaTier tier = LAMBDA_TIER_JIT;
         if (lambda_tier_parse(arg + 7, &tier)) {
-            if (tier == LAMBDA_TIER_AUTO) tier = LAMBDA_TIER_JIT;
             lambda_tier_set(tier);
         } else {
             log_warn("interp: unrecognized %s; using jit", arg);
