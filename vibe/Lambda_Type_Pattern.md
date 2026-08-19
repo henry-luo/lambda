@@ -6,7 +6,7 @@
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S11.1.1–S11.1.3 (bracket types, pattern islands, range types), S11.2.1 (match arms incl. constrained-arm spelling), S10.1.1 (`|` is union everywhere), S10.1.3 (`~` scoping innermost-wins), S10.3.1 (keyword operators), S7.4.5 (system fn failures are values, never `T^E`), S7.5.1 (`T^` must-engage receiving positions), SO9 (constrained-type predicate enforcement unowned)
 - **Related:** `vibe/Lambda_Grammar_Reduce4.md` (parser-size campaign; states × symbols levers), `vibe/Lambda_Type_String_Pattern.md` / `Lambda_Type_String_Pattern2.md` (island deliberations), `doc/Lambda_Type.md` §Constrained Types, `doc/Lambda_Expr_Stam.md` §Filter (`that`)
 - **ID series:** `CT#` (constrained-type hoisting decisions, §3)
-- **Implementation plan:** `vibe/Lambda_Impl_Type_Scanner.md` (stages SC0–SC7: hoist, grammar split — `grammar-lambda.js` official full grammar / trimmed `grammar.js` production, external scanner tokens, hand parser, differential verification)
+- **Implementation plan:** `vibe/Lambda_Grammar_Reduce5.md` (stages SC0–SC7: hoist, grammar split — `grammar-lambda.js` official full grammar / trimmed `grammar.js` production, external scanner tokens, hand parser, differential verification)
 
 ## 1. Occurrence quantifiers (decided 2026-02, landed)
 

@@ -11,7 +11,7 @@
 // island each arrive at the parser as ONE opaque token. The scanner only finds
 // where such a token ENDS — it never validates the interior. The Lambda side
 // (lambda/runtime/parse_type_pattern.cpp) parses the token's source text into
-// `Type*` directly. See vibe/Lambda_Impl_Type_Scanner.md.
+// `Type*` directly. See vibe/Lambda_Grammar_Reduce5.md.
 //
 // The split matters: this file is compiled standalone by the package's language
 // bindings, so it must not reach into the Lambda runtime, and tree-sitter may
@@ -28,9 +28,10 @@ enum TokenType {
     // apart. Sharing TYPE_PATTERN_TOKEN would consume the name before the
     // parser ever sees the ':'.
     CONTENT_TYPE_TOKEN,
-    // View/edit patterns may be preceded by `name:`, so they need the same
-    // name-versus-pattern rule that content position does.
-    VIEW_ATOM_TOKEN,
+    // The declaration-only `T (^ E)?` type sub-form.
+    RETURN_TYPE_TOKEN,
+    // The complete view/edit model pattern (atom or `|` union).
+    VIEW_PATTERN_TOKEN,
 };
 
 void *tree_sitter_lambda_external_scanner_create(void) {
@@ -387,6 +388,148 @@ static bool scan_type_pattern(TSLexer *lexer, bool primary_only, bool *out_bare_
 }
 
 // ---------------------------------------------------------------------------
+// declaration return contracts and view patterns
+// ---------------------------------------------------------------------------
+
+static bool scan_return_type_atom(TSLexer *lexer, char *out_word,
+        unsigned out_word_cap, unsigned *out_length) {
+    if (!is_identifier_start(lexer->lookahead)) { return false; }
+    char discarded_word[16];
+    char *word = out_word ? out_word : discarded_word;
+    unsigned word_cap = out_word ? out_word_cap : sizeof(discarded_word);
+    unsigned length = consume_word(lexer, word, word_cap);
+    if (out_length) { *out_length = length; }
+    while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+    if (lexer->lookahead == '?' || lexer->lookahead == '+' || lexer->lookahead == '*') {
+        lexer->advance(lexer, false);
+        return true;
+    }
+    if (lexer->lookahead != '[') { return true; }
+    lexer->advance(lexer, false);
+    while (!lexer->eof(lexer) && lexer->lookahead != ']') {
+        lexer->advance(lexer, false);
+    }
+    if (lexer->eof(lexer)) { return false; }
+    lexer->advance(lexer, false);
+    return true;
+}
+
+static bool is_return_type_statement_keyword(const char *word, unsigned length) {
+    return (length == 2 && strcmp(word, "if") == 0) ||
+        (length == 2 && strcmp(word, "fn") == 0) ||
+        (length == 2 && strcmp(word, "pn") == 0) ||
+        (length == 2 && strcmp(word, "on") == 0) ||
+        (length == 3 && strcmp(word, "for") == 0) ||
+        (length == 3 && strcmp(word, "let") == 0) ||
+        (length == 3 && strcmp(word, "var") == 0) ||
+        (length == 3 && strcmp(word, "pub") == 0) ||
+        (length == 4 && strcmp(word, "else") == 0) ||
+        (length == 4 && strcmp(word, "view") == 0) ||
+        (length == 4 && strcmp(word, "edit") == 0) ||
+        (length == 4 && strcmp(word, "type") == 0) ||
+        (length == 4 && strcmp(word, "case") == 0) ||
+        (length == 5 && strcmp(word, "while") == 0) ||
+        (length == 5 && strcmp(word, "match") == 0) ||
+        (length == 5 && strcmp(word, "raise") == 0) ||
+        (length == 5 && strcmp(word, "state") == 0) ||
+        (length == 5 && strcmp(word, "apply") == 0) ||
+        (length == 6 && strcmp(word, "return") == 0) ||
+        (length == 7 && strcmp(word, "default") == 0) ||
+        (length == 8 && strcmp(word, "continue") == 0) ||
+        (length == 8 && strcmp(word, "function") == 0);
+}
+
+static bool scan_return_type_token(TSLexer *lexer) {
+    skip_extras(lexer);
+    char first_word[16];
+    unsigned first_length = 0;
+    if (!scan_return_type_atom(lexer, first_word, sizeof(first_word),
+            &first_length)) { return false; }
+    // A return slot may start with an alias, but a control-flow keyword such
+    // as `else {` is never an alias. Refusing it prevents this opaque token
+    // from swallowing ordinary statement bodies during GLR recovery.
+    if (is_return_type_statement_keyword(first_word, first_length)) { return false; }
+    lexer->mark_end(lexer);
+
+    bool saw_raised_channel = false;
+    for (;;) {
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        if (lexer->lookahead == '^' && !saw_raised_channel) {
+            lexer->advance(lexer, false);
+            lexer->mark_end(lexer);
+            saw_raised_channel = true;
+            while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+            if (!scan_return_type_atom(lexer, NULL, 0, NULL)) { break; }
+            lexer->mark_end(lexer);
+            continue;
+        }
+        if (lexer->lookahead != '|' && lexer->lookahead != '&' && lexer->lookahead != '!') {
+            break;
+        }
+        lexer->advance(lexer, false);
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        // A partial union here is an expression operator (notably `|>`), not
+        // a return contract. Do not turn its left identifier into a token.
+        if (!scan_return_type_atom(lexer, NULL, 0, NULL)) { return false; }
+        lexer->mark_end(lexer);
+    }
+    // `return_type` is declaration-only. During recovery the GLR parser can
+    // offer it beside an ordinary expression (`raise error(...)`), so require
+    // the declaration continuation before committing to this opaque token.
+    while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+    if (lexer->lookahead == '{') { return true; }
+    if (lexer->lookahead == '=') {
+        lexer->advance(lexer, false);
+        return lexer->lookahead == '>';
+    }
+    if (!is_identifier_start(lexer->lookahead)) { return false; }
+    char word[8];
+    unsigned length = consume_word(lexer, word, sizeof(word));
+    return length == 5 && strcmp(word, "state") == 0;
+}
+
+static bool scan_view_atom(TSLexer *lexer) {
+    if (lexer->lookahead == '<') {
+        int depth = 0;
+        do {
+            int32_t ch = lexer->lookahead;
+            if (ch == '"' || ch == '\'') { consume_quoted(lexer, ch); continue; }
+            if (ch == '<') { depth++; }
+            else if (ch == '>') { depth--; }
+            lexer->advance(lexer, false);
+        } while (!lexer->eof(lexer) && depth > 0);
+        return depth == 0;
+    }
+    if (!is_identifier_start(lexer->lookahead)) { return false; }
+    char word[16];
+    consume_word(lexer, word, sizeof(word));
+    return true;
+}
+
+static bool scan_view_pattern_token(TSLexer *lexer) {
+    skip_extras(lexer);
+    bool first_is_word = is_identifier_start(lexer->lookahead);
+    if (!scan_view_atom(lexer)) { return false; }
+    lexer->mark_end(lexer);
+
+    // `view name: Pattern` must leave the leading name to the ordinary
+    // identifier rule; only the colon distinguishes it from a bare pattern.
+    if (first_is_word) {
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        if (lexer->lookahead == ':') { return false; }
+    }
+
+    while (lexer->lookahead == '|') {
+        lexer->advance(lexer, false);
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        if (!scan_view_atom(lexer)) { return true; }
+        lexer->mark_end(lexer);
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // contextual `start` keyword (unchanged)
 // ---------------------------------------------------------------------------
 
@@ -446,15 +589,14 @@ bool tree_sitter_lambda_external_scanner_scan(
         return true;
     }
 
-    if (valid_symbols[PATTERN_ISLAND_TOKEN]) {
-        skip_extras(lexer);
-        if (lexer->lookahead == '\\' && consume_island(lexer)) {
-            lexer->mark_end(lexer);
-            lexer->result_symbol = PATTERN_ISLAND_TOKEN;
-            return true;
-        }
-        // not an island: fall through so the other pattern tokens still get a
-        // chance in states where several are valid
+    // Islands are first-class values. Probe only their unambiguous backslash
+    // prefix: skip_extras would inspect a rooted path's '/', which must remain
+    // available to the complete-path scanner below.
+    if (valid_symbols[PATTERN_ISLAND_TOKEN] && lexer->lookahead == '\\' &&
+            consume_island(lexer)) {
+        lexer->mark_end(lexer);
+        lexer->result_symbol = PATTERN_ISLAND_TOKEN;
+        return true;
     }
 
     // Content position: a bare name may be a FIELD name instead, and only the
@@ -479,38 +621,14 @@ bool tree_sitter_lambda_external_scanner_scan(
         return false;  // a field name: let the parser lex it as an identifier
     }
 
-    // View/edit patterns are the restricted atom set element|identifier|
-    // base_type, so accept ONLY a bare word or one balanced <...> element.
-    // Anything else — the body '{', params '(' — belongs to the enclosing view
-    // statement, and a lone `word :` is the view's optional name prefix.
-    if (valid_symbols[VIEW_ATOM_TOKEN]) {
-        skip_extras(lexer);
-        if (lexer->lookahead == '<') {
-            int depth = 0;
-            do {
-                int32_t ch = lexer->lookahead;
-                if (ch == '"' || ch == '\'') { consume_quoted(lexer, ch); continue; }
-                if (ch == '<') { depth++; }
-                else if (ch == '>') { depth--; }
-                lexer->advance(lexer, false);
-            } while (!lexer->eof(lexer) && depth > 0);
-            if (depth != 0) { return false; }
-            lexer->mark_end(lexer);
-            lexer->result_symbol = VIEW_ATOM_TOKEN;
-            return true;
-        }
-        if (is_identifier_start(lexer->lookahead)) {
-            char word[16];
-            unsigned n = consume_word(lexer, word, sizeof(word));
-            (void)n;
-            lexer->mark_end(lexer);
-            // skip=false: see the content branch — a skip here zeroes the token
-            while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-            if (lexer->lookahead == ':') { return false; }  // the name prefix
-            lexer->result_symbol = VIEW_ATOM_TOKEN;
-            return true;
-        }
-        return false;
+    if (valid_symbols[RETURN_TYPE_TOKEN] && scan_return_type_token(lexer)) {
+        lexer->result_symbol = RETURN_TYPE_TOKEN;
+        return true;
+    }
+
+    if (valid_symbols[VIEW_PATTERN_TOKEN] && scan_view_pattern_token(lexer)) {
+        lexer->result_symbol = VIEW_PATTERN_TOKEN;
+        return true;
     }
 
     if (valid_symbols[TYPE_PATTERN_TOKEN] && scan_type_pattern(lexer, false, NULL)) {

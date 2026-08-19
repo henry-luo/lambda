@@ -575,6 +575,7 @@ module.exports = {
 
     // Path wildcard: * (single segment) or ** (recursive, zero or more segments)
     path_wildcard: _ => token(choice('**', '*')),
+
     _binary_eq_symbol_op: _ => token(choice('==', '!=')),
     _binary_eq_word_op: _ => token(choice('eq', 'ne')),
     _binary_word_relation_op: _ => token(choice('lt', 'le', 'ge', 'gt')),
@@ -1039,6 +1040,7 @@ module.exports = {
         optional(field('error', $.return_type_pattern))
       ))
     )),
+    
     type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as',
       $._annotation_type)),
 

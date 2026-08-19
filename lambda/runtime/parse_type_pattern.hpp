@@ -16,7 +16,7 @@
 // element. So the parser produces the tier the consumers already understand.
 //
 // Grammar reference: lambda/tree-sitter-lambda/grammar-lambda.js is normative.
-// Design: vibe/Lambda_Impl_Type_Scanner.md, vibe/Lambda_Type_Pattern.md §3.
+// Design: vibe/Lambda_Grammar_Reduce5.md, vibe/Lambda_Type_Pattern.md §3.
 
 #include "ast.hpp"
 
@@ -28,3 +28,10 @@ AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin, const char* 
 // Parse a single primary type — the `?T` query operand and view-pattern atoms.
 // Never consumes a top-level `|`, so a following union stays a value union.
 AstNode* parse_primary_type_text(Transpiler* tp, const char* begin, const char* end, TSNode origin);
+
+// Parse the restricted declaration return contract: `T`, `T | U`, `T^`, or
+// `T^E`. It returns the same AST_NODE_FUNC_TYPE wrapper as build_return_type.
+AstNode* parse_return_type_text(Transpiler* tp, const char* begin, const char* end, TSNode origin);
+
+// Parse a view/edit model pattern: an element, name/base type, or `|` union.
+AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin, const char* end, TSNode origin);

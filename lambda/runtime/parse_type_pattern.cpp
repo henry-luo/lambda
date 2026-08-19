@@ -968,6 +968,81 @@ AstNode* parse_union(Lexer* lx) {
     return left;
 }
 
+// Declaration return types deliberately admit only named/base atoms plus one
+// occurrence suffix. Keeping that boundary explicit prevents a function body
+// `{...}` or a nested fn/map type from being swallowed by the scanner token.
+AstNode* parse_return_pattern_atom(Lexer* lx) {
+    skip_space(lx);
+    StrView word = peek_word(lx);
+    if (!word.length || word_is(word, "fn") || word_is(word, "true") ||
+            word_is(word, "false")) {
+        fail(lx, "expected a return type");
+        return NULL;
+    }
+    AstNode* atom = parse_primary(lx);
+    if (!atom) { return NULL; }
+    skip_space(lx);
+    return apply_occurrence(lx, atom);
+}
+
+Type* return_contract_type(AstNode* node) {
+    if (!node || !node->type) { return &TYPE_ERROR; }
+    if (node->type->type_id == LMD_TYPE_TYPE) {
+        Type* inner = ((TypeType*)node->type)->type;
+        return inner ? inner : &TYPE_ERROR;
+    }
+    return node->type;
+}
+
+AstNode* parse_return_type_pattern(Lexer* lx) {
+    AstNode* left = parse_return_pattern_atom(lx);
+    if (!left) { return NULL; }
+
+    for (;;) {
+        skip_space(lx);
+        if (lx->p >= lx->end || (*lx->p != '|' && *lx->p != '&' && *lx->p != '!')) {
+            break;
+        }
+        const char* op_text = lx->p++;
+        AstNode* right = parse_return_pattern_atom(lx);
+        if (!right) { return NULL; }
+        Operator op = *op_text == '|' ? OPERATOR_UNION :
+            (*op_text == '&' ? OPERATOR_OR : OPERATOR_EXCLUDE);
+        left = (AstNode*)build_registered_binary_type(lx->tp, lx->origin,
+            left, right, left->type, right->type, op, {op_text, 1});
+    }
+    return left;
+}
+
+AstNode* parse_view_pattern_atom(Lexer* lx) {
+    skip_space(lx);
+    if (lx->p < lx->end && *lx->p == '<') {
+        lx->p++;
+        return parse_element_type(lx);
+    }
+    StrView word = peek_word(lx);
+    if (!word.length || word_is(word, "fn") || word_is(word, "true") ||
+            word_is(word, "false")) {
+        fail(lx, "expected a view pattern atom");
+        return NULL;
+    }
+    return parse_primary(lx);
+}
+
+AstNode* parse_view_pattern(Lexer* lx) {
+    AstNode* left = parse_view_pattern_atom(lx);
+    if (!left) { return NULL; }
+    while (at(lx, '|')) {
+        const char* op_text = lx->p++;
+        AstNode* right = parse_view_pattern_atom(lx);
+        if (!right) { return NULL; }
+        left = (AstNode*)build_registered_binary_type(lx->tp, lx->origin,
+            left, right, left->type, right->type, OPERATOR_UNION,
+            {op_text, 1});
+    }
+    return left;
+}
+
 }  // namespace
 
 AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin, const char* end, TSNode origin) {
@@ -984,4 +1059,39 @@ AstNode* parse_primary_type_text(Transpiler* tp, const char* begin, const char* 
     AstNode* node = parse_primary(&lx);
     if (!node || lx.failed) { return NULL; }
     return node;
+}
+
+AstNode* parse_return_type_text(Transpiler* tp, const char* begin, const char* end,
+        TSNode origin) {
+    Lexer lx = {tp, begin, end, origin, false};
+    AstNode* ok = parse_return_type_pattern(&lx);
+    if (!ok || lx.failed) { return NULL; }
+
+    skip_space(&lx);
+    bool can_raise = eat(&lx, '^');
+    Type* error_type = NULL;
+    if (can_raise) {
+        skip_space(&lx);
+        if (lx.p < lx.end) {
+            AstNode* error = parse_return_type_pattern(&lx);
+            if (!error || lx.failed) { return NULL; }
+            error_type = return_contract_type(error);
+        } else {
+            error_type = &TYPE_ERROR;
+        }
+    }
+    skip_space(&lx);
+    if (lx.p != lx.end) { fail(&lx, "trailing return contract input"); return NULL; }
+    return build_function_return_contract_node(tp, origin,
+        return_contract_type(ok), error_type, can_raise);
+}
+
+AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin, const char* end,
+        TSNode origin) {
+    Lexer lx = {tp, begin, end, origin, false};
+    AstNode* pattern = parse_view_pattern(&lx);
+    if (!pattern || lx.failed) { return NULL; }
+    skip_space(&lx);
+    if (lx.p != lx.end) { fail(&lx, "trailing view pattern input"); return NULL; }
+    return pattern;
 }

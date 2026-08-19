@@ -5,10 +5,13 @@
  *
  * This is the grammar that ships. It shares its core with the official full
  * grammar (`grammar-lambda.js`) through `grammar-common.js`; the difference is
- * the type layer below, where the whole type-pattern sub-language — type
- * patterns, string/symbol islands and all — arrives as opaque tokens from the
- * external scanner (src/scanner.c) and is parsed on the Lambda side by
- * lambda/runtime/parse_type_pattern.cpp.
+ * the type/path layer below. Full type patterns and string/symbol islands,
+ * declaration return contracts, and whole view patterns arrive as opaque
+ * tokens from the external scanner (src/scanner.c) and are parsed on the
+ * Lambda side by lambda/runtime/parse_type_pattern.cpp. Paths retain their
+ * lexical grammar boundary because `/` also means division and `.` also means
+ * member access, but Lambda parses every recognized static path directly to
+ * AST through lambda/runtime/parse_path_expr.cpp.
  *
  * Read grammar-lambda.js to learn what the type language accepts; it is the
  * normative statement. `make grammar-sync-check` guards the two against drift.
@@ -33,7 +36,14 @@ const typeLayer = {
     // Never consumes `|`, so `data?int | other` keeps `| other` as the value
     // union it is.
     _primary_type: $ => $.primary_type_pattern_token,
-    _view_atom_type: $ => $.view_atom_token,
+    // Retained only because grammar-common.js names the full-grammar helper.
+    // Production view_pattern below supersedes every reachable use.
+    _view_atom_type: $ => $.primary_type_pattern_token,
+
+    // Declaration return contracts and view model patterns are bounded type
+    // sub-forms with their own direct AST parsers.
+    return_type: $ => $.return_type_token,
+    view_pattern: $ => $.view_pattern_token,
 
     // Islands are first-class values (`let p = \(d[3])`), so they keep their
     // own token in value position.
@@ -57,7 +67,8 @@ module.exports = grammar({
     $.primary_type_pattern_token,
     $.pattern_island_token,
     $.content_type_token,
-    $.view_atom_token,
+    $.return_type_token,
+    $.view_pattern_token,
   ],
   rules: Object.assign({}, common.coreRules, typeLayer),
 });

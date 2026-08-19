@@ -10,7 +10,7 @@
  * It is NOT the grammar the product ships. `grammar.js` is the optimized
  * production grammar: it shares this file's core (via grammar-common.js) and
  * replaces the type layer below with external scanner tokens, which a hand
- * parser reads (see vibe/Lambda_Impl_Type_Scanner.md). The two grammars must
+ * parser reads (see vibe/Lambda_Grammar_Reduce5.md). The two grammars must
  * accept the same language; `make test-grammar-diff` checks that.
  *
  * Generated artifacts from this file are test-only and live under ./temp/.

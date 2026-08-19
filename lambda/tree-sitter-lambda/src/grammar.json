@@ -6077,22 +6077,8 @@
       "name": "_view_atom_type"
     },
     "view_pattern": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "_view_pattern_atom"
-        },
-        {
-          "type": "ALIAS",
-          "content": {
-            "type": "SYMBOL",
-            "name": "view_pattern_union"
-          },
-          "named": true,
-          "value": "binary_type"
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "view_pattern_token"
     },
     "view_pattern_union": {
       "type": "PREC_LEFT",
@@ -8598,54 +8584,8 @@
       }
     },
     "return_type": {
-      "type": "PREC_RIGHT",
-      "value": 0,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "FIELD",
-            "name": "ok",
-            "content": {
-              "type": "SYMBOL",
-              "name": "return_type_pattern"
-            }
-          },
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "^"
-                  },
-                  {
-                    "type": "CHOICE",
-                    "members": [
-                      {
-                        "type": "FIELD",
-                        "name": "error",
-                        "content": {
-                          "type": "SYMBOL",
-                          "name": "return_type_pattern"
-                        }
-                      },
-                      {
-                        "type": "BLANK"
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
-          }
-        ]
-      }
+      "type": "SYMBOL",
+      "name": "return_type_token"
     },
     "type_assign": {
       "type": "SEQ",
@@ -9121,7 +9061,7 @@
     },
     "_view_atom_type": {
       "type": "SYMBOL",
-      "name": "view_atom_token"
+      "name": "primary_type_pattern_token"
     },
     "_value_island": {
       "type": "SYMBOL",
@@ -9322,7 +9262,11 @@
     },
     {
       "type": "SYMBOL",
-      "name": "view_atom_token"
+      "name": "return_type_token"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "view_pattern_token"
     }
   ],
   "inline": [
