@@ -8,26 +8,27 @@
  * Phase 4 additions: HMAC (native), randomBytes (OS entropy), randomUUID (v4),
  * createHash (streaming hash API), crypto module namespace.
  */
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "../jube/jube_registry.h"
-#include "../module/node_core/node_runtime_state.hpp"
-#include "js_typed_array.h"
-#include "js_error_codes.h"
-#include "../lambda-data.hpp"
-#include "../lambda.hpp"
+#include "../../js/js_runtime.h"
+#include "../../js/js_runtime_state.hpp"
+#include "../../jube/jube_registry.h"
+#include "../node_core/node_runtime_state.hpp"
+#include "../../js/js_typed_array.h"
+#include "../../js/js_error_codes.h"
+#include "../../lambda-data.hpp"
+#include "../../lambda.hpp"
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
 #include <cstring>
-#include "../../lib/mem.h"
-#include "../../lib/hex.h"
-#include "../../lib/base64.h"
-#include "../../lib/uuid.h"
-#include "../../lib/digest.h"
-#include "../../lib/utf.h"
+#include "../../../lib/mem.h"
+#include "../../../lib/hex.h"
+#include "../../../lib/base64.h"
+#include "../../../lib/uuid.h"
+#include "../../../lib/digest.h"
+#include "../../../lib/utf.h"
+#include "../../jube/jube.h"
 #include <mbedtls/bignum.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/md.h>
@@ -375,19 +376,6 @@ static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
     return true;
 }
 
-static void sha256_compute(const uint8_t* data, int offset, int length, uint8_t* out) {
-    if (!crypto_digest_compute_bits(DIGEST_SHA256, data, offset, length, out) && out) {
-        memset(out, 0, 32);
-    }
-}
-
-static void sha512_compute(const uint8_t* data, int offset, int length, bool mode384, uint8_t* out) {
-    int bits = mode384 ? DIGEST_SHA384 : DIGEST_SHA512;
-    if (!crypto_digest_compute_bits(bits, data, offset, length, out) && out) {
-        memset(out, 0, mode384 ? 48 : 64);
-    }
-}
-
 // ============================================================================
 // Helper: extract uint8 buffer from a JS typed array Item
 // ============================================================================
@@ -401,47 +389,6 @@ static bool get_uint8_buffer(Item ta_item, const uint8_t** out_data, int* out_le
     *out_length = byte_len;
     return true;
 }
-
-// ============================================================================
-// JS-callable functions: calculateSHA256, calculateSHA384, calculateSHA512
-// All take (data: Uint8Array|Array, offset: int, length: int)
-// and return a new Uint8Array with the hash result.
-// ============================================================================
-
-static Item js_native_sha(Item data_item, Item offset_item, Item length_item,
-        int bits) {
-    int offset = (int)it2i(offset_item);
-    int length = (int)it2i(length_item);
-
-    const uint8_t* buf = NULL;
-    int buf_len = 0;
-    if (!get_uint8_buffer(data_item, &buf, &buf_len)) {
-        log_error("js_native_sha: data is not a typed array");
-        return (Item){.item = ITEM_NULL};
-    }
-    if (offset < 0) offset = 0;
-    if (offset + length > buf_len) length = buf_len - offset;
-    if (length < 0) length = 0;
-
-    int hash_len = bits == DIGEST_SHA256 ? 32 : bits == DIGEST_SHA384 ? 48 : 64;
-    uint8_t hash[64];
-    if (bits == DIGEST_SHA256) sha256_compute(buf, offset, length, hash);
-    else sha512_compute(buf, offset, length, bits == DIGEST_SHA384, hash);
-
-    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
-    uint8_t* out = (uint8_t*)js_typed_array_prepare_write_ptr(result);
-    if (out) memcpy(out, hash, (size_t)hash_len);
-    return result;
-}
-
-#define JS_NATIVE_SHA_WRAPPER(name, digest) \
-extern "C" Item name(Item data_item, Item offset_item, Item length_item) { \
-    return js_native_sha(data_item, offset_item, length_item, digest); \
-}
-JS_NATIVE_SHA_WRAPPER(js_native_sha256, DIGEST_SHA256)
-JS_NATIVE_SHA_WRAPPER(js_native_sha384, DIGEST_SHA384)
-JS_NATIVE_SHA_WRAPPER(js_native_sha512, DIGEST_SHA512)
-#undef JS_NATIVE_SHA_WRAPPER
 
 // ============================================================================
 // OS-level random bytes
@@ -7871,3 +7818,74 @@ extern "C" void js_crypto_node_runtime_detach(void* session) {
 #undef crypto_live_hmac_contexts
 #undef crypto_pseudo_random_warning_emitted
 #undef crypto_native_state
+
+static Item node_crypto_namespace(void) {
+    return js_get_crypto_namespace();
+}
+
+static const char* const node_crypto_specifiers[] = { "crypto" };
+static const char* const node_crypto_dependencies[] = { "node-core" };
+
+static const JubeNamespaceDef node_crypto_namespaces[] = {
+    {node_crypto_specifiers, 1, node_crypto_namespace, NULL, 0},
+};
+
+static int node_crypto_init(const JubeHostAPI* host) {
+    return host ? 0 : -1;
+}
+
+static void node_crypto_shutdown(void) {
+}
+
+static void node_crypto_runtime_reset(void) {
+    js_crypto_reset();
+}
+
+static void node_crypto_runtime_reset_session(void* session) {
+    (void)session;
+    js_crypto_reset();
+}
+
+static void node_crypto_runtime_detach(void* session) {
+    js_crypto_node_runtime_detach(session);
+}
+
+static const JubeModuleDef node_crypto_module = {
+    JUBE_ABI_VERSION,
+    sizeof(JubeModuleDef),
+    "node-crypto",
+    "0.1.0",
+    "Node crypto namespace module",
+    NULL,
+    0,
+    NULL,
+    0,
+    node_crypto_namespaces,
+    1,
+    node_crypto_init,
+    node_crypto_shutdown,
+    NULL,
+    NULL,
+    0,
+    node_crypto_runtime_reset,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    0,
+    NULL,
+    node_crypto_runtime_reset_session,
+    node_crypto_runtime_detach,
+    node_crypto_dependencies,
+    1,
+};
+
+extern "C" const JubeModuleDef* node_crypto_jube_module(void) {
+    return &node_crypto_module;
+}
+
+#if defined(LAMBDA_NODE_CRYPTO_DYNAMIC_MODULE)
+extern "C" const JubeModuleDef* jube_module(void) {
+    return node_crypto_jube_module();
+}
+#endif

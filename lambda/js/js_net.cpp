@@ -13,7 +13,7 @@
 #include "js_network_service.h"
 #include "../jube/jube_registry.h"
 #include "js_class.h"
-#include "js_permission.h"
+#include "../jube/jube_node_permission.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"

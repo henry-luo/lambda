@@ -370,7 +370,21 @@
         "LAMBDA_NODE_NET_DYNAMIC_MODULE"
       ],
       "source_files": [
-        "lambda/module/node_net/node_net_module.cpp"
+        "lambda/module/node_net/node_net_module.cpp",
+        "lambda/module/node_net/node_dns_module.cpp"
+      ]
+    },
+    {
+      "name": "node-crypto",
+      "description": "External Node crypto Jube module",
+      "defines": [
+        "LAMBDA_NODE_CRYPTO_DYNAMIC_MODULE"
+      ],
+      "source_files": [
+        "lambda/module/node_crypto/node_crypto_module.cpp"
+      ],
+      "dependencies": [
+        "node-core"
       ]
     },
     {

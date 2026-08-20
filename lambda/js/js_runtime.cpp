@@ -11,7 +11,7 @@
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
 #include "js_exec_profile.h"
-#include "js_permission.h"
+#include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 #include "../module/node_core/node_trace_events.hpp"

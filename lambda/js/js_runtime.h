@@ -1199,7 +1199,7 @@ Item js_get_import_meta();
 Item js_require(Item specifier);
 Item js_dynamic_import(Item specifier);
 
-// Native SHA hash functions (js_crypto.cpp)
+// Native SHA hash functions (Jube node-crypto host primitive provider)
 Item js_native_sha256(Item data, Item offset, Item length);
 Item js_native_sha384(Item data, Item offset, Item length);
 Item js_native_sha512(Item data, Item offset, Item length);

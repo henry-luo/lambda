@@ -1,0 +1,19 @@
+{
+  "name": "node-crypto",
+  "version": "0.1.0",
+  "base_abi_version": 4,
+  "hosted_api_version": 1,
+  "kind": "runtime-library",
+  "engine": "js",
+  "provides": [
+    "crypto"
+  ],
+  "dependencies": [
+    "node-core"
+  ],
+  "resources": [],
+  "library_macos": "node-crypto.dylib",
+  "library_linux": "node-crypto.so",
+  "library_windows": "node-crypto.dll",
+  "entry_symbol": "jube_module"
+}

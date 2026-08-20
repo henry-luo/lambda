@@ -62,7 +62,7 @@ PUBLIC_STATIC_SELECTOR = re.compile(r"^\s*#\s*(?:define|undef)\s+LAMBDA_STATIC\b
 RUNTIME_NATIVE_IO = {
     "lambda/js/js_fs.cpp": "rt-native: Node fs handles and callbacks",
     "lambda/js/js_net.cpp": "rt-native: Node sockets and libuv handles",
-    "lambda/js/js_dns.cpp": "rt-native: Node DNS callbacks and libuv requests",
+    "lambda/module/node_net/node_dns_module.cpp": "rt-native: Node DNS callbacks and libuv requests",
     "lambda/js/js_tls.cpp": "rt-native: Node TLS handles and promises",
     "lambda/js/js_fetch.cpp": "review: JS promise binding stays rt; reusable curl worker is io candidate",
 }
