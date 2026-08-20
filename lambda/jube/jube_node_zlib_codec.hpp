@@ -19,7 +19,7 @@ enum NodeZlibCodecMode {
     NODE_ZLIB_CODEC_UNZIP,
 };
 
-// Keep the host provider's seed and unsigned-result semantics identical to
+// keep the host provider's seed and unsigned-result semantics identical to
 // zlib while the Node-facing namespace remains in the dynamic module.
 static inline uint32_t node_zlib_crc32_bytes(const uint8_t* data, int length, uint32_t seed) {
     static const uint8_t empty_data = 0;

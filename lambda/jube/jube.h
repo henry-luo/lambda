@@ -1397,7 +1397,7 @@ struct JubeHostStreamAPI {
     int (*resource_close)(void* session, uint32_t resource_id);
     int (*resource_ref)(void* session, uint32_t resource_id, bool referenced);
     bool (*resource_is_live)(void* session, uint32_t resource_id);
-    // Zlib transforms reuse the host's generic Transform lifecycle while the
+    // zlib transforms reuse the host's generic Transform lifecycle while the
     // module owns the Node-facing codec callbacks.
     Item (*transform_new)(Item options);
     Item (*transform_prototype)(void);
@@ -1451,7 +1451,7 @@ struct JubeHostNodeZlibAPI {
     bool (*codec)(enum JubeNodeZlibCodecMode mode, const uint8_t* data, int length,
                   JubeNodeZlibResult* out_result);
     void (*result_release)(JubeNodeZlibResult* result);
-    // Stateful transforms remain host-owned so the node-zlib DSO does not
+    // stateful transforms remain host-owned so the node-zlib DSO does not
     // import libz; the module supplies only validated options and byte views.
     bool (*stream_init)(enum JubeNodeZlibCodecMode mode, int window_bits, int level,
                         int mem_level, int strategy, void** out_state, int* out_status);

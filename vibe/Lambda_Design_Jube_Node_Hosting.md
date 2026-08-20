@@ -758,8 +758,10 @@ standard host byte-identical across bundle packaging, and lands static-first
   build target cloned from `lang-python`'s shape, `module.json` + hash
   stamping, `make build-node-zlib`, loader-negative matrix entries,
   absent-module smoke (`require('zlib')` → MODULE_NOT_FOUND + host log).
-  zlib stops linking into the standard host. *Gate:* dynamic load green on
-  macOS + Linux; identical behavior static vs dynamic (P7 diffing).
+  zlib stops linking into the Node module image while remaining host-owned for
+  the codec provider. *Gate:* dynamic load green on macOS + Linux; identical
+  behavior against the golden fixture (P7-style diffing), under the
+  D7.3.2/D7.3.4 DSO/dependency rules and D7.4.3's opaque-table boundary.
 - **N5 — libuv leaves.** `node-fs`, then `node-net` (net+dns), then
   `node-child-process`, static→dynamic each, converting rooting per JN9 and
   every direct `uv_*`/JS-queue call to the §9.1 request API (JN8). *Gate per
