@@ -1799,7 +1799,8 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
     return NULL;
 }
 
-static void check_compound_assignment_static_boundary(Transpiler* tp, TSNode node,
+static void check_compound_assignment_static_boundary(Transpiler* tp,
+        LambdaSourceSpan span,
         AstNode* destination, AstNode* value, const char* label) {
     const char* destination_label = label;
     Type* expected = declared_compound_destination_type(tp, destination, &destination_label);
@@ -1814,7 +1815,7 @@ static void check_compound_assignment_static_boundary(Transpiler* tp, TSNode nod
     char value_name[128];
     lambda_type_format_name(expected, expected_name, sizeof(expected_name));
     lambda_type_format_name(success_type, value_name, sizeof(value_name));
-    record_semantic_error(tp, node, ERR_TYPE_MISMATCH,
+    record_semantic_error_span(tp, span, ERR_TYPE_MISMATCH,
         "cannot assign %s to typed %s of type %s",
         value_name, destination_label, expected_name);
 }
@@ -6566,6 +6567,26 @@ AstNode* build_match_from_parts(Transpiler* tp, LambdaSourceSpan span,
     }
     node->type = mixed ? set_type_any(tp, ANY_JOIN) :
         (result ? result : &TYPE_NULL);
+    AstNode* value = boundary_unwrap_primary(scrutinee);
+    if (value && value->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)value;
+        AstNode* binding = ident->entry ? ident->entry->node : NULL;
+        TypeParam* parameter = binding && binding->node_type == AST_NODE_PARAM &&
+                binding->type && binding->type->kind == TYPE_KIND_PARAM
+            ? (TypeParam*)binding->type : NULL;
+        if (parameter && !parameter->has_explicit_contract && parameter->contract_type &&
+                !lambda_type_accepts_error(parameter->contract_type) &&
+                match_has_error_handler(node)) {
+            LambdaSourcePoint point = lambda_source_span_start_point(tp->source, span);
+            // Implicit parameters short-circuit errors before a match body,
+            // so a `case error` arm is unreachable without an explicit any.
+            log_warn("lambda_match_lint: line %u: `case error:` is unreachable for implicit parameter '%.*s'; declare '%.*s: any' to accept error values",
+                point.row + 1, ident->name ? (int)ident->name->len : 9,
+                ident->name ? ident->name->chars : "parameter",
+                ident->name ? (int)ident->name->len : 9,
+                ident->name ? ident->name->chars : "parameter");
+        }
+    }
     return (AstNode*)node;
 }
 
@@ -9271,7 +9292,9 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         ast_node->left = (AstNode*)left;
         ast_node->right = ast_node->value;
 
-        check_compound_assignment_static_boundary(tp, assign_node, (AstNode*)left,
+        check_compound_assignment_static_boundary(tp,
+            (LambdaSourceSpan){ts_node_start_byte(assign_node), ts_node_end_byte(assign_node)},
+            (AstNode*)left,
             ast_node->value, "array element");
 
         return (AstNode*)ast_node;
@@ -9312,7 +9335,9 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         ast_node->left = (AstNode*)left;
         ast_node->right = ast_node->value;
 
-        check_compound_assignment_static_boundary(tp, assign_node, (AstNode*)left,
+        check_compound_assignment_static_boundary(tp,
+            (LambdaSourceSpan){ts_node_start_byte(assign_node), ts_node_end_byte(assign_node)},
+            (AstNode*)left,
             ast_node->value, "map member");
 
         return (AstNode*)ast_node;
@@ -13175,6 +13200,15 @@ static AstNode* direct_type_stam(Transpiler* tp, LambdaSourceSpan span,
 static void direct_finalize_type_alias(Transpiler* tp, AstNamedNode* alias) {
     if (!tp || !alias || !alias->type) return;
     Type* definition = alias->type;
+    Type* actual = definition->type_id == LMD_TYPE_TYPE &&
+        definition->kind == TYPE_KIND_SIMPLE ? ((TypeType*)definition)->type : definition;
+    if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP && alias->name) {
+        // A named map contract carries its alias into runtime validators and
+        // field lowering; anonymous `map` would lose both identities.
+        TypeMap* map = (TypeMap*)actual;
+        map->struct_name = alias->name->chars;
+        map->is_trusted_contract = true;
+    }
     bool literal_alias = (definition->type_id == LMD_TYPE_STRING ||
         definition->type_id == LMD_TYPE_SYMBOL) && definition->is_literal;
     bool range_alias = definition->type_id == LMD_TYPE_RANGE &&
@@ -13461,6 +13495,24 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
     if (node->op == OPERATOR_UNION && promote_type_union_expr(tp, node)) {
         return (AstNode*)node;
     }
+    if (node->op == OPERATOR_OR && ast_is_explicit_type_value(left) &&
+            ast_is_explicit_type_value(right)) {
+        // `or` handles runtime error/null values; preserve the type-union
+        // spelling check after the direct parser has already built both sides.
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+            "operator `or` cannot combine type values; use `|` to form a union type");
+        node->type = &TYPE_ERROR;
+        return (AstNode*)node;
+    }
+    if ((node->op == OPERATOR_IDIV || node->op == OPERATOR_MOD) &&
+            ast_static_numeric_literal_is_zero(tp, right)) {
+        // Literal integral zero is a compile-time invalid operation, before
+        // MIR lowering could obscure the source diagnostic (S3.3.4).
+        record_semantic_error_span(tp, right->source_span, ERR_INVALID_OPERATION,
+            "integral division or remainder by literal zero");
+        node->type = &TYPE_ERROR;
+        return (AstNode*)node;
+    }
     if ((node->op == OPERATOR_ADD || node->op == OPERATOR_SUB ||
             node->op == OPERATOR_MUL || node->op == OPERATOR_DIV ||
             node->op == OPERATOR_POW) &&
@@ -13742,6 +13794,13 @@ static AstNode* direct_start_node(Transpiler* tp, LambdaSourceSpan span,
     start->owner_scope = tp->current_scope;
     start->mode = START_MODE_TASK;
     start->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
+    if (!tp->current_scope || !tp->current_scope->is_proc) {
+        // Task creation participates in procedure return/join flow, so a
+        // direct call must retain the same scope firewall as the CST builder.
+        record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
+            "`start` is only allowed inside a procedure (pn)");
+        start->type = &TYPE_ERROR;
+    }
     if (arg_count < 1 || arg_count > 3) {
         record_semantic_error_span(tp, span, ERR_ARGUMENT_COUNT_MISMATCH,
             "`start` expects 1 to 3 arguments, got %d", arg_count);
@@ -13803,11 +13862,14 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
         AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
     call->function = function;
     call->argument = arguments;
+    (void)validate_lambda_argument_limit(tp, span, arg_count, "call argument");
     StrView name = {0};
     SysFuncInfo* info = NULL;
     bool method_call = false;
     bool user_method_found = false;
     bool user_method_is_proc = false;
+    AstNode* user_method_receiver = NULL;
+    StrView user_method_name = {0};
     int lookup_arg_count = arg_count + tp->pipe_inject_args;
     AstNode* effective = ast_unwrap_primary(function);
     if (effective && effective->node_type == AST_NODE_MEMBER_EXPR) {
@@ -13868,6 +13930,8 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
             if (user_method) {
                 user_method_found = true;
                 user_method_is_proc = user_method->is_proc;
+                user_method_receiver = receiver;
+                user_method_name = field_name;
             } else {
                 info = get_sys_func_for_method(&field_name, arg_count, object_type);
                 if (info) {
@@ -13952,6 +14016,24 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
         Type* target_type = ast_called_type_target(call->function);
         call->type = target_type ? target_type : set_type_any(tp, ANY_CALL_RESULT);
     }
+    if (!info && arg_count == 1) {
+        // Only unresolved calls can denote a type conversion. Builtins such
+        // as type() use the shared TYPE_TYPE marker, not a TypeType payload.
+        Type* conversion_target = ast_called_type_target(call->function);
+        if (conversion_target && conversion_target->type_id == LMD_TYPE_NUM_SIZED) {
+            NumSizedType num_type = type_num_sized_kind(conversion_target);
+            int64_t const_value = 0;
+            if (num_type != NUM_FLOAT16 && num_type != NUM_FLOAT32 &&
+                    ast_constant_integer_value(tp, call->argument, &const_value) &&
+                    !constant_fits_sized_integer(num_type, const_value)) {
+                // Constant sized conversions reject overflow before runtime
+                // truncation, matching the Go-style numeric contract.
+                record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
+                    "constant conversion to %s overflows", get_num_sized_type_name(num_type));
+                call->type = &TYPE_ERROR;
+            }
+        }
+    }
     if (user_method_found && user_method_is_proc) {
         if (!tp->current_scope || !tp->current_scope->is_proc) {
             AstIdentNode* field = effective && effective->node_type == AST_NODE_MEMBER_EXPR
@@ -13962,6 +14044,15 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
                 field && field->name ? field->name->chars : "");
             call->type = &TYPE_ERROR;
         } else {
+            AstIdentNode* receiver_root = compound_root_ident(user_method_receiver);
+            if (!receiver_root || !receiver_root->entry || !receiver_root->entry->is_mutable) {
+                // A pn method writes its implicit receiver back on return;
+                // reject a let root before that write can be lost.
+                record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
+                    "mutating method '%.*s' needs a `var` binding receiver",
+                    (int)user_method_name.length, user_method_name.str);
+                call->type = &TYPE_ERROR;
+            }
             call->is_proc_method = true;
         }
     }
@@ -14222,7 +14313,8 @@ AstNamedNode* build_assignment_from_parts(Transpiler* tp, LambdaSourceSpan span,
     assignment->type = value && value->type ? value->type : &TYPE_ANY;
 
     Type* declared = type_expr ? direct_function_contract(type_expr) : NULL;
-    if (declared) {
+    bool invalid_annotation = declared && declared->type_id == LMD_TYPE_ERROR;
+    if (declared && !invalid_annotation) {
         assignment->declared_type = declared;
         // Range annotations are membership contracts, not a storage lane.
         // Preserve the initializer's concrete type so a string range value is
@@ -14231,6 +14323,11 @@ AstNamedNode* build_assignment_from_parts(Transpiler* tp, LambdaSourceSpan span,
                 value->type ? value->type : declared;
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
         check_declaration_static_boundary(tp, assignment, declared, line);
+    }
+    if (invalid_annotation && tp->static_warning && value && value->type) {
+        // A downgraded unknown annotation is no storage contract. Retaining
+        // TYPE_ERROR here makes MIR reinterpret the initializer and crash.
+        assignment->type = value->type;
     }
     lambda_ast_register_name(tp, assignment);
     return assignment;
@@ -14270,6 +14367,8 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
         assignment->left = target;
         assignment->right = value;
         direct_validate_mutable_compound(tp, span, field->object);
+        check_compound_assignment_static_boundary(tp, span, target, value,
+            target->node_type == AST_NODE_INDEX_EXPR ? "array element" : "map member");
         return (AstNode*)assignment;
     }
     if (target->node_type != AST_NODE_IDENT) return NULL;
@@ -14414,18 +14513,21 @@ static AstNode* direct_complete_function(Transpiler* tp, LambdaSourceSpan span,
         function_type->error_type = error;
         function_type->can_raise = true;
     }
+    // Keep the inferred body result separate from its declared contract.
+    // Otherwise the direct path cannot diagnose a mismatched return or an
+    // implicit error escape after a completed function body is available.
+    function_type->inferred_return = is_proc
+        ? infer_procedural_return_type(tp, fn)
+        : body && body->type ? body->type : &TYPE_ANY;
+    (void)validate_lambda_argument_limit(tp, span,
+        function_type->param_count + (function_type->is_variadic ? 1 : 0),
+        "function formal");
     if (!returned_type) {
-        // A pn's result is its reachable return/statement flow, not the
-        // enclosing content-list carrier. Using the latter erased mutation
-        // method results and made direct calls return null (D6.1.2).
-        function_type->inferred_return = is_proc
-            ? infer_procedural_return_type(tp, fn)
-            : body && body->type ? body->type : &TYPE_ANY;
         // Earlier calls can still target this placeholder through the boxed
         // ABI; retain that stable public carrier while MIR uses inferred_return.
         function_type->returned = &TYPE_ANY;
     }
-    (void)span;
+    validate_function_return_contract(tp, fn, function_type);
     return (AstNode*)fn;
 }
 
@@ -14678,6 +14780,12 @@ AstNode* build_while_from_parts(Transpiler* tp, LambdaSourceSpan span,
     node->vars = loop_scope;
     node->cond = condition;
     node->body = body;
+    if (!tp->current_scope || !tp->current_scope->is_proc) {
+        // A loop scope inherits procedure capability; it must not manufacture
+        // one for a top-level `while` before this source guard runs.
+        record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
+            "`while` is only allowed inside a procedure (pn)");
+    }
     // Keep procedural conditions subject to the same mask/container lint as
     // the CST path; this guards truthy-array control flow (S5.4.1).
     lint_condition_span(tp, span, condition, "while");
@@ -14804,7 +14912,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             }
             bool is_while = reduction->form == LAMBDA_REDUCTION_FORM_WHILE_BEGIN;
             sink->loop_scopes[sink->loop_scope_depth] = lambda_ast_enter_scope(tp,
-                is_while || (tp->current_scope && tp->current_scope->is_proc));
+                tp->current_scope && tp->current_scope->is_proc);
             sink->for_nodes[sink->loop_scope_depth] = NULL;
             if (!is_while) {
                 sink->for_nodes[sink->loop_scope_depth] =
@@ -15599,8 +15707,15 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         AstNode* tail = imports;
         while (tail && tail->next) tail = tail->next;
-        if (tail) tail->next = content;
-        root->child = imports ? imports : (AstNode*)content;
+        AstNode* body = (AstNode*)content;
+        if (content_items && !content_items->next) {
+            // `build_content(..., true, true)` unwraps a sole top-level
+            // declaration. Keeping a CONTENT wrapper here makes module MIR
+            // materialize an otherwise absent list before invoking main.
+            body = content_items;
+        }
+        if (tail) tail->next = body;
+        root->child = imports ? imports : body;
         root->type = child0 && child0->type ? child0->type : &TYPE_ANY;
         sink->root = root;
         return direct_ast_value((AstNode*)root);

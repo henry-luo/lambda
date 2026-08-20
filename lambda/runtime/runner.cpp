@@ -51,6 +51,55 @@ extern void free_document(DomDocument* doc);
 static __thread LambdaCompilerTiming g_last_lambda_compiler_timing;
 static int g_compiler_timing_enabled = -1;
 
+static void record_direct_parse_error(Transpiler* tp, const char* script_path,
+        const LambdaParseError* parse_error) {
+    if (!tp || !tp->source) return;
+    LambdaSourceSpan span = parse_error ? parse_error->span : (LambdaSourceSpan){0, 0};
+    size_t source_length = strlen(tp->source);
+    if (span.start_byte > source_length) span.start_byte = (uint32_t)source_length;
+    if (span.end_byte < span.start_byte || span.end_byte > source_length) {
+        span.end_byte = span.start_byte;
+    }
+    LambdaSourcePoint start = lambda_source_span_start_point(tp->source, span);
+    LambdaSourcePoint end = lambda_source_span_end_point(tp->source, span);
+    SourceLocation location = src_loc_span(script_path, start.row + 1, start.column + 1,
+        end.row + 1, end.column + 1);
+    location.source = tp->source;
+    char message[256];
+    const char* text = tp->source + span.start_byte;
+    size_t text_length = span.end_byte - span.start_byte;
+    if (text_length == 0 && span.start_byte < source_length) text_length = 1;
+    bool separated_relation = false;
+    if (parse_error) {
+        // Pratt has already consumed the relation before it discovers that
+        // its right operand cannot start a sibling statement. Walk back on
+        // this source line to recover that committed delimiter.
+        size_t cursor = span.start_byte;
+        while (cursor > 0 && tp->source[cursor - 1] != '\n' &&
+                tp->source[cursor - 1] != '\r') {
+            char previous = tp->source[--cursor];
+            if (previous == ' ' || previous == '\t') continue;
+            separated_relation = previous == '<' || previous == '>';
+            break;
+        }
+    }
+    if (separated_relation) {
+        // The direct Pratt parser reaches the same unseparated relation that
+        // Tree-sitter marks as element-ambiguous; preserve one user-facing
+        // syntax diagnosis instead of exposing parser-internal terminology.
+        snprintf(message, sizeof(message),
+            "'<' and '>' are ambiguous with element syntax at statement level");
+    } else {
+        snprintf(message, sizeof(message), "Unexpected syntax near '%.*s'",
+            (int)(text_length > 30 ? 30 : text_length), text);
+    }
+    LambdaError* error = err_create(ERR_SYNTAX_ERROR, message, &location);
+    if (!error) return;
+    if (tp->errors) arraylist_append(tp->errors, error);
+    else err_free(error);
+    tp->error_count++;
+}
+
 static int lambda_index_compiler_pass(void* opaque) {
     Transpiler* tp = (Transpiler*)opaque;
     return tp && (!tp->ast_root || ast_index_build_profile(
@@ -800,6 +849,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         if (!initialize_script_ast_storage(tp) ||
                 lambda_rd_build_ast(tp, tp->source, strlen(tp->source),
                     &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
+            // A parser failure must enter the same structured diagnostic lane
+            // as a Tree-sitter ERROR node, or callers see only a generic
+            // execution failure after the direct-parser cutover.
+            record_direct_parse_error(tp, script_path, &parse_error);
             log_error("C parser rejected %s: %s", script_path,
                 parse_error.message ? parse_error.message : "direct AST reduction failed");
             return;
