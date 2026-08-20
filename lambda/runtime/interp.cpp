@@ -474,11 +474,12 @@ static Item eval_literal(InterpFrame* f, AstNode* node) {
     case LMD_TYPE_NULL:
         return ItemNull;
     case LMD_TYPE_BOOL:
-        return (Item){.item = b2it(parse_bool_literal(f->module->source, node->node)
+        return (Item){.item = b2it(parse_bool_literal_span(f->module->source, node->source_span)
             ? BOOL_TRUE : BOOL_FALSE)};
     case LMD_TYPE_INT: {
-        if (type == &LIT_INT || ts_node_symbol(node->node) == SYM_INT) {
-            return (Item){.item = i2it(parse_int_literal(f->module->source, node->node))};
+        if (type == &LIT_INT) {
+            return (Item){.item = i2it(parse_int_literal_span(f->module->source,
+                node->source_span))};
         }
         const int64_t* slot = (const int64_t*)interp_const_at(f->module, tc->const_index);
         return (Item){.item = i2it(slot ? *slot : 0)};

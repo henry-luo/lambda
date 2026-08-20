@@ -9,14 +9,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../source_span.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct LambdaSourceSpan {
-    uint32_t start_byte;
-    uint32_t end_byte;
-} LambdaSourceSpan;
 
 typedef enum LambdaTokenKind {
     LAMBDA_TOK_EOF = 0,
@@ -161,7 +158,7 @@ typedef struct LambdaParseMetrics {
     uint64_t structural_hash;
 } LambdaParseMetrics;
 
-// These are intentionally syntax-level reductions.  Phase 1 fingerprints
+// These are intentionally syntax-level reductions. Phase 1 fingerprints
 // them; Phase 2 maps the same committed reductions to the shared AST helpers.
 typedef enum LambdaReductionKind {
     LAMBDA_REDUCE_ATOM = 1,
@@ -185,13 +182,41 @@ typedef enum LambdaReductionKind {
     LAMBDA_REDUCE_LIST,
 } LambdaReductionKind;
 
+// A generic reduction kind is insufficient for a direct AST sink: an atom
+// must retain whether it was an identifier or a literal, and a Pratt reduction
+// must retain its operator spelling. The parser publishes that committed
+// syntactic form here instead of asking the sink to re-lex source text.
+typedef enum LambdaReductionForm {
+    LAMBDA_REDUCTION_FORM_NONE = 0,
+    LAMBDA_REDUCTION_FORM_TOKEN,
+    LAMBDA_REDUCTION_FORM_GROUP,
+    LAMBDA_REDUCTION_FORM_CALL,
+    LAMBDA_REDUCTION_FORM_INDEX,
+    LAMBDA_REDUCTION_FORM_MEMBER,
+    LAMBDA_REDUCTION_FORM_QUERY,
+    LAMBDA_REDUCTION_FORM_HANDLER,
+} LambdaReductionForm;
+
 // The sink remains deliberately small. Phase 1 uses it for deterministic
 // reduction fingerprints; Phase 2 will supply values backed by AstNode*.
 typedef uint64_t LambdaParseValue;
+typedef struct LambdaParseReduction {
+    LambdaReductionKind kind;
+    LambdaReductionForm form;
+    // This is the complete production range, including the left child of a
+    // Pratt/postfix reduction. It is therefore directly usable as AstNode's
+    // source_span without reconstructing a range from opaque child values.
+    LambdaSourceSpan span;
+    // The committed introducer/operator token. It is zeroed when the form has
+    // no token-specific interpretation.
+    LambdaToken detail_token;
+    const LambdaParseValue* children;
+    uint32_t child_count;
+} LambdaParseReduction;
+
 typedef struct LambdaParseSink {
-    LambdaParseValue (*reduce)(void* context, int reduction_kind,
-        LambdaSourceSpan span, const LambdaParseValue* children,
-        uint32_t child_count);
+    LambdaParseValue (*reduce)(void* context,
+        const LambdaParseReduction* reduction);
 } LambdaParseSink;
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);

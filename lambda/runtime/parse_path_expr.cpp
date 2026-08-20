@@ -11,7 +11,7 @@ struct PathLexer {
     Transpiler* tp;
     const char* p;
     const char* end;
-    TSNode origin;
+    LambdaSourceSpan origin;
     bool failed;
     bool report_errors;
     ArrayList* segments;
@@ -35,7 +35,7 @@ void path_fail(PathLexer* lx, const char* detail) {
     if (lx->failed) { return; }
     lx->failed = true;
     if (lx->report_errors) {
-        record_semantic_error(lx->tp, lx->origin, ERR_INVALID_LITERAL,
+        record_semantic_error_span(lx->tp, lx->origin, ERR_INVALID_LITERAL,
             "invalid path expression: %s", detail);
     }
 }
@@ -247,13 +247,14 @@ bool parse_path_static_expr(PathLexer* lx, PathScheme* scheme,
 
 }  // namespace
 
-AstNode* build_static_path_ast(Transpiler* tp, TSNode origin, PathScheme scheme,
+AstNode* build_static_path_ast_from_span(Transpiler* tp, LambdaSourceSpan span,
+        PathScheme scheme,
         String* authority, ArrayList* segments, int first_segment) {
     int segment_count = segments ? segments->length - first_segment : 0;
     if (segment_count < 0) { segment_count = 0; }
 
-    AstPathNode* path = (AstPathNode*)alloc_ast_node(tp, AST_NODE_PATH_EXPR,
-        origin, sizeof(AstPathNode));
+    AstPathNode* path = (AstPathNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PATH_EXPR, span, sizeof(AstPathNode));
     path->scheme = scheme;
     path->authority = authority;
     path->segment_count = segment_count;
@@ -269,9 +270,16 @@ AstNode* build_static_path_ast(Transpiler* tp, TSNode origin, PathScheme scheme,
     return (AstNode*)path;
 }
 
+AstNode* build_static_path_ast(Transpiler* tp, TSNode origin, PathScheme scheme,
+        String* authority, ArrayList* segments, int first_segment) {
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return build_static_path_ast_from_span(tp, span, scheme, authority, segments,
+        first_segment);
+}
+
 static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin, bool report_errors) {
-    PathLexer lx = {tp, begin, end, origin, false, report_errors, arraylist_new(8)};
+        const char* end, LambdaSourceSpan span, bool report_errors) {
+    PathLexer lx = {tp, begin, end, span, false, report_errors, arraylist_new(8)};
     PathScheme scheme = PATH_SCHEME_REL;
     bool file_local = false;
     if (!parse_path_static_expr(&lx, &scheme, &file_local) || lx.failed) {
@@ -294,7 +302,7 @@ static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
             first_segment = 1;
         }
     }
-    AstNode* path = build_static_path_ast(tp, origin, scheme, authority,
+    AstNode* path = build_static_path_ast_from_span(tp, span, scheme, authority,
         lx.segments, first_segment);
     arraylist_free(lx.segments);
     return path;
@@ -302,10 +310,22 @@ static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
 
 AstNode* parse_path_expr_text(Transpiler* tp, const char* begin, const char* end,
         TSNode origin) {
-    return parse_path_expr_text_impl(tp, begin, end, origin, true);
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return parse_path_expr_text_impl(tp, begin, end, span, true);
 }
 
 AstNode* try_parse_path_expr_text(Transpiler* tp, const char* begin,
         const char* end, TSNode origin) {
-    return parse_path_expr_text_impl(tp, begin, end, origin, false);
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return parse_path_expr_text_impl(tp, begin, end, span, false);
+}
+
+AstNode* parse_path_expr_text_span(Transpiler* tp, const char* begin,
+        const char* end, LambdaSourceSpan span) {
+    return parse_path_expr_text_impl(tp, begin, end, span, true);
+}
+
+AstNode* try_parse_path_expr_text_span(Transpiler* tp, const char* begin,
+        const char* end, LambdaSourceSpan span) {
+    return parse_path_expr_text_impl(tp, begin, end, span, false);
 }

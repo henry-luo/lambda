@@ -4,6 +4,7 @@
 #include "lambda-error.h"
 #include "type_contract.hpp"
 #include "type_build.hpp"
+#include "ast_build.hpp"
 #include "parse_type_pattern.hpp"
 #include "parse_path_expr.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -31,6 +32,7 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
     *out = mantissa;
     return mantissa >= INT53_MIN && mantissa <= INT53_MAX;
 }
+
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
 #include "../../lib/arraylist.h"
@@ -38,6 +40,17 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 #include "../../lib/recursion_guard.hpp"
 #include <errno.h>
 #include <stdlib.h>
+
+static StrView ast_node_source(Transpiler* tp, const AstNode* node) {
+    LambdaSourceSpan span = node ? node->source_span : (LambdaSourceSpan){0, 0};
+    return (StrView){.str = tp->source + span.start_byte,
+        .length = lambda_source_span_length(span)};
+}
+
+static LambdaSourcePoint ast_node_start_point(Transpiler* tp, const AstNode* node) {
+    LambdaSourceSpan span = node ? node->source_span : (LambdaSourceSpan){0, 0};
+    return lambda_source_span_start_point(tp->source, span);
+}
 
 // Caps build_expr recursion so a pathologically nested source reports an error
 // instead of overflowing the stack (and tripping the SIGSEGV recovery). Well above
@@ -1009,7 +1022,7 @@ bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
 
     switch (node->type->type_id) {
     case LMD_TYPE_BOOL: {
-        StrView text = ts_node_source(tp, node->node);
+        StrView text = ast_node_source(tp, node);
         out->item = b2it(strview_equal(&text, "true") ? BOOL_TRUE : BOOL_FALSE);
         return true;
     }
@@ -1021,7 +1034,7 @@ bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
             out->item = i2it(((TypeInt64*)node->type)->int64_val);
             return true;
         }
-        StrView source = ts_node_source(tp, node->node);
+        StrView source = ast_node_source(tp, node);
         char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
@@ -1304,18 +1317,10 @@ void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     record_type_error_code(tp, line, ERR_TYPE_MISMATCH, "%s", error_msg);
 }
 
-// Record a semantic error with error code
-void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
-    // Get location from TSNode
-    TSPoint start = ts_node_start_point(node);
-    TSPoint end = ts_node_end_point(node);
-
-    // Format error message
-    char error_msg[512];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(error_msg, sizeof(error_msg), format, args);
-    va_end(args);
+static void record_semantic_error_message(Transpiler* tp, LambdaSourceSpan span,
+        LambdaErrorCode code, const char* error_msg) {
+    LambdaSourcePoint start = lambda_source_span_start_point(tp->source, span);
+    LambdaSourcePoint end = lambda_source_span_end_point(tp->source, span);
 
     // Create structured error with span
     SourceLocation loc = src_loc_span(tp->reference,
@@ -1346,6 +1351,28 @@ void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, co
     if (tp->error_count >= tp->max_errors) {
         log_error("error_threshold: max errors (%d) reached", tp->max_errors);
     }
+}
+
+// Record a semantic error with a Tree-sitter source range while the legacy
+// builder is active. The direct parser uses the span entry point below.
+void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    record_semantic_error_message(tp, span, code, error_msg);
+}
+
+void record_semantic_error_span(Transpiler* tp, LambdaSourceSpan span,
+        LambdaErrorCode code, const char* format, ...) {
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    record_semantic_error_message(tp, span, code, error_msg);
 }
 
 // Check if should continue transpiling based on error count
@@ -1556,7 +1583,7 @@ static void check_declared_map_literal(Transpiler* tp, AstNamedNode* declaration
             expected_entry->name->str, (int)expected_entry->name->length);
         if (!actual_entry) {
             if (!has_spread) {
-                record_semantic_error(tp, declaration->node, ERR_UNDEFINED_FIELD,
+                record_semantic_error_span(tp, declaration->source_span, ERR_UNDEFINED_FIELD,
                     "map assigned to '%.*s' is missing required field '%.*s'",
                     (int)declaration->name->len, declaration->name->chars,
                     (int)expected_entry->name->length, expected_entry->name->str);
@@ -2077,7 +2104,7 @@ void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_sc
             // A mutable capture is an explicit cross-frame write only when the
             // outer binding itself is a `var`; immutable captures remain pure.
             if (c->is_mutable && (!c->entry || !c->entry->is_mutable)) {
-                record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
+                record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
                     "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
                     (int)capture_name->len, capture_name->chars);
             }
@@ -2096,10 +2123,19 @@ NameScope* find_global_scope(NameScope* scope) {
 
 // str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
 
-AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
+AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
+        LambdaSourceSpan span, size_t size) {
     AstNode* ast_node = (AstNode*)pool_alloc(tp->pool, size);
     memset(ast_node, 0, size);
-    ast_node->node_type = node_type;  ast_node->node = node;
+    ast_node->node_type = node_type;
+    ast_node->source_span = span;
+    return ast_node;
+}
+
+AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    AstNode* ast_node = alloc_ast_node_from_span(tp, node_type, span, size);
+    ast_node->node = node;
     return ast_node;
 }
 
@@ -2182,7 +2218,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
 
     StrView name_view = {node->name->chars, node->name->len};
     if (is_reserved_identifier_keyword(name_view)) {
-        int line = ts_node_start_point(node->node).row + 1;
+        int line = (int)ast_node_start_point(tp, node).row + 1;
         // c15 reserves last globally so it cannot escape its two grammar homes via declarations.
         record_type_error(tp, line, "Error: '%.*s' is a reserved keyword and cannot be used as a name",
             (int)name_view.length, name_view.str);
@@ -2191,7 +2227,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     // check for duplicate definition in current scope
     NameEntry* existing = lookup_name_in_current_scope(tp, node->name);
     if (existing) {
-        record_semantic_error(tp, node->node, ERR_DUPLICATE_DEFINITION,
+        record_semantic_error_span(tp, node->source_span, ERR_DUPLICATE_DEFINITION,
             "duplicate definition of '%.*s' in the same scope",
             (int)node->name->len, node->name->chars);
         // continue anyway to allow further error checking
@@ -3778,12 +3814,14 @@ NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     }
 }
 
-AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
+AstNode* build_identifier_from_span(Transpiler* tp, LambdaSourceSpan span) {
     log_debug("building identifier");
-    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstIdentNode));
+    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IDENT, span, sizeof(AstIdentNode));
 
     // get the identifier name from source and create pooled string
-    StrView var_name = ts_node_source(tp, id_node);
+    StrView var_name = {.str = tp->source + span.start_byte,
+        .length = lambda_source_span_length(span)};
     ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
 
     // lookup the name
@@ -3795,10 +3833,11 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         if (tp->in_that_clause) {
             log_debug("that clause: rewriting bare '%.*s' to ~.%.*s",
                 (int)var_name.length, var_name.str, (int)var_name.length, var_name.str);
-            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node(tp,
-                AST_NODE_MEMBER_EXPR, id_node, sizeof(AstFieldNode));
+            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_MEMBER_EXPR, span, sizeof(AstFieldNode));
             // create ~ (current item) as the object
-            AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, id_node, sizeof(AstNode));
+            AstNode* current_item = alloc_ast_node_from_span(tp,
+                AST_NODE_CURRENT_ITEM, span, sizeof(AstNode));
             current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
             field_node->object = current_item;
             // use the identifier as the field name (without scope lookup)
@@ -3824,7 +3863,8 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 arraylist_append(tp->const_list, &ft->double_val);
                 ft->const_index = tp->const_list->length - 1;
                 ft->is_const = 1;  ft->is_literal = 1;
-                AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, id_node, sizeof(AstPrimaryNode));
+                AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+                    AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
                 pn->type = (Type*)ft;
                 log_debug("global import math constant resolved: %.*s", (int)var_name.length, var_name.str);
                 return (AstNode*)pn;
@@ -3832,8 +3872,8 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         }
         SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
         if (sys_value) {
-            AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
-                AST_NODE_SYS_FUNC, id_node, sizeof(AstSysFuncNode));
+            AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
             TypeFunc* fn_type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
             fn_type->param_count = sys_value->arg_count;
             fn_type->required_param_count = sys_value->arg_count;
@@ -3928,6 +3968,11 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         }
     }
     return (AstNode*)ast_node;
+}
+
+AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
+    LambdaSourceSpan span = {ts_node_start_byte(id_node), ts_node_end_byte(id_node)};
+    return build_identifier_from_span(tp, span);
 }
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
@@ -4660,16 +4705,22 @@ static const char* base_type_alias_suggestion(StrView type_name) {
     return NULL;
 }
 
-void record_unknown_base_type(Transpiler* tp, TSNode type_node, StrView type_name) {
+void record_unknown_base_type_span(Transpiler* tp, LambdaSourceSpan span,
+        StrView type_name) {
     const char* suggestion = base_type_alias_suggestion(type_name);
     if (suggestion) {
-        record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+        record_semantic_error_span(tp, span, ERR_UNDEFINED_TYPE,
             "unknown type '%.*s'; did you mean '%s'?",
             (int)type_name.length, type_name.str, suggestion);
         return;
     }
-    record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+    record_semantic_error_span(tp, span, ERR_UNDEFINED_TYPE,
         "unknown type '%.*s'", (int)type_name.length, type_name.str);
+}
+
+void record_unknown_base_type(Transpiler* tp, TSNode type_node, StrView type_name) {
+    LambdaSourceSpan span = {ts_node_start_byte(type_node), ts_node_end_byte(type_node)};
+    record_unknown_base_type_span(tp, span, type_name);
 }
 
 // helper: returns Type* for base_type node (used in primary_expr context)
@@ -4969,15 +5020,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_CURRENT_PARENT_EXPR) {
-        AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
-            AST_NODE_NAVIGATION_EXPR, child, sizeof(AstNavigationNode));
-        AstNode* current = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, child, sizeof(AstNode));
-        current->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-        nav->object = current;
-        nav->root = false;
-        nav->type = nav->object->type;
-        ast_node->expr = (AstNode*)nav;
-        ast_node->type = nav->type;
+        LambdaSourceSpan span = {ts_node_start_byte(child), ts_node_end_byte(child)};
+        ast_node->expr = build_current_parent_navigation_from_span(tp, span);
+        ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_INDEX_EXPR) {
         // Check if this is a path index expression (path[expr])
@@ -5094,6 +5139,105 @@ AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
 
 AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node);
 
+bool lambda_unary_operator_from_spelling(StrView op, Operator* op_out) {
+    if (!op_out) return false;
+    if (strview_equal(&op, "not")) { *op_out = OPERATOR_NOT; }
+    else if (strview_equal(&op, "-")) { *op_out = OPERATOR_NEG; }
+    else if (strview_equal(&op, "+")) { *op_out = OPERATOR_POS; }
+    else { return false; }
+    return true;
+}
+
+bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
+    if (!op_out) return false;
+    if (strview_equal(&op, "and")) { *op_out = OPERATOR_AND; }
+    else if (strview_equal(&op, "or")) { *op_out = OPERATOR_OR; }
+    else if (strview_equal(&op, "+")) { *op_out = OPERATOR_ADD; }
+    else if (strview_equal(&op, "++")) { *op_out = OPERATOR_JOIN; }
+    else if (strview_equal(&op, "-")) { *op_out = OPERATOR_SUB; }
+    else if (strview_equal(&op, "*")) { *op_out = OPERATOR_MUL; }
+    else if (strview_equal(&op, "**")) { *op_out = OPERATOR_POW; }
+    else if (strview_equal(&op, "/")) { *op_out = OPERATOR_DIV; }
+    else if (strview_equal(&op, "div")) { *op_out = OPERATOR_IDIV; }
+    else if (strview_equal(&op, "%")) { *op_out = OPERATOR_MOD; }
+    else if (strview_equal(&op, "==")) { *op_out = OPERATOR_EQ; }
+    else if (strview_equal(&op, "!=")) { *op_out = OPERATOR_NE; }
+    else if (strview_equal(&op, "<")) { *op_out = OPERATOR_LT; }
+    else if (strview_equal(&op, "<=")) { *op_out = OPERATOR_LE; }
+    else if (strview_equal(&op, ">")) { *op_out = OPERATOR_GT; }
+    else if (strview_equal(&op, ">=")) { *op_out = OPERATOR_GE; }
+    else if (strview_equal(&op, "eq")) { *op_out = OPERATOR_ELEM_EQ; }
+    else if (strview_equal(&op, "ne")) { *op_out = OPERATOR_ELEM_NE; }
+    else if (strview_equal(&op, "lt")) { *op_out = OPERATOR_ELEM_LT; }
+    else if (strview_equal(&op, "le")) { *op_out = OPERATOR_ELEM_LE; }
+    else if (strview_equal(&op, "gt")) { *op_out = OPERATOR_ELEM_GT; }
+    else if (strview_equal(&op, "ge")) { *op_out = OPERATOR_ELEM_GE; }
+    else if (strview_equal(&op, "to")) { *op_out = OPERATOR_TO; }
+    else if (strview_equal(&op, "|")) { *op_out = OPERATOR_UNION; }
+    else if (strview_equal(&op, "|>")) { *op_out = OPERATOR_PIPE; }
+    else if (strview_equal(&op, "where") || strview_equal(&op, "that")) {
+        *op_out = OPERATOR_WHERE;
+    }
+    else if (strview_equal(&op, "&")) { *op_out = OPERATOR_INTERSECT; }
+    else if (strview_equal(&op, "!")) { *op_out = OPERATOR_EXCLUDE; }
+    else if (strview_equal(&op, "is")) { *op_out = OPERATOR_IS; }
+    else if (strview_equal(&op, "in")) { *op_out = OPERATOR_IN; }
+    else if (strview_equal(&op, "at")) { *op_out = OPERATOR_AT; }
+    else { return false; }
+    return true;
+}
+
+AstNode* build_unary_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        StrView op, AstNode* operand) {
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_UNARY, span, sizeof(AstUnaryNode));
+    ast_node->op_str = op;
+    ast_node->operand = operand;
+    if (!lambda_unary_operator_from_spelling(op, &ast_node->op)) {
+        // `*` spread and `!` type negation have distinct retained node shapes;
+        // ordinary unary construction must not silently classify either one.
+        log_error("build unary from parts: unsupported operator %.*s", (int)op.length,
+            op.str);
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    if (!operand) {
+        log_error("build unary from parts: missing operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    if (!operand->type) {
+        log_error("build unary from parts: operand missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TypeId operand_type = operand->type->type_id;
+    TypeId type_id;
+    if (ast_node->op == OPERATOR_NOT) {
+        type_id = LMD_TYPE_BOOL;
+    }
+    else if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+        ast_node->type = operand->type;
+        return (AstNode*)ast_node;
+    }
+    else if (IS_NUMERIC_ID(operand_type)) {
+        type_id = operand_type;
+    }
+    else if (operand_type != LMD_TYPE_ANY) {
+        // Keep the shared constructor's result honest: a known non-number
+        // cannot become `any` merely because it crosses a parser boundary.
+        ast_node->type = lambda_type_union_normalized(tp->pool, &TYPE_NUMBER,
+            &TYPE_ERROR);
+        return (AstNode*)ast_node;
+    }
+    else {
+        type_id = census_any_type_id(tp, ANY_UNARY);
+    }
+    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build unary expr");
 
@@ -5108,69 +5252,12 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
         return build_spread_expr(tp, bi_node);
     }
 
-    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
-    ast_node->op_str = op;
-    if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
-    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
-    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
-
     TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
-    ast_node->operand = build_expr(tp, operand_node);
-
-    // Defensive validation: ensure operand was built successfully
-    if (!ast_node->operand) {
-        log_error("Error: build_unary_expr failed to build operand");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    // Additional validation: ensure operand has valid type
-    if (!ast_node->operand->type) {
-        log_error("Error: build_unary_expr operand missing type information");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    // More robust type inference based on operator and operand type
-    TypeId operand_type = ast_node->operand->type->type_id;
-    TypeId type_id;
-
-    if (ast_node->op == OPERATOR_NOT) {
-        type_id = LMD_TYPE_BOOL;
-    }
-    else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
-        // For numeric unary operators (+/-), preserve the operand type if numeric
-        if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
-            ast_node->type = ast_node->operand->type;
-            log_debug("end build unary expr");
-            return (AstNode*)ast_node;
-        }
-        if (IS_NUMERIC_ID(operand_type)) {
-            type_id = operand_type;  // Preserve the exact numeric type
-        }
-        else if (operand_type != LMD_TYPE_ANY) {
-            // A non-numeric operand of known type cannot silently become `any`:
-            // negation either produces a number or raises, so the honest type
-            // is `number | error` [TIG12, S7.2.1]. An open (`any`) operand
-            // stays open — nothing has been proven about it.
-            ast_node->type = lambda_type_union_normalized(tp->pool,
-                &TYPE_NUMBER, &TYPE_ERROR);
-            log_debug("end build unary expr");
-            return (AstNode*)ast_node;
-        }
-        else {
-            type_id = census_any_type_id(tp, ANY_UNARY);  // open operand stays open
-        }
-    }
-    else {
-        log_error("Error: build_unary_expr unknown operator");
-        type_id = census_any_type_id(tp, ANY_ERROR_RECOVERY);  // Default fallback
-    }
-
-    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
-
+    AstNode* operand = build_expr(tp, operand_node);
+    LambdaSourceSpan span = {ts_node_start_byte(bi_node), ts_node_end_byte(bi_node)};
+    AstNode* result = build_unary_node_from_parts(tp, span, op, operand);
     log_debug("end build unary expr");
-    return (AstNode*)ast_node;
+    return result;
 }
 
 // build spread expression: *expr
@@ -5526,39 +5613,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     }
     strview_trim(&op);
     ast_node->op_str = op;
-    if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
-    else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
-    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
-    else if (strview_equal(&op, "++")) { ast_node->op = OPERATOR_JOIN; }
-    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
-    else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
-    else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
-    else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
-    else if (strview_equal(&op, "div")) { ast_node->op = OPERATOR_IDIV; }
-    else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
-    else if (strview_equal(&op, "==")) { ast_node->op = OPERATOR_EQ; }
-    else if (strview_equal(&op, "!=")) { ast_node->op = OPERATOR_NE; }
-    else if (strview_equal(&op, "<")) { ast_node->op = OPERATOR_LT; }
-    else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
-    else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
-    else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
-    else if (strview_equal(&op, "eq")) { ast_node->op = OPERATOR_ELEM_EQ; }
-    else if (strview_equal(&op, "ne")) { ast_node->op = OPERATOR_ELEM_NE; }
-    else if (strview_equal(&op, "lt")) { ast_node->op = OPERATOR_ELEM_LT; }
-    else if (strview_equal(&op, "le")) { ast_node->op = OPERATOR_ELEM_LE; }
-    else if (strview_equal(&op, "gt")) { ast_node->op = OPERATOR_ELEM_GT; }
-    else if (strview_equal(&op, "ge")) { ast_node->op = OPERATOR_ELEM_GE; }
-    else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
-    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
-    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
-    else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
-    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
-    else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
-    else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
-    else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
-    else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
-    else if (strview_equal(&op, "at")) { ast_node->op = OPERATOR_AT; }
-    else {
+    if (!lambda_binary_operator_from_spelling(op, &ast_node->op)) {
         log_error("Error: build_binary_expr unknown operator: %.*s", (int)op.length, op.str);
         ast_node->op = OPERATOR_ADD; // Default fallback to prevent crashes
     }
@@ -5956,35 +6011,69 @@ bool has_current_item_ref(AstNode* node) {
     }
 }
 
-// build current item reference (~)
-AstNode* build_current_expr(Transpiler* tp, TSNode node) {
-    uint32_t len = ts_node_end_byte(node) - ts_node_start_byte(node);
-    bool is_index = (len == 2); // ~# is 2 chars, ~ is 1
+AstNode* build_current_item_from_span(Transpiler* tp, LambdaSourceSpan span,
+        bool is_index) {
     if (is_index) {
         log_debug("build current index (~#)");
-        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_INDEX, node, sizeof(AstNode));
+        AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_INDEX,
+            span, sizeof(AstNode));
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
         return ast_node;
     } else {
         log_debug("build current item (~)");
-        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, node, sizeof(AstNode));
+        AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_ITEM,
+            span, sizeof(AstNode));
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
         return ast_node;
     }
 }
 
+AstNode* build_current_parent_navigation_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_NAVIGATION_EXPR, span, sizeof(AstNavigationNode));
+    nav->object = build_current_item_from_span(tp, span, false);
+    nav->root = false;
+    nav->type = nav->object->type;
+    return (AstNode*)nav;
+}
+
+AstNode* build_primary_wrapper_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* expr) {
+    AstPrimaryNode* primary = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    primary->expr = expr;
+    primary->type = expr && expr->type ? expr->type : &TYPE_ERROR;
+    return (AstNode*)primary;
+}
+
+// build current item reference (~)
+AstNode* build_current_expr(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_current_item_from_span(tp, span,
+        lambda_source_span_length(span) == 2); // ~# is 2 chars, ~ is 1
+}
+
 // Build the handler-local current error reference (`^`).  The grammar admits
 // the token as a primary so ordinary member/index builders can compose with it;
 // semantic scope is enforced here rather than letting `^` become a global value.
-static AstNode* build_current_error_expr(Transpiler* tp, TSNode node) {
-    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ERROR, node, sizeof(AstNode));
+AstNode* build_current_error_from_span(Transpiler* tp, LambdaSourceSpan span) {
+    AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_ERROR,
+        span, sizeof(AstNode));
     ast_node->type = &TYPE_ERROR;
     if (!tp->building_handler_body) {
-        record_semantic_error(tp, node, ERR_INVALID_EXPR_CONTEXT,
+        // A direct parser cannot rely on a CST ancestor to enforce this scope;
+        // the committed constructor owns the handler-body invariant for both paths.
+        record_semantic_error_span(tp, span, ERR_INVALID_EXPR_CONTEXT,
             "current error `^` is only valid inside an error-handler body");
     }
     log_debug("build current handler error (^)");
     return ast_node;
+}
+
+static AstNode* build_current_error_expr(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_current_error_from_span(tp, span);
 }
 
 static AstNode* build_null_noop(Transpiler* tp, TSNode source_node) {
@@ -7630,11 +7719,12 @@ AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;
 }
 
-AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
+AstBinaryNode* build_registered_binary_type_from_span(Transpiler* tp,
+        LambdaSourceSpan span,
         AstNode* left, AstNode* right, Type* left_type, Type* right_type,
         Operator op, StrView op_str) {
-    AstBinaryNode* binary = (AstBinaryNode*)alloc_ast_node(tp,
-        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+    AstBinaryNode* binary = (AstBinaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_BINARY_TYPE, span, sizeof(AstBinaryNode));
     binary->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY,
         sizeof(TypeBinary));
@@ -7649,6 +7739,14 @@ AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
     arraylist_append(tp->type_list, binary->type);
     type->type_index = tp->type_list->length - 1;
     return binary;
+}
+
+AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
+        AstNode* left, AstNode* right, Type* left_type, Type* right_type,
+        Operator op, StrView op_str) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_registered_binary_type_from_span(tp, span, left, right,
+        left_type, right_type, op, op_str);
 }
 
 // Helper function to parse occurrence count from string like "[]", "[2]", "[2, 5]", "[2+]"
@@ -7710,12 +7808,13 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
 }
 
-AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
+AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
+        LambdaSourceSpan span,
         Type* returned, Type* error_type, bool can_raise) {
     // Both grammar paths must carry exactly this compact TypeFunc contract;
     // build_func reads it before replacing the wrapper with the declared fn.
-    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE,
-        node, sizeof(AstFuncNode));
+    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_FUNC_TYPE, span, sizeof(AstFuncNode));
     wrapper_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     ((TypeType*)wrapper_node->type)->type = (Type*)fn_type_info;
@@ -7732,6 +7831,13 @@ AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
         can_raise);
 
     return (AstNode*)wrapper_node;
+}
+
+AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
+        Type* returned, Type* error_type, bool can_raise) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_function_return_contract_node_from_span(tp, span, returned,
+        error_type, can_raise);
 }
 
 // todo: build reference type
@@ -9257,7 +9363,7 @@ static bool return_error_call_name(AstCallNode* call, const char** name, int* le
 
 static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         AstNode* site, Type* expected, Type* actual, bool has_explicit_contract) {
-    TSPoint point = ts_node_start_point(site ? site->node : fn->node);
+    LambdaSourcePoint point = ast_node_start_point(tp, site ? site : (AstNode*)fn);
     ReturnErrorOriginScan origin = {0};
     if (site) walk_lambda_ast(site, find_first_return_error_call, &origin, false);
     const char* call_name = NULL;
@@ -9309,7 +9415,7 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
         ? static_parameter_boundary_relation(actual, scan->expected)
         : static_boundary_relation(actual, scan->expected);
     if (relation == STATIC_BOUNDARY_REJECTED) {
-        TSPoint point = ts_node_start_point(node->node);
+        LambdaSourcePoint point = ast_node_start_point(scan->tp, node);
         char expected_name[128];
         char actual_name[128];
         lambda_type_format_name(scan->expected, expected_name, sizeof(expected_name));
@@ -9373,7 +9479,7 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
             name_length = (int)ident_name->len;
         }
     }
-    record_semantic_error(tp, call->node, ERR_UNHANDLED_ERROR,
+    record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
         "error from '%.*s' must be handled: use '%.*s(...)^' to propagate, "
         "handle with '%.*s(...) ^ { ... }', or recover with '%.*s(...) or default'",
         name_length, name, name_length, name, name_length, name, name_length, name);
@@ -9739,7 +9845,7 @@ static AstFuncNode* direct_user_callable(AstCallNode* call) {
 static void report_invalidated_read(InvalidatedBindingState* state,
         AstNode* node, String* name) {
     if (!state || !state->tp || !node || !name) return;
-    record_semantic_error(state->tp, node->node, ERR_INVALIDATED_BINDING,
+    record_semantic_error_span(state->tp, node->source_span, ERR_INVALIDATED_BINDING,
         "binding '%.*s' may have been changed invisibly by a previous call; "
         "assign the returned value back to '%.*s' before reading it",
         (int)name->len, name->chars, (int)name->len, name->chars);
@@ -11075,14 +11181,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_MEMBER_EXPR:
         return build_member_expr(tp, expr_node);
     case SYM_CURRENT_PARENT_EXPR: {
-        AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
-            AST_NODE_NAVIGATION_EXPR, expr_node, sizeof(AstNavigationNode));
-        AstNode* current = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, expr_node, sizeof(AstNode));
-        current->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-        nav->object = current;
-        nav->root = false;
-        nav->type = nav->object->type;
-        return (AstNode*)nav;
+        LambdaSourceSpan span = {ts_node_start_byte(expr_node),
+            ts_node_end_byte(expr_node)};
+        return build_current_parent_navigation_from_span(tp, span);
     }
     case SYM_CALL_EXPR:
         return build_call_expr(tp, expr_node, symbol);
@@ -12073,7 +12174,7 @@ static bool validate_concurrency_node(AstNode* node, void* data) {
         if (capture->entry && capture->entry->is_mutable) {
             // A spawned task may resume after its lexical parent moves on, so
             // borrowing an outer var by reference would create shared mutation.
-            record_semantic_error(validation->tp, start->node, ERR_INVALID_EXPR_CONTEXT,
+            record_semantic_error_span(validation->tp, start->source_span, ERR_INVALID_EXPR_CONTEXT,
                 "`start` cannot capture mutable var '%.*s'; copy it to a `let` value or use message passing",
                 (int)capture->lambda_name->len, capture->lambda_name->chars);
         }
@@ -12098,7 +12199,7 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
         // A statement pn handler consumes the call's explicit Item completion
         // after the async resume point; only value handlers still require a
         // live native result context that cannot span a scheduler yield.
-        record_semantic_error(validation->tp, node->node, ERR_INVALID_EXPR_CONTEXT,
+        record_semantic_error_span(validation->tp, node->source_span, ERR_INVALID_EXPR_CONTEXT,
             "error handler operand may suspend (%s); await before applying `^ { ... }`",
             scan.cause ? scan.cause : "possible await");
     }

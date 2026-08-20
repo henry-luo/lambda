@@ -35,16 +35,46 @@ struct ParserSeamRecorder {
     int path_count;
 };
 
-static LambdaParseValue record_parser_seam(void* context, int reduction_kind,
-        LambdaSourceSpan span, const LambdaParseValue*, uint32_t) {
+struct ReductionMetadataRecorder {
+    LambdaParseReduction atom;
+    LambdaParseReduction binary;
+    LambdaParseReduction postfix;
+    int atom_count;
+    int binary_count;
+    int postfix_count;
+};
+
+static LambdaParseValue record_parser_seam(void* context,
+        const LambdaParseReduction* reduction) {
     ParserSeamRecorder* recorder = (ParserSeamRecorder*)context;
-    if (reduction_kind == LAMBDA_REDUCE_TYPE_SLOT) {
-        recorder->type_span = span;
+    if (reduction->kind == LAMBDA_REDUCE_TYPE_SLOT) {
+        recorder->type_span = reduction->span;
         recorder->type_count++;
     }
-    if (reduction_kind == LAMBDA_REDUCE_PATH_SLOT) {
-        recorder->path_span = span;
+    if (reduction->kind == LAMBDA_REDUCE_PATH_SLOT) {
+        recorder->path_span = reduction->span;
         recorder->path_count++;
+    }
+    return 0;
+}
+
+static LambdaParseValue record_reduction_metadata(void* context,
+        const LambdaParseReduction* reduction) {
+    ReductionMetadataRecorder* recorder = (ReductionMetadataRecorder*)context;
+    if (reduction->kind == LAMBDA_REDUCE_ATOM &&
+            reduction->form == LAMBDA_REDUCTION_FORM_TOKEN) {
+        recorder->atom = *reduction;
+        recorder->atom_count++;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_BINARY &&
+            reduction->form == LAMBDA_REDUCTION_FORM_TOKEN) {
+        recorder->binary = *reduction;
+        recorder->binary_count++;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_POSTFIX &&
+            reduction->form == LAMBDA_REDUCTION_FORM_CALL) {
+        recorder->postfix = *reduction;
+        recorder->postfix_count++;
     }
     return 0;
 }
@@ -150,6 +180,26 @@ TEST(LambdaRdParserPoc, KeepsTypeAndStaticPathAsCommittedSourceSlots) {
     EXPECT_EQ(recorder.path_count, 1);
     EXPECT_EQ(strncmp(source + recorder.type_span.start_byte, "int", 3), 0);
     EXPECT_EQ(strncmp(source + recorder.path_span.start_byte, ".records.~~.id", 14), 0);
+}
+
+TEST(LambdaRdParserPoc, PublishesCommittedTokenFormsAndCompletePrattSpans) {
+    const char* source = "start(1 + 2)";
+    LambdaParseError error = {};
+    ReductionMetadataRecorder recorder = {};
+    LambdaParseSink sink = {record_reduction_metadata};
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+
+    ASSERT_GT(recorder.atom_count, 0);
+    ASSERT_EQ(recorder.binary_count, 1);
+    ASSERT_EQ(recorder.postfix_count, 1);
+    EXPECT_EQ(recorder.binary.detail_token.kind, LAMBDA_TOK_PLUS);
+    EXPECT_EQ(recorder.binary.detail_token.span.start_byte, 8u);
+    EXPECT_EQ(recorder.binary.span.start_byte, 6u);
+    EXPECT_EQ(recorder.binary.span.end_byte, 11u);
+    EXPECT_EQ(recorder.postfix.detail_token.kind, LAMBDA_TOK_LPAREN);
+    EXPECT_EQ(recorder.postfix.span.start_byte, 0u);
+    EXPECT_EQ(recorder.postfix.span.end_byte, strlen(source));
 }
 
 TEST(LambdaRdParserPoc, ParsesTypeAliasAndObjectDeclarationShells) {

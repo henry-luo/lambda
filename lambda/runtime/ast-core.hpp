@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <tree_sitter/api.h>
+#include "source_span.h"
 #include "../lambda.h"
 #include "value_rep.h"
 
@@ -325,6 +326,9 @@ struct AstNode {
     AstNodeType node_type;
     Type *type;
     AstNode* next;
+    LambdaSourceSpan source_span;
+    // Transitional CST compatibility only. P2.1 callers must use source_span;
+    // direct-parser nodes leave this null until the field is removed at switch.
     TSNode node;
 };
 

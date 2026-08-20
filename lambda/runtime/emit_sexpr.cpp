@@ -84,12 +84,10 @@ static bool emit_prepare_parse(const char* script_path, EmitParseState* state) {
     return true;
 }
 
-// get source text for a TSNode
-static inline const char* node_src(const char* source, TSNode node, int* out_len) {
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
-    *out_len = (int)(end - start);
-    return source + start;
+// Get source text from the parser-neutral span retained on every AST node.
+static inline const char* node_src(const char* source, LambdaSourceSpan span, int* out_len) {
+    *out_len = (int)lambda_source_span_length(span);
+    return source + span.start_byte;
 }
 
 // emit a Racket-safe escaped string
@@ -170,7 +168,7 @@ static bool emit_concrete_type_expr(const char* source, AstNode* node) {
     TypeType* tt = (TypeType*)node->type;
     if (!tt->type) return false;
     int slen;
-    const char* source_text = node_src(source, node->node, &slen);
+    const char* source_text = node_src(source, node->source_span, &slen);
     if (slen == 4 && strncmp(source_text, "list", 4) == 0) {
         printf("list-type");
         return true;
@@ -188,7 +186,7 @@ static void emit_type_expr(const char* source, AstNode* node) {
         // base type: get the type name from the type_id
         if (emit_concrete_type_expr(source, node)) return;
         // fallback: use source text with -type suffix
-        int len; const char* src = node_src(source, node->node, &len);
+        int len; const char* src = node_src(source, node->source_span, &len);
         printf("%.*s-type", len, src);
     }
     else if (node->node_type == AST_NODE_BINARY_TYPE) {
@@ -201,7 +199,7 @@ static void emit_type_expr(const char* source, AstNode* node) {
             emit_type_expr(source, bn->right);
             printf(")");
         } else {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("%.*s", len, src);
         }
     }
@@ -901,25 +899,25 @@ static void emit_expr(const char* source, AstNode* node) {
             printf("null");
             break;
         case LMD_TYPE_BOOL: {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             if (len >= 4 && strncmp(src, "true", 4) == 0) printf("#t");
             else printf("#f");
             break;
         }
         case LMD_TYPE_INT: {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("%.*s", len, src);
             break;
         }
         case LMD_TYPE_FLOAT: {
             // use source text for exact representation
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("%.*s", len, src);
             break;
         }
         case LMD_TYPE_STRING: {
             // use source text (preserves original escapes, already in "..." form)
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             // source may include outer primary_expr wrapper; find the actual string
             const char* q = (const char*)memchr(src, '"', len);
             if (q) {
@@ -933,7 +931,7 @@ static void emit_expr(const char* source, AstNode* node) {
         case LMD_TYPE_SYMBOL: {
             // Lambda: 'name' → Redex: (sym "name")
             // Symbol content may have escape sequences: \' for quote, \\ for backslash
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             // find the quote-delimited symbol content
             const char* q = (const char*)memchr(src, '\'', len);
             if (q) {
@@ -997,13 +995,13 @@ static void emit_expr(const char* source, AstNode* node) {
                     printf("(type-val %s-type)", type_info[tt->type->type_id].name);
                 }
             } else {
-                int len; const char* src = node_src(source, node->node, &len);
+                int len; const char* src = node_src(source, node->source_span, &len);
                 printf("(type-val %.*s-type)", len, src);
             }
             break;
         }
         case LMD_TYPE_DTIME: {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             if (len >= 3 && src[0] == 't' && src[1] == '\'') {
                 printf("(datetime ");
                 emit_escaped_string(src + 2, len - 3);
@@ -1017,18 +1015,18 @@ static void emit_expr(const char* source, AstNode* node) {
         case LMD_TYPE_NUM_SIZED:
         case LMD_TYPE_INT64:
         case LMD_TYPE_UINT64: {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("%.*s", len, src);
             break;
         }
         case LMD_TYPE_BINARY: {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("(binary \"%.*s\")", len, src);
             break;
         }
         default: {
             // fallback: emit source text as comment
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("(unsupported \"%.*s\")", len, src);
             break;
         }
@@ -1079,7 +1077,7 @@ static void emit_expr(const char* source, AstNode* node) {
                 printf(")");
             }
         } else {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("(unsupported-op \"%.*s\")", len, src);
         }
         break;
@@ -1098,7 +1096,7 @@ static void emit_expr(const char* source, AstNode* node) {
         case OPERATOR_PROPAGATE:
             printf("(propagate "); emit_expr(source, un->operand); printf(")"); break;
         default: {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("(unsupported-unary \"%.*s\")", len > 60 ? 60 : len, src);
             break;
         }
@@ -1628,7 +1626,7 @@ static void emit_expr(const char* source, AstNode* node) {
             else printf("any");
             printf(")");
         } else {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             printf("(def-type-raw ");
             emit_escaped_string(src, len);
             printf(")");
@@ -1650,7 +1648,7 @@ static void emit_expr(const char* source, AstNode* node) {
                 break;
             }
         }
-        int len; const char* src = node_src(source, node->node, &len);
+        int len; const char* src = node_src(source, node->source_span, &len);
         printf("(type-val %.*s-type)", len, src);
         break;
     }
@@ -1711,7 +1709,7 @@ static void emit_expr(const char* source, AstNode* node) {
     }
 
     case AST_NODE_PATH_EXPR: {
-        int len; const char* src = node_src(source, node->node, &len);
+        int len; const char* src = node_src(source, node->source_span, &len);
         printf("(path ");
         emit_escaped_string(src, len);
         printf(")");
@@ -1797,7 +1795,7 @@ static void emit_expr(const char* source, AstNode* node) {
             emit_expr(source, bt->right);
             printf(")");
         } else {
-            int len; const char* src = node_src(source, node->node, &len);
+            int len; const char* src = node_src(source, node->source_span, &len);
             emit_escaped_string(src, len);
         }
         break;
@@ -1807,7 +1805,7 @@ static void emit_expr(const char* source, AstNode* node) {
     case AST_NODE_PATTERN_CHAR_CLASS:
     case AST_NODE_PATTERN_SEQ:
     case AST_NODE_PATTERN_RANGE: {
-        int len; const char* src = node_src(source, node->node, &len);
+        int len; const char* src = node_src(source, node->source_span, &len);
         emit_escaped_string(src, len);
         break;
     }
@@ -1818,7 +1816,7 @@ static void emit_expr(const char* source, AstNode* node) {
     }
 
     default: {
-        int len; const char* src = node_src(source, node->node, &len);
+        int len; const char* src = node_src(source, node->source_span, &len);
         printf("(unsupported-%d \"%.*s\")", node->node_type, len > 60 ? 60 : len, src);
         break;
     }
@@ -1865,7 +1863,7 @@ static void emit_object_fields(const char* source, AstObjectTypeNode* obj_type) 
             }
             printf(")");
         } else {
-            int flen; const char* fsrc = node_src(source, field->node, &flen);
+            int flen; const char* fsrc = node_src(source, field->source_span, &flen);
             printf("(%.*s)", flen, fsrc);
         }
         field = field->next;
@@ -2166,9 +2164,9 @@ static void emit_dump_contract_field(const char* label, const Type* type,
     if (type) printf(" (%s_explicit %s)", label, is_explicit ? "true" : "false");
 }
 
-static void emit_dump_source_field(const char* source, TSNode node) {
+static void emit_dump_source_field(const char* source, LambdaSourceSpan span) {
     int len = 0;
-    const char* src = node_src(source, node, &len);
+    const char* src = node_src(source, span, &len);
     if (len <= 0) return;
     printf(" (source ");
     emit_escaped_string(src, len);
@@ -2234,7 +2232,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             if (((AstPrimaryNode*)node)->expr) {
                 emit_lambda_dump_field(source, "expr", ((AstPrimaryNode*)node)->expr, indent + 1);
             } else {
-                emit_dump_source_field(source, node->node);
+                emit_dump_source_field(source, node->source_span);
             }
             break;
         case AST_NODE_UNARY:
@@ -2556,7 +2554,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             break;
         }
         default:
-            emit_dump_source_field(source, node->node);
+            emit_dump_source_field(source, node->source_span);
             break;
     }
 

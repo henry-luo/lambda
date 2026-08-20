@@ -1081,8 +1081,8 @@ static bool mir_is_exact_int_literal(MirTranspiler* mt, AstNode* node,
             node->type->type_id != LMD_TYPE_INT) {
         return false;
     }
-    uint32_t start = ts_node_start_byte(node->node);
-    uint32_t end = ts_node_end_byte(node->node);
+    uint32_t start = node->source_span.start_byte;
+    uint32_t end = node->source_span.end_byte;
     return end >= start && end - start == text_len &&
         memcmp(mt->source + start, text, text_len) == 0;
 }
@@ -4930,8 +4930,10 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         if (!node->type || !node->type->is_literal) return false;
         if (static_literal_item_from_type(node->type, out)) return true;
         switch (node->type->type_id) {
-        case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal(mt->source, node->node)); return true;
-        case LMD_TYPE_INT: out->item = i2it(parse_int_literal(mt->source, node->node)); return true;
+        case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal_span(mt->source,
+            node->source_span)); return true;
+        case LMD_TYPE_INT: out->item = i2it(parse_int_literal_span(mt->source,
+            node->source_span)); return true;
         case LMD_TYPE_DTIME: return false;
         // A complex literal must be heap-allocated and therefore cannot be embedded
         // in an Input-backed static collection constant.
@@ -5173,8 +5175,8 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             // the pooled arm is a plain load with no conversion at all. (Under
             // v4 both arms had to reach the FP unit.) The literal band keeps
             // every value in range by construction.
-            if (node->type == &LIT_INT || ts_node_symbol(node->node) == SYM_INT) {
-                int64_t val = parse_int_literal(mt->source, node->node);
+            if (node->type == &LIT_INT) {
+                int64_t val = parse_int_literal_span(mt->source, node->source_span);
                 MIR_reg_t r = new_reg(mt, "int", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, val)));
@@ -5206,7 +5208,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             return emit_unbox_container(mt, boxed);
         }
         case LMD_TYPE_BOOL: {
-            bool val = parse_bool_literal(mt->source, node->node);
+            bool val = parse_bool_literal_span(mt->source, node->source_span);
             MIR_reg_t r = new_reg(mt, "bool", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_int_op(mt->ctx, val ? 1 : 0)));
@@ -6103,7 +6105,7 @@ static bool mir_native_analysis_matches(MirTranspiler* mt,
     // The analysis pass and the emitter may hold equivalent AST nodes for one
     // source function. Pointer identity alone then hides the recursive
     // candidate even though the backend name and source span are identical.
-    return ts_node_start_byte(analysis->node) == ts_node_start_byte(fn->node) &&
+    return analysis->source_span.start_byte == fn->source_span.start_byte &&
         analysis->name && fn->name && analysis->name->len == fn->name->len &&
         memcmp(analysis->name->chars, fn->name->chars, fn->name->len) == 0;
 }
@@ -7749,7 +7751,7 @@ static bool mir_literal_int_value(MirTranspiler* mt, AstNode* node, int64_t* val
     if (!primary || primary->node_type != AST_NODE_PRIMARY || !primary->type ||
             primary->type->type_id != LMD_TYPE_INT || !primary->type->is_literal ||
             !mt) return false;
-    int64_t parsed = parse_int_literal(mt->source, primary->node);
+    int64_t parsed = parse_int_literal_span(mt->source, primary->source_span);
     *value = negative ? -parsed : parsed;
     return true;
 }

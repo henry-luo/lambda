@@ -1,7 +1,7 @@
 # Lambda Grammar Parser: Hybrid Recursive-Descent + Pratt Design
 
 - **Date:** 2026-08-19
-- **Status:** **PHASE 1 IN PROGRESS — the lexer and complete recursive-descent/Pratt recognizer POC are implemented.** The valid-source side of P1.3 is green; invalid-source classification, size, and performance gates remain. Phase 2 requires the P1.6 go gate. No production parser switch is made by this document.
+- **Status:** **PHASE 1 IN PROGRESS; P2.1 COMPLETE FOR THE CURRENT CST PATH; P2.2 CONSTRUCTOR EXTRACTION IN PROGRESS.** The lexer and complete recursive-descent/Pratt recognizer POC are implemented. The valid-source side of P1.3 is green; invalid-source classification and final linked-size gates remain open. At user direction, P2.2 may proceed in parallel, but P1.6 and P2.6 still forbid a production-parser switch.
 - **Formal authority:** **D8.1.1v2** (current Tree-sitter grammar → typed AST pipeline and retained AST as runtime source of truth), **D8.1.2** (generated grammar discipline), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D4.1.1v2** (AST/const-pool ownership). Phase 1 is an implementation POC under those current rulings. A successful Phase 2 switch requires revising D8.1.1v2 and D8.1.2 in place, with the formal-design semver bump required by the repository convention.
 - **Surface-syntax authority:** `lambda/tree-sitter-lambda/grammar-lambda.js` remains the complete structural reference grammar; `grammar-common.js` plus the production replacement layer in `grammar.js` describes the currently shipped parser seams. S2.4.3v2 governs greedy namespace-qualified names, and S7.6.3v2 governs query at the postfix/member tier.
 - **Related:** `vibe/Lambda_Grammar_Reduce5.md` (current grammar reductions and latest-Tree-sitter size POC), `doc/dev/lambda/LR_02_Parsing_AST.md` (current Tree-sitter/CST front end), `lambda/runtime/parse.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp`, and `lambda/runtime/parse_path_expr.cpp`.
@@ -425,6 +425,19 @@ The existing Tree-sitter builder converts each `TSNode` to `LambdaSourceSpan` at
 
 Because core AST nodes are shared under D8.2.1, the source reference is parser-neutral for all language profiles. Tree-sitter-based guest builders fill the same range from their `TSNode`; they do not force Tree-sitter storage back into core `AstNode`.
 
+**P2.1 checkpoint (2026-08-20):** `LambdaSourceSpan` is now the common
+half-open byte-range type in `lambda/runtime/source_span.h`; every `AstNode`
+stores it, and the current CST allocator populates it from the source `TSNode`.
+The AST allocator has a span entry point for the direct parser, and structured
+semantic errors, literal decoding in T0/MIR, MIR source-name identity, and AST
+dump source extraction read the retained span rather than `AstNode::node`.
+The existing type-pattern and static-path parsers now have equivalent span
+entry points; their CST APIs are compatibility adapters only.
+`AstNode::node` remains a transitional, zeroed-for-direct-AST compatibility
+field while the CST walker remains active; the type/path helpers retain only
+legacy `TSNode` adapters. No direct-AST node is yet published through the
+runtime path.
+
 ### P2.2 — separate traversal from AST construction
 
 Refactor `build_ast.cpp` by extracting reusable production constructors and semantic hooks rather than copying cases into the C parser:
@@ -440,6 +453,23 @@ Refactor `build_ast.cpp` by extracting reusable production constructors and sema
 During the dual-front-end period, the legacy CST walker and the direct parser sink call the same helpers. At the third near-identical construction shape, extract the shared helper first, per repository rule 13. Once parity is proven, delete the CST adapters; do not retain two semantic builders.
 
 Parser lookahead must not enter a `NameScope` or register a declaration. Scope lifecycle callbacks occur only after a syntactic branch commits, and a failed compilation releases the complete AST pool.
+
+**P2.2 checkpoint (2026-08-20):** The reduction ABI now carries a committed
+form and introducer/operator token in addition to child values. Pratt binary
+and postfix reductions now publish the complete expression span, including
+their left child; this fixes the prior recognizer-only span shape before an AST
+sink can depend on it. The C parser does not re-lex that source in the sink.
+`ast_build.hpp` now owns the common prefix/infix operator classification, and
+the ordinary unary constructor accepts a parser-neutral span plus a committed
+operand. The Tree-sitter unary walker calls this constructor, preserving its
+existing type inference while proving the seam is live. Identifier resolution,
+current-item/index/error atoms, and current-parent navigation now have the
+same span-native constructors and their CST adapters delegate to them. A
+primary-wrapper constructor is ready for grouped direct reductions, preserving
+`AST_NODE_PRIMARY` as required by D8.2.2. Spread and type negation remain
+dedicated node constructors because their retained node shapes are intentionally
+distinct. This is still an early constructor family: literals, containers,
+calls, declarations, and scope lifecycle require extraction before P2.3.
 
 ### P2.3 — implement the direct AST sink
 
@@ -581,4 +611,4 @@ Language-reference documents do not need a syntax rewrite because the accepted l
 
 ## 12. Immediate next action
 
-The P1.1 lexer, P1.2 whole-language recognizer, manifest generator, and reproducible P1.3 valid-source differential are checked in under `lambda/runtime/parser/`, `test/`, and `utils/`; the production parser selector is unchanged. Next, classify and pin the eight Tree-sitter-error / C-accepted sources, then measure release-linked size and parse-stage performance. Publish no size conclusion until the full P1.3 status gate is green.
+The P1.1 lexer, P1.2 whole-language recognizer, manifest generator, and reproducible P1.3 valid-source differential are checked in under `lambda/runtime/parser/`, `test/`, and `utils/`; the production parser selector is unchanged. The P2.1 source-span migration is landed in parallel, including span-native type/path helpers. P2.2 has started with complete Pratt reduction ranges/form metadata plus shared unary/operator, identifier, and contextual-atom constructors used by the CST walker. Next, extract literals, containers/calls, declarations, and scope-lifecycle constructors before connecting the direct-AST sink; meanwhile classify and pin the eight Tree-sitter-error / C-accepted sources and finish the linked-size gate. Publish no production-switch conclusion until P1.6 and P2.6 are green.
