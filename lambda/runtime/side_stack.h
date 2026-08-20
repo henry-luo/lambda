@@ -54,6 +54,8 @@ void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint);
 // Reserve canonical Item roots above the current watermark. The caller owns
 // restoration through a saved side-stack snapshot or an enclosing frame.
 uint64_t* lambda_side_root_alloc_n(size_t slot_count);
+// Pop a contiguous suffix previously allocated by lambda_side_root_alloc_n.
+bool lambda_side_root_pop_n(size_t slot_count);
 uint64_t* lambda_side_number_alloc(void);
 void lambda_side_stack_decommit_unused(void);
 
@@ -76,6 +78,8 @@ LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture_for(
 void lambda_recovery_checkpoint_restore_for(
     Context* context, LambdaRecoveryCheckpoint* checkpoint);
 uint64_t* lambda_side_root_alloc_n_for(Context* context, size_t slot_count);
+// Pop a contiguous suffix previously allocated for the same Context.
+bool lambda_side_root_pop_n_for(Context* context, size_t slot_count);
 uint64_t* lambda_side_number_alloc_for(Context* context);
 bool lambda_root_frame_begin_for(Context* context, LambdaRootFrame* frame,
                                  size_t slot_count);
