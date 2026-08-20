@@ -2212,10 +2212,26 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         }
         if (parser->current.kind == LAMBDA_TOK_RETURN || parser->current.kind == LAMBDA_TOK_BREAK ||
                 parser->current.kind == LAMBDA_TOK_CONTINUE) {
+            LambdaToken control = parser->current;
             parser_advance(parser);
-            if (token_starts_expression(parser->current.kind)) {
-                if (!parse_expression(parser, 0)) return 0;
+            LambdaParseValue value = 0;
+            if (control.kind == LAMBDA_TOK_RETURN &&
+                    token_starts_expression(parser->current.kind)) {
+                value = parse_expression(parser, 0);
+                if (!value) return 0;
             }
+            LambdaReductionForm form = control.kind == LAMBDA_TOK_RETURN
+                ? LAMBDA_REDUCTION_FORM_RETURN
+                : control.kind == LAMBDA_TOK_BREAK
+                    ? LAMBDA_REDUCTION_FORM_BREAK
+                    : LAMBDA_REDUCTION_FORM_CONTINUE;
+            // Control flow must reach the AST sink as a committed reduction.
+            // Dropping `return` here made every direct-parser procedure fall
+            // through as null instead of preserving its procedural effect (D6.1.2).
+            return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT, form,
+                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                control, (LambdaToken){0}, 0, value ? &value : NULL,
+                value ? 1 : 0);
         } else {
             parser->top_level_statement_relation = false;
             LambdaParseValue expr = parse_expression(parser, 0);

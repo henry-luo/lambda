@@ -14082,6 +14082,29 @@ static Type* direct_function_contract(AstNode* type_node) {
     return type_node->type;
 }
 
+static AstNode* build_control_statement_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, LambdaReductionForm form, AstNode* value) {
+    const char* subject = form == LAMBDA_REDUCTION_FORM_RETURN ? "`return`"
+        : form == LAMBDA_REDUCTION_FORM_BREAK ? "`break`" : "`continue`";
+    if (!tp->current_scope || !tp->current_scope->is_proc) {
+        record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
+            "%s is only allowed inside a procedure (pn)", subject);
+    }
+    if (form == LAMBDA_REDUCTION_FORM_RETURN) {
+        AstReturnNode* node = (AstReturnNode*)alloc_ast_node_from_span(tp,
+            AST_NODE_RETURN_STAM, span, sizeof(AstReturnNode));
+        node->value = value;
+        node->type = value && value->type ? value->type : &TYPE_NULL;
+        return (AstNode*)node;
+    }
+    AstNode* node = alloc_ast_node_from_span(tp,
+        form == LAMBDA_REDUCTION_FORM_BREAK
+            ? AST_NODE_BREAK_STAM : AST_NODE_CONTINUE_STAM,
+        span, sizeof(AstNode));
+    node->type = set_type_any(tp, ANY_STATEMENT);
+    return node;
+}
+
 AstNamedNode* build_assignment_from_parts(Transpiler* tp, LambdaSourceSpan span,
         StrView name, AstNode* type_expr, AstNode* value) {
     AstNamedNode* assignment = (AstNamedNode*)alloc_ast_node_from_span(tp,
@@ -14212,7 +14235,12 @@ AstNode* build_function_from_parts(Transpiler* tp, LambdaSourceSpan span,
         function_type->can_raise = true;
     }
     if (!returned_type) {
-        function_type->inferred_return = body && body->type ? body->type : &TYPE_ANY;
+        function_type->inferred_return = is_proc
+            ? infer_procedural_return_type(tp, fn)
+            : body && body->type ? body->type : &TYPE_ANY;
+        // The forward placeholder is the dynamic ABI seen by earlier calls;
+        // only inferred_return narrows after the completed body is available.
+        function_type->returned = &TYPE_ANY;
     }
     lambda_ast_leave_scope(tp, function_scope);
     if (name.length) lambda_ast_register_name(tp, (AstNamedNode*)fn);
@@ -15188,6 +15216,12 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         break;
     case LAMBDA_REDUCE_STATEMENT: {
+        if (reduction->form == LAMBDA_REDUCTION_FORM_RETURN ||
+                reduction->form == LAMBDA_REDUCTION_FORM_BREAK ||
+                reduction->form == LAMBDA_REDUCTION_FORM_CONTINUE) {
+            return direct_ast_value(build_control_statement_from_parts(tp,
+                reduction->span, reduction->form, child0));
+        }
         if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD) {
             direct_object_add_field(sink, reduction);
             return direct_ast_value(child0);
