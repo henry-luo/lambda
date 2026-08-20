@@ -8,6 +8,7 @@
 #include <unistd.h>    // for sysconf
 #endif
 #include "transpiler.hpp"
+#include "ast_build.hpp"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/thread_pool.h"
 #include "../io/mark_builder.hpp"
@@ -741,6 +742,35 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
     return true;
 }
 
+static bool lambda_tree_parser_selected(void) {
+    const char* mode = shell_getenv("LAMBDA_PARSER");
+    return mode && (strcmp(mode, "tree") == 0 ||
+        strcmp(mode, "tree-sitter") == 0);
+}
+
+static bool lambda_parser_compare_selected(void) {
+    const char* mode = shell_getenv("LAMBDA_PARSER");
+    return mode && strcmp(mode, "compare") == 0;
+}
+
+static bool initialize_script_ast_storage(Transpiler* tp) {
+    Input* input_base = Input::create(
+        mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
+    if (!input_base) {
+        log_error("Error: Failed to initialize Input base");
+        return false;
+    }
+    tp->pool = input_base->pool;
+    tp->arena = input_base->arena;
+    tp->name_pool = input_base->name_pool;
+    tp->type_list = input_base->type_list;
+    tp->url = input_base->url;
+    tp->path = input_base->path;
+    tp->root = input_base->root;
+    tp->const_list = arraylist_new(16);
+    return tp->const_list != NULL;
+}
+
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
         log_error("Error: Source code is NULL");
@@ -756,14 +786,44 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     profile_time_t p0, p1, p2, p3;
     if (profiling || compiler_timing) profile_get_time(&p0);
 
-    // create a parser
+    // The first-party parser is the production default. Tree-sitter remains
+    // an explicit reference/rollback mode; compare parses with both front ends
+    // while publishing only the direct AST.
+    bool compare_parser = lambda_parser_compare_selected();
+    bool direct_parser = !lambda_tree_parser_selected();
+    TSNode root_node = {};
     get_time(&start);
-    // parse the source
     tp->source = script->source;
-    tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
-    if (tp->syntax_tree == NULL) {
-        log_error("Error: Failed to parse the source code.");
-        return;
+    if (direct_parser) {
+        AstScript* direct_root = NULL;
+        LambdaParseError parse_error = {};
+        if (!initialize_script_ast_storage(tp) ||
+                lambda_rd_build_ast(tp, tp->source, strlen(tp->source),
+                    &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
+            log_error("C parser rejected %s: %s", script_path,
+                parse_error.message ? parse_error.message : "direct AST reduction failed");
+            return;
+        }
+        tp->syntax_tree = NULL;
+        tp->ast_root = (AstNode*)direct_root;
+        if (compare_parser) {
+            TSTree* reference_tree = lambda_parse_source(tp->parser, tp->source);
+            if (!reference_tree || ts_node_has_error(ts_tree_root_node(reference_tree))) {
+                log_error("parser compare: Tree-sitter rejected source accepted by C parser: %s",
+                    script_path);
+                if (reference_tree) ts_tree_delete(reference_tree);
+                return;
+            }
+            ts_tree_delete(reference_tree);
+        }
+    } else {
+        // parse the source with the retained Tree-sitter oracle.
+        tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
+        if (tp->syntax_tree == NULL) {
+            log_error("Error: Failed to parse the source code.");
+            return;
+        }
+        root_node = ts_tree_root_node(tp->syntax_tree);
     }
     get_time(&end);
     print_elapsed_time("parsing", start, end);
@@ -772,12 +832,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
 #ifndef NDEBUG
     // print the syntax tree as an s-expr
-    print_ts_root(tp->source, tp->syntax_tree);
+    if (!direct_parser) print_ts_root(tp->source, tp->syntax_tree);
 #endif
 
     // check if the syntax tree is valid
-    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
-    if (ts_node_has_error(root_node)) {
+    if (!direct_parser && ts_node_has_error(root_node)) {
         log_error("Syntax tree has errors.");
 
         // collect structured parse errors
@@ -787,34 +846,16 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
 
-    // build the AST from the syntax tree
-    get_time(&start);
-
-    // Initialize Input base class (Script extends Input)
-    Input* input_base = Input::create(mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
-    if (!input_base) {
-        log_error("Error: Failed to initialize Input base");
-        return;
+    // build the AST from the syntax tree when the oracle is selected.
+    if (!direct_parser) {
+        get_time(&start);
+        if (strcmp(ts_node_type(root_node), "document") != 0) {
+            log_error("Error: The tree has no valid root node.");
+            return;
+        }
+        if (!initialize_script_ast_storage(tp)) return;
+        tp->ast_root = build_script(tp, root_node);
     }
-
-    // Copy Input fields to Script (Script extends Input)
-    tp->pool = input_base->pool;
-    tp->arena = input_base->arena;
-    tp->name_pool = input_base->name_pool;
-    tp->type_list = input_base->type_list;
-    tp->url = input_base->url;
-    tp->path = input_base->path;
-    tp->root = input_base->root;
-
-    // Initialize Script-specific fields
-    tp->const_list = arraylist_new(16);
-
-    if (strcmp(ts_node_type(root_node), "document") != 0) {
-        log_error("Error: The tree has no valid root node.");
-        return;
-    }
-    // build the AST
-    tp->ast_root = build_script(tp, root_node);
     if (profiling || compiler_timing) profile_get_time(&p2);
     // Publish the first production pass contract now: all later Lambda work
     // consumes the indexed identity table rather than rediscovering children
@@ -1335,10 +1376,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
 
 #ifndef _WIN32
-    // For the main script, pre-compile all imports in parallel.
-    // Only trigger when: not an import, no source provided (file-based), MIR Direct mode,
-    // and not already in a worker thread (tls_parser == NULL).
-    if (!is_import && !source && runtime->use_mir_direct && !tls_parser) {
+    // The direct parser loads imports as part of its AST reduction. Keep the
+    // Tree-sitter import-graph precompile only for the explicit reference and
+    // compare modes so the production path does not parse Lambda twice.
+    if (!is_import && !source && runtime->use_mir_direct && !tls_parser &&
+            (lambda_tree_parser_selected() || lambda_parser_compare_selected())) {
         precompile_imports(runtime, script_path);
     }
 #endif

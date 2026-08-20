@@ -109,6 +109,8 @@ AstNode* parse_element_type(Lexer* lx);
 AstNode* parse_fn_type(Lexer* lx);
 AstNode* parse_island(Lexer* lx);
 AstNode* parse_island_body(Lexer* lx);
+AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right,
+        Operator op, const char* op_text, size_t op_len);
 
 AstNode* new_node(Lexer* lx, AstNodeType kind, size_t size) {
     return alloc_ast_node_from_span(lx->tp, kind, lx->origin, size);
@@ -795,9 +797,15 @@ AstNode* parse_primary(Lexer* lx) {
         // match_arm_is_error_handler blind-casts an arm's type as (TypeType*),
         // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
         if (def->node_type == AST_NODE_TYPE_STAM ||
+                (def->node_type == AST_NODE_ASSIGN &&
+                 ((AstNamedNode*)def)->is_type_definition) ||
                 def->node_type == AST_NODE_STRING_PATTERN ||
                 def->node_type == AST_NODE_SYMBOL_PATTERN) {
-            ident->type = wrap_type(lx, def->type);
+            // direct aliases for literals/ranges already carry the first-class
+            // TypeType wrapper; wrapping that carrier again hides the payload
+            // from the matcher and makes `is Alias` fail (D2.2.2).
+            ident->type = def->type && def->type->type_id == LMD_TYPE_TYPE
+                ? def->type : wrap_type(lx, def->type);
         }
     } else if (base_type_alias_suggestion(w)) {
         // conceptual base-type spellings (int64, float32) get the canonical
@@ -868,12 +876,11 @@ AstNode* parse_unary(Lexer* lx) {
         lx->p++;
         AstNode* operand = parse_unary(lx);
         if (!operand) { return NULL; }
-        AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY, sizeof(AstUnaryNode));
-        ast_node->operand = operand;
-        ast_node->op = OPERATOR_NOT;
-        ast_node->op_str = {.str = "!", .length = 1};
-        ast_node->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
+        AstPrimaryNode* any_node = (AstPrimaryNode*)new_node(lx,
+            AST_NODE_PRIMARY, sizeof(AstPrimaryNode));
+        any_node->type = wrap_type(lx, set_type_any(lx->tp, ANY_EXPLICIT));
+        return make_binary_node(lx, (AstNode*)any_node, operand,
+            OPERATOR_EXCLUDE, "!", 1);
     }
 
     AstNode* primary = parse_primary(lx);

@@ -352,6 +352,9 @@ struct MirTranspiler {
     NamePool* name_pool;
 };
 
+static bool ensure_pattern_compiled(MirTranspiler* mt,
+        AstPatternDefNode* pattern_def);
+
 // ============================================================================
 // Hashmap helpers for import_cache and var_scopes
 // ============================================================================
@@ -5630,6 +5633,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
         else if (entry_node->node_type == AST_NODE_STRING_PATTERN ||
                  entry_node->node_type == AST_NODE_SYMBOL_PATTERN) {
             AstPatternDefNode* pattern_def = (AstPatternDefNode*)entry_node;
+            ensure_pattern_compiled(mt, pattern_def);
             TypePattern* pattern_type = (TypePattern*)pattern_def->type;
             log_debug("mir: pattern reference '%s', index=%d", name_buf, pattern_type->pattern_index);
 
@@ -12119,13 +12123,15 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     } else if (MIR_reg_type(mt->ctx, val, mt->em.func) == MIR_T_P ||
                             (var_tid == LMD_TYPE_STRING &&
                              (expr_tid == LMD_TYPE_STRING || expr_tid == LMD_TYPE_ANY))) {
-                        // Native pointer expressions (notably string literals)
-                        // still enter an Item binding at this boundary; moving
-                        // the raw pointer into its I64 carrier drops the tag
-                        // that later it2s/GC consumers require (D2.2.2).
-                        TypeId pointer_tid = expr_tid != LMD_TYPE_ANY &&
-                                expr_tid != LMD_TYPE_NULL ? expr_tid : var_tid;
-                        src = emit_box(mt, val, pointer_tid);
+                        // Known pointer bindings keep their raw GC-pointer lane;
+                        // only an `any` binding needs the Item tag. Boxing a
+                        // pointer while retaining its concrete type makes the
+                        // root metadata and later reads disagree (D2.2.2).
+                        if (lambda_value_rep(var_tid) == VALUE_REP_ITEM) {
+                            TypeId pointer_tid = expr_tid != LMD_TYPE_ANY &&
+                                    expr_tid != LMD_TYPE_NULL ? expr_tid : var_tid;
+                            src = emit_box(mt, val, pointer_tid);
+                        }
                     }
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, copy), MIR_new_reg_op(mt->ctx, src)));
@@ -25426,36 +25432,41 @@ static void prepass_create_interp_module_vars(MirTranspiler* mt,
 // storing results in the script's type_list for runtime const_pattern() access.
 // ============================================================================
 
+static bool ensure_pattern_compiled(MirTranspiler* mt,
+        AstPatternDefNode* pattern_def) {
+    if (!mt || !pattern_def || !pattern_def->type || !pattern_def->as) return false;
+    TypePattern* pattern_type = (TypePattern*)pattern_def->type;
+    if (pattern_type->pattern_index >= 0) return true;
+
+    const char* error_msg = nullptr;
+    TypePattern* compiled = compile_pattern_ast(mt->script_pool, pattern_def->as,
+        pattern_def->is_symbol, &error_msg);
+    if (!compiled) {
+        log_error("mir: failed to compile pattern '%.*s': %s",
+            pattern_def->name ? (int)pattern_def->name->len : 0,
+            pattern_def->name ? pattern_def->name->chars : "",
+            error_msg ? error_msg : "unknown error");
+        return false;
+    }
+    pattern_type->re2 = compiled->re2;
+    pattern_type->source = compiled->source;
+    pattern_type->regex_source = compiled->regex_source;
+    arraylist_append(mt->type_list, pattern_type);
+    pattern_type->pattern_index = mt->type_list->length - 1;
+    log_debug("mir: compiled pattern '%.*s' to regex, index=%d",
+        pattern_def->name ? (int)pattern_def->name->len : 0,
+        pattern_def->name ? pattern_def->name->chars : "",
+        pattern_type->pattern_index);
+    return true;
+}
+
 static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
     while (node) {
         switch (node->node_type) {
         case AST_NODE_STRING_PATTERN:
         case AST_NODE_SYMBOL_PATTERN: {
             AstPatternDefNode* pattern_def = (AstPatternDefNode*)node;
-            TypePattern* pattern_type = (TypePattern*)pattern_def->type;
-
-
-            // compile pattern to regex if not already compiled
-            if (pattern_type->re2 == nullptr && pattern_def->as != nullptr) {
-                const char* error_msg = nullptr;
-                TypePattern* compiled = compile_pattern_ast(mt->script_pool, pattern_def->as,
-                    pattern_def->is_symbol, &error_msg);
-                if (compiled) {
-                    // copy compiled info to existing type
-                    pattern_type->re2 = compiled->re2;
-                    pattern_type->source = compiled->source;
-                    pattern_type->regex_source = compiled->regex_source;
-                    // add to type_list for runtime access via const_pattern()
-                    arraylist_append(mt->type_list, pattern_type);
-                    pattern_type->pattern_index = mt->type_list->length - 1;
-                    log_debug("mir: compiled pattern '%.*s' to regex, index=%d",
-                        (int)pattern_def->name->len, pattern_def->name->chars, pattern_type->pattern_index);
-                } else {
-                    log_error("mir: failed to compile pattern '%.*s': %s",
-                        (int)pattern_def->name->len, pattern_def->name->chars,
-                        error_msg ? error_msg : "unknown error");
-                }
-            }
+            ensure_pattern_compiled(mt, pattern_def);
             break;
         }
         case AST_NODE_CONTENT:
