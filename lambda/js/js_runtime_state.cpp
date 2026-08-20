@@ -83,9 +83,7 @@ extern "C" void js_fetch_apply_bootstrap_base_path(void);
 extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
 extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
 extern "C" void js_tls_destroy_context(JsRuntimeState* state);
-extern "C" void js_permission_destroy_context(JsRuntimeState* state);
 extern "C" void js_net_destroy_context(JsRuntimeState* state);
-extern "C" void js_crypto_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
 extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
@@ -236,6 +234,9 @@ void js_runtime_state_destroy_context(void) {
     EvalContext* runtime_context = context;
     if (!runtime_context || !runtime_context->js_state) return;
     bool was_active = js_active_runtime_state == runtime_context->js_state;
+    // Final runtime cleanup does not pass through batch reset, so detach the
+    // optional Node session while its heap-backed state is still valid.
+    jube_modules_runtime_detach();
     js_runtime_owned_cache_destroy_context(runtime_context->js_state);
     js_dom_platform_destroy_context(runtime_context->js_state);
     js_dom_events_destroy_context(runtime_context->js_state);
@@ -247,9 +248,7 @@ void js_runtime_state_destroy_context(void) {
     js_fetch_destroy_context(runtime_context->js_state);
     js_fs_pending_destroy_context(runtime_context->js_state);
     js_tls_destroy_context(runtime_context->js_state);
-    js_permission_destroy_context(runtime_context->js_state);
     js_net_destroy_context(runtime_context->js_state);
-    js_crypto_destroy_context(runtime_context->js_state);
     js_atomics_destroy_context(runtime_context->js_state);
     js_canvas_destroy_context(runtime_context->js_state);
     js_dynfunc_cache_destroy_context(runtime_context->js_state);
@@ -303,7 +302,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&local->lexical_key_roots, local->lexical_keys, JS_EVAL_LEXICAL_BIND_MAX, "eval lexical keys") \
     M(&local->immutable_key_roots, local->immutable_keys, JS_EVAL_IMMUTABLE_BIND_MAX, "eval immutable keys") \
     M(&state->super_this_values.roots, state->super_this_value_slots, 128, "super-this values") \
-    M(&state->cjs.module_stack.roots, state->cjs.module_stack_slots, JS_CJS_STACK_MAX, "CommonJS module stack") \
     M(&state->with_scope.stack.roots, state->with_scope.stack_slots, JS_WITH_STACK_MAX, "with-scope stack") \
     M(&state->with_scope.last_binding_roots, state->with_scope.last_binding_slots, 2, "with binding cache") \
     M(&state->builtin_cache.roots, state->builtin_cache.entries, JS_INTRINSIC_BINDING_COUNT, "intrinsic binding function cache") \
@@ -332,7 +330,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->test262_agent.roots, &state->test262_agent.object, 1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX, "Test262 agent state") \
     M(&state->process.roots, &state->process.argv, 3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state") \
     M(&state->iterators.roots, &state->iterators.generator_return_marker, 13, "generator and iterator prototype caches") \
-    M(&state->diagnostics_channels.roots, state->diagnostics_channels.channel_names, 2 * JS_DIAGNOSTICS_CHANNEL_MAX + 6 + JS_DIAGNOSTICS_DEFERRED_ERROR_MAX, "diagnostics channel state") \
     M(&state->async_hooks.roots, &state->async_hooks.root_resource, 2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX, "async hooks state") \
     M(&state->promises.roots, &state->promises.unhandled_storage, 3, "Promise unhandled queue and domain state") \
     M(&state->promises.domain_stack.roots, state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack") \

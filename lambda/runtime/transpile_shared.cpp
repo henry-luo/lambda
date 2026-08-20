@@ -53,7 +53,7 @@ void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* impor
     }
     // _ + char offset ensures the fn name is unique across the script
     strbuf_append_char(strbuf, '_');
-    strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
+    strbuf_append_int(strbuf, fn_node->source_span.start_byte);
 }
 
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {

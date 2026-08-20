@@ -25,6 +25,10 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     float bullet_size = marker_prop->bullet_size;
     CssEnum marker_type = marker_prop->marker_type;
     Color color = rdcon->color;
+    const FontMetrics* marker_metrics = rdcon->font.font_handle
+        ? font_get_metrics(rdcon->font.font_handle) : NULL;
+    float marker_font_size = marker_metrics
+        ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
 
 
     if (marker_prop->is_image_marker) {
@@ -77,6 +81,11 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float img_w = content_width > 0.0f ? content_width : (float)img->width;
             float img_h = marker_prop->height > 0.0f ? marker_prop->height : (float)img->height;
             float ix = x;
+            if (marker_prop->is_outside) {
+                // outside image markers align to the font-relative marker field;
+                // placing them at the box start incorrectly anchors post-image space.
+                ix = x + width - marker_font_size - img_w / 2.0f;
+            }
             float iy = y + marker->height / 2.0f - img_h / 2.0f;
             // display-list image replay expects decoded dimensions and uint32_t row stride.
             int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
@@ -87,10 +96,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         }
     }
 
-    const FontMetrics* marker_metrics = rdcon->font.font_handle
-        ? font_get_metrics(rdcon->font.font_handle) : NULL;
-    float marker_font_size = marker_metrics
-        ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
     float marker_cx = x + width - marker_font_size;
     float marker_cy = y + marker->height / 2.0f;
 

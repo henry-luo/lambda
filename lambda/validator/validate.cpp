@@ -165,6 +165,28 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
 }
 
 ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
+    // A compact global meta-type (`number`, `integer`, `type`) carries ONLY the
+    // two-byte Type prefix -- there is no TypeType payload, so reading
+    // `type->type` runs off the end of the global. ASAN caught it as a
+    // global-buffer-overflow 8 bytes before TYPE_STRING, reached from admitting
+    // a `{q: number}` map field, which aborted construction outright.
+    //
+    // `type_is_global_meta_type` exists for exactly this and its comment says
+    // callers must test it before reading extended fields; both arms below
+    // instead dereferenced FIRST and only compared the UNWRAPPED result against
+    // TYPE_NUMBER/TYPE_INTEGER -- a comparison a compact global never reaches,
+    // because the deref that precedes it is already out of bounds.
+    if (type_is_global_meta_type((const Type*)type)) {
+        Type* meta = (Type*)type;
+        bool ok = meta == &TYPE_NUMBER ? IS_NUMERIC_ID(item.type_id())
+            : meta == &TYPE_INTEGER ? validator_numeric_item_embeds(item, meta)
+            : item.type_id() == LMD_TYPE_TYPE;
+        if (validator->is_fast_mode()) return validation_verdict(ok);
+        ValidationResult* meta_result = create_validation_result(validator->get_pool());
+        meta_result->valid = ok;
+        if (!ok) add_type_mismatch_error_ex(meta_result, validator, meta, item);
+        return meta_result;
+    }
     if (validator->is_fast_mode()) {
         // This is the leaf the element walk calls once per item, so the
         // allocation at the top of full mode is exactly what fast mode must
@@ -583,11 +605,35 @@ static bool shape_entries_match_fast(SchemaValidator* validator, ShapeEntry* sha
     return true;
 }
 
+// A map that already carries this exact TypeMap was BUILT to this shape: its
+// slots are that shape's slots, so walking its fields cannot discover a
+// disagreement its construction did not already prevent.
+//
+// Without this the cost is structural and unbounded for a RECURSIVE contract.
+// `type SplayNode = {key: float, left: SplayNode?, ...}` makes every declared
+// boundary crossing re-walk the whole reachable structure, so an O(1) admission
+// becomes O(n) and the workload becomes O(n^2) -- measured 0.63s / 1.94s / 6.44s
+// / 38.0s at tree sizes 800 / 1600 / 3200 / 8000, against ~0.25s for the whole
+// benchmark when the same field is declared as a bare `map?`. That cost is why
+// the splay benchmark declares its links `map?` and cannot say what it means.
+//
+// Scoped to fast mode on purpose: that is the runtime admission predicate
+// (lambda_type_matches). The reporting validator still walks, because it owes a
+// per-field diagnosis rather than a verdict (D3.2.1, D4.6.1v2).
+static bool map_carries_exact_shape(ConstItem item, const TypeMap* map_type) {
+    if (!map_type || !item.item) return false;
+    TypeId tid = item.type_id();
+    const void* actual = tid == LMD_TYPE_MAP ? (const void*)((Map*)item.map)->type
+        : tid == LMD_TYPE_OBJECT ? (const void*)((Object*)item.object)->type : NULL;
+    return actual && actual == (const void*)map_type;
+}
+
 ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstItem item, TypeMap* map_type) {
     if (validator->is_fast_mode()) {
         ItemReader fast_reader(item);
         if (!fast_reader.isMap()) return validation_verdict(false);
         if (!map_type->shape) return validation_verdict(true);
+        if (map_carries_exact_shape(item, map_type)) return validation_verdict(true);
         MapReader fast_map = fast_reader.asMap();
         return validation_verdict(shape_entries_match_fast(validator, map_type->shape,
             [&fast_map](const char* name) { return fast_map.has(name); },

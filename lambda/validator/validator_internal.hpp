@@ -145,7 +145,15 @@ public:
  * @return The innermost non-TypeType type, or nullptr if input is nullptr
  */
 inline Type* unwrap_type(Type* type) {
-    while (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+    // A compact global meta-type (`number`, `integer`, `type`) matches this
+    // loop's condition exactly -- type_id LMD_TYPE_TYPE with kind SIMPLE -- but
+    // carries ONLY the two-byte Type prefix, so the deref reads past the global.
+    // ASAN caught it as a global-buffer-overflow next to TYPE_STRING, reached
+    // from admitting a `{q: number}` map field, aborting construction outright.
+    // The runtime's own runtime_boundary_unwrap_type already carries this
+    // guard; the validator's copy did not (Tune19 §12.8).
+    while (type && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_SIMPLE && !type_is_global_meta_type(type)) {
         type = ((TypeType*)type)->type;
     }
     return type;
@@ -221,6 +229,17 @@ static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType
 
 static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
     TypeId actual = item.type_id();
+    // BigInt is carried as `Decimal*` tagged LMD_TYPE_DECIMAL, discriminated by
+    // `unlimited == DECIMAL_BIGINT` -- it has no tag of its own. The runtime's
+    // item_type_is_integer_subtype admits it as `integer`; the validator's
+    // TypeId-only lattice could not see it, because the discriminator lives in
+    // the VALUE, not the type. That divergence made `c.n = c.n + 1n` on an
+    // `integer` field fail admission with "expected type, got decimal"
+    // (D3.2.2's known three-way divergence; Tune19 §12.8).
+    if (actual == LMD_TYPE_DECIMAL && unwrap_type(target) == &TYPE_INTEGER) {
+        Decimal* dec = ((Item*)&item)->get_decimal();
+        return dec && dec->unlimited == DECIMAL_BIGINT;
+    }
     // Shared IEEE poison decodes as float, but its surface type is int; keep
     // validator admission aligned with fn_type() and the runtime type boundary.
     if (lambda_item_is_merged_poison(item.item)) actual = LMD_TYPE_INT;

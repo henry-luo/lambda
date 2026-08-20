@@ -1,9 +1,8 @@
 #include "js_permission.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
-#include "../../lib/mem.h"
-#include "../../lib/log.h"
-
+#include "../jube/jube_registry.h"
+#include "../module/node_core/node_runtime_state.hpp"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -20,39 +19,20 @@
 
 extern String* heap_create_name(const char* name, size_t len);
 
-#define JS_PERMISSION_MAX_GRANTS 128
-
 typedef enum JsPermissionFsKind {
     JS_PERMISSION_FS_READ,
     JS_PERMISSION_FS_WRITE,
 } JsPermissionFsKind;
-
-typedef struct JsPermissionGrant {
-    char path[PATH_MAX];
-    bool wildcard_all;
-    bool wildcard_prefix;
-    bool directory;
-    bool active;
-} JsPermissionGrant;
-
-struct JsPermissionPolicy {
-    bool enabled = false;
-    bool child_process = false;
-    bool net = false;
-    bool inspector = false;
-    bool addon = false;
-    bool wasi = false;
-    JsPermissionGrant fs_read_grants[JS_PERMISSION_MAX_GRANTS] = {};
-    JsPermissionGrant fs_write_grants[JS_PERMISSION_MAX_GRANTS] = {};
-};
 
 // Command-line policy is immutable bootstrap configuration. Per-context
 // mutations (notably process.permission.drop()) use a private copy below.
 static JsPermissionPolicy js_permission_bootstrap_policy = {};
 
 static JsPermissionPolicy* js_permission_context_policy() {
-    if (!js_active_runtime_state || !js_runtime_state.permission_state) return NULL;
-    return (JsPermissionPolicy*)js_runtime_state.permission_state;
+    if (!js_active_runtime_state) return NULL;
+    void* session = jube_node_runtime_current_session();
+    JsPermissionPolicy* policy = session ? jube_node_permission_policy(session) : NULL;
+    return policy && policy->initialized ? policy : NULL;
 }
 
 static JsPermissionPolicy* js_permission_policy_current() {
@@ -64,14 +44,18 @@ static JsPermissionPolicy* js_permission_policy_mutable() {
     if (!js_active_runtime_state) return &js_permission_bootstrap_policy;
     JsPermissionPolicy* policy = js_permission_context_policy();
     if (policy) return policy;
-    policy = (JsPermissionPolicy*)mem_calloc(1, sizeof(JsPermissionPolicy),
-        MEM_CAT_JS_RUNTIME);
+    jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    policy = session ? jube_node_permission_policy(session) : NULL;
     if (!policy) {
-        log_error("js-permission: failed to allocate context state");
-        return NULL;
+        // The bootstrap policy remains available if the optional Node session
+        // cannot be attached; callers still observe the command-line policy.
+        return &js_permission_bootstrap_policy;
     }
-    memcpy(policy, &js_permission_bootstrap_policy, sizeof(*policy));
-    js_runtime_state.permission_state = policy;
+    if (!policy->initialized) {
+        memcpy(policy, &js_permission_bootstrap_policy, sizeof(*policy));
+        policy->initialized = true;
+    }
     return policy;
 }
 
@@ -239,8 +223,10 @@ static void js_permission_add_grant_values(JsPermissionGrant* grants, const char
 }
 
 extern "C" void js_permission_init_from_argv(int argc, const char** argv) {
-    JsPermissionPolicy* policy = js_permission_policy_mutable();
-    if (!policy) return;
+    // Command-line parsing must not attach a Node session to every JS realm;
+    // the bootstrap policy is copied into Node state only when Node is active.
+    JsPermissionPolicy* policy = &js_permission_bootstrap_policy;
+    policy->initialized = false;
     policy->enabled = false;
     policy->child_process = false;
     policy->net = false;
@@ -275,6 +261,12 @@ extern "C" void js_permission_init_from_argv(int argc, const char** argv) {
                 js_permission_add_grant_values(policy->fs_write_grants, write_val);
             }
         }
+    }
+    void* session = jube_node_runtime_current_session();
+    JsPermissionPolicy* session_policy = session ? jube_node_permission_policy(session) : NULL;
+    if (session_policy) {
+        memcpy(session_policy, &js_permission_bootstrap_policy, sizeof(*session_policy));
+        session_policy->initialized = true;
     }
 }
 
@@ -455,9 +447,3 @@ extern "C" Item js_permission_check_fs_write(const char* path) {
 #undef g_permission_wasi
 #undef g_fs_read_grants
 #undef g_fs_write_grants
-
-extern "C" void js_permission_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->permission_state) return;
-    mem_free(runtime_state->permission_state);
-    runtime_state->permission_state = NULL;
-}

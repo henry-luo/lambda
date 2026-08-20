@@ -35,8 +35,9 @@ Lambda Script provides an interactive **Read-Eval-Print Loop (REPL)** for explor
 
 #### 3. Multi-line Input Support
 - **Continuation prompt (`.. `)** when statement is incomplete
-- Tree-sitter based detection of incomplete statements
-- Checks for `MISSING` nodes (parser-inserted expected tokens)
+- Tree-sitter reference detection of incomplete statements (transitional)
+- Checks for `MISSING` nodes (parser-inserted expected tokens) while the
+  append-only fragment source/span transaction remains Tree-sitter-backed
 - Automatically continues collecting input until statement is complete
 
 ```
@@ -60,7 +61,9 @@ Lambda Script provides an interactive **Read-Eval-Print Loop (REPL)** for explor
 - Reduces visual clutter in long REPL sessions
 
 #### 6. Script Execution
-- JIT compilation via C2MIR (default) or pure MIR (`--mir` flag)
+- MIR Direct compilation; normal file/module parsing uses the C RD/Pratt parser
+  while the REPL retains Tree-sitter fragment trees until its source-offset
+  transaction is migrated
 - Full Lambda language support in REPL mode
 - Error reporting with line/column information
 
@@ -81,7 +84,7 @@ Lambda Script provides an interactive **Read-Eval-Print Loop (REPL)** for explor
 ├─────────────────────────────────────────────────────────────┤
 │  main-repl.cpp                    │  main.cpp               │
 │  - Statement completeness check   │  - run_repl() loop      │
-│  - Tree-sitter MISSING detection  │  - Multi-line handling  │
+│  - Reference-parser status        │  - Multi-line handling  │
 │  - Prompt functions               │  - Error recovery       │
 │  - Line editor wrappers           │  - Incremental output   │
 └─────────────────────────────────────────────────────────────┘
@@ -122,7 +125,9 @@ StrBuf *last_output = strbuf_new_cap(256);    // previous output for incremental
 
 ### 2. Statement Completeness Detection
 
-Uses a **hybrid approach** combining lexical bracket counting and Tree-sitter parsing:
+The current transitional implementation uses a **hybrid approach** combining
+lexical bracket counting and the retained Tree-sitter reference parser. The
+normal file/module cutover does not yet replace this append-only fragment path:
 
 ```cpp
 enum StatementStatus {

@@ -598,11 +598,9 @@ typedef struct AstEventHandler : AstNode {
 // Literal spellings that carry no const-pool entry are re-read from source at
 // use. Shared by MIR lowering and the T0 interpreter so both decode the same
 // bytes to the same value.
-static inline int64_t parse_int_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    int end = ts_node_end_byte(node);
-    const char* text = source + start;
-    int len = end - start;
+static inline int64_t parse_int_literal_span(const char* source, LambdaSourceSpan span) {
+    const char* text = source + span.start_byte;
+    int len = (int)lambda_source_span_length(span);
 
     // Copy to null-terminated buffer
     char buf[128];
@@ -641,9 +639,18 @@ static inline int64_t parse_int_literal(const char* source, TSNode node) {
     return value;
 }
 
+static inline bool parse_bool_literal_span(const char* source, LambdaSourceSpan span) {
+    return source[span.start_byte] == 't';
+}
+
+static inline int64_t parse_int_literal(const char* source, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return parse_int_literal_span(source, span);
+}
+
 static inline bool parse_bool_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    return source[start] == 't';
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return parse_bool_literal_span(source, span);
 }
 
 // A type node's runtime identity is not always its TypeId: `date`/`time` share
