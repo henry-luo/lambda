@@ -1151,8 +1151,8 @@ static Type* ast_called_type_target(AstNode* function) {
     if (function->type->type_id != LMD_TYPE_TYPE) {
         return function->node_type == AST_NODE_TYPE ? function->type : NULL;
     }
-    TypeType* type_type = (TypeType*)function->type;
-    return type_type->type;
+    Type* target = unwrap_simple_type_type(function->type);
+    return target != function->type ? target : NULL;
 }
 
 static bool ast_called_function_signature_ready(AstNode* function) {
@@ -9743,7 +9743,12 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
 
 static bool match_arm_is_error_handler(AstMatchArm* arm) {
     AstNode* pattern = arm ? boundary_unwrap_primary(arm->pattern) : NULL;
-    if (!pattern || !pattern->type || pattern->type->type_id != LMD_TYPE_TYPE) return false;
+    if (!pattern || !pattern->type || pattern->type->type_id != LMD_TYPE_TYPE ||
+            is_global_simple_type(pattern->type) ||
+            pattern->type->kind != TYPE_KIND_SIMPLE) return false;
+    // A named pattern has a TypePattern payload under the TYPE_TYPE meta-ID.
+    // Only a simple TypeType owns the nested target below; treating a pattern
+    // as that wrapper makes ordinary `case alias` dereference address 0x1.
     Type* type = ((TypeType*)pattern->type)->type;
     return type && boundary_unwrap_type(type)->type_id == LMD_TYPE_ERROR;
 }
@@ -12803,10 +12808,7 @@ static void direct_object_add_field(LambdaDirectAstSink* sink,
     else sink->object_field_tail->next = (AstNode*)field;
     sink->object_field_tail = (AstNode*)field;
 
-    Type* field_type = field->type;
-    if (field_type->type_id == LMD_TYPE_TYPE && field_type->kind == TYPE_KIND_SIMPLE) {
-        field_type = ((TypeType*)field_type)->type;
-    }
+    Type* field_type = unwrap_simple_type_type(field->type);
     ShapeEntry* shape = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
     StrView* field_name = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
     field_name->str = field->name->chars;
@@ -13200,8 +13202,7 @@ static AstNode* direct_type_stam(Transpiler* tp, LambdaSourceSpan span,
 static void direct_finalize_type_alias(Transpiler* tp, AstNamedNode* alias) {
     if (!tp || !alias || !alias->type) return;
     Type* definition = alias->type;
-    Type* actual = definition->type_id == LMD_TYPE_TYPE &&
-        definition->kind == TYPE_KIND_SIMPLE ? ((TypeType*)definition)->type : definition;
+    Type* actual = unwrap_simple_type_type(definition);
     if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP && alias->name) {
         // A named map contract carries its alias into runtime validators and
         // field lowering; anonymous `map` would lose both identities.
@@ -13235,10 +13236,7 @@ static AstNode* direct_constrained_type(Transpiler* tp, LambdaSourceSpan span,
     TypeConstrained* type = (TypeConstrained*)alloc_type_kind(tp->pool,
         TYPE_KIND_CONSTRAINED, sizeof(TypeConstrained));
     Type* base_type = base && base->type ? base->type : &TYPE_ANY;
-    if (base_type->type_id == LMD_TYPE_TYPE &&
-            base_type->kind == TYPE_KIND_SIMPLE) {
-        base_type = ((TypeType*)base_type)->type;
-    }
+    base_type = unwrap_simple_type_type(base_type);
     type->base = base_type ? base_type : &TYPE_ANY;
     type->constraint = constraint;
     node->type = (Type*)type;
@@ -13365,13 +13363,23 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     Type* lt = left && left->type ? left->type : &TYPE_ANY;
     Type* rt = right && right->type ? right->type : &TYPE_ANY;
     if (op == OPERATOR_TO) return &TYPE_RANGE;
-    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_LT ||
-            op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE ||
-            op == OPERATOR_ELEM_EQ || op == OPERATOR_ELEM_NE ||
-            op == OPERATOR_ELEM_LT || op == OPERATOR_ELEM_LE ||
-            op == OPERATOR_ELEM_GT || op == OPERATOR_ELEM_GE ||
+    if (op == OPERATOR_EQ || op == OPERATOR_NE ||
             op == OPERATOR_IS || op == OPERATOR_IN || op == OPERATOR_AT) {
         return &TYPE_BOOL;
+    }
+    if (op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT ||
+            op == OPERATOR_GE) {
+        // Dynamic magnitude comparisons retain an open result. Treating every
+        // comparison as bool erased the Tree path's uncertainty and made a
+        // later implicit fn boundary report a spurious E208 (S5.5.2).
+        bool left_open = lt->type_id == LMD_TYPE_ANY || lt->type_id == LMD_TYPE_NULL;
+        bool right_open = rt->type_id == LMD_TYPE_ANY || rt->type_id == LMD_TYPE_NULL;
+        return !left_open && !right_open &&
+            known_magnitude_comparable(lt->type_id, rt->type_id)
+            ? &TYPE_BOOL : set_type_any(tp, ANY_COMPARE);
+    }
+    if (is_elementwise_comparison_op(op)) {
+        return set_type_any(tp, ANY_COMPARE);
     }
     if (op == OPERATOR_AND) {
         return lambda_type_union_normalized(tp->pool, lt, rt);
@@ -13654,7 +13662,23 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
                 matched = unwrap_simple_type_type(entry->type);
             }
         }
-        if (matched) return matched;
+        if (matched) {
+            TypeId field_tid = matched->type_id;
+            if (is_native_numeric_type_id(field_tid) ||
+                    field_tid == LMD_TYPE_BOOL || field_tid == LMD_TYPE_STRING) {
+                // A scalar member expression exposes its payload lane, not the
+                // shape occurrence wrapper. Retaining `string?` here made an
+                // unannotated local box raw null String* bits as a Type item,
+                // collapsing S7.1.1 absence into an empty string. Match the
+                // Tree path; only container fields need their shape for a
+                // following member access.
+                return alloc_type(tp->pool, field_tid, sizeof(Type));
+            }
+            if (field_tid == LMD_TYPE_MAP || field_tid == LMD_TYPE_ELEMENT ||
+                    field_tid == LMD_TYPE_OBJECT) {
+                return matched;
+            }
+        }
     }
     return set_type_any(tp, ANY_MEMBER_SHAPE);
 }
@@ -14237,10 +14261,7 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, LambdaSourceSpan span,
     TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY,
         sizeof(TypeParam));
     Type* declared = type_expr ? type_expr->type : NULL;
-    if (declared && declared->type_id == LMD_TYPE_TYPE &&
-            declared->kind == TYPE_KIND_SIMPLE) {
-        declared = ((TypeType*)declared)->type;
-    }
+    declared = unwrap_simple_type_type(declared);
     if (declared) {
         *(Type*)param_type = *declared;
         param_type->full_type = declared;
@@ -14274,11 +14295,7 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, LambdaSourceSpan span,
 
 static Type* direct_function_contract(AstNode* type_node) {
     if (!type_node || !type_node->type) return NULL;
-    if (type_node->type->type_id == LMD_TYPE_TYPE &&
-            type_node->type->kind == TYPE_KIND_SIMPLE) {
-        return ((TypeType*)type_node->type)->type;
-    }
-    return type_node->type;
+    return unwrap_simple_type_type(type_node->type);
 }
 
 static AstNode* build_control_statement_from_parts(Transpiler* tp,
