@@ -214,8 +214,9 @@ models:
   failures that remain are mostly composition/fidelity rather than raw TCP.
 - `js_https.cpp`: has grown beyond the old thin comment, but still has a custom
   HTTP-over-TLS adapter surface and agent/session handling is incomplete.
-- `js_zlib.cpp`: sync operations and some Transform constructors exist, but
-  brotli/zstd families and full transform lifecycle are missing.
+- `node_zlib_module.cpp`: sync operations and Transform constructors now live in
+  the dynamic node-zlib image, while the host retains only the opaque codec
+  provider; brotli/zstd families remain outside this slice.
 
 ### Async Context and Diagnostics
 

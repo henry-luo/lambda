@@ -45,7 +45,7 @@
     "lambda/module/node_core/node_events.cpp",
     "lambda/module/node_core/node_trace_events.cpp",
     "lambda/module/node_core/node_url.cpp",
-    "lambda/js/js_zlib_codec.cpp",
+    "lambda/jube/jube_node_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
   ],

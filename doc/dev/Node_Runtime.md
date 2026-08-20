@@ -99,7 +99,7 @@ Sub-paths are also handled where applicable:
 | `util` | `js_util.cpp` | `format`, `inspect`, `promisify`, `deprecate`, `inherits`, `isDeepStrictEqual`, `types.*` (isDate, isRegExp, isArray, isMap, isSet, etc.) |
 | `querystring` | `js_querystring.cpp` | `parse`, `stringify`, `escape`, `unescape`, `decode` (alias), `encode` (alias) |
 | `assert` | `js_assert.cpp` | `ok`, `equal`, `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`, `notDeepStrictEqual`, `throws`, `doesNotThrow`, `rejects`, `doesNotReject`, `match`, `doesNotMatch`, `fail`, `ifError`, `assert/strict` (same as assert) |
-| `zlib` | `js_zlib.cpp` | `gzipSync`, `gunzipSync`, `deflateSync`, `inflateSync`, `createGzip`, `createGunzip` |
+| `zlib` | `lambda/module/node_zlib/node_zlib_module.cpp` + host Jube codec provider | `gzipSync`, `gunzipSync`, `deflateSync`, `inflateSync`, `createGzip`, `createGunzip` |
 | `dns` | `js_dns.cpp` | `lookup`, `resolve`, `resolve4` |
 | `readline` | `js_readline.cpp` | `createInterface` |
 | `string_decoder` | `js_string_decoder.cpp` | `StringDecoder` |
@@ -441,7 +441,7 @@ When running a package binary (like `npx`):
 | `js_util.cpp` | ~1,200 | format, inspect, types |
 | `js_querystring.cpp` | ~460 | Query string parsing |
 | `js_assert.cpp` | ~1,200 | Assertion library |
-| `js_zlib.cpp` | ~460 | Compression |
+| `node_zlib_module.cpp` + `jube_node_zlib_codec.cpp` | ~1,580 | Compression |
 | `js_dns.cpp` | ~220 | DNS resolution |
 | `js_readline.cpp` | ~130 | Readline interface |
 | `js_string_decoder.cpp` | ~150 | String decoder |

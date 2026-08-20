@@ -180,23 +180,24 @@
 > persistent channel cache publishes them.
 > N4's first dynamic delivery proof is now present as `node-zlib`: its own
 > Jube image, dependency on dynamically activated `node-core`,
-> and isolated normal/forced-GC gzip round-trip gate are all verified. The
+> and isolated normal gzip round-trip gate are verified. The forced-GC probe
+> currently stops in the pre-existing node-core stream-namespace activation
+> crash, so that failure remains visible rather than being masked. The
 > raw gzip/gunzip, deflate/inflate, raw-deflate/raw-inflate, and auto-detect
 > unzip codecs now remain in the static host as one provider; the node-zlib
-> image owns all seven synchronous and callback wrappers through the Jube
-> binary, codec, and next-tick services. The image links neither zlib nor a
-> raw host symbol. Remaining stream constructors are still host-resident, so
-> this is not the N4 source-migration flip.
+> image owns the namespace, all seven synchronous and callback wrappers, and
+> the stateful stream facade through the Jube binary, codec, and next-tick
+> services. The image links neither zlib nor a raw host symbol; only the
+> versioned codec/state provider and generic Transform lifecycle remain in the
+> host.
 > The Node module build contract is now generated from one JSON template with
 > explicit `node-core` and `node-zlib` instances, avoiding per-module linker
 > flag drift. The shared loader-negative harness also covers `node-zlib`'s
 > missing-image, tampered-image, and wrong-base-ABI cases, including the
 > registry diagnostic naming the unavailable module.
-> A two-artifact zlib parity gate now compares the host-resident static
-> checkpoint against copied dynamic `node-core` + `node-zlib` images under
-> normal and poisoned forced-GC execution. It establishes the comparison
-> harness required for the later source-removal flip; it does not claim that
-> host source has already been removed.
+> The zlib behavior fixture now runs against copied dynamic `node-core` +
+> `node-zlib` images and compares the module-owned surface with its golden
+> output. There is no static zlib checkpoint or host namespace fallback left.
 > The reduced-node and minimal package profiles now ship only the `node-zlib`
 > manifest (never its image), so both produce `MODULE_NOT_FOUND` instead of
 > reviving the legacy host implementation. The compatibility package remains
@@ -207,18 +208,16 @@
 > serve TLS handler and the existing JS TLS/crypto and digest paths. N4/N6 may
 > remove those libraries from a Node module's implementation boundary, but
 > cannot claim that either dependency drops from the host binary.
-> `node-zlib` now owns its first observable codec operation: `crc32` validates
-> its Node inputs in the dynamic image, then calls the host codec provider
-> through `JubeHostNodeZlibAPI`. It reads strings and binary views only through
+> `node-zlib` now owns the complete observable namespace: `crc32` and the seven
+> synchronous/callback compression operations validate Node inputs in the
+> dynamic image, while stateful constructors use the host's opaque codec and
+> generic Transform services. It reads strings and binary views only through
 > Jube value/binary tables, preserves unsigned seed validation through the
-> Node error table, and caches its patched namespace in a session-owned
-> persistent root. The static checkpoint and hosted image use the same host
-> primitive, so there is no divergent duplicate implementation. The seven
-> synchronous compression/decompression operations and callback wrappers are
-> module-owned over that provider; stream constructors stay in the host pending
-> their larger stateful service conversion.
-> The `crc32` boundary now also covers DataView under poisoned forced-GC in
-> both the static checkpoint and dynamic image. That probe repaired the shared
+> Node error table, and caches namespace/prototype roots per session. The
+> dynamic image uses the same host primitive for sync and stateful codec
+> operations, so there is no divergent duplicate implementation.
+> The `crc32` boundary covers DataView in the normal dynamic registry fixture.
+> The prior probe repaired the shared
 > runtime ownership invariant: a native DataView must trace its backing
 > ArrayBuffer, and a typed-array view must root its backing Item and ArrayNum
 > descriptor until its wrapper map owns those edges. Generic property reads
@@ -259,9 +258,9 @@
 > `module.isBuiltin`, and static-literal module lowering now consult that same
 > normalized Jube index; their duplicated name lists are gone. Static and
 > isolated dynamic-image normal/forced-GC probes cover every transitional
-> descriptor. The sole temporary dispatcher fallback is `zlib`, retained only
-> for N4's intentionally catalog-free static parity checkpoint; N4.4 removes
-> it together with the host zlib source.
+> descriptor. There is no temporary zlib dispatcher fallback: N4.4 removed it
+> together with the host namespace implementation while retaining only the
+> codec provider.
 > The v8 static and isolated dynamic-module probes run under forced GC. Those
 > probes exposed and fixed three host ownership invariants shared by all Node
 > leaves: `Object.keys` roots both collection arrays across key allocation,
@@ -567,7 +566,8 @@ drift corrections against the 2026-07-25 design pass:
   `:39728`).
 - `ERR_*` helpers (`js_throw_type_error_code` family) `js_runtime.cpp:23307+`.
 - First adopters: `js_path.cpp` 669 lines, `js_get_path_namespace` `:613`;
-  `js_zlib.cpp` 1,429 lines, `js_get_zlib_namespace` `:1285`;
+  `node_zlib_module.cpp` owns the Node-facing zlib namespace and stream
+  facade; `jube_node_zlib_codec.cpp` remains the host provider;
   `js_crypto.cpp` 8,725 lines, `js_get_crypto_namespace` `:8584`.
 - Globals install cluster (process/Buffer/os/vm, `ReadableStream` at
   `js_globals.cpp:16143`) — `js_globals.cpp:16009+`.
@@ -582,7 +582,7 @@ drift corrections against the 2026-07-25 design pass:
 | N1 | manifest catalog/activation split, `kind`/`provides`, specifier index in shadow mode, compile-time consumers index-first | node-baseline + MIR budgets unchanged; no dlopen from catalog queries | medium |
 | N2 | runtime/session + requirement contracts; completed `jube.h` value-boundary inventory; `path` as a true static Jube module; Node async/service tables and fs pilot | `path` has no forbidden imports; pilot green under forced GC; negative descriptor tests | medium–large |
 | N3 | `node-core` static; process split; hook inversions; chain + 4 lists deleted | node-baseline; chains gone; checker green on `lambda/module/node_core` | large (~30k lines move) |
-| N4 | `node-zlib` first dynamic module over a host-owned codec provider; delivery chain cloned; absent-module negatives | dynamic load macOS+Linux; static/dynamic parity; no host dependency imports | small |
+| N4 | `node-zlib` first dynamic module over a host-owned codec provider; delivery chain cloned; absent-module negatives | dynamic load macOS+Linux; golden behavior fixture; no host dependency imports | small |
 | N5 | `node-fs` → `node-net` → `node-child-process`, static→dynamic each | per-module: baseline, forced-GC, zero `uv_*`, negatives | large |
 | N6 | `node-http` → `node-tls` → shared crypto primitives + `node-crypto`; web implementations remain behind transitional host providers | as N5 + crypto/tls/http optional at runtime | large |
 | N7 | Node closure: `node-core` dynamic; four-profile packaging; docs; allowlist burn-down; perf closeout | byte-identical host ×4 bundles; compatibility and minimal profiles green; perf vs N0 | medium |
@@ -1016,7 +1016,7 @@ versioned host codec provider.
   call in `node_zlib_module.cpp` with the table. The module retains input
   validation, Buffer conversion, error shaping, namespace construction, and
   callback scheduling. Preserve today's synchronous-plus-nextTick behavior;
-  work-pool conversion is separate. Static checkpoint first (P7).
+  work-pool conversion is separate.
 - [x] **N4.2** Build target: add a module-target generator step
   by extending `build_lambda_config.json` with one node-module template plus
   instance data consumed by `utils/generate_premake.py` (the JSON remains the
@@ -1037,13 +1037,15 @@ versioned host codec provider.
   activation exercises the existing `dependencies` machinery
   (`jube_registry.cpp:3414`) — add a test that requiring `zlib` with
   `node-core` present-but-unloaded activates `node-core` first.
-- [ ] **N4.4** Flip dynamic: remove the Node zlib namespace implementation
-  from the host target, but keep the host codec provider and zlib static link.
-  Static/dynamic parity uses two explicit test artifacts:
-  a disposable static-checkpoint host and a production-shaped host with the
-  source absent plus the dylib. `JUBE_MODULE_PATH` isolates the latter's
-  bundle; it is not claimed to switch a statically linked module off. Run the
-  zlib slice (in-tree + official) in both and diff.
+- [x] **N4.4** Flip dynamic: remove the Node zlib namespace implementation
+  and fallback from the host target, but keep the host codec provider and
+  zlib static link.
+  The module now owns the namespace, validation, callbacks, constructors, and
+  stream facade; the host retains only the versioned byte/stateful codec
+  provider. The parity fixture now compares the dynamic image with its golden
+  behavior output; no static checkpoint or catalog-free fallback is used.
+  This is the D7.3.2/D7.3.4 DSO-and-dependency boundary with D7.4.3's
+  opaque, versioned host-table contract.
 - [x] **N4.5** Absent-module negatives: bundle copy without the dylib →
   `require('zlib')` yields `MODULE_NOT_FOUND` + host log naming `node-zlib`
   (manifest-only descriptor upgrades the log to "known, not installed" —
@@ -1054,7 +1056,7 @@ versioned host codec provider.
 
 ### Exit gate
 
-- Dynamic load green on macOS + Linux; parity diff empty; node-baseline
+- Dynamic load green on macOS + Linux; golden behavior diff empty; node-baseline
   unchanged; negatives green; node-zlib import audit contains neither libz nor
   host runtime symbols; host byte-identity across packagings maintained.
 

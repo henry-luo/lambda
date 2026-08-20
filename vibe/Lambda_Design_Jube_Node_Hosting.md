@@ -197,7 +197,7 @@ exposing a `js_get_<name>_namespace()` entry:
 |---|---|---|---|
 | `js_stream.cpp` (stream + stream/web/promises/consumers/iter) | 10,111 | `js_dns.cpp` | 1,991 |
 | `js_crypto.cpp` (node:crypto **mixed with WebCrypto**) | 8,725 | `js_readline.cpp` | 1,878 |
-| `js_assert.cpp` (assert + node:test) | 6,240 | `js_zlib.cpp` | 1,429 |
+| `js_assert.cpp` (assert + node:test) | 6,240 | `node_zlib_module.cpp` + host codec provider | 1,583 |
 | `js_http.cpp` (own HTTP/1.1 parser, raw libuv) | 6,175 | `js_url_module.cpp` | 870 |
 | `js_net.cpp` | 5,883 | `js_events.cpp` | 846 |
 | `js_fs.cpp` | 3,919 | `js_os.cpp` | 803 |
@@ -272,7 +272,7 @@ browser/DOM ≈12%.
 
 ### 4.4 External dependencies
 
-Only **libuv**, **zlib** (`js_zlib.cpp` only), and **mbedTLS** (`js_tls.cpp`,
+Only **libuv**, **zlib** (host provider consumed by `node-zlib`), and **mbedTLS** (`js_tls.cpp`,
 `js_crypto.cpp`), plus **OpenSSL as an existing runtime `dlopen` soft-dep** for
 PFX/PKCS12 (`js_tls.cpp:1190–1206`). There is **no libcurl** (curl is
 `js_fetch.cpp` — browser surface) and **no c-ares** (`cares_wrap` is a shim
@@ -758,8 +758,10 @@ standard host byte-identical across bundle packaging, and lands static-first
   build target cloned from `lang-python`'s shape, `module.json` + hash
   stamping, `make build-node-zlib`, loader-negative matrix entries,
   absent-module smoke (`require('zlib')` → MODULE_NOT_FOUND + host log).
-  zlib stops linking into the standard host. *Gate:* dynamic load green on
-  macOS + Linux; identical behavior static vs dynamic (P7 diffing).
+  zlib stops linking into the Node module image while remaining host-owned for
+  the codec provider. *Gate:* dynamic load green on macOS + Linux; identical
+  behavior against the golden fixture (P7-style diffing), under the
+  D7.3.2/D7.3.4 DSO/dependency rules and D7.4.3's opaque-table boundary.
 - **N5 — libuv leaves.** `node-fs`, then `node-net` (net+dns), then
   `node-child-process`, static→dynamic each, converting rooting per JN9 and
   every direct `uv_*`/JS-queue call to the §9.1 request API (JN8). *Gate per

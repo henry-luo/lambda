@@ -16,7 +16,7 @@
 #include "../js/js_state_guards.h"
 #include "../js/js_fs_service.h"
 #include "../js/js_network_service.h"
-#include "../js/js_zlib_codec.hpp"
+#include "jube_node_zlib_codec.hpp"
 #include "../js/js_runtime.h"
 #include "../module/node_core/node_events.hpp"
 #include "../module/node_core/node_trace_events.hpp"
@@ -770,14 +770,12 @@ extern "C" Item js_get_stream_web_namespace(void);
 extern "C" Item js_get_stream_iter_namespace(void);
 extern "C" Item js_get_repl_namespace(void);
 extern "C" Item js_get_diagnostics_channel_namespace(void);
-extern "C" Item js_get_zlib_namespace(void);
 extern "C" bool js_net_default_auto_select_family_get(void);
 extern "C" void js_net_default_auto_select_family_set(bool enabled);
 extern "C" int js_net_default_auto_select_family_timeout_get(void);
 extern "C" bool js_net_default_auto_select_family_timeout_set(int timeout_ms);
 extern "C" int js_permission_has_net(void);
 extern "C" Item js_permission_make_net_error(const char* syscall, const char* resource);
-extern "C" Item js_zlib_throw_error_status(const char* method, int status);
 static Item jube_host_node_throw_type_error_code(void* session, const char* code,
                                                   const char* message);
 static Item jube_host_node_throw_range_error_code(void* session, const char* code,
@@ -810,6 +808,17 @@ static uint32_t jube_host_node_zlib_crc32(const uint8_t* data, int length, uint3
 static bool jube_host_node_zlib_codec(enum JubeNodeZlibCodecMode mode, const uint8_t* data,
                                       int length, JubeNodeZlibResult* out_result);
 static void jube_host_node_zlib_result_release(JubeNodeZlibResult* result);
+static bool jube_host_node_zlib_stream_init(enum JubeNodeZlibCodecMode mode, int window_bits,
+                                            int level, int mem_level, int strategy,
+                                            void** out_state, int* out_status);
+static bool jube_host_node_zlib_stream_run(void* state, const uint8_t* data, int length,
+                                           int flush, JubeNodeZlibResult* out_result);
+static void jube_host_node_zlib_stream_free(void* state);
+static Item jube_host_node_transform_new(Item options);
+static Item jube_host_node_transform_prototype(void);
+static Item jube_host_node_readable_push(Item stream, Item chunk);
+static void jube_host_node_flush_data_if_flowing(Item stream);
+static void jube_host_node_transform_flush_drained(Item stream);
 static uint8_t* jube_host_node_buffer_prepare_write(Item value);
 static bool jube_host_node_is_buffer(Item value);
 static int jube_host_node_describe_binary_view(Item value, JubeBinaryView* out_view);
@@ -878,6 +887,11 @@ extern "C" Item js_throw_type_error_code(const char* code, const char* message);
 extern "C" Item js_throw_range_error_code(const char* code, const char* message);
 extern "C" Item js_throw_uri_error_code(const char* code, const char* message);
 extern "C" Item js_throw_value(Item error);
+extern "C" Item js_transform_new(Item opts);
+extern "C" Item js_get_stream_transform_prototype(void);
+extern "C" Item js_readable_push(Item self, Item chunk);
+extern "C" void js_stream_flush_data_if_flowing(Item self);
+extern "C" void js_stream_transform_flush_drained(Item self);
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_object_keys(Item obj);
 extern "C" Item js_reflect_delete_property(Item obj, Item key);
@@ -1305,6 +1319,11 @@ static const JubeHostStreamAPI jube_host_node_stream_api = {
     js_node_stream_resource_close,
     js_node_stream_resource_ref,
     js_node_stream_resource_is_live,
+    jube_host_node_transform_new,
+    jube_host_node_transform_prototype,
+    jube_host_node_readable_push,
+    jube_host_node_flush_data_if_flowing,
+    jube_host_node_transform_flush_drained,
 };
 
 static const JubeHostNetworkAPI jube_host_node_network_api = {
@@ -1326,6 +1345,9 @@ static const JubeHostNodeZlibAPI jube_host_node_zlib_api = {
     jube_host_node_zlib_crc32,
     jube_host_node_zlib_codec,
     jube_host_node_zlib_result_release,
+    jube_host_node_zlib_stream_init,
+    jube_host_node_zlib_stream_run,
+    jube_host_node_zlib_stream_free,
 };
 
 static const JubeHostFilesystemAPI jube_host_filesystem_api = {
@@ -3471,9 +3493,44 @@ static Item jube_host_node_throw_range_error_code(void* session, const char* cod
     return js_throw_range_error_code(code, message);
 }
 
+static const char* jube_host_node_zlib_error_code(int status) {
+    switch (status) {
+    case Z_STREAM_END: return "Z_STREAM_END";
+    case Z_NEED_DICT: return "Z_NEED_DICT";
+    case Z_ERRNO: return "Z_ERRNO";
+    case Z_STREAM_ERROR: return "Z_STREAM_ERROR";
+    case Z_DATA_ERROR: return "Z_DATA_ERROR";
+    case Z_MEM_ERROR: return "Z_MEM_ERROR";
+    case Z_BUF_ERROR: return "Z_BUF_ERROR";
+    case Z_VERSION_ERROR: return "Z_VERSION_ERROR";
+    default: return "Z_OK";
+    }
+}
+
+static const char* jube_host_node_zlib_error_detail(int status) {
+    switch (status) {
+    case Z_NEED_DICT: return "need dictionary";
+    case Z_ERRNO: return "zlib errno";
+    case Z_STREAM_ERROR: return "stream error";
+    case Z_DATA_ERROR: return "data error";
+    case Z_MEM_ERROR: return "memory error";
+    case Z_BUF_ERROR: return "unexpected end of file";
+    case Z_VERSION_ERROR: return "version error";
+    default: return "zlib operation failed";
+    }
+}
+
 static Item jube_host_node_throw_zlib_error(void* session, const char* method, int status) {
     if (!jube_host_node_session_is_live(session) || !method) return ItemNull;
-    return js_zlib_throw_error_status(method, status);
+    const char* code = jube_host_node_zlib_error_code(status);
+    const char* reason = jube_host_node_zlib_error_detail(status);
+    char message[256];
+    snprintf(message, sizeof(message), "%s: %s failed: %s", code, method, reason);
+    Item error = js_new_error(js_make_string_len(message, (int)strlen(message)));
+    js_set_key_default(error, js_make_string_len("code", 4),
+        js_make_string_len(code, (int)strlen(code)));
+    js_set_key_default(error, js_make_string_len("errno", 5), (Item){.item = i2it(status)});
+    return js_throw_value(error);
 }
 
 static uint32_t jube_host_node_zlib_crc32(const uint8_t* data, int length, uint32_t seed) {
@@ -3523,6 +3580,54 @@ static void jube_host_node_zlib_result_release(JubeNodeZlibResult* result) {
     result->data = NULL;
     result->length = 0;
     result->status = 0;
+}
+
+static bool jube_host_node_zlib_stream_init(enum JubeNodeZlibCodecMode mode, int window_bits,
+                                            int level, int mem_level, int strategy,
+                                            void** out_state, int* out_status) {
+    return node_zlib_stream_init((enum NodeZlibCodecMode)mode, window_bits, level,
+                                 mem_level, strategy, out_state, out_status);
+}
+
+static bool jube_host_node_zlib_stream_run(void* state, const uint8_t* data, int length,
+                                           int flush, JubeNodeZlibResult* out_result) {
+    NodeZlibBytes host_result = {};
+    bool success = node_zlib_stream_run(state, data, length, flush, &host_result);
+    if (out_result) {
+        out_result->data = host_result.data;
+        out_result->length = host_result.length;
+        out_result->status = host_result.status;
+    } else {
+        node_zlib_bytes_free(&host_result);
+    }
+    return success;
+}
+
+static void jube_host_node_zlib_stream_free(void* state) {
+    node_zlib_stream_free(state);
+}
+
+static Item jube_host_node_transform_new(Item options) {
+    return js_transform_new(options);
+}
+
+static Item jube_host_node_transform_prototype(void) {
+    // initialize the host stream prototypes before handing the opaque parent
+    // to a leaf module; the module must not resolve a host namespace itself.
+    (void)js_get_stream_namespace();
+    return js_get_stream_transform_prototype();
+}
+
+static Item jube_host_node_readable_push(Item stream, Item chunk) {
+    return js_readable_push(stream, chunk);
+}
+
+static void jube_host_node_flush_data_if_flowing(Item stream) {
+    js_stream_flush_data_if_flowing(stream);
+}
+
+static void jube_host_node_transform_flush_drained(Item stream) {
+    js_stream_transform_flush_drained(stream);
 }
 
 static Item jube_host_node_throw_system_error(void* session, const char* syscall,
@@ -3761,7 +3866,6 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         {"stream/iter", js_get_stream_iter_namespace},
         {"repl", js_get_repl_namespace},
         {"diagnostics_channel", js_get_diagnostics_channel_namespace},
-        {"zlib", js_get_zlib_namespace},
         {"module", js_get_node_module_namespace},
         {"vm", js_get_vm_namespace},
         {"async_hooks", js_get_async_hooks_namespace},

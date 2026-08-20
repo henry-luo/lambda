@@ -19,8 +19,8 @@ enum NodeZlibCodecMode {
     NODE_ZLIB_CODEC_UNZIP,
 };
 
-// This host primitive is shared by the legacy checkpoint and the Jube provider
-// so both paths use zlib's exact seed and unsigned-result semantics.
+// keep the host provider's seed and unsigned-result semantics identical to
+// zlib while the Node-facing namespace remains in the dynamic module.
 static inline uint32_t node_zlib_crc32_bytes(const uint8_t* data, int length, uint32_t seed) {
     static const uint8_t empty_data = 0;
     const uint8_t* input = data ? data : &empty_data;
@@ -35,3 +35,10 @@ bool node_zlib_deflate_raw_encode(const uint8_t* data, int length, NodeZlibBytes
 bool node_zlib_inflate_raw_decode(const uint8_t* data, int length, NodeZlibBytes* out_bytes);
 bool node_zlib_unzip_decode(const uint8_t* data, int length, NodeZlibBytes* out_bytes);
 void node_zlib_bytes_free(NodeZlibBytes* bytes);
+
+bool node_zlib_stream_init(enum NodeZlibCodecMode mode, int window_bits, int level,
+                           int mem_level, int strategy, void** out_state,
+                           int* out_status);
+bool node_zlib_stream_run(void* state, const uint8_t* data, int length, int flush,
+                          NodeZlibBytes* out_bytes);
+void node_zlib_stream_free(void* state);

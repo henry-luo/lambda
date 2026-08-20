@@ -24,7 +24,6 @@ extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 extern "C" void js_reset_buffer_module(void);
 extern "C" void js_crypto_reset(void);
 extern "C" void js_dns_reset(void);
-extern "C" void js_zlib_reset(void);
 extern "C" void js_readline_reset(void);
 extern "C" void js_stream_reset(void);
 extern "C" void js_net_reset(void);
@@ -61,7 +60,6 @@ static void js_reset_core_module_caches(void) {
     js_reset_buffer_module();
     js_crypto_reset();
     js_dns_reset();
-    js_zlib_reset();
     js_readline_reset();
     js_stream_reset();
     js_net_reset();
@@ -311,7 +309,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->util.roots, &state->util.namespace_object, 1, "util namespace") \
     M(&state->crypto.roots, &state->crypto.namespace_object, 1, "crypto namespace") \
     M(&state->child_process.roots, &state->child_process.namespace_object, 1, "child_process namespace") \
-    M(&state->zlib.roots, state->zlib.constructor_prototypes, 9, "zlib constructors and namespace") \
     M(&state->tls.roots, &state->tls.namespace_object, 5, "TLS namespace and certificate caches") \
     M(&state->stream.roots, &state->stream.key_on, 44, "stream keys, prototypes, and namespaces") \
     M(&state->http.roots, &state->http.server_prototype, 5, "HTTP namespace and prototypes") \
