@@ -1,8 +1,8 @@
 # Lambda Runtime — Parsing & AST Construction
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how source text becomes a Tree-sitter concrete syntax tree (CST), and how `build_ast.cpp` walks that CST to produce a typed AST — a tree of `AstNode` structs where every node carries an inferred `Type*`. It owns the CST→AST dispatch, the concrete node hierarchy, the build-time (forward, local, structural) type inference, and the scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how the first-party C lexer and hybrid recursive-descent + Pratt parser reduce source directly to a typed AST, with the Tree-sitter CST builder retained as an explicit reference/rollback adapter. It owns the direct reduction dispatch, the shared AST construction seams, the concrete node hierarchy, build-time (forward, local, structural) type inference, and scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
 >
-> **Primary sources:** `lambda/parse.c` (the thin Tree-sitter wrapper), `lambda/tree-sitter-lambda/grammar.js` (the grammar that auto-generates `parser.c`), `lambda/ts-enum.h` (the auto-generated symbol/field id enums), `lambda/ast.hpp` (the `AstNode` hierarchy + scope/closure model), `lambda/build_ast.cpp` (the 8200-line CST→AST builder + inference), `lambda/emit_sexpr.cpp` (a read-only AST consumer for the formal-semantics bridge).
+> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/parse.c` (explicit Tree-sitter reference wrapper), `lambda/tree-sitter-lambda/grammar.js` (the grammar that auto-generates reference `parser.c`), `lambda/ts-enum.h` (the auto-generated symbol/field id enums), `lambda/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/emit_sexpr.cpp` (a read-only AST consumer for the formal-semantics bridge).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -17,13 +17,35 @@ Three responsibilities live here and nowhere else: the central CST→AST **dispa
 
 ---
 
-## 2. Parsing: `parse.c` and the generated grammar
+## 2. Parsing: C RD/Pratt front end and Tree-sitter reference
 
-### 2.1 The thin wrapper — `parse.c`
+### 2.1 Production parser — `lambda_lexer.c` + `lambda_parser.c`
 
-`parse.c` is 23 lines and does no AST work. `lambda_parser()` creates a `TSParser` and sets its language to `tree_sitter_lambda()` (the symbol exported by the generated `parser.c`); `lambda_parse_source()` runs `ts_parser_parse_string()` to produce a `TSTree`. That is the whole of stage one. The wrapper does **not** free trees or inspect parse errors itself — error recovery and error reporting are entirely downstream in `build_ast.cpp`, which reads the (possibly error-bearing) CST and records structured diagnostics.
+Normal Lambda files and modules use the first-party parser by default. The
+lexer is a streaming C17 scanner with bounded lookahead; recursive descent owns
+documents, declarations, statements, containers, and the type/path seams, while
+one Pratt table owns prefix, postfix, and infix expression binding. Each
+committed production immediately calls the direct sink in `build_ast.cpp` and
+returns an `AstNode*`-backed value. No Lambda CST or replacement syntax tree is
+retained. `lambda_rd_build_ast` is the production adapter and fail-closes on an
+unsupported reduction or syntax error.
 
-### 2.2 The grammar — `grammar.js`
+`LambdaSourceSpan` is the shared half-open source contract. The existing type
+pattern and static-path parsers consume the same spans, so the direct path does
+not synthesize `TSNode` objects or duplicate those subgrammars.
+
+### 2.2 Reference wrapper — `parse.c`
+
+`parse.c` is the explicit reference path and does no direct-AST work.
+`lambda_parser()` creates a `TSParser` and sets its language to
+`tree_sitter_lambda()` (the symbol exported by generated `parser.c`);
+`lambda_parse_source()` runs `ts_parser_parse_string()` to produce a `TSTree`.
+`LAMBDA_PARSER=tree`/`tree-sitter` selects this adapter, while
+`LAMBDA_PARSER=compare` uses it only as a syntax oracle after the direct AST is
+built. The REPL and legacy inspection tools still retain trees for their
+append-only fragment transactions.
+
+### 2.3 Reference grammar — `grammar.js`
 
 `grammar.js` (1132 lines, `name: "lambda"`, `grammar.js:107`) is the single source of truth for the parser. Running `make generate-grammar` feeds it to the Tree-sitter CLI, which emits `src/parser.c` (a table-driven GLR parser) — **never edit `parser.c` by hand** (CLAUDE.md rule 5). The grammar declares every CST node symbol, every named field, the operator-precedence table, and the GLR conflict set.
 
@@ -44,7 +66,11 @@ Two deliberate symbol-count optimizations matter downstream: 30 type keywords ar
 
 ---
 
-## 3. CST → typed AST
+## 3. Reference CST → typed AST adapter and shared construction
+
+The following CST dispatch remains for explicit Tree-sitter mode, REPL
+fragments, and legacy tools. Its semantic constructors are shared with the
+direct sink; it is not the normal file/module front end.
 
 ### 3.1 Entry: `build_script`
 

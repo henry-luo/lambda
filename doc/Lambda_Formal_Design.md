@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.26.2 (2026-08-19)
+**Spec version:** 1.26.3 (2026-08-20)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1082,23 +1082,26 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v2*** Tree-sitter grammar → typed AST → **tiered execution**:
-  a boxed AST-walking interpreter (**T0**) is the default execution mode
-  and the retained AST is the runtime source of truth; **MIR Direct**
-  (`transpile-mir.cpp`) → MIR JIT (**T1**) compiles individual hot
-  definitions on demand (per-definition promotion cells, default 3rd
-  call), with whole-module eager compilation under explicit policy. The
-  const-folder is the same engine in CONST mode; MIR-interp demotes to a
-  codegen diagnostic. Promotion swaps entry-pointer data, never patches
-  code (D8.4.1, DI14); D5.1.2's "no hotness detection" continues to
-  scope stack primitives — definition-site counters are tier policy, not
-  primitive adaptivity. *(Historical: v1 ruled the opposite — "no
-  AST-walking interpreter", MIR-interp as sole non-JIT path [U26] —
-  reversed by user ruling 2026-08-15; the full record is
-  `Lambda_Design_Unified_AST.md` §12.)* [AI1–AI22]
-- **D8.1.2** Grammar is regenerated from `grammar.js` (never hand-edit
-  `parser.c`); build config generates the build files (never hand-edit
-  the Lua). [rules 5, 7]
+- **D8.1.1v3*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+  parser → the shared typed AST → **tiered execution**. The parser reduces
+  directly into the retained `AstNode` graph; no Lambda CST or replacement
+  syntax tree is retained. The default file/module path is the C parser, while
+  Tree-sitter remains an explicit reference/rollback parser and the editor/
+  binding grammar. A boxed AST-walking interpreter (**T0**) remains the
+  default execution mode and the retained AST is the runtime source of truth;
+  **MIR Direct** (`transpile-mir.cpp`) → MIR JIT (**T1**) retains the existing
+  tier policy and ownership contracts. The REPL and legacy inspection tools
+  may still use the reference Tree-sitter path until their fragment/source-span
+  migration is complete. *(Historical: v1 ruled the opposite — "no
+  AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
+  by user ruling 2026-08-15; the full record is
+  `Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]
+- **D8.1.2v2** The shipped Lambda executable uses the first-party C parser for
+  normal source-to-AST compilation. `grammar-lambda.js` is the complete
+  Tree-sitter syntax oracle and editor/bindings grammar; `grammar.js` and its
+  generated `parser.c` remain a reference artifact and are regenerated from
+  grammar sources (never hand-edit `parser.c`). Build config generates the
+  build files (never hand-edit the Lua). [CGP5, rules 5, 7]
 
 ### D8.2 Unified AST
 
@@ -1299,7 +1302,8 @@ Status of `*`-marked rulings as of 2026-08-17.
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (js_dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.1.1v2 | Decided 2026-08-15 (user ruling). P0/P1 T0 are landed; P2's opt-in `LAMBDA_TIER=auto` now starts in T0 and promotes an eligible definition to a unique Script-owned boxed MIR satellite at the shared dynamic dispatcher. The currently verified satellite boundary includes self recursion, shared module-slab reads, dynamic calls through other module Function values, pre-planned Lambda-import slab reads/calls, and deferred next-entry promotion after a T0 loop backedge (`LAMBDA_JIT_BACKEDGE`, default 1024); there is no OSR. An import satellite embeds the already-planned owner `{module_id, slot}` and retains the boxed dynamic Function call, so it never links a mixed T0/MIR import cone. Captures, cross-language/type imports, and named-property/key-table users remain pinned to T0. P3 has a restricted, fuel-bounded PREDICATE vertical slice for non-object constrained `is` checks and constrained match arms, plus a pass-manager CONST slice that folds admitted literal scalar subtrees to immediate non-pointer AST facts at generic `Item` boundaries. P4 has a persistent-REPL vertical slice for explicit `interp`/`auto`: one retained Script appends, indexes, and executes only a completed fragment; a failure restores its slab/name/source transaction; `clear` retires the module root before discarding the Script. Post-start imports remain rejected until the REPL has a cone init/rollback transaction (D7.2.2). Validator de-JIT and P5's default flip remain unimplemented; `jit` and the unset default remain eager whole-module MIR. Status and gates: `vibe/Lambda_Impl_Ast_Interp.md` §0/§3. |
+| D8.1.1v3 | Decided 2026-08-20 (user ruling). Normal Lambda files/modules now use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. Tiered T0/T1 execution remains as recorded in v2: P0/P1 T0 are landed; P2's opt-in `LAMBDA_TIER=auto` promotes an eligible definition to a unique Script-owned boxed MIR satellite at the shared dynamic dispatcher; P3 has restricted PREDICATE/CONST slices; P4 has the persistent-REPL vertical slice. Validator de-JIT and P5's default flip remain unimplemented. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7. |
+| D8.1.2v2 | Decided 2026-08-20 with D8.1.1v3. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
@@ -1372,7 +1376,7 @@ Numbered `DO#` (design-open); each links to its record.
   deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
   OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
   JR3.
-- **DO25** Interpreter tier (D8.1.1v2) opens: satellite-module treatment
+- **DO25** Interpreter tier (D8.1.1v3) opens: satellite-module treatment
   under the MT7 emission budgets (AIO2); cross-context visibility of
   promotion cells (AIO8); once-called hot bodies — `run`-mode `main`
   with heavy inline loops never re-enters, so backedge marking never

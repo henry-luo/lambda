@@ -29,7 +29,7 @@ struct Lexer {
     Transpiler* tp;
     const char* p;
     const char* end;
-    TSNode origin;
+    LambdaSourceSpan origin;
     bool failed;
 };
 
@@ -46,7 +46,8 @@ void fail(Lexer* lx, const char* what) {
     lx->failed = true;
     size_t left = (size_t)(lx->end - lx->p);
     log_error("type-pattern: %s at '%.*s'", what, (int)(left > 24 ? 24 : left), lx->p);
-    record_semantic_error(lx->tp, lx->origin, ERR_INVALID_LITERAL, "invalid type pattern");
+    record_semantic_error_span(lx->tp, lx->origin, ERR_INVALID_LITERAL,
+        "invalid type pattern");
 }
 
 void skip_space(Lexer* lx) {
@@ -108,13 +109,15 @@ AstNode* parse_element_type(Lexer* lx);
 AstNode* parse_fn_type(Lexer* lx);
 AstNode* parse_island(Lexer* lx);
 AstNode* parse_island_body(Lexer* lx);
+AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right,
+        Operator op, const char* op_text, size_t op_len);
 
 AstNode* new_node(Lexer* lx, AstNodeType kind, size_t size) {
-    return alloc_ast_node(lx->tp, kind, lx->origin, size);
+    return alloc_ast_node_from_span(lx->tp, kind, lx->origin, size);
 }
 
-// Every hand node shares the token's TSNode, so nothing downstream may re-read
-// source through it expecting a sub-span. The one consumer that does is the
+// Every hand node shares the type-slot source span, so nothing downstream may
+// re-read source through it expecting a sub-span. The one consumer that does is the
 // literal emitter for `&LIT_INT` / `&LIT_BOOL` typed nodes — which is why
 // numeric literals here always carry value-bearing types instead (see below).
 Type* wrap_type(Lexer* lx, Type* inner) {
@@ -225,7 +228,7 @@ Type* parse_number_literal_type(Lexer* lx) {
         return (Type*)ft;
     }
     // NOT &LIT_INT: that shared type makes the emitter re-parse the value from
-    // the node's TSNode span, and every hand node spans the whole token. A
+// the node's source span, and every hand node spans the whole token. A
     // pooled int is value-bearing, so the span never matters.
     TypeInt64* it = (TypeInt64*)alloc_type(lx->tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
     it->int64_val = strtoll(buf, NULL, 10);
@@ -311,7 +314,7 @@ AstNode* parse_island_primary(Lexer* lx) {
         // `d` inside an island ambiguous, which the CST builder rejected too
         NameEntry* shadowed = lookup_name(lx->tp, w);
         if (shadowed) {
-            record_semantic_error(lx->tp, lx->origin, ERR_SEMANTIC_ERROR,
+            record_semantic_error_span(lx->tp, lx->origin, ERR_SEMANTIC_ERROR,
                 "pattern class '%.*s' is reserved inside pattern islands; rename the surrounding binding",
                 (int)w.length, w.str);
         }
@@ -452,7 +455,7 @@ AstNode* parse_island(Lexer* lx) {
     // Pattern bodies are content-only: the domain is the island's tag, so a
     // symbol literal inside one is a mistake (S11.1.2).
     if (pattern_ast_has_symbol_literal(node->pattern)) {
-        record_semantic_error(lx->tp, lx->origin, ERR_INVALID_LITERAL,
+        record_semantic_error_span(lx->tp, lx->origin, ERR_INVALID_LITERAL,
             "pattern bodies are content-only; use \\symbol(...) for the symbol domain and string literals for content");
         node->type = &TYPE_ERROR;
         return (AstNode*)node;
@@ -804,14 +807,20 @@ AstNode* parse_primary(Lexer* lx) {
         // match_arm_is_error_handler blind-casts an arm's type as (TypeType*),
         // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
         if (def->node_type == AST_NODE_TYPE_STAM ||
+                (def->node_type == AST_NODE_ASSIGN &&
+                 ((AstNamedNode*)def)->is_type_definition) ||
                 def->node_type == AST_NODE_STRING_PATTERN ||
                 def->node_type == AST_NODE_SYMBOL_PATTERN) {
-            ident->type = wrap_type(lx, def->type);
+            // direct aliases for literals/ranges already carry the first-class
+            // TypeType wrapper; wrapping that carrier again hides the payload
+            // from the matcher and makes `is Alias` fail (D2.2.2).
+            ident->type = def->type && def->type->type_id == LMD_TYPE_TYPE
+                ? def->type : wrap_type(lx, def->type);
         }
     } else if (base_type_alias_suggestion(w)) {
         // conceptual base-type spellings (int64, float32) get the canonical
         // suggestion and fail the annotation, exactly as build_base_type did
-        record_unknown_base_type(lx->tp, lx->origin, w);
+        record_unknown_base_type_span(lx->tp, lx->origin, w);
         ident->type = (Type*)&LIT_TYPE_ERROR;
     } else {
         // stay lenient like build_identifier: an unresolved name defers to ANY
@@ -877,12 +886,11 @@ AstNode* parse_unary(Lexer* lx) {
         lx->p++;
         AstNode* operand = parse_unary(lx);
         if (!operand) { return NULL; }
-        AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY, sizeof(AstUnaryNode));
-        ast_node->operand = operand;
-        ast_node->op = OPERATOR_NOT;
-        ast_node->op_str = {.str = "!", .length = 1};
-        ast_node->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
+        AstPrimaryNode* any_node = (AstPrimaryNode*)new_node(lx,
+            AST_NODE_PRIMARY, sizeof(AstPrimaryNode));
+        any_node->type = wrap_type(lx, set_type_any(lx->tp, ANY_EXPLICIT));
+        return make_binary_node(lx, (AstNode*)any_node, operand,
+            OPERATOR_EXCLUDE, "!", 1);
     }
 
     AstNode* primary = parse_primary(lx);
@@ -1018,7 +1026,7 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
         if (!right) { return NULL; }
         Operator op = *op_text == '|' ? OPERATOR_UNION :
             (*op_text == '&' ? OPERATOR_OR : OPERATOR_EXCLUDE);
-        left = (AstNode*)build_registered_binary_type(lx->tp, lx->origin,
+        left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
             left, right, left->type, right->type, op, {op_text, 1});
     }
     return left;
@@ -1046,7 +1054,7 @@ AstNode* parse_view_pattern(Lexer* lx) {
         const char* op_text = lx->p++;
         AstNode* right = parse_view_pattern_primary(lx);
         if (!right) { return NULL; }
-        left = (AstNode*)build_registered_binary_type(lx->tp, lx->origin,
+        left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
             left, right, left->type, right->type, OPERATOR_UNION,
             {op_text, 1});
     }
@@ -1055,8 +1063,9 @@ AstNode* parse_view_pattern(Lexer* lx) {
 
 }  // namespace
 
-AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin, const char* end, TSNode origin) {
-    Lexer lx = {tp, begin, end, origin, false};
+AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
+        const char* end, LambdaSourceSpan span) {
+    Lexer lx = {tp, begin, end, span, false};
     AstNode* node = parse_union(&lx);
     if (!node || lx.failed) { return NULL; }
     skip_space(&lx);
@@ -1064,16 +1073,17 @@ AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin, const char* 
     return node;
 }
 
-AstNode* parse_primary_type_text(Transpiler* tp, const char* begin, const char* end, TSNode origin) {
-    Lexer lx = {tp, begin, end, origin, false};
+AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
+        const char* end, LambdaSourceSpan span) {
+    Lexer lx = {tp, begin, end, span, false};
     AstNode* node = parse_primary(&lx);
     if (!node || lx.failed) { return NULL; }
     return node;
 }
 
-AstNode* parse_return_type_text(Transpiler* tp, const char* begin, const char* end,
-        TSNode origin) {
-    Lexer lx = {tp, begin, end, origin, false};
+AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
+        const char* end, LambdaSourceSpan span) {
+    Lexer lx = {tp, begin, end, span, false};
     AstNode* ok = parse_return_type_pattern(&lx);
     if (!ok || lx.failed) { return NULL; }
 
@@ -1092,16 +1102,40 @@ AstNode* parse_return_type_text(Transpiler* tp, const char* begin, const char* e
     }
     skip_space(&lx);
     if (lx.p != lx.end) { fail(&lx, "trailing return contract input"); return NULL; }
-    return build_function_return_contract_node(tp, origin,
+    return build_function_return_contract_node_from_span(tp, span,
         return_contract_type(ok), error_type, can_raise);
 }
 
-AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin, const char* end,
-        TSNode origin) {
-    Lexer lx = {tp, begin, end, origin, false};
+AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
+        const char* end, LambdaSourceSpan span) {
+    Lexer lx = {tp, begin, end, span, false};
     AstNode* pattern = parse_view_pattern(&lx);
     if (!pattern || lx.failed) { return NULL; }
     skip_space(&lx);
     if (lx.p != lx.end) { fail(&lx, "trailing view pattern input"); return NULL; }
     return pattern;
+}
+
+AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin,
+        const char* end, TSNode origin) {
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return parse_type_pattern_text_span(tp, begin, end, span);
+}
+
+AstNode* parse_primary_type_text(Transpiler* tp, const char* begin,
+        const char* end, TSNode origin) {
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return parse_primary_type_text_span(tp, begin, end, span);
+}
+
+AstNode* parse_return_type_text(Transpiler* tp, const char* begin,
+        const char* end, TSNode origin) {
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return parse_return_type_text_span(tp, begin, end, span);
+}
+
+AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin,
+        const char* end, TSNode origin) {
+    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    return parse_view_pattern_text_span(tp, begin, end, span);
 }

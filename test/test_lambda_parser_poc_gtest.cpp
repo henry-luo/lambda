@@ -35,16 +35,70 @@ struct ParserSeamRecorder {
     int path_count;
 };
 
-static LambdaParseValue record_parser_seam(void* context, int reduction_kind,
-        LambdaSourceSpan span, const LambdaParseValue*, uint32_t) {
+struct ReductionMetadataRecorder {
+    LambdaParseReduction atom;
+    LambdaParseReduction binary;
+    LambdaParseReduction postfix;
+    LambdaParseReduction named_argument;
+    LambdaParseReduction map_item;
+    LambdaParseReduction element_attribute;
+    LambdaParseReduction assignment;
+    int atom_count;
+    int binary_count;
+    int postfix_count;
+    int named_argument_count;
+    int map_item_count;
+    int element_attribute_count;
+    int assignment_count;
+};
+
+static LambdaParseValue record_parser_seam(void* context,
+        const LambdaParseReduction* reduction) {
     ParserSeamRecorder* recorder = (ParserSeamRecorder*)context;
-    if (reduction_kind == LAMBDA_REDUCE_TYPE_SLOT) {
-        recorder->type_span = span;
+    if (reduction->kind == LAMBDA_REDUCE_TYPE_SLOT) {
+        recorder->type_span = reduction->span;
         recorder->type_count++;
     }
-    if (reduction_kind == LAMBDA_REDUCE_PATH_SLOT) {
-        recorder->path_span = span;
+    if (reduction->kind == LAMBDA_REDUCE_PATH_SLOT) {
+        recorder->path_span = reduction->span;
         recorder->path_count++;
+    }
+    return 0;
+}
+
+static LambdaParseValue record_reduction_metadata(void* context,
+        const LambdaParseReduction* reduction) {
+    ReductionMetadataRecorder* recorder = (ReductionMetadataRecorder*)context;
+    if (reduction->kind == LAMBDA_REDUCE_ATOM &&
+            reduction->form == LAMBDA_REDUCTION_FORM_TOKEN) {
+        recorder->atom = *reduction;
+        recorder->atom_count++;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_BINARY &&
+            reduction->form == LAMBDA_REDUCTION_FORM_TOKEN) {
+        recorder->binary = *reduction;
+        recorder->binary_count++;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_POSTFIX &&
+            reduction->form == LAMBDA_REDUCTION_FORM_CALL) {
+        recorder->postfix = *reduction;
+        recorder->postfix_count++;
+    }
+    if (reduction->form == LAMBDA_REDUCTION_FORM_NAMED_ARGUMENT) {
+        recorder->named_argument = *reduction;
+        recorder->named_argument_count++;
+    }
+    if (reduction->form == LAMBDA_REDUCTION_FORM_MAP_ITEM) {
+        recorder->map_item = *reduction;
+        recorder->map_item_count++;
+    }
+    if (reduction->form == LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE) {
+        recorder->element_attribute = *reduction;
+        recorder->element_attribute_count++;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_ASSIGNMENT) {
+        recorder->assignment = *reduction;
+        recorder->assignment_count++;
     }
     return 0;
 }
@@ -150,6 +204,61 @@ TEST(LambdaRdParserPoc, KeepsTypeAndStaticPathAsCommittedSourceSlots) {
     EXPECT_EQ(recorder.path_count, 1);
     EXPECT_EQ(strncmp(source + recorder.type_span.start_byte, "int", 3), 0);
     EXPECT_EQ(strncmp(source + recorder.path_span.start_byte, ".records.~~.id", 14), 0);
+}
+
+TEST(LambdaRdParserPoc, PublishesCommittedTokenFormsAndCompletePrattSpans) {
+    const char* source = "start(1 + 2)";
+    LambdaParseError error = {};
+    ReductionMetadataRecorder recorder = {};
+    LambdaParseSink sink = {record_reduction_metadata};
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+
+    ASSERT_GT(recorder.atom_count, 0);
+    ASSERT_EQ(recorder.binary_count, 1);
+    ASSERT_EQ(recorder.postfix_count, 1);
+    EXPECT_EQ(recorder.binary.detail_token.kind, LAMBDA_TOK_PLUS);
+    EXPECT_EQ(recorder.binary.detail_token.span.start_byte, 8u);
+    EXPECT_EQ(recorder.binary.span.start_byte, 6u);
+    EXPECT_EQ(recorder.binary.span.end_byte, 11u);
+    EXPECT_EQ(recorder.postfix.detail_token.kind, LAMBDA_TOK_LPAREN);
+    EXPECT_EQ(recorder.postfix.span.start_byte, 0u);
+    EXPECT_EQ(recorder.postfix.span.end_byte, strlen(source));
+}
+
+TEST(LambdaRdParserPoc, PublishesCommittedNamedAndCollectionItemForms) {
+    const char* source = "{item: 1}\ncall(option: 2)\n<tag title: \"x\">";
+    LambdaParseError error = {};
+    ReductionMetadataRecorder recorder = {};
+    LambdaParseSink sink = {record_reduction_metadata};
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+
+    ASSERT_EQ(recorder.map_item_count, 1);
+    ASSERT_EQ(recorder.named_argument_count, 1);
+    ASSERT_EQ(recorder.element_attribute_count, 1);
+    EXPECT_EQ(recorder.map_item.detail_token.kind, LAMBDA_TOK_IDENTIFIER);
+    EXPECT_EQ(recorder.named_argument.detail_token.kind, LAMBDA_TOK_IDENTIFIER);
+    EXPECT_EQ(recorder.element_attribute.detail_token.kind, LAMBDA_TOK_IDENTIFIER);
+    EXPECT_EQ(strncmp(source + recorder.map_item.detail_token.span.start_byte,
+        "item", 4), 0);
+    EXPECT_EQ(strncmp(source + recorder.named_argument.detail_token.span.start_byte,
+        "option", 6), 0);
+    EXPECT_EQ(strncmp(source + recorder.element_attribute.detail_token.span.start_byte,
+        "title", 5), 0);
+    EXPECT_EQ(recorder.element_attribute.detail_token.span.end_byte -
+        recorder.element_attribute.detail_token.span.start_byte, 5u);
+}
+
+TEST(LambdaRdParserPoc, PublishesProceduralAssignmentTargetAndValue) {
+    const char* source = "pn main() { var xs = [1]; xs[0] = 42 }";
+    LambdaParseError error = {};
+    ReductionMetadataRecorder recorder = {};
+    LambdaParseSink sink = {record_reduction_metadata};
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+    ASSERT_EQ(recorder.assignment_count, 1);
+    ASSERT_EQ(recorder.assignment.child_count, 2u);
 }
 
 TEST(LambdaRdParserPoc, ParsesTypeAliasAndObjectDeclarationShells) {

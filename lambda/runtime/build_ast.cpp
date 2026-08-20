@@ -4,6 +4,7 @@
 #include "lambda-error.h"
 #include "type_contract.hpp"
 #include "type_build.hpp"
+#include "ast_build.hpp"
 #include "parse_type_pattern.hpp"
 #include "parse_path_expr.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -15,6 +16,7 @@
 #include "../../lib/datetime.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_factory.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -31,6 +33,7 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
     *out = mantissa;
     return mantissa >= INT53_MIN && mantissa <= INT53_MAX;
 }
+
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
 #include "../../lib/arraylist.h"
@@ -38,6 +41,21 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 #include "../../lib/recursion_guard.hpp"
 #include <errno.h>
 #include <stdlib.h>
+
+static StrView source_span_text(Transpiler* tp, LambdaSourceSpan span) {
+    return (StrView){.str = tp->source + span.start_byte,
+        .length = lambda_source_span_length(span)};
+}
+
+static StrView ast_node_source(Transpiler* tp, const AstNode* node) {
+    LambdaSourceSpan span = node ? node->source_span : (LambdaSourceSpan){0, 0};
+    return source_span_text(tp, span);
+}
+
+static LambdaSourcePoint ast_node_start_point(Transpiler* tp, const AstNode* node) {
+    LambdaSourceSpan span = node ? node->source_span : (LambdaSourceSpan){0, 0};
+    return lambda_source_span_start_point(tp->source, span);
+}
 
 // Caps build_expr recursion so a pathologically nested source reports an error
 // instead of overflowing the stack (and tripping the SIGSEGV recovery). Well above
@@ -47,8 +65,8 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
-static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
-    TSNode diagnostic_node, int arg_count);
+bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
+    LambdaSourceSpan diagnostic_span, int arg_count);
 
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol, AstNode* prebuilt_as);
@@ -71,6 +89,14 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 
 // Forward declaration for view/edit template building
 AstNode* build_view_stam(Transpiler* tp, TSNode view_node);
+
+// Shared element namespace desugaring helpers used by both CST and direct
+// parser paths.  Keeping the constructors shared prevents the cutover path
+// from inventing a second AST shape for qualified attributes.
+static AstNode* build_ns_attr_map_from_parts(Transpiler* tp, StrView attr_name,
+        AstNode* val_expr, LambdaSourceSpan span);
+static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_item);
+static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name);
 
 // Defined with the E228 traversal below; match construction uses the same
 // pattern classification for the implicit-parameter dead-arm lint.
@@ -708,6 +734,17 @@ static inline void set_param_contract(TypeParam* parameter, Type* contract,
     parameter->has_explicit_contract = is_explicit;
 }
 
+static Type* parameter_contract_for_declared(Transpiler* tp, Type* declared,
+        bool optional, AstNode* default_value) {
+    if (optional && !default_value) {
+        // An omitted typed optional is the language-level null value. Keep the
+        // scalar payload for the native lane, but publish the nullable contract
+        // so ABI padding decodes null instead of silently becoming zero (D2.5.1).
+        return lambda_type_nullable_normalized(tp->pool, declared);
+    }
+    return declared;
+}
+
 static inline Type* parameter_boundary_type(TypeParam* parameter) {
     if (!parameter) return &TYPE_ANY;
     // TypeParam repurposes `kind` for the ABI, so its compact prefix loses a
@@ -1009,7 +1046,7 @@ bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
 
     switch (node->type->type_id) {
     case LMD_TYPE_BOOL: {
-        StrView text = ts_node_source(tp, node->node);
+        StrView text = ast_node_source(tp, node);
         out->item = b2it(strview_equal(&text, "true") ? BOOL_TRUE : BOOL_FALSE);
         return true;
     }
@@ -1021,7 +1058,7 @@ bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
             out->item = i2it(((TypeInt64*)node->type)->int64_val);
             return true;
         }
-        StrView source = ts_node_source(tp, node->node);
+        StrView source = ast_node_source(tp, node);
         char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
@@ -1106,7 +1143,14 @@ static Type* ast_called_type_target(AstNode* function) {
         if (!primary->expr) break;
         function = primary->expr;
     }
-    if (!function || !function->type || function->type->type_id != LMD_TYPE_TYPE) return NULL;
+    if (!function || !function->type) return NULL;
+    // Built-in annotations (`i32`, `u64`, ...) are represented directly by
+    // AST_NODE_TYPE with their target type.  Named type values retain the
+    // TypeType wrapper.  Accept both forms so direct and CST calls enter the
+    // same conversion lowering lane.
+    if (function->type->type_id != LMD_TYPE_TYPE) {
+        return function->node_type == AST_NODE_TYPE ? function->type : NULL;
+    }
     TypeType* type_type = (TypeType*)function->type;
     return type_type->type;
 }
@@ -1304,18 +1348,10 @@ void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     record_type_error_code(tp, line, ERR_TYPE_MISMATCH, "%s", error_msg);
 }
 
-// Record a semantic error with error code
-void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
-    // Get location from TSNode
-    TSPoint start = ts_node_start_point(node);
-    TSPoint end = ts_node_end_point(node);
-
-    // Format error message
-    char error_msg[512];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(error_msg, sizeof(error_msg), format, args);
-    va_end(args);
+static void record_semantic_error_message(Transpiler* tp, LambdaSourceSpan span,
+        LambdaErrorCode code, const char* error_msg) {
+    LambdaSourcePoint start = lambda_source_span_start_point(tp->source, span);
+    LambdaSourcePoint end = lambda_source_span_end_point(tp->source, span);
 
     // Create structured error with span
     SourceLocation loc = src_loc_span(tp->reference,
@@ -1346,6 +1382,28 @@ void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, co
     if (tp->error_count >= tp->max_errors) {
         log_error("error_threshold: max errors (%d) reached", tp->max_errors);
     }
+}
+
+// Record a semantic error with a Tree-sitter source range while the legacy
+// builder is active. The direct parser uses the span entry point below.
+void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    record_semantic_error_message(tp, span, code, error_msg);
+}
+
+void record_semantic_error_span(Transpiler* tp, LambdaSourceSpan span,
+        LambdaErrorCode code, const char* format, ...) {
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    record_semantic_error_message(tp, span, code, error_msg);
 }
 
 // Check if should continue transpiling based on error count
@@ -1556,7 +1614,7 @@ static void check_declared_map_literal(Transpiler* tp, AstNamedNode* declaration
             expected_entry->name->str, (int)expected_entry->name->length);
         if (!actual_entry) {
             if (!has_spread) {
-                record_semantic_error(tp, declaration->node, ERR_UNDEFINED_FIELD,
+                record_semantic_error_span(tp, declaration->source_span, ERR_UNDEFINED_FIELD,
                     "map assigned to '%.*s' is missing required field '%.*s'",
                     (int)declaration->name->len, declaration->name->chars,
                     (int)expected_entry->name->length, expected_entry->name->str);
@@ -2077,7 +2135,7 @@ void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_sc
             // A mutable capture is an explicit cross-frame write only when the
             // outer binding itself is a `var`; immutable captures remain pure.
             if (c->is_mutable && (!c->entry || !c->entry->is_mutable)) {
-                record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
+                record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
                     "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
                     (int)capture_name->len, capture_name->chars);
             }
@@ -2096,10 +2154,19 @@ NameScope* find_global_scope(NameScope* scope) {
 
 // str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
 
-AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
+AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
+        LambdaSourceSpan span, size_t size) {
     AstNode* ast_node = (AstNode*)pool_alloc(tp->pool, size);
     memset(ast_node, 0, size);
-    ast_node->node_type = node_type;  ast_node->node = node;
+    ast_node->node_type = node_type;
+    ast_node->source_span = span;
+    return ast_node;
+}
+
+AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    AstNode* ast_node = alloc_ast_node_from_span(tp, node_type, span, size);
+    ast_node->node = node;
     return ast_node;
 }
 
@@ -2182,7 +2249,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
 
     StrView name_view = {node->name->chars, node->name->len};
     if (is_reserved_identifier_keyword(name_view)) {
-        int line = ts_node_start_point(node->node).row + 1;
+        int line = (int)ast_node_start_point(tp, node).row + 1;
         // c15 reserves last globally so it cannot escape its two grammar homes via declarations.
         record_type_error(tp, line, "Error: '%.*s' is a reserved keyword and cannot be used as a name",
             (int)name_view.length, name_view.str);
@@ -2191,7 +2258,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     // check for duplicate definition in current scope
     NameEntry* existing = lookup_name_in_current_scope(tp, node->name);
     if (existing) {
-        record_semantic_error(tp, node->node, ERR_DUPLICATE_DEFINITION,
+        record_semantic_error_span(tp, node->source_span, ERR_DUPLICATE_DEFINITION,
             "duplicate definition of '%.*s' in the same scope",
             (int)node->name->len, node->name->chars);
         // continue anyway to allow further error checking
@@ -2213,6 +2280,61 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     tp->current_scope->last = entry;
 }
 
+NameScope* lambda_ast_enter_scope_with_parent(Transpiler* tp,
+        NameScope* parent, bool is_proc) {
+    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    scope->parent = parent;
+    scope->is_proc = is_proc;
+    tp->current_scope = scope;
+    return scope;
+}
+
+NameScope* lambda_ast_enter_scope(Transpiler* tp, bool is_proc) {
+    return lambda_ast_enter_scope_with_parent(tp, tp->current_scope, is_proc);
+}
+
+void lambda_ast_leave_scope(Transpiler* tp, NameScope* scope) {
+    if (!scope || tp->current_scope != scope) {
+        // A parser lookahead must never mutate a scope. Refusing an unmatched
+        // leave protects the parent chain if a future sink abandons a branch.
+        log_error("lambda AST scope leave: unmatched scope");
+        return;
+    }
+    tp->current_scope = scope->parent;
+}
+
+void lambda_ast_register_name(Transpiler* tp, AstNamedNode* node) {
+    push_name(tp, node, NULL);
+}
+
+AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, StrView name, bool is_proc) {
+    AstFuncNode* fn_node = (AstFuncNode*)alloc_ast_node_from_span(tp,
+        is_proc ? AST_NODE_PROC : AST_NODE_FUNC, span, sizeof(AstFuncNode));
+    fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+    fn_type->is_anonymous = false;
+    fn_type->is_proc = is_proc;
+    fn_type->param = NULL;
+    fn_type->param_count = 0;
+    fn_type->required_param_count = 0;
+    fn_type->is_variadic = false;
+    fn_type->error_type = NULL;
+    fn_type->can_raise = false;
+    fn_type->returned = &TYPE_ANY;
+    set_function_return_contract(fn_type,
+        is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
+    fn_node->name = name_pool_create_strview(tp->name_pool, name);
+    // The forward declaration must be safely visible before its body exists.
+    // Completion later fills these fields in place so every early reference
+    // keeps the binding identity registered in the enclosing scope.
+    fn_node->param = NULL;
+    fn_node->body = NULL;
+    fn_node->vars = NULL;
+    fn_node->captures = NULL;
+    return fn_node;
+}
+
 // Parenthesized lets: (let x = a, let y = b, expr) — sequential bindings returning the last expr.
 AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
     log_debug("build let_block expr");
@@ -2221,9 +2343,7 @@ AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
     ast_node->list_type = type;
 
     // push scope for let bindings
-    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    scope->parent = tp->current_scope;
-    tp->current_scope = scope;
+    NameScope* scope = lambda_ast_enter_scope(tp, false);
     ast_node->vars = scope;
 
     // process children: let_expr nodes are declarations, last non-let child is the body
@@ -2254,15 +2374,46 @@ AstNode* build_let_block(Transpiler* tp, TSNode block_node) {
     ast_node->type = body ? body->type : alloc_type(tp->pool, LMD_TYPE_NULL, sizeof(Type));
 
     // pop scope
-    tp->current_scope = scope->parent;
+    lambda_ast_leave_scope(tp, scope);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_array_from_items(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* items) {
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_ARRAY, span, sizeof(AstArrayNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    TypeArray* type = (TypeArray*)ast_node->type;
+
+    Type* nested_type = NULL;
+    bool has_value_item = false;
+    for (AstNode* item = items; item; item = item->next) {
+        // Let bindings are transparent: they establish a local name but do
+        // not occupy a runtime array slot in either parser front end.
+        if (item->node_type == AST_NODE_ASSIGN) continue;
+        if (!has_value_item) {
+            nested_type = item->type;
+            has_value_item = true;
+        }
+        else if (nested_type && (!item->type ||
+                item->type->type_id != nested_type->type_id)) {
+            nested_type = NULL;
+        }
+        else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED &&
+                type_num_sized_kind(nested_type) != type_num_sized_kind(item->type)) {
+            nested_type = NULL;
+        }
+        type->length++;
+    }
+    ast_node->item = items;
+    type->nested = nested_type;
+    log_debug("build array from items: nested type %d",
+        nested_type ? nested_type->type_id : -1);
     return (AstNode*)ast_node;
 }
 
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
     log_debug("build array expr");
-    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
-    TypeArray* type = (TypeArray*)ast_node->type;
 
     // check if array has let expressions - push scope to contain their bindings
     bool has_let = false;
@@ -2276,49 +2427,22 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
             scan = ts_node_next_named_sibling(scan);
         }
     }
-    NameScope* saved_scope = tp->current_scope;
+    NameScope* array_scope = NULL;
     if (has_let) {
-        NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-        scope->parent = tp->current_scope;
-        tp->current_scope = scope;
+        array_scope = lambda_ast_enter_scope(tp, false);
     }
 
     TSNode child = ts_node_named_child(array_node, 0);
-    AstNode* prev_item = NULL;  Type* nested_type = NULL;
+    AstNode* first_item = NULL;
+    AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
         if (item) {
             if (!prev_item) {
-                ast_node->item = item;
-                // let bindings are transparent - they don't contribute array elements
-                if (item->node_type != AST_NODE_ASSIGN) {
-                    nested_type = item->type;
-                    type->length++;
-                }
-                log_debug("DEBUG: First array item type_id: %d", item->type ? item->type->type_id : -1);
+                first_item = item;
             }
             else {
                 prev_item->next = item;
-                // let bindings are transparent - skip for type/length tracking
-                if (item->node_type != AST_NODE_ASSIGN) {
-                    log_debug("DEBUG: Array item type_id: %d, nested_type_id: %d",
-                        item->type ? item->type->type_id : -1, nested_type ? nested_type->type_id : -1);
-                    if (nested_type && item->type->type_id != nested_type->type_id) {
-                        log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
-                        nested_type = NULL;
-                    }
-                    // for NUM_SIZED, also check sub-type uniformity
-                    else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED) {
-                        NumSizedType a_num_type = type_num_sized_kind(nested_type);
-                        NumSizedType b_num_type = type_num_sized_kind(item->type);
-                        if (a_num_type != b_num_type) {
-                            log_debug("DEBUG: NUM_SIZED sub-type mismatch (%d vs %d), resetting nested_type to NULL",
-                                a_num_type, b_num_type);
-                            nested_type = NULL;
-                        }
-                    }
-                    type->length++;
-                }
             }
             prev_item = item;
         }
@@ -2326,12 +2450,11 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
     }
 
     if (has_let) {
-        tp->current_scope = saved_scope;
+        lambda_ast_leave_scope(tp, array_scope);
     }
 
-    type->nested = nested_type;
-    log_debug("DEBUG: Final array nested_type_id: %d", nested_type ? nested_type->type_id : -1);
-    return (AstNode*)ast_node;
+    LambdaSourceSpan span = {ts_node_start_byte(array_node), ts_node_end_byte(array_node)};
+    return build_array_from_items(tp, span, first_item);
 }
 
 // check if an identifier is a path scheme keyword
@@ -2509,6 +2632,36 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
     return -1;  // unknown node type, not a path
 }
 
+static AstNode* build_namespace_symbol_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, String* prefix, String* field,
+        NamespaceEntry* ns_entry) {
+    if (!tp || !prefix || !field || !ns_entry) return NULL;
+    size_t total_len = prefix->len + 1 + field->len;
+    char* qualified = (char*)pool_alloc(tp->pool, total_len + 1);
+    memcpy(qualified, prefix->chars, prefix->len);
+    qualified[prefix->len] = '.';
+    memcpy(qualified + prefix->len + 1, field->chars, field->len);
+    qualified[total_len] = '\0';
+
+    TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL,
+        sizeof(TypeString));
+    sym_type->is_const = 1;
+    sym_type->is_literal = 1;
+    Symbol* symbol = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
+    symbol->ns = ns_entry->target;
+    symbol->len = total_len;
+    memcpy(symbol->chars, qualified, total_len);
+    symbol->chars[total_len] = '\0';
+    sym_type->string = (String*)symbol;
+    arraylist_append(tp->const_list, symbol);
+    sym_type->const_index = tp->const_list->length - 1;
+
+    AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    result->type = (Type*)sym_type;
+    return (AstNode*)result;
+}
+
 // build a path expression from a member_expr chain that starts with a path scheme
 static AstNode* build_path_expr(Transpiler* tp, TSNode node, PathScheme scheme, ArrayList* segments) {
     log_debug("build_path_expr: scheme=%d, segment_count=%d", scheme, segments->length);
@@ -2558,36 +2711,10 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                 AstIdentNode* ns_ident = (AstIdentNode*)pri->expr;
                 NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
                 if (ns_entry) {
-                    // ns.value becomes a symbol literal with qualified name
-                    // Create qualified name: ns.value
-                    size_t ns_len = ns_ident->name->len;
-                    size_t val_len = id_node->name->len;
-                    size_t total_len = ns_len + 1 + val_len;  // ns.value
-                    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
-                    memcpy(buf, ns_ident->name->chars, ns_len);
-                    buf[ns_len] = '.';
-                    memcpy(buf + ns_len + 1, id_node->name->chars, val_len);
-                    buf[total_len] = '\0';
-                    log_debug("namespace symbol created: '%.*s'", (int)total_len, buf);
-
-                    // Build a symbol type with the qualified name
-                    TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL, sizeof(TypeString));
-                    sym_type->is_const = 1;
-                    sym_type->is_literal = 1;
-                    // Allocate Symbol struct (has ns field)
-                    Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
-                    sym->ns = ns_entry->target;  // set namespace target
-                    sym->len = total_len;
-                    memcpy(sym->chars, buf, total_len);
-                    sym->chars[total_len] = '\0';
-                    sym_type->string = (String*)sym;
-                    arraylist_append(tp->const_list, sym);
-                    sym_type->const_index = tp->const_list->length - 1;
-
-                    // Return a primary node with symbol type
-                    AstPrimaryNode* sym_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
-                    sym_node->type = (Type*)sym_type;
-                    return (AstNode*)sym_node;
+                    return build_namespace_symbol_from_parts(tp,
+                        (LambdaSourceSpan){ts_node_start_byte(array_node),
+                            ts_node_end_byte(array_node)},
+                        ns_ident->name, id_node->name, ns_entry);
                 }
 
                 // Check for math module constants: math.pi, math.e (also via alias)
@@ -3008,13 +3135,13 @@ static const char* start_literal_symbol(AstNode* node) {
     return symbol ? symbol->chars : NULL;
 }
 
-static bool parse_start_options(Transpiler* tp, AstNode* options,
-        TSNode call_node, StartMode* mode) {
+static bool parse_start_options_span(Transpiler* tp, AstNode* options,
+        LambdaSourceSpan span, StartMode* mode) {
     *mode = START_MODE_TASK;
     if (!options) return true;
     AstNode* root = ast_unwrap_primary(options);
     if (!root || root->node_type != AST_NODE_MAP) {
-        record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
             "`start` options must be a map literal");
         return false;
     }
@@ -3023,14 +3150,14 @@ static bool parse_start_options(Transpiler* tp, AstNode* options,
     bool valid = true;
     for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
         if (item->node_type != AST_NODE_KEY_EXPR) {
-            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "`start` options cannot use spread fields");
             valid = false;
             continue;
         }
         AstNamedNode* option = (AstNamedNode*)item;
         if (!start_option_name_is(option, "mode")) {
-            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "unknown `start` option '%.*s'",
                 option->name ? option->name->len : 0,
                 option->name ? option->name->chars : "");
@@ -3038,7 +3165,7 @@ static bool parse_start_options(Transpiler* tp, AstNode* options,
             continue;
         }
         if (saw_mode) {
-            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "duplicate `start` option 'mode'");
             valid = false;
             continue;
@@ -3046,7 +3173,7 @@ static bool parse_start_options(Transpiler* tp, AstNode* options,
         saw_mode = true;
         const char* value = start_literal_symbol(option->as);
         if (!value) {
-            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "`start` option 'mode' must be the literal symbol 'task', 'thread', or 'process'");
             valid = false;
         } else if (strcmp(value, "task") == 0) {
@@ -3056,7 +3183,7 @@ static bool parse_start_options(Transpiler* tp, AstNode* options,
         } else if (strcmp(value, "process") == 0) {
             *mode = START_MODE_PROCESS;
         } else {
-            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "invalid `start` mode '%s'; expected 'task', 'thread', or 'process'", value);
             valid = false;
         }
@@ -3064,15 +3191,61 @@ static bool parse_start_options(Transpiler* tp, AstNode* options,
 
     if (valid && *mode != START_MODE_TASK) {
         const char* value = *mode == START_MODE_THREAD ? "thread" : "process";
-        record_semantic_error(tp, call_node, ERR_NOT_IMPLEMENTED,
+        record_semantic_error_span(tp, span, ERR_NOT_IMPLEMENTED,
             "`start` mode '%s' is not implemented yet; use 'task'", value);
         valid = false;
     }
     return valid;
 }
 
+static bool start_has_named_arguments(AstNode* target) {
+    for (AstNode* arg = target; arg; arg = arg->next) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) return true;
+    }
+    return false;
+}
+
+static void validate_start_parts(Transpiler* tp, AstStartNode* start,
+        LambdaSourceSpan span, AstNode* target, AstNode* args, AstNode* options,
+        AstCallNode* target_call) {
+    TypeFunc* fn_type = target && target->type &&
+        target->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)target->type : NULL;
+    if (!fn_type || !fn_type->is_proc) {
+        record_semantic_error_span(tp, span, ERR_INVALID_CALL,
+            "`start` first argument must resolve to a procedure (pn)");
+        start->type = &TYPE_ERROR;
+    }
+    if (args && (!args->type || args->type->type_id != LMD_TYPE_ARRAY)) {
+        record_semantic_error_span(tp, span, ERR_ARGUMENT_TYPE_MISMATCH,
+            "`start` second argument must be an argument array");
+        start->type = &TYPE_ERROR;
+    }
+    if (!parse_start_options_span(tp, options, span, &start->mode)) {
+        start->type = &TYPE_ERROR;
+    }
+    AstNode* args_root = args ? ast_unwrap_primary(args) : NULL;
+    if (fn_type && args_root && args_root->node_type == AST_NODE_ARRAY) {
+        AstArrayNode* literal_args = (AstArrayNode*)args_root;
+        for (AstNode* item = literal_args->item; item; item = item->next) {
+            if (item->node_type == AST_NODE_ASSIGN) {
+                record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+                    "`start` argument arrays cannot contain declarations");
+                start->type = &TYPE_ERROR;
+                return;
+            }
+        }
+        AstCallNode validation_call = *target_call;
+        validation_call.argument = literal_args->item;
+        if (!lambda_ast_validate_call_arguments(tp, &validation_call, span,
+                (int)((TypeArray*)literal_args->type)->length)) {
+            start->type = &TYPE_ERROR;
+        }
+    }
+}
+
 static AstNode* build_start_call(Transpiler* tp, AstCallNode* source_call,
         TSNode call_node, int arg_count) {
+    LambdaSourceSpan span = {ts_node_start_byte(call_node), ts_node_end_byte(call_node)};
     AstStartNode* start = (AstStartNode*)alloc_ast_node(
         tp, AST_NODE_START, call_node, sizeof(AstStartNode));
     start->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
@@ -3089,13 +3262,11 @@ static AstNode* build_start_call(Transpiler* tp, AstCallNode* source_call,
     AstNode* target = source_call->argument;
     AstNode* args = target ? target->next : NULL;
     AstNode* options = args ? args->next : NULL;
-    for (AstNode* arg = target; arg; arg = arg->next) {
-        if (arg->node_type == AST_NODE_NAMED_ARG) {
-            record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
+    if (start_has_named_arguments(target)) {
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "`start` uses positional arguments: start(pn, args, options)");
-            start->type = &TYPE_ERROR;
-            return (AstNode*)start;
-        }
+        start->type = &TYPE_ERROR;
+        return (AstNode*)start;
     }
     if (target) target->next = NULL;
     if (args) args->next = NULL;
@@ -3103,21 +3274,6 @@ static AstNode* build_start_call(Transpiler* tp, AstCallNode* source_call,
 
     TypeFunc* fn_type = target && target->type && target->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)target->type : NULL;
-    if (!fn_type || !fn_type->is_proc) {
-        record_semantic_error(tp, call_node, ERR_INVALID_CALL,
-            "`start` first argument must resolve to a procedure (pn)");
-        start->type = &TYPE_ERROR;
-    }
-
-    AstNode* args_root = args ? ast_unwrap_primary(args) : NULL;
-    if (args && (!args->type || args->type->type_id != LMD_TYPE_ARRAY)) {
-        record_semantic_error(tp, call_node, ERR_ARGUMENT_TYPE_MISMATCH,
-            "`start` second argument must be an argument array");
-        start->type = &TYPE_ERROR;
-    }
-    if (!parse_start_options(tp, options, call_node, &start->mode)) {
-        start->type = &TYPE_ERROR;
-    }
 
     AstCallNode* target_call = (AstCallNode*)alloc_ast_node(
         tp, AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
@@ -3126,38 +3282,22 @@ static AstNode* build_start_call(Transpiler* tp, AstCallNode* source_call,
     target_call->type = fn_type ? function_call_result_type(tp, fn_type) : &TYPE_ERROR;
     target_call->can_raise = fn_type ? fn_type->can_raise : false;
     start->call = target_call;
-
-    if (fn_type && args_root && args_root->node_type == AST_NODE_ARRAY) {
-        AstArrayNode* literal_args = (AstArrayNode*)args_root;
-        for (AstNode* item = literal_args->item; item; item = item->next) {
-            if (item->node_type == AST_NODE_ASSIGN) {
-                record_semantic_error(tp, call_node, ERR_INVALID_OPERATION,
-                    "`start` argument arrays cannot contain declarations");
-                start->type = &TYPE_ERROR;
-                return (AstNode*)start;
-            }
-        }
-        AstCallNode validation_call = *target_call;
-        validation_call.argument = literal_args->item;
-        if (!validate_lambda_call_arguments(tp, &validation_call, call_node,
-                (int)((TypeArray*)literal_args->type)->length)) {
-            start->type = &TYPE_ERROR;
-        }
-    }
+    validate_start_parts(tp, start, span, target, args, options, target_call);
     return (AstNode*)start;
 }
 
-static bool validate_lambda_argument_limit(Transpiler* tp, TSNode node,
+static bool validate_lambda_argument_limit(Transpiler* tp,
+        LambdaSourceSpan span,
         int count, const char* subject) {
     if (count <= LAMBDA_MAX_FUNCTION_ARGS) return true;
-    record_semantic_error(tp, node, ERR_FUNCTION_ARGUMENT_LIMIT,
+    record_semantic_error_span(tp, span, ERR_FUNCTION_ARGUMENT_LIMIT,
         "%s count %d exceeds Core Lambda limit %d; use a rest parameter or an array/map",
         subject, count, LAMBDA_MAX_FUNCTION_ARGS);
     return false;
 }
 
-static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
-        TSNode diagnostic_node, int arg_count) {
+bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
+        LambdaSourceSpan diagnostic_span, int arg_count) {
     if (!call || !call->function || !call->function->type ||
             call->function->type->type_id != LMD_TYPE_FUNC) return true;
 
@@ -3165,7 +3305,8 @@ static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
     TypeParam* expected_param = func_type->param;
     AstNode* arg = call->argument;
     int arg_index = 0;
-    int line = ts_node_start_point(diagnostic_node).row + 1;
+    int line = (int)lambda_source_span_start_point(tp->source,
+        diagnostic_span).row + 1;
     String* var_arg_roots[64];
     int var_arg_root_count = 0;
     bool parameter_short_circuits_error = false;
@@ -3192,7 +3333,7 @@ static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
         if (expected_param->is_var_param) {
             AstIdentNode* root = compound_root_ident(arg);
             if (!root || !root->entry || !root->entry->is_mutable) {
-                record_semantic_error(tp, diagnostic_node, ERR_IMMUTABLE_ASSIGNMENT,
+                record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
                     "argument %d for `var` parameter must be a mutable `var` binding",
                     arg_index + 1);
                 if (!should_continue_transpiling(tp)) {
@@ -3202,7 +3343,7 @@ static bool validate_lambda_call_arguments(Transpiler* tp, AstCallNode* call,
             } else {
                 for (int i = 0; i < var_arg_root_count; i++) {
                     if (same_name_string(var_arg_roots[i], root->name)) {
-                        record_semantic_error(tp, diagnostic_node, ERR_IMMUTABLE_ASSIGNMENT,
+                        record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
                             "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
                             arg_index + 1);
                         break;
@@ -3309,7 +3450,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
     log_debug("arg count: %d", arg_count);
-    (void)validate_lambda_argument_limit(tp, call_node, arg_count, "call argument");
+    LambdaSourceSpan call_span = {ts_node_start_byte(call_node), ts_node_end_byte(call_node)};
+    (void)validate_lambda_argument_limit(tp, call_span, arg_count, "call argument");
 
     // build function name
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
@@ -3720,7 +3862,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
-    if (!validate_lambda_call_arguments(tp, ast_node, call_node, arg_count)) {
+    if (!lambda_ast_validate_call_arguments(tp, ast_node, call_span, arg_count)) {
         return (AstNode*)ast_node;
     }
 
@@ -3778,12 +3920,14 @@ NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     }
 }
 
-AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
+AstNode* build_identifier_from_span(Transpiler* tp, LambdaSourceSpan span) {
     log_debug("building identifier");
-    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstIdentNode));
+    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IDENT, span, sizeof(AstIdentNode));
 
     // get the identifier name from source and create pooled string
-    StrView var_name = ts_node_source(tp, id_node);
+    StrView var_name = {.str = tp->source + span.start_byte,
+        .length = lambda_source_span_length(span)};
     ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
 
     // lookup the name
@@ -3795,10 +3939,11 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         if (tp->in_that_clause) {
             log_debug("that clause: rewriting bare '%.*s' to ~.%.*s",
                 (int)var_name.length, var_name.str, (int)var_name.length, var_name.str);
-            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node(tp,
-                AST_NODE_MEMBER_EXPR, id_node, sizeof(AstFieldNode));
+            AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_MEMBER_EXPR, span, sizeof(AstFieldNode));
             // create ~ (current item) as the object
-            AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, id_node, sizeof(AstNode));
+            AstNode* current_item = alloc_ast_node_from_span(tp,
+                AST_NODE_CURRENT_ITEM, span, sizeof(AstNode));
             current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
             field_node->object = current_item;
             // use the identifier as the field name (without scope lookup)
@@ -3824,7 +3969,8 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 arraylist_append(tp->const_list, &ft->double_val);
                 ft->const_index = tp->const_list->length - 1;
                 ft->is_const = 1;  ft->is_literal = 1;
-                AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, id_node, sizeof(AstPrimaryNode));
+                AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+                    AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
                 pn->type = (Type*)ft;
                 log_debug("global import math constant resolved: %.*s", (int)var_name.length, var_name.str);
                 return (AstNode*)pn;
@@ -3832,11 +3978,12 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         }
         SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
         if (sys_value) {
-            AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
-                AST_NODE_SYS_FUNC, id_node, sizeof(AstSysFuncNode));
+            AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
             TypeFunc* fn_type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
-            fn_type->param_count = sys_value->arg_count;
-            fn_type->required_param_count = sys_value->arg_count;
+            fn_type->is_variadic = sys_value->arg_count < 0;
+            fn_type->param_count = fn_type->is_variadic ? 0 : sys_value->arg_count;
+            fn_type->required_param_count = fn_type->is_variadic ? 0 : fn_type->param_count;
             fn_type->returned = sys_value->return_type;
             fn_type->inferred_return = sys_value->success_type
                 ? sys_value->success_type : sys_value->return_type;
@@ -3930,21 +4077,28 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     return (AstNode*)ast_node;
 }
 
-Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
+AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
+    LambdaSourceSpan span = {ts_node_start_byte(id_node), ts_node_end_byte(id_node)};
+    return build_identifier_from_span(tp, span);
+}
+
+static Type* build_lit_string_from_span(Transpiler* tp, LambdaSourceSpan span,
+        LambdaAstLiteralKind kind) {
     // Phase 3: empty strings are values; empty symbol/binary values remain absent.
     // With single-token strings/symbols, we parse the raw token text directly
     // Binary is now a single token: b'content'
     String* str;
-    log_debug("build lit string with symbol: %d", symbol);
+    bool is_binary = kind == LAMBDA_AST_LITERAL_BINARY;
+    bool is_symbol = kind == LAMBDA_AST_LITERAL_SYMBOL;
+    log_debug("build lit string with kind: %d", kind);
 
     // Handle binary separately — extract content between b' and '
-    if (symbol == SYM_BINARY) {
+    if (is_binary) {
         TypeBinaryConst* str_type = (TypeBinaryConst*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeBinaryConst));
         str_type->is_const = 1;  str_type->is_literal = 1;
 
-        int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-        const char* raw = tp->source + start;
-        int raw_len = end - start;
+        const char* raw = tp->source + span.start_byte;
+        int raw_len = (int)lambda_source_span_length(span);
 
         // Skip b' prefix (2 chars) and trailing ' (1 char)
         const char* content_start = raw + 2;
@@ -3957,7 +4111,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         if (decoded_len < 0) {
             // Binary constants must enter the runtime as bytes; retaining malformed
             // source text here makes every later length/print operation ambiguous.
-            record_semantic_error(tp, node, ERR_SYNTAX_ERROR,
+            record_semantic_error_span(tp, span, ERR_SYNTAX_ERROR,
                 "invalid binary literal payload at byte %d", err_off);
             if (decoded) strbuf_free(decoded);
             return &TYPE_ERROR;
@@ -3977,12 +4131,11 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         return (Type*)str_type;
     }
 
-    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int raw_len = end - start;
-    const char* raw = tp->source + start;
+    int raw_len = (int)lambda_source_span_length(span);
+    const char* raw = tp->source + span.start_byte;
 
     // Determine quote character and content boundaries
-    char quote_char = (symbol == SYM_STRING) ? '"' : '\'';  // symbols use single quotes
+    char quote_char = is_symbol ? '\'' : '"';  // symbols use single quotes
 
     // Skip opening quote
     if (raw_len < 2 || raw[0] != quote_char || raw[raw_len - 1] != quote_char) {
@@ -3995,14 +4148,14 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
     // Empty symbol literals are rejected by grammar; keep a null fallback for generated/stale parsers.
     if (content_len == 0) {
-        if (symbol == SYM_SYMBOL) {
+        if (is_symbol) {
             log_debug("build_lit_string: empty symbol literal, returning null type");
             return &LIT_NULL;
         }
     }
 
     TypeString* str_type = (TypeString*)alloc_type(tp->pool,
-        symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(TypeString));
+        is_symbol ? LMD_TYPE_SYMBOL : LMD_TYPE_STRING, sizeof(TypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
 
     // Check if there are any escape sequences in the content
@@ -4016,7 +4169,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
     if (!has_escape) {
         // No escapes - simple copy
-        if (symbol == SYM_SYMBOL) {
+        if (is_symbol) {
             // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
             sym->ns = NULL;
@@ -4216,13 +4369,13 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         log_debug("final string: %.*s", str->len, str->chars);
 
         // Escapes can only produce empty solid values through generated/stale parsers.
-        if (str->len == 0 && symbol == SYM_SYMBOL) {
+        if (str->len == 0 && is_symbol) {
             log_debug("build_lit_string: empty symbol after escape processing, returning null type");
             return &LIT_NULL;
         }
 
         // For symbols, re-allocate as Symbol struct (different layout from String)
-        if (symbol == SYM_SYMBOL) {
+        if (is_symbol) {
             int slen = str->len;
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
             sym->ns = NULL;
@@ -4239,15 +4392,20 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     return (Type*)str_type;
 }
 
-Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    LambdaAstLiteralKind kind = symbol == SYM_BINARY ? LAMBDA_AST_LITERAL_BINARY :
+        symbol == SYM_SYMBOL ? LAMBDA_AST_LITERAL_SYMBOL : LAMBDA_AST_LITERAL_STRING;
+    return build_lit_string_from_span(tp, span, kind);
+}
 
+static Type* build_lit_datetime_from_span(Transpiler* tp, LambdaSourceSpan span) {
     TypeDateTime* dt_type = (TypeDateTime*)alloc_type(tp->pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
     dt_type->is_const = 1;  dt_type->is_literal = 1;
 
     // Token is t'...' — skip the t' prefix and trailing '
-    const char* raw = tp->source + start;
-    int raw_len = end - start;
+    const char* raw = tp->source + span.start_byte;
+    int raw_len = (int)lambda_source_span_length(span);
     const char* datetime_start = raw + 2;  // skip t'
     int datetime_len = raw_len - 3;        // exclude t' and trailing '
 
@@ -4281,6 +4439,12 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     return (Type*)dt_type;
 }
 
+Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
+    (void)symbol;
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_datetime_from_span(tp, span);
+}
+
 Type* build_lit_int64(Transpiler* tp, TSNode node) {
     TypeInt64* item_type = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(TypeInt64));
     StrView source = ts_node_source(tp, node);
@@ -4296,11 +4460,13 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
 static int decimal_literal_significant_digits(const char* str);
 static bool n_literal_is_integer(const char* str);
 
-Type* build_lit_float(Transpiler* tp, TSNode node) {
+static Type* build_lit_float_from_span(Transpiler* tp, LambdaSourceSpan span) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
     log_debug("build lit float");
-    const char* num_str = tp->source + ts_node_start_byte(node);
+    StrView source = source_span_text(tp, span);
+    char* number_text = strview_to_cstr(&source);
+    const char* num_str = number_text;
     // check if there's sign
     bool has_sign = false;
     if (num_str[0] == '-') { has_sign = true;  num_str++; } // skip the sign
@@ -4325,11 +4491,18 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
     arraylist_append(tp->const_list, &item_type->double_val);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
+    mem_free(number_text);
     return (Type*)item_type;
 }
 
-static Type* build_lit_decimal_poison(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
+Type* build_lit_float(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_float_from_span(tp, span);
+}
+
+static Type* build_lit_decimal_poison_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    StrView source = source_span_text(tp, span);
     const char* spelling = strview_equal(&source, "decimal.inf") ? "Infinity" : "NaN";
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL,
         sizeof(TypeDecimal));
@@ -4346,17 +4519,24 @@ static Type* build_lit_decimal_poison(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
-static Type* build_lit_named_value(Transpiler* tp, TSNode node) {
-    StrView text = ts_node_source(tp, node);
+static Type* build_lit_named_value_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    StrView text = source_span_text(tp, span);
     if (strview_equal(&text, "true") || strview_equal(&text, "false")) return &LIT_BOOL;
     if (strview_equal(&text, "decimal.inf") || strview_equal(&text, "decimal.nan")) {
-        return build_lit_decimal_poison(tp, node);
+        return build_lit_decimal_poison_from_span(tp, span);
     }
-    return build_lit_float(tp, node);
+    return build_lit_float_from_span(tp, span);
 }
 
-Type* build_lit_imaginary(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
+static Type* build_lit_named_value(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_named_value_from_span(tp, span);
+}
+
+static Type* build_lit_imaginary_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    StrView source = source_span_text(tp, span);
     if (source.length < 2 || source.str[source.length - 1] != 'j') return &TYPE_ERROR;
     char* coefficient = (char*)mem_alloc(source.length, MEM_CAT_AST);
     if (!coefficient) return &TYPE_ERROR;
@@ -4377,13 +4557,18 @@ Type* build_lit_imaginary(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
-Type* build_lit_decimal(Transpiler* tp, TSNode node) {
+Type* build_lit_imaginary(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_imaginary_from_span(tp, span);
+}
+
+static Type* build_lit_decimal_from_span(Transpiler* tp, LambdaSourceSpan span) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
-    StrView num_sv = ts_node_source(tp, node);
+    StrView num_sv = source_span_text(tp, span);
     char* num_str = strview_to_cstr(&num_sv);
     char suffix_char = num_sv.str[num_sv.length - 1];
     if (suffix_char == 'N') {
-        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+        record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "decimal literal suffix 'N' has been retired; use 'm' for decimal or 'n' for integer");
         mem_free(num_str);
         return &TYPE_ERROR;
@@ -4399,7 +4584,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     // or negative-exponent spelling cannot be an integer.
     bool is_integer_literal = (suffix_char == 'n');
     if (is_integer_literal && !n_literal_is_integer(num_str)) {
-        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+        record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "'n' literal must be integer-valued; use the 'm' suffix for decimal (e.g. 1.5m)");
         mem_free(num_str);
         return &TYPE_ERROR;
@@ -4430,6 +4615,11 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     item_type->is_const = 1;  item_type->is_literal = 1;
     mem_free(num_str);
     return (Type*)item_type;
+}
+
+Type* build_lit_decimal(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_decimal_from_span(tp, span);
 }
 
 // Parse a sized integer suffix and return the NumSizedType and suffix length
@@ -4506,8 +4696,9 @@ static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal)
 }
 
 // Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
-Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
+static Type* build_lit_sized_integer_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    StrView source = source_span_text(tp, span);
     char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
     memcpy(num_str, source.str, source.length);
     num_str[source.length] = '\0';
@@ -4525,7 +4716,7 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     errno = 0;
     uint64_t raw_value = strtoull(num_str, &endptr, 0);
     if (errno == ERANGE || endptr == num_str || *endptr != '\0') {
-        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+        record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "invalid sized integer literal '%s'", num_str);
         mem_free(num_str);
         return &TYPE_ERROR;
@@ -4534,7 +4725,7 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     uint64_t limit = sized_literal_limit(num_type, decimal_literal);
     if (raw_value > limit) {
         // sized constants are checked before packing so invalid source cannot silently truncate.
-        record_semantic_error(tp, node, ERR_INVALID_NUMBER,
+        record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "sized integer literal '%s' overflows %s", num_str, get_num_sized_type_name(num_type));
         mem_free(num_str);
         return &TYPE_ERROR;
@@ -4588,9 +4779,15 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
+Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_sized_integer_from_span(tp, span);
+}
+
 // Build AST type for sized float literal (e.g., 3.14f32, 0.5f16)
-Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
-    StrView source = ts_node_source(tp, node);
+static Type* build_lit_sized_float_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    StrView source = source_span_text(tp, span);
     char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
     memcpy(num_str, source.str, source.length);
     num_str[source.length] = '\0';
@@ -4638,6 +4835,55 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
+Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_lit_sized_float_from_span(tp, span);
+}
+
+static Type* build_literal_type_from_span(Transpiler* tp,
+        LambdaSourceSpan span, LambdaAstLiteralKind kind) {
+    switch (kind) {
+    case LAMBDA_AST_LITERAL_STRING:
+    case LAMBDA_AST_LITERAL_SYMBOL:
+    case LAMBDA_AST_LITERAL_BINARY:
+        return build_lit_string_from_span(tp, span, kind);
+    case LAMBDA_AST_LITERAL_DATETIME:
+        return build_lit_datetime_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_NAMED_VALUE:
+        return build_lit_named_value_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_INTEGER: {
+        StrView source = source_span_text(tp, span);
+        char* number = strview_to_cstr(&source);
+        int64_t value = 0;
+        bool in_band = number && lambda_parse_int_literal(number, &value);
+        if (number) mem_free(number);
+        if (in_band) return &LIT_INT;
+        record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
+            "integer literal is outside compact int range; use an explicit suffix or decimal literal");
+        return &TYPE_ERROR;
+    }
+    case LAMBDA_AST_LITERAL_FLOAT:
+        return build_lit_float_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_DECIMAL:
+        return build_lit_decimal_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_SIZED_INTEGER:
+        return build_lit_sized_integer_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_SIZED_FLOAT:
+        return build_lit_sized_float_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_IMAGINARY:
+        return build_lit_imaginary_from_span(tp, span);
+    }
+    return &TYPE_ERROR;
+}
+
+AstNode* build_literal_from_span(Transpiler* tp, LambdaSourceSpan span,
+        LambdaAstLiteralKind kind) {
+    AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    ast_node->type = build_literal_type_from_span(tp, span, kind);
+    return (AstNode*)ast_node;
+}
+
 // unknown type-name diagnostic with a conceptual-alias suggestion. Names like
 // `int64` appear in docs/prose as concept names but are NOT Lambda annotation
 // syntax (the defined names are the sized forms, e.g. `i64`); without this,
@@ -4660,16 +4906,22 @@ static const char* base_type_alias_suggestion(StrView type_name) {
     return NULL;
 }
 
-void record_unknown_base_type(Transpiler* tp, TSNode type_node, StrView type_name) {
+void record_unknown_base_type_span(Transpiler* tp, LambdaSourceSpan span,
+        StrView type_name) {
     const char* suggestion = base_type_alias_suggestion(type_name);
     if (suggestion) {
-        record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+        record_semantic_error_span(tp, span, ERR_UNDEFINED_TYPE,
             "unknown type '%.*s'; did you mean '%s'?",
             (int)type_name.length, type_name.str, suggestion);
         return;
     }
-    record_semantic_error(tp, type_node, ERR_UNDEFINED_TYPE,
+    record_semantic_error_span(tp, span, ERR_UNDEFINED_TYPE,
         "unknown type '%.*s'", (int)type_name.length, type_name.str);
+}
+
+void record_unknown_base_type(Transpiler* tp, TSNode type_node, StrView type_name) {
+    LambdaSourceSpan span = {ts_node_start_byte(type_node), ts_node_end_byte(type_node)};
+    record_unknown_base_type_span(tp, span, type_name);
 }
 
 // helper: returns Type* for base_type node (used in primary_expr context)
@@ -4794,15 +5046,22 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     }
 }
 
+AstNode* build_navigation_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* object, bool root) {
+    AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_NAVIGATION_EXPR, span, sizeof(AstNavigationNode));
+    nav->object = object;
+    nav->root = root;
+    nav->type = nav->object ? nav->object->type : &TYPE_ANY;
+    return (AstNode*)nav;
+}
+
 static AstNode* build_navigation_expr(Transpiler* tp, TSNode node) {
     TSNode object_node = ts_node_child_by_field_id(node, FIELD_OBJECT);
     TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
-    AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
-        AST_NODE_NAVIGATION_EXPR, node, sizeof(AstNavigationNode));
-    nav->object = build_expr(tp, object_node);
-    nav->root = ts_node_symbol(field_node) == SYM_PATH_ROOT;
-    nav->type = nav->object ? nav->object->type : &TYPE_ANY;
-    return (AstNode*)nav;
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_navigation_node_from_parts(tp, span, build_expr(tp, object_node),
+        ts_node_symbol(field_node) == SYM_PATH_ROOT);
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
@@ -4842,51 +5101,25 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
             ast_node->type = ast_node->expr->type;
         }
     }
-    else if (symbol == SYM_NAMED_VALUE) {
-        ast_node->type = build_lit_named_value(tp, child);
-    }
-    else if (symbol == SYM_INT) {
-        // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
-        StrView source = ts_node_source(tp, child);
-        // Create a null-terminated string for strtoll
-        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
-        memcpy(num_str, source.str, source.length);
-        num_str[source.length] = '\0';
-
-        int64_t value = 0;
-        bool in_band = lambda_parse_int_literal(num_str, &value);
-        mem_free(num_str);
-
-        log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        if (!in_band) {
-            record_semantic_error(tp, child, ERR_INVALID_NUMBER,
-                "integer literal is outside compact int range; use an explicit suffix or decimal literal");
-            ast_node->type = &TYPE_ERROR;
-        }
-        else {
-            ast_node->type = &LIT_INT;
-        }
-    }
-    else if (symbol == SYM_DECIMAL) {
-        ast_node->type = build_lit_decimal(tp, child);
-    }
-    else if (symbol == SYM_FLOAT) {
-        ast_node->type = build_lit_float(tp, child);
-    }
-    else if (symbol == SYM_IMAGINARY) {
-        ast_node->type = build_lit_imaginary(tp, child);
-    }
-    else if (symbol == SYM_SIZED_INT) {
-        ast_node->type = build_lit_sized_integer(tp, child);
-    }
-    else if (symbol == SYM_SIZED_FLOAT) {
-        ast_node->type = build_lit_sized_float(tp, child);
-    }
-    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
-        ast_node->type = build_lit_string(tp, child, symbol);
-    }
-    else if (symbol == SYM_DATETIME) {
-        ast_node->type = build_lit_datetime(tp, child, symbol);
+    else if (symbol == SYM_NAMED_VALUE || symbol == SYM_INT ||
+            symbol == SYM_DECIMAL || symbol == SYM_FLOAT ||
+            symbol == SYM_IMAGINARY || symbol == SYM_SIZED_INT ||
+            symbol == SYM_SIZED_FLOAT || symbol == SYM_STRING ||
+            symbol == SYM_SYMBOL || symbol == SYM_BINARY ||
+            symbol == SYM_DATETIME) {
+        LambdaAstLiteralKind kind = LAMBDA_AST_LITERAL_NAMED_VALUE;
+        if (symbol == SYM_INT) kind = LAMBDA_AST_LITERAL_INTEGER;
+        else if (symbol == SYM_DECIMAL) kind = LAMBDA_AST_LITERAL_DECIMAL;
+        else if (symbol == SYM_FLOAT) kind = LAMBDA_AST_LITERAL_FLOAT;
+        else if (symbol == SYM_IMAGINARY) kind = LAMBDA_AST_LITERAL_IMAGINARY;
+        else if (symbol == SYM_SIZED_INT) kind = LAMBDA_AST_LITERAL_SIZED_INTEGER;
+        else if (symbol == SYM_SIZED_FLOAT) kind = LAMBDA_AST_LITERAL_SIZED_FLOAT;
+        else if (symbol == SYM_STRING) kind = LAMBDA_AST_LITERAL_STRING;
+        else if (symbol == SYM_SYMBOL) kind = LAMBDA_AST_LITERAL_SYMBOL;
+        else if (symbol == SYM_BINARY) kind = LAMBDA_AST_LITERAL_BINARY;
+        else if (symbol == SYM_DATETIME) kind = LAMBDA_AST_LITERAL_DATETIME;
+        LambdaSourceSpan child_span = {ts_node_start_byte(child), ts_node_end_byte(child)};
+        ast_node->type = build_literal_type_from_span(tp, child_span, kind);
     }
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
@@ -4969,15 +5202,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_CURRENT_PARENT_EXPR) {
-        AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
-            AST_NODE_NAVIGATION_EXPR, child, sizeof(AstNavigationNode));
-        AstNode* current = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, child, sizeof(AstNode));
-        current->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-        nav->object = current;
-        nav->root = false;
-        nav->type = nav->object->type;
-        ast_node->expr = (AstNode*)nav;
-        ast_node->type = nav->type;
+        LambdaSourceSpan span = {ts_node_start_byte(child), ts_node_end_byte(child)};
+        ast_node->expr = build_current_parent_navigation_from_span(tp, span);
+        ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_INDEX_EXPR) {
         // Check if this is a path index expression (path[expr])
@@ -5094,6 +5321,105 @@ AstNode* build_type_negation_expr(Transpiler* tp, TSNode node) {
 
 AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node);
 
+bool lambda_unary_operator_from_spelling(StrView op, Operator* op_out) {
+    if (!op_out) return false;
+    if (strview_equal(&op, "not")) { *op_out = OPERATOR_NOT; }
+    else if (strview_equal(&op, "-")) { *op_out = OPERATOR_NEG; }
+    else if (strview_equal(&op, "+")) { *op_out = OPERATOR_POS; }
+    else { return false; }
+    return true;
+}
+
+bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
+    if (!op_out) return false;
+    if (strview_equal(&op, "and")) { *op_out = OPERATOR_AND; }
+    else if (strview_equal(&op, "or")) { *op_out = OPERATOR_OR; }
+    else if (strview_equal(&op, "+")) { *op_out = OPERATOR_ADD; }
+    else if (strview_equal(&op, "++")) { *op_out = OPERATOR_JOIN; }
+    else if (strview_equal(&op, "-")) { *op_out = OPERATOR_SUB; }
+    else if (strview_equal(&op, "*")) { *op_out = OPERATOR_MUL; }
+    else if (strview_equal(&op, "**")) { *op_out = OPERATOR_POW; }
+    else if (strview_equal(&op, "/")) { *op_out = OPERATOR_DIV; }
+    else if (strview_equal(&op, "div")) { *op_out = OPERATOR_IDIV; }
+    else if (strview_equal(&op, "%")) { *op_out = OPERATOR_MOD; }
+    else if (strview_equal(&op, "==")) { *op_out = OPERATOR_EQ; }
+    else if (strview_equal(&op, "!=")) { *op_out = OPERATOR_NE; }
+    else if (strview_equal(&op, "<")) { *op_out = OPERATOR_LT; }
+    else if (strview_equal(&op, "<=")) { *op_out = OPERATOR_LE; }
+    else if (strview_equal(&op, ">")) { *op_out = OPERATOR_GT; }
+    else if (strview_equal(&op, ">=")) { *op_out = OPERATOR_GE; }
+    else if (strview_equal(&op, "eq")) { *op_out = OPERATOR_ELEM_EQ; }
+    else if (strview_equal(&op, "ne")) { *op_out = OPERATOR_ELEM_NE; }
+    else if (strview_equal(&op, "lt")) { *op_out = OPERATOR_ELEM_LT; }
+    else if (strview_equal(&op, "le")) { *op_out = OPERATOR_ELEM_LE; }
+    else if (strview_equal(&op, "gt")) { *op_out = OPERATOR_ELEM_GT; }
+    else if (strview_equal(&op, "ge")) { *op_out = OPERATOR_ELEM_GE; }
+    else if (strview_equal(&op, "to")) { *op_out = OPERATOR_TO; }
+    else if (strview_equal(&op, "|")) { *op_out = OPERATOR_UNION; }
+    else if (strview_equal(&op, "|>")) { *op_out = OPERATOR_PIPE; }
+    else if (strview_equal(&op, "where") || strview_equal(&op, "that")) {
+        *op_out = OPERATOR_WHERE;
+    }
+    else if (strview_equal(&op, "&")) { *op_out = OPERATOR_INTERSECT; }
+    else if (strview_equal(&op, "!")) { *op_out = OPERATOR_EXCLUDE; }
+    else if (strview_equal(&op, "is")) { *op_out = OPERATOR_IS; }
+    else if (strview_equal(&op, "in")) { *op_out = OPERATOR_IN; }
+    else if (strview_equal(&op, "at")) { *op_out = OPERATOR_AT; }
+    else { return false; }
+    return true;
+}
+
+AstNode* build_unary_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        StrView op, AstNode* operand) {
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_UNARY, span, sizeof(AstUnaryNode));
+    ast_node->op_str = op;
+    ast_node->operand = operand;
+    if (!lambda_unary_operator_from_spelling(op, &ast_node->op)) {
+        // `*` spread and `!` type negation have distinct retained node shapes;
+        // ordinary unary construction must not silently classify either one.
+        log_error("build unary from parts: unsupported operator %.*s", (int)op.length,
+            op.str);
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    if (!operand) {
+        log_error("build unary from parts: missing operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    if (!operand->type) {
+        log_error("build unary from parts: operand missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TypeId operand_type = operand->type->type_id;
+    TypeId type_id;
+    if (ast_node->op == OPERATOR_NOT) {
+        type_id = LMD_TYPE_BOOL;
+    }
+    else if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+        ast_node->type = operand->type;
+        return (AstNode*)ast_node;
+    }
+    else if (IS_NUMERIC_ID(operand_type)) {
+        type_id = operand_type;
+    }
+    else if (operand_type != LMD_TYPE_ANY) {
+        // Keep the shared constructor's result honest: a known non-number
+        // cannot become `any` merely because it crosses a parser boundary.
+        ast_node->type = lambda_type_union_normalized(tp->pool, &TYPE_NUMBER,
+            &TYPE_ERROR);
+        return (AstNode*)ast_node;
+    }
+    else {
+        type_id = census_any_type_id(tp, ANY_UNARY);
+    }
+    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build unary expr");
 
@@ -5108,69 +5434,12 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
         return build_spread_expr(tp, bi_node);
     }
 
-    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
-    ast_node->op_str = op;
-    if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
-    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
-    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
-
     TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
-    ast_node->operand = build_expr(tp, operand_node);
-
-    // Defensive validation: ensure operand was built successfully
-    if (!ast_node->operand) {
-        log_error("Error: build_unary_expr failed to build operand");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    // Additional validation: ensure operand has valid type
-    if (!ast_node->operand->type) {
-        log_error("Error: build_unary_expr operand missing type information");
-        ast_node->type = &TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-
-    // More robust type inference based on operator and operand type
-    TypeId operand_type = ast_node->operand->type->type_id;
-    TypeId type_id;
-
-    if (ast_node->op == OPERATOR_NOT) {
-        type_id = LMD_TYPE_BOOL;
-    }
-    else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
-        // For numeric unary operators (+/-), preserve the operand type if numeric
-        if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
-            ast_node->type = ast_node->operand->type;
-            log_debug("end build unary expr");
-            return (AstNode*)ast_node;
-        }
-        if (IS_NUMERIC_ID(operand_type)) {
-            type_id = operand_type;  // Preserve the exact numeric type
-        }
-        else if (operand_type != LMD_TYPE_ANY) {
-            // A non-numeric operand of known type cannot silently become `any`:
-            // negation either produces a number or raises, so the honest type
-            // is `number | error` [TIG12, S7.2.1]. An open (`any`) operand
-            // stays open — nothing has been proven about it.
-            ast_node->type = lambda_type_union_normalized(tp->pool,
-                &TYPE_NUMBER, &TYPE_ERROR);
-            log_debug("end build unary expr");
-            return (AstNode*)ast_node;
-        }
-        else {
-            type_id = census_any_type_id(tp, ANY_UNARY);  // open operand stays open
-        }
-    }
-    else {
-        log_error("Error: build_unary_expr unknown operator");
-        type_id = census_any_type_id(tp, ANY_ERROR_RECOVERY);  // Default fallback
-    }
-
-    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
-
+    AstNode* operand = build_expr(tp, operand_node);
+    LambdaSourceSpan span = {ts_node_start_byte(bi_node), ts_node_end_byte(bi_node)};
+    AstNode* result = build_unary_node_from_parts(tp, span, op, operand);
     log_debug("end build unary expr");
-    return (AstNode*)ast_node;
+    return result;
 }
 
 // build spread expression: *expr
@@ -5526,39 +5795,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     }
     strview_trim(&op);
     ast_node->op_str = op;
-    if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
-    else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
-    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
-    else if (strview_equal(&op, "++")) { ast_node->op = OPERATOR_JOIN; }
-    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
-    else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
-    else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
-    else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
-    else if (strview_equal(&op, "div")) { ast_node->op = OPERATOR_IDIV; }
-    else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
-    else if (strview_equal(&op, "==")) { ast_node->op = OPERATOR_EQ; }
-    else if (strview_equal(&op, "!=")) { ast_node->op = OPERATOR_NE; }
-    else if (strview_equal(&op, "<")) { ast_node->op = OPERATOR_LT; }
-    else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
-    else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
-    else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
-    else if (strview_equal(&op, "eq")) { ast_node->op = OPERATOR_ELEM_EQ; }
-    else if (strview_equal(&op, "ne")) { ast_node->op = OPERATOR_ELEM_NE; }
-    else if (strview_equal(&op, "lt")) { ast_node->op = OPERATOR_ELEM_LT; }
-    else if (strview_equal(&op, "le")) { ast_node->op = OPERATOR_ELEM_LE; }
-    else if (strview_equal(&op, "gt")) { ast_node->op = OPERATOR_ELEM_GT; }
-    else if (strview_equal(&op, "ge")) { ast_node->op = OPERATOR_ELEM_GE; }
-    else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
-    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
-    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE; }
-    else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
-    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is filter like 'where'
-    else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
-    else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
-    else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
-    else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
-    else if (strview_equal(&op, "at")) { ast_node->op = OPERATOR_AT; }
-    else {
+    if (!lambda_binary_operator_from_spelling(op, &ast_node->op)) {
         log_error("Error: build_binary_expr unknown operator: %.*s", (int)op.length, op.str);
         ast_node->op = OPERATOR_ADD; // Default fallback to prevent crashes
     }
@@ -5956,35 +6193,69 @@ bool has_current_item_ref(AstNode* node) {
     }
 }
 
-// build current item reference (~)
-AstNode* build_current_expr(Transpiler* tp, TSNode node) {
-    uint32_t len = ts_node_end_byte(node) - ts_node_start_byte(node);
-    bool is_index = (len == 2); // ~# is 2 chars, ~ is 1
+AstNode* build_current_item_from_span(Transpiler* tp, LambdaSourceSpan span,
+        bool is_index) {
     if (is_index) {
         log_debug("build current index (~#)");
-        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_INDEX, node, sizeof(AstNode));
+        AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_INDEX,
+            span, sizeof(AstNode));
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
         return ast_node;
     } else {
         log_debug("build current item (~)");
-        AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, node, sizeof(AstNode));
+        AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_ITEM,
+            span, sizeof(AstNode));
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
         return ast_node;
     }
 }
 
+AstNode* build_current_parent_navigation_from_span(Transpiler* tp,
+        LambdaSourceSpan span) {
+    AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_NAVIGATION_EXPR, span, sizeof(AstNavigationNode));
+    nav->object = build_current_item_from_span(tp, span, false);
+    nav->root = false;
+    nav->type = nav->object->type;
+    return (AstNode*)nav;
+}
+
+AstNode* build_primary_wrapper_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* expr) {
+    AstPrimaryNode* primary = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    primary->expr = expr;
+    primary->type = expr && expr->type ? expr->type : &TYPE_ERROR;
+    return (AstNode*)primary;
+}
+
+// build current item reference (~)
+AstNode* build_current_expr(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_current_item_from_span(tp, span,
+        lambda_source_span_length(span) == 2); // ~# is 2 chars, ~ is 1
+}
+
 // Build the handler-local current error reference (`^`).  The grammar admits
 // the token as a primary so ordinary member/index builders can compose with it;
 // semantic scope is enforced here rather than letting `^` become a global value.
-static AstNode* build_current_error_expr(Transpiler* tp, TSNode node) {
-    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ERROR, node, sizeof(AstNode));
+AstNode* build_current_error_from_span(Transpiler* tp, LambdaSourceSpan span) {
+    AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_ERROR,
+        span, sizeof(AstNode));
     ast_node->type = &TYPE_ERROR;
     if (!tp->building_handler_body) {
-        record_semantic_error(tp, node, ERR_INVALID_EXPR_CONTEXT,
+        // A direct parser cannot rely on a CST ancestor to enforce this scope;
+        // the committed constructor owns the handler-body invariant for both paths.
+        record_semantic_error_span(tp, span, ERR_INVALID_EXPR_CONTEXT,
             "current error `^` is only valid inside an error-handler body");
     }
     log_debug("build current handler error (^)");
     return ast_node;
+}
+
+static AstNode* build_current_error_expr(Transpiler* tp, TSNode node) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_current_error_from_span(tp, span);
 }
 
 static AstNode* build_null_noop(Transpiler* tp, TSNode source_node) {
@@ -6044,11 +6315,10 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     // Build 'then' branch — create scope if it's a content block
     TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
     bool then_is_block = (!ts_node_is_null(then_node) && ts_node_symbol(then_node) == SYM_CONTENT);
+    NameScope* then_scope = NULL;
     if (then_is_block) {
-        NameScope* then_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-        then_scope->parent = tp->current_scope;
-        then_scope->is_proc = tp->current_scope->is_proc;
-        tp->current_scope = then_scope;
+        then_scope = lambda_ast_enter_scope(tp,
+            tp->current_scope && tp->current_scope->is_proc);
     }
     if (ts_node_is_null(then_node)) {
         // empty branch blocks are legal no-ops; represent them as null so pn control flow continues.
@@ -6062,9 +6332,9 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         // left unset and the scope became unreachable from the AST — which any
         // later pass walking scopes (the T0 frame plan) needs it to be.
         if (ast_node->then && ast_node->then->node_type == AST_NODE_CONTENT) {
-            ((AstListNode*)ast_node->then)->vars = tp->current_scope;
+            ((AstListNode*)ast_node->then)->vars = then_scope;
         }
-        tp->current_scope = tp->current_scope->parent;  // restore scope
+        lambda_ast_leave_scope(tp, then_scope);
     }
 
     // Defensive validation: ensure then clause was built successfully
@@ -6082,11 +6352,10 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     }
     else {
         bool else_is_block = (ts_node_symbol(else_node) == SYM_CONTENT);
+        NameScope* else_scope = NULL;
         if (else_is_block) {
-            NameScope* else_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-            else_scope->parent = tp->current_scope;
-            else_scope->is_proc = tp->current_scope->is_proc;
-            tp->current_scope = else_scope;
+            else_scope = lambda_ast_enter_scope(tp,
+                tp->current_scope && tp->current_scope->is_proc);
         }
         ast_node->otherwise = build_expr(tp, else_node);
         if (else_is_block) {
@@ -6095,9 +6364,9 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
             // left unset and the scope became unreachable from the AST — which any
             // later pass walking scopes (the T0 frame plan) needs it to be.
             if (ast_node->otherwise && ast_node->otherwise->node_type == AST_NODE_CONTENT) {
-                ((AstListNode*)ast_node->otherwise)->vars = tp->current_scope;
+                ((AstListNode*)ast_node->otherwise)->vars = else_scope;
             }
-            tp->current_scope = tp->current_scope->parent;  // restore scope
+            lambda_ast_leave_scope(tp, else_scope);
         }
         // Defensive validation: if else node exists, ensure it was built successfully
         if (!ast_node->otherwise) {
@@ -6239,16 +6508,14 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
         }
 
         // create a new scope for the arm body (like if_stam branches)
-        NameScope* arm_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-        arm_scope->parent = tp->current_scope;
-        arm_scope->is_proc = tp->current_scope->is_proc;
-        tp->current_scope = arm_scope;
+        NameScope* arm_scope = lambda_ast_enter_scope(tp,
+            tp->current_scope && tp->current_scope->is_proc);
 
         // build arm body
         TSNode body_node = ts_node_child_by_field_id(child, FIELD_BODY);
         arm->body = build_expr(tp, body_node);
 
-        tp->current_scope = arm_scope->parent; // restore scope
+        lambda_ast_leave_scope(tp, arm_scope);
 
         // type inference: track union of all arm body types
         if (arm->body && arm->body->type) {
@@ -6306,6 +6573,27 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_match_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* scrutinee, AstNode* arms) {
+    AstMatchNode* node = (AstMatchNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_MATCH_EXPR, span, sizeof(AstMatchNode));
+    node->scrutinee = scrutinee;
+    node->first_arm = (AstMatchArm*)arms;
+    node->arm_count = 0;
+    Type* result = NULL;
+    bool mixed = false;
+    for (AstMatchArm* arm = node->first_arm; arm;
+            arm = (AstMatchArm*)arm->next) {
+        node->arm_count++;
+        Type* arm_type = arm->body && arm->body->type ? arm->body->type : &TYPE_ANY;
+        if (!result) result = arm_type;
+        else if (result->type_id != arm_type->type_id) mixed = true;
+    }
+    node->type = mixed ? set_type_any(tp, ANY_JOIN) :
+        (result ? result : &TYPE_NULL);
+    return (AstNode*)node;
+}
+
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
     log_debug("build list");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
@@ -6316,9 +6604,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     // double-report every list whose type is later refined.
     ast_node->type = NULL;
 
-    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    ast_node->vars->parent = tp->current_scope;
-    tp->current_scope = ast_node->vars;
+    ast_node->vars = lambda_ast_enter_scope(tp, false);
 
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_declare = NULL, * prev_item = NULL;
@@ -6359,11 +6645,11 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         child = ts_node_next_named_sibling(child);
     }
     if (!ast_node->declare && type->length == 1) {
-        tp->current_scope = ast_node->vars->parent;  // Fix scope restoration
+        lambda_ast_leave_scope(tp, ast_node->vars);
         log_debug("build_list: returning single item with type %d", ast_node->item->type->type_id);
         return ast_node->item;
     }
-    tp->current_scope = ast_node->vars->parent;
+    lambda_ast_leave_scope(tp, ast_node->vars);
 
     // A list node's runtime value is NOT always a list: `transpile_list`
     // collapses a declaration block with exactly one value item to that value
@@ -6666,62 +6952,19 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     return (AstNode*)ast_node;
 }
 
-// Build decomposition expression: let a, b = expr OR let a, b at expr
-AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
-    log_debug("build decompose expr, is_named=%d", is_named);
-
-    // Count names first
-    TSTreeCursor cursor = ts_tree_cursor_new(asn_node);
-    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
-    int name_count = 0;
-    while (has_child) {
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_NAME) {
-            name_count++;
-        }
-        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-
-    if (name_count == 0) {
-        log_error("decompose: no variable names found");
-        return nullptr;
-    }
-
-    AstDecomposeNode* ast_node = (AstDecomposeNode*)alloc_ast_node(tp, AST_NODE_DECOMPOSE, asn_node, sizeof(AstDecomposeNode));
+AstNode* build_decompose_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        String** names, int name_count, AstNode* value, bool is_named) {
+    if (!names || name_count <= 0) return NULL;
+    AstDecomposeNode* ast_node = (AstDecomposeNode*)alloc_ast_node_from_span(
+        tp, AST_NODE_DECOMPOSE, span, sizeof(AstDecomposeNode));
     ast_node->name_count = name_count;
     ast_node->is_named = is_named;
     ast_node->names = (String**)pool_calloc(tp->pool, sizeof(String*) * name_count);
     ast_node->entries = (NameEntry**)pool_calloc(tp->pool,
         sizeof(NameEntry*) * name_count);
-
-    // Collect all names
-    cursor = ts_tree_cursor_new(asn_node);
-    has_child = ts_tree_cursor_goto_first_child(&cursor);
-    int idx = 0;
-    while (has_child) {
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_NAME) {
-            TSNode name_node = ts_tree_cursor_current_node(&cursor);
-            StrView name_view = node_name_text(tp, name_node);
-            ast_node->names[idx] = name_pool_create_strview(tp->name_pool, name_view);
-            log_debug("decompose name[%d]: %.*s", idx, (int)name_view.length, name_view.str);
-            idx++;
-        }
-        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-
-    // Build the source expression
-    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
-    if (ts_node_is_null(val_node)) {
-        log_error("decompose: missing source expression");
-        ast_node->as = nullptr;
-        ast_node->type = set_type_any(tp, ANY_DECOMPOSE);
-    } else {
-        ast_node->as = build_expr(tp, val_node);
-        ast_node->type = set_type_any(tp, ANY_DECOMPOSE);  // decomposition itself doesn't have a single type
-    }
+    for (int i = 0; i < name_count; i++) ast_node->names[i] = names[i];
+    ast_node->as = value;
+    ast_node->type = set_type_any(tp, ANY_DECOMPOSE);
 
     // Project the source's shape onto each target where it is knowable [TIG15].
     // Positional decomposition of a homogeneous array binds the element type;
@@ -6749,7 +6992,8 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
     // Push all names to the name stack
     for (int i = 0; i < name_count; i++) {
         // Create a temporary named node for each variable
-        AstNamedNode* var_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+        AstNamedNode* var_node = (AstNamedNode*)alloc_ast_node_from_span(tp,
+            AST_NODE_ASSIGN, span, sizeof(AstNamedNode));
         var_node->name = ast_node->names[i];
         Type* projected = NULL;
         if (is_named && source_map && source_map->shape) {
@@ -6780,6 +7024,39 @@ AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
     }
 
     return (AstNode*)ast_node;
+}
+
+// Build decomposition expression: let a, b = expr OR let a, b at expr.
+AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
+    TSTreeCursor cursor = ts_tree_cursor_new(asn_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int name_count = 0;
+    while (has_child) {
+        if (ts_tree_cursor_current_field_id(&cursor) == FIELD_NAME) name_count++;
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (name_count == 0) return NULL;
+
+    String** names = (String**)pool_calloc(tp->pool, sizeof(String*) * name_count);
+    cursor = ts_tree_cursor_new(asn_node);
+    has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int index = 0;
+    while (has_child) {
+        if (ts_tree_cursor_current_field_id(&cursor) == FIELD_NAME) {
+            names[index++] = name_pool_create_strview(tp->name_pool,
+                node_name_text(tp, ts_tree_cursor_current_node(&cursor)));
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
+    AstNode* value = ts_node_is_null(val_node) ? NULL : build_expr(tp, val_node);
+    LambdaSourceSpan span = {ts_node_start_byte(asn_node), ts_node_end_byte(asn_node)};
+    AstNode* result = build_decompose_from_parts(tp, span, names, name_count,
+        value, is_named);
+    if (result) result->node = asn_node;
+    return result;
 }
 
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
@@ -7001,13 +7278,16 @@ static TSNode find_dotted_name_in_name(TSNode name_node) {
 
 // Build a synthetic map node wrapping a single key-value pair: {attr_name: val_expr}
 // Used for desugaring ns.attr: val → ns: {attr: val}
-static AstNode* build_ns_attr_map(Transpiler* tp, StrView attr_name, AstNode* val_expr, TSNode source_node) {
-    AstMapNode* map_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, source_node, sizeof(AstMapNode));
+static AstNode* build_ns_attr_map_from_parts(Transpiler* tp, StrView attr_name,
+        AstNode* val_expr, LambdaSourceSpan span) {
+    AstMapNode* map_node = (AstMapNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_MAP, span, sizeof(AstMapNode));
     TypeMap* map_type = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     map_node->type = (Type*)map_type;
 
     // create key_expr: attr_name: val_expr
-    AstNamedNode* key_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, source_node, sizeof(AstNamedNode));
+    AstNamedNode* key_node = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_KEY_EXPR, span, sizeof(AstNamedNode));
     key_node->name = name_pool_create_strview(tp->name_pool, attr_name);
     key_node->as = val_expr;
     key_node->type = val_expr->type;
@@ -7030,6 +7310,13 @@ static AstNode* build_ns_attr_map(Transpiler* tp, StrView attr_name, AstNode* va
     map_type->type_index = tp->type_list->length - 1;
 
     return (AstNode*)map_node;
+}
+
+static AstNode* build_ns_attr_map(Transpiler* tp, StrView attr_name,
+        AstNode* val_expr, TSNode source_node) {
+    return build_ns_attr_map_from_parts(tp, attr_name, val_expr,
+        (LambdaSourceSpan){ts_node_start_byte(source_node),
+            ts_node_end_byte(source_node)});
 }
 
 // Merge two map AST nodes: append src map's items and shape entries to dst map
@@ -7339,9 +7626,7 @@ static void push_inherited_fields_to_scope(Transpiler* tp, TypeObject* base_type
 static void build_object_type_methods(Transpiler* tp, AstObjectTypeNode* ast_node,
     TypeObject* obj_type, TypeObject* base_type_obj, TSNode type_node,
     ShapeEntry* prev_entry, int byte_offset) {
-    NameScope* obj_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    obj_scope->parent = tp->current_scope;
-    tp->current_scope = obj_scope;
+    NameScope* obj_scope = lambda_ast_enter_scope(tp, false);
 
     push_inherited_fields_to_scope(tp, base_type_obj);
     AstNode* field_node = ast_node->item;
@@ -7390,7 +7675,7 @@ static void build_object_type_methods(Transpiler* tp, AstObjectTypeNode* ast_nod
 
     obj_type->byte_size = byte_offset;
     obj_type->last = prev_entry;
-    tp->current_scope = obj_scope->parent;
+    lambda_ast_leave_scope(tp, obj_scope);
 }
 
 // ============================================================================
@@ -7630,11 +7915,12 @@ AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;
 }
 
-AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
+AstBinaryNode* build_registered_binary_type_from_span(Transpiler* tp,
+        LambdaSourceSpan span,
         AstNode* left, AstNode* right, Type* left_type, Type* right_type,
         Operator op, StrView op_str) {
-    AstBinaryNode* binary = (AstBinaryNode*)alloc_ast_node(tp,
-        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+    AstBinaryNode* binary = (AstBinaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_BINARY_TYPE, span, sizeof(AstBinaryNode));
     binary->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY,
         sizeof(TypeBinary));
@@ -7649,6 +7935,14 @@ AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
     arraylist_append(tp->type_list, binary->type);
     type->type_index = tp->type_list->length - 1;
     return binary;
+}
+
+AstBinaryNode* build_registered_binary_type(Transpiler* tp, TSNode node,
+        AstNode* left, AstNode* right, Type* left_type, Type* right_type,
+        Operator op, StrView op_str) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_registered_binary_type_from_span(tp, span, left, right,
+        left_type, right_type, op, op_str);
 }
 
 // Helper function to parse occurrence count from string like "[]", "[2]", "[2, 5]", "[2+]"
@@ -7710,12 +8004,13 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
 }
 
-AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
+AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
+        LambdaSourceSpan span,
         Type* returned, Type* error_type, bool can_raise) {
     // Both grammar paths must carry exactly this compact TypeFunc contract;
     // build_func reads it before replacing the wrapper with the declared fn.
-    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE,
-        node, sizeof(AstFuncNode));
+    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_FUNC_TYPE, span, sizeof(AstFuncNode));
     wrapper_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     ((TypeType*)wrapper_node->type)->type = (Type*)fn_type_info;
@@ -7732,6 +8027,13 @@ AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
         can_raise);
 
     return (AstNode*)wrapper_node;
+}
+
+AstNode* build_function_return_contract_node(Transpiler* tp, TSNode node,
+        Type* returned, Type* error_type, bool can_raise) {
+    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return build_function_return_contract_node_from_span(tp, span, returned,
+        error_type, can_raise);
 }
 
 // todo: build reference type
@@ -7773,39 +8075,34 @@ static ShapeEntry* build_map_shape_entry(Transpiler* tp, AstNode* item,
     return shape_entry;
 }
 
-AstNode* build_map(Transpiler* tp, TSNode map_node) {
-    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
+static bool ast_node_is_syntactic_spread_key(Transpiler* tp, AstNode* item) {
+    if (!item || item->node_type != AST_NODE_KEY_EXPR) return false;
+
+    // A quoted `'*'` remains an ordinary key. The source spelling is retained
+    // until the direct sink has committed the map item, so inspect it here
+    // instead of collapsing name text into spread semantics.
+    StrView source = ast_node_source(tp, item);
+    return source.length > 0 && source.str[0] == '*';
+}
+
+AstNode* build_map_from_items(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* items) {
+    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_MAP, span, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
 
-    TSNode child = ts_node_named_child(map_node, 0);
     AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
-    while (!ts_node_is_null(child)) {
-        TSSymbol symbol = ts_node_symbol(child);
-        if (symbol == SYM_COMMENT) {  // skip comments
-            child = ts_node_next_named_sibling(child);  continue;
-        }
-        // named map item; *:expr is a map_item with key name "*" (spread)
-        AstNode* item;
-        bool is_spread = false;
-        if (symbol == SYM_MAP_ITEM) {
-            AstNamedNode* key_expr = build_key_expr(tp, child);
-            TSNode key_node = ts_node_child_by_field_id(child, FIELD_NAME);
-            // A quoted `'*'` is an ordinary map key; only the grammar's
-            // anonymous `*` token denotes a spread. Confusing the two leaves
-            // an array value in a nameless shape slot and crashes later map
-            // construction (S2.3.1, D2.1.1).
-            if (is_syntactic_spread_key(key_node)) {
-                // spread: *:expr — extract the value expression
-                item = key_expr->as;
-                is_spread = true;
-            } else {
-                item = (AstNode*)key_expr;
-            }
-        } else {
-            item = build_expr(tp, child);
-        }
+    for (AstNode* raw_item = items; raw_item;) {
+        AstNode* next_item = raw_item->next;
+        bool is_spread = ast_node_is_syntactic_spread_key(tp, raw_item);
+        AstNode* item = is_spread ? ((AstNamedNode*)raw_item)->as : raw_item;
         if (!item) { log_error("build_map: null expr item");  break; }
+
+        // The input chain represents syntactic map items, but the retained
+        // AST represents a spread by its value. Detach before relinking so a
+        // direct parser's raw reduction list cannot leak stale sibling links.
+        item->next = NULL;
 
         if (!prev_item) { ast_node->item = item; }
         else { prev_item->next = item; }
@@ -7825,13 +8122,76 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         type->length++;
         byte_offset += (!is_spread) ?
             type_info[type_field_storage_type_id(field_type)].byte_size : sizeof(void*);
-        child = ts_node_next_named_sibling(child);
+        raw_item = next_item;
     }
     type->byte_size = byte_offset;
 
     arraylist_append(tp->type_list, type);
     type->type_index = tp->type_list->length - 1;
     return (AstNode*)ast_node;
+}
+
+AstNode* build_map(Transpiler* tp, TSNode map_node) {
+    AstNode* first_item = NULL;
+    AstNode* prev_item = NULL;
+    TSNode child = ts_node_named_child(map_node, 0);
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol != SYM_COMMENT) {
+            AstNode* item = (symbol == SYM_MAP_ITEM)
+                ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
+            if (!item) {
+                log_error("build_map: null expr item");
+                break;
+            }
+            if (!prev_item) first_item = item;
+            else prev_item->next = item;
+            prev_item = item;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    LambdaSourceSpan span = {ts_node_start_byte(map_node), ts_node_end_byte(map_node)};
+    return build_map_from_items(tp, span, first_item);
+}
+
+static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) {
+    NameEntry* entry = lookup_name(tp, tag_name);
+    if (!entry || !entry->node || !entry->node->type) return NULL;
+    Type* resolved = entry->node->type;
+    if (resolved->type_id != LMD_TYPE_TYPE) return NULL;
+    Type* inner = ((TypeType*)resolved)->type;
+    return inner && inner->type_id == LMD_TYPE_OBJECT
+        ? (TypeObject*)inner : NULL;
+}
+
+static AstNode* build_object_literal_from_items(Transpiler* tp,
+        LambdaSourceSpan span, StrView tag_name, TypeObject* object_type,
+        AstNode* children) {
+    AstObjectLiteralNode* object = (AstObjectLiteralNode*)alloc_ast_node_from_span(
+        tp, AST_NODE_OBJECT_LITERAL, span, sizeof(AstObjectLiteralNode));
+    object->type_name = name_pool_create_strview(tp->name_pool, tag_name);
+    object->type = (Type*)object_type;
+    object->item = NULL;
+
+    AstNode* prev = NULL;
+    for (AstNode* raw = children; raw;) {
+        AstNode* next = raw->next;
+        raw->next = NULL;
+        if (raw->node_type != AST_NODE_CONTENT) {
+            bool spread = raw->node_type == AST_NODE_KEY_EXPR &&
+                ast_node_is_syntactic_spread_key(tp, raw);
+            AstNode* item = spread ? ((AstNamedNode*)raw)->as : raw;
+            if (item) {
+                item->next = NULL;
+                if (!object->item) object->item = item;
+                else prev->next = item;
+                prev = item;
+            }
+        }
+        raw = next;
+    }
+    return (AstNode*)object;
 }
 
 AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
@@ -7854,22 +8214,12 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
 
     // check if tag name resolves to an object type definition
     if (tag_name.length > 0) {
-        NameEntry* entry = lookup_name(tp, tag_name);
-        if (entry && entry->node && entry->node->type) {
-            Type* resolved = entry->node->type;
-            if (resolved->type_id == LMD_TYPE_TYPE) {
-                Type* inner = ((TypeType*)resolved)->type;
-                if (inner && inner->type_id == LMD_TYPE_OBJECT) {
+        TypeObject* object_type = lookup_object_type_for_tag(tp, tag_name);
+        if (object_type) {
                     // build as object literal instead of element
                     log_debug("build_elmt: detected <%.*s> as object type, building object literal", (int)tag_name.length, tag_name.str);
-                    TypeObject* obj_type = (TypeObject*)inner;
-                    AstObjectLiteralNode* obj_node = (AstObjectLiteralNode*)alloc_ast_node(tp,
-                        AST_NODE_OBJECT_LITERAL, elmt_node, sizeof(AstObjectLiteralNode));
-                    obj_node->type_name = name_pool_create_strview(tp->name_pool, tag_name);
-                    obj_node->type = (Type*)obj_type;
-                    obj_node->item = NULL;
-
                     // parse children: attrs and spread become items
+                    AstNode* object_items = NULL;
                     AstNode* prev_item = NULL;
                     TSNode child = ts_node_named_child(elmt_node, 0);
                     int name_start = ts_node_start_byte(first_child);
@@ -7907,15 +8257,17 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
                             continue;
                         }
                         if (item) {
-                            if (!prev_item) { obj_node->item = item; }
+                            item->next = NULL;
+                            if (!prev_item) { object_items = item; }
                             else { prev_item->next = item; }
                             prev_item = item;
                         }
                         child = ts_node_next_named_sibling(child);
                     }
-                    return (AstNode*)obj_node;
-                }
-            }
+                    LambdaSourceSpan span = {ts_node_start_byte(elmt_node),
+                        ts_node_end_byte(elmt_node)};
+                    return build_object_literal_from_items(tp, span, tag_name,
+                        object_type, object_items);
         }
     }
 
@@ -8082,7 +8434,10 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
 }
 
 static void append_join_key_spec(Transpiler* tp, AstLoopNode* loop, AstNode* prior_expr, AstNode* new_expr) {
-    AstJoinKey* spec = (AstJoinKey*)alloc_ast_node(tp, AST_NODE_JOIN_KEY, loop->node, sizeof(AstJoinKey));
+    // Direct reductions have no Tree-sitter node; the loop span is the shared
+    // source anchor for both builders.
+    AstJoinKey* spec = (AstJoinKey*)alloc_ast_node_from_span(tp,
+        AST_NODE_JOIN_KEY, loop->source_span, sizeof(AstJoinKey));
     spec->prior_expr = prior_expr;
     spec->new_expr = new_expr;
     if (!loop->join_keys) {
@@ -8340,10 +8695,15 @@ static bool group_alias_exists(AstGroupKey* first, String* alias) {
 }
 
 static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
-    NameScope* scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    scope->parent = for_node->vars ? for_node->vars->parent : tp->current_scope;
-    scope->is_proc = tp->current_scope ? tp->current_scope->is_proc : false;
-    tp->current_scope = scope;
+    NameScope* row_scope = for_node->vars;
+    NameScope* parent = row_scope ? row_scope->parent : tp->current_scope;
+    bool is_proc = tp->current_scope && tp->current_scope->is_proc;
+    // Grouping commits the row-scope boundary before aggregate clauses. The
+    // post-group name can see the enclosing scope but never loop/let bindings.
+    if (row_scope && tp->current_scope == row_scope) {
+        lambda_ast_leave_scope(tp, row_scope);
+    }
+    lambda_ast_enter_scope_with_parent(tp, parent, is_proc);
 }
 
 // Helper: build group by clause
@@ -8547,10 +8907,8 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
     // Type will be determined after processing the 'then' expression
 
-    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    ast_node->vars->parent = tp->current_scope;
-    ast_node->vars->is_proc = tp->current_scope->is_proc;
-    tp->current_scope = ast_node->vars;
+    ast_node->vars = lambda_ast_enter_scope(tp,
+        tp->current_scope && tp->current_scope->is_proc);
 
     // Build all clauses (loop, let, where, group, order, limit, offset)
     build_for_clauses(tp, for_node, ast_node);
@@ -8558,10 +8916,8 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
     if (ts_node_symbol(then_node) == SYM_CONTENT) {
         // Keep braced for-expression bodies lexically local to each iteration.
-        NameScope* body_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-        body_scope->parent = tp->current_scope;
-        body_scope->is_proc = tp->current_scope->is_proc;
-        tp->current_scope = body_scope;
+        NameScope* body_scope = lambda_ast_enter_scope(tp,
+            tp->current_scope && tp->current_scope->is_proc);
         ast_node->then = build_content(tp, then_node, true, false);
         // Hang the scope off the content node it belongs to. Lowering resolves
         // these names through its own per-scope hashmaps, so this was left
@@ -8570,7 +8926,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
         if (ast_node->then && ast_node->then->node_type == AST_NODE_CONTENT) {
             ((AstListNode*)ast_node->then)->vars = body_scope;
         }
-        tp->current_scope = body_scope->parent;
+        lambda_ast_leave_scope(tp, body_scope);
     }
     else {
         ast_node->then = build_expr(tp, then_node);
@@ -8589,7 +8945,9 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
         ast_node->type = set_type_any(tp, ANY_LIST);
     }
 
-    tp->current_scope = ast_node->vars->parent;
+    // A group clause has already closed the row scope and left its aggregate
+    // scope active. Leave whichever committed scope owns the final body.
+    lambda_ast_leave_scope(tp, tp->current_scope);
     return (AstNode*)ast_node;
 }
 
@@ -8597,10 +8955,8 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
     log_debug("build for stam");
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_STAM, for_node, sizeof(AstForNode));
 
-    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    ast_node->vars->parent = tp->current_scope;
-    ast_node->vars->is_proc = tp->current_scope->is_proc;  // inherit proc context
-    tp->current_scope = ast_node->vars;
+    ast_node->vars = lambda_ast_enter_scope(tp,
+        tp->current_scope && tp->current_scope->is_proc);
 
     // Build all clauses (loop, let, where, group, order, limit, offset)
     build_for_clauses(tp, for_node, ast_node);
@@ -8611,7 +8967,7 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
 
     // for statement returns type
     ast_node->type = set_type_any(tp, ANY_STATEMENT);
-    tp->current_scope = ast_node->vars->parent;
+    lambda_ast_leave_scope(tp, tp->current_scope);
     return (AstNode*)ast_node;
 }
 
@@ -8623,10 +8979,8 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
 
     // synthesize: for (c$apply in ~) apply(c$apply)
     AstForNode* for_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, apply_node, sizeof(AstForNode));
-    for_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    for_node->vars->parent = tp->current_scope;
-    for_node->vars->is_proc = tp->current_scope->is_proc;
-    tp->current_scope = for_node->vars;
+    for_node->vars = lambda_ast_enter_scope(tp,
+        tp->current_scope && tp->current_scope->is_proc);
 
     // synthesize loop binding `c$apply in ~`
     AstLoopNode* loop = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, apply_node, sizeof(AstLoopNode));
@@ -8658,7 +9012,7 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
         log_error("apply_stam: 'apply' sys func (arity 1) not found");
         for_node->then = NULL;
         for_node->type = &TYPE_ERROR;
-        tp->current_scope = for_node->vars->parent;
+        lambda_ast_leave_scope(tp, for_node->vars);
         return (AstNode*)for_node;
     }
     AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
@@ -8684,7 +9038,7 @@ AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
     for_node->then = (AstNode*)call;
     for_node->type = set_type_any(tp, ANY_STATEMENT);
 
-    tp->current_scope = for_node->vars->parent;
+    lambda_ast_leave_scope(tp, for_node->vars);
     return (AstNode*)for_node;
 }
 
@@ -8710,10 +9064,7 @@ AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
 
     AstWhileNode* ast_node = (AstWhileNode*)alloc_ast_node(tp, AST_NODE_WHILE_STAM, while_node, sizeof(AstWhileNode));
 
-    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    ast_node->vars->parent = tp->current_scope;
-    ast_node->vars->is_proc = true;
-    tp->current_scope = ast_node->vars;
+    ast_node->vars = lambda_ast_enter_scope(tp, true);
 
     // build condition
     TSNode cond_node = ts_node_child_by_field_id(while_node, FIELD_COND);
@@ -8727,7 +9078,7 @@ AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
     log_debug("got while body type %d", ast_node->body ? ast_node->body->node_type : -1);
 
     ast_node->type = set_type_any(tp, ANY_STATEMENT);
-    tp->current_scope = ast_node->vars->parent;
+    lambda_ast_leave_scope(tp, ast_node->vars);
     return (AstNode*)ast_node;
 }
 
@@ -9082,13 +9433,8 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
     param_type->is_var_param = was_var_param;
     param_type->default_value = default_value;
 
-    Type* parameter_contract = declared;
-    if (was_optional && !default_value) {
-        // An omitted `p?: T` reaches the body as null.  The compact TypeParam
-        // remains T for its register class, but its full contract must be T? so
-        // native lanes do not decode absence as a zero value.
-        parameter_contract = lambda_type_nullable_normalized(tp->pool, parameter_contract);
-    }
+    Type* parameter_contract = parameter_contract_for_declared(tp, declared,
+        was_optional, default_value);
     set_param_contract(param_type, parameter_contract, true);
 
     // For complex types (TypeBinary, TypeUnary) and named map/object types,
@@ -9192,21 +9538,27 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     return ast_node;
 }
 
+AstNamedNode* build_named_argument_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, StrView name, AstNode* value) {
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_NAMED_ARG, span, sizeof(AstNamedNode));
+    ast_node->name = name_pool_create_strview(tp->name_pool, name);
+    ast_node->as = value;
+    ast_node->type = value ? value->type : &TYPE_ANY;
+
+    log_debug("named argument: %s", ast_node->name);
+    return ast_node;
+}
+
 // build named argument in function call: name: value
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
     log_debug("build named argument");
-    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_NAMED_ARG, arg_node, sizeof(AstNamedNode));
-
-    TSNode name = ts_node_child_by_field_id(arg_node, FIELD_NAME);
-    StrView name_str = node_name_text(tp, name);
-    ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
-
+    TSNode name_node = ts_node_child_by_field_id(arg_node, FIELD_NAME);
+    StrView name = node_name_text(tp, name_node);
     TSNode value_node = ts_node_child_by_field_id(arg_node, FIELD_VALUE);
-    ast_node->as = build_expr(tp, value_node);
-    ast_node->type = ast_node->as ? ast_node->as->type : &TYPE_ANY;
-
-    log_debug("named argument: %s", ast_node->name);
-    return (AstNode*)ast_node;
+    AstNode* value = build_expr(tp, value_node);
+    LambdaSourceSpan span = {ts_node_start_byte(arg_node), ts_node_end_byte(arg_node)};
+    return (AstNode*)build_named_argument_from_parts(tp, span, name, value);
 }
 
 typedef struct ReturnBoundaryScan {
@@ -9257,7 +9609,7 @@ static bool return_error_call_name(AstCallNode* call, const char** name, int* le
 
 static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
         AstNode* site, Type* expected, Type* actual, bool has_explicit_contract) {
-    TSPoint point = ts_node_start_point(site ? site->node : fn->node);
+    LambdaSourcePoint point = ast_node_start_point(tp, site ? site : (AstNode*)fn);
     ReturnErrorOriginScan origin = {0};
     if (site) walk_lambda_ast(site, find_first_return_error_call, &origin, false);
     const char* call_name = NULL;
@@ -9309,7 +9661,7 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
         ? static_parameter_boundary_relation(actual, scan->expected)
         : static_boundary_relation(actual, scan->expected);
     if (relation == STATIC_BOUNDARY_REJECTED) {
-        TSPoint point = ts_node_start_point(node->node);
+        LambdaSourcePoint point = ast_node_start_point(scan->tp, node);
         char expected_name[128];
         char actual_name[128];
         lambda_type_format_name(scan->expected, expected_name, sizeof(expected_name));
@@ -9373,7 +9725,7 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
             name_length = (int)ident_name->len;
         }
     }
-    record_semantic_error(tp, call->node, ERR_UNHANDLED_ERROR,
+    record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
         "error from '%.*s' must be handled: use '%.*s(...)^' to propagate, "
         "handle with '%.*s(...) ^ { ... }', or recover with '%.*s(...) or default'",
         name_length, name, name_length, name, name_length, name, name_length, name);
@@ -9739,7 +10091,7 @@ static AstFuncNode* direct_user_callable(AstCallNode* call) {
 static void report_invalidated_read(InvalidatedBindingState* state,
         AstNode* node, String* name) {
     if (!state || !state->tp || !node || !name) return;
-    record_semantic_error(state->tp, node->node, ERR_INVALIDATED_BINDING,
+    record_semantic_error_span(state->tp, node->source_span, ERR_INVALIDATED_BINDING,
         "binding '%.*s' may have been changed invisibly by a previous call; "
         "assign the returned value back to '%.*s' before reading it",
         (int)name->len, name->chars, (int)name->len, name->chars);
@@ -10070,10 +10422,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     }
 
     // build the params
-    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    ast_node->vars->parent = tp->current_scope;
-    ast_node->vars->is_proc = is_proc;
-    tp->current_scope = ast_node->vars;
+    ast_node->vars = lambda_ast_enter_scope(tp, is_proc);
     AstNamedNode* prev_param = NULL;  int param_count = 0;  int required_count = 0;
     bool seen_optional = false;  // track if we've seen an optional param
 
@@ -10180,7 +10529,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     ts_tree_cursor_delete(&cursor);
     fn_type->param_count = param_count;
     fn_type->required_param_count = required_count;
-    (void)validate_lambda_argument_limit(tp, func_node,
+    LambdaSourceSpan func_span = {ts_node_start_byte(func_node), ts_node_end_byte(func_node)};
+    (void)validate_lambda_argument_limit(tp, func_span,
         param_count + (fn_type->is_variadic ? 1 : 0), "function formal");
 
     // build the function body
@@ -10205,7 +10555,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     validate_function_enforcing_calls(tp, ast_node, fn_type);
 
     // restore parent namescope
-    tp->current_scope = ast_node->vars->parent;
+    lambda_ast_leave_scope(tp, ast_node->vars);
 
     // Analyze captures for closure support
     NameScope* global_scope = find_global_scope(ast_node->vars);
@@ -10262,10 +10612,7 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
     }
 
     // create scope for params, state, and body
-    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-    ast_node->vars->parent = tp->current_scope;
-    ast_node->vars->is_proc = false; // body is functional
-    tp->current_scope = ast_node->vars;
+    ast_node->vars = lambda_ast_enter_scope(tp, false);
 
     // add ~ (current item) to scope — it refers to the matched model item
     // (this is inherent to view/edit — ~ is always available)
@@ -10364,10 +10711,8 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
             }
 
             // handler scope (procedural)
-            handler->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-            handler->vars->parent = ast_node->vars; // inherits template scope (state vars, params)
-            handler->vars->is_proc = true; // handlers are procedural
-            tp->current_scope = handler->vars;
+            handler->vars = lambda_ast_enter_scope_with_parent(tp,
+                ast_node->vars, true);
 
             // optional event parameter
             TSNode param_node = ts_node_child_by_field_id(handler_node, FIELD_DECLARE);
@@ -10386,8 +10731,9 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
                 handler->body = build_expr(tp, handler_body);
             }
 
-            // restore scope to template scope
-            tp->current_scope = ast_node->vars;
+            // The handler is a committed child scope; finish it before the
+            // next event so a direct sink cannot retain handler-local names.
+            lambda_ast_leave_scope(tp, handler->vars);
 
             if (prev_handler == NULL) {
                 ast_node->handler = handler;
@@ -10401,7 +10747,7 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
     ts_tree_cursor_delete(&cursor);
 
     // restore parent scope
-    tp->current_scope = ast_node->vars->parent;
+    lambda_ast_leave_scope(tp, ast_node->vars);
 
     // register named template in scope (update pre-registered placeholder if exists)
     if (ast_node->name) {
@@ -10443,29 +10789,15 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     is_proc = strview_equal(&kind_str, "pn");
                 }
 
-                AstFuncNode* fn_node = (AstFuncNode*)alloc_ast_node(tp,
-                    is_proc ? AST_NODE_PROC : AST_NODE_FUNC, child, sizeof(AstFuncNode));
-                fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
-                TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-                fn_type->is_anonymous = false;
-                fn_type->is_proc = is_proc;
-                fn_type->returned = &TYPE_ANY;  // Safe default for forward references
-                set_function_return_contract(fn_type,
-                    is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
-
-                // Initialize required fields to prevent crashes
-                fn_node->param = NULL;
-                fn_node->body = NULL;
-                fn_node->vars = NULL;
-                fn_node->captures = NULL;
-
                 // Get function name and register it early
                 TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
                 StrView name = node_name_text(tp, fn_name_node);
-                fn_node->name = name_pool_create_strview(tp->name_pool, name);
+                LambdaSourceSpan span = {ts_node_start_byte(child), ts_node_end_byte(child)};
+                AstFuncNode* fn_node = build_function_placeholder_from_parts(tp,
+                    span, name, is_proc);
 
                 log_debug("pass 1: registering function placeholder '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
-                push_name(tp, (AstNamedNode*)fn_node, NULL);
+                lambda_ast_register_name(tp, (AstNamedNode*)fn_node);
             }
             else if (symbol == SYM_OBJECT_TYPE) {
                 // pre-register object type placeholder so it can be forward-referenced
@@ -10549,10 +10881,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     fn_type->is_public = !ts_node_is_null(pub);
 
                     // Build parameters
-                    fn_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
-                    fn_node->vars->parent = tp->current_scope;
-                    fn_node->vars->is_proc = fn_type->is_proc;
-                    tp->current_scope = fn_node->vars;
+                    fn_node->vars = lambda_ast_enter_scope(tp, fn_type->is_proc);
 
                     TSTreeCursor cursor = ts_tree_cursor_new(child);
                     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
@@ -10609,7 +10938,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
                     fn_type->param_count = param_count;
                     fn_type->required_param_count = required_count;
-                    (void)validate_lambda_argument_limit(tp, child,
+                    LambdaSourceSpan function_span = {ts_node_start_byte(child),
+                        ts_node_end_byte(child)};
+                    (void)validate_lambda_argument_limit(tp, function_span,
                         param_count + (fn_type->is_variadic ? 1 : 0),
                         "function formal");
 
@@ -10633,8 +10964,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     }
                     validate_function_return_contract(tp, fn_node, fn_type);
 
-                    // Restore parent scope
-                    tp->current_scope = fn_node->vars->parent;
+                    // Restore parent scope before capture analysis observes
+                    // the completed closure boundary.
+                    lambda_ast_leave_scope(tp, fn_node->vars);
 
                     // Analyze captures
                     NameScope* global_scope = find_global_scope(fn_node->vars->parent);
@@ -10806,11 +11138,11 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol) {
     log_debug("build lit node");
-    // string, symbol, binary, datetime, time
-    AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, lit_node, sizeof(AstPrimaryNode));
-    // TSNode val_node = quoted_value ? ts_node_named_child(lit_node, 0) : lit_node;
-    ast_node->type = build_lit_string(tp, lit_node, symbol);
-    return (AstNode*)ast_node;
+    (void)quoted_value;
+    LambdaAstLiteralKind kind = symbol == SYM_BINARY ? LAMBDA_AST_LITERAL_BINARY :
+        symbol == SYM_SYMBOL ? LAMBDA_AST_LITERAL_SYMBOL : LAMBDA_AST_LITERAL_STRING;
+    LambdaSourceSpan span = {ts_node_start_byte(lit_node), ts_node_end_byte(lit_node)};
+    return build_literal_from_span(tp, span, kind);
 }
 
 static bool handler_operand_is_proc(AstNode* operand) {
@@ -10928,6 +11260,30 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
         ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
     }
     return (AstNode*)ast_node;
+}
+
+AstNode* build_handler_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* operand, AstNode* body, AstNode* value_body) {
+    bool is_statement = handler_operand_is_proc(operand);
+    AstHandlerNode* node = (AstHandlerNode*)alloc_ast_node_from_span(tp,
+        is_statement ? AST_NODE_HANDLER_STAM : AST_NODE_HANDLER_EXPR, span,
+        sizeof(AstHandlerNode));
+    node->operand = operand;
+    node->body = body;
+    node->value_body = value_body;
+    node->is_statement = is_statement;
+    if (is_statement) {
+        node->type = set_type_any(tp, ANY_STATEMENT);
+    } else {
+        Type* success = operand && operand->type
+            ? lambda_type_remove_error(tp->pool, operand->type) : &TYPE_ANY;
+        if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
+        Type* body_type = body && body->type ? body->type : &TYPE_ANY;
+        node->type = value_body && value_body->type
+            ? lambda_type_union_normalized(tp->pool, body_type, value_body->type)
+            : lambda_type_union_normalized(tp->pool, success, body_type);
+    }
+    return (AstNode*)node;
 }
 
 static AstNode* build_propagate_expr(Transpiler* tp, TSNode propagate_node) {
@@ -11075,14 +11431,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_MEMBER_EXPR:
         return build_member_expr(tp, expr_node);
     case SYM_CURRENT_PARENT_EXPR: {
-        AstNavigationNode* nav = (AstNavigationNode*)alloc_ast_node(tp,
-            AST_NODE_NAVIGATION_EXPR, expr_node, sizeof(AstNavigationNode));
-        AstNode* current = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, expr_node, sizeof(AstNode));
-        current->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-        nav->object = current;
-        nav->root = false;
-        nav->type = nav->object->type;
-        return (AstNode*)nav;
+        LambdaSourceSpan span = {ts_node_start_byte(expr_node),
+            ts_node_end_byte(expr_node)};
+        return build_current_parent_navigation_from_span(tp, span);
     }
     case SYM_CALL_EXPR:
         return build_call_expr(tp, expr_node, symbol);
@@ -12073,7 +12424,7 @@ static bool validate_concurrency_node(AstNode* node, void* data) {
         if (capture->entry && capture->entry->is_mutable) {
             // A spawned task may resume after its lexical parent moves on, so
             // borrowing an outer var by reference would create shared mutation.
-            record_semantic_error(validation->tp, start->node, ERR_INVALID_EXPR_CONTEXT,
+            record_semantic_error_span(validation->tp, start->source_span, ERR_INVALID_EXPR_CONTEXT,
                 "`start` cannot capture mutable var '%.*s'; copy it to a `let` value or use message passing",
                 (int)capture->lambda_name->len, capture->lambda_name->chars);
         }
@@ -12098,7 +12449,7 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
         // A statement pn handler consumes the call's explicit Item completion
         // after the async resume point; only value handlers still require a
         // live native result context that cannot span a scheduler yield.
-        record_semantic_error(validation->tp, node->node, ERR_INVALID_EXPR_CONTEXT,
+        record_semantic_error_span(validation->tp, node->source_span, ERR_INVALID_EXPR_CONTEXT,
             "error handler operand may suspend (%s); await before applying `^ { ... }`",
             scan.cause ? scan.cause : "possible await");
     }
@@ -12288,4 +12639,2699 @@ AstNode* build_repl_fragment(Transpiler* tp, TSNode document_node) {
         }
     }
     return first;
+}
+
+// --- direct recursive-descent AST sink ------------------------------------
+// The sink deliberately lives beside the CST constructors so both front ends
+// share allocation, literal, name, and type ownership.  It starts with the
+// reductions whose child contract is already complete; complex declaration
+// reductions are added only after the parser publishes their binding metadata.
+
+struct LambdaDirectAstSink {
+    Transpiler* tp;
+    AstScript* root;
+    bool failed;
+    bool handler_context[64];
+    uint32_t handler_context_depth;
+    bool that_context[64];
+    uint32_t that_context_depth;
+    NameScope* loop_scopes[64];
+    AstForNode* for_nodes[64];
+    uint32_t loop_scope_depth;
+    NameScope* group_scopes[64];
+    uint32_t group_scope_depth;
+    NameScope* completed_group_scope;
+    NameScope* if_scopes[64];
+    uint32_t if_scope_depth;
+    AstFuncNode* function_nodes[64];
+    NameScope* function_scopes[64];
+    uint32_t function_depth;
+    uint32_t type_object_depth;
+    AstObjectTypeNode* object_node;
+    TypeObject* object_type;
+    NameScope* object_scope;
+    AstNode* object_field_tail;
+    ShapeEntry* object_shape_tail;
+    AstNode* object_method_tail;
+    int object_byte_offset;
+    AstObjectTypeNode* completed_object;
+};
+
+static LambdaParseValue direct_ast_value(AstNode* node) {
+    return (LambdaParseValue)(uintptr_t)node;
+}
+
+static AstNode* direct_ast_node(LambdaParseValue value) {
+    return (AstNode*)(uintptr_t)value;
+}
+
+static StrView direct_token_text(Transpiler* tp, LambdaToken token) {
+    return source_span_text(tp, token.span);
+}
+
+static void direct_object_copy_base(LambdaDirectAstSink* sink,
+        StrView base_name) {
+    if (!base_name.length) return;
+    Transpiler* tp = sink->tp;
+    TypeObject* base = lookup_object_type_for_tag(tp, base_name);
+    if (!base) {
+        record_semantic_error_span(tp, sink->object_node->source_span,
+            ERR_SEMANTIC_ERROR, "unknown object base type '%.*s'",
+            (int)base_name.length, base_name.str);
+        return;
+    }
+    sink->object_type->base = base;
+    for (ShapeEntry* parent = base->shape; parent; parent = parent->next) {
+        ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+        entry->name = parent->name;
+        entry->type = parent->type;
+        entry->byte_offset = sink->object_byte_offset;
+        if (!sink->object_type->shape) sink->object_type->shape = entry;
+        else sink->object_shape_tail->next = entry;
+        sink->object_shape_tail = entry;
+        sink->object_type->length++;
+        sink->object_byte_offset += sizeof(void*);
+
+        AstNamedNode* field = (AstNamedNode*)pool_calloc(tp->pool,
+            sizeof(AstNamedNode));
+        field->node_type = AST_NODE_KEY_EXPR;
+        field->name = name_pool_create_len(tp->name_pool,
+            parent->name->str, parent->name->length);
+        field->type = parent->type;
+        lambda_ast_register_name(tp, field);
+    }
+}
+
+static void direct_object_begin(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    Transpiler* tp = sink->tp;
+    StrView name = direct_token_text(tp, reduction->secondary_token);
+    AstObjectTypeNode* object = (AstObjectTypeNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_OBJECT_TYPE, reduction->span, sizeof(AstObjectTypeNode));
+    TypeObject* object_type = (TypeObject*)pool_calloc(tp->pool,
+        sizeof(TypeObject));
+    object_type->type_id = LMD_TYPE_OBJECT;
+    TypeType* type_value = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
+        sizeof(TypeType));
+    type_value->type = (Type*)object_type;
+    object->type = (Type*)type_value;
+    object->name = name_pool_create_strview(tp->name_pool, name);
+    object->local_type_index = -1;
+    object_type->type_name = (StrView){object->name->chars, object->name->len};
+    object_type->struct_name = object->name->chars;
+    object_type->is_trusted_contract = true;
+
+    sink->object_node = object;
+    sink->object_type = object_type;
+    sink->object_field_tail = NULL;
+    sink->object_shape_tail = NULL;
+    sink->object_method_tail = NULL;
+    sink->object_byte_offset = 0;
+    sink->completed_object = NULL;
+    lambda_ast_register_name(tp, (AstNamedNode*)object);
+    sink->object_scope = lambda_ast_enter_scope(tp, false);
+    direct_object_copy_base(sink, direct_token_text(tp, reduction->detail_token));
+}
+
+static void direct_object_add_field(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    if (!sink->object_node || !reduction->child_count) return;
+    Transpiler* tp = sink->tp;
+    AstNode* type_node = direct_ast_node(reduction->children[0]);
+    AstNode* default_value = reduction->child_count > 1
+        ? direct_ast_node(reduction->children[1]) : NULL;
+    AstNamedNode* field = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
+    field->name = name_pool_create_strview(tp->name_pool,
+        direct_token_text(tp, reduction->detail_token));
+    field->as = type_node;
+    field->type = type_node && type_node->type ? type_node->type : &TYPE_ANY;
+    if (!sink->object_node->item) sink->object_node->item = (AstNode*)field;
+    else sink->object_field_tail->next = (AstNode*)field;
+    sink->object_field_tail = (AstNode*)field;
+
+    Type* field_type = field->type;
+    if (field_type->type_id == LMD_TYPE_TYPE && field_type->kind == TYPE_KIND_SIMPLE) {
+        field_type = ((TypeType*)field_type)->type;
+    }
+    ShapeEntry* shape = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    StrView* field_name = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
+    field_name->str = field->name->chars;
+    field_name->length = field->name->len;
+    shape->name = field_name;
+    shape->type = field_type;
+    shape->default_value = default_value;
+    shape->byte_offset = sink->object_byte_offset;
+    if (!sink->object_type->shape) sink->object_type->shape = shape;
+    else sink->object_shape_tail->next = shape;
+    sink->object_shape_tail = shape;
+    sink->object_type->length++;
+    sink->object_byte_offset += sizeof(void*);
+
+    // Methods and constraints resolve bare field names in the object scope;
+    // keep that scope entry separate from the annotation AST node.
+    AstNamedNode* field_ref = (AstNamedNode*)pool_calloc(tp->pool,
+        sizeof(AstNamedNode));
+    field_ref->node_type = AST_NODE_KEY_EXPR;
+    field_ref->name = field->name;
+    field_ref->type = field_type;
+    lambda_ast_register_name(tp, field_ref);
+}
+
+static AstNode* direct_object_content_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, AstNode* type_node) {
+    AstListNode* content = (AstListNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_CONTENT_TYPE, span, sizeof(AstListNode));
+    content->list_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+        sizeof(TypeList));
+    content->item = type_node;
+    content->list_type->length = type_node ? 1 : 0;
+    content->type = (Type*)content->list_type;
+    return (AstNode*)content;
+}
+
+static void direct_object_add_method(LambdaDirectAstSink* sink, AstNode* method) {
+    if (!sink->object_node || !method) return;
+    AstFuncNode* fn = (AstFuncNode*)method;
+    if (!sink->object_node->methods) sink->object_node->methods = method;
+    else sink->object_method_tail->next = method;
+    sink->object_method_tail = method;
+    TypeMethod* tm = (TypeMethod*)pool_calloc(sink->tp->pool, sizeof(TypeMethod));
+    StrView* method_name = (StrView*)pool_calloc(sink->tp->pool, sizeof(StrView));
+    method_name->str = fn->name->chars;
+    method_name->length = fn->name->len;
+    tm->name = method_name;
+    tm->fn_type = (TypeFunc*)fn->type;
+    tm->is_proc = method->node_type == AST_NODE_PROC;
+    if (!sink->object_type->methods) sink->object_type->methods = tm;
+    else sink->object_type->methods_last->next = tm;
+    sink->object_type->methods_last = tm;
+    sink->object_type->method_count++;
+}
+
+static void direct_object_end(LambdaDirectAstSink* sink) {
+    if (!sink->object_node) return;
+    sink->object_type->byte_size = sink->object_byte_offset;
+    sink->object_type->last = sink->object_shape_tail;
+    arraylist_append(sink->tp->type_list, sink->object_node->type);
+    sink->object_type->type_index = sink->tp->type_list->length - 1;
+    lambda_ast_leave_scope(sink->tp, sink->object_scope);
+    sink->completed_object = sink->object_node;
+    sink->object_node = NULL;
+    sink->object_type = NULL;
+    sink->object_scope = NULL;
+    sink->object_field_tail = NULL;
+    sink->object_shape_tail = NULL;
+    sink->object_method_tail = NULL;
+    sink->object_byte_offset = 0;
+}
+
+static bool direct_function_name_token(LambdaTokenKind kind) {
+    // Keep this small lexical predicate aligned with the parser's context-
+    // sensitive `token_is_key`: declarations may use soft keywords as names.
+    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_BASE_TYPE ||
+        kind == LAMBDA_TOK_SYMBOL || kind == LAMBDA_TOK_TYPE ||
+        (kind >= LAMBDA_TOK_LET && kind <= LAMBDA_TOK_GT_WORD) ||
+        kind == LAMBDA_TOK_STAR;
+}
+
+static void direct_predeclare_top_level_functions(Transpiler* tp,
+        const char* source, size_t length) {
+    LambdaLexer lexer;
+    lambda_lexer_init(&lexer, source, length);
+    LambdaToken token = lambda_lexer_next(&lexer);
+    uint32_t delimiter_depth = 0;
+    bool public_pending = false;
+    while (token.kind != LAMBDA_TOK_EOF && token.kind != LAMBDA_TOK_ERROR) {
+        if (delimiter_depth == 0 && token.kind == LAMBDA_TOK_PUB) {
+            public_pending = true;
+            token = lambda_lexer_next(&lexer);
+            continue;
+        }
+        if (delimiter_depth == 0 &&
+                (token.kind == LAMBDA_TOK_FN || token.kind == LAMBDA_TOK_PN)) {
+            bool is_proc = token.kind == LAMBDA_TOK_PN;
+            LambdaToken name = lambda_lexer_next(&lexer);
+            if (direct_function_name_token(name.kind)) {
+                StrView name_view = {source + name.span.start_byte,
+                    name.span.end_byte - name.span.start_byte};
+                String* pooled_name = name_pool_create_strview(tp->name_pool,
+                    name_view);
+                NameEntry* existing = lookup_name_in_current_scope(tp,
+                    pooled_name);
+                if (!existing || !existing->node ||
+                        (existing->node->source_span.start_byte !=
+                            token.span.start_byte)) {
+                    AstFuncNode* fn = build_function_placeholder_from_parts(tp,
+                        (LambdaSourceSpan){token.span.start_byte, name.span.end_byte},
+                        name_view, is_proc);
+                    ((TypeFunc*)fn->type)->is_public = public_pending;
+                    lambda_ast_register_name(tp, (AstNamedNode*)fn);
+                } else if (existing->node->node_type == AST_NODE_FUNC ||
+                        existing->node->node_type == AST_NODE_PROC) {
+                    ((TypeFunc*)existing->node->type)->is_public = public_pending;
+                }
+            }
+            public_pending = false;
+            token = lambda_lexer_next(&lexer);
+            continue;
+        }
+        if (token.kind == LAMBDA_TOK_NEWLINE ||
+                token.kind == LAMBDA_TOK_SEMICOLON) {
+            public_pending = false;
+        }
+        if (token.kind == LAMBDA_TOK_LPAREN ||
+                token.kind == LAMBDA_TOK_LBRACKET ||
+                token.kind == LAMBDA_TOK_LBRACE) {
+            delimiter_depth++;
+        } else if (token.kind == LAMBDA_TOK_RPAREN ||
+                token.kind == LAMBDA_TOK_RBRACKET ||
+                token.kind == LAMBDA_TOK_RBRACE) {
+            if (delimiter_depth) delimiter_depth--;
+        }
+        token = lambda_lexer_next(&lexer);
+    }
+}
+
+static bool direct_literal_kind(LambdaTokenKind token, LambdaAstLiteralKind* kind) {
+    if (!kind) return false;
+    switch (token) {
+    case LAMBDA_TOK_STRING: *kind = LAMBDA_AST_LITERAL_STRING; return true;
+    case LAMBDA_TOK_SYMBOL: *kind = LAMBDA_AST_LITERAL_SYMBOL; return true;
+    case LAMBDA_TOK_BINARY: *kind = LAMBDA_AST_LITERAL_BINARY; return true;
+    case LAMBDA_TOK_DATETIME: *kind = LAMBDA_AST_LITERAL_DATETIME; return true;
+    case LAMBDA_TOK_NAMED_VALUE: *kind = LAMBDA_AST_LITERAL_NAMED_VALUE; return true;
+    case LAMBDA_TOK_INTEGER: *kind = LAMBDA_AST_LITERAL_INTEGER; return true;
+    case LAMBDA_TOK_FLOAT: *kind = LAMBDA_AST_LITERAL_FLOAT; return true;
+    case LAMBDA_TOK_DECIMAL: *kind = LAMBDA_AST_LITERAL_DECIMAL; return true;
+    case LAMBDA_TOK_SIZED_INTEGER: *kind = LAMBDA_AST_LITERAL_SIZED_INTEGER; return true;
+    case LAMBDA_TOK_SIZED_FLOAT: *kind = LAMBDA_AST_LITERAL_SIZED_FLOAT; return true;
+    case LAMBDA_TOK_IMAGINARY: *kind = LAMBDA_AST_LITERAL_IMAGINARY; return true;
+    default: return false;
+    }
+}
+
+static AstNode* direct_member_field(Transpiler* tp, LambdaToken token) {
+    LambdaAstLiteralKind literal_kind;
+    if (direct_literal_kind(token.kind, &literal_kind)) {
+        return build_literal_from_span(tp, token.span, literal_kind);
+    }
+    AstIdentNode* field = (AstIdentNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IDENT, token.span, sizeof(AstIdentNode));
+    field->name = name_pool_create_strview(tp->name_pool,
+        source_span_text(tp, token.span));
+    // A member key is a spelling, not a lexical variable reference. In
+    // particular, built-ins such as `name` must not turn `record.name` into a
+    // system-function node (D4.6.1v2).
+    field->type = set_type_any(tp, ANY_DYNAMIC_NAME);
+    return (AstNode*)field;
+}
+
+static AstNode* direct_base_type_from_span(Transpiler* tp, LambdaSourceSpan span) {
+    AstTypeNode* node = (AstTypeNode*)alloc_ast_node_from_span(tp, AST_NODE_TYPE,
+        span, sizeof(AstTypeNode));
+    StrView name = source_span_text(tp, span);
+    node->type = lookup_base_type_name(tp, name);
+    if (!node->type) {
+        // Some conversion builtins (notably `int64`) share the lexer token
+        // class used by type names. Resolve the callable spelling before
+        // reporting an unknown type so expression-position aliases retain
+        // the same meaning as the Tree-sitter builder.
+        AstNode* builtin = build_identifier_from_span(tp, span);
+        if (builtin && builtin->node_type == AST_NODE_SYS_FUNC) return builtin;
+        record_unknown_base_type_span(tp, span, name);
+        node->type = (Type*)&LIT_TYPE_ERROR;
+    }
+    return (AstNode*)node;
+}
+
+static AstNode* direct_type_error_from_span(Transpiler* tp, LambdaSourceSpan span) {
+    AstTypeNode* node = (AstTypeNode*)alloc_ast_node_from_span(tp, AST_NODE_TYPE,
+        span, sizeof(AstTypeNode));
+    node->type = (Type*)&LIT_TYPE_ERROR;
+    return (AstNode*)node;
+}
+
+static AstNode* direct_append(AstNode* first, AstNode* item) {
+    if (!item) return first;
+    item->next = NULL;
+    if (!first) return item;
+    AstNode* tail = first;
+    while (tail->next) tail = tail->next;
+    tail->next = item;
+    return first;
+}
+
+static AstNode* direct_list_node(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* items) {
+    AstListNode* list = (AstListNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_LIST, span, sizeof(AstListNode));
+    list->item = items;
+    list->list_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+        sizeof(TypeList));
+    list->type = items && !items->next && items->type ? items->type :
+        set_type_any(tp, ANY_LIST);
+    for (AstNode* item = items; item; item = item->next) {
+        list->list_type->length++;
+    }
+    return (AstNode*)list;
+}
+
+static AstNode* direct_content_node(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* items) {
+    AstListNode* content = (AstListNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_CONTENT, span, sizeof(AstListNode));
+    AstNode* filtered = NULL;
+    for (AstNode* item = items; item;) {
+        AstNode* next = item->next;
+        item->next = NULL;
+        if (item->node_type != AST_NODE_NULL) {
+            filtered = direct_append(filtered, item);
+        }
+        item = next;
+    }
+    content->item = filtered;
+    content->list_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+        sizeof(TypeList));
+    for (AstNode* item = filtered; item; item = item->next) {
+        content->list_type->length++;
+    }
+    // Keep block typing identical to the CST builder: a multi-item functional
+    // block is an open list value, not the type of its first declaration. The
+    // first-item shortcut reinterprets a later native result at the caller
+    // boundary (D2.2.2).
+    if (content->list_type->length == 1 && filtered && filtered->type) {
+        content->type = filtered->type;
+    } else if (tp->current_scope && tp->current_scope->is_proc && filtered) {
+        AstNode* last = filtered;
+        while (last->next) last = last->next;
+        content->type = last->type ? last->type : set_type_any(tp, ANY_LIST);
+    } else {
+        content->type = set_type_any(tp, ANY_LIST);
+    }
+    return (AstNode*)content;
+}
+
+static AstNode* direct_type_stam(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* declaration, bool is_public) {
+    AstLetNode* node = (AstLetNode*)alloc_ast_node_from_span(tp,
+        is_public ? AST_NODE_PUB_STAM : AST_NODE_TYPE_STAM, span,
+        sizeof(AstLetNode));
+    node->declare = declaration;
+    node->type = is_public ? set_type_any(tp, ANY_STATEMENT) : &LIT_NULL;
+    return (AstNode*)node;
+}
+
+static void direct_finalize_type_alias(Transpiler* tp, AstNamedNode* alias) {
+    if (!tp || !alias || !alias->type) return;
+    Type* definition = alias->type;
+    bool literal_alias = (definition->type_id == LMD_TYPE_STRING ||
+        definition->type_id == LMD_TYPE_SYMBOL) && definition->is_literal;
+    bool range_alias = definition->type_id == LMD_TYPE_RANGE &&
+        definition->kind == TYPE_KIND_RANGE;
+    if (!literal_alias && !range_alias) return;
+
+    // Named literal/range aliases are first-class type values. Keep the
+    // payload under the same TypeType carrier and type-list identity as the
+    // CST builder; emitting the raw value type makes `x is Alias` test data
+    // storage rather than the alias contract (D2.2.2).
+    TypeType* wrapper = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
+        sizeof(TypeType));
+    wrapper->type = definition;
+    alias->type = (Type*)wrapper;
+    arraylist_append(tp->type_list, alias->type);
+}
+
+static AstNode* direct_constrained_type(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* base, AstNode* constraint) {
+    AstConstrainedTypeNode* node = (AstConstrainedTypeNode*)alloc_ast_node_from_span(
+        tp, AST_NODE_CONSTRAINED_TYPE, span, sizeof(AstConstrainedTypeNode));
+    node->base = base;
+    node->constraint = constraint;
+    TypeConstrained* type = (TypeConstrained*)alloc_type_kind(tp->pool,
+        TYPE_KIND_CONSTRAINED, sizeof(TypeConstrained));
+    Type* base_type = base && base->type ? base->type : &TYPE_ANY;
+    if (base_type->type_id == LMD_TYPE_TYPE &&
+            base_type->kind == TYPE_KIND_SIMPLE) {
+        base_type = ((TypeType*)base_type)->type;
+    }
+    type->base = base_type ? base_type : &TYPE_ANY;
+    type->constraint = constraint;
+    node->type = (Type*)type;
+    arraylist_append(tp->type_list, node->type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)node;
+}
+
+static AstNode* direct_pattern_definition(Transpiler* tp,
+        LambdaSourceSpan span, StrView name, AstNode* island) {
+    AstPatternIslandNode* source = (AstPatternIslandNode*)island;
+    AstPatternDefNode* pattern = (AstPatternDefNode*)alloc_ast_node_from_span(tp,
+        source->is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN,
+        span, sizeof(AstPatternDefNode));
+    pattern->name = name_pool_create_strview(tp->name_pool, name);
+    pattern->is_symbol = source->is_symbol;
+    pattern->as = source->type == &TYPE_ERROR ? NULL : source->pattern;
+    if (!pattern->as) {
+        pattern->type = &TYPE_ERROR;
+    } else {
+        TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool,
+            TYPE_KIND_PATTERN, sizeof(TypePattern));
+        pattern_type->is_symbol = pattern->is_symbol;
+        pattern_type->pattern_index = -1;
+        pattern_type->re2 = NULL;
+        pattern_type->re2_unanchored = NULL;
+        pattern_type->source = NULL;
+        pattern_type->regex_source = NULL;
+        pattern->type = (Type*)pattern_type;
+    }
+    lambda_ast_register_name(tp, (AstNamedNode*)pattern);
+    return (AstNode*)pattern;
+}
+
+static void direct_move_binding(NameScope* from, NameScope* to,
+        AstNode* declaration) {
+    if (!from || !to || !declaration ||
+            (declaration->node_type != AST_NODE_ASSIGN &&
+             declaration->node_type != AST_NODE_PARAM)) return;
+    AstNamedNode* named = (AstNamedNode*)declaration;
+    NameEntry* prior = NULL;
+    NameEntry* entry = from->first;
+    while (entry && entry->node != declaration) {
+        prior = entry;
+        entry = entry->next;
+    }
+    if (!entry) return;
+    if (prior) prior->next = entry->next;
+    else from->first = entry->next;
+    if (from->last == entry) from->last = prior;
+    entry->next = NULL;
+    entry->scope = to;
+    if (!to->first) to->first = entry;
+    else to->last->next = entry;
+    to->last = entry;
+    named->entry = entry;
+}
+
+static AstNode* direct_let_group(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* items, NameScope* existing_scope) {
+    bool has_declaration = false;
+    for (AstNode* item = items; item; item = item->next) {
+        if (item->node_type == AST_NODE_ASSIGN ||
+                item->node_type == AST_NODE_DECOMPOSE ||
+                item->node_type == AST_NODE_LET_STAM) {
+            has_declaration = true;
+            break;
+        }
+    }
+    if (!has_declaration) return direct_list_node(tp, span, items);
+    AstListNode* list = (AstListNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_LIST, span, sizeof(AstListNode));
+    list->list_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+        sizeof(TypeList));
+    NameScope* parent = tp->current_scope;
+    NameScope* scope = existing_scope ? existing_scope :
+        lambda_ast_enter_scope(tp, false);
+    list->vars = scope;
+    AstNode* declaration_tail = NULL;
+    AstNode* body = NULL;
+    for (AstNode* item = items; item;) {
+        AstNode* next = item->next;
+        item->next = NULL;
+        AstNode* declaration = item;
+        if (item->node_type == AST_NODE_LET_STAM) {
+            // The outer `let` reduction is a statement wrapper; retain only
+            // its declaration in the block's declaration chain, matching the
+            // CST builder's let-block shape.
+            declaration = ((AstLetNode*)item)->declare;
+        }
+        if (declaration && (declaration->node_type == AST_NODE_ASSIGN ||
+                declaration->node_type == AST_NODE_DECOMPOSE)) {
+            if (!existing_scope && declaration->node_type == AST_NODE_ASSIGN) {
+                direct_move_binding(parent, scope, declaration);
+            }
+            if (!list->declare) list->declare = declaration;
+            else declaration_tail->next = declaration;
+            declaration_tail = declaration;
+        } else {
+            body = item;
+        }
+        item = next;
+    }
+    list->item = body;
+    list->list_type->length = body ? 1 : 0;
+    list->type = body && body->type ? body->type : &TYPE_NULL;
+    if (!existing_scope) lambda_ast_leave_scope(tp, scope);
+    return (AstNode*)list;
+}
+
+static Type* direct_binary_result_type(Transpiler* tp, Operator op,
+        AstNode* left, AstNode* right) {
+    Type* lt = left && left->type ? left->type : &TYPE_ANY;
+    Type* rt = right && right->type ? right->type : &TYPE_ANY;
+    TypeId lid = lt->type_id;
+    TypeId rid = rt->type_id;
+    if (op == OPERATOR_TO) return &TYPE_RANGE;
+    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_LT ||
+            op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE ||
+            op == OPERATOR_ELEM_EQ || op == OPERATOR_ELEM_NE ||
+            op == OPERATOR_ELEM_LT || op == OPERATOR_ELEM_LE ||
+            op == OPERATOR_ELEM_GT || op == OPERATOR_ELEM_GE ||
+            op == OPERATOR_IS || op == OPERATOR_IN || op == OPERATOR_AT) {
+        return &TYPE_BOOL;
+    }
+    if (op == OPERATOR_AND) {
+        return lambda_type_union_normalized(tp->pool, lt, rt);
+    }
+    if (op == OPERATOR_OR) {
+        Type* clean = lambda_type_remove_error_and_null(tp->pool, lt);
+        return lambda_type_union_normalized(tp->pool, clean, rt);
+    }
+    if (op == OPERATOR_PIPE || op == OPERATOR_WHERE) {
+        if (op == OPERATOR_WHERE) return lt;
+        if (has_current_item_ref(right)) {
+            TypeArray* mapped = (TypeArray*)alloc_type(tp->pool,
+                LMD_TYPE_ARRAY, sizeof(TypeArray));
+            mapped->nested = rt;
+            mapped->type_index = -1;
+            return (Type*)mapped;
+        }
+        return rt;
+    }
+    // Power deliberately remains boxed: negative exponents and mixed numeric
+    // domains are resolved by `fn_pow`, and the MIR native lane rejects an
+    // inferred scalar type for this operator.
+    if (op == OPERATOR_POW) return set_type_any(tp, ANY_JOIN_OP);
+    if (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
+            op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
+            op == OPERATOR_POW) {
+        LambdaNumericOpFamily family = op == OPERATOR_ADD ? LAMBDA_NUM_OP_ADD :
+            op == OPERATOR_SUB ? LAMBDA_NUM_OP_SUB :
+            op == OPERATOR_MUL ? LAMBDA_NUM_OP_MUL :
+            op == OPERATOR_DIV ? LAMBDA_NUM_OP_TRUE_DIV :
+            op == OPERATOR_IDIV ? LAMBDA_NUM_OP_IDIV : LAMBDA_NUM_OP_MOD;
+        LambdaNumericDecision decision = lambda_numeric_classify(family,
+            lambda_numeric_kind_from_type(lt), lambda_numeric_kind_from_type(rt));
+        if (decision.valid) return lambda_numeric_type_from_kind(decision.result);
+        return set_type_any(tp, ANY_ARITH_OPERAND);
+    }
+    return set_type_any(tp, ANY_JOIN_OP);
+}
+
+static AstNode* direct_promote_bare_pipe_sysfunc(Transpiler* tp,
+        AstNode* right) {
+    AstNode* target = ast_unwrap_primary(right);
+    if (!target || (target->node_type != AST_NODE_SYS_FUNC &&
+            target->node_type != AST_NODE_IDENT)) return NULL;
+    StrView name = {0};
+    if (target->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* current = ((AstSysFuncNode*)target)->fn_info;
+        if (!current) return NULL;
+        name = strview_from_cstr(current->name);
+    } else {
+        AstIdentNode* ident = (AstIdentNode*)target;
+        if (ident->entry) return NULL;
+        name = strview_init(ident->name->chars, ident->name->len);
+    }
+    if (!get_sys_func_info(&name, 1) &&
+            !lookup_global_imported_sys_func(tp, &name, 1)) return NULL;
+    int prior_pipe_inject = tp->pipe_inject_args;
+    tp->pipe_inject_args = 1;
+    AstNode* call = build_call_node_from_parts(tp, right->source_span,
+        target, NULL, 0);
+    tp->pipe_inject_args = prior_pipe_inject;
+    return call;
+}
+
+AstNode* build_binary_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        StrView op_spelling, AstNode* left, AstNode* right) {
+    AstBinaryNode* node = (AstBinaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_BINARY, span, sizeof(AstBinaryNode));
+    node->left = left;
+    node->right = right;
+    node->op_str = op_spelling;
+    if (!lambda_binary_operator_from_spelling(op_spelling, &node->op)) {
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+            "unknown binary operator '%.*s'", (int)op_spelling.length,
+            op_spelling.str);
+        node->type = &TYPE_ERROR;
+        return (AstNode*)node;
+    }
+    if (node->op == OPERATOR_PIPE || node->op == OPERATOR_WHERE) {
+        node->node_type = AST_NODE_PIPE;
+    }
+    if (node->op == OPERATOR_PIPE && !has_current_item_ref(right)) {
+        AstNode* promoted = direct_promote_bare_pipe_sysfunc(tp, right);
+        if (promoted) {
+            node->right = right = promoted;
+        }
+    }
+    if (node->op == OPERATOR_UNION && promote_type_union_expr(tp, node)) {
+        return (AstNode*)node;
+    }
+    // The grammar parses relational chains left-associatively, but Lambda's
+    // semantics are pairwise: `a < b < c` means `(a < b) and (b < c)`.
+    // Preserve the shared AST shape here; otherwise the second comparison
+    // consumes the first boolean and every chained comparison becomes an
+    // invalid numeric operation (D2.2.2).
+    AstNode* left_value = ast_unwrap_primary(left);
+    if (is_relational_op(node->op) && left_value &&
+            left_value->node_type == AST_NODE_BINARY &&
+            is_relational_op(((AstBinaryNode*)left_value)->op)) {
+        AstBinaryNode* left_cmp = (AstBinaryNode*)left_value;
+        AstBinaryNode* right_cmp = (AstBinaryNode*)alloc_ast_node_from_span(tp,
+            AST_NODE_BINARY,
+            (LambdaSourceSpan){left_cmp->right->source_span.start_byte,
+                span.end_byte}, sizeof(AstBinaryNode));
+        right_cmp->left = left_cmp->right;
+        right_cmp->right = right;
+        right_cmp->op = node->op;
+        right_cmp->op_str = op_spelling;
+        right_cmp->type = &TYPE_BOOL;
+        node->left = left;
+        node->op = OPERATOR_AND;
+        node->op_str = strview_from_cstr("and");
+        node->right = (AstNode*)right_cmp;
+        node->type = &TYPE_BOOL;
+        return (AstNode*)node;
+    }
+    if (node->op == OPERATOR_IS && right && right->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)right;
+        if (primary->type && primary->type->type_id == LMD_TYPE_FLOAT &&
+                __builtin_isnan(((TypeFloat*)primary->type)->double_val)) {
+            // `nan` is a value-pattern atom, not a type witness; retain the
+            // dedicated runtime predicate so NaN payloads are recognized on
+            // the direct path (S3.4.2).
+            node->op = OPERATOR_IS_NAN;
+            node->type = &TYPE_BOOL;
+            return (AstNode*)node;
+        }
+    }
+    node->type = direct_binary_result_type(tp, node->op, left, right);
+    if (is_elementwise_comparison_op(node->op) &&
+            ((left && is_array_family_type_id(left->type ? left->type->type_id : LMD_TYPE_ANY)) ||
+             (right && is_array_family_type_id(right->type ? right->type->type_id : LMD_TYPE_ANY)))) {
+        // Keyword comparisons over arrays produce a bool mask. Keeping the
+        // scalar bool result here makes `a[a gt 0]` pass a bool to the indexer,
+        // which then returns a raw pointer instead of a boxed selection.
+        node->type = alloc_array_num_result_type(tp, node);
+    }
+    if (!node->type) node->type = &TYPE_ANY;
+    return (AstNode*)node;
+}
+
+static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
+        AstNode* field, AstNodeType node_type) {
+    if (!object || !object->type) return set_type_any(tp, ANY_MEMBER_SHAPE);
+    Type* object_type = object->type;
+    if (node_type == AST_NODE_INDEX_EXPR) {
+        if (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
+                object_type->type_id == LMD_TYPE_ARRAY) {
+            AstNode* index = unwrap_primary_node(field);
+            if (index && index->node_type == AST_NODE_BINARY &&
+                    ((AstBinaryNode*)index)->op == OPERATOR_TO) {
+                // A range index produces a sliced collection, not the
+                // element lane. Returning the nested scalar here makes a
+                // surrounding map allocate a native slot and rejects the
+                // actual array result at runtime (S7.1).
+                return set_type_any(tp, ANY_INDEX_ELEM);
+            }
+            if (index && index->type &&
+                    (index->type->type_id == LMD_TYPE_ARRAY_NUM ||
+                     index->type->type_id == LMD_TYPE_ARRAY ||
+                     index->type->type_id == LMD_TYPE_TYPE)) {
+                // A mask or type query returns a collection of matches, not a
+                // scalar element. Keep the boxed result contract before map
+                // shape construction (S7.1).
+                return set_type_any(tp, ANY_INDEX_ELEM);
+            }
+            AstNode* object_base = ast_unwrap_primary(object);
+            bool mutable_binding = object_base &&
+                object_base->node_type == AST_NODE_IDENT &&
+                ((AstIdentNode*)object_base)->entry &&
+                (((AstIdentNode*)object_base)->entry->is_mutable ||
+                 ((AstIdentNode*)object_base)->entry->type_widened);
+            if (mutable_binding) return set_type_any(tp, ANY_INDEX_ELEM);
+            TypeArray* array = (TypeArray*)object_type;
+            return array->nested && array->nested->type_id != LMD_TYPE_ANY
+                ? lambda_type_nullable_normalized(tp->pool, array->nested)
+                : set_type_any(tp, ANY_INDEX_ELEM);
+        }
+        return set_type_any(tp, ANY_INDEX_ELEM);
+    }
+    if ((object_type->type_id == LMD_TYPE_MAP ||
+            object_type->type_id == LMD_TYPE_OBJECT) &&
+            !is_global_simple_type(object_type) && field &&
+            field->node_type == AST_NODE_IDENT) {
+        TypeMap* map = (TypeMap*)object_type;
+        AstIdentNode* ident = (AstIdentNode*)field;
+        Type* matched = NULL;
+        FOR_EACH_MAP_FIELD(map, entry) {
+            if (entry->name && entry->name->length == ident->name->len &&
+                    strncmp(entry->name->str, ident->name->chars,
+                            entry->name->length) == 0) {
+                // Shape entries are retained in source order; runtime lookup
+                // is last-writer-wins, so the type oracle must keep scanning
+                // duplicate keys instead of publishing the first contract.
+                matched = unwrap_simple_type_type(entry->type);
+            }
+        }
+        if (matched) return matched;
+    }
+    return set_type_any(tp, ANY_MEMBER_SHAPE);
+}
+
+AstNode* build_field_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNodeType node_type, AstNode* object, AstNode* field) {
+    if (node_type == AST_NODE_MEMBER_EXPR) {
+        AstNode* object_value = ast_unwrap_primary(object);
+        AstNode* field_value = ast_unwrap_primary(field);
+        if (object_value && object_value->node_type == AST_NODE_IDENT &&
+                field_value && field_value->node_type == AST_NODE_IDENT) {
+            AstIdentNode* object_ident = (AstIdentNode*)object_value;
+            AstIdentNode* field_ident = (AstIdentNode*)field_value;
+            StrView module_name = strview_init(object_ident->name->chars,
+                object_ident->name->len);
+            NamespaceEntry* ns_entry = lookup_namespace(tp, object_ident->name);
+            if (ns_entry) {
+                // A namespace prefix in expression position denotes a
+                // qualified symbol, not an unresolved variable member.
+                return build_namespace_symbol_from_parts(tp, span,
+                    object_ident->name, field_ident->name, ns_entry);
+            }
+            const char* module = resolve_imported_module(tp, &module_name);
+            if (module && strcmp(module, "math") == 0) {
+                double value = 0.0;
+                bool is_float = false;
+                if (field_ident->name->len == 7 &&
+                        memcmp(field_ident->name->chars, "max_int", 7) == 0) {
+                    // keep the named math constant on the same literal lane
+                    // as the CST builder; otherwise overflow checks reject the
+                    // canonical compact-int boundary (D2.2.2).
+                    TypeInt64* constant = (TypeInt64*)alloc_type(tp->pool,
+                        LMD_TYPE_INT, sizeof(TypeInt64));
+                    constant->int64_val = INT53_MAX;
+                    constant->is_const = 1;
+                    constant->is_literal = 1;
+                    arraylist_append(tp->const_list, &constant->int64_val);
+                    constant->const_index = tp->const_list->length - 1;
+                    AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(
+                        tp, AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+                    result->type = (Type*)constant;
+                    return (AstNode*)result;
+                }
+                if (field_ident->name->len == 2 &&
+                        memcmp(field_ident->name->chars, "pi", 2) == 0) {
+                    value = 3.14159265358979323846;
+                    is_float = true;
+                } else if (field_ident->name->len == 1 &&
+                        field_ident->name->chars[0] == 'e') {
+                    value = 2.71828182845904523536;
+                    is_float = true;
+                }
+                if (is_float) {
+                    TypeFloat* constant = (TypeFloat*)alloc_type(tp->pool,
+                        LMD_TYPE_FLOAT, sizeof(TypeFloat));
+                    constant->double_val = value;
+                    constant->is_const = 1;
+                    constant->is_literal = 1;
+                    arraylist_append(tp->const_list, &constant->double_val);
+                    constant->const_index = tp->const_list->length - 1;
+                    AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(
+                        tp, AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+                    result->type = (Type*)constant;
+                    return (AstNode*)result;
+                }
+            }
+            char qualified[256];
+            snprintf(qualified, sizeof(qualified), "%.*s.%.*s",
+                (int)module_name.length, module_name.str,
+                (int)field_ident->name->len, field_ident->name->chars);
+            NameEntry* imported = lookup_name(tp, strview_from_cstr(qualified));
+            if (imported && imported->import && imported->node) {
+                AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node_from_span(
+                    tp, AST_NODE_IDENT, span, sizeof(AstIdentNode));
+                resolved->name = imported->name;
+                resolved->entry = imported;
+                resolved->type = imported->node->type ? imported->node->type : &TYPE_ANY;
+                return build_primary_wrapper_from_parts(tp, span, (AstNode*)resolved);
+            }
+        }
+    }
+    AstFieldNode* node = (AstFieldNode*)alloc_ast_node_from_span(tp, node_type,
+        span, sizeof(AstFieldNode));
+    node->object = object;
+    node->field = field;
+    node->computed = node_type == AST_NODE_INDEX_EXPR;
+    node->type = direct_field_result_type(tp, object, field, node_type);
+    return (AstNode*)node;
+}
+
+AstNode* build_query_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* object, AstNode* query, bool direct) {
+    AstQueryNode* node = (AstQueryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_QUERY_EXPR, span, sizeof(AstQueryNode));
+    node->object = object;
+    node->query = query;
+    node->direct = direct;
+    node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    return (AstNode*)node;
+}
+
+static AstNode* direct_sys_function(Transpiler* tp, LambdaSourceSpan span,
+        SysFuncInfo* info) {
+    AstSysFuncNode* node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
+    node->fn_info = info;
+    // A resolved call callee mirrors the CST builder's return-typed node. A
+    // standalone sysfunc value uses the separate callable-signature builder.
+    // The transpiler relies on this distinction when boxing native results at
+    // handler and collection boundaries (D2.2.2).
+    node->type = info->return_type;
+    return (AstNode*)node;
+}
+
+static AstNode* direct_start_node(Transpiler* tp, LambdaSourceSpan span,
+        AstCallNode* source_call, int arg_count) {
+    AstStartNode* start = (AstStartNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_START, span, sizeof(AstStartNode));
+    start->owner_scope = tp->current_scope;
+    start->mode = START_MODE_TASK;
+    start->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
+    if (arg_count < 1 || arg_count > 3) {
+        record_semantic_error_span(tp, span, ERR_ARGUMENT_COUNT_MISMATCH,
+            "`start` expects 1 to 3 arguments, got %d", arg_count);
+        start->type = &TYPE_ERROR;
+        return (AstNode*)start;
+    }
+    AstNode* target = source_call->argument;
+    AstNode* args = target ? target->next : NULL;
+    AstNode* options = args ? args->next : NULL;
+    if (start_has_named_arguments(target)) {
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+            "`start` uses positional arguments: start(pn, args, options)");
+        start->type = &TYPE_ERROR;
+        return (AstNode*)start;
+    }
+    if (target) target->next = NULL;
+    if (args) args->next = NULL;
+    if (options) options->next = NULL;
+    TypeFunc* fn_type = target && target->type && target->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)target->type : NULL;
+    AstCallNode* target_call = (AstCallNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
+    target_call->function = target;
+    target_call->argument = args;
+    target_call->type = fn_type ? function_call_result_type(tp, fn_type) : &TYPE_ERROR;
+    target_call->can_raise = fn_type && fn_type->can_raise;
+    start->call = target_call;
+    validate_start_parts(tp, start, span, target, args, options, target_call);
+    return (AstNode*)start;
+}
+
+static TypeMethod* direct_lookup_object_method(Transpiler* tp,
+        AstNode* receiver, StrView name) {
+    if (!receiver || !receiver->type) return NULL;
+    Type* receiver_type = receiver->type;
+    if (receiver_type->type_id != LMD_TYPE_OBJECT ||
+            is_global_simple_type(receiver_type)) return NULL;
+    TypeObject* object_type = (TypeObject*)receiver_type;
+    for (TypeObject* owner = object_type; owner; owner = owner->base) {
+        for (ShapeEntry* field = owner->shape; field; field = field->next) {
+            if (field->name && field->name->length == name.length &&
+                    strncmp(field->name->str, name.str, name.length) == 0) {
+                return NULL; // fields shadow methods, matching the CST path.
+            }
+        }
+        for (TypeMethod* method = owner->methods; method; method = method->next) {
+            if (method->name && method->name->length == name.length &&
+                    strncmp(method->name->str, name.str, name.length) == 0) {
+                return method;
+            }
+        }
+    }
+    return NULL;
+}
+
+AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* function, AstNode* arguments, int arg_count) {
+    AstCallNode* call = (AstCallNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
+    call->function = function;
+    call->argument = arguments;
+    StrView name = {0};
+    SysFuncInfo* info = NULL;
+    bool method_call = false;
+    bool user_method_found = false;
+    bool user_method_is_proc = false;
+    int lookup_arg_count = arg_count + tp->pipe_inject_args;
+    AstNode* effective = ast_unwrap_primary(function);
+    if (effective && effective->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* member = (AstFieldNode*)effective;
+        AstNode* object = ast_unwrap_primary(member->object);
+        AstNode* field = ast_unwrap_primary(member->field);
+        if (object && object->node_type == AST_NODE_IDENT &&
+                field && field->node_type == AST_NODE_IDENT) {
+            StrView module_name = strview_init(
+                ((AstIdentNode*)object)->name->chars,
+                ((AstIdentNode*)object)->name->len);
+            StrView field_name = strview_init(
+                ((AstIdentNode*)field)->name->chars,
+                ((AstIdentNode*)field)->name->len);
+            const char* module = resolve_imported_module(tp, &module_name);
+            if (module) {
+                char qualified[128];
+                snprintf(qualified, sizeof(qualified), "%s_%.*s", module,
+                    (int)field_name.length, field_name.str);
+                StrView qualified_name = strview_from_cstr(qualified);
+                info = get_sys_func_info(&qualified_name, lookup_arg_count);
+                if (info) call->function = direct_sys_function(tp,
+                    effective->source_span, info);
+            } else {
+                char qualified[256];
+                snprintf(qualified, sizeof(qualified), "%.*s.%.*s",
+                    (int)module_name.length, module_name.str,
+                    (int)field_name.length, field_name.str);
+                NameEntry* entry = lookup_name(tp, strview_from_cstr(qualified));
+                if (entry && entry->node) {
+                    call->function = entry->node;
+                    effective = entry->node;
+                } else {
+                    // Method-only builtins (for example `map.set`) are
+                    // registered under their receiver-aware arity and are
+                    // not visible through ordinary name lookup.
+                    TypeId object_type = object->type ? object->type->type_id : LMD_TYPE_ANY;
+                    info = get_sys_func_for_method(&field_name, arg_count,
+                        object_type);
+                    if (info) {
+                        method_call = true;
+                        call->argument = object;
+                        object->next = arguments;
+                    }
+                }
+            }
+        }
+        if (!info && field && field->node_type == AST_NODE_IDENT) {
+            // Method receivers are not limited to identifiers: literals,
+            // arrays, and chained calls must use the same receiver-aware
+            // registry lookup as `x.method()` (the CST path already does).
+            AstNode* receiver = object ? object : member->object;
+            StrView field_name = strview_init(((AstIdentNode*)field)->name->chars,
+                ((AstIdentNode*)field)->name->len);
+            TypeId object_type = receiver && receiver->type ? receiver->type->type_id : LMD_TYPE_ANY;
+            TypeMethod* user_method = direct_lookup_object_method(tp, receiver,
+                field_name);
+            if (user_method) {
+                user_method_found = true;
+                user_method_is_proc = user_method->is_proc;
+            } else {
+                info = get_sys_func_for_method(&field_name, arg_count, object_type);
+                if (info) {
+                    method_call = true;
+                    if (receiver) {
+                        receiver->next = arguments;
+                        call->argument = receiver;
+                    }
+                }
+            }
+        }
+    }
+    if (effective && effective->node_type == AST_NODE_SYS_FUNC) {
+        info = ((AstSysFuncNode*)effective)->fn_info;
+        if (tp->pipe_inject_args > 0 && info) {
+            name = strview_from_cstr(info->name);
+            SysFuncInfo* piped = get_sys_func_info(&name, lookup_arg_count);
+            if (!piped) piped = lookup_global_imported_sys_func(tp, &name,
+                lookup_arg_count);
+            if (piped) info = piped;
+        }
+    } else if (effective && effective->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)effective;
+        name = (StrView){ident->name->chars, ident->name->len};
+        bool user_function = ident->entry && ident->entry->node &&
+            (ident->entry->node->node_type == AST_NODE_FUNC ||
+             ident->entry->node->node_type == AST_NODE_PROC);
+        if (!user_function) info = get_sys_func_info(&name, lookup_arg_count);
+        if (!info && !user_function) {
+            // Qualified imports are resolved above; bare calls need the same
+            // module-prefix fallback as the CST builder (`sqrt` -> `math_sqrt`).
+            info = lookup_global_imported_sys_func(tp, &name, lookup_arg_count);
+        }
+        if (!info && !user_function) {
+            info = lookup_complex_math_builtin(&name, lookup_arg_count);
+        }
+    } else if (effective && effective->node_type == AST_NODE_TYPE) {
+        // The lexer classifies built-in spellings such as `string` and `map`
+        // as base types before postfix parsing. In expression position a
+        // following call is still the ordinary conversion/constructor builtin;
+        // resolve it by the same name and arity path as an identifier call.
+        name = source_span_text(tp, effective->source_span);
+        NameEntry* entry = lookup_name(tp, name);
+        bool user_function = entry && entry->node &&
+            (entry->node->node_type == AST_NODE_FUNC ||
+             entry->node->node_type == AST_NODE_PROC);
+        if (user_function) {
+            call->function = build_identifier_from_span(tp, effective->source_span);
+            effective = ast_unwrap_primary(call->function);
+        } else {
+            info = get_sys_func_info(&name, lookup_arg_count);
+            if (!info) info = lookup_global_imported_sys_func(tp, &name,
+                lookup_arg_count);
+            if (!info) info = lookup_complex_math_builtin(&name,
+                lookup_arg_count);
+        }
+    }
+    if (info && info->fn == SYSPROC_START) return direct_start_node(tp, span, call, arg_count);
+    if (info) {
+        // Keep the resolved sysfunc as the call callee even when the parser
+        // supplied a primary wrapper around the spelling. The MIR pipe fast
+        // path (and the Tree builder) dispatch on AST_NODE_SYS_FUNC itself;
+        // retaining the wrapper would fall back to generic fn_pipe_call.
+        call->function = direct_sys_function(tp, function->source_span, info);
+        call->can_raise = info->can_raise;
+        call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
+        call->type = sys_func_call_result_type(tp, info,
+            sys_func_call_may_return_error(tp, info, call->argument), call->argument);
+        Type* bitwise_type = infer_bitwise_call_type(info->fn,
+            call->argument, call->argument ? call->argument->next : NULL);
+        if (bitwise_type) {
+            call->type = bitwise_type;
+        }
+    } else if (effective && effective->type && effective->type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* type = (TypeFunc*)effective->type;
+        call->can_raise = type->can_raise;
+        call->type = function_call_result_type(tp, type);
+    } else {
+        // Sized/base type calls (`i32(value)`, `u8(value)`) have no registry
+        // function; preserve their target type for the MIR coercion lane
+        // instead of lowering them as dynamic calls (D2.2.2).
+        Type* target_type = ast_called_type_target(call->function);
+        call->type = target_type ? target_type : set_type_any(tp, ANY_CALL_RESULT);
+    }
+    if (user_method_found && user_method_is_proc) {
+        if (!tp->current_scope || !tp->current_scope->is_proc) {
+            AstIdentNode* field = effective && effective->node_type == AST_NODE_MEMBER_EXPR
+                ? (AstIdentNode*)ast_unwrap_primary(((AstFieldNode*)effective)->field) : NULL;
+            record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
+                "procedure method '%.*s' cannot be called in a function",
+                field && field->name ? (int)field->name->len : 0,
+                field && field->name ? field->name->chars : "");
+            call->type = &TYPE_ERROR;
+        } else {
+            call->is_proc_method = true;
+        }
+    }
+    if (!lambda_ast_validate_call_arguments(tp, call, span,
+            lookup_arg_count + (method_call ? 1 : 0))) {
+        call->type = &TYPE_ERROR;
+    }
+    return (AstNode*)call;
+}
+
+AstNode* build_raise_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* value, bool statement_form) {
+    AstRaiseNode* node = (AstRaiseNode*)alloc_ast_node_from_span(tp,
+        statement_form ? AST_NODE_RAISE_STAM : AST_NODE_RAISE_EXPR,
+        span, sizeof(AstRaiseNode));
+    node->value = value;
+    node->type = value && value->type ? value->type : &TYPE_ERROR;
+    return (AstNode*)node;
+}
+
+AstNode* build_spread_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* operand) {
+    AstUnaryNode* node = (AstUnaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_SPREAD, span, sizeof(AstUnaryNode));
+    node->operand = operand;
+    node->op = OPERATOR_SPREAD;
+    node->op_str = (StrView){"*", 1};
+    node->type = operand && operand->type ? operand->type : &TYPE_ERROR;
+    return (AstNode*)node;
+}
+
+AstNode* build_type_negation_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* operand) {
+    AstBinaryNode* node = (AstBinaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_BINARY_TYPE, span, sizeof(AstBinaryNode));
+    TypeType* type_value = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
+        sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool,
+        TYPE_KIND_BINARY, sizeof(TypeBinary));
+    type_value->type = (Type*)type;
+    AstPrimaryNode* any = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    any->type = (Type*)alloc_type_kind(tp->pool, TYPE_KIND_SIMPLE, sizeof(Type));
+    any->type->type_id = LMD_TYPE_TYPE;
+    ((TypeType*)any->type)->type = set_type_any(tp, ANY_EXPLICIT);
+    node->left = (AstNode*)any;
+    node->right = operand;
+    node->op = OPERATOR_EXCLUDE;
+    node->op_str = (StrView){"!", 1};
+    node->type = (Type*)type_value;
+    type->left = any->type;
+    type->right = operand && operand->type ? operand->type : &TYPE_ANY;
+    type->op = OPERATOR_EXCLUDE;
+    arraylist_append(tp->type_list, node->type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)node;
+}
+
+AstNode* build_element_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        LambdaSourceSpan tag_span, AstNode* children) {
+    StrView tag = source_span_text(tp, tag_span);
+    if (tag.length >= 2 && tag.str[0] == '\'' &&
+            tag.str[tag.length - 1] == '\'') {
+        tag.str++;
+        tag.length -= 2;
+    }
+    // the CST canonicalizes whitespace around dotted tag names; preserve that
+    // invariant for direct parsing so `<svg .rect>` and `<svg.rect>` share the
+    // same element type/name (S2.4.3v2).
+    bool has_tag_space = false;
+    for (size_t i = 0; i < tag.length; i++) {
+        char c = tag.str[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            has_tag_space = true;
+            break;
+        }
+    }
+    if (has_tag_space) {
+        char* compact = (char*)pool_alloc(tp->pool, tag.length + 1);
+        size_t compact_len = 0;
+        for (size_t i = 0; i < tag.length; i++) {
+            char c = tag.str[i];
+            if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+                compact[compact_len++] = c;
+            }
+        }
+        compact[compact_len] = '\0';
+        tag = (StrView){compact, compact_len};
+    }
+    TypeObject* object_type = lookup_object_type_for_tag(tp, tag);
+    if (object_type) {
+        // Object-typed tags are object literals, not ordinary elements; keep
+        // this decision shared with the CST path so `is Type` sees the same
+        // runtime object contract (D2.2.2).
+        return build_object_literal_from_items(tp, span, tag, object_type,
+            children);
+    }
+
+    AstElementNode* node = (AstElementNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_ELEMENT, span, sizeof(AstElementNode));
+    TypeElmt* type = (TypeElmt*)alloc_type(tp->pool, LMD_TYPE_ELEMENT,
+        sizeof(TypeElmt));
+    String* name = name_pool_create_strview(tp->name_pool, tag);
+    type->name = (StrView){name->chars, name->len};
+    node->type = (Type*)type;
+    AstNode* prev = NULL;
+    ShapeEntry* prev_shape = NULL;
+    int byte_offset = 0;
+    for (AstNode* raw = children; raw;) {
+        AstNode* next = raw->next;
+        raw->next = NULL;
+        if (raw->node_type == AST_NODE_CONTENT) {
+            node->content = raw;
+            type->content_length = ((AstListNode*)raw)->list_type->length;
+        } else {
+            AstNode* candidate = raw;
+            // Direct reductions carry the source spelling `ns.local` as one
+            // key.  Reuse the legacy desugaring (`ns: {local: value}`) before
+            // shape construction, including merge of repeated namespace keys.
+            if (raw->node_type == AST_NODE_KEY_EXPR) {
+                AstNamedNode* qualified = (AstNamedNode*)raw;
+                if (qualified->name && qualified->name->len > 2) {
+                    const char* dot = (const char*)memchr(qualified->name->chars,
+                        '.', qualified->name->len);
+                    if (dot && dot != qualified->name->chars &&
+                            dot + 1 < qualified->name->chars + qualified->name->len) {
+                        StrView prefix = {qualified->name->chars,
+                            (size_t)(dot - qualified->name->chars)};
+                        StrView local = {dot + 1,
+                            (size_t)(qualified->name->chars + qualified->name->len - dot - 1)};
+                        AstNamedNode* grouped = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                            AST_NODE_KEY_EXPR, raw->source_span, sizeof(AstNamedNode));
+                        grouped->name = name_pool_create_strview(tp->name_pool, prefix);
+                        grouped->as = build_ns_attr_map_from_parts(tp, local,
+                            qualified->as, raw->source_span);
+                        grouped->type = grouped->as ? grouped->as->type : &TYPE_ERROR;
+                        AstNamedNode* existing = find_existing_named_item(node->item,
+                            grouped->name);
+                        if (existing && existing->as && grouped->as &&
+                                existing->as->type->type_id == LMD_TYPE_MAP &&
+                                grouped->as->type->type_id == LMD_TYPE_MAP) {
+                            merge_ns_attr_maps(tp, existing->as, grouped->as);
+                            existing->type = existing->as->type;
+                            raw = next;
+                            continue;
+                        }
+                        candidate = (AstNode*)grouped;
+                    }
+                }
+            }
+            bool spread = ast_node_is_syntactic_spread_key(tp, candidate);
+            AstNode* item = spread ? ((AstNamedNode*)candidate)->as : candidate;
+            if (item) {
+                if (!node->item) node->item = item;
+                else prev->next = item;
+                prev = item;
+                ShapeEntry* shape = build_map_shape_entry(tp, item, spread, false);
+                shape->byte_offset = byte_offset;
+                if (!prev_shape) type->shape = shape;
+                else prev_shape->next = shape;
+                prev_shape = shape;
+                type->length++;
+                byte_offset += spread ? (int)sizeof(void*) :
+                    (int)type_info[type_field_storage_type_id(item->type)].byte_size;
+            }
+        }
+        raw = next;
+    }
+    type->byte_size = byte_offset;
+    arraylist_append(tp->type_list, type);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)node;
+}
+
+AstNamedNode* build_param_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        StrView name, AstNode* type_expr, AstNode* default_value,
+        bool optional, bool is_var) {
+    AstNamedNode* param = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PARAM, span, sizeof(AstNamedNode));
+    param->name = name_pool_create_strview(tp->name_pool, name);
+    param->as = default_value;
+    TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY,
+        sizeof(TypeParam));
+    Type* declared = type_expr ? type_expr->type : NULL;
+    if (declared && declared->type_id == LMD_TYPE_TYPE &&
+            declared->kind == TYPE_KIND_SIMPLE) {
+        declared = ((TypeType*)declared)->type;
+    }
+    if (declared) {
+        *(Type*)param_type = *declared;
+        param_type->full_type = declared;
+        param->declared_type = declared;
+        set_param_contract(param_type,
+            parameter_contract_for_declared(tp, declared, optional, default_value), true);
+    } else if (default_value && default_value->type) {
+        *(Type*)param_type = *default_value->type;
+        param_type->full_type = NULL;
+        set_param_contract(param_type, &TYPE_ANY_NO_ERROR, false);
+    } else {
+        *(Type*)param_type = TYPE_ANY;
+        param_type->full_type = NULL;
+        set_param_contract(param_type, &TYPE_ANY_NO_ERROR, false);
+    }
+    param_type->kind = TYPE_KIND_PARAM;
+    param_type->is_optional = optional;
+    param_type->is_var_param = is_var;
+    param_type->default_value = default_value;
+    param->type = (Type*)param_type;
+    lambda_ast_register_name(tp, param);
+    if (tp->current_scope && tp->current_scope->is_proc) {
+        NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
+        if (entry) {
+            entry->is_mutable = true;
+            entry->is_var_param = is_var;
+        }
+    }
+    return param;
+}
+
+static Type* direct_function_contract(AstNode* type_node) {
+    if (!type_node || !type_node->type) return NULL;
+    if (type_node->type->type_id == LMD_TYPE_TYPE &&
+            type_node->type->kind == TYPE_KIND_SIMPLE) {
+        return ((TypeType*)type_node->type)->type;
+    }
+    return type_node->type;
+}
+
+AstNamedNode* build_assignment_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        StrView name, AstNode* type_expr, AstNode* value) {
+    AstNamedNode* assignment = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_ASSIGN, span, sizeof(AstNamedNode));
+    assignment->name = name_pool_create_strview(tp->name_pool, name);
+    assignment->as = value;
+    assignment->type = value && value->type ? value->type : &TYPE_ANY;
+
+    Type* declared = type_expr ? direct_function_contract(type_expr) : NULL;
+    if (declared) {
+        assignment->declared_type = declared;
+        // Range annotations are membership contracts, not a storage lane.
+        // Preserve the initializer's concrete type so a string range value is
+        // not emitted as a raw Range pointer (the CST builder's invariant).
+        assignment->type = declared->type_id == LMD_TYPE_RANGE && value &&
+                value->type ? value->type : declared;
+        int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
+        check_declaration_static_boundary(tp, assignment, declared, line);
+    }
+    lambda_ast_register_name(tp, assignment);
+    return assignment;
+}
+
+static void direct_validate_mutable_compound(Transpiler* tp,
+        LambdaSourceSpan span, AstNode* object) {
+    AstIdentNode* root = compound_root_ident(object);
+    if (!root || !root->entry || root->entry->is_mutable) return;
+    record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
+        "cannot mutate through immutable binding '%.*s'. declare it with `var` or pass it as `var`.",
+        (int)root->name->len, root->name->chars);
+}
+
+AstNode* build_assignment_statement_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, AstNode* target, AstNode* value) {
+    if (!tp->current_scope || !tp->current_scope->is_proc) {
+        record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
+            "assignment is only allowed inside a procedure (pn)");
+        return NULL;
+    }
+    target = unwrap_primary_node(target);
+    if (!target) return NULL;
+    if (target->node_type == AST_NODE_INDEX_EXPR ||
+            target->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* field = (AstFieldNode*)target;
+        AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)
+            alloc_ast_node_from_span(tp,
+                target->node_type == AST_NODE_INDEX_EXPR
+                    ? AST_NODE_INDEX_ASSIGN_STAM : AST_NODE_MEMBER_ASSIGN_STAM,
+                span, sizeof(AstCompoundAssignNode));
+        assignment->object = field->object;
+        assignment->key = field->field;
+        assignment->value = value;
+        assignment->type = value && value->type ? value->type : &TYPE_ANY;
+        assignment->op = OPERATOR_ASSIGN;
+        assignment->left = target;
+        assignment->right = value;
+        direct_validate_mutable_compound(tp, span, field->object);
+        return (AstNode*)assignment;
+    }
+    if (target->node_type != AST_NODE_IDENT) return NULL;
+
+    AstIdentNode* ident = (AstIdentNode*)target;
+    NameEntry* entry = ident->entry ? ident->entry : lookup_name(tp,
+        strview_init(ident->name->chars, ident->name->len));
+    AstAssignStamNode* assignment = (AstAssignStamNode*)alloc_ast_node_from_span(
+        tp, AST_NODE_ASSIGN_STAM, span, sizeof(AstAssignStamNode));
+    assignment->target = ident->name;
+    assignment->target_node = entry ? entry->node : NULL;
+    assignment->target_entry = entry;
+    assignment->value = value;
+    assignment->type = value && value->type ? value->type : &TYPE_ANY;
+    assignment->op = OPERATOR_ASSIGN;
+    assignment->left = target;
+    assignment->right = value;
+    bool is_object_field_in_proc = entry && entry->node &&
+        entry->node->node_type == AST_NODE_KEY_EXPR &&
+        tp->current_scope && tp->current_scope->is_proc;
+    if (entry && !entry->is_mutable && !is_object_field_in_proc) {
+        // Object fields are the receiver's mutable storage lane inside a pn
+        // method; treating their scope entries as let bindings rejects the
+        // same bare-field assignment accepted by the CST builder (D2.2.2).
+        record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
+            "cannot assign to let binding '%.*s'. declare it with `var` instead.",
+            (int)ident->name->len, ident->name->chars);
+    }
+    return (AstNode*)assignment;
+}
+
+AstNode* build_function_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        StrView name, AstNode* params, AstNode* returned, AstNode* error_type,
+        AstNode* body, bool is_proc, bool variadic, bool raised) {
+    AstFuncNode* fn = build_function_placeholder_from_parts(tp, span, name,
+        is_proc);
+    TypeFunc* function_type = (TypeFunc*)fn->type;
+    NameScope* parent = tp->current_scope;
+    NameScope* function_scope = lambda_ast_enter_scope(tp, is_proc);
+    fn->vars = function_scope;
+    AstNamedNode* previous = NULL;
+    for (AstNamedNode* param = (AstNamedNode*)params; param;
+            param = (AstNamedNode*)param->next) {
+        direct_move_binding(parent, function_scope, (AstNode*)param);
+        if (!previous) fn->param = param;
+        else previous->next = (AstNode*)param;
+        previous = param;
+        TypeParam* param_type = (TypeParam*)param->type;
+        if (!function_type->param) function_type->param = param_type;
+        else {
+            TypeParam* tail = function_type->param;
+            while (tail->next) tail = tail->next;
+            tail->next = param_type;
+        }
+        function_type->param_count++;
+        if (!param_type->is_optional) function_type->required_param_count++;
+    }
+    fn->body = body;
+    function_type->is_variadic = variadic;
+    function_type->can_raise = raised;
+    Type* returned_type = direct_function_contract(returned);
+    Type* error = direct_function_contract(error_type);
+    if (raised && !error) error = &TYPE_ERROR;
+    if (returned_type) {
+        function_type->returned = returned_type;
+        function_type->inferred_return = returned_type;
+        set_function_return_contract(function_type, returned_type, true);
+    }
+    if (error) {
+        function_type->error_type = error;
+        function_type->can_raise = true;
+    }
+    if (!returned_type) {
+        function_type->inferred_return = body && body->type ? body->type : &TYPE_ANY;
+    }
+    lambda_ast_leave_scope(tp, function_scope);
+    if (name.length) lambda_ast_register_name(tp, (AstNamedNode*)fn);
+    return (AstNode*)fn;
+}
+
+static AstNode* direct_complete_function(Transpiler* tp, LambdaSourceSpan span,
+        AstFuncNode* fn, NameScope* function_scope, AstNode* params,
+        AstNode* returned, AstNode* error_type, AstNode* body,
+        bool is_proc, bool variadic, bool raised) {
+    if (!fn || !function_scope) return NULL;
+    fn->vars = function_scope;
+    fn->param = (AstNamedNode*)params;
+    fn->body = body;
+    TypeFunc* function_type = (TypeFunc*)fn->type;
+    function_type->is_proc = is_proc;
+    function_type->is_variadic = variadic;
+    function_type->can_raise = raised;
+    function_type->param = NULL;
+    function_type->param_count = 0;
+    function_type->required_param_count = 0;
+    for (AstNamedNode* param = (AstNamedNode*)params; param;
+            param = (AstNamedNode*)param->next) {
+        TypeParam* param_type = (TypeParam*)param->type;
+        if (!function_type->param) function_type->param = param_type;
+        else {
+            TypeParam* tail = function_type->param;
+            while (tail->next) tail = tail->next;
+            tail->next = param_type;
+        }
+        function_type->param_count++;
+        if (!param_type->is_optional) function_type->required_param_count++;
+    }
+    Type* returned_type = direct_function_contract(returned);
+    Type* error = direct_function_contract(error_type);
+    if (raised && !error) error = &TYPE_ERROR;
+    if (returned_type) {
+        function_type->returned = returned_type;
+        function_type->inferred_return = returned_type;
+        set_function_return_contract(function_type, returned_type, true);
+    }
+    if (error) {
+        function_type->error_type = error;
+        function_type->can_raise = true;
+    }
+    if (!returned_type) {
+        function_type->inferred_return = body && body->type ? body->type : &TYPE_ANY;
+    }
+    (void)span;
+    return (AstNode*)fn;
+}
+
+static AstNode* build_module_import_from_parts(Transpiler* tp,
+        LambdaSourceSpan span, StrView alias_view, StrView module) {
+    AstImportNode* node = (AstImportNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IMPORT, span, sizeof(AstImportNode));
+    node->type = &TYPE_NULL;
+    node->module = module;
+    node->alias = alias_view.length
+        ? name_pool_create_strview(tp->name_pool, alias_view) : NULL;
+    if (!module.length) return (AstNode*)node;
+    if (strview_equal(&module, "math")) {
+        if (node->alias) tp->builtin_alias_math = node->alias;
+        else tp->builtin_import_math = true;
+        return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
+    }
+    if (strview_equal(&module, "io")) {
+        if (node->alias) tp->builtin_alias_io = node->alias;
+        else tp->builtin_import_io = true;
+        return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
+    }
+#ifndef SIMPLE_SCHEMA_PARSER
+    char module_buf[128];
+    if (module.length < sizeof(module_buf)) {
+        memcpy(module_buf, module.str, module.length);
+        module_buf[module.length] = '\0';
+        jube_register_builtin_modules();
+        const JubeModuleDef* jube = jube_find_static_module(module_buf);
+        if (jube) {
+            add_jube_module_import(tp,
+                name_pool_create_strview(tp->name_pool,
+                    strview_from_cstr(jube->name)), node->alias);
+            return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
+        }
+    }
+#endif
+    if (module.str[0] == '\'' && module.length > 1) {
+        if (node->alias) {
+            Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
+            StrView uri = {module.str + 1, module.length - 2};
+            String* uri_string = name_pool_create_strview(tp->name_pool, uri);
+            target->original = uri_string->chars;
+            add_namespace(tp, node->alias, target);
+        }
+        return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
+    }
+    StrBuf* path = strbuf_new();
+    bool relative = module.str[0] == '.';
+    if (relative) {
+        const char* base = tp->directory ? tp->directory : "./";
+        strbuf_append_format(path, "%s%.*s", base,
+            (int)module.length - 1, module.str + 1);
+        for (char* ch = path->str; *ch; ch++) if (*ch == '.') *ch = '/';
+    } else {
+        strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
+        for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
+        char* slash = strchr(path->str + 2, '/');
+        if (slash) {
+            StrBuf* fixed = strbuf_new();
+            const char* home = g_lambda_home;
+            if (home[0] == '.' && home[1] == '/') home += 2;
+            strbuf_append_str(fixed, "./");
+            strbuf_append_str(fixed, home);
+            strbuf_append_str(fixed, slash);
+            strbuf_free(path);
+            path = fixed;
+        }
+    }
+    strbuf_append_str(path, ".ls");
+    node->is_relative = relative;
+    bool lambda_source_exists = file_exists(path->str);
+    bool imported = false;
+    node->script = load_script(tp->runtime, path->str, NULL, true);
+    if (node->script && node->script->ast_root) {
+        declare_module_import(tp, node);
+        imported = true;
+    } else if (!lambda_source_exists) {
+        // Keep the direct parser's import surface aligned with the CST path:
+        // a missing Lambda module may resolve to a hosted JavaScript module.
+        path->str[path->length - 2] = 'j';
+        path->str[path->length - 1] = 's';
+        Item namespace_obj = load_js_module(tp->runtime, path->str);
+        if (namespace_obj.item != ItemNull.item) {
+            node->script = (Script*)create_module_import_script(
+                path->str, namespace_obj, tp->runtime);
+            node->is_cross_lang = node->script != NULL;
+            if (node->script) {
+                declare_module_import(tp, node);
+                imported = true;
+            }
+        }
+    }
+    if (!imported) {
+        record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
+            "failed to import Lambda module '%.*s' (resolved: %s)",
+            (int)module.length, module.str, path->str);
+    }
+    strbuf_free(path);
+    return (AstNode*)node;
+}
+
+AstNode* build_if_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* condition, AstNode* then_branch, AstNode* else_branch) {
+    AstIfNode* node = (AstIfNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IF_EXPR, span, sizeof(AstIfNode));
+    node->cond = condition;
+    node->then = then_branch;
+    node->otherwise = else_branch;
+    Type* left = then_branch && then_branch->type ? then_branch->type : &TYPE_ANY;
+    Type* right = else_branch && else_branch->type ? else_branch->type : &TYPE_NULL;
+    node->type = lambda_type_union_normalized(tp->pool, left, right);
+    return (AstNode*)node;
+}
+
+static Type* direct_range_element_type(Transpiler* tp, AstNode* source) {
+    AstNode* value = ast_unwrap_primary(source);
+    if (value && value->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)value;
+        if (ident->entry && ident->entry->node &&
+                ident->entry->node->node_type == AST_NODE_ASSIGN) {
+            value = ast_unwrap_primary(((AstNamedNode*)ident->entry->node)->as);
+        }
+    }
+    if (value && value->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)value)->op == OPERATOR_TO) {
+        AstBinaryNode* range = (AstBinaryNode*)value;
+        TypeId left = range->left && range->left->type
+            ? range->left->type->type_id : LMD_TYPE_ANY;
+        TypeId right = range->right && range->right->type
+            ? range->right->type->type_id : LMD_TYPE_ANY;
+        if (left == LMD_TYPE_STRING && right == LMD_TYPE_STRING) {
+            // String ranges iterate codepoint strings; treating every range as
+            // an int unboxes each Item result and turns characters into zero
+            // (S7.1, D2.2.2).
+            return &TYPE_STRING;
+        }
+    }
+    return &TYPE_INT;
+}
+
+static Type* direct_loop_value_type(Transpiler* tp, AstNode* source,
+        bool key_only) {
+    if (key_only || !source || !source->type) {
+        return set_type_any(tp, ANY_LOOP_SRC);
+    }
+    Type* source_type = source->type;
+    if (source_type->type_id == LMD_TYPE_ARRAY_NUM ||
+            source_type->type_id == LMD_TYPE_ARRAY) {
+        TypeArray* array = !is_global_simple_type(source_type)
+            ? (TypeArray*)source_type : NULL;
+        if (array && array->nested && (uintptr_t)array->nested > 0x1000) {
+            return array->nested;
+        }
+        return set_type_any(tp, ANY_LOOP_SRC);
+    }
+    if (source_type->type_id == LMD_TYPE_RANGE) {
+        return direct_range_element_type(tp, source);
+    }
+    if (source_type->type_id == LMD_TYPE_BINARY) return &TYPE_U8;
+    return set_type_any(tp, ANY_LOOP_SRC);
+}
+
+AstNode* build_loop_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        LambdaToken name_token, LambdaToken index_token, uint32_t flags,
+        AstNode* index_type, AstNode* source, AstNode* join) {
+    AstLoopNode* loop = (AstLoopNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_LOOP, span, sizeof(AstLoopNode));
+    StrView name = source_span_text(tp, name_token.span);
+    loop->name = name_pool_create_strview(tp->name_pool, name);
+    loop->index_name = index_token.kind
+        ? name_pool_create_strview(tp->name_pool,
+            source_span_text(tp, index_token.span)) : NULL;
+    loop->as = source;
+    loop->on = join;
+    loop->key_filter = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY)
+        ? LOOP_KEY_SYMBOL : LOOP_KEY_ALL;
+    loop->key_only = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY) != 0;
+    loop->optional = (flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) != 0;
+    loop->type = direct_loop_value_type(tp, source, loop->key_only);
+
+    Type* key_contract = index_type ? direct_function_contract(index_type) : NULL;
+    if (loop->index_name && key_contract) {
+        if (key_contract->type_id == LMD_TYPE_INT) loop->key_filter = LOOP_KEY_INT;
+        else if (key_contract->type_id == LMD_TYPE_SYMBOL) loop->key_filter = LOOP_KEY_SYMBOL;
+        else record_semantic_error_span(tp, index_type->source_span,
+            ERR_INVALID_OPERATION, "for index type must be int or symbol");
+    }
+    if (loop->index_name) {
+        AstNamedNode* index = (AstNamedNode*)alloc_ast_node_from_span(tp,
+            AST_NODE_LOOP, index_token.span, sizeof(AstNamedNode));
+        index->name = loop->index_name;
+        index->type = loop->key_filter == LOOP_KEY_INT ? &TYPE_INT :
+            loop->key_filter == LOOP_KEY_SYMBOL ? &TYPE_SYMBOL :
+            set_type_any(tp, ANY_LOOP_SRC);
+        lambda_ast_register_name(tp, index);
+    }
+    lambda_ast_register_name(tp, (AstNamedNode*)loop);
+    if (join) build_join_key_specs(tp, loop, join);
+    if (loop->optional && !join) {
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+            "optional for binding requires an `on` condition");
+    }
+    return (AstNode*)loop;
+}
+
+static void direct_append_clause(AstNode** first, AstNode* item) {
+    if (!item) return;
+    item->next = NULL;
+    if (!*first) {
+        *first = item;
+        return;
+    }
+    AstNode* tail = *first;
+    while (tail->next) tail = tail->next;
+    tail->next = item;
+}
+
+AstNode* build_for_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* clauses, AstNode* body, NameScope* loop_scope,
+        bool statement_form) {
+    (void)clauses;
+    AstForNode* node = (AstForNode*)alloc_ast_node_from_span(tp,
+        statement_form ? AST_NODE_FOR_STAM : AST_NODE_FOR_EXPR, span,
+        sizeof(AstForNode));
+    node->vars = loop_scope;
+    node->then = body;
+    if (body && body->node_type == AST_NODE_CONTENT &&
+            !((AstListNode*)body)->vars) {
+        ((AstListNode*)body)->vars = loop_scope;
+    }
+    node->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
+        set_type_any(tp, ANY_LIST);
+    return (AstNode*)node;
+}
+
+AstNode* build_while_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* condition, AstNode* body, NameScope* loop_scope) {
+    AstWhileNode* node = (AstWhileNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_WHILE_STAM, span, sizeof(AstWhileNode));
+    node->vars = loop_scope;
+    node->cond = condition;
+    node->body = body;
+    if (body && body->node_type == AST_NODE_CONTENT &&
+            !((AstListNode*)body)->vars) {
+        ((AstListNode*)body)->vars = loop_scope;
+    }
+    node->type = set_type_any(tp, ANY_STATEMENT);
+    return (AstNode*)node;
+}
+
+AstNode* build_propagate_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* operand) {
+    AstNode* effective = operand;
+    while (effective && effective->node_type == AST_NODE_PRIMARY) {
+        effective = ((AstPrimaryNode*)effective)->expr;
+    }
+    bool may_error = operand && operand->type &&
+        lambda_type_accepts_error(operand->type);
+    if (effective && effective->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)effective;
+        call->propagate = true;
+        may_error = may_error || call->can_raise;
+        if (call->can_raise && call->function && call->function->type &&
+                call->function->type->type_id == LMD_TYPE_FUNC) {
+            Type* success = function_success_result_type((TypeFunc*)call->function->type);
+            if (success) call->type = success;
+        }
+    }
+    if (!may_error) {
+        record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
+            "postfix `^` used on an expression that does not return errors");
+    }
+    Type* success = operand && operand->type
+        ? lambda_type_remove_error(tp->pool, operand->type) : NULL;
+    if (!success) success = set_type_any(tp, ANY_ERROR_RECOVERY);
+    if (effective && effective->node_type == AST_NODE_CALL_EXPR) {
+        operand->type = success;
+        effective->type = success;
+        return effective;
+    }
+    AstUnaryNode* node = (AstUnaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_UNARY, span, sizeof(AstUnaryNode));
+    node->operand = operand;
+    node->op = OPERATOR_PROPAGATE;
+    node->prefix = false;
+    node->type = success;
+    node->op_str = source_span_text(tp, span);
+    return (AstNode*)node;
+}
+
+static LambdaParseValue direct_ast_reduce(void* context,
+        const LambdaParseReduction* reduction) {
+    LambdaDirectAstSink* sink = (LambdaDirectAstSink*)context;
+    if (!sink || !reduction || sink->failed) return 0;
+    Transpiler* tp = sink->tp;
+    AstNode* child0 = reduction->child_count > 0
+        ? direct_ast_node(reduction->children[0]) : NULL;
+
+    if (reduction->kind == LAMBDA_REDUCE_CONTEXT) {
+        if (reduction->form == LAMBDA_REDUCTION_FORM_HANDLER_BEGIN) {
+            if (sink->handler_context_depth >= 64) {
+                log_error("direct sink handler context overflow");
+                sink->failed = true;
+                return 0;
+            }
+            sink->handler_context[sink->handler_context_depth++] =
+                tp->building_handler_body;
+            tp->building_handler_body = true;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_HANDLER_END) {
+            if (!sink->handler_context_depth) {
+                log_error("direct sink handler context underflow");
+                sink->failed = true;
+                return 0;
+            }
+            tp->building_handler_body =
+                sink->handler_context[--sink->handler_context_depth];
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_THAT_BEGIN) {
+            if (sink->that_context_depth >= 64) {
+                log_error("direct sink that context overflow");
+                sink->failed = true;
+                return 0;
+            }
+            sink->that_context[sink->that_context_depth++] = tp->in_that_clause;
+            tp->in_that_clause = true;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_THAT_END) {
+            if (!sink->that_context_depth) {
+                log_error("direct sink that context underflow");
+                sink->failed = true;
+                return 0;
+            }
+            tp->in_that_clause =
+                sink->that_context[--sink->that_context_depth];
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_BEGIN ||
+                reduction->form == LAMBDA_REDUCTION_FORM_WHILE_BEGIN) {
+            if (sink->loop_scope_depth >= 64) {
+                log_error("direct sink loop scope overflow");
+                sink->failed = true;
+                return 0;
+            }
+            bool is_while = reduction->form == LAMBDA_REDUCTION_FORM_WHILE_BEGIN;
+            sink->loop_scopes[sink->loop_scope_depth] = lambda_ast_enter_scope(tp,
+                is_while || (tp->current_scope && tp->current_scope->is_proc));
+            sink->for_nodes[sink->loop_scope_depth] = NULL;
+            if (!is_while) {
+                sink->for_nodes[sink->loop_scope_depth] =
+                    (AstForNode*)alloc_ast_node_from_span(tp, AST_NODE_FOR_EXPR,
+                        reduction->span, sizeof(AstForNode));
+                sink->for_nodes[sink->loop_scope_depth]->vars =
+                    sink->loop_scopes[sink->loop_scope_depth];
+            }
+            sink->loop_scope_depth++;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_END ||
+                reduction->form == LAMBDA_REDUCTION_FORM_WHILE_END) {
+            if (!sink->loop_scope_depth) {
+                log_error("direct sink loop scope underflow");
+                sink->failed = true;
+                return 0;
+            }
+            NameScope* scope = sink->loop_scopes[--sink->loop_scope_depth];
+            lambda_ast_leave_scope(tp, scope);
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_GROUP_BEGIN) {
+            if (sink->group_scope_depth >= 64) {
+                log_error("direct sink group scope overflow");
+                sink->failed = true;
+                return 0;
+            }
+            sink->group_scopes[sink->group_scope_depth++] =
+                lambda_ast_enter_scope(tp, tp->current_scope &&
+                    tp->current_scope->is_proc);
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_GROUP_END) {
+            if (!sink->group_scope_depth) {
+                log_error("direct sink group scope underflow");
+                sink->failed = true;
+                return 0;
+            }
+            sink->completed_group_scope =
+                sink->group_scopes[--sink->group_scope_depth];
+            lambda_ast_leave_scope(tp, sink->completed_group_scope);
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN) {
+            if (sink->if_scope_depth >= 64) {
+                log_error("direct sink if scope overflow");
+                sink->failed = true;
+                return 0;
+            }
+            sink->if_scopes[sink->if_scope_depth++] = lambda_ast_enter_scope(tp,
+                tp->current_scope && tp->current_scope->is_proc);
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_IF_BRANCH_END) {
+            if (!sink->if_scope_depth) {
+                log_error("direct sink if scope underflow");
+                sink->failed = true;
+                return 0;
+            }
+            NameScope* scope = sink->if_scopes[--sink->if_scope_depth];
+            lambda_ast_leave_scope(tp, scope);
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN) {
+            if (sink->function_depth >= 64) {
+                sink->failed = true;
+                return 0;
+            }
+            StrView name = direct_token_text(tp, reduction->secondary_token);
+            bool is_proc = (reduction->flags & LAMBDA_REDUCTION_FLAG_PROC) != 0;
+            AstFuncNode* fn = NULL;
+            if (name.length && !sink->type_object_depth) {
+                String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+                NameEntry* existing = lookup_name_in_current_scope(tp,
+                    pooled_name);
+                if (existing && existing->node &&
+                        existing->node->source_span.start_byte ==
+                            reduction->span.start_byte &&
+                        (existing->node->node_type == AST_NODE_FUNC ||
+                         existing->node->node_type == AST_NODE_PROC)) {
+                    fn = (AstFuncNode*)existing->node;
+                }
+            }
+            if (!fn) {
+                fn = build_function_placeholder_from_parts(tp,
+                    reduction->span, name, is_proc);
+                if (name.length && !sink->type_object_depth) {
+                    lambda_ast_register_name(tp, (AstNamedNode*)fn);
+                }
+            }
+            if (!name.length) ((TypeFunc*)fn->type)->is_anonymous = true;
+            ((TypeFunc*)fn->type)->is_public =
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0 ||
+                ((TypeFunc*)fn->type)->is_public;
+            sink->function_nodes[sink->function_depth] = fn;
+            sink->function_scopes[sink->function_depth++] =
+                lambda_ast_enter_scope(tp, is_proc);
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_BEGIN) {
+            direct_object_begin(sink, reduction);
+            sink->type_object_depth++;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_END) {
+            if (sink->type_object_depth) {
+                direct_object_end(sink);
+                sink->type_object_depth--;
+            }
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT_BEGIN) {
+            tp->in_that_clause = true;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT_END) {
+            tp->in_that_clause = false;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FUNCTION_END) {
+            if (!sink->function_depth) {
+                sink->failed = true;
+                return 0;
+            }
+            uint32_t slot = --sink->function_depth;
+            AstFuncNode* fn = sink->function_nodes[slot];
+            NameScope* function_scope = sink->function_scopes[slot];
+            lambda_ast_leave_scope(tp, function_scope);
+            // Capture analysis must run after the body and nested functions
+            // are complete; otherwise an outer closure loses transitive
+            // captures and MIR sees those names as undefined variables.
+            if (fn) {
+                analyze_captures(tp, fn, find_global_scope(function_scope->parent));
+                validate_cross_frame_binding_reads(tp, fn);
+            }
+            return 0;
+        }
+    }
+
+    switch (reduction->kind) {
+    case LAMBDA_REDUCE_LIST: {
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_CLAUSES) {
+            return direct_ast_value(reduction->child_count > 1
+                ? direct_ast_node(reduction->children[0]) : child0);
+        }
+        AstNode* item = reduction->child_count > 1
+            ? direct_ast_node(reduction->children[1]) : child0;
+        if (reduction->child_count > 1) return direct_ast_value(direct_append(child0, item));
+        return direct_ast_value(item);
+    }
+    case LAMBDA_REDUCE_CONTENT: {
+        AstNode* content = direct_content_node(tp, reduction->span, child0);
+        if (content && sink->if_scope_depth) {
+            ((AstListNode*)content)->vars = sink->if_scopes[
+                sink->if_scope_depth - 1];
+        }
+        return direct_ast_value(content);
+    }
+    case LAMBDA_REDUCE_ATOM: {
+        LambdaToken token = reduction->detail_token;
+        LambdaAstLiteralKind literal_kind;
+        AstNode* node = NULL;
+        if (direct_literal_kind(token.kind, &literal_kind)) {
+            node = build_literal_from_span(tp, token.span, literal_kind);
+        } else if (token.kind == LAMBDA_TOK_BASE_TYPE ||
+                token.kind == LAMBDA_TOK_TYPE) {
+            StrView base_name = source_span_text(tp, token.span);
+            if (strview_equal(&base_name, "null")) {
+                // `null` shares the base-type token with the type-pattern
+                // spelling, but in expression position it is a value literal.
+                AstPrimaryNode* null_node = (AstPrimaryNode*)alloc_ast_node_from_span(
+                    tp, AST_NODE_PRIMARY, token.span, sizeof(AstPrimaryNode));
+                // `null` shares the base-type token with type expressions, but
+                // in value position it must retain the literal marker so both
+                // MIR and the interpreter materialize ItemNull (S3.1).
+                null_node->type = &LIT_NULL;
+                node = (AstNode*)null_node;
+            } else {
+                node = direct_base_type_from_span(tp, token.span);
+            }
+        } else if (token.kind == LAMBDA_TOK_TILDE) {
+            node = build_current_item_from_span(tp, token.span, false);
+        } else if (token.kind == LAMBDA_TOK_TILDE_INDEX) {
+            node = build_current_item_from_span(tp, token.span, true);
+        } else if (token.kind == LAMBDA_TOK_PARENT) {
+            node = build_current_parent_navigation_from_span(tp, token.span);
+        } else if (token.kind == LAMBDA_TOK_CARET) {
+            node = build_current_error_from_span(tp, token.span);
+        } else if (token.kind == LAMBDA_TOK_LAST) {
+            node = alloc_ast_node_from_span(tp, AST_NODE_LAST_INDEX, token.span,
+                sizeof(AstNode));
+            node->type = &TYPE_INT;
+        } else if (token.kind == LAMBDA_TOK_PATTERN_ISLAND) {
+            StrView source = source_span_text(tp, token.span);
+            node = parse_type_pattern_text_span(tp, source.str,
+                source.str + source.length, token.span);
+            if (!node) node = direct_type_error_from_span(tp, token.span);
+        } else {
+            node = build_primary_wrapper_from_parts(tp, token.span,
+                build_identifier_from_span(tp, token.span));
+        }
+        return direct_ast_value(node);
+    }
+    case LAMBDA_REDUCE_PREFIX: {
+        if (reduction->child_count != 1) break;
+        AstNode* operand = direct_ast_node(reduction->children[0]);
+        StrView op = direct_token_text(tp, reduction->detail_token);
+        if (reduction->detail_token.kind == LAMBDA_TOK_STAR) {
+            return direct_ast_value(build_spread_node_from_parts(tp,
+                reduction->span, operand));
+        }
+        if (reduction->detail_token.kind == LAMBDA_TOK_RAISE) {
+            return direct_ast_value(build_raise_node_from_parts(tp,
+                reduction->span, operand, false));
+        }
+        if (reduction->detail_token.kind == LAMBDA_TOK_BANG) {
+            return direct_ast_value(build_type_negation_from_parts(tp,
+                reduction->span, operand));
+        }
+        return direct_ast_value(build_unary_node_from_parts(tp,
+            reduction->span, op, operand));
+    }
+    case LAMBDA_REDUCE_GROUP: {
+        if (reduction->child_count == 1) {
+            return direct_ast_value(build_primary_wrapper_from_parts(tp,
+                reduction->span, child0));
+        }
+        AstNode* grouped = NULL;
+        for (uint32_t i = 0; i < reduction->child_count; i++) {
+            grouped = direct_append(grouped,
+                direct_ast_node(reduction->children[i]));
+        }
+        NameScope* group_scope = sink->completed_group_scope;
+        sink->completed_group_scope = NULL;
+        return direct_ast_value(direct_let_group(tp, reduction->span, grouped,
+            group_scope));
+    }
+    case LAMBDA_REDUCE_ARRAY:
+        return direct_ast_value(build_array_from_items(tp, reduction->span, child0));
+    case LAMBDA_REDUCE_MAP:
+        return direct_ast_value(build_map_from_items(tp, reduction->span, child0));
+    case LAMBDA_REDUCE_ELEMENT: {
+        AstNode* children = NULL;
+        for (uint32_t i = 0; i < reduction->child_count; i++) {
+            children = direct_append(children,
+                direct_ast_node(reduction->children[i]));
+        }
+        return direct_ast_value(build_element_from_parts(tp, reduction->span,
+            reduction->detail_token.span, children));
+    }
+    case LAMBDA_REDUCE_LET: {
+        if (reduction->form == LAMBDA_REDUCTION_FORM_DECOMPOSE &&
+                reduction->name_tokens && reduction->name_count > 0 &&
+                reduction->child_count > 0) {
+            String** names = (String**)pool_calloc(tp->pool,
+                sizeof(String*) * reduction->name_count);
+            for (uint32_t i = 0; i < reduction->name_count; i++) {
+                names[i] = name_pool_create_strview(tp->name_pool,
+                    direct_token_text(tp, reduction->name_tokens[i]));
+            }
+            AstNode* value = direct_ast_node(
+                reduction->children[reduction->child_count - 1]);
+            return direct_ast_value(build_decompose_from_parts(tp,
+                reduction->span, names, (int)reduction->name_count, value,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_DECOMPOSE_NAMED) != 0));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TOKEN) {
+            StrView name = direct_token_text(tp, reduction->detail_token);
+            AstNode* type_expr = (reduction->flags & LAMBDA_REDUCTION_FLAG_TYPED)
+                ? child0 : NULL;
+            AstNode* value = (reduction->flags & LAMBDA_REDUCTION_FLAG_TYPED)
+                ? (reduction->child_count > 1
+                    ? direct_ast_node(reduction->children[1]) : NULL)
+                : child0;
+            return direct_ast_value((AstNode*)build_assignment_from_parts(tp,
+                reduction->span, name, type_expr, value));
+        }
+        return direct_ast_value(child0);
+    }
+    case LAMBDA_REDUCE_FUNCTION: {
+        if (reduction->form != LAMBDA_REDUCTION_FORM_FUNCTION ||
+                reduction->child_count == 0) break;
+        AstNode* params = NULL;
+        AstNode* returned = NULL;
+        AstNode* error_type = NULL;
+        AstNode* body = direct_ast_node(
+            reduction->children[reduction->child_count - 1]);
+        uint32_t i = 0;
+        if (i < reduction->child_count &&
+                direct_ast_node(reduction->children[i]) &&
+                direct_ast_node(reduction->children[i])->node_type == AST_NODE_PARAM) {
+            params = direct_ast_node(reduction->children[i++]);
+        }
+        while (i + 1 < reduction->child_count) {
+            AstNode* type_node = direct_ast_node(reduction->children[i++]);
+            if (!returned) returned = type_node;
+            else if (!error_type) error_type = type_node;
+        }
+        StrView name = source_span_text(tp, reduction->secondary_token.span);
+        if (sink->function_depth) {
+            uint32_t slot = sink->function_depth - 1;
+            AstNode* completed = (AstNode*)direct_complete_function(tp, reduction->span,
+                sink->function_nodes[slot], sink->function_scopes[slot], params,
+                returned, error_type, body,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PROC) != 0,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_VARIADIC) != 0,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_RAISED) != 0);
+            if (sink->type_object_depth && sink->function_depth == 1) {
+                direct_object_add_method(sink, completed);
+            }
+            return direct_ast_value(completed);
+        }
+        return direct_ast_value(build_function_from_parts(tp, reduction->span,
+            name, params, returned, error_type, body,
+            (reduction->flags & LAMBDA_REDUCTION_FLAG_PROC) != 0,
+            (reduction->flags & LAMBDA_REDUCTION_FLAG_VARIADIC) != 0,
+            (reduction->flags & LAMBDA_REDUCTION_FLAG_RAISED) != 0));
+    }
+    case LAMBDA_REDUCE_IF: {
+        if (reduction->child_count < 2 || reduction->child_count > 3) break;
+        return direct_ast_value(build_if_node_from_parts(tp, reduction->span,
+            direct_ast_node(reduction->children[0]),
+            direct_ast_node(reduction->children[1]),
+            reduction->child_count == 3
+                ? direct_ast_node(reduction->children[2]) : NULL));
+    }
+    case LAMBDA_REDUCE_MATCH: {
+        if (reduction->child_count != 2) break;
+        return direct_ast_value(build_match_from_parts(tp, reduction->span,
+            direct_ast_node(reduction->children[0]),
+            direct_ast_node(reduction->children[1])));
+    }
+    case LAMBDA_REDUCE_FOR: {
+        if (!sink->loop_scope_depth || reduction->child_count != 2) break;
+        uint32_t slot = sink->loop_scope_depth - 1;
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_WHILE) {
+            return direct_ast_value(build_while_from_parts(tp, reduction->span,
+                direct_ast_node(reduction->children[0]),
+                direct_ast_node(reduction->children[1]),
+                sink->loop_scopes[slot]));
+        }
+        AstForNode* active = sink->for_nodes[slot];
+        if (!active) break;
+        active->then = direct_ast_node(reduction->children[1]);
+        bool statement_form = (reduction->flags & LAMBDA_REDUCTION_FLAG_BODY_BLOCK) != 0;
+        active->node_type = statement_form ? AST_NODE_FOR_STAM : AST_NODE_FOR_EXPR;
+        if (active->then && active->then->node_type == AST_NODE_CONTENT &&
+                !((AstListNode*)active->then)->vars) {
+            ((AstListNode*)active->then)->vars = active->vars;
+        }
+        active->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
+            set_type_any(tp, ANY_LIST);
+        return direct_ast_value((AstNode*)active);
+    }
+    case LAMBDA_REDUCE_BINARY: {
+        if (reduction->child_count != 2) break;
+        return direct_ast_value(build_binary_node_from_parts(tp, reduction->span,
+            direct_token_text(tp, reduction->detail_token), child0,
+            direct_ast_node(reduction->children[1])));
+    }
+    case LAMBDA_REDUCE_POSTFIX: {
+        if (!reduction->child_count) break;
+        AstNode* object = child0;
+        if (reduction->form == LAMBDA_REDUCTION_FORM_MEMBER) {
+            StrView source = source_span_text(tp, reduction->span);
+            AstNode* path = try_parse_path_expr_text_span(tp, source.str,
+                source.str + source.length, reduction->span);
+            if (path) return direct_ast_value(path);
+            if (reduction->detail_token.kind == LAMBDA_TOK_SLASH) {
+                // A slash after an existing value is the navigation root
+                // field (`record./.name`), not a normal member named `/`.
+                return direct_ast_value(build_navigation_node_from_parts(tp,
+                    reduction->span, object, true));
+            }
+            if (reduction->detail_token.kind == LAMBDA_TOK_PARENT) {
+                return direct_ast_value(build_navigation_node_from_parts(tp,
+                    reduction->span, object, false));
+            }
+            AstNode* field = direct_member_field(tp, reduction->detail_token);
+            return direct_ast_value(build_field_node_from_parts(tp,
+                reduction->span, AST_NODE_MEMBER_EXPR, object, field));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_INDEX) {
+            AstNode* fields = NULL;
+            for (uint32_t i = 1; i < reduction->child_count; i++) {
+                fields = direct_append(fields,
+                    direct_ast_node(reduction->children[i]));
+            }
+            return direct_ast_value(build_field_node_from_parts(tp,
+                reduction->span, AST_NODE_INDEX_EXPR, object, fields));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_QUERY &&
+                reduction->child_count == 2) {
+            return direct_ast_value(build_query_node_from_parts(tp,
+                reduction->span, object,
+                direct_ast_node(reduction->children[1]),
+                reduction->detail_token.kind == LAMBDA_TOK_DOT_QUESTION));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_HANDLER) {
+            if (reduction->child_count < 2 || reduction->child_count > 3) break;
+            AstNode* body = direct_ast_node(reduction->children[1]);
+            AstNode* value_body = reduction->child_count == 3
+                ? direct_ast_node(reduction->children[2]) : NULL;
+            return direct_ast_value(build_handler_from_parts(tp, reduction->span,
+                object, body, value_body));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_PROPAGATE &&
+                reduction->child_count == 1) {
+            return direct_ast_value(build_propagate_node_from_parts(tp,
+                reduction->span, object));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_CALL) {
+            AstNode* args = NULL;
+            for (uint32_t i = 1; i < reduction->child_count; i++) {
+                args = direct_append(args,
+                    direct_ast_node(reduction->children[i]));
+            }
+            int prior_pipe_inject = tp->pipe_inject_args;
+            tp->pipe_inject_args = (reduction->flags &
+                LAMBDA_REDUCTION_FLAG_PIPE_INJECT) ? 1 : 0;
+            AstNode* call = build_call_node_from_parts(tp,
+                reduction->span, object, args,
+                (int)reduction->child_count - 1);
+            tp->pipe_inject_args = prior_pipe_inject;
+            return direct_ast_value(call);
+        }
+        break;
+    }
+    case LAMBDA_REDUCE_TYPE_SLOT: {
+        if ((reduction->flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_CONSTRAINT) &&
+                reduction->child_count == 2) {
+            AstNode* base = direct_ast_node(reduction->children[0]);
+            AstNode* constraint = direct_ast_node(reduction->children[1]);
+            return direct_ast_value(direct_constrained_type(tp, reduction->span,
+                base, constraint));
+        }
+        StrView source = source_span_text(tp, reduction->span);
+        AstNode* node = parse_type_pattern_text_span(tp, source.str,
+            source.str + source.length, reduction->span);
+        if (!node) {
+            // A rejected annotation still needs a concrete reduction value so
+            // its enclosing declaration can report the semantic error without
+            // dereferencing a poisoned null slot (D8.1.1v3).
+            node = direct_type_error_from_span(tp, reduction->span);
+        }
+        return direct_ast_value(node);
+    }
+    case LAMBDA_REDUCE_DECLARATION: {
+        // `pub` is a visibility modifier in the CST, not a distinct AST
+        // node. The committed assignment/function child already owns the
+        // binding entry; preserve it instead of manufacturing a declaration.
+        if (reduction->form == LAMBDA_REDUCTION_FORM_IMPORT) {
+            return direct_ast_value(build_module_import_from_parts(tp,
+                reduction->span,
+                direct_token_text(tp, reduction->detail_token),
+                direct_token_text(tp, reduction->secondary_token)));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_ALIAS) {
+            StrView alias_name = direct_token_text(tp, reduction->detail_token);
+            if (child0 && child0->node_type == AST_NODE_PATTERN_ISLAND) {
+                AstNode* pattern = direct_pattern_definition(tp, reduction->span,
+                    alias_name, child0);
+                return direct_ast_value(direct_type_stam(tp, reduction->span,
+                    pattern,
+                    (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0));
+            }
+            AstNamedNode* alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+            alias->name = name_pool_create_strview(tp->name_pool,
+                alias_name);
+            alias->as = child0;
+            alias->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+            alias->is_type_definition = true;
+            direct_finalize_type_alias(tp, alias);
+            lambda_ast_register_name(tp, alias);
+            return direct_ast_value(direct_type_stam(tp, reduction->span,
+                (AstNode*)alias,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT) {
+            if (sink->completed_object) {
+                AstNode* object = (AstNode*)sink->completed_object;
+                sink->completed_object = NULL;
+                return direct_ast_value(object);
+            }
+            break;
+        }
+        if (child0 && (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC)) {
+            AstLetNode* pub = (AstLetNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_PUB_STAM, reduction->span, sizeof(AstLetNode));
+            pub->declare = child0;
+            pub->type = set_type_any(tp, ANY_STATEMENT);
+            return direct_ast_value((AstNode*)pub);
+        }
+        if (child0) return direct_ast_value(child0);
+        AstNode* statement_noop = alloc_ast_node_from_span(tp, AST_NODE_NULL,
+            reduction->span, sizeof(AstNode));
+        statement_noop->type = &TYPE_NULL;
+        return direct_ast_value(statement_noop);
+    }
+    case LAMBDA_REDUCE_PATH_SLOT: {
+        StrView source = source_span_text(tp, reduction->span);
+        AstNode* node = parse_path_expr_text_span(tp, source.str,
+            source.str + source.length, reduction->span);
+        if (!node) {
+            // Keep a committed path reduction alive after a semantic path
+            // rejection; the enclosing expression must report the error
+            // rather than dereference a null reduction value (D8.1.1v3).
+            node = alloc_ast_node_from_span(tp, AST_NODE_PATH_EXPR,
+                reduction->span, sizeof(AstNode));
+            node->type = &TYPE_ERROR;
+        }
+        return direct_ast_value(node);
+    }
+    case LAMBDA_REDUCE_ASSIGNMENT:
+        if (reduction->child_count == 2) {
+            AstNode* assignment = build_assignment_statement_from_parts(tp,
+                reduction->span, direct_ast_node(reduction->children[0]),
+                direct_ast_node(reduction->children[1]));
+            if (assignment) return direct_ast_value(assignment);
+            // Preserve a real reduction value after a semantic rejection;
+            // a null callback result leaves the parser's value slot poisoned
+            // and the enclosing content walk then dereferences it (D8.1.1).
+            AstNode* noop = alloc_ast_node_from_span(tp, AST_NODE_NULL,
+                reduction->span, sizeof(AstNode));
+            noop->type = &TYPE_NULL;
+            return direct_ast_value(noop);
+        }
+        break;
+    case LAMBDA_REDUCE_STATEMENT: {
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD) {
+            direct_object_add_field(sink, reduction);
+            return direct_ast_value(child0);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONTENT) {
+            if (sink->object_node && child0) {
+                sink->object_node->content = direct_object_content_from_parts(
+                    tp, reduction->span, child0);
+            }
+            return direct_ast_value(child0);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT) {
+            if (sink->object_node && child0) {
+                if (!sink->object_node->constraints) {
+                    sink->object_node->constraints = child0;
+                } else {
+                    AstNode* tail = sink->object_node->constraints;
+                    while (tail->next) tail = tail->next;
+                    tail->next = child0;
+                }
+                sink->object_type->constraint = child0;
+            }
+            return direct_ast_value(child0);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VAR) {
+            if (!tp->current_scope || !tp->current_scope->is_proc) {
+                record_semantic_error_span(tp, reduction->span, ERR_PROC_IN_FN,
+                    "`var` is only allowed inside a procedure (pn)");
+            }
+            AstLetNode* var = (AstLetNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_VAR_STAM, reduction->span, sizeof(AstLetNode));
+            var->declare = child0;
+            var->type = set_type_any(tp, ANY_STATEMENT);
+            for (AstNode* declaration = child0; declaration;
+                    declaration = declaration->next) {
+                if (declaration->node_type != AST_NODE_ASSIGN) continue;
+                AstNamedNode* named = (AstNamedNode*)declaration;
+                NameEntry* entry = lookup_name_in_current_scope(tp, named->name);
+                if (entry) {
+                    entry->is_mutable = true;
+                    named->entry = entry;
+                }
+            }
+            return direct_ast_value((AstNode*)var);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_BINDING) {
+            if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1] ||
+                    !reduction->child_count) break;
+            bool has_index_type = (reduction->flags & LAMBDA_REDUCTION_FLAG_INDEX_TYPED) != 0;
+            AstNode* index_type = has_index_type
+                ? direct_ast_node(reduction->children[0]) : NULL;
+            AstNode* source = direct_ast_node(reduction->children[has_index_type ? 1 : 0]);
+            AstNode* join = reduction->child_count > (has_index_type ? 2u : 1u)
+                ? direct_ast_node(reduction->children[has_index_type ? 2 : 1]) : NULL;
+            AstNode* loop = build_loop_from_parts(tp, reduction->span,
+                reduction->detail_token, reduction->secondary_token,
+                reduction->flags, index_type, source, join);
+            AstForNode* active = sink->for_nodes[sink->loop_scope_depth - 1];
+            direct_append_clause(&active->loop, loop);
+            return direct_ast_value(loop);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_LET) {
+            if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1]) break;
+            AstNamedNode* let = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+            let->name = name_pool_create_strview(tp->name_pool,
+                direct_token_text(tp, reduction->detail_token));
+            let->as = child0;
+            let->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+            lambda_ast_register_name(tp, let);
+            AstForNode* active = sink->for_nodes[sink->loop_scope_depth - 1];
+            direct_append_clause(&active->let_clause, (AstNode*)let);
+            return direct_ast_value((AstNode*)let);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_WHERE) {
+            if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1]) break;
+            sink->for_nodes[sink->loop_scope_depth - 1]->where = child0;
+            return direct_ast_value(child0);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_GROUP_KEY) {
+            AstGroupKey* key = (AstGroupKey*)alloc_ast_node_from_span(tp,
+                AST_NODE_GROUP_CLAUSE, reduction->span, sizeof(AstGroupKey));
+            key->expr = child0;
+            key->alias = reduction->detail_token.kind
+                ? name_pool_create_strview(tp->name_pool,
+                    direct_token_text(tp, reduction->detail_token)) :
+                infer_group_key_alias(tp, child0);
+            return direct_ast_value((AstNode*)key);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_GROUP) {
+            if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1]) break;
+            AstGroupClause* group = (AstGroupClause*)alloc_ast_node_from_span(tp,
+                AST_NODE_GROUP_CLAUSE, reduction->span, sizeof(AstGroupClause));
+            group->name = name_pool_create_strview(tp->name_pool,
+                direct_token_text(tp, reduction->detail_token));
+            group->keys = (AstGroupKey*)child0;
+            for (AstGroupKey* key = group->keys; key;
+                    key = (AstGroupKey*)key->next) group->key_count++;
+            AstForNode* active = sink->for_nodes[sink->loop_scope_depth - 1];
+            active->group = group;
+            enter_for_group_scope(tp, active);
+            AstNamedNode* grouped = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+            grouped->name = group->name;
+            grouped->type = &TYPE_ELMT;
+            lambda_ast_register_name(tp, grouped);
+            return direct_ast_value((AstNode*)group);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_ORDER) {
+            if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1]) break;
+            AstOrderSpec* order = (AstOrderSpec*)alloc_ast_node_from_span(tp,
+                AST_NODE_ORDER_SPEC, reduction->span, sizeof(AstOrderSpec));
+            order->expr = child0;
+            order->descending = reduction->detail_token.kind == LAMBDA_TOK_DESC;
+            order->type = set_type_any(tp, ANY_STATEMENT);
+            AstForNode* active = sink->for_nodes[sink->loop_scope_depth - 1];
+            direct_append_clause(&active->order, (AstNode*)order);
+            return direct_ast_value((AstNode*)order);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_LIMIT ||
+                reduction->form == LAMBDA_REDUCTION_FORM_FOR_OFFSET) {
+            if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1]) break;
+            AstForNode* active = sink->for_nodes[sink->loop_scope_depth - 1];
+            if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_LIMIT) {
+                active->limit = child0;
+                active->limit_from_end =
+                    (reduction->flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) != 0;
+            } else active->offset = child0;
+            return direct_ast_value(child0);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_NAMED_ARGUMENT) {
+            AstNode* value = reduction->child_count ? child0 : NULL;
+            StrView name = direct_token_text(tp, reduction->detail_token);
+            return direct_ast_value((AstNode*)build_named_argument_from_parts(tp,
+                reduction->span, name, value));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_MAP_ITEM) {
+            AstNamedNode* item = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
+            StrView name = direct_token_text(tp, reduction->detail_token);
+            if (reduction->detail_token.kind == LAMBDA_TOK_SYMBOL &&
+                    name.length >= 2 && name.str[0] == '\'' &&
+                    name.str[name.length - 1] == '\'') {
+                // Map key symbols are quoted source spellings, but the AST
+                // stores the same bare field name as the CST key builder.
+                name.str++;
+                name.length -= 2;
+            }
+            item->name = name_pool_create_strview(tp->name_pool, name);
+            item->as = child0;
+            item->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+            return direct_ast_value((AstNode*)item);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE) {
+            AstNamedNode* item = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
+            StrView name = direct_token_text(tp, reduction->detail_token);
+            item->name = name_pool_create_strview(tp->name_pool, name);
+            item->as = child0;
+            item->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+            return direct_ast_value((AstNode*)item);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_MATCH_ARM) {
+            AstMatchArm* arm = (AstMatchArm*)alloc_ast_node_from_span(tp,
+                AST_NODE_MATCH_ARM, reduction->span, sizeof(AstMatchArm));
+            arm->next = NULL;
+            arm->pattern = reduction->child_count == 2
+                ? direct_ast_node(reduction->children[0]) : NULL;
+            arm->body = direct_ast_node(reduction->children[reduction->child_count - 1]);
+            return direct_ast_value((AstNode*)arm);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_PARAMETER) {
+            AstNode* type_node = NULL;
+            AstNode* default_value = NULL;
+            for (uint32_t i = 0; i < reduction->child_count; i++) {
+                AstNode* child = direct_ast_node(reduction->children[i]);
+                if (child && (child->node_type == AST_NODE_TYPE ||
+                        child->node_type == AST_NODE_CONTENT_TYPE ||
+                        child->node_type == AST_NODE_LIST_TYPE ||
+                        child->node_type == AST_NODE_ARRAY_TYPE ||
+                        child->node_type == AST_NODE_MAP_TYPE ||
+                        child->node_type == AST_NODE_ELMT_TYPE ||
+                        child->node_type == AST_NODE_FUNC_TYPE ||
+                        child->node_type == AST_NODE_BINARY_TYPE ||
+                        child->node_type == AST_NODE_UNARY_TYPE)) {
+                    type_node = child;
+                } else {
+                    default_value = child;
+                }
+            }
+            return direct_ast_value((AstNode*)build_param_from_parts(tp,
+                reduction->span, direct_token_text(tp, reduction->detail_token),
+                type_node, default_value,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) != 0,
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_VAR) != 0));
+        }
+        if (child0 && (child0->node_type == AST_NODE_ASSIGN ||
+                child0->node_type == AST_NODE_DECOMPOSE)) {
+            AstLetNode* let = (AstLetNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_LET_STAM, reduction->span, sizeof(AstLetNode));
+            let->declare = child0;
+            let->type = child0->type;
+            return direct_ast_value((AstNode*)let);
+        }
+        if (child0) return direct_ast_value(child0);
+        // Statement separators may carry a syntax-only declaration (for
+        // example `var` or `apply;`).  Publish a real sentinel so the parser
+        // reduction value is not replaced by its structural hash and later
+        // mistaken for an AstNode pointer.
+        AstNode* noop = alloc_ast_node_from_span(tp, AST_NODE_NULL,
+            reduction->span, sizeof(AstNode));
+        noop->type = &TYPE_NULL;
+        return direct_ast_value(noop);
+    }
+    case LAMBDA_REDUCE_DOCUMENT: {
+        AstScript* root = (AstScript*)alloc_ast_node_from_span(tp, AST_SCRIPT,
+            reduction->span, sizeof(AstScript));
+        root->global_vars = tp->current_scope;
+        // Top-level imports are script children in the legacy AST.  Keep that
+        // contract here so module registration sees every dependency before it
+        // scans the single content list for public declarations.
+        AstNode* imports = NULL;
+        AstNode* content_items = NULL;
+        AstListNode* content = child0 && child0->node_type == AST_NODE_CONTENT
+            ? (AstListNode*)child0 : NULL;
+        if (content) {
+            for (AstNode* item = content->item; item;) {
+                AstNode* next = item->next;
+                item->next = NULL;
+                if (item->node_type == AST_NODE_IMPORT) {
+                    imports = direct_append(imports, item);
+                } else {
+                    content_items = direct_append(content_items, item);
+                }
+                item = next;
+            }
+            content->item = content_items;
+            content->list_type->length = 0;
+            for (AstNode* item = content_items; item; item = item->next) {
+                content->list_type->length++;
+            }
+            content->type = content_items && content_items->type
+                ? content_items->type : &TYPE_NULL;
+        }
+        AstNode* tail = imports;
+        while (tail && tail->next) tail = tail->next;
+        if (tail) tail->next = content;
+        root->child = imports ? imports : (AstNode*)content;
+        root->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+        sink->root = root;
+        return direct_ast_value((AstNode*)root);
+    }
+    default:
+        break;
+    }
+
+    // Keep unsupported forms fail-closed while the reduction contract is being
+    // expanded. Publishing a partial semantic node would make comparison mode
+    // accept a source with a silently different AST.
+    log_error("direct AST reduction unsupported kind=%d form=%d span=%u..%u",
+        (int)reduction->kind, (int)reduction->form,
+        reduction->span.start_byte, reduction->span.end_byte);
+    sink->failed = true;
+    return 0;
+}
+
+LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
+        size_t length, AstScript** root_out, LambdaParseError* error) {
+    if (root_out) *root_out = NULL;
+    if (!tp || !source) return LAMBDA_PARSE_ERROR;
+    tp->source = source;
+    if (!tp->pool) {
+        Input* input = Input::create(mem_pool_create(NULL, MEM_ROLE_AST, "direct-parser.pool"), nullptr);
+        if (!input) return LAMBDA_PARSE_ERROR;
+        tp->pool = input->pool;
+        tp->arena = input->arena;
+        tp->name_pool = input->name_pool;
+        tp->type_list = input->type_list;
+        tp->url = input->url;
+        tp->path = input->path;
+        tp->root = input->root;
+    }
+    if (!tp->const_list) tp->const_list = arraylist_new(16);
+    if (!tp->current_scope) {
+        tp->current_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    }
+
+    // Match the CST builder's top-level pass: every named function is visible
+    // while earlier bodies are reduced, so a declaration cannot be mistaken
+    // for a same-spelled system function (for example `gamma`).
+    direct_predeclare_top_level_functions(tp, source, length);
+
+    LambdaDirectAstSink sink = {.tp = tp, .root = NULL, .failed = false};
+    LambdaParseSink parse_sink = {direct_ast_reduce};
+    LambdaParseStatus status = lambda_rd_parse_source(source, length, &parse_sink,
+        &sink, NULL, error);
+    if (status != LAMBDA_PARSE_OK || sink.failed || !sink.root) {
+        log_error("direct parser failure status=%d sink=%d at=%u message=%s",
+            (int)status, sink.failed ? 1 : 0,
+            error ? error->span.start_byte : 0,
+            error && error->message ? error->message : "<none>");
+        if (error && !error->message) error->message = "direct AST reduction failed";
+        return status == LAMBDA_PARSE_OK ? LAMBDA_PARSE_ERROR : status;
+    }
+    if (root_out) *root_out = sink.root;
+    return LAMBDA_PARSE_OK;
 }
