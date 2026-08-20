@@ -12286,15 +12286,13 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     } else if (MIR_reg_type(mt->ctx, val, mt->em.func) == MIR_T_P ||
                             (var_tid == LMD_TYPE_STRING &&
                              (expr_tid == LMD_TYPE_STRING || expr_tid == LMD_TYPE_ANY))) {
-                        // Known pointer bindings keep their raw GC-pointer lane;
-                        // only an `any` binding needs the Item tag. Boxing a
-                        // pointer while retaining its concrete type makes the
-                        // root metadata and later reads disagree (D2.2.2).
-                        if (lambda_value_rep(var_tid) == VALUE_REP_ITEM) {
-                            TypeId pointer_tid = expr_tid != LMD_TYPE_ANY &&
-                                    expr_tid != LMD_TYPE_NULL ? expr_tid : var_tid;
-                            src = emit_box(mt, val, pointer_tid);
-                        }
+                        // Local bindings publish through the Item root lane.
+                        // The string append/freeze path reloads that root after
+                        // allocation; retaining a raw String* here makes it
+                        // decode pointer bits as an Item (D2.2.2).
+                        TypeId pointer_tid = expr_tid != LMD_TYPE_ANY &&
+                                expr_tid != LMD_TYPE_NULL ? expr_tid : var_tid;
+                        src = emit_box(mt, val, pointer_tid);
                     }
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, copy), MIR_new_reg_op(mt->ctx, src)));

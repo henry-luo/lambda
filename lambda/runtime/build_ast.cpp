@@ -13612,6 +13612,27 @@ AstNode* build_field_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
     if (node_type == AST_NODE_MEMBER_EXPR) {
         AstNode* object_value = ast_unwrap_primary(object);
         AstNode* field_value = ast_unwrap_primary(field);
+        if (object_value && field_value &&
+                field_value->node_type == AST_NODE_IDENT) {
+            AstIdentNode* field_ident = (AstIdentNode*)field_value;
+            StrView object_name = source_span_text(tp, object_value->source_span);
+            char qualified[256];
+            snprintf(qualified, sizeof(qualified), "%.*s.%.*s",
+                (int)object_name.length, object_name.str,
+                (int)field_ident->name->len, field_ident->name->chars);
+            NameEntry* imported = lookup_name(tp, strview_from_cstr(qualified));
+            if (imported && imported->import && imported->node) {
+                // An import alias may share a system-function spelling (for
+                // example `stack`). Resolve its qualified export before the
+                // bare spelling can become a callable value (D4.6.1v2).
+                AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node_from_span(
+                    tp, AST_NODE_IDENT, span, sizeof(AstIdentNode));
+                resolved->name = imported->name;
+                resolved->entry = imported;
+                resolved->type = imported->node->type ? imported->node->type : &TYPE_ANY;
+                return build_primary_wrapper_from_parts(tp, span, (AstNode*)resolved);
+            }
+        }
         if (object_value && object_value->node_type == AST_NODE_IDENT &&
                 field_value && field_value->node_type == AST_NODE_IDENT) {
             AstIdentNode* object_ident = (AstIdentNode*)object_value;
@@ -13668,19 +13689,6 @@ AstNode* build_field_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
                     result->type = (Type*)constant;
                     return (AstNode*)result;
                 }
-            }
-            char qualified[256];
-            snprintf(qualified, sizeof(qualified), "%.*s.%.*s",
-                (int)module_name.length, module_name.str,
-                (int)field_ident->name->len, field_ident->name->chars);
-            NameEntry* imported = lookup_name(tp, strview_from_cstr(qualified));
-            if (imported && imported->import && imported->node) {
-                AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node_from_span(
-                    tp, AST_NODE_IDENT, span, sizeof(AstIdentNode));
-                resolved->name = imported->name;
-                resolved->entry = imported;
-                resolved->type = imported->node->type ? imported->node->type : &TYPE_ANY;
-                return build_primary_wrapper_from_parts(tp, span, (AstNode*)resolved);
             }
         }
     }
