@@ -14038,7 +14038,20 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
         // function; preserve their target type for the MIR coercion lane
         // instead of lowering them as dynamic calls (D2.2.2).
         Type* target_type = ast_called_type_target(call->function);
-        call->type = target_type ? target_type : set_type_any(tp, ANY_CALL_RESULT);
+        bool unresolved_system_spelling = effective &&
+            effective->node_type == AST_NODE_TYPE && name.length &&
+            is_sys_func_name(name.str, (int)name.length);
+        // `error` is both a type spelling and a constructor name (S7.4.4).
+        // If no arity-compatible system entry was found, the Tree builder
+        // keeps that call dynamic; treating the lexical TYPE token as a value
+        // constructor here incorrectly turns an unresolved named call into a
+        // proven error return and rejects its enclosing fn with E208.
+        if (unresolved_system_spelling) {
+            call->type = set_type_any(tp, ANY_CALL_RESULT);
+        } else {
+            call->type = target_type ? target_type :
+                set_type_any(tp, ANY_CALL_RESULT);
+        }
     }
     if (!info && arg_count == 1) {
         // Only unresolved calls can denote a type conversion. Builtins such
