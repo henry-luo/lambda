@@ -48,12 +48,23 @@ mirrors, with identical workload sizes and PRNG sequences.
 - `cow_document_edit`: exercises Lambda's copy-on-write document runtime, not a
   portable C workload.
 
-## Known caveat
+## Resolved caveat — `crypto_sha1` (cleared 2026-08-19)
 
-- `jetstream/crypto_sha1.ls` currently computes a WRONG digest on the Lambda
-  engine (prints `FAIL got=ffffffffffffffffffffffffffffffffffffffff` on both
-  the archived v33 binary and current builds) — a Lambda bitwise defect under
-  investigation, not a workload ambiguity. The C port asserts the digest the
-  `.ls` itself asserts (`2524d264…b796d`, independently verified against
-  Python's hashlib), so the C2MIR cell measures the *correct* computation while
-  the MIR cells for this row time a wrong one until the engine bug is fixed.
+- `jetstream/crypto_sha1.ls` was recorded here as computing a WRONG digest on
+  the Lambda engine (`FAIL got=ffffffffffffffffffffffffffffffffffffffff`, an
+  all-ones saturation) on both the archived v33 binary and the then-current
+  build. **That is no longer true.** Both variants now assert PASS, and the
+  asserted digest `2524d264def74cce2498bf112bedf00e6c0b796d` was re-verified
+  against Python's `hashlib` on the exact doubled-plaintext input the script
+  hashes. The row measures the correct computation on both engines.
+
+- ⚠ Where it was fixed is NOT established. It passes on `f46aae989` (the tree
+  the caveat's own commit predates) as well as on current builds, so the fix
+  landed somewhere in that window; no bisect was run, because each step needs a
+  full release build.
+
+- ⚠ Consequence for the published cells: the crypto_sha1 **MIR** cells in
+  `benchmark_results_v33.json` and earlier were taken while the engine was
+  producing all-ones, which is not the same amount of work as the correct
+  digest. Those cells should be re-measured before this row is compared across
+  sessions. The C2MIR cell was always correct and is unaffected.

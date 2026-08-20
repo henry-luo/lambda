@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "T19-A: rebinding a declared int from a lane-native int[] read tests INT_LANE_NULL inline and branches, instead of boxing the lane for lambda_type_check on the straight-line path. Anchored on the indexed load (the one `mul` in the body): the read's null arm materialises INT_LANE_NULL, the boundary compares against it, and a branch follows immediately. The boxed lowering has no such adjacency -- it tags the lane and calls out first. checked_rebind is the unproven twin and still crosses the boxed boundary.",
+  "checks": [
+    {
+      "in_func": "_last_element_#",
+      "expect_seq": [
+        { "pattern": "\tmul\t" },
+        { "pattern": ", 72057594037927936" },
+        { "pattern": ", 72057594037927936" },
+        { "pattern": "\tbf\t", "next_line": true }
+      ],
+      "count": {
+        "lambda_type_check,": 2
+      }
+    },
+    {
+      "in_func": "_checked_rebind_#",
+      "expect": [
+        "lambda_type_check,"
+      ]
+    }
+  ]
+}

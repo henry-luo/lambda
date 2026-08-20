@@ -39,13 +39,13 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 216,
+          "module_insns": 204,
           "functions": {
             "_twice_#": {
-              "insns": 69
+              "insns": 66
             },
             "main": {
-              "insns": 50
+              "insns": 48
             }
           },
           "frames": [
@@ -107,13 +107,13 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 239,
+          "module_insns": 223,
           "functions": {
             "_accumulate_#": {
-              "insns": 109
+              "insns": 104
             },
             "main": {
-              "insns": 44
+              "insns": 42
             }
           },
           "frames": [
@@ -145,10 +145,10 @@
       "description": "Boundary i64/u64 boxing cost through the number-stack boxers.",
       "budgets": {
         "default": {
-          "module_insns": 152,
+          "module_insns": 50,
           "functions": {
             "main": {
-              "insns": 152
+              "insns": 50
             }
           },
           "frames": [
@@ -156,7 +156,7 @@
               "name": "main",
               "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
               "safepoints": 11
             }
@@ -171,17 +171,17 @@
       "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2).",
       "budgets": {
         "default": {
-          "module_insns": 243,
+          "module_insns": 231,
           "functions": {
             "js_main": {
-              "insns": 178
+              "insns": 170
             }
           },
           "frames": [
             {
               "name": "js_main",
               "roots": 7,
-              "root_stores": 19,
+              "root_stores": 18,
               "scalar_homes": 2,
               "number_scratch": 0,
               "safepoints": 21
@@ -224,10 +224,10 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 520,
+          "module_insns": 417,
           "functions": {
             "js_main": {
-              "insns": 76
+              "insns": 74
             }
           },
           "frames": [
@@ -259,7 +259,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 3138
+          "module_insns": 2132
         }
       }
     },
@@ -270,7 +270,7 @@
       "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks.",
       "budgets": {
         "default": {
-          "module_insns": 1785
+          "module_insns": 1442
         }
       }
     },
@@ -281,7 +281,7 @@
       "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots and merged Item error-tag branches in each generated root frame. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary.",
       "budgets": {
         "default": {
-          "module_insns": 3537
+          "module_insns": 3332
         }
       }
     },
@@ -292,7 +292,7 @@
       "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary.",
       "budgets": {
         "default": {
-          "module_insns": 5300
+          "module_insns": 5256
         }
       }
     },
@@ -303,7 +303,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3).",
       "budgets": {
         "default": {
-          "module_insns": 7991
+          "module_insns": 7785
         }
       }
     },
@@ -317,7 +317,7 @@
           "module_insns": 155
         },
         "darwin-debug-v3": {
-          "module_insns": 156
+          "module_insns": 142
         }
       }
     },
@@ -328,13 +328,13 @@
       "description": "Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 1177,
+          "module_insns": 955,
           "functions": {
             "_guarded_load_#": {
-              "insns": 57
+              "insns": 54
             },
             "_guarded_store_#": {
-              "insns": 107
+              "insns": 105
             }
           },
           "frames": [
@@ -352,7 +352,7 @@
               "root_stores": 0,
               "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 5
+              "safepoints": 4
             }
           ]
         }
@@ -365,13 +365,13 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 687,
+          "module_insns": 608,
           "functions": {
             "_closed_gap_#": {
-              "insns": 73
+              "insns": 64
             },
             "_open_gap_#": {
-              "insns": 73
+              "insns": 64
             }
           },
           "frames": [
@@ -438,10 +438,10 @@
           ]
         },
         "darwin-debug": {
-          "module_insns": 14587,
+          "module_insns": 14448,
           "functions": {
             "js_main": {
-              "insns": 5686
+              "insns": 5676
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 10
@@ -450,11 +450,11 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 12,
-              "root_stores": 806,
+              "roots": 11,
+              "root_stores": 785,
               "scalar_homes": 15,
               "number_scratch": 0,
-              "safepoints": 2111
+              "safepoints": 2102
             }
           ]
         },
