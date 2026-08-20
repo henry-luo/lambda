@@ -13,13 +13,15 @@
 //    direct field read/write pair, which returns raw untagged bytes for them --
 //    `{v: decimal}` reported its type as `raw_pointer`.
 //
-// ⚠ NOT covered, still broken at HEAD and pre-existing: a `number`-contracted
-// field fails at CONSTRUCTION (`var m: M = {q: 1.5}` produces no output at all,
-// on the session-start binary too), and arithmetic on an `integer` field
-// (`c.n = c.n + 1n`) silently yields nothing. See Tune19 §12.7.
+//  * the validator's `unwrap_type` dereferenced a compact global meta-type
+//    (`number`/`integer` carry only the two-byte Type prefix), so a
+//    `number`-contracted field aborted CONSTRUCTION on a global-buffer-overflow,
+//    and `integer` membership could not be decided at all -- which is why
+//    arithmetic on an `integer` field failed at the STORE.
 
 type Counter = {v: integer}
 type Counts = {n: integer, label: string}
+type Measures = {q: number, label: string}
 type Money = {amount: decimal, label: string}
 type Stamped = {at: datetime, label: string}
 
@@ -34,4 +36,10 @@ pn main() {
     print(wide.n ++ " " ++ wide.label ++ "\n")
     print(type(money.amount) ++ " " ++ money.amount ++ " " ++ money.label ++ "\n")
     print(type(stamped.at) ++ " " ++ stamped.label ++ "\n")
+
+    // arithmetic round-trips through the slot: read, compute, store back
+    var m: Measures = {q: 1.5, label: "measures"}
+    m.q = m.q + 1.0
+    multi.n = multi.n + 1n
+    print(type(m.q) ++ " " ++ m.q ++ " | " ++ type(multi.n) ++ " " ++ multi.n ++ "\n")
 }
