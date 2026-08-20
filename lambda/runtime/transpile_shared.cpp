@@ -81,6 +81,21 @@ ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int na
     return NULL;
 }
 
+AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
+        const ShapeEntry* shape) {
+    if (!literal || !shape || !shape->name) return NULL;
+    for (AstNode* item = literal->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* key = (AstNamedNode*)item;
+        if (key->name && key->name->len == shape->name->length &&
+                strncmp(key->name->chars, shape->name->str,
+                    shape->name->length) == 0) {
+            return key->as;
+        }
+    }
+    return NULL;
+}
+
 bool has_fixed_shape(TypeMap* map_type) {
     if (!map_type->struct_name) return false;
     if (!map_type->shape || map_type->length == 0) return false;

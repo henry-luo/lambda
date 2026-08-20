@@ -2091,6 +2091,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_LOOP: return "AST_NODE_LOOP";
         case AST_NODE_ORDER_SPEC: return "AST_NODE_ORDER_SPEC";
         case AST_NODE_GROUP_CLAUSE: return "AST_NODE_GROUP_CLAUSE";
+        case AST_NODE_GROUP_KEY: return "AST_NODE_GROUP_KEY";
         case AST_NODE_JOIN_KEY: return "AST_NODE_JOIN_KEY";
         case AST_NODE_FOR_EXPR: return "AST_NODE_FOR_EXPR";
         case AST_NODE_INDEX_ASSIGN_STAM: return "AST_NODE_INDEX_ASSIGN_STAM";
@@ -2342,6 +2343,12 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             AstGroupClause* group = (AstGroupClause*)node;
             emit_dump_string_field("name", group->name);
             emit_lambda_dump_list(source, "keys", (AstNode*)group->keys, indent + 1);
+            break;
+        }
+        case AST_NODE_GROUP_KEY: {
+            AstGroupKey* key = (AstGroupKey*)node;
+            emit_dump_string_field("alias", key->alias);
+            emit_lambda_dump_field(source, "expr", key->expr, indent + 1);
             break;
         }
         case AST_NODE_ORDER_SPEC:

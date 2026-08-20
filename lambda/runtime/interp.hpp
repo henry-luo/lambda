@@ -78,6 +78,8 @@ struct InterpFrame {
     uint64_t*           slots;       // side-root window base (Item lanes)
     Item*               env;         // closure capture env (NULL when not a closure)
     uint32_t            env_count;
+    const TypeMethod*   method;      // non-null for an interpreted bound object method
+    uint64_t*           method_self; // separately rooted receiver slot for that method
     uint32_t            slot_count;
     uint32_t            scratch_base;
     uint32_t            scratch_top; // debug-checked <= slot_count
@@ -193,6 +195,10 @@ bool interp_satellite_import_supported(const NameEntry* entry);
 // as defense in depth when a future AST form reaches eval_call directly.
 bool interp_predicate_supported(AstNode* predicate);
 bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info);
+// System-call names are syntactic labels only: MIR lowers their values in
+// source order. Pure rows therefore share T0's positional Item ABI; procedural
+// rows remain excluded because a piped receiver has no COW write-back channel.
+bool interp_named_sys_args_supported(const AstNode* callee);
 // the P3 pass-manager entry evaluates pure literal subtrees in CONST mode and
 // publish only immediate results into the indexed AST fact table.
 bool interp_const_fold_script(Transpiler* tp);

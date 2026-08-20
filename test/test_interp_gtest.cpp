@@ -24,10 +24,12 @@
 #include <sstream>
 
 #ifdef _WIN32
+    #include <process.h>
     #define LAMBDA_EXE "lambda.exe"
     #define popen _popen
     #define pclose _pclose
 #else
+    #include <unistd.h>
     #define LAMBDA_EXE "./lambda.exe"
 #endif
 
@@ -38,6 +40,16 @@ struct RunResult {
     std::string stderr_text;
     int exit_code = 0;
 };
+
+long interp_test_process_id() {
+#ifdef _WIN32
+    return (long)_getpid();
+#else
+    return (long)getpid();
+#endif
+}
+
+static unsigned long interp_gtest_run_sequence = 0;
 
 // The project's own harness (test_lambda_helpers.hpp) trims trailing whitespace
 // on both sides before comparing, and several goldens are stored without a
@@ -63,7 +75,11 @@ std::string read_file(const std::string& path) {
 RunResult run_script(const std::string& script, const char* tier,
                      bool procedural = false) {
     RunResult result;
-    std::string err_path = "temp/interp_gtest_stderr.txt";
+    char err_path[128];
+    // A fixed stderr path races with another interpreter gtest invocation and
+    // can make this run read an empty or unrelated summary after pclose().
+    snprintf(err_path, sizeof(err_path), "temp/interp_gtest_stderr_%ld_%lu.txt",
+             interp_test_process_id(), ++interp_gtest_run_sequence);
     std::string command;
     if (tier) command += std::string("LAMBDA_TIER=") + tier + " ";
     command += LAMBDA_EXE;
@@ -81,6 +97,7 @@ RunResult run_script(const std::string& script, const char* tier,
     result.exit_code = WEXITSTATUS(status);
 #endif
     result.stderr_text = read_file(err_path);
+    ::remove(err_path);
     return result;
 }
 
@@ -206,6 +223,76 @@ TEST(InterpWalker, SystemFunctionsAndMethods) {
         "let nums = [3, 1, 2]\nsum(nums)\nmin(nums)\nmax(nums)\nnums.len()\n");
 }
 
+TEST(InterpWalker, NamedPureSystemArgsKeepTheirPositionalAbi) {
+    // The system registry has no formal-name table: MIR evaluates the named
+    // value in source order, including when the pipe supplies argument zero.
+    expect_tiers_agree("named_sys_pipe",
+        "let m = [[1, 5, 3], [4, 2, 6]]\n"
+        "min(m, axis: 0)\n"
+        "m |> min(axis: 0)\n"
+        "m |> max(axis: 1)\n");
+}
+
+TEST(InterpWalker, DeferredDeclarationFailureSkipsItsDeclaringBlock) {
+    // A dynamic decimal reaches the int boundary only at runtime. Both tiers
+    // must abandon the function before the following expression can run.
+    expect_tiers_agree("declaration_boundary_skip",
+        "fn dynamic_decimal() any { 3.5m }\n"
+        "fn must_stop() {\n"
+        "  let rejected: int = dynamic_decimal()\n"
+        "  \"unreachable\"\n"
+        "}\n"
+        "must_stop()\n");
+}
+
+TEST(InterpWalker, DeferredParameterFailureReturnsAtTheCallBoundary) {
+    // The direct-call boundary owns a rejected parameter. MIR returns before
+    // the callee body or an enclosing `or` expression can turn it into a value.
+    expect_tiers_agree("parameter_boundary_skip",
+        "fn dynamic_decimal() any { 3.5m }\n"
+        "fn must_not_enter(value: int) int { value }\n"
+        "must_not_enter(dynamic_decimal()) or 9\n");
+}
+
+TEST(InterpWalker, NamedAndInlinePatterns) {
+    // Pattern values have no slab binding: both tiers must materialize their
+    // module-local TypePattern before `is`, match, or a partial text operation.
+    expect_tiers_agree("patterns",
+        "type digits = \\(d+)\n"
+        "type symbol_digits = \\symbol(d+)\n"
+        "\"123\" is digits\n"
+        "'123' is symbol_digits\n"
+        "\"123\" is \\(d+)\n"
+        "match \"42\" { case digits: \"number\" default: \"other\" }\n"
+        "replace(\"a1b2\", digits, \"x\")\n");
+}
+
+TEST(InterpWalker, OrderedForWindowsUseSharedSortKeys) {
+    // Ordered comprehensions must sort their emitted rows before selecting the
+    // requested window; the key stream is separate from the spreadable output.
+    expect_tiers_agree("ordered_for",
+        "for (x in [3, 1, 4, 1, 5] order by x desc limit 3 offset 1) x\n");
+}
+
+TEST(InterpWalker, GroupedForMaterializesRowsBeforeAggregateBody) {
+    // Group keys are evaluated against the filtered row scope, whereas the
+    // body observes only the materialized `into` Element and its child rows.
+    expect_tiers_agree("grouped_for",
+        "for (x in [1, 2, 3, 4], let parity = x % 2 where x > 1 "
+        "group by parity as p into g order by g.p desc) "
+        "{key: g.p, total: sum(g |> ~)}\n");
+}
+
+TEST(InterpWalker, JoinedForPreservesTupleAndLeftJoinBindings) {
+    // S14.1 requires tuple-stream joins to retain prior index bindings and
+    // null-pad the optional source without allowing null keys to match.
+    expect_tiers_agree("joined_for",
+        "let orders = [{cid: 1, item: \"a\"}, {cid: 9, item: \"z\"}]\n"
+        "let customers = [{id: 1, name: \"Ann\"}]\n"
+        "for (i, o in orders, j, c? in customers on o.cid == c.id) "
+        "{order_pos: i, customer_pos: j, item: o.item, name: c.name}\n");
+}
+
 TEST(InterpWalker, HigherOrderCalls) {
     expect_tiers_agree("hof",
         "fn apply(f, v) { f(v) }\nlet dbl = (x) => x * 2\napply(dbl, 21)\n"
@@ -238,6 +325,168 @@ TEST(InterpWalker, ProceduralMainIsInvokedUnderRunMode) {
     EXPECT_EQ(jit.stdout_text, interp.stdout_text) << "run-mode tiers diverge";
     EXPECT_NE(interp.stdout_text.find("42"), std::string::npos)
         << "run mode produced no main() result: [" << interp.stdout_text << "]";
+}
+
+TEST(InterpWalker, IntegerBoundedRangeIndicesUseCowAssignment) {
+    // A `to` range is AST-typed any, but an explicit integer bound makes every
+    // successful iteration integral; nested arithmetic must retain that proof.
+    const char* path = "temp/interp_case_range_index.ls";
+    write_script(path,
+        "pn main() {\n"
+        "    var values = [null, null, null, null]\n"
+        "    for i in 0 to 1 {\n"
+        "        for j in 0 to 1 { values[i * 2 + j] = i * 2 + j }\n"
+        "    }\n"
+        "    print(string(int(values[0])))\n"
+        "    print(string(int(values[1])))\n"
+        "    print(string(int(values[2])))\n"
+        "    print(string(int(values[3])))\n"
+        "}\n");
+    RunResult jit = run_script(path, "jit", /*procedural=*/true);
+    RunResult interp = run_script(path, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text))
+        << "integer range-index stores diverge across tiers";
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, Uint64TypedArrayKeepsItsFullWidthLane) {
+    // A u64[] literal must retain ELEM_UINT64 through a checked COW write;
+    // routing it through generic storage would erase the typed-index proof.
+    const std::string script = "test/lambda/proc/proc_uint64_array_set.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, NullableNativeTypedArraysKeepTheirDestinationLane) {
+    // Optional array elements are full contracts, so T0 must enter the same
+    // nullable native carrier used by MIR before its checked COW write.
+    const char* scripts[] = {
+        "test/lambda/proc/proc_nullable_native_array.ls",
+        "test/lambda/proc/proc_nullable_native_float_array.ls",
+        "test/lambda/proc/proc_nullable_native_int64_array.ls",
+        "test/lambda/proc/proc_nullable_native_sized_array.ls",
+        "test/lambda/proc/proc_nullable_native_pointer.ls",
+        "test/lambda/proc/proc_nullable_native_extended_pointer.ls",
+    };
+    for (const char* script : scripts) {
+        RunResult jit = run_script(script, "jit", /*procedural=*/true);
+        RunResult interp = run_script(script, "interp", /*procedural=*/true);
+        EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0) << script;
+        EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text)) << script;
+        EXPECT_EQ(jit.exit_code, interp.exit_code) << script;
+    }
+}
+
+TEST(InterpWalker, NumericMaskAssignmentUsesTheVectorStore) {
+    // A typed bool mask owns its lane/shape checks in fn_index_assign; T0 must
+    // use that same in-place vector store for scalar, block, and N-D writes.
+    const char* script = "test/lambda/proc/proc_mask_assign.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, DirectNumericNdimIndicesUseArrayNumHelpers) {
+    // Fixed coordinates on a direct N-D numeric literal must retain ArrayNum's
+    // axis bounds and in-place store semantics across both execution tiers.
+    const char* script = "test/lambda/proc/proc_ndim_index_write.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, DirectVmapSetUsesTheCowReplacement) {
+    // A direct VMap receiver must publish vmap_set_cow's replacement so a
+    // later alias observes its own snapshot rather than the writer's update.
+    const char* script = "test/lambda/proc/vmap.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, OpenItemMarkupMutationUsesRuntimeCow) {
+    // `any | error` is a boxed open contract, so its map/Element writes must
+    // keep the runtime COW ownership bridge instead of being rejected as a
+    // typed structural write.
+    const char* script = "test/lambda/proc/proc_markup_mutation.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, ObjectMethodsUseTracedCowReceiver) {
+    // A bound T0 method keeps self in a GC-traced closure slot. Procedural
+    // methods must detach and publish that receiver before field write-back,
+    // while ordinary methods read the same receiver without mutating aliases.
+    const char* scripts[] = {
+        "test/lambda/proc/proc_object_counter.ls",
+        "test/lambda/proc/object_mutation.ls",
+    };
+    for (const char* script : scripts) {
+        RunResult jit = run_script(script, "jit", /*procedural=*/true);
+        RunResult interp = run_script(script, "interp", /*procedural=*/true);
+        EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0) << script;
+        EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text)) << script;
+        EXPECT_EQ(jit.exit_code, interp.exit_code) << script;
+    }
+}
+
+TEST(InterpWalker, NestedDeclaredMapWritesUseFullContract) {
+    // Nested writes must validate the rebuilt Person root, so dynamic numeric
+    // fields are converted at admission and a rejected child write is atomic.
+    const char* script = "test/lambda/proc/proc_type_numeric_structural_admission.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, ElementLiteralMutationUsesTheMatchingCowLayout) {
+    // Element attributes and children occupy distinct layouts; the walker must
+    // dispatch their direct literal writes through map- and array-COW alike.
+    const std::string script = "test/lambda/proc/proc_element_mutation.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, ImmutableProcAliasStaysSynchronous) {
+    // Native concurrency analysis conservatively treats an indirect pn call as
+    // await-capable. T0 may execute only the immutable-alias case after its
+    // source-level proof finds no task edge.
+    const std::string script = "test/lambda/proc/proc_closure_mutation.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpFallback, ImmutableProcAliasWithTaskStaysPinned) {
+    // An immutable alias alone is insufficient: its resolved procedure must
+    // also have no async system call or task edge before T0 may execute it.
+    const std::string path = "temp/interp_case_proc_alias_task.ls";
+    write_script(path,
+        "pn worker() { sleep(1) }\n"
+        "pn main() { let run = worker\n run() }\n");
+    RunResult interp = run_script(path, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 0);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 1);
 }
 
 //==============================================================================
@@ -279,6 +528,19 @@ TEST(InterpFramePlan, NestedCallArgumentsStayInsideThePlannedWindow) {
         << "frame plan undercounted scratch for nested calls";
 }
 
+TEST(InterpFramePlan, NominalMatchPatternsStayInsideThePlannedWindow) {
+    // A type-name arm keeps its evaluated Type value live while fn_is runs;
+    // account for that temporary above eval_match's four context homes.
+    const char* script = "test/lambda/object_pattern.ls";
+    RunResult jit = run_script(script, "jit");
+    RunResult interp = run_script(script, "interp");
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+    EXPECT_EQ(interp.stderr_text.find("interp: scratch overflow"), (size_t)-1)
+        << "frame plan undercounted a nominal match pattern";
+}
+
 // Recursion beyond the budget must produce a clean S7.4.3-channel fault, not a
 // crash. Fault timing may differ from T1 (S7.11.4); reaching the fault at all
 // is what this pins.
@@ -313,6 +575,28 @@ TEST(InterpFallback, ExcludedScriptsAreCountedNotInterpreted) {
         EXPECT_EQ(executed, 0) << entry.script
             << " is on the exclusion list but ran under T0";
     }
+}
+
+TEST(InterpFallback, GenericUint64ReadStaysPinnedToMir) {
+    // Generic storage canonicalizes a small borrowed u64 to int on read, so
+    // only a native ELEM_UINT64 lane may run under T0 until generic storage
+    // gains a lane-preserving read carrier.
+    RunResult interp = run_script("test/lambda/sized_numeric_collections.ls", "interp");
+    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 0);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 1);
+}
+
+TEST(InterpFallback, CharacterRangeIndexRemainsPinned) {
+    // `to` can also make a character range, so it cannot use the integer COW
+    // bridge merely because the loop's conservative AST type is `any`.
+    const char* path = "temp/interp_case_char_range_index.ls";
+    write_script(path,
+        "pn main() {\n"
+        "    var values = [null, null, null]\n"
+        "    for c in \"a\" to \"c\" { values[c] = c }\n"
+        "}\n");
+    RunResult interp = run_script(path, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 1);
 }
 
 }  // namespace

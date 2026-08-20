@@ -7568,6 +7568,9 @@ static TypeObject* resolve_base_type(Transpiler* tp, TSNode base_node, TypeObjec
         se->name = parent_se->name;
         se->type = parent_se->type;
         se->byte_offset = byte_offset;
+        // The child owns a fresh layout entry but inherits the parent default;
+        // dropping this AST makes `<Child>` leave inherited fields uninitialized.
+        se->default_value = parent_se->default_value;
         se->next = NULL;
         if (!prev_entry) { obj_type->shape = se; }
         else { prev_entry->next = se; }
@@ -7637,6 +7640,8 @@ static void build_object_type_methods(Transpiler* tp, AstObjectTypeNode* ast_nod
                 tm->compiled_fn = NULL;
                 // retain the source signature; wrappers cannot recover optional or variadic semantics.
                 tm->fn_type = (struct TypeFunc*)fn_method->type;
+                tm->ast_def = fn_method;
+                tm->ast_module = tp->script_owner;
                 tm->is_proc = (method->node_type == AST_NODE_PROC);
                 tm->next = NULL;
                 if (!obj_type->methods) { obj_type->methods = tm; }
@@ -8699,7 +8704,7 @@ AstNode* build_group_clause(Transpiler* tp, TSNode group_node) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_SPEC) {
             TSNode spec_node = ts_tree_cursor_current_node(&cursor);
-            AstGroupKey* key_spec = (AstGroupKey*)alloc_ast_node(tp, AST_NODE_GROUP_CLAUSE, spec_node, sizeof(AstGroupKey));
+            AstGroupKey* key_spec = (AstGroupKey*)alloc_ast_node(tp, AST_NODE_GROUP_KEY, spec_node, sizeof(AstGroupKey));
             TSNode key_node = ts_node_child_by_field_id(spec_node, FIELD_KEY);
             key_spec->expr = build_expr(tp, key_node);
 
@@ -8832,6 +8837,11 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
                     group_var->name = ast_node->group->name;
                     group_var->type = &TYPE_ELMT;
                     push_name(tp, group_var, NULL);
+                    // The group scope is intentionally separate from the row
+                    // scope; retain its entry so non-MIR execution can bind
+                    // `into` without making row names visible again.
+                    ast_node->group->entry = lookup_name_in_current_scope(tp,
+                        ast_node->group->name);
                 }
             }
             else if (field_id == FIELD_ORDER) {

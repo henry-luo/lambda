@@ -570,6 +570,98 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     return pattern;
 }
 
+bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* pattern,
+                             AstNode* pattern_ast, bool is_symbol) {
+    if (!pool || !type_list || !pattern || !pattern_ast) return false;
+    if (pattern->re2) return pattern->pattern_index >= 0;
+
+    const char* error_msg = NULL;
+    TypePattern* compiled = compile_pattern_ast(pool, pattern_ast, is_symbol, &error_msg);
+    if (!compiled) {
+        log_error("pattern compile: failed to build regex: %s",
+            error_msg ? error_msg : "unknown error");
+        return false;
+    }
+    pattern->re2 = compiled->re2;
+    pattern->re2_unanchored = NULL;
+    pattern->source = compiled->source;
+    pattern->regex_source = compiled->regex_source;
+    arraylist_append(type_list, pattern);
+    pattern->pattern_index = type_list->length - 1;
+    return true;
+}
+
+// Walk the declaration-bearing shapes that can contain a named pattern. This
+// stays beside compile_pattern_ast so MIR lowering and the AST interpreter
+// publish exactly one module-local TypePattern identity per definition.
+bool compile_script_pattern_definitions(Pool* pool, ArrayList* type_list,
+                                        AstNode* node) {
+    if (!pool || !type_list) return false;
+    bool ok = true;
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_STRING_PATTERN:
+        case AST_NODE_SYMBOL_PATTERN: {
+            AstPatternDefNode* definition = (AstPatternDefNode*)node;
+            TypePattern* pattern = (TypePattern*)definition->type;
+            if (!pattern || !definition->as) {
+                log_error("pattern prepass: invalid definition '%.*s'",
+                    definition->name ? (int)definition->name->len : 0,
+                    definition->name ? definition->name->chars : "");
+                ok = false;
+                break;
+            }
+            bool needs_compile = !pattern->re2;
+            if (!compile_runtime_pattern(pool, type_list, pattern, definition->as,
+                    definition->is_symbol)) {
+                log_error("pattern prepass: failed to compile '%.*s'",
+                    (int)definition->name->len, definition->name->chars);
+                ok = false;
+                break;
+            }
+            if (needs_compile) {
+                log_debug("pattern prepass: compiled '%.*s' index=%d",
+                    (int)definition->name->len, definition->name->chars,
+                    pattern->pattern_index);
+            }
+            break;
+        }
+        case AST_NODE_CONTENT:
+        case AST_NODE_LIST: {
+            AstListNode* list = (AstListNode*)node;
+            if (list->declare &&
+                    !compile_script_pattern_definitions(pool, type_list, list->declare)) {
+                ok = false;
+            }
+            if (!compile_script_pattern_definitions(pool, type_list, list->item)) ok = false;
+            break;
+        }
+        case AST_NODE_LET_STAM:
+        case AST_NODE_PUB_STAM:
+        case AST_NODE_TYPE_STAM:
+        case AST_NODE_VAR_STAM:
+            if (!compile_script_pattern_definitions(pool, type_list,
+                    ((AstLetNode*)node)->declare)) ok = false;
+            break;
+        case AST_NODE_OBJECT_TYPE: {
+            AstObjectTypeNode* object = (AstObjectTypeNode*)node;
+            if (!compile_script_pattern_definitions(pool, type_list, object->methods)) ok = false;
+            break;
+        }
+        case AST_NODE_FUNC:
+        case AST_NODE_PROC:
+        case AST_NODE_FUNC_EXPR:
+            if (!compile_script_pattern_definitions(pool, type_list,
+                    ((AstFuncNode*)node)->body)) ok = false;
+            break;
+        default:
+            break;
+        }
+        node = node->next;
+    }
+    return ok;
+}
+
 static bool append_literal_type_regex(StrBuf* regex, Type* type) {
     if (!type) return false;
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {

@@ -5370,7 +5370,9 @@ static bool mir_is_type_value_node(AstNode* node) {
         return true;
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
-        return ident->entry && mir_is_type_definition_binding(ident->entry->node);
+        AstNode* definition = ident->entry ? ident->entry->node : NULL;
+        return definition && (mir_is_type_definition_binding(definition) ||
+            definition->node_type == AST_NODE_OBJECT_TYPE);
     }
     default:
         return false;
@@ -19841,30 +19843,14 @@ static MIR_reg_t transpile_pattern_island(MirTranspiler* mt,
         return pattern_error_item();
     }
 
-    if (pattern_type->re2 == nullptr && island->pattern != nullptr) {
-        const char* error_msg = nullptr;
-        TypePattern* compiled = compile_pattern_ast(mt->script_pool, island->pattern,
-            island->is_symbol, &error_msg);
-        if (!compiled) {
-            log_error("mir: failed to compile inline pattern: %s",
-                error_msg ? error_msg : "unknown error");
-            return pattern_error_item();
-        }
-        pattern_type->re2 = compiled->re2;
-        pattern_type->source = compiled->source;
-        pattern_type->regex_source = compiled->regex_source;
-        pattern_type->re2_unanchored = nullptr;
-        arraylist_append(mt->type_list, pattern_type);
-        pattern_type->pattern_index = mt->type_list->length - 1;
-        island->pattern_index = pattern_type->pattern_index;
-        log_debug("mir: compiled inline %s pattern, index=%d",
-            island->is_symbol ? "symbol" : "string", island->pattern_index);
-    }
-
-    if (pattern_type->pattern_index < 0) {
+    if (!compile_runtime_pattern(mt->script_pool, mt->type_list, pattern_type,
+            island->pattern, island->is_symbol)) {
         log_error("mir: inline pattern has no compiled type index");
         return pattern_error_item();
     }
+    island->pattern_index = pattern_type->pattern_index;
+    log_debug("mir: compiled inline %s pattern, index=%d",
+        island->is_symbol ? "symbol" : "string", island->pattern_index);
     return emit_call_2(mt, "const_pattern_with_tl", MIR_T_P,
         MIR_T_I64, MIR_new_int_op(mt->ctx, pattern_type->pattern_index),
         MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
@@ -21138,10 +21124,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, type_index),
             MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
 
-        // count and evaluate field values
-        AstNode* item = obj_lit->item;
-        int val_count = 0;
-        while (item) { val_count++; item = item->next; }
+        // Field storage is declaration-order, while an object literal carries
+        // only its named overrides. Align them through the shared shape helper
+        // so defaults and inherited fields occupy their own lanes.
+        int val_count = (int)obj_type->length;
 
         if (val_count == 0) {
             // no fields - return empty object
@@ -21149,27 +21135,21 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         }
 
         MIR_op_t* val_ops = LAMBDA_ALLOCA(val_count, MIR_op_t);
-        item = obj_lit->item;
+        ShapeEntry* field = obj_type->shape;
         int vi = 0;
-        while (item) {
-            if (item->node_type == AST_NODE_KEY_EXPR) {
-                AstNamedNode* key_expr = (AstNamedNode*)item;
-                if (key_expr->as) {
-                    MIR_reg_t val = transpile_box_item(mt, key_expr->as);
-                    val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
-                } else {
-                    MIR_reg_t nul = new_reg(mt, "objnull", MIR_T_I64);
-                    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nul),
-                        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                    val_ops[vi++] = MIR_new_reg_op(mt->ctx, nul);
-                }
-            } else {
-                // bare expression (wrapping source object) — not yet handled
-                MIR_reg_t val = transpile_box_item(mt, item);
+        for (; field; field = field->next) {
+            AstNode* value_node = ast_object_literal_value_for_shape(obj_lit, field);
+            if (!value_node) value_node = field->default_value;
+            if (value_node) {
+                MIR_reg_t val = transpile_box_item(mt, value_node);
                 val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
+            } else {
+                MIR_reg_t nul = new_reg(mt, "objnull", MIR_T_I64);
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nul),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                val_ops[vi++] = MIR_new_reg_op(mt->ctx, nul);
             }
-            item = item->next;
         }
 
         // call object_fill(o, val1, val2, ...) — variadic
@@ -25882,47 +25862,10 @@ static bool ensure_pattern_compiled(MirTranspiler* mt,
 }
 
 static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
-    while (node) {
-        switch (node->node_type) {
-        case AST_NODE_STRING_PATTERN:
-        case AST_NODE_SYMBOL_PATTERN: {
-            AstPatternDefNode* pattern_def = (AstPatternDefNode*)node;
-            ensure_pattern_compiled(mt, pattern_def);
-            break;
-        }
-        case AST_NODE_CONTENT:
-        case AST_NODE_LIST: {
-            AstListNode* list = (AstListNode*)node;
-            if (list->declare) prepass_compile_patterns(mt, list->declare);
-            prepass_compile_patterns(mt, list->item);
-            break;
-        }
-        case AST_NODE_LET_STAM:
-        case AST_NODE_PUB_STAM:
-        case AST_NODE_TYPE_STAM:
-        case AST_NODE_VAR_STAM: {
-            AstLetNode* let_node = (AstLetNode*)node;
-            prepass_compile_patterns(mt, let_node->declare);
-            break;
-        }
-        case AST_NODE_OBJECT_TYPE: {
-            // recurse into methods for pattern compilation
-            AstObjectTypeNode* obj = (AstObjectTypeNode*)node;
-            if (obj->methods) prepass_compile_patterns(mt, obj->methods);
-            break;
-        }
-        case AST_NODE_FUNC:
-        case AST_NODE_PROC:
-        case AST_NODE_FUNC_EXPR: {
-            AstFuncNode* fn_node = (AstFuncNode*)node;
-            if (fn_node->body) prepass_compile_patterns(mt, fn_node->body);
-            break;
-        }
-        default:
-            break;
-        }
-        node = node->next;
-    }
+    // MIR and T0 must register the same module-local TypePattern objects before
+    // either tier resolves a named pattern reference; keep traversal in the
+    // shared compiler instead of allowing the walkers to drift.
+    (void)compile_script_pattern_definitions(mt->script_pool, mt->type_list, node);
 }
 
 // ============================================================================

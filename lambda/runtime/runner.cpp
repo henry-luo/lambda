@@ -1480,6 +1480,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
+    transpiler.script_owner = new_script;
     transpiler.parser = tls_parser ? tls_parser : runtime->parser;
     transpiler.runtime = runtime;
     transpiler.error_count = 0;
@@ -1709,6 +1710,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
 
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
+    tp.script_owner = script;
     tp.parser = session->runner.runtime->parser;
     tp.runtime = session->runner.runtime;
     tp.current_scope = globals;
