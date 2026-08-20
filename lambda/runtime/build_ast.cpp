@@ -6296,6 +6296,45 @@ static bool ast_branch_diverges(AstNode* node) {
     return false;
 }
 
+static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
+        AstNode* else_branch) {
+    // Each arm contributes a type to the join. A `raise` never yields a
+    // value, so it contributes error rather than its raised payload.
+    Type* then_contrib = ast_branch_diverges(then_branch)
+        ? &TYPE_ERROR : then_branch->type;
+    Type* else_contrib = !else_branch ? &TYPE_NULL
+        : ast_branch_diverges(else_branch)
+            ? &TYPE_ERROR : else_branch->type;
+    TypeId then_type_id = then_contrib->type_id;
+    TypeId else_type_id = else_contrib->type_id;
+
+    LambdaNumericDecision numeric_join = lambda_numeric_classify(LAMBDA_NUM_OP_ADD,
+        lambda_numeric_kind_from_type(then_contrib),
+        lambda_numeric_kind_from_type(else_branch ? else_contrib : NULL));
+    if (numeric_join.valid) {
+        return lambda_numeric_type_from_kind(numeric_join.result);
+    }
+    if (then_type_id != else_type_id) {
+        // Plain mixed joins remain open until recursive return inference and
+        // boxed-carrier handling are resolved together. A written `raise` is
+        // the exception: preserve its real error constituent.
+        bool has_divergence = then_contrib == &TYPE_ERROR ||
+            else_contrib == &TYPE_ERROR;
+        if (!has_divergence || then_type_id == LMD_TYPE_ANY ||
+                else_type_id == LMD_TYPE_ANY) {
+            return set_type_any(tp, ANY_JOIN);
+        }
+        TypeBinary* join = (TypeBinary*)alloc_type_kind(tp->pool,
+            TYPE_KIND_BINARY, sizeof(TypeBinary));
+        join->left = then_contrib;
+        join->right = else_contrib;
+        join->op = OPERATOR_UNION;
+        return (Type*)join;
+    }
+    // Reuse container types to retain their complete shape metadata.
+    return then_contrib;
+}
+
 // Unified build_if_expr: handles both expression and block forms
 // When a branch is a content block, creates a new scope for variable shadowing
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
@@ -6384,84 +6423,8 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
-    // Determine the type of the if expression.
-    //
-    // Each arm CONTRIBUTES a type to the join. A `raise` arm never yields a
-    // value — control unwinds carrying an error — so its contribution is the
-    // error type, not the raised expression's own type. This is what lets a
-    // one-armed-raise body type as `T | error` below instead of collapsing.
-    Type* then_contrib = ast_branch_diverges(ast_node->then)
-        ? &TYPE_ERROR : ast_node->then->type;
-    Type* else_contrib = !ast_node->otherwise ? &TYPE_NULL
-        : ast_branch_diverges(ast_node->otherwise)
-            ? &TYPE_ERROR : ast_node->otherwise->type;
-    TypeId then_type_id = then_contrib->type_id;
-    TypeId else_type_id = else_contrib->type_id;
-
-    LambdaNumericDecision numeric_join = lambda_numeric_classify(LAMBDA_NUM_OP_ADD,
-        lambda_numeric_kind_from_type(then_contrib),
-        lambda_numeric_kind_from_type(ast_node->otherwise ? else_contrib : NULL));
-    if (numeric_join.valid) {
-        ast_node->type = lambda_numeric_type_from_kind(numeric_join.result);
-    } else if (then_type_id != else_type_id) {
-        // When one arm DIVERGES by raising, the join is the union of the
-        // contributions — `T | error` — not ANY: the union records both that
-        // the value lane is exactly T and that error-ness is present, where
-        // ANY erased the first and my earlier bare-T narrowing erased the
-        // second. Representation is unaffected: a union's type_id is
-        // LMD_TYPE_TYPE, which consumers already treat as boxed/dynamic
-        // ("unions retain their runtime Item tag" — the shape-storage rule),
-        // and the hardened native-return admission treats it as unprovable,
-        // so the boxed error join that propagation/handler consumers use stays intact.
-        //
-        // TIG7: plain differing arms now join as the normalized union too.
-        // An open arm keeps the result open — `any` already contains the other
-        // constituent, so unioning with it would only re-derive `any`.
-        //
-        // Acceptance tightening is expected and sanctioned here: the union
-        // makes error-capable branches visible to the E208 containment checker
-        // that ANY was hiding. Under SI3v2/D3.3.1v2 that is the point, and
-        // TI6 forbids staging it — the scripts it rejects are genuinely
-        // mis-typed and are repaired in the same change.
-        // TIG7 stays open, with a two-sided blocker measured in Impl §13.
-        //
-        // Unioning plain differing arms is right in principle and carrier-safe
-        // in isolation, but two independent failures block it:
-        //
-        // 1. A function's forward-reference placeholder return is `any`
-        //    (error-capable) while its body is still being built, so a
-        //    RECURSIVE arm contributes error-ness the finished function does
-        //    not have. The full union produced 109 SPURIOUS E208s across ~14
-        //    library files — `last_caret_pos_in` provably returns a map on
-        //    every path, yet callers were told it may return an error.
-        // 2. Restricting the union to error-free arms removed those, but left
-        //    21 failures including a segfault in the math package: the union
-        //    type reaches consumers that decode it as a lane.
-        //
-        // Closing it needs resolved recursive return types (a fixpoint before
-        // joins observe them) AND the carrier sweep of §10.3 — not another
-        // local rule here.
-        bool has_divergence = then_contrib == &TYPE_ERROR ||
-            else_contrib == &TYPE_ERROR;
-        if (!has_divergence ||
-                then_type_id == LMD_TYPE_ANY || else_type_id == LMD_TYPE_ANY) {
-            ast_node->type = set_type_any(tp, ANY_JOIN);
-        } else {
-            // A diverging arm still unions with TYPE_ERROR: that error comes
-            // from a `raise` the source actually wrote, not from a placeholder.
-            TypeBinary* join = (TypeBinary*)alloc_type_kind(tp->pool,
-                TYPE_KIND_BINARY, sizeof(TypeBinary));
-            join->left = then_contrib;
-            join->right = else_contrib;
-            join->op = OPERATOR_UNION;
-            ast_node->type = (Type*)join;
-        }
-    } else if (then_type_id >= LMD_TYPE_CONTAINER) {
-        // reuse branch type to preserve full struct (TypeMap, TypeArray, etc.)
-        ast_node->type = then_contrib;
-    } else {
-        ast_node->type = then_contrib;
-    }
+    ast_node->type = infer_if_result_type(tp, ast_node->then,
+        ast_node->otherwise);
     log_debug("end build if expr");
     return (AstNode*)ast_node;
 }
@@ -12666,6 +12629,14 @@ struct LambdaDirectAstSink {
     AstFuncNode* function_nodes[64];
     NameScope* function_scopes[64];
     uint32_t function_depth;
+    AstViewNode* view_nodes[64];
+    NameScope* view_scopes[64];
+    AstStateEntry* view_state_tails[64];
+    AstEventHandler* view_handler_tails[64];
+    uint32_t view_depth;
+    AstEventHandler* event_handlers[64];
+    NameScope* event_handler_scopes[64];
+    uint32_t event_handler_depth;
     uint32_t type_object_depth;
     AstObjectTypeNode* object_node;
     TypeObject* object_type;
@@ -12687,6 +12658,18 @@ static AstNode* direct_ast_node(LambdaParseValue value) {
 
 static StrView direct_token_text(Transpiler* tp, LambdaToken token) {
     return source_span_text(tp, token.span);
+}
+
+static StrView direct_key_text(Transpiler* tp, LambdaToken token) {
+    StrView name = direct_token_text(tp, token);
+    // symbol keys retain their quotes in source, but map and element shapes
+    // must store the bare field name so quoted attributes use normal lookup.
+    if (token.kind == LAMBDA_TOK_SYMBOL && name.length >= 2 &&
+            name.str[0] == '\'' && name.str[name.length - 1] == '\'') {
+        name.str++;
+        name.length -= 2;
+    }
+    return name;
 }
 
 static void direct_object_copy_base(LambdaDirectAstSink* sink,
@@ -12736,6 +12719,7 @@ static void direct_object_begin(LambdaDirectAstSink* sink,
     type_value->type = (Type*)object_type;
     object->type = (Type*)type_value;
     object->name = name_pool_create_strview(tp->name_pool, name);
+    object->is_public = (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0;
     object->local_type_index = -1;
     object_type->type_name = (StrView){object->name->chars, object->name->len};
     object_type->struct_name = object->name->chars;
@@ -12982,6 +12966,128 @@ static AstNode* direct_append(AstNode* first, AstNode* item) {
     return first;
 }
 
+static AstViewNode* direct_active_view(LambdaDirectAstSink* sink) {
+    return sink->view_depth ? sink->view_nodes[sink->view_depth - 1] : NULL;
+}
+
+// a view has a functional body but procedural event handlers. Reducing it as
+// only its body lost the state scope, so handler assignments were rejected as
+// function-level mutations instead of binding to the view state (D2.2.2).
+static bool direct_view_begin(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    if (sink->view_depth >= 64 || reduction->child_count != 1) return false;
+    Transpiler* tp = sink->tp;
+    uint32_t slot = sink->view_depth++;
+    AstViewNode* view = (AstViewNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_VIEW, reduction->span, sizeof(AstViewNode));
+    view->type = set_type_any(tp, ANY_STATEMENT);
+    view->is_edit = reduction->detail_token.kind == LAMBDA_TOK_EDIT;
+    if (reduction->secondary_token.kind) {
+        view->name = name_pool_create_strview(tp->name_pool,
+            direct_token_text(tp, reduction->secondary_token));
+    }
+    view->pattern = direct_ast_node(reduction->children[0]);
+    view->vars = lambda_ast_enter_scope(tp, false);
+    sink->view_nodes[slot] = view;
+    sink->view_scopes[slot] = view->vars;
+    sink->view_state_tails[slot] = NULL;
+    sink->view_handler_tails[slot] = NULL;
+    return true;
+}
+
+static bool direct_view_add_state(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    AstViewNode* view = direct_active_view(sink);
+    if (!view || reduction->child_count != 1) return false;
+    Transpiler* tp = sink->tp;
+    AstStateEntry* state = (AstStateEntry*)alloc_ast_node_from_span(tp,
+        AST_NODE_STATE_ENTRY, reduction->span, sizeof(AstStateEntry));
+    state->type = set_type_any(tp, ANY_STATEMENT);
+    state->name = name_pool_create_strview(tp->name_pool,
+        direct_token_text(tp, reduction->detail_token));
+    state->value = direct_ast_node(reduction->children[0]);
+
+    uint32_t slot = sink->view_depth - 1;
+    if (sink->view_state_tails[slot]) {
+        sink->view_state_tails[slot]->next_state = state;
+    } else {
+        view->state = state;
+    }
+    sink->view_state_tails[slot] = state;
+
+    AstNamedNode* binding = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PARAM, reduction->span, sizeof(AstNamedNode));
+    binding->name = state->name;
+    binding->type = state->value && state->value->type
+        ? state->value->type : &TYPE_ANY;
+    lambda_ast_register_name(tp, binding);
+    NameEntry* entry = lookup_name_in_current_scope(tp, binding->name);
+    if (entry) entry->is_mutable = true;
+    return true;
+}
+
+static bool direct_view_begin_handler(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    AstViewNode* view = direct_active_view(sink);
+    if (!view || sink->event_handler_depth >= 64) return false;
+    Transpiler* tp = sink->tp;
+    AstEventHandler* handler = (AstEventHandler*)alloc_ast_node_from_span(tp,
+        AST_NODE_EVENT_HANDLER, reduction->span, sizeof(AstEventHandler));
+    handler->type = set_type_any(tp, ANY_STATEMENT);
+    handler->event = name_pool_create_strview(tp->name_pool,
+        direct_token_text(tp, reduction->detail_token));
+    handler->vars = lambda_ast_enter_scope_with_parent(tp, view->vars, true);
+
+    uint32_t view_slot = sink->view_depth - 1;
+    if (sink->view_handler_tails[view_slot]) {
+        sink->view_handler_tails[view_slot]->next_handler = handler;
+    } else {
+        view->handler = handler;
+    }
+    sink->view_handler_tails[view_slot] = handler;
+
+    uint32_t slot = sink->event_handler_depth++;
+    sink->event_handlers[slot] = handler;
+    sink->event_handler_scopes[slot] = handler->vars;
+    return true;
+}
+
+static bool direct_view_finish_handler(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    if (!sink->event_handler_depth || reduction->child_count != 2) return false;
+    AstEventHandler* handler = sink->event_handlers[sink->event_handler_depth - 1];
+    handler->source_span = reduction->span;
+    handler->param = (AstNamedNode*)direct_ast_node(reduction->children[0]);
+    handler->body = direct_ast_node(reduction->children[1]);
+    return true;
+}
+
+static bool direct_view_end_handler(LambdaDirectAstSink* sink) {
+    if (!sink->event_handler_depth) return false;
+    uint32_t slot = --sink->event_handler_depth;
+    lambda_ast_leave_scope(sink->tp, sink->event_handler_scopes[slot]);
+    return true;
+}
+
+static AstNode* direct_view_finish(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    AstViewNode* view = direct_active_view(sink);
+    if (!view || reduction->child_count != 2) return NULL;
+    view->source_span = reduction->span;
+    view->param = (AstNamedNode*)direct_ast_node(reduction->children[0]);
+    view->body = direct_ast_node(reduction->children[1]);
+    return (AstNode*)view;
+}
+
+static bool direct_view_end(LambdaDirectAstSink* sink) {
+    if (!sink->view_depth) return false;
+    uint32_t slot = --sink->view_depth;
+    AstViewNode* view = sink->view_nodes[slot];
+    lambda_ast_leave_scope(sink->tp, sink->view_scopes[slot]);
+    if (view->name) lambda_ast_register_name(sink->tp, (AstNamedNode*)view);
+    return true;
+}
+
 static AstNode* direct_list_node(Transpiler* tp, LambdaSourceSpan span,
         AstNode* items) {
     AstListNode* list = (AstListNode*)alloc_ast_node_from_span(tp,
@@ -13185,12 +13291,21 @@ static AstNode* direct_let_group(Transpiler* tp, LambdaSourceSpan span,
     return (AstNode*)list;
 }
 
+static Type* direct_open_binary_result_type(Transpiler* tp, AnyReason reason,
+        Type* left, Type* right) {
+    set_type_any(tp, reason);
+    // The CST builder preserves an open operand's exclusion contract when an
+    // operator's result remains `any`. Returning global `any` here lost
+    // `any \\ error` and made later call boundaries invent errors.
+    if (right->type_id == LMD_TYPE_ANY) return right;
+    if (left->type_id == LMD_TYPE_ANY) return left;
+    return &TYPE_ANY;
+}
+
 static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         AstNode* left, AstNode* right) {
     Type* lt = left && left->type ? left->type : &TYPE_ANY;
     Type* rt = right && right->type ? right->type : &TYPE_ANY;
-    TypeId lid = lt->type_id;
-    TypeId rid = rt->type_id;
     if (op == OPERATOR_TO) return &TYPE_RANGE;
     if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_LT ||
             op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE ||
@@ -13221,7 +13336,8 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     // Power deliberately remains boxed: negative exponents and mixed numeric
     // domains are resolved by `fn_pow`, and the MIR native lane rejects an
     // inferred scalar type for this operator.
-    if (op == OPERATOR_POW) return set_type_any(tp, ANY_JOIN_OP);
+    if (op == OPERATOR_POW) return direct_open_binary_result_type(tp,
+        ANY_JOIN_OP, lt, rt);
     if (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
             op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
             op == OPERATOR_POW) {
@@ -13233,9 +13349,9 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         LambdaNumericDecision decision = lambda_numeric_classify(family,
             lambda_numeric_kind_from_type(lt), lambda_numeric_kind_from_type(rt));
         if (decision.valid) return lambda_numeric_type_from_kind(decision.result);
-        return set_type_any(tp, ANY_ARITH_OPERAND);
+        return direct_open_binary_result_type(tp, ANY_ARITH_OPERAND, lt, rt);
     }
-    return set_type_any(tp, ANY_JOIN_OP);
+    return direct_open_binary_result_type(tp, ANY_JOIN_OP, lt, rt);
 }
 
 static AstNode* direct_promote_bare_pipe_sysfunc(Transpiler* tp,
@@ -14255,9 +14371,15 @@ AstNode* build_if_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
     node->cond = condition;
     node->then = then_branch;
     node->otherwise = else_branch;
-    Type* left = then_branch && then_branch->type ? then_branch->type : &TYPE_ANY;
-    Type* right = else_branch && else_branch->type ? else_branch->type : &TYPE_NULL;
-    node->type = lambda_type_union_normalized(tp->pool, left, right);
+    if (!then_branch || !then_branch->type ||
+            (else_branch && !else_branch->type)) {
+        node->type = &TYPE_ERROR;
+        return (AstNode*)node;
+    }
+    // Direct reductions previously kept every mixed arm as a union while the
+    // CST builder widens ordinary mixed joins. Reuse the shared rule so later
+    // boundary validation observes the same function return contracts.
+    node->type = infer_if_result_type(tp, then_branch, else_branch);
     return (AstNode*)node;
 }
 
@@ -14446,6 +14568,22 @@ static LambdaParseValue direct_ast_reduce(void* context,
         ? direct_ast_node(reduction->children[0]) : NULL;
 
     if (reduction->kind == LAMBDA_REDUCE_CONTEXT) {
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW_BEGIN) {
+            if (!direct_view_begin(sink, reduction)) sink->failed = true;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW_END) {
+            if (!direct_view_end(sink)) sink->failed = true;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW_HANDLER_BEGIN) {
+            if (!direct_view_begin_handler(sink, reduction)) sink->failed = true;
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW_HANDLER_END) {
+            if (!direct_view_end_handler(sink)) sink->failed = true;
+            return 0;
+        }
         if (reduction->form == LAMBDA_REDUCTION_FORM_HANDLER_BEGIN) {
             if (sink->handler_context_depth >= 64) {
                 log_error("direct sink handler context overflow");
@@ -14515,7 +14653,15 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 sink->failed = true;
                 return 0;
             }
-            NameScope* scope = sink->loop_scopes[--sink->loop_scope_depth];
+            uint32_t slot = --sink->loop_scope_depth;
+            NameScope* scope = sink->loop_scopes[slot];
+            AstForNode* loop = sink->for_nodes[slot];
+            if (loop && loop->group) {
+                // `group by` commits the row scope and replaces it with an
+                // aggregate scope. Closing the saved row scope leaves that
+                // child active and shifts every following binding (D2.2.2).
+                scope = tp->current_scope;
+            }
             lambda_ast_leave_scope(tp, scope);
             return 0;
         }
@@ -14638,6 +14784,20 @@ static LambdaParseValue direct_ast_reduce(void* context,
     }
 
     switch (reduction->kind) {
+    case LAMBDA_REDUCE_VIEW:
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW_STATE) {
+            if (!direct_view_add_state(sink, reduction)) break;
+            return direct_ast_value(child0);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW_HANDLER) {
+            if (!direct_view_finish_handler(sink, reduction)) break;
+            return direct_ast_value(direct_ast_node(reduction->children[1]));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_VIEW) {
+            AstNode* view = direct_view_finish(sink, reduction);
+            if (view) return direct_ast_value(view);
+        }
+        break;
     case LAMBDA_REDUCE_LIST: {
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_CLAUSES) {
             return direct_ast_value(reduction->child_count > 1
@@ -15167,15 +15327,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
         if (reduction->form == LAMBDA_REDUCTION_FORM_MAP_ITEM) {
             AstNamedNode* item = (AstNamedNode*)alloc_ast_node_from_span(tp,
                 AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
-            StrView name = direct_token_text(tp, reduction->detail_token);
-            if (reduction->detail_token.kind == LAMBDA_TOK_SYMBOL &&
-                    name.length >= 2 && name.str[0] == '\'' &&
-                    name.str[name.length - 1] == '\'') {
-                // Map key symbols are quoted source spellings, but the AST
-                // stores the same bare field name as the CST key builder.
-                name.str++;
-                name.length -= 2;
-            }
+            StrView name = direct_key_text(tp, reduction->detail_token);
             item->name = name_pool_create_strview(tp->name_pool, name);
             item->as = child0;
             item->type = child0 && child0->type ? child0->type : &TYPE_ANY;
@@ -15184,7 +15336,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
         if (reduction->form == LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE) {
             AstNamedNode* item = (AstNamedNode*)alloc_ast_node_from_span(tp,
                 AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
-            StrView name = direct_token_text(tp, reduction->detail_token);
+            StrView name = direct_key_text(tp, reduction->detail_token);
             item->name = name_pool_create_strview(tp->name_pool, name);
             item->as = child0;
             item->type = child0 && child0->type ? child0->type : &TYPE_ANY;

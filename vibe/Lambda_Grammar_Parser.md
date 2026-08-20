@@ -368,6 +368,16 @@ which is the documented eight-source classification difference. This clears
 the numerical P1.6 speed thresholds for the recognizer-only stage, but is
 **not** a Phase 1 go decision and does not predict Phase 2 AST performance.
 
+**Latest rerun (2026-08-20):** the current tracked manifest contains 1,486
+sources and 4,647,118 bytes. Across five warmed runs, Tree-sitter's median was
+**690.664 ms** (**6.42 MiB/s**) and the C recognizer's median was **193.332 ms**
+(**22.92 MiB/s**), for `rd_over_tree=0.280` and a **3.57x** parser-stage
+speedup. Median per-file latency was 122 us versus 23 us; p95 was 1,700 us
+versus 368 us. The largest-16 cohort took 157.355 ms versus 85.853 ms. The
+run reported 1,396 Tree-sitter OK / 90 error roots and 1,402 C OK / 1
+incomplete / 83 error; this is still a recognizer-only measurement, not a
+claim about full direct-AST end-to-end timing.
+
 ### P1.6 — go/no-go gate
 
 Phase 2 proceeds only if every mandatory gate passes:
