@@ -12504,6 +12504,18 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     arraylist_free(functions);
 }
 
+static void finalize_lambda_script_ast(Transpiler* tp, AstScript* script) {
+    if (!tp || !script || tp->error_count != 0) return;
+    for (AstNode* item = script->child; item; item = item->next) {
+        validate_top_level_enforcing_calls(tp, item);
+        validate_top_level_cross_frame_binding_reads(tp, item);
+    }
+    // both parser front ends share this final pass. Direct AST construction
+    // used to skip it, leaving suspend-capable procedures without their
+    // resumable task state machine (D6.1.2).
+    if (tp->error_count == 0) analyze_lambda_concurrency(tp, script);
+}
+
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
     log_debug("build script");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
@@ -12537,19 +12549,9 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         child = ts_node_next_named_sibling(child);
     }
     if (ast_node->child) ast_node->type = ast_node->child->type;
-    // Duplicate-definition recovery can re-link a placeholder into this list.
-    // E228 only needs a complete clean AST, never that recovery representation.
-    if (tp->error_count == 0) {
-        for (AstNode* item = ast_node->child; item; item = item->next) {
-            validate_top_level_enforcing_calls(tp, item);
-            validate_top_level_cross_frame_binding_reads(tp, item);
-        }
-    }
     // Duplicate/invalid declarations can leave recovery placeholders linked
-    // into the partial AST; concurrency analysis is valid only after a clean build.
-    if (tp->error_count == 0) {
-        analyze_lambda_concurrency(tp, ast_node);
-    }
+    // into the partial AST, so final validation only runs for a clean tree.
+    finalize_lambda_script_ast(tp, ast_node);
     log_debug("build script child: %p", ast_node->child);
     return (AstNode*)ast_node;
 }
@@ -15390,15 +15392,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
             AstNode* default_value = NULL;
             for (uint32_t i = 0; i < reduction->child_count; i++) {
                 AstNode* child = direct_ast_node(reduction->children[i]);
-                if (child && (child->node_type == AST_NODE_TYPE ||
-                        child->node_type == AST_NODE_CONTENT_TYPE ||
-                        child->node_type == AST_NODE_LIST_TYPE ||
-                        child->node_type == AST_NODE_ARRAY_TYPE ||
-                        child->node_type == AST_NODE_MAP_TYPE ||
-                        child->node_type == AST_NODE_ELMT_TYPE ||
-                        child->node_type == AST_NODE_FUNC_TYPE ||
-                        child->node_type == AST_NODE_BINARY_TYPE ||
-                        child->node_type == AST_NODE_UNARY_TYPE)) {
+                // named aliases reduce as AST_NODE_IDENT, so node kind alone
+                // would silently drop a parameter's declared contract (D6.1.2).
+                if (child && ast_is_explicit_type_value(child)) {
                     type_node = child;
                 } else {
                     default_value = child;
@@ -15518,6 +15514,7 @@ LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
         if (error && !error->message) error->message = "direct AST reduction failed";
         return status == LAMBDA_PARSE_OK ? LAMBDA_PARSE_ERROR : status;
     }
+    finalize_lambda_script_ast(tp, sink.root);
     if (root_out) *root_out = sink.root;
     return LAMBDA_PARSE_OK;
 }
