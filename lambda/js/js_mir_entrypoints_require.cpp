@@ -1,5 +1,8 @@
 #include "js_mir_internal.hpp"
 #include "js_runtime_state.hpp"
+#include "../jube/jube_registry.h"
+#include "../module/node_core/node_runtime_state.hpp"
+#include "../module/node_core/node_trace_events.hpp"
 #undef js_input
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
@@ -21,7 +24,6 @@ int js_dynamic_import_suppress_module_drain = 0;
 extern "C" int js_batch_execution_mode = 0;
 extern "C" int js_process_current_exit_code(void);
 extern "C" void js_async_hooks_drain_destroy_queue(void);
-extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
 
 static Item js_mir_finalize_result(Item result, bool reusing_context,
@@ -1122,7 +1124,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             js_microtask_flush();
         }
         js_process_emit_exit(exit_code);
-        js_trace_flush();
+        node_trace_events_flush();
         js_process_current_exit_code();
     }
 
@@ -1797,12 +1799,19 @@ static Item js_cjs_key(const char* name, int len) {
     return js_name_item(name, len);
 }
 
-#define js_cjs_module_stack_state (js_runtime_state.cjs.module_stack)
+static JsCjsState* js_cjs_state_current(bool attach) {
+    if (attach) jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_cjs_state(session) : NULL;
+}
+
+#define js_cjs_module_stack_state (js_cjs_state_current(true)->module_stack)
 #define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
 #define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
 
 extern "C" void js_cjs_metadata_reset(void) {
-    js_item_stack_clear(&js_cjs_module_stack_state);
+    JsCjsState* state = js_cjs_state_current(false);
+    if (state) js_item_stack_clear(&state->module_stack);
 }
 
 static Item js_cjs_current_module(void) {
@@ -1873,6 +1882,7 @@ static Item js_cjs_cached_value(Item specifier) {
 }
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
+    if (!js_cjs_state_current(true)) return (Item){.item = ITEM_JS_UNDEFINED};
     if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }

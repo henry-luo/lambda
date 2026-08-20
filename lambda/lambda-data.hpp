@@ -1024,6 +1024,14 @@ static inline TypeId type_field_storage_type_id(const Type* type) {
             return LMD_TYPE_NUM_SIZED;
         }
         if (base && lambda_type_id_has_pointer_lane(base->type_id)) return base->type_id;
+        // TB1: `T[]?`. An occurrence's own type_id is LMD_TYPE_TYPE, so the
+        // pointer-lane test above cannot see it; the VALUE is an Array or
+        // ArrayNum, both Container* whose pointee self-describes.
+        if (base && base->type_id == LMD_TYPE_TYPE &&
+                base->kind == TYPE_KIND_UNARY &&
+                ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
+            return LMD_TYPE_ARRAY;
+        }
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
             ((TypeBinary*)type)->op == OPERATOR_UNION) {
@@ -1041,8 +1049,54 @@ static inline TypeId type_field_storage_type_id(const Type* type) {
     // map field such as `score: min(values)` cannot be read as a Type pointer.
     if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_ANY;
     if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
-        // Unions and constrained contracts retain their runtime Item tag;
-        // reserving a zero-byte slot would let map_fill write past the shape.
+        // TB1: an occurrence contract (`T[]`) is a POINTER lane, not ANY. Array
+        // and ArrayNum are both Container*, and the pointee's own type_id is the
+        // discriminator -- the same arrangement `map?`/named-map fields already
+        // use. Classifying it ANY put it in a 9-byte TypedItem slot inside a
+        // shape laid out on 8-byte strides, which is the malformation Tune19
+        // §11.3 measured (Lambda_Design_Compiling_Lane.md §10.3).
+        if (type->kind == TYPE_KIND_UNARY &&
+                ((const TypeUnary*)type)->op == OPERATOR_REPEAT) {
+            return LMD_TYPE_ARRAY;
+        }
+        // TB5: a constrained contract stores in its BASE type's lane. The
+        // predicate is an admission-time check on the value, not a property of
+        // how the value is carried (D3.2.2* already scopes constrained types to
+        // base enforcement).
+        //
+        // ⚠ Unwound as a LOOP, not a recursive call. Recursion here defeats
+        // inlining of this `static inline`, so the compiler emits an
+        // out-of-line copy in every translation unit that includes this header
+        // -- and that copy pulled a symbol into test binaries which do not link
+        // it (`test_binary_storage_gtest` and `test_compiler_pass_gtest` failed
+        // to LOAD with `symbol not found in flat namespace '_ItemError'`).
+        // A header-only classifier on the hot path must stay inlinable.
+        if (type->kind == TYPE_KIND_CONSTRAINED) {
+            const Type* base = type;
+            for (int depth = 0; depth < 8; depth++) {
+                const Type* next = ((const TypeConstrained*)base)->base;
+                if (!next || next == base) break;
+                next = type_field_unwrap_simple_decl((Type*)next);
+                if (!next) break;
+                base = next;
+                if (!(base->type_id == LMD_TYPE_TYPE &&
+                        base->kind == TYPE_KIND_CONSTRAINED)) {
+                    // Reached a non-constrained base: classify it inline,
+                    // mirroring the simple/optional cases handled above.
+                    if (base->type_id == LMD_TYPE_TYPE &&
+                            base->kind == TYPE_KIND_UNARY &&
+                            ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
+                        return LMD_TYPE_ARRAY;
+                    }
+                    if (base == &TYPE_INTEGER || base == &TYPE_NUMBER) return LMD_TYPE_ANY;
+                    if (base->type_id == LMD_TYPE_TYPE &&
+                            base->kind != TYPE_KIND_SIMPLE) return LMD_TYPE_ANY;
+                    return base->type_id;
+                }
+            }
+        }
+        // Unions retain their runtime Item tag (TB2 makes them admission-only;
+        // recording the actual member at construction is gap G2).
         return LMD_TYPE_ANY;
     }
     return type->type_id;

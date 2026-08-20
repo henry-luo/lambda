@@ -80,9 +80,9 @@ Other limits:
 | `JsRuntimeState` | 1,138,728 | 111 | canonical JS context capsule | eagerly embeds unrelated realm, execution, Node, async, compiler-cleanup and diagnostic state |
 | `ParsedRequest` | 815,168 | 18 | HTTP/1 request parse result | duplicates raw/normalized header and trailer text in fixed matrices; often automatic storage |
 | `JsDomCollectionRuntimeState` | 753,696 | 9 | live DOM collection cache | four 4,096-entry registries, including two identical entry layouts |
-| `JsTraceState` | 528,912 | 6 | trace-event buffer | optional diagnostics pay for 2,048 inline category/name strings eagerly |
-| `JsPermissionPolicy` | 263,174 | 8 | Node permission policy | two 128-entry arrays, each entry carrying `PATH_MAX` bytes |
-| `JsCryptoNativeState` | 131,112 | 9 | crypto native context registry | four independent 4,096-pointer tables and counters |
+| `NodeTraceState` | 528,912 | 8 | Node trace-event buffer | optional diagnostics now live under the lazy `NodeRuntimeSession` |
+| `JsPermissionPolicy` | 263,174 | 8 | Node permission policy | two 128-entry arrays, each entry carrying `PATH_MAX` bytes; now paid only by `NodeRuntimeSession` |
+| `JsCryptoNativeState` | 131,112 | 9 | crypto native context registry | four independent 4,096-pointer tables and counters; now paid only by `NodeRuntimeSession` |
 | `JsXhrRuntimeState` | 72,720 | 3 | XHR state pool | 64 XHR records, each with 64 fixed request headers |
 | `JsDeferredMirState` | 65,544 | 3 | deferred code cleanup | two parallel 4,096-entry ownership arrays |
 | `JsDeepEqualContext` | 65,544 | 2 | cycle traversal | same 4,096 Item-pair stack concept as assert partial matching |
@@ -95,7 +95,8 @@ Other limits:
 
 `JsRuntimeState` is large mainly because it embeds maximum-sized members by value:
 
-- `JsTraceState`: 528,912 bytes.
+- `NodeTraceState`: 528,912 bytes, paid only by a live `NodeRuntimeSession`.
+- `JsPermissionPolicy` and `JsCryptoNativeState`: Node-only policy/native slabs, now paid only by a live `NodeRuntimeSession`.
 - `generators[4096]`: approximately 360 KB.
 - `JsDeferredMirState`: 65,544 bytes.
 - `JsEvalState`: 40,936 bytes.
@@ -317,11 +318,20 @@ D7.4.5 formally points live indexed host data toward `VArray`, but its implement
 
 ### 7.3 Permission policy
 
+The current ownership boundary places `JsPermissionPolicy` in the lazy
+`NodeRuntimeSession`; the bootstrap copy remains process-level command-line
+configuration until a Node session needs a mutable policy. The representation
+cleanup below is still pending.
+
 Replace inline `JsPermissionGrant[128]` arrays with one immutable `JsPermissionPolicy` configuration containing dynamic read/write grant sets. A grant owns one normalized `Str` path plus flags or a compiled prefix entry; normalize once at policy construction.
 
 The bootstrap policy becomes immutable after publication (D5.4.4). `process.permission.drop()` creates a context delta/copy-on-write policy rather than memcpy-copying 263 KB. There is no silent path truncation or 128-grant ceiling. Allocation failure and malformed paths fail closed.
 
 ### 7.4 Crypto and other native handles
+
+The current ownership boundary places `JsCryptoNativeState` in the lazy
+`NodeRuntimeSession`; crypto namespace objects remain ordinary JS realm state.
+The resource-table consolidation below is still pending.
 
 Replace the four 4,096-pointer arrays in `JsCryptoNativeState` by introducing or reusing one runtime native resource/rid-table mechanism. Each entry carries resource kind, native handle and destructor. JS-visible objects store an integer rid, never a raw pointer (D7.4.1v2). Context teardown closes remaining entries through that table.
 
@@ -329,7 +339,7 @@ Hash, HMAC, sign/verify and cipher contexts remain distinct resource kinds; the 
 
 ### 7.5 Trace events
 
-Make tracing a lazy `JsTraceBuffer`. Intern category/name strings once and store compact event records such as phase, category ID, name ID, timestamp, optional ID and flags. The events use a configured ring or dynamic buffer. With tracing disabled, the semantic runtime allocates no event array.
+Make tracing a lazy `NodeTraceBuffer`. Intern category/name strings once and store compact event records such as phase, category ID, name ID, timestamp, optional ID and flags. The events use a configured ring or dynamic buffer. With tracing disabled, the semantic runtime allocates no event array.
 
 Diagnostics must never influence runtime semantics (D5.4.4). Dropping or rotating trace events is therefore a diagnostic policy, not a JS execution branch.
 
@@ -471,7 +481,7 @@ Large resource records such as `JsSocket`, `JsTlsSocket`, and `JsSpawnProcess` a
 | `ParsedRequest` matrices | `HttpRequestParser` + `HttpRequestHead` + field spans | source-buffer views, dynamic fields |
 | permission grant matrices | immutable dynamic `JsPermissionPolicy` | normalized owned paths, COW delta |
 | four crypto pointer arrays | shared native resource/rid table | typed destructor entries |
-| inline trace strings/events | lazy interned `JsTraceBuffer` | compact dynamic/ring records |
+| inline trace strings/events | lazy interned `NodeTraceBuffer` | compact dynamic/ring records |
 | `JsDeferredMirState` parallel arrays | `JsCodeStore` of `JsCompiledArtifact` | one artifact owner/lifecycle |
 | assert/util pair stacks | `JsObjectPairTraversal` | one precise dynamic traversal mechanism |
 | `JsFunction` mixed fields | callable code + function value + optional payloads | separate immutable and mutable lifetimes |

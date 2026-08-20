@@ -17,7 +17,6 @@
 #define JS_EVENT_RAF_CAPACITY 1024
 #define JS_EVENT_TIMER_CAPACITY 1024
 #define JS_EVENT_MOCK_WAIT_CAPACITY 128
-#define JS_CJS_STACK_MAX 128
 #define JS_WITH_STACK_MAX 16
 #define JS_DEFERRED_MIR_MAX 4096
 #define JS_FUNCTION_CACHE_CAPACITY 512
@@ -29,14 +28,10 @@
 #define JS_TEST262_AGENT_MAX 16
 #define JS_TEST262_AGENT_REPORT_MAX 64
 #define JS_PROCESS_LISTENER_MAX 32
-#define JS_DIAGNOSTICS_CHANNEL_MAX 512
-#define JS_DIAGNOSTICS_DEFERRED_ERROR_MAX 64
 #define JS_ASYNC_HOOK_STATE_MAX 256
 #define JS_ASYNC_PENDING_DESTROY_STATE_MAX 1024
 #define JS_DOMAIN_STACK_MAX 64
 #define JS_MAX_ALS_INSTANCES 256
-#define JS_TRACE_MAX_CATEGORIES 64
-#define JS_TRACE_MAX_EVENTS 2048
 #define JS_DOM_STORAGE_ENTRY_CAP 128
 #define JS_DOM_MEDIA_QUERY_CAP 64
 #define JS_DOM_PROMPT_QUEUE_CAP 32
@@ -137,15 +132,6 @@ struct JsItemStack : JsRootedState {
     int depth = 0;
 };
 
-// CommonJS metadata is semantic module state: a nested require must observe
-// its own parent stack and cache, but unrelated runtimes must never share it.
-// Keep the fixed root storage adjacent to its owner so module lookup remains a
-// direct context-local access and heap registration happens only per epoch.
-struct JsCjsState {
-    Item module_stack_slots[JS_CJS_STACK_MAX] = {};
-    JsItemStack module_stack = {};
-};
-
 struct JsWithScopeState {
     Item stack_slots[JS_WITH_STACK_MAX] = {};
     JsItemStack stack = {};
@@ -200,9 +186,6 @@ struct JsUtilState : JsNamespaceState {
 };
 
 struct JsCryptoState : JsNamespaceState {
-    // Native hash/cipher/sign records are allocated only by crypto users.
-    // Their source-private table is lazy to keep non-crypto contexts compact.
-    void* native_state = NULL;
 };
 
 struct JsChildProcessState : JsNamespaceState {
@@ -593,20 +576,6 @@ struct JsWellKnownRefs {
     NameId symbol_dispose = NAME_ID_NONE;
 };
 
-struct JsDiagnosticsChannelState : JsRootedState {
-    Item channel_names[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
-    Item channels[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
-    Item channel_prototype = {};
-    Item tracing_channel_prototype = {};
-    Item bounded_channel_prototype = {};
-    Item channel_constructor = {};
-    Item tracing_channel_constructor = {};
-    Item bounded_channel_constructor = {};
-    Item deferred_errors[JS_DIAGNOSTICS_DEFERRED_ERROR_MAX] = {};
-    int channel_count = 0;
-    int deferred_error_count = 0;
-};
-
 struct JsAsyncHooksState : JsRootedState {
     Item root_resource = {};
     Item current_resource = {};
@@ -687,37 +656,6 @@ struct JsPerformanceState {
     double frame_clock_ms = 0.0;
     bool virtual_clock_enabled = false;
     double virtual_clock_ms = 0.0;
-};
-
-struct JsTraceCategory {
-    char name[64] = {};
-    int refs = 0;
-    bool from_exec_argv = false;
-};
-
-struct JsTraceEvent {
-    char ph = 0;
-    char cat[128] = {};
-    char name[96] = {};
-    uint64_t ts = 0;
-    int64_t id = 0;
-    bool has_id = false;
-};
-
-struct JsTraceState {
-    JsTraceCategory categories[JS_TRACE_MAX_CATEGORIES] = {};
-    int category_count = 0;
-    JsTraceEvent events[JS_TRACE_MAX_EVENTS] = {};
-    int event_count = 0;
-    bool initialized = false;
-    bool file_written = false;
-};
-
-struct JsCommonJsCompileCacheState {
-    char directory[4096] = {};
-    bool enabled = false;
-    bool disabled = false;
-    bool reported = false;
 };
 
 struct JsGeneratorStateRecord {
@@ -896,7 +834,6 @@ struct JsRuntimeState {
     void* dom_collection_state = NULL;
     void* dom_foreign_document_state = NULL;
     void* fetch_state = NULL;
-    void* permission_state = NULL;
     void* canvas_state = NULL;
     JsStringConcatState string_concat = {};
     JsGlobalVarModuleBindingState global_var_module_bindings = {};
@@ -916,15 +853,12 @@ struct JsRuntimeState {
     JsConsoleState console = {};
     JsRuntimeOperationState operations = {};
     JsWellKnownRefs well_known = {};
-    JsDiagnosticsChannelState diagnostics_channels = {};
     JsAsyncHooksState async_hooks = {};
     JsPromiseRuntimeState promises = {};
     JsModuleRuntimeState modules = {};
     JsClusterState cluster = {};
     JsAsyncLocalStorageState async_local_storage = {};
     JsPerformanceState performance = {};
-    JsTraceState trace = {};
-    JsCommonJsCompileCacheState commonjs_compile_cache = {};
     // Native buffer ownership and tagged-template identity are realm-local
     // caches. Their pointer lookups remain ordinary context-local accesses.
     HashMap* array_runtime_items = NULL;
@@ -938,7 +872,6 @@ struct JsRuntimeState {
     JsEvalState eval = {};
     JsEventLoopQueueState event_loop = {};
     JsEventLoopTimerState timers = {};
-    JsCjsState cjs = {};
     JsWithScopeState with_scope = {};
     JsDeferredMirState deferred_mir = {};
     void* dynamic_function_cache_state = NULL;

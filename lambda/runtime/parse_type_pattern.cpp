@@ -569,7 +569,17 @@ AstNode* parse_map_type(Lexer* lx) {
             prev_item = (AstNode*)item;
             append_shape_entry_typed(lx->tp, item->name, item->type, &type->shape, &prev_entry, byte_offset);
             type->length++;
-            byte_offset += sizeof(void*);
+            // Stride by the field's STORAGE class, not a flat pointer width.
+            // A field whose contract does not name one concrete carrier
+            // (`integer`, `number`, a union) is stored self-describing, and
+            // sizeof(TypedItem) is 9 -- so a flat 8 laid the NEXT field one byte
+            // inside it. `{n: integer, label: string}` put `label` at offset 8
+            // over a TypedItem spanning 0..8, and byte_size came out 16 for 17
+            // bytes of fields: reads returned the wrong type, writes clobbered a
+            // payload byte, and the shape failed its own
+            // shape_entry_storage_fits_data (Lambda_Design_Compiling_Lane.md
+            // §10.4b G3).
+            byte_offset += type_info[type_field_storage_type_id(item->type)].byte_size;
         } while (eat(lx, ','));
     }
     if (!eat(lx, '}')) { fail(lx, "expected '}'"); return NULL; }
@@ -645,7 +655,7 @@ AstNode* parse_element_type(Lexer* lx) {
         prev_item = (AstNode*)named;
         append_shape_entry_typed(lx->tp, named->name, named->type, &type->shape, &prev_entry, byte_offset);
         type->length++;
-        byte_offset += sizeof(void*);
+        byte_offset += type_info[type_field_storage_type_id(named->type)].byte_size;
         if (eat(lx, ',')) { continue; }
         if (eat(lx, ';')) { saw_content_sep = true; }
         break;

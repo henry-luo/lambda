@@ -1,0 +1,6 @@
+integer 0 true
+integer 42 counts
+9007199254740993 wide
+decimal 1.5 money
+datetime stamped
+

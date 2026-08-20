@@ -1706,19 +1706,22 @@ float lanes) are still ahead.
 
 ### 12.3 Open, in the order I would take them
 
-1. **TB1/TB5 classifier slice** (Lane §10.4b, gaps G1/G2b/G5) — one function:
-   `T[]`/`T[]?` → pointer lane, `T where …` → base lane, `integer` →
-   `Decimal*` lane. Widens the §11.5 storage-valid gate automatically, with no
-   change to the adoption code, so `Person`-shaped contracts start adopting.
-2. **G2** — record the actual member at union-field CONSTRUCTION, as the
+1. ~~**TB1/TB5 classifier slice**~~ — **G1/G2b LANDED 2026-08-20** (§12.5);
+   **G5 split out**, see below.
+2. **G5 — `integer` → `Decimal*` lane.** Ruled (TB4) but blocked on conversion
+   plumbing: `set_field_value`'s DECIMAL arm assumes the Item already carries a
+   `Decimal*`, so reclassifying without a compact-int → heap-Decimal conversion
+   at the store (and in `map_field_store`) would silently corrupt
+   `n: integer = 3`. Needs the conversion first, then the one classifier line.
+3. **G2** — record the actual member at union-field CONSTRUCTION, as the
    mutation path already does.
-3. **T19-6 remainder** — `fn_map_set` is still ~46% of richards2 on its own.
+4. **T19-6 remainder** — `fn_map_set` is still ~46% of richards2 on its own.
    ⚠ The O(1) shape index was tried and reverted (§7.9): it needs a
    precomputed site hash or a NameId-keyed index first.
-4. **T19-8** — closed-caller float lanes; untyped ray 30x, spectralnorm 13.6x.
+5. **T19-8** — closed-caller float lanes; untyped ray 30x, spectralnorm 13.6x.
    The largest remaining untyped multiples, no prerequisite.
-5. **T19-7** — the strings design doc; still the single biggest C2MIR lever.
-6. **T19-9** (unopened) — call boundary on scalar recursion (§7.8).
+6. **T19-7** — the strings design doc; still the single biggest C2MIR lever.
+7. **T19-9** (unopened) — call boundary on scalar recursion (§7.8).
 
 Not worth doing: **T19-1** (three slices have now landed without it) and
 **T19-5** (refuted by profiling, §7.9). Anything in **§8** needs its stated
@@ -1736,3 +1739,213 @@ Baseline **3829/3829**; test262 **40261/40261**, zero regressions; ratchet
 it show `__asan_memset` in the top ten; benchmark A/Bs against it show uniform
 2–20x "regressions". Always `make release` and check
 `otool -L lambda.exe | grep -c asan` before measuring anything.
+
+### 12.5 TB1/TB5 classifier slice — LANDED 2026-08-20 (G1, G2b)
+
+One function, `type_field_storage_type_id`:
+
+- **G1** — an occurrence contract (`T[]`, and `T[]?` via the optional branch)
+  classifies to the **pointer lane** (`LMD_TYPE_ARRAY`), not ANY. Array and
+  ArrayNum are both `Container*` and the pointee's own `type_id` discriminates,
+  exactly as `map?`/named-map fields already work. Verified safe at the store:
+  `set_field_value`'s container arm accepts any container in `RANGE..OBJECT`.
+- **G2b** — a constrained contract (`T where …`) recurses to its **base type's
+  lane**, with a self-reference guard. The predicate is an admission-time check
+  on the value, not a property of how it is carried.
+- **G5 deliberately NOT included** — see §12.3 item 2. Reclassifying `integer`
+  to `Decimal*` without conversion plumbing would silently corrupt a compact-int
+  store; that is a separate slice.
+
+**Effect — the gate widened with no adoption-code change**, which was the point:
+a `T[]`-bearing contract now passes `mir_map_contract_storage_valid` and adopts,
+admitting an unproven field at construction
+(`type check at field 'scores' failed: expected int[], got string`).
+
+Gates: baseline **3857/3857**, test262 40261/40261 zero regressions, 112/112
+byte-identical. ⚠ The baseline total jumped 3829 → 3857 because
+`test_lambda_parser_poc_gtest.exe` had never been BUILT in this tree — the
+runner reported it as a failure until `make build-test` produced it, after which
+its 28 tests pass. Pre-existing build gap, unrelated to this slice.
+
+⚠ Paired A/B read **1.0063 geomean**, and re-measuring the 16 flagged rows at 15
+pairs dissolved all but one — paraffins 1.129 → 0.990, matmul 1.147 → 0.965,
+puzzle typed 1.086 → **0.926**, list typed 1.131 → **0.950**. The survivor,
+`binarytrees untyped` at 1.054 with **0/15 wins**, is NOT a semantic change:
+binarytrees declares no types and uses no occurrence/constrained/integer field,
+and diffing its emitted MIR between the two binaries gives 42 differing lines,
+**all 42 pure address constants** with an identical instruction stream. It is
+C++ binary layout shifted by editing a widely-included inline header — the same
+class of effect seen when `shape_field_name_equals` was added. Treat the slice
+as neutral-to-enabling, not as a 0.6% regression.
+
+### 12.6 G5 attempt: a regression I caused, and the pre-existing bugs it uncovered
+
+**G5 is NOT landed.** Starting it surfaced two things that had to come first.
+
+#### The regression (mine, now fixed)
+
+`{v: integer}` map fields read back as `error` — introduced by the §11.5
+adoption slice, shipped through **3857 passing tests**, and caught only by
+probing `integer` fields directly while scoping G5.
+
+Cause: I REPLACED the adoption test rather than extending it. `integer`
+classifies ANY, so an `{v: integer}` contract is not storage-valid, so the new
+gate refused adoption — and refusing pushes the literal through the declaration
+boundary's **re-pack into that same malformed contract shape**, which is worse
+than adopting it. Before the slice, that literal adopted via the VALUE-PROOF
+path (`0n` proves `integer`).
+
+Fix: adopt when EITHER the storage-valid shape match OR the original
+all-values-proven test passes. The disjunction is a strict superset of the
+pre-slice behaviour, so it cannot regress what used to adopt, while keeping the
+new capability. Guard added: `test/lambda/proc/abstract_numeric_field.{ls,txt}`
+— verified to FAIL (empty output) on the broken binary.
+
+⚠ Lesson worth generalising: a gate that redirects work to a DIFFERENT path is
+not conservative just because the gate itself is. Ask what the refused case
+falls through to.
+
+#### Pre-existing bugs found (all reproduce on `f46aae989`)
+
+Abstract-numeric map fields are substantially broken, independent of this round:
+
+| case | behaviour at HEAD |
+|---|---|
+| `{n: integer, label: string}` — multi-field | `type(n)` reports **`float`** |
+| `{q: number, …}` | read produces nothing |
+| `{n: integer}` holding a wide BigInt | `fn_string unhandled type: any` |
+| `bg.v = bg.v + 1n` on an `integer` field | silently produces no output |
+| `{v: decimal}` field | reads back `null` |
+
+These are the exact failure class TB4/G5 addresses — an abstract contract in a
+TypedItem slot, inside a contract shape whose stride does not match that slot.
+G5 would likely fix several of them, which strengthens the case for it.
+
+#### What G5 still needs
+
+Beyond the classifier line: `set_field_value`'s DECIMAL arm is
+`*(Decimal**)field_ptr = item.get_decimal()` — it assumes the Item already
+carries a Decimal. `decimal_from_int64` is public but produces a FIXED-precision
+decimal (`unlimited = 0`), and `item_type_is_integer_subtype` only accepts
+`DECIMAL_BIGINT`, so converting through it would break `n is integer`. The
+BigInt constructors (`bigint_push_result` and the `unlimited = DECIMAL_BIGINT`
+site near `lambda-decimal.cpp:728`) are `static`. So G5 needs a public
+int → BigInt-decimal conversion exported first, applied at BOTH store sites
+(`set_field_value` and `map_field_store`), and it should be landed together with
+fixes for the table above rather than on its own.
+
+Gates after the fix: baseline **3858/3858**, test262 40261/40261 zero
+regressions.
+
+### 12.7 Abstract-numeric and pointer-lane field bugs — three of five fixed
+
+Three defects, all pre-existing, all of the same family: **an admission that is
+broader than the implementation it guards.**
+
+**(a) The map-TYPE parser strode a flat `sizeof(void*)`.**
+`parse_type_pattern.cpp` laid every field 8 bytes apart regardless of its
+storage class, so a field following an `integer`/`number` slot began ONE BYTE
+INSIDE it (`sizeof(TypedItem)` is 9). Dumped for
+`type Counts = {n: integer, label: string}`: `n` a 9-byte ANY slot at 0,
+`label` at **8**, `byte_size` 16 for 17 bytes of fields — the shape failing its
+own `shape_entry_storage_fits_data`. Both stride sites now use
+`type_info[type_field_storage_type_id(...)].byte_size`. This is **gap G3**, and
+it turned out to live in ONE builder, not to need the fill/rebuild/COW audit
+§11.3 anticipated.
+
+**(b) The map-literal direct-store loop admitted more types than it stores.**
+`all_direct` asked `mir_is_native_scalar_value_type`, which also admits SYMBOL,
+BINARY, DECIMAL, DTIME and COMPLEX — none of which the store if-chain has a
+branch for, so those fields **fell off the end and were never written**. An
+annotated `{v: decimal}` read back as null. Admission now lists exactly the
+classes the loop stores; the rest go through `map_fill`, whose
+`set_field_value` covers every class.
+
+**(c) The direct field read/write pair had the same asymmetry.** Its scalar arm
+returns the raw 8 bytes — correct for the int/bool lanes and for STRING (whose
+consumers re-tag), wrong for DECIMAL/DTIME/SYMBOL/BINARY/COMPLEX, which came
+back untagged: `{v: decimal}` reported `raw_pointer`. `is_direct_access_type`
+admits all of them, so it is too broad to gate that path; added
+`mir_direct_field_access_type` and gated both read and write on it.
+
+| bug | state |
+|---|---|
+| `{n: integer, label: string}` → `type(n)` was `float` | **FIXED** |
+| wide BigInt in an `integer` field → `fn_string unhandled type: any` | **FIXED** |
+| `{v: decimal}` → read back `null` / `raw_pointer` | **FIXED** (with symbol/binary/datetime/complex) |
+| `{q: number, …}` — fails at CONSTRUCTION | **still broken**, pre-existing; `var m: M = {q: 1.5}` produces no output on the session-start binary too |
+| `c.n = c.n + 1n` on an `integer` field | **still broken**, pre-existing |
+
+Guard: `test/lambda/proc/abstract_numeric_field.{ls,txt}` — verified to fail on
+the session-start binary, where it prints the overlap garbage directly
+(`float -3.38461e+125 counts`, `3.91911e+202 wide`). Gates: baseline
+**3858/3858**, test262 40261/40261 zero regressions. No benchmark A/B: the
+corpus contains no map type declaring any of the reclassified field types
+(grep-verified).
+
+⚠ The recurring shape here is worth stating once: **three separate defects, and
+all three were an admission predicate that was broader than the code it
+guarded.** When adding a fast path, the gate and the switch must be derived from
+one list.
+
+**G5 remains blocked** on the two still-broken rows above plus the missing
+public int → BigInt conversion (§12.6). Fixing `number` construction first is
+the natural next step, since G5 moves `integer` off this slot entirely and the
+`number` path will still be there.
+
+### 12.8 `number` construction fixed; two build/link traps; G5 still open
+
+**`number`-contracted map fields worked at no point before today.**
+`var m: M = {q: 1.5}` aborted construction outright. ASAN named it precisely: a
+**global-buffer-overflow** next to `TYPE_STRING`, from
+`validate_against_base_type`.
+
+Root cause: the validator's `unwrap_type` loops on
+`type_id == LMD_TYPE_TYPE && kind == TYPE_KIND_SIMPLE` and dereferences
+`((TypeType*)type)->type`. A compact global meta-type (`number`, `integer`,
+`type`) matches that condition EXACTLY but carries only the two-byte `Type`
+prefix — there is no payload to read. The runtime's own
+`runtime_boundary_unwrap_type` already guards this with
+`!type_is_global_meta_type`; the validator's copy did not. Guard added there,
+plus a defensive arm at the top of `validate_against_base_type` (both its fast
+and full arms dereferenced before checking).
+
+`{q: number}` now stores each value in its ACTUAL carrier — `float 1.5`,
+`int 7` — which is TB2's storage model, and `m.q = m.q + 1.0` gives 2.5.
+
+**Still open (the 5th bug):** `c.n = c.n + 1n` on an `integer` field. The read
+and the arithmetic are both correct (`integer 5` → `integer 6`); the STORE is
+rejected: `validator at .v: Expected type 'type', but got 'decimal'`. The
+validator's numeric lattice is TypeId-only and BigInt has no tag of its own
+(`Decimal*` + `unlimited == DECIMAL_BIGINT`), so it cannot see it. A fix was
+attempted in `validator_numeric_item_embeds` and did NOT take — the reported
+target displays as `type`, not `integer`, so the failing comparison is not the
+one patched. Needs tracing from the map-field admission path, not guessing.
+
+#### ⚠ Two traps that cost more than the fixes
+
+**(a) A recursive `static inline` in a widely-included header.** G2b's
+constrained-type case was written as a recursive call to
+`type_field_storage_type_id`. Recursion defeats inlining, so the compiler emits
+an out-of-line copy in every TU including `lambda-data.hpp`, and that copy
+pulled a symbol into two test binaries that do not link it —
+`test_binary_storage_gtest` and `test_compiler_pass_gtest` failed to **LOAD**
+with `symbol not found in flat namespace '_ItemError'`. Not a compile error, not
+a test failure: a dyld failure at startup, which the runner reports only as
+"no valid JSON output". Unwound to a bounded loop; both pass.
+**Rule: a header-only classifier on the hot path must stay inlinable.**
+
+**(b) The pre-existing `node_trace_events` link gap.** `make test-lambda-baseline`
+began failing to LINK — `node_trace_events_init` etc. undefined — from
+uncommitted work already in the tree at session start
+(`lambda/module/node_core/node_trace_events.cpp` is untracked, and the modified
+`jube_registry.cpp` calls it). The file was registered in the main source list
+but not in the `node-core` library target, and the two targets that link
+`lambda-rt` without `node-core` could not resolve it. Fixed in
+`build_lambda_config.json` (rule 7): added the source to `node-core`, and
+`node-core` to exactly the two targets whose link failed. ⚠ A blanket edit
+adding `node-core` to all six `lambda-rt` dependents BROKE two other binaries
+the same dyld way — scope the dependency to the targets that actually need it.
+
+Gates: baseline **3858/3858**, test262 40261/40261 zero regressions,
+splay_deep still 135 ms.
