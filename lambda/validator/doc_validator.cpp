@@ -481,7 +481,14 @@ bool is_item_compatible_with_type(ConstItem item, Type* type) {
 
 const char* type_to_string(Type* type) {
     if (!type) return "unknown";
+    // The abstract numeric contracts share LMD_TYPE_TYPE with the `type` value,
+    // so a TypeId-derived name renders BOTH of them as "type". `number` was
+    // already special-cased; `integer` was not, and a real `integer` field
+    // rejection therefore reported "Expected type 'type', but got 'decimal'" --
+    // which reads as a different bug than the one that occurred and sent this
+    // investigation down a wrong path (Tune19 §12.9).
     if (type == &TYPE_NUMBER) return "number";
+    if (type == &TYPE_INTEGER) return "integer";
     return get_type_name(type->type_id);
 }
 

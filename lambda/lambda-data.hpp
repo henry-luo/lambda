@@ -457,12 +457,18 @@ static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
     return (uint8_t*)map_data + field->byte_offset;
 }
 
-static inline TypeId type_field_storage_type_id(const Type* type);
+// Defined in lambda/core/lambda-data.cpp. NOT header-inline: both this and
+// shape_entry_uses_native_lane below are long classifiers (92 and 28 lines),
+// and a `static inline` of that size in a header this widely included is
+// emitted out-of-line in every TU that cannot fully inline it -- which pulled
+// a symbol into test binaries that do not link it and made them fail to LOAD
+// (`symbol not found in flat namespace '_ItemError'`). See Tune19 §12.9.
+TypeId type_field_storage_type_id(const Type* type);
 
 // The full semantic contract, not just TypeId, decides whether a packed field
 // has a nullable native lane.  The implementation lives with the type-contract
 // rules so a ShapeEntry and an array boundary cannot disagree about `T?`.
-static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
+bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out);
 
 static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
@@ -1007,128 +1013,6 @@ static inline Type* type_field_unwrap_simple_decl(Type* type) {
         type = inner;
     }
     return type;
-}
-
-static inline TypeId type_field_storage_type_id(const Type* type) {
-    if (!type) return LMD_TYPE_NULL;
-    type = type_field_unwrap_simple_decl((Type*)type);
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
-        Type* base = type_field_unwrap_simple_decl(((TypeUnary*)type)->operand);
-        if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
-                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
-            return base->type_id;
-        }
-        if (base && base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
-                lambda_num_sized_is_integer(type_num_sized_kind(base))) {
-            return LMD_TYPE_NUM_SIZED;
-        }
-        if (base && lambda_type_id_has_pointer_lane(base->type_id)) return base->type_id;
-        // TB1: `T[]?`. An occurrence's own type_id is LMD_TYPE_TYPE, so the
-        // pointer-lane test above cannot see it; the VALUE is an Array or
-        // ArrayNum, both Container* whose pointee self-describes.
-        if (base && base->type_id == LMD_TYPE_TYPE &&
-                base->kind == TYPE_KIND_UNARY &&
-                ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
-            return LMD_TYPE_ARRAY;
-        }
-    }
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)type)->op == OPERATOR_UNION) {
-        TypeBinary* binary = (TypeBinary*)type;
-        Type* base = binary->left && binary->left->type_id == LMD_TYPE_NULL ? binary->right :
-            (binary->right && binary->right->type_id == LMD_TYPE_NULL ? binary->left : NULL);
-        base = type_field_unwrap_simple_decl(base);
-        if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
-                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
-            return base->type_id;
-        }
-    }
-    // Abstract numeric contracts describe numeric Items; they are not
-    // Type* payloads. Keep them in the self-describing TypedItem lane so a
-    // map field such as `score: min(values)` cannot be read as a Type pointer.
-    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_ANY;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
-        // TB1: an occurrence contract (`T[]`) is a POINTER lane, not ANY. Array
-        // and ArrayNum are both Container*, and the pointee's own type_id is the
-        // discriminator -- the same arrangement `map?`/named-map fields already
-        // use. Classifying it ANY put it in a 9-byte TypedItem slot inside a
-        // shape laid out on 8-byte strides, which is the malformation Tune19
-        // §11.3 measured (Lambda_Design_Compiling_Lane.md §10.3).
-        if (type->kind == TYPE_KIND_UNARY &&
-                ((const TypeUnary*)type)->op == OPERATOR_REPEAT) {
-            return LMD_TYPE_ARRAY;
-        }
-        // TB5: a constrained contract stores in its BASE type's lane. The
-        // predicate is an admission-time check on the value, not a property of
-        // how the value is carried (D3.2.2* already scopes constrained types to
-        // base enforcement).
-        //
-        // ⚠ Unwound as a LOOP, not a recursive call. Recursion here defeats
-        // inlining of this `static inline`, so the compiler emits an
-        // out-of-line copy in every translation unit that includes this header
-        // -- and that copy pulled a symbol into test binaries which do not link
-        // it (`test_binary_storage_gtest` and `test_compiler_pass_gtest` failed
-        // to LOAD with `symbol not found in flat namespace '_ItemError'`).
-        // A header-only classifier on the hot path must stay inlinable.
-        if (type->kind == TYPE_KIND_CONSTRAINED) {
-            const Type* base = type;
-            for (int depth = 0; depth < 8; depth++) {
-                const Type* next = ((const TypeConstrained*)base)->base;
-                if (!next || next == base) break;
-                next = type_field_unwrap_simple_decl((Type*)next);
-                if (!next) break;
-                base = next;
-                if (!(base->type_id == LMD_TYPE_TYPE &&
-                        base->kind == TYPE_KIND_CONSTRAINED)) {
-                    // Reached a non-constrained base: classify it inline,
-                    // mirroring the simple/optional cases handled above.
-                    if (base->type_id == LMD_TYPE_TYPE &&
-                            base->kind == TYPE_KIND_UNARY &&
-                            ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
-                        return LMD_TYPE_ARRAY;
-                    }
-                    if (base == &TYPE_INTEGER || base == &TYPE_NUMBER) return LMD_TYPE_ANY;
-                    if (base->type_id == LMD_TYPE_TYPE &&
-                            base->kind != TYPE_KIND_SIMPLE) return LMD_TYPE_ANY;
-                    return base->type_id;
-                }
-            }
-        }
-        // Unions retain their runtime Item tag (TB2 makes them admission-only;
-        // recording the actual member at construction is gap G2).
-        return LMD_TYPE_ANY;
-    }
-    return type->type_id;
-}
-
-static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
-        LaneStorageDesc* out) {
-    if (!field || !field->type || !out) return false;
-    Type* semantic = type_field_unwrap_simple_decl(field->type);
-    Type* base = NULL;
-    if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)semantic)->op == OPERATOR_OPTIONAL) {
-        base = ((TypeUnary*)semantic)->operand;
-    } else if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)semantic)->op == OPERATOR_UNION) {
-        TypeBinary* binary = (TypeBinary*)semantic;
-        if (binary->left && binary->left->type_id == LMD_TYPE_NULL) base = binary->right;
-        else if (binary->right && binary->right->type_id == LMD_TYPE_NULL) base = binary->left;
-    }
-    if (!base) return false;
-    base = type_field_unwrap_simple_decl(base);
-    *out = {};
-    out->semantic_contract = semantic; out->base_contract = base; out->nullable = 1;
-    if (base->type_id == LMD_TYPE_INT) { out->kind = LANE_STORAGE_INT; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_BOOL) { out->kind = LANE_STORAGE_BOOL; out->byte_size = 1; }
-    else if (base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64) { out->kind = LANE_STORAGE_FLOAT64; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
-            lambda_num_sized_is_integer(type_num_sized_kind(base))) { out->kind = LANE_STORAGE_SIZED_I64; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_INT64 || base->type_id == LMD_TYPE_UINT64) { out->kind = LANE_STORAGE_ITEM; out->byte_size = 8; }
-    else if (lambda_type_id_has_pointer_lane(base->type_id)) { out->kind = LANE_STORAGE_POINTER; out->byte_size = (uint8_t)sizeof(void*); }
-    else return false;
-    return true;
 }
 
 static inline bool shape_entry_uses_raw_item_storage(const ShapeEntry* field) {
