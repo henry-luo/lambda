@@ -721,23 +721,22 @@ static bool arrow_head_candidate(const LambdaRdParser* parser) {
         return arrow_return_tail_candidate(&probe);
     }
     for (;;) {
+        parser_skip_newlines(&probe);
         if (!token_is_key(probe.current.kind)) return false;
         parser_advance(&probe);
         if (probe.current.kind == LAMBDA_TOK_QUESTION) parser_advance(&probe);
         if (probe.current.kind == LAMBDA_TOK_COLON) {
             parser_advance(&probe);
-            if (!token_starts_type(probe.current.kind)) return false;
-            while (probe.current.kind != LAMBDA_TOK_COMMA &&
-                    probe.current.kind != LAMBDA_TOK_RPAREN &&
-                    probe.current.kind != LAMBDA_TOK_EOF) parser_advance(&probe);
+            parser_skip_newlines(&probe);
+            LambdaParseValue type_value = 0;
+            if (!parse_annotation_type_slot_value(&probe, &type_value)) return false;
         }
         if (probe.current.kind == LAMBDA_TOK_EQ) {
             parser_advance(&probe);
-            if (!token_starts_expression(probe.current.kind)) return false;
-            while (probe.current.kind != LAMBDA_TOK_COMMA &&
-                    probe.current.kind != LAMBDA_TOK_RPAREN &&
-                    probe.current.kind != LAMBDA_TOK_EOF) parser_advance(&probe);
+            parser_skip_newlines(&probe);
+            if (!parse_expression(&probe, 0)) return false;
         }
+        parser_skip_newlines(&probe);
         if (probe.current.kind == LAMBDA_TOK_RPAREN) {
             return arrow_return_tail_candidate(&probe);
         }
@@ -1205,6 +1204,12 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
             parser_set_error(parser, "expected case or default in match", LAMBDA_TOK_CASE);
             return 0;
         }
+        // A match arm owns its local bindings even when its body is a single
+        // expression. Without this scope, same-named lets in sibling arms
+        // collide during direct AST construction.
+        parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
+            LAMBDA_REDUCTION_FORM_MATCH_ARM_BEGIN, arm_first.span, arm_first,
+            NULL, 0);
         LambdaParseValue body = 0;
         if (parser_accept(parser, LAMBDA_TOK_COLON)) {
             parser_skip_newlines(parser);
@@ -1217,6 +1222,9 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
             return 0;
         }
         if (parser->status != LAMBDA_PARSE_OK) return 0;
+        parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
+            LAMBDA_REDUCTION_FORM_MATCH_ARM_END, arm_first.span, arm_first,
+            NULL, 0);
         LambdaParseValue arm_children[2];
         uint32_t arm_child_count = 0;
         if (pattern) arm_children[arm_child_count++] = pattern;
@@ -2109,7 +2117,9 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
                     parser->current.kind == LAMBDA_TOK_SLASH) {
                 module_first = parser->current;
                 parser_advance(parser);
-                if (!token_is_identifier_like(parser->current.kind)) {
+                // Package segments are names, so a base-type spelling such
+                // as `.atoms.array` remains valid after lexer classification.
+                if (!token_is_key(parser->current.kind)) {
                     parser_set_error(parser, "expected a relative import component", LAMBDA_TOK_IDENTIFIER);
                     return 0;
                 }
@@ -2126,7 +2136,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             while (parser->current.kind == LAMBDA_TOK_DOT ||
                     parser->current.kind == LAMBDA_TOK_SLASH) {
                 parser_advance(parser);
-                if (!token_is_identifier_like(parser->current.kind)) {
+                if (!token_is_key(parser->current.kind)) {
                     parser_set_error(parser, "expected an import component", LAMBDA_TOK_IDENTIFIER);
                     return 0;
                 }

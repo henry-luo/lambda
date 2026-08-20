@@ -5499,10 +5499,9 @@ static bool is_direct_elementwise_comparison(AstNode* node) {
         is_elementwise_comparison_op(((AstBinaryNode*)node)->op);
 }
 
-static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond, const char* context) {
+static void lint_condition_at_line(Transpiler* tp, int line, AstNode* cond,
+        const char* context) {
     if (!cond) return;
-    TSPoint point = ts_node_start_point(cond_node);
-    int line = (int)point.row + 1;
 
     if (is_direct_elementwise_comparison(cond)) {
         // masks are containers and therefore truthy; condition sites need an explicit scalar reduction.
@@ -5517,6 +5516,19 @@ static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond,
         log_warn("lambda_condition_lint: line %d: %s condition has container type %s, which is always truthy; use len(...), any(...), all(...), or an explicit comparison",
             line, context, get_type_name(cond_type));
     }
+}
+
+static void lint_condition_expr(Transpiler* tp, TSNode cond_node, AstNode* cond,
+        const char* context) {
+    lint_condition_at_line(tp, (int)ts_node_start_point(cond_node).row + 1,
+        cond, context);
+}
+
+static void lint_condition_span(Transpiler* tp, LambdaSourceSpan span,
+        AstNode* cond, const char* context) {
+    lint_condition_at_line(tp,
+        (int)lambda_source_span_start_point(tp->source, span).row + 1,
+        cond, context);
 }
 
 static bool is_magnitude_numeric_type(TypeId type_id) {
@@ -12626,8 +12638,8 @@ struct LambdaDirectAstSink {
     NameScope* group_scopes[64];
     uint32_t group_scope_depth;
     NameScope* completed_group_scope;
-    NameScope* if_scopes[64];
-    uint32_t if_scope_depth;
+    NameScope* branch_scopes[64];
+    uint32_t branch_scope_depth;
     AstFuncNode* function_nodes[64];
     NameScope* function_scopes[64];
     uint32_t function_depth;
@@ -13335,6 +13347,11 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         }
         return rt;
     }
+    if ((op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
+            op == OPERATOR_DIV || op == OPERATOR_POW) &&
+            (lt->type_id == LMD_TYPE_COMPLEX || rt->type_id == LMD_TYPE_COMPLEX)) {
+        return &TYPE_COMPLEX;
+    }
     // Power deliberately remains boxed: negative exponents and mixed numeric
     // domains are resolved by `fn_pow`, and the MIR native lane rejects an
     // inferred scalar type for this operator.
@@ -13354,6 +13371,33 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         return direct_open_binary_result_type(tp, ANY_ARITH_OPERAND, lt, rt);
     }
     return direct_open_binary_result_type(tp, ANY_JOIN_OP, lt, rt);
+}
+
+static bool direct_validate_relational_operands(Transpiler* tp,
+        LambdaSourceSpan span, Operator op, AstNode* left, AstNode* right) {
+    if (!is_relational_op(op)) return true;
+    AstNode* left_value = ast_unwrap_primary(left);
+    if (left_value && left_value->node_type == AST_NODE_BINARY &&
+            is_relational_op(((AstBinaryNode*)left_value)->op)) {
+        // A left-associated chain is normalized to two scalar predicates
+        // below. Its temporary bool node is not an operand of the final
+        // comparison, so validate after that normalization instead.
+        return true;
+    }
+    Type* left_type = left && left->type ? lambda_type_remove_error_and_null(
+        tp->pool, left->type) : NULL;
+    Type* right_type = right && right->type ? lambda_type_remove_error_and_null(
+        tp->pool, right->type) : NULL;
+    if (!left_type || !right_type) return true;
+    // Reuse the CST magnitude predicate instead of treating every `type` tag
+    // as a container: abstract `number` is represented by that tag, and
+    // conversions such as `int(value) < 0` are valid scalar comparisons.
+    if (known_magnitude_comparable_type_set(left_type, right_type)) {
+        return true;
+    }
+    record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+        "ordered comparison has no magnitude for these types; use sort() for total ordering");
+    return false;
 }
 
 static AstNode* direct_promote_bare_pipe_sysfunc(Transpiler* tp,
@@ -13405,6 +13449,33 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
         }
     }
     if (node->op == OPERATOR_UNION && promote_type_union_expr(tp, node)) {
+        return (AstNode*)node;
+    }
+    if ((node->op == OPERATOR_ADD || node->op == OPERATOR_SUB ||
+            node->op == OPERATOR_MUL || node->op == OPERATOR_DIV ||
+            node->op == OPERATOR_POW) &&
+            ((left && left->type && left->type->type_id == LMD_TYPE_COMPLEX) ||
+             (right && right->type && right->type->type_id == LMD_TYPE_COMPLEX))) {
+        TypeId left_type = left && left->type ? left->type->type_id : LMD_TYPE_ANY;
+        TypeId right_type = right && right->type ? right->type->type_id : LMD_TYPE_ANY;
+        bool left_valid = left_type == LMD_TYPE_COMPLEX ||
+            is_complex_component_type(left_type);
+        bool right_valid = right_type == LMD_TYPE_COMPLEX ||
+            is_complex_component_type(right_type);
+        if (!left_valid || !right_valid) {
+            // Preserve the Tree-sitter builder's concrete complex arithmetic
+            // contract. Leaving this pair as open any makes a typed call add
+            // a spurious error arm for an expression that cannot fail here.
+            record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+                "operator '%.*s' is not defined for %s and %s",
+                (int)op_spelling.length, op_spelling.str,
+                get_type_name(left_type), get_type_name(right_type));
+            node->type = &TYPE_ERROR;
+            return (AstNode*)node;
+        }
+    }
+    if (!direct_validate_relational_operands(tp, span, node->op, left, right)) {
+        node->type = &TYPE_ERROR;
         return (AstNode*)node;
     }
     // The grammar parses relational chains left-associatively, but Lambda's
@@ -13502,6 +13573,13 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
             !is_global_simple_type(object_type) && field &&
             field->node_type == AST_NODE_IDENT) {
         TypeMap* map = (TypeMap*)object_type;
+        if (!map->struct_name || !map->shape) {
+            // An inferred map literal is mutable and its field shape can
+            // change after this read was built. Only named record/object
+            // contracts may publish a native field lane; otherwise a later
+            // map write is read back through the literal's stale slot type.
+            return set_type_any(tp, ANY_MEMBER_SHAPE);
+        }
         AstIdentNode* ident = (AstIdentNode*)field;
         Type* matched = NULL;
         FOR_EACH_MAP_FIELD(map, entry) {
@@ -13601,6 +13679,16 @@ AstNode* build_field_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
     node->object = object;
     node->field = field;
     node->computed = node_type == AST_NODE_INDEX_EXPR;
+    if (node_type == AST_NODE_INDEX_EXPR) {
+        Type* declared = declared_compound_destination_type(tp,
+            (AstNode*)node, NULL);
+        if (declared) {
+            // Indexed reads are total. Preserve the annotated element contract
+            // as nullable so an OOB read cannot bypass its declaration check.
+            node->type = lambda_type_nullable_normalized(tp->pool, declared);
+            return (AstNode*)node;
+        }
+    }
     node->type = direct_field_result_type(tp, object, field, node_type);
     return (AstNode*)node;
 }
@@ -14192,6 +14280,16 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
             "cannot assign to let binding '%.*s'. declare it with `var` instead.",
             (int)ident->name->len, ident->name->chars);
     }
+    if (entry && entry->is_mutable && assignment->value && assignment->value->type &&
+            entry->node && entry->node->type && !entry->has_type_annotation &&
+            entry->node->type->type_id != assignment->value->type->type_id &&
+            !entry->type_widened && entry->node->type->type_id != LMD_TYPE_ANY) {
+        // Keep the direct binding metadata in lockstep with the CST builder:
+        // an inferred var that changes type must use the Item carrier on all
+        // later reads, rather than reinterpreting its new value through the
+        // initializer's native lane (D2.2.2).
+        entry->type_widened = true;
+    }
     return (AstNode*)assignment;
 }
 
@@ -14256,6 +14354,16 @@ static AstNode* direct_complete_function(Transpiler* tp, LambdaSourceSpan span,
     if (!fn || !function_scope) return NULL;
     fn->vars = function_scope;
     fn->param = (AstNamedNode*)params;
+    if (body && body->node_type == AST_NODE_CONTENT) {
+        AstListNode* content = (AstListNode*)body;
+        if (content->item && !content->item->next) {
+            // `build_content(..., true, ...)` collapses a one-item function
+            // block in the Tree-sitter path. Preserve that AST contract so a
+            // terminal assignment remains a procedure's implicit result
+            // instead of being discarded as a CONTENT side effect (D6.1.2).
+            body = content->item;
+        }
+    }
     fn->body = body;
     TypeFunc* function_type = (TypeFunc*)fn->type;
     function_type->is_proc = is_proc;
@@ -14289,7 +14397,15 @@ static AstNode* direct_complete_function(Transpiler* tp, LambdaSourceSpan span,
         function_type->can_raise = true;
     }
     if (!returned_type) {
-        function_type->inferred_return = body && body->type ? body->type : &TYPE_ANY;
+        // A pn's result is its reachable return/statement flow, not the
+        // enclosing content-list carrier. Using the latter erased mutation
+        // method results and made direct calls return null (D6.1.2).
+        function_type->inferred_return = is_proc
+            ? infer_procedural_return_type(tp, fn)
+            : body && body->type ? body->type : &TYPE_ANY;
+        // Earlier calls can still target this placeholder through the boxed
+        // ABI; retain that stable public carrier while MIR uses inferred_return.
+        function_type->returned = &TYPE_ANY;
     }
     (void)span;
     return (AstNode*)fn;
@@ -14401,6 +14517,9 @@ AstNode* build_if_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
     node->cond = condition;
     node->then = then_branch;
     node->otherwise = else_branch;
+    // Direct reductions have source spans, not TSNodes. Route them through the
+    // shared condition lint so parser choice cannot suppress diagnostics.
+    lint_condition_span(tp, span, condition, "if");
     if (!then_branch || !then_branch->type ||
             (else_branch && !else_branch->type)) {
         node->type = &TYPE_ERROR;
@@ -14541,6 +14660,9 @@ AstNode* build_while_from_parts(Transpiler* tp, LambdaSourceSpan span,
     node->vars = loop_scope;
     node->cond = condition;
     node->body = body;
+    // Keep procedural conditions subject to the same mask/container lint as
+    // the CST path; this guards truthy-array control flow (S5.4.1).
+    lint_condition_span(tp, span, condition, "while");
     if (body && body->node_type == AST_NODE_CONTENT &&
             !((AstListNode*)body)->vars) {
         ((AstListNode*)body)->vars = loop_scope;
@@ -14717,23 +14839,25 @@ static LambdaParseValue direct_ast_reduce(void* context,
             lambda_ast_leave_scope(tp, sink->completed_group_scope);
             return 0;
         }
-        if (reduction->form == LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN) {
-            if (sink->if_scope_depth >= 64) {
-                log_error("direct sink if scope overflow");
+        if (reduction->form == LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN ||
+                reduction->form == LAMBDA_REDUCTION_FORM_MATCH_ARM_BEGIN) {
+            if (sink->branch_scope_depth >= 64) {
+                log_error("direct sink branch scope overflow");
                 sink->failed = true;
                 return 0;
             }
-            sink->if_scopes[sink->if_scope_depth++] = lambda_ast_enter_scope(tp,
+            sink->branch_scopes[sink->branch_scope_depth++] = lambda_ast_enter_scope(tp,
                 tp->current_scope && tp->current_scope->is_proc);
             return 0;
         }
-        if (reduction->form == LAMBDA_REDUCTION_FORM_IF_BRANCH_END) {
-            if (!sink->if_scope_depth) {
-                log_error("direct sink if scope underflow");
+        if (reduction->form == LAMBDA_REDUCTION_FORM_IF_BRANCH_END ||
+                reduction->form == LAMBDA_REDUCTION_FORM_MATCH_ARM_END) {
+            if (!sink->branch_scope_depth) {
+                log_error("direct sink branch scope underflow");
                 sink->failed = true;
                 return 0;
             }
-            NameScope* scope = sink->if_scopes[--sink->if_scope_depth];
+            NameScope* scope = sink->branch_scopes[--sink->branch_scope_depth];
             lambda_ast_leave_scope(tp, scope);
             return 0;
         }
@@ -14840,9 +14964,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
     }
     case LAMBDA_REDUCE_CONTENT: {
         AstNode* content = direct_content_node(tp, reduction->span, child0);
-        if (content && sink->if_scope_depth) {
-            ((AstListNode*)content)->vars = sink->if_scopes[
-                sink->if_scope_depth - 1];
+        if (content && sink->branch_scope_depth) {
+            ((AstListNode*)content)->vars = sink->branch_scopes[
+                sink->branch_scope_depth - 1];
         }
         return direct_ast_value(content);
     }
@@ -15301,6 +15425,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_WHERE) {
             if (!sink->loop_scope_depth || !sink->for_nodes[sink->loop_scope_depth - 1]) break;
             sink->for_nodes[sink->loop_scope_depth - 1]->where = child0;
+            lint_condition_span(tp, reduction->span, child0, "where");
             return direct_ast_value(child0);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_GROUP_KEY) {
