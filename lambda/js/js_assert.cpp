@@ -3885,15 +3885,6 @@ static bool js_assert_has_constructor_prototype(Item value, const char* ctor_nam
     return js_assert_string_equals(tag, ctor_name);
 }
 
-static int js_assert_partial_deep_enter(JsObjectPairTraversal* ctx, Item actual, Item expected) {
-    if (!ctx) return 1;
-    return ctx->enter(actual, expected);
-}
-
-static void js_assert_partial_deep_leave(JsObjectPairTraversal* ctx) {
-    if (ctx) ctx->leave();
-}
-
 static bool js_assert_is_real_regexp(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     return js_class_id(value) == JS_CLASS_REGEXP;
@@ -4300,7 +4291,7 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
 
     bool entered = false;
     if (actual_object_like || expected_object_like) {
-        int enter_status = js_assert_partial_deep_enter(ctx, actual, expected);
+        int enter_status = ctx->enter(actual, expected);
         if (enter_status == 0) {
             // cyclic partial comparisons must reuse the same active actual/expected pair instead of recursing forever.
             return true;
@@ -4399,7 +4390,7 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
     }
 
 done:
-    if (entered) js_assert_partial_deep_leave(ctx);
+    if (entered) ctx->leave();
     return result;
 }
 
