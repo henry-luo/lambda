@@ -36473,15 +36473,6 @@ extern "C" Item js_module_get_builtin(Item specifier) {
     }
     if (jube_status != JUBE_SPECIFIER_UNKNOWN) return ItemNull;
 
-    // The N4 parity checkpoint intentionally runs with no catalog so it can
-    // compare the pre-flip host zlib implementation against node-zlib. Keep
-    // this sole fallback until N4.4 removes that source from the host image.
-    if ((spec->len == 4 && memcmp(spec->chars, "zlib", 4) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "zlib.js", 7) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:zlib", 9) == 0)) {
-        extern Item js_get_zlib_namespace(void);
-        return js_get_zlib_namespace();
-    }
     return ItemNull;
 }
 

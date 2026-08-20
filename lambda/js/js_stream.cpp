@@ -7229,6 +7229,10 @@ static Item js_transform_new_internal(Item opts, JsClass class_id) {
 }
 JS_FORWARD_ITEM(js_transform_new, (Item opts), js_transform_new_internal, (opts, JS_CLASS_TRANSFORM))
 
+extern "C" Item js_get_stream_transform_prototype(void) {
+    return stream_transform_prototype;
+}
+
 // =============================================================================
 // PassThrough — Transform that passes data unchanged
 // =============================================================================

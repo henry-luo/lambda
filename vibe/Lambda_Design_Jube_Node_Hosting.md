@@ -197,7 +197,7 @@ exposing a `js_get_<name>_namespace()` entry:
 |---|---|---|---|
 | `js_stream.cpp` (stream + stream/web/promises/consumers/iter) | 10,111 | `js_dns.cpp` | 1,991 |
 | `js_crypto.cpp` (node:crypto **mixed with WebCrypto**) | 8,725 | `js_readline.cpp` | 1,878 |
-| `js_assert.cpp` (assert + node:test) | 6,240 | `js_zlib.cpp` | 1,429 |
+| `js_assert.cpp` (assert + node:test) | 6,240 | `node_zlib_module.cpp` + host codec provider | 1,583 |
 | `js_http.cpp` (own HTTP/1.1 parser, raw libuv) | 6,175 | `js_url_module.cpp` | 870 |
 | `js_net.cpp` | 5,883 | `js_events.cpp` | 846 |
 | `js_fs.cpp` | 3,919 | `js_os.cpp` | 803 |
@@ -272,7 +272,7 @@ browser/DOM ≈12%.
 
 ### 4.4 External dependencies
 
-Only **libuv**, **zlib** (`js_zlib.cpp` only), and **mbedTLS** (`js_tls.cpp`,
+Only **libuv**, **zlib** (host provider consumed by `node-zlib`), and **mbedTLS** (`js_tls.cpp`,
 `js_crypto.cpp`), plus **OpenSSL as an existing runtime `dlopen` soft-dep** for
 PFX/PKCS12 (`js_tls.cpp:1190–1206`). There is **no libcurl** (curl is
 `js_fetch.cpp` — browser surface) and **no c-ares** (`cares_wrap` is a shim

@@ -167,7 +167,7 @@ JS_SUBMODULES = [
         'js_fs', 'js_path', 'js_os', 'js_http', 'js_https', 'js_net', 'js_dns',
         'js_tls', 'js_child_process', 'js_stream', 'js_buffer', 'js_util',
         'js_querystring', 'js_readline', 'js_string_decoder', 'js_crypto',
-        'js_events', 'js_assert', 'js_zlib', 'js_permission',
+        'js_events', 'js_assert', 'js_permission',
     ])),
     ('core js engine', under('lambda/js')),
 ]

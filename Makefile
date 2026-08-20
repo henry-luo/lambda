@@ -1305,30 +1305,24 @@ test-jube-node-zlib-dynamic: build-node-zlib build-node-core
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-zlib-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-zlib/module.json temp/node-zlib-dynamic/node-zlib/module.json
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log | diff -u test/node/jube_zlib_dynamic_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log | diff -u test/node/jube_zlib_dynamic_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log > temp/node-zlib-dynamic/normal.out
+	@diff -u test/node/jube_zlib_dynamic_registry.txt temp/node-zlib-dynamic/normal.out
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log > temp/node-zlib-dynamic/forced.out
+	@diff -u test/node/jube_zlib_dynamic_registry.txt temp/node-zlib-dynamic/forced.out
 
 test-jube-node-zlib-negative: build-node-zlib build-node-core
 	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-zlib --runtime-specifier zlib
 
-# The static checkpoint deliberately runs outside a module catalog so the
-# legacy host implementation remains the parity reference. The dynamic half
-# then activates node-zlib and its node-core dependency from copied images.
+# The parity fixture now validates the module-owned namespace against its
+# golden behavior; the host no longer contains a static zlib namespace.
 test-jube-node-zlib-parity: build-node-zlib build-node-core
-	@mkdir -p temp/node-zlib-static-checkpoint temp/node-zlib-dynamic/node-core temp/node-zlib-dynamic/node-zlib
-	@cp lambda.exe temp/node-zlib-static-checkpoint/lambda.exe
+	@mkdir -p temp/node-zlib-dynamic/node-core temp/node-zlib-dynamic/node-zlib
 	@cp modules/node-core/module.json temp/node-zlib-dynamic/node-core/module.json
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-zlib-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-zlib/module.json temp/node-zlib-dynamic/node-zlib/module.json
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
-	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing ./lambda.exe js ../../test/node/jube_zlib_parity_registry.js --no-log > static.out
 	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic.out
-	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static.out
-	@diff -u temp/node-zlib-static-checkpoint/static.out temp/node-zlib-dynamic/dynamic.out
-	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js ../../test/node/jube_zlib_parity_registry.js --no-log > static-forced.out
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic-forced.out
-	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static-forced.out
-	@diff -u temp/node-zlib-static-checkpoint/static-forced.out temp/node-zlib-dynamic/dynamic-forced.out
+	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-dynamic/dynamic.out
 
 release-jube: package-jube
 	@ln -sfn lambda release-jube/lambda-jube

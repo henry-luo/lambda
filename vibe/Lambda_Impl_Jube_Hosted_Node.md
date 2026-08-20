@@ -183,10 +183,11 @@
 > and isolated normal/forced-GC gzip round-trip gate are all verified. The
 > raw gzip/gunzip, deflate/inflate, raw-deflate/raw-inflate, and auto-detect
 > unzip codecs now remain in the static host as one provider; the node-zlib
-> image owns all seven synchronous and callback wrappers through the Jube
-> binary, codec, and next-tick services. The image links neither zlib nor a
-> raw host symbol. Remaining stream constructors are still host-resident, so
-> this is not the N4 source-migration flip.
+> image owns the namespace, all seven synchronous and callback wrappers, and
+> the stateful stream facade through the Jube binary, codec, and next-tick
+> services. The image links neither zlib nor a raw host symbol; only the
+> versioned codec/state provider and generic Transform lifecycle remain in the
+> host.
 > The Node module build contract is now generated from one JSON template with
 > explicit `node-core` and `node-zlib` instances, avoiding per-module linker
 > flag drift. The shared loader-negative harness also covers `node-zlib`'s
@@ -207,16 +208,14 @@
 > serve TLS handler and the existing JS TLS/crypto and digest paths. N4/N6 may
 > remove those libraries from a Node module's implementation boundary, but
 > cannot claim that either dependency drops from the host binary.
-> `node-zlib` now owns its first observable codec operation: `crc32` validates
-> its Node inputs in the dynamic image, then calls the host codec provider
-> through `JubeHostNodeZlibAPI`. It reads strings and binary views only through
+> `node-zlib` now owns the complete observable namespace: `crc32` and the seven
+> synchronous/callback compression operations validate Node inputs in the
+> dynamic image, while stateful constructors use the host's opaque codec and
+> generic Transform services. It reads strings and binary views only through
 > Jube value/binary tables, preserves unsigned seed validation through the
-> Node error table, and caches its patched namespace in a session-owned
-> persistent root. The static checkpoint and hosted image use the same host
-> primitive, so there is no divergent duplicate implementation. The seven
-> synchronous compression/decompression operations and callback wrappers are
-> module-owned over that provider; stream constructors stay in the host pending
-> their larger stateful service conversion.
+> Node error table, and caches namespace/prototype roots per session. The
+> static checkpoint and hosted image use the same host primitive, so there is
+> no divergent duplicate implementation.
 > The `crc32` boundary now also covers DataView under poisoned forced-GC in
 > both the static checkpoint and dynamic image. That probe repaired the shared
 > runtime ownership invariant: a native DataView must trace its backing
@@ -567,7 +566,8 @@ drift corrections against the 2026-07-25 design pass:
   `:39728`).
 - `ERR_*` helpers (`js_throw_type_error_code` family) `js_runtime.cpp:23307+`.
 - First adopters: `js_path.cpp` 669 lines, `js_get_path_namespace` `:613`;
-  `js_zlib.cpp` 1,429 lines, `js_get_zlib_namespace` `:1285`;
+  `node_zlib_module.cpp` owns the Node-facing zlib namespace and stream
+  facade; `jube_node_zlib_codec.cpp` remains the host provider;
   `js_crypto.cpp` 8,725 lines, `js_get_crypto_namespace` `:8584`.
 - Globals install cluster (process/Buffer/os/vm, `ReadableStream` at
   `js_globals.cpp:16143`) — `js_globals.cpp:16009+`.
@@ -1037,9 +1037,11 @@ versioned host codec provider.
   activation exercises the existing `dependencies` machinery
   (`jube_registry.cpp:3414`) — add a test that requiring `zlib` with
   `node-core` present-but-unloaded activates `node-core` first.
-- [ ] **N4.4** Flip dynamic: remove the Node zlib namespace implementation
+- [x] **N4.4** Flip dynamic: remove the Node zlib namespace implementation
   from the host target, but keep the host codec provider and zlib static link.
-  Static/dynamic parity uses two explicit test artifacts:
+  The module now owns the namespace, validation, callbacks, constructors, and
+  stream facade; the host retains only the versioned byte/stateful codec
+  provider. Static/dynamic parity uses two explicit test artifacts:
   a disposable static-checkpoint host and a production-shaped host with the
   source absent plus the dylib. `JUBE_MODULE_PATH` isolates the latter's
   bundle; it is not claimed to switch a statically linked module off. Run the

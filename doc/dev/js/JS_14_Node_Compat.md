@@ -114,7 +114,7 @@ The table records each module's **actual** backing and the notable gaps verified
 | `child_process` | `js_child_process.cpp` / `js_get_child_process_namespace` | libuv `uv_spawn` + `popen` | `exec` (async, `uv_spawn`, `:287`), `execSync` (`popen`, `:329`), `spawn`/`spawnSync`. **`fork()` is absent.** |
 | `url` | `js_url_module.cpp` / `js_get_url_namespace` | native, immutable `TypeMap::js_meta` brand | WHATWG `URL` constructor plus legacy `parse`/`format`/`resolve`. `searchParams` is a basic key/value object, **not** a full `URLSearchParams` (`:80`). |
 | `querystring` | `js_querystring.cpp` / `js_get_querystring_namespace` | native | `parse`/`stringify`/`escape`/`unescape` with Node percent-encoding semantics (`:33`). |
-| `zlib` | `js_zlib.cpp` / `js_get_zlib_namespace` | system `<zlib.h>` | `gzipSync`/`gunzipSync`/`deflateSync`/`inflateSync` (`deflateInit2` with gzip windowBits, `:69`) and streaming `createGzip`/`createGunzip`. |
+| `zlib` | `lambda/module/node_zlib/node_zlib_module.cpp` | host Jube zlib provider (system `<zlib.h>` remains host-linked) | `gzipSync`/`gunzipSync`/`deflateSync`/`inflateSync` and streaming `createGzip`/`createGunzip`. |
 | `dns` | `js_dns.cpp` / `js_get_dns_namespace` | libuv `uv_getaddrinfo` | `lookup` (async, `:92`), `lookupSync`, `resolve`/`resolve4` (delegate to A/AAAA `getaddrinfo`). No real DNS record types beyond A/AAAA. |
 | `readline` | `js_readline.cpp` / `js_get_readline_namespace` | native, blocking stdin | `createInterface` with `question`/`on`/`close`; reads stdin synchronously (`:31`). |
 | `string_decoder` | `js_string_decoder.cpp` / `js_get_string_decoder_namespace` | native | `StringDecoder` with `write`/`end`; buffers incomplete multi-byte sequences in `__pending__` (`:56`). utf8 primary. |

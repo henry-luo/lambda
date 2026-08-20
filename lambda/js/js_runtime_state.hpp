@@ -191,10 +191,6 @@ struct JsCryptoState : JsNamespaceState {
 struct JsChildProcessState : JsNamespaceState {
 };
 
-struct JsZlibState : JsNamespaceState {
-    Item constructor_prototypes[8] = {};
-};
-
 struct JsTlsState : JsNamespaceState {
     Item ca_bundled = {};
     Item ca_extra = {};
@@ -812,7 +808,6 @@ struct JsRuntimeState {
     JsUtilState util = {};
     JsCryptoState crypto = {};
     JsChildProcessState child_process = {};
-    JsZlibState zlib = {};
     JsTlsState tls = {};
     JsStreamState stream = {};
     JsHttpState http = {};

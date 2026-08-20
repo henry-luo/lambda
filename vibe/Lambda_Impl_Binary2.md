@@ -345,7 +345,7 @@ JS/ArrayNum raw-access inventory:
   points.
 - Direct ArrayBuffer/DataView readers exist in `js_assert.cpp`,
   `js_child_process.cpp`, `js_clipboard.cpp`, `js_crypto.cpp`, `js_runtime.cpp`,
-  `js_tls.cpp`, `js_util.cpp`, and `js_zlib.cpp`.
+  `js_tls.cpp`, `js_util.cpp`, and the dynamic `node_zlib_module.cpp`.
 - Direct writers/storage creators exist in `js_clipboard.cpp`, `js_crypto.cpp`,
   `js_globals.cpp`, `js_stream.cpp`, and `js_typed_array.cpp`; accessor-based
   mutable typed-array/Buffer/file/network writers additionally occur in
