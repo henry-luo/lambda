@@ -13553,10 +13553,20 @@ static Type* mir_direct_map_contract(AstNode* value, Type* target) {
         return NULL;
     }
     TypeMap* expected = (TypeMap*)target;
-    // Adopt whenever the SHAPE lines up and the contract is storage-valid;
-    // unproven fields are admitted at construction rather than denying the
-    // literal its declared shape.
-    return mir_map_literal_shape_matches_contract((AstMapNode*)primary, expected)
+    // Adopt when EITHER path allows it:
+    //   * the contract is storage-valid and the shape lines up -- unproven
+    //     fields are then admitted at construction (the new path); or
+    //   * every value is statically proven (the original path).
+    // The second disjunct is not redundant: a contract with an ANY-classified
+    // field (`{v: integer}`) is NOT storage-valid, so the first test refuses
+    // it -- and refusing to adopt pushes the literal through the declaration
+    // boundary's re-pack into that same malformed shape, which broke `integer`
+    // map fields outright. Keeping the value-proof path preserves exactly the
+    // set of literals that adopted before, so this is a superset, never a
+    // regression (Tune19 §12.6).
+    AstMapNode* literal = (AstMapNode*)primary;
+    return (mir_map_literal_shape_matches_contract(literal, expected) ||
+            mir_map_literal_matches_contract(literal, expected))
         ? target : NULL;
 }
 
@@ -13614,7 +13624,10 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         if (hint && hint->type_id == LMD_TYPE_MAP && hint != &TYPE_MAP &&
                 map_node->type && map_node->type->type_id == LMD_TYPE_MAP) {
             TypeMap* expected = (TypeMap*)hint;
-            if (mir_map_literal_shape_matches_contract(map_node, expected)) {
+            // Same disjunction as mir_direct_map_contract: storage-valid
+            // shape match, or the original all-values-proven path.
+            if (mir_map_literal_shape_matches_contract(map_node, expected) ||
+                    mir_map_literal_matches_contract(map_node, expected)) {
                 map_contract = expected;
             }
         }
@@ -13667,9 +13680,19 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                 all_direct = false;
                 break;
             }
-            if (!mir_is_native_scalar_value_type(ft) &&
-                ft != LMD_TYPE_STRING && ft != LMD_TYPE_NULL &&
-                !mir_is_container_field_type(ft)) {
+            // ⚠ This admission MUST match the store switch below exactly.
+            // It used to ask mir_is_native_scalar_value_type, which also admits
+            // SYMBOL, BINARY, DECIMAL, DTIME and COMPLEX -- none of which the
+            // loop has a branch for, so those fields fell off the end of the
+            // if-chain and were NEVER WRITTEN. An annotated `{v: decimal}` read
+            // back as null; the same held for symbol/binary/datetime/complex
+            // fields. Admitting less sends them through map_fill, whose
+            // set_field_value covers every storage class.
+            bool stored_by_loop = ft == LMD_TYPE_NULL || ft == LMD_TYPE_FLOAT ||
+                is_integer_type_id(ft) || ft == LMD_TYPE_UINT64 ||
+                ft == LMD_TYPE_BOOL || ft == LMD_TYPE_STRING ||
+                mir_is_container_field_type(ft);
+            if (!stored_by_loop) {
                 all_direct = false;
                 break;
             }
@@ -14044,6 +14067,24 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 // Member/Index access
 // ============================================================================
 
+// Which packed storage classes does the direct field read/write pair actually
+// produce in a form its consumers can use?
+//
+// The scalar arm of emit_mir_direct_field_read returns the raw 8 bytes. That is
+// correct for the int/bool lanes (the value IS the lane) and for STRING, whose
+// consumers re-tag the raw pointer. It is NOT correct for the other
+// pointer-lane scalars -- DECIMAL, DTIME, SYMBOL, BINARY, COMPLEX -- which come
+// back untagged and read as `raw_pointer`: an annotated `{v: decimal}` field
+// reported its type as raw_pointer instead of decimal. `is_direct_access_type`
+// admits all of them, so it is too broad to gate this path; those types belong
+// on the generic accessor, which tags them through _map_read_field.
+static bool mir_direct_field_access_type(TypeId storage_type) {
+    return storage_type == LMD_TYPE_NULL || storage_type == LMD_TYPE_FLOAT ||
+        is_integer_type_id(storage_type) || storage_type == LMD_TYPE_UINT64 ||
+        storage_type == LMD_TYPE_BOOL || storage_type == LMD_TYPE_STRING ||
+        mir_is_container_field_type(storage_type);
+}
+
 // Emit direct field READ from a packed map/object data struct.
 // Map/Object layout: [TypeId(1) flags(1) pad(6)] [void* type @8] [void* data @16] [int data_cap @24]
 // data points to packed struct where each field is 8-byte aligned.
@@ -14417,6 +14458,7 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
                 // remains the authority (D2.6.1, D3.2.2).
                 bool field_is_container = mir_is_container_field_type(storage_type);
                 if (se && se->type && is_direct_access_type(storage_type) &&
+                        mir_direct_field_access_type(storage_type) &&
                         (!uses_native_lane || field_is_container) &&
                         (!object_may_be_null || field_is_container)) {
                     log_debug("mir: direct field read: %.*s (type=%d offset=%lld)",
@@ -20899,6 +20941,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 // already the checked-map invariant. Keep dynamic values and
                 // shared roots on the transactional setter path.
                 if (field && field->type && is_direct_access_type(storage_type) &&
+                        mir_direct_field_access_type(storage_type) &&
                         !mir_argument_may_return_item_error(mt, ca->value) &&
                         field_contract &&
                         (!mir_expr_may_be_null(mt, ca->value) || nullable_value_allowed) &&

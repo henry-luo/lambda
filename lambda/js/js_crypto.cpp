@@ -10,6 +10,8 @@
  */
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "../jube/jube_registry.h"
+#include "../module/node_core/node_runtime_state.hpp"
 #include "js_typed_array.h"
 #include "js_error_codes.h"
 #include "../lambda-data.hpp"
@@ -62,32 +64,19 @@ static const uint8_t crypto_empty_bytes[1] = {0};
 template <typename Target>
 JS_FORWARD_STATIC_VOID( crypto_set_native, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
 
-#define JS_CRYPTO_MAX_LIVE_CONTEXTS 4096
-
-struct JsCryptoNativeState {
-    bool pseudo_random_warning_emitted;
-    void* hmac_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int hmac_context_count;
-    void* hash_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int hash_context_count;
-    void* sign_verify_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int sign_verify_context_count;
-    void* cipher_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int cipher_context_count;
-};
-
 static JsCryptoNativeState* crypto_native_state_ensure(void) {
     if (!js_active_runtime_state) return NULL;
-    if (!js_runtime_state.crypto.native_state) {
-        // This is module-entry allocation, never an update/digest hot-path
-        // guard. All later registry operations are plain context-local loads.
-        js_runtime_state.crypto.native_state = mem_calloc(1, sizeof(JsCryptoNativeState),
-            MEM_CAT_JS_RUNTIME);
-    }
-    return (JsCryptoNativeState*)js_runtime_state.crypto.native_state;
+    jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_crypto_native_state(session) : NULL;
 }
 
-#define crypto_native_state (*(JsCryptoNativeState*)js_runtime_state.crypto.native_state)
+static JsCryptoNativeState* crypto_native_state_current(void) {
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_crypto_native_state(session) : NULL;
+}
+
+#define crypto_native_state (*crypto_native_state_current())
 #define crypto_pseudo_random_warning_emitted (crypto_native_state.pseudo_random_warning_emitted)
 JS_FORWARD_STATIC_RETURN(bool, crypto_ensure_roots, (void), crypto_native_state_ensure, () && js_root_range_ensure_registered(&js_runtime_state.crypto.roots))
 
@@ -7856,13 +7845,20 @@ static void crypto_destroy_live_contexts(JsCryptoNativeState* state) {
 
 extern "C" void js_crypto_reset(void) {
     if (!js_active_runtime_state) return;
-    if (!js_runtime_state.crypto.native_state) {
+    if (!crypto_native_state_current()) {
         crypto_namespace = (Item){0};
         return;
     }
     crypto_reset_live_contexts();
     crypto_pseudo_random_warning_emitted = false;
     crypto_namespace = (Item){0};
+}
+
+extern "C" void js_crypto_node_runtime_detach(void* session) {
+    JsCryptoNativeState* state = jube_node_crypto_native_state(session);
+    if (!state) return;
+    crypto_destroy_live_contexts(state);
+    memset(state, 0, sizeof(*state));
 }
 
 #undef crypto_live_cipher_context_count
@@ -7875,11 +7871,3 @@ extern "C" void js_crypto_reset(void) {
 #undef crypto_live_hmac_contexts
 #undef crypto_pseudo_random_warning_emitted
 #undef crypto_native_state
-
-extern "C" void js_crypto_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->crypto.native_state) return;
-    crypto_destroy_live_contexts(
-        (JsCryptoNativeState*)runtime_state->crypto.native_state);
-    mem_free(runtime_state->crypto.native_state);
-    runtime_state->crypto.native_state = NULL;
-}

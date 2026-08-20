@@ -165,6 +165,28 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
 }
 
 ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
+    // A compact global meta-type (`number`, `integer`, `type`) carries ONLY the
+    // two-byte Type prefix -- there is no TypeType payload, so reading
+    // `type->type` runs off the end of the global. ASAN caught it as a
+    // global-buffer-overflow 8 bytes before TYPE_STRING, reached from admitting
+    // a `{q: number}` map field, which aborted construction outright.
+    //
+    // `type_is_global_meta_type` exists for exactly this and its comment says
+    // callers must test it before reading extended fields; both arms below
+    // instead dereferenced FIRST and only compared the UNWRAPPED result against
+    // TYPE_NUMBER/TYPE_INTEGER -- a comparison a compact global never reaches,
+    // because the deref that precedes it is already out of bounds.
+    if (type_is_global_meta_type((const Type*)type)) {
+        Type* meta = (Type*)type;
+        bool ok = meta == &TYPE_NUMBER ? IS_NUMERIC_ID(item.type_id())
+            : meta == &TYPE_INTEGER ? validator_numeric_item_embeds(item, meta)
+            : item.type_id() == LMD_TYPE_TYPE;
+        if (validator->is_fast_mode()) return validation_verdict(ok);
+        ValidationResult* meta_result = create_validation_result(validator->get_pool());
+        meta_result->valid = ok;
+        if (!ok) add_type_mismatch_error_ex(meta_result, validator, meta, item);
+        return meta_result;
+    }
     if (validator->is_fast_mode()) {
         // This is the leaf the element walk calls once per item, so the
         // allocation at the top of full mode is exactly what fast mode must

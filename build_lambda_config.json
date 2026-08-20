@@ -43,6 +43,7 @@
   "source_files": [
     "lib/sqlite/sqlite3.c",
     "lambda/module/node_core/node_events.cpp",
+    "lambda/module/node_core/node_trace_events.cpp",
     "lambda/module/node_core/node_url.cpp",
     "lambda/js/js_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
@@ -346,6 +347,7 @@
         "lambda/module/node_core/node_querystring.cpp",
         "lambda/module/node_core/node_string_decoder.cpp",
         "lambda/module/node_core/node_timers.cpp",
+        "lambda/module/node_core/node_trace_events.cpp",
         "lambda/module/node_core/node_tty.cpp",
         "lambda/module/node_core/node_v8.cpp",
         "lambda/module/node_core/node_workers.cpp"
@@ -4552,6 +4554,7 @@
             "name": "Lambda Item Representation Tests",
             "dependencies": [
               "lambda-rt",
+              "node-core",
               "radiant"
             ],
             "binary": "test_item_repr_gtest.exe",
@@ -4625,6 +4628,7 @@
             "name": "Lambda Error System Tests",
             "dependencies": [
               "lambda-rt",
+              "node-core",
               "radiant"
             ],
             "binary": "test_lambda_errors_gtest.exe",

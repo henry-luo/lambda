@@ -726,12 +726,12 @@ bug. Parenthesize or bind to a local before printing.
 
 | gap | site | state |
 |---|---|---|
-| G1 | classifier sends `T[]`/`T[]?` to ANY | open — one missing case; its own gated slice (changes storage format of rebuilt shapes holding occurrence fields) |
+| G1 | classifier sends `T[]`/`T[]?` to ANY | **FIXED 2026-08-20** — occurrence contracts classify to the pointer lane (`LMD_TYPE_ARRAY`); the pointee's own `type_id` discriminates Array vs ArrayNum, as `map?` fields already do |
 | G2 | unions classify ANY at construction | open — admission-only under TB2; construction should record the actual member like mutation already does |
-| G2b | constrained `T where …` classifies ANY | open — TB5: classify as the base type's lane |
-| G5 | `integer` classifies ANY/TypedItem | **confirmed** `Decimal*` lane (TB4, 2026-08-20; compact-int stores box) — implement with G1/G2b in the one classifier slice |
+| G2b | constrained `T where …` classifies ANY | **FIXED 2026-08-20** — recurses to the base type's lane (self-reference guarded) |
+| G5 | `integer` classifies ANY/TypedItem | ruled `Decimal*` (TB4) but **NOT implemented — needs conversion plumbing first.** `set_field_value`'s DECIMAL arm is a bare `*(Decimal**)field_ptr = item.get_decimal()`: it assumes the Item ALREADY carries a Decimal. Reclassifying without a compact-int → heap-Decimal conversion at the store (and in `map_field_store`, its runtime twin) would silently corrupt `n: integer = 3`. Split out of the G1/G2b slice for that reason |
 | G6 | union-typed LOCAL's carrier narrowed from the initializer (§10.4) | **FIXED 2026-08-20** — boxed Item from declaration for binary-union annotations + membership check on unproven stores; test `test/lambda/proc/union_local_carrier.ls` |
-| G3 | AST contract shapes: offsets computed under type-valued 8B accounting, slots consumed as 9B TypedItem — malformed; own `shape_entry_storage_fits_data` returns false on the last field | open — recompute under the storage rule for storage-valid contracts; never use union-bearing contract shapes for storage (see Type_Boundary doc) |
+| G3 | AST contract shapes: offsets computed under a flat `sizeof(void*)` stride, slots consumed as 9B TypedItem — malformed | **FIXED 2026-08-20** — the map-TYPE parser (`parse_type_pattern.cpp`, both sites) now strides by `type_info[type_field_storage_type_id(...)].byte_size`. It was ONE builder, not the multi-path audit §11.3 anticipated (Tune19 §12.7) |
 | G4 | `set_field_value`/`map_field_store` honor ANY on G3 shapes (the byte-24 tag clobber, byte-32 overflow of Tune19 §11.3) | closes with G1–G3 |
 
 ⚠ Open observation: the `map_get ANY type is UNKNOWN: 0` [ERR!] lines visible

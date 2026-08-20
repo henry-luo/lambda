@@ -14,6 +14,8 @@
 #include "js_permission.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
+#include "../module/node_core/node_trace_events.hpp"
+#include "../module/node_core/node_runtime_state.hpp"
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../runtime/heap_api.h"
@@ -76,7 +78,6 @@ Item js_set_name_key(Item object, const char* name, Item value) {
 #define js_dc_key js_runtime_key
 #define js_cluster_key js_runtime_key
 #define js_repl_key js_runtime_key
-#define js_trace_key js_runtime_key
 #define js_async_hooks_key js_runtime_key
 #define js_vm_stm_key js_runtime_key
 #define js_cc_key js_runtime_key
@@ -32683,15 +32684,22 @@ static Item js_dc_stores_key(void);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 
 #define JS_DC_CHANNEL_MAX JS_DIAGNOSTICS_CHANNEL_MAX
-#define js_dc_channel_names (js_runtime_state.diagnostics_channels.channel_names)
-#define js_dc_channels (js_runtime_state.diagnostics_channels.channels)
-#define js_dc_channel_count (js_runtime_state.diagnostics_channels.channel_count)
-#define js_dc_channel_proto (js_runtime_state.diagnostics_channels.channel_prototype)
-#define js_dc_tracing_channel_proto (js_runtime_state.diagnostics_channels.tracing_channel_prototype)
-#define js_dc_bounded_channel_proto (js_runtime_state.diagnostics_channels.bounded_channel_prototype)
-#define js_dc_channel_ctor (js_runtime_state.diagnostics_channels.channel_constructor)
-#define js_dc_tracing_channel_ctor (js_runtime_state.diagnostics_channels.tracing_channel_constructor)
-#define js_dc_bounded_channel_ctor (js_runtime_state.diagnostics_channels.bounded_channel_constructor)
+static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool attach) {
+    if (attach) jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_diagnostics_channel_state(session) : NULL;
+}
+
+#define js_dc_state (*js_diagnostics_channel_state_current(true))
+#define js_dc_channel_names (js_dc_state.channel_names)
+#define js_dc_channels (js_dc_state.channels)
+#define js_dc_channel_count (js_dc_state.channel_count)
+#define js_dc_channel_proto (js_dc_state.channel_prototype)
+#define js_dc_tracing_channel_proto (js_dc_state.tracing_channel_prototype)
+#define js_dc_bounded_channel_proto (js_dc_state.bounded_channel_prototype)
+#define js_dc_channel_ctor (js_dc_state.channel_constructor)
+#define js_dc_tracing_channel_ctor (js_dc_state.tracing_channel_constructor)
+#define js_dc_bounded_channel_ctor (js_dc_state.bounded_channel_constructor)
 
 static bool js_dc_is_symbol(Item value) {
     return get_type_id(value) == LMD_TYPE_SYMBOL ||
@@ -32858,8 +32866,8 @@ static Item js_als_apply_context(Item context);
 static void js_als_restore_context(Item previous);
 
 #define JS_DC_DEFERRED_ERROR_MAX JS_DIAGNOSTICS_DEFERRED_ERROR_MAX
-#define js_dc_deferred_errors (js_runtime_state.diagnostics_channels.deferred_errors)
-#define js_dc_deferred_error_count (js_runtime_state.diagnostics_channels.deferred_error_count)
+#define js_dc_deferred_errors (js_dc_state.deferred_errors)
+#define js_dc_deferred_error_count (js_dc_state.deferred_error_count)
 
 static Item js_dc_emit_deferred_error(void) {
     if (js_dc_deferred_error_count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -32874,7 +32882,7 @@ static Item js_dc_emit_deferred_error(void) {
 }
 
 static void js_dc_defer_transform_error(Item error) {
-    js_root_range_ensure_registered(&js_runtime_state.diagnostics_channels.roots);
+    js_root_range_ensure_registered(&js_dc_state.roots);
     if (js_dc_deferred_error_count >= JS_DC_DEFERRED_ERROR_MAX) {
         js_process_emit(js_name_item("uncaughtException", 17), error);
         return;
@@ -33031,7 +33039,7 @@ static Item js_dc_channel_withStoreScope(Item message) {
 
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
-    js_root_range_ensure_registered(&js_runtime_state.diagnostics_channels.roots);
+    js_root_range_ensure_registered(&js_dc_state.roots);
     RootFrame roots(2);
     Rooted<Item> name_root(roots, name);
     if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
@@ -34582,352 +34590,6 @@ static Item js_als_withScope(Item store) {
     return scope;
 }
 
-// trace_events are realm diagnostics: a context enables and drains only its
-// own categories and event list, using ordinary owner-thread accesses.
-#define js_trace_categories (js_runtime_state.trace.categories)
-#define js_trace_category_count (js_runtime_state.trace.category_count)
-#define js_trace_events (js_runtime_state.trace.events)
-#define js_trace_event_count (js_runtime_state.trace.event_count)
-#define js_trace_initialized (js_runtime_state.trace.initialized)
-#define js_trace_file_written (js_runtime_state.trace.file_written)
-
-static void js_trace_copy_cstr(char* dst, int dst_size, const char* src, int src_len) {
-    if (!dst || dst_size <= 0) return;
-    if (!src) src = "";
-    if (src_len < 0) src_len = (int)strlen(src);
-    if (src_len >= dst_size) src_len = dst_size - 1;
-    memcpy(dst, src, (size_t)src_len);
-    dst[src_len] = '\0';
-}
-
-static bool js_trace_category_matches(const char* enabled, const char* category) {
-    if (!enabled || !enabled[0] || !category || !category[0]) return false;
-    if (strcmp(enabled, category) == 0) return true;
-    if (strcmp(enabled, "node") == 0 && strncmp(category, "node.", 5) == 0) return true;
-    return strcmp(enabled, "*") == 0;
-}
-
-static int js_trace_find_category(const char* name) {
-    for (int i = 0; i < js_trace_category_count; i++) {
-        if (strcmp(js_trace_categories[i].name, name) == 0) return i;
-    }
-    return -1;
-}
-
-static void js_trace_add_category(const char* name, bool from_exec_argv) {
-    if (!name || !name[0]) return;
-    int idx = js_trace_find_category(name);
-    if (idx >= 0) {
-        js_trace_categories[idx].refs++;
-        js_trace_categories[idx].from_exec_argv =
-            js_trace_categories[idx].from_exec_argv || from_exec_argv;
-        return;
-    }
-    if (js_trace_category_count >= JS_TRACE_MAX_CATEGORIES) return;
-    JsTraceCategory* cat = &js_trace_categories[js_trace_category_count++];
-    js_trace_copy_cstr(cat->name, (int)sizeof(cat->name), name, -1);
-    cat->refs = 1;
-    cat->from_exec_argv = from_exec_argv;
-}
-
-static void js_trace_remove_category(const char* name) {
-    int idx = js_trace_find_category(name);
-    if (idx < 0 || js_trace_categories[idx].from_exec_argv) return;
-    if (js_trace_categories[idx].refs > 0) js_trace_categories[idx].refs--;
-    if (js_trace_categories[idx].refs > 0) return;
-    for (int i = idx; i + 1 < js_trace_category_count; i++) {
-        js_trace_categories[i] = js_trace_categories[i + 1];
-    }
-    js_trace_category_count--;
-}
-
-static void js_trace_add_categories_from_chars(const char* chars, int len, bool from_exec_argv) {
-    if (!chars || len <= 0) return;
-    int start = 0;
-    for (int i = 0; i <= len; i++) {
-        if (i == len || chars[i] == ',') {
-            int end = i;
-            while (start < end && (chars[start] == ' ' || chars[start] == '\t')) start++;
-            while (end > start && (chars[end - 1] == ' ' || chars[end - 1] == '\t')) end--;
-            if (end > start) {
-                char name[64];
-                js_trace_copy_cstr(name, (int)sizeof(name), chars + start, end - start);
-                js_trace_add_category(name, from_exec_argv);
-            }
-            start = i + 1;
-        }
-    }
-}
-
-static void js_trace_init_from_exec_argv(void) {
-    if (js_trace_initialized) return;
-    js_trace_initialized = true;
-    Item exec_argv = js_get_process_exec_argv();
-    if (get_type_id(exec_argv) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(exec_argv);
-    for (int64_t i = 0; i < len; i++) {
-        Item arg = js_elements_get_int(exec_argv, i);
-        if (get_type_id(arg) != LMD_TYPE_STRING) continue;
-        String* s = it2s(arg);
-        if (!s) continue;
-        const char* prefix = "--trace-event-categories=";
-        int prefix_len = (int)strlen(prefix);
-        if ((int)s->len > prefix_len && memcmp(s->chars, prefix, (size_t)prefix_len) == 0) {
-            js_trace_add_categories_from_chars(s->chars + prefix_len, (int)s->len - prefix_len, true);
-        } else if (s->len == 24 && memcmp(s->chars, "--trace-event-categories", 24) == 0 &&
-                   i + 1 < len) {
-            Item next = js_elements_get_int(exec_argv, i + 1);
-            if (get_type_id(next) == LMD_TYPE_STRING) {
-                String* ns = it2s(next);
-                if (ns) js_trace_add_categories_from_chars(ns->chars, (int)ns->len, true);
-            }
-            i++;
-        }
-    }
-}
-
-extern "C" bool js_trace_is_category_enabled_cstr(const char* category) {
-    js_trace_init_from_exec_argv();
-    for (int i = 0; i < js_trace_category_count; i++) {
-        if (js_trace_categories[i].refs > 0 &&
-            js_trace_category_matches(js_trace_categories[i].name, category)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void js_trace_append_json_string(StrBuf* sb, const char* chars) {
-    if (!chars) chars = "";
-    strbuf_append_char(sb, '"');
-    for (int i = 0; chars[i]; i++) {
-        unsigned char c = (unsigned char)chars[i];
-        switch (c) {
-            case '"': strbuf_append_str_n(sb, "\\\"", 2); break;
-            case '\\': strbuf_append_str_n(sb, "\\\\", 2); break;
-            case '\n': strbuf_append_str_n(sb, "\\n", 2); break;
-            case '\r': strbuf_append_str_n(sb, "\\r", 2); break;
-            case '\t': strbuf_append_str_n(sb, "\\t", 2); break;
-            default:
-                if (c < 0x20) {
-                    char esc[8];
-                    snprintf(esc, sizeof(esc), "\\u%04x", c);
-                    strbuf_append_str_n(sb, esc, 6);
-                } else {
-                    strbuf_append_char(sb, (char)c);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(sb, '"');
-}
-
-extern "C" void js_trace_emit_async_hooks_init(const char* type_chars, int type_len,
-                                                int64_t async_id, int64_t trigger_id) {
-    if (!js_trace_is_category_enabled_cstr("node.async_hooks")) return;
-    if (js_trace_event_count >= JS_TRACE_MAX_EVENTS) return;
-    JsTraceEvent* ev = &js_trace_events[js_trace_event_count++];
-    ev->ph = 'b';
-    js_trace_copy_cstr(ev->cat, (int)sizeof(ev->cat), "node,node.async_hooks", -1);
-    js_trace_copy_cstr(ev->name, (int)sizeof(ev->name), type_chars, type_len);
-    ev->ts = uv_hrtime() / 1000;
-    ev->id = async_id;
-    ev->has_id = true;
-    (void)trigger_id;
-    js_trace_file_written = false;
-}
-
-extern "C" void js_trace_flush(void) {
-    js_trace_init_from_exec_argv();
-    if (js_trace_file_written || js_trace_event_count <= 0) return;
-    FILE* fp = fopen("node_trace.1.log", "wb");
-    if (!fp) {
-        log_error("trace_events: failed to open node_trace.1.log");
-        return;
-    }
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str_n(sb, "{\"traceEvents\":[", 16);
-    long pid = (long)uv_os_getpid();
-    for (int i = 0; i < js_trace_event_count; i++) {
-        JsTraceEvent* ev = &js_trace_events[i];
-        if (i > 0) strbuf_append_char(sb, ',');
-        strbuf_append_str_n(sb, "{\"pid\":", 7);
-        strbuf_append_int64(sb, (int64_t)pid);
-        strbuf_append_str_n(sb, ",\"tid\":0,\"ts\":", 14);
-        strbuf_append_int64(sb, (int64_t)ev->ts);
-        strbuf_append_str_n(sb, ",\"ph\":\"", 7);
-        strbuf_append_char(sb, ev->ph);
-        strbuf_append_str_n(sb, "\",\"cat\":", 8);
-        js_trace_append_json_string(sb, ev->cat);
-        strbuf_append_str_n(sb, ",\"name\":", 8);
-        js_trace_append_json_string(sb, ev->name);
-        if (ev->has_id) {
-            char id_buf[32];
-            snprintf(id_buf, sizeof(id_buf), "0x%llx", (long long)ev->id);
-            strbuf_append_str_n(sb, ",\"id\":", 6);
-            js_trace_append_json_string(sb, id_buf);
-        }
-        strbuf_append_str_n(sb, ",\"args\":{}}", 11);
-    }
-    strbuf_append_str_n(sb, "]}", 2);
-    fwrite(sb->str, 1, sb->length, fp);
-    fclose(fp);
-    strbuf_free(sb);
-    js_trace_file_written = true;
-}
-
-static Item js_trace_getEnabledCategories(void) {
-    js_trace_init_from_exec_argv();
-    StrBuf* sb = strbuf_new();
-    bool first = true;
-    for (int i = 0; i < js_trace_category_count; i++) {
-        if (js_trace_categories[i].refs <= 0) continue;
-        if (!first) strbuf_append_char(sb, ',');
-        first = false;
-        strbuf_append_str_n(sb, js_trace_categories[i].name, strlen(js_trace_categories[i].name));
-    }
-    Item result = js_name_item(sb->str, (int)sb->length);
-    strbuf_free(sb);
-    return result;
-}
-
-static bool js_trace_value_to_category_string(Item value, char* out, int out_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return false;
-    String* s = it2s(value);
-    if (!s || s->len == 0) return false;
-    js_trace_copy_cstr(out, out_size, s->chars, (int)s->len);
-    return true;
-}
-
-JS_FORWARD_STATIC_ITEM(js_trace_throw_invalid_arg, (void), js_throw_type_error_code,
-    ("ERR_INVALID_ARG_TYPE", "The \"options.categories\" property must be an array of strings."))
-
-static Item js_trace_enable(void) {
-    Item self = js_get_this();
-    Item enabled = js_get_key_default(self, js_trace_key("enabled"));
-    if (get_type_id(enabled) != LMD_TYPE_BOOL || !it2b(enabled)) {
-        Item cats = js_get_key_default(self, js_trace_key("__lambda_trace_categories__"));
-        if (get_type_id(cats) == LMD_TYPE_STRING) {
-            String* s = it2s(cats);
-            if (s) js_trace_add_categories_from_chars(s->chars, (int)s->len, false);
-        }
-        js_set_key_default(self, js_trace_key("enabled"), (Item){.item = b2it(true)});
-    }
-    return self;
-}
-
-static Item js_trace_disable(void) {
-    Item self = js_get_this();
-    Item enabled = js_get_key_default(self, js_trace_key("enabled"));
-    if (get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled)) {
-        Item cats = js_get_key_default(self, js_trace_key("__lambda_trace_categories__"));
-        if (get_type_id(cats) == LMD_TYPE_STRING) {
-            String* s = it2s(cats);
-            if (s) {
-                int start = 0;
-                for (int i = 0; i <= (int)s->len; i++) {
-                    if (i == (int)s->len || s->chars[i] == ',') {
-                        char cat[64];
-                        js_trace_copy_cstr(cat, (int)sizeof(cat), s->chars + start, i - start);
-                        js_trace_remove_category(cat);
-                        start = i + 1;
-                    }
-                }
-            }
-        }
-        js_set_key_default(self, js_trace_key("enabled"), (Item){.item = b2it(false)});
-    }
-    return self;
-}
-
-static Item js_trace_createTracing(Item options) {
-    TypeId options_type = get_type_id(options);
-    if (options_type != LMD_TYPE_MAP && options_type != LMD_TYPE_OBJECT) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"options\" argument must be an object.");
-    }
-    Item categories = js_get_key_default(options, js_trace_key("categories"));
-    if (get_type_id(categories) != LMD_TYPE_ARRAY) return js_trace_throw_invalid_arg();
-    int64_t len = js_array_length(categories);
-    if (len <= 0) {
-        return js_throw_type_error_code("ERR_TRACE_EVENTS_CATEGORY_REQUIRED",
-            "At least one category is required.");
-    }
-    StrBuf* joined = strbuf_new();
-    for (int64_t i = 0; i < len; i++) {
-        char cat[64];
-        if (!js_trace_value_to_category_string(js_elements_get_int(categories, i),
-                                               cat, (int)sizeof(cat))) {
-            strbuf_free(joined);
-            return js_trace_throw_invalid_arg();
-        }
-        if (i > 0) strbuf_append_char(joined, ',');
-        strbuf_append_str_n(joined, cat, strlen(cat));
-    }
-
-    Item tracing = js_new_object();
-    js_set_key_default(tracing, js_trace_key("categories"),
-        js_name_item(joined->str, (int)joined->length));
-    js_set_key_default(tracing, js_trace_key("__lambda_trace_categories__"),
-        js_name_item(joined->str, (int)joined->length));
-    js_set_key_default(tracing, js_trace_key("enabled"), (Item){.item = b2it(false)});
-    js_runtime_set_native_key(tracing, js_trace_key("enable"), js_trace_enable);
-    js_runtime_set_native_key(tracing, js_trace_key("disable"), js_trace_disable);
-    strbuf_free(joined);
-    return tracing;
-}
-
-static Item js_trace_isTraceCategoryEnabled(Item category) {
-    char cat[128];
-    if (!js_trace_value_to_category_string(category, cat, (int)sizeof(cat))) {
-        return (Item){.item = b2it(false)};
-    }
-    return (Item){.item = b2it(js_trace_is_category_enabled_cstr(cat))};
-}
-
-static Item js_trace_manual_trace(Item phase, Item category, Item name, Item id, Item args) {
-    (void)args;
-    char cat[128];
-    char trace_name[96];
-    if (!js_trace_value_to_category_string(category, cat, (int)sizeof(cat))) return make_js_undefined();
-    if (!js_trace_is_category_enabled_cstr(cat)) return make_js_undefined();
-    if (!js_trace_value_to_category_string(name, trace_name, (int)sizeof(trace_name))) return make_js_undefined();
-    if (js_trace_event_count >= JS_TRACE_MAX_EVENTS) return make_js_undefined();
-    JsTraceEvent* ev = &js_trace_events[js_trace_event_count++];
-    if (get_type_id(phase) == LMD_TYPE_INT) ev->ph = (char)it2i(phase);
-    else if (get_type_id(phase) == LMD_TYPE_STRING && it2s(phase) && it2s(phase)->len > 0) ev->ph = it2s(phase)->chars[0];
-    else ev->ph = 'i';
-    js_trace_copy_cstr(ev->cat, (int)sizeof(ev->cat), cat, -1);
-    js_trace_copy_cstr(ev->name, (int)sizeof(ev->name), trace_name, -1);
-    ev->ts = uv_hrtime() / 1000;
-    ev->has_id = get_type_id(id) == LMD_TYPE_INT || get_type_id(id) == LMD_TYPE_INT64;
-    ev->id = ev->has_id ? it2i(id) : 0;
-    js_trace_file_written = false;
-    return make_js_undefined();
-}
-
-extern "C" Item js_get_trace_events_namespace(void) {
-    static Item trace_ns = {0};
-    static uint64_t trace_epoch = (uint64_t)-1;
-    if (trace_ns.item == 0 || trace_epoch != js_heap_epoch) {
-        trace_epoch = js_heap_epoch;
-        trace_ns = js_new_object();
-        heap_register_gc_root(&trace_ns.item);
-        js_runtime_set_native_key(trace_ns, js_trace_key("createTracing"), js_trace_createTracing);
-        js_runtime_set_native_key(trace_ns, js_trace_key("getEnabledCategories"), js_trace_getEnabledCategories);
-        js_set_key_default(trace_ns, js_trace_key("default"), trace_ns);
-    }
-    return trace_ns;
-}
-
-extern "C" Item js_get_internal_trace_events_binding(void) {
-    Item binding = js_new_object();
-    js_runtime_set_native_key(binding, js_trace_key("isTraceCategoryEnabled"), js_trace_isTraceCategoryEnabled);
-    js_runtime_set_native_key(binding, js_trace_key("trace"), js_trace_manual_trace);
-    js_set_key_default(binding, js_trace_key("getCategoryEnabledBuffer"), js_new_object());
-    return binding;
-}
-
 #define JS_ASYNC_HOOK_MAX JS_ASYNC_HOOK_STATE_MAX
 #define JS_ASYNC_PENDING_DESTROY_MAX JS_ASYNC_PENDING_DESTROY_STATE_MAX
 #define js_async_hooks_enabled_count (js_runtime_state.async_hooks.enabled_count)
@@ -35059,7 +34721,7 @@ extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_ch
     js_set_key_default(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_stamp_id_symbols(resource, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, resource);
-    js_trace_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
+    node_trace_events_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
     return resource;
 }
 
@@ -35203,7 +34865,7 @@ static Item js_ar_constructor(Item type, Item options) {
     js_set_key_default(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_stamp_id_symbols(self, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, self);
-    js_trace_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
+    node_trace_events_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
     if (!require_manual_destroy && !js_async_hooks_is_gc_tracker(self)) {
         js_async_hooks_queue_destroy(self);
     }
@@ -36310,7 +35972,7 @@ extern "C" Item js_internal_binding(Item name) {
     }
 
     if (s->len == 12 && memcmp(s->chars, "trace_events", 12) == 0) {
-        return js_get_internal_trace_events_binding();
+        return node_trace_events_internal_binding();
     }
 
     // internalBinding('config')
@@ -36366,10 +36028,17 @@ static bool js_cc_env_truthy(const char* name) {
     return value && value[0] && strcmp(value, "0") != 0;
 }
 
-#define g_js_cc_dir (js_runtime_state.commonjs_compile_cache.directory)
-#define g_js_cc_enabled (js_runtime_state.commonjs_compile_cache.enabled)
-#define g_js_cc_disabled (js_runtime_state.commonjs_compile_cache.disabled)
-#define g_js_cc_reported (js_runtime_state.commonjs_compile_cache.reported)
+static JsCommonJsCompileCacheState* js_commonjs_compile_cache_state_current(bool attach) {
+    if (attach) jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_commonjs_compile_cache_state(session) : NULL;
+}
+
+#define g_js_cc_state (*js_commonjs_compile_cache_state_current(true))
+#define g_js_cc_dir (g_js_cc_state.directory)
+#define g_js_cc_enabled (g_js_cc_state.enabled)
+#define g_js_cc_disabled (g_js_cc_state.disabled)
+#define g_js_cc_reported (g_js_cc_state.reported)
 
 static bool js_cc_write_allowed(const char* dir) {
     return js_permission_has_fs_write(dir) != 0;
@@ -36662,15 +36331,15 @@ extern "C" Item js_get_repl_namespace(void) {
 }
 
 extern "C" Item js_get_diagnostics_channel_namespace(void) {
-    static Item diagnostics_namespace = {0};
-    static uint64_t diagnostics_epoch = (uint64_t)-1;
-    if (diagnostics_namespace.item != 0 && diagnostics_epoch == js_heap_epoch) {
-        return diagnostics_namespace;
+    JsDiagnosticsChannelState* state = js_diagnostics_channel_state_current(true);
+    if (!state) return ItemNull;
+    if (state->namespace_object.item != 0 && state->namespace_epoch == js_heap_epoch) {
+        return state->namespace_object;
     }
-    diagnostics_epoch = js_heap_epoch;
-    diagnostics_namespace = js_new_object();
-    heap_register_gc_root(&diagnostics_namespace.item);
-    js_root_range_ensure_registered(&js_runtime_state.diagnostics_channels.roots);
+    state->namespace_epoch = js_heap_epoch;
+    if (!js_root_range_ensure_registered(&state->roots)) return ItemError;
+    state->namespace_object = js_new_object();
+    Item diagnostics_namespace = state->namespace_object;
     js_dc_channel_proto = js_new_object();
     js_dc_tracing_channel_proto = js_new_object();
     js_dc_bounded_channel_proto = js_new_object();
@@ -36701,7 +36370,8 @@ extern "C" Item js_get_diagnostics_channel_namespace(void) {
     js_set_key_cstr(diagnostics_namespace, "TracingChannel", js_dc_tracing_channel_ctor);
     js_set_key_cstr(diagnostics_namespace, "BoundedChannel", js_dc_bounded_channel_ctor);
     js_set_key_cstr(diagnostics_namespace, "default", diagnostics_namespace);
-    return diagnostics_namespace;
+    state->namespace_object = diagnostics_namespace;
+    return state->namespace_object;
 }
 
 typedef void (*JsInternalNamespacePopulate)(Item);
@@ -37328,12 +36998,6 @@ void js_deep_batch_reset() {
     js_async_hook_count = 0;
     memset(js_async_pending_destroy_resources, 0, sizeof(js_async_pending_destroy_resources));
     js_async_pending_destroy_count = 0;
-    memset(js_trace_categories, 0, sizeof(js_trace_categories));
-    js_trace_category_count = 0;
-    memset(js_trace_events, 0, sizeof(js_trace_events));
-    js_trace_event_count = 0;
-    js_trace_initialized = false;
-    js_trace_file_written = false;
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

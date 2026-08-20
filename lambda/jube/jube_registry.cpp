@@ -11,6 +11,7 @@
 #include "../input/css/dom_element.hpp"
 #include "../js/js_class.h"
 #include "../js/js_permission.h"
+#include "../js/js_runtime_state.hpp"
 #include "../js/js_typed_array.h"
 #include "../js/js_state_guards.h"
 #include "../js/js_fs_service.h"
@@ -18,6 +19,8 @@
 #include "../js/js_zlib_codec.hpp"
 #include "../js/js_runtime.h"
 #include "../module/node_core/node_events.hpp"
+#include "../module/node_core/node_trace_events.hpp"
+#include "../module/node_core/node_runtime_state.hpp"
 #include "../module/node_core/node_url.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../runtime/lambda-stack.h"
@@ -48,6 +51,8 @@
 #include <dlfcn.h>
 #include <dirent.h>
 #endif
+
+extern "C" void js_crypto_node_runtime_detach(void* session);
 
 #define JUBE_STATIC_MODULE_CAPACITY 64
 #define JUBE_MANIFEST_DEPENDENCY_CAPACITY 32
@@ -160,7 +165,7 @@ static ArrayList* jube_mir_module_slots = NULL;
 static ArrayList* jube_mir_state_tokens = NULL;
 static uintptr_t jube_mir_state_token_next = 1;
 
-struct JubeNodeRuntimeSession {
+struct NodeRuntimeSession {
     uint64_t generation;
     bool live;
     bool detaching;
@@ -168,6 +173,12 @@ struct JubeNodeRuntimeSession {
     ArrayList* async_work;
     uint32_t async_work_next_id;
     void* module_states[JUBE_NODE_MODULE_STATE_SLOTS];
+    NodeTraceState trace;
+    JsCjsState cjs;
+    JsCommonJsCompileCacheState commonjs_compile_cache;
+    JsDiagnosticsChannelState diagnostics_channels;
+    JsPermissionPolicy permission_policy;
+    JsCryptoNativeState crypto_native;
 };
 
 struct JubeNodeResource {
@@ -208,18 +219,18 @@ static void jube_runtime_session_lock_release(void) {
     uv_mutex_unlock(&jube_runtime_session_lock);
 }
 
-static JubeNodeRuntimeSession* jube_active_node_runtime_session_current(void) {
-    return context ? (JubeNodeRuntimeSession*)((EvalContext*)context)->jube_node_session : NULL;
+static NodeRuntimeSession* jube_active_node_runtime_session_current(void) {
+    return context ? (NodeRuntimeSession*)((EvalContext*)context)->jube_node_session : NULL;
 }
 
-static void jube_active_node_runtime_session_set(JubeNodeRuntimeSession* session) {
+static void jube_active_node_runtime_session_set(NodeRuntimeSession* session) {
     if (context) ((EvalContext*)context)->jube_node_session = session;
 }
 
 #define jube_active_node_runtime_session (jube_active_node_runtime_session_current())
 
 void* jube_node_session_module_state_get(void* session_handle, uint32_t slot, size_t size) {
-    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (!session || !session->live || slot >= JUBE_NODE_MODULE_STATE_SLOTS || size == 0) return NULL;
     jube_runtime_session_lock_acquire();
     if (!session->module_states[slot]) {
@@ -233,17 +244,39 @@ void* jube_node_session_module_state_get(void* session_handle, uint32_t slot, si
 }
 
 void* jube_node_current_module_state(uint32_t slot) {
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    NodeRuntimeSession* session = jube_active_node_runtime_session;
     return session && session->live && slot < JUBE_NODE_MODULE_STATE_SLOTS
         ? session->module_states[slot] : NULL;
 }
 
-static void jube_node_session_module_states_destroy(JubeNodeRuntimeSession* session) {
+static void jube_node_session_module_states_destroy(NodeRuntimeSession* session) {
     if (!session) return;
     for (uint32_t i = 0; i < JUBE_NODE_MODULE_STATE_SLOTS; i++) {
         mem_free(session->module_states[i]);
         session->module_states[i] = NULL;
     }
+}
+
+static void jube_node_session_state_init(NodeRuntimeSession* session) {
+    if (!session) return;
+    session->cjs.module_stack.roots.slots = session->cjs.module_stack_slots;
+    session->cjs.module_stack.roots.slot_count = JS_CJS_STACK_MAX;
+    session->cjs.module_stack.roots.name = "CommonJS module stack";
+    session->diagnostics_channels.roots.slots =
+        &session->diagnostics_channels.namespace_object;
+    session->diagnostics_channels.roots.slot_count =
+        1 + 2 * JS_DIAGNOSTICS_CHANNEL_MAX + 6 + JS_DIAGNOSTICS_DEFERRED_ERROR_MAX;
+    session->diagnostics_channels.roots.name = "diagnostics channel state";
+    session->diagnostics_channels.namespace_epoch = UINT64_MAX;
+}
+
+static void jube_node_session_state_clear(NodeRuntimeSession* session) {
+    if (!session) return;
+    memset(&session->cjs, 0, sizeof(session->cjs));
+    memset(&session->commonjs_compile_cache, 0, sizeof(session->commonjs_compile_cache));
+    memset(&session->diagnostics_channels, 0, sizeof(session->diagnostics_channels));
+    memset(&session->permission_policy, 0, sizeof(session->permission_policy));
+    memset(&session->crypto_native, 0, sizeof(session->crypto_native));
 }
 
 struct JubeNodeAsyncWork {
@@ -723,7 +756,6 @@ extern "C" Item js_get_internal_test_binding_namespace(void);
 extern "C" Item js_get_node_module_namespace(void);
 extern "C" Item js_get_vm_namespace(void);
 extern "C" Item js_get_async_hooks_namespace(void);
-extern "C" Item js_get_trace_events_namespace(void);
 extern "C" Item js_get_domain_namespace(void);
 extern "C" Item js_get_cluster_namespace(void);
 extern "C" Item js_get_readline_namespace(void);
@@ -3077,7 +3109,7 @@ static void* jube_host_node_current_session(void) {
 }
 
 static bool jube_host_node_session_is_live(void* session) {
-    JubeNodeRuntimeSession* node_session = (JubeNodeRuntimeSession*)session;
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
     return node_session && node_session == jube_active_node_runtime_session &&
         node_session->live;
 }
@@ -3574,7 +3606,7 @@ static void jube_host_node_next_tick_callback(void* session, Item callback, Item
 }
 
 static void jube_node_async_work_remove(JubeNodeAsyncWork* job) {
-    JubeNodeRuntimeSession* session = job ? (JubeNodeRuntimeSession*)job->session : NULL;
+    NodeRuntimeSession* session = job ? (NodeRuntimeSession*)job->session : NULL;
     if (!session || !session->async_work) return;
     for (int i = 0; i < session->async_work->length; i++) {
         if (session->async_work->data[i] == job) {
@@ -3593,7 +3625,7 @@ static void jube_host_node_work_complete(uv_work_t* request, int status) {
     JubeNodeAsyncWork* job = request ? (JubeNodeAsyncWork*)request->data : NULL;
     if (!job) return;
     jube_node_async_work_remove(job);
-    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)job->session;
+    NodeRuntimeSession* session = (NodeRuntimeSession*)job->session;
     // Detached heaps must never receive a late completion; release only the
     // module-owned POD payload after libuv has returned ownership to the host.
     if (session && !session->detaching && jube_host_node_session_is_live(session) &&
@@ -3609,7 +3641,7 @@ static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
                                       JubeAsyncDestroyCallback destroy, void* user,
                                       uint32_t* out_request_id) {
     if (out_request_id) *out_request_id = 0;
-    JubeNodeRuntimeSession* node_session = (JubeNodeRuntimeSession*)session;
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
     if (!jube_host_node_session_is_live(session) || node_session->detaching || !work ||
             !destroy || !lambda_uv_loop()) return -1;
     if (!node_session->async_work) {
@@ -3644,7 +3676,7 @@ static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
 }
 
 static int jube_host_node_work_cancel(void* session, uint32_t request_id) {
-    JubeNodeRuntimeSession* node_session = (JubeNodeRuntimeSession*)session;
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
     if (!jube_host_node_session_is_live(session) || request_id == 0 || !node_session->async_work) {
         return -1;
     }
@@ -3658,7 +3690,7 @@ static int jube_host_node_work_cancel(void* session, uint32_t request_id) {
 }
 
 static void jube_node_async_cancel_session(void* session) {
-    JubeNodeRuntimeSession* node_session = (JubeNodeRuntimeSession*)session;
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
     if (!node_session || !node_session->async_work) return;
     for (int i = 0; i < node_session->async_work->length; i++) {
         JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)node_session->async_work->data[i];
@@ -3733,7 +3765,7 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         {"module", js_get_node_module_namespace},
         {"vm", js_get_vm_namespace},
         {"async_hooks", js_get_async_hooks_namespace},
-        {"trace_events", js_get_trace_events_namespace},
+        {"trace_events", node_trace_events_namespace},
         {"domain", js_get_domain_namespace},
         {"cluster", js_get_cluster_namespace},
         {"readline", js_get_readline_namespace},
@@ -4151,12 +4183,18 @@ static int jube_node_shared_primitives_init(void) {
         node_url_shutdown();
         return -1;
     }
+    if (node_trace_events_init(&jube_host_api) != 0) {
+        node_events_shutdown();
+        node_url_shutdown();
+        return -1;
+    }
     jube_node_shared_primitives_initialized = true;
     return 0;
 }
 
 static void jube_node_shared_primitives_shutdown(void) {
     if (!jube_node_shared_primitives_initialized) return;
+    node_trace_events_shutdown();
     node_events_shutdown();
     node_url_shutdown();
     jube_node_shared_primitives_attached = false;
@@ -4626,7 +4664,7 @@ static JubeStaticModuleEntry* jube_module_entry(const JubeModuleDef* module) {
 }
 
 static bool jube_module_is_attached_to_session(const JubeStaticModuleEntry* entry,
-                                                const JubeNodeRuntimeSession* session) {
+                                                const NodeRuntimeSession* session) {
     if (!entry || !session) return false;
     jube_runtime_session_lock_acquire();
     bool attached = false;
@@ -4643,7 +4681,7 @@ static bool jube_module_is_attached_to_session(const JubeStaticModuleEntry* entr
 }
 
 static bool jube_module_attach_session(JubeStaticModuleEntry* entry,
-                                       JubeNodeRuntimeSession* session, bool* out_new_attachment) {
+                                       NodeRuntimeSession* session, bool* out_new_attachment) {
     if (out_new_attachment) *out_new_attachment = false;
     if (!entry || !session) return false;
     jube_runtime_session_lock_acquire();
@@ -4667,7 +4705,7 @@ static bool jube_module_attach_session(JubeStaticModuleEntry* entry,
 }
 
 static void jube_module_detach_session(JubeStaticModuleEntry* entry,
-                                       JubeNodeRuntimeSession* session) {
+                                       NodeRuntimeSession* session) {
     if (!entry || !session) return;
     jube_runtime_session_lock_acquire();
     if (entry->attached_sessions) {
@@ -4683,7 +4721,7 @@ static void jube_module_detach_session(JubeStaticModuleEntry* entry,
 
 static bool jube_attach_module_to_active_runtime(JubeStaticModuleEntry* entry) {
     if (!entry || entry->activation_state != JUBE_MODULE_ACTIVE) return false;
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session || !session->live || session->detaching) return true;
     // Mark the generation before invoking module code so a namespace/global
     // builder that re-enters the registry cannot attach the same module twice.
@@ -5877,7 +5915,7 @@ bool jube_node_module_enabled(const char* module_name) {
     return enabled;
 }
 
-static void jube_node_resource_cleanup(JubeNodeRuntimeSession* session) {
+static void jube_node_resource_cleanup(NodeRuntimeSession* session) {
     if (!session || !session->resource_slots) return;
     for (int i = 0; i < session->resource_slots->length; i++) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
@@ -5897,7 +5935,7 @@ static void jube_node_resource_cleanup(JubeNodeRuntimeSession* session) {
     session->resource_slots = NULL;
 }
 
-static JubeNodeResourceSlot* jube_node_resource_slot(JubeNodeRuntimeSession* session,
+static JubeNodeResourceSlot* jube_node_resource_slot(NodeRuntimeSession* session,
         uint32_t resource_id) {
     if (!session || !session->resource_slots || resource_id == 0) return NULL;
     uint32_t index = resource_id & JUBE_NODE_RESOURCE_INDEX_MASK;
@@ -5912,7 +5950,7 @@ static JubeNodeResourceSlot* jube_node_resource_slot(JubeNodeRuntimeSession* ses
 
 uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, const char* kind,
         JubeNodeResourceCloseCallback close_callback, void* close_user) {
-    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (!session || session != jube_active_node_runtime_session || !session->live ||
             session->detaching || !value.item || !kind) return 0;
     if (!session->resource_slots) {
@@ -5970,7 +6008,7 @@ uint32_t jube_node_resource_add(Item value, const char* kind) {
 }
 
 void jube_node_resource_remove_for_session(void* session_handle, uint32_t resource_id) {
-    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (session != jube_active_node_runtime_session) return;
     JubeNodeResourceSlot* slot = jube_node_resource_slot(session, resource_id);
     if (!slot) return;
@@ -5987,7 +6025,7 @@ void jube_node_resource_remove(uint32_t resource_id) {
 }
 
 void* jube_node_resource_user_data_for_session(void* session_handle, uint32_t resource_id) {
-    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)session_handle;
+    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (session != jube_active_node_runtime_session) return NULL;
     JubeNodeResourceSlot* slot = jube_node_resource_slot(session, resource_id);
     return slot ? slot->resource->close_user : NULL;
@@ -5998,18 +6036,60 @@ void* jube_node_runtime_current_session(void) {
             !jube_active_node_runtime_session->detaching ? jube_active_node_runtime_session : NULL;
 }
 
+NodeTraceState* jube_node_trace_state(void* session) {
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
+    if (!node_session || node_session != jube_active_node_runtime_session ||
+            !node_session->live) return NULL;
+    return &node_session->trace;
+}
+
+JsCjsState* jube_node_cjs_state(void* session) {
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
+    if (!node_session || node_session != jube_active_node_runtime_session ||
+            !node_session->live) return NULL;
+    return &node_session->cjs;
+}
+
+JsCommonJsCompileCacheState* jube_node_commonjs_compile_cache_state(void* session) {
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
+    if (!node_session || node_session != jube_active_node_runtime_session ||
+            !node_session->live) return NULL;
+    return &node_session->commonjs_compile_cache;
+}
+
+JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session) {
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
+    if (!node_session || node_session != jube_active_node_runtime_session ||
+            !node_session->live) return NULL;
+    return &node_session->diagnostics_channels;
+}
+
+JsPermissionPolicy* jube_node_permission_policy(void* session) {
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
+    if (!node_session || node_session != jube_active_node_runtime_session ||
+            !node_session->live) return NULL;
+    return &node_session->permission_policy;
+}
+
+JsCryptoNativeState* jube_node_crypto_native_state(void* session) {
+    NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
+    if (!node_session || node_session != jube_active_node_runtime_session ||
+            !node_session->live) return NULL;
+    return &node_session->crypto_native;
+}
+
 void jube_node_resource_clear(void) {
     jube_node_resource_cleanup(jube_active_node_runtime_session);
 }
 
 bool jube_node_resource_contains(uint32_t resource_id) {
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    NodeRuntimeSession* session = jube_active_node_runtime_session;
     return jube_node_resource_slot(session, resource_id) != NULL;
 }
 
 Item jube_node_resource_active_handles(void) {
     Item handles = js_array_new(0);
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session || !session->resource_slots) return handles;
     for (int i = 0; i < session->resource_slots->length; i++) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
@@ -6021,7 +6101,7 @@ Item jube_node_resource_active_handles(void) {
 
 Item jube_node_resource_active_resources_info(void) {
     Item resources = js_array_new(0);
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session || !session->resource_slots) return resources;
     for (int i = 0; i < session->resource_slots->length; i++) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
@@ -6060,7 +6140,7 @@ const JubeModuleDef* jube_static_module_at(int index) {
 }
 
 void jube_modules_runtime_reset(void) {
-    JubeNodeRuntimeSession* session = jube_active_node_runtime_session;
+    NodeRuntimeSession* session = jube_active_node_runtime_session;
     // Most short-lived JS realms never use Jube. Scanning the module registry
     // here used to make their heap reset pay the Node lifecycle cost anyway.
     if (!session || !session->live || session->detaching) return;
@@ -6085,6 +6165,7 @@ void jube_modules_runtime_reset(void) {
         }
     }
     jube_node_shared_primitives_reset(session);
+    node_trace_events_runtime_reset(session);
 }
 
 void jube_modules_runtime_attach(void) {
@@ -6097,8 +6178,8 @@ void jube_modules_runtime_attach(void) {
             return;
         }
     }
-    JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)mem_calloc(1,
-        sizeof(JubeNodeRuntimeSession), MEM_CAT_SYSTEM);
+    NodeRuntimeSession* session = (NodeRuntimeSession*)mem_calloc(1,
+        sizeof(NodeRuntimeSession), MEM_CAT_SYSTEM);
     if (!session) {
         jube_runtime_session_lock_release();
         return;
@@ -6111,6 +6192,7 @@ void jube_modules_runtime_attach(void) {
     session->generation = ++jube_node_runtime_generation;
     if (session->generation == 0) session->generation = ++jube_node_runtime_generation;
     session->live = true;
+    jube_node_session_state_init(session);
     jube_runtime_session_lock_release();
     jube_active_node_runtime_session_set(session);
 
@@ -6126,7 +6208,7 @@ void jube_modules_runtime_attach(void) {
 }
 
 void jube_modules_runtime_detach(void) {
-    JubeNodeRuntimeSession* active_session = jube_active_node_runtime_session;
+    NodeRuntimeSession* active_session = jube_active_node_runtime_session;
     // Keep ordinary JS realm teardown out of the Jube host bridge until a
     // lazy global or namespace request has actually attached a session.
     if (!active_session || !active_session->live || active_session->detaching) return;
@@ -6148,9 +6230,12 @@ void jube_modules_runtime_detach(void) {
             active_session);
     }
     jube_node_shared_primitives_detach(session);
+    node_trace_events_runtime_detach(session);
+    js_crypto_node_runtime_detach(session);
     jube_node_async_cancel_session(session);
     jube_node_resource_cleanup(active_session);
     jube_node_session_module_states_destroy(active_session);
+    jube_node_session_state_clear(active_session);
     // Invalidate before the next attach so stale module tokens cannot resolve
     // namespaces against a replacement JS heap.
     active_session->live = false;
@@ -6168,7 +6253,7 @@ void jube_registry_cleanup(void) {
     }
     if (jube_node_runtime_sessions) {
         for (int i = 0; i < jube_node_runtime_sessions->length; i++) {
-            JubeNodeRuntimeSession* session = (JubeNodeRuntimeSession*)
+            NodeRuntimeSession* session = (NodeRuntimeSession*)
                 jube_node_runtime_sessions->data[i];
             jube_node_resource_cleanup(session);
             jube_node_session_module_states_destroy(session);
