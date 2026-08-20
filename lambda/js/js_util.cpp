@@ -10,6 +10,7 @@
 #include "js_typed_array.h"
 #include "js_class.h"
 #include "js_function.hpp"
+#include "js_object_pair_traversal.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
@@ -1546,36 +1547,19 @@ static bool js_util_is_host_singleton_object(Item value) {
     return js_is_global_this_object_value(value) || js_is_process_object_value(value);
 }
 
-typedef struct JsDeepEqualPair {
-    Item a;
-    Item b;
-} JsDeepEqualPair;
-
-typedef struct JsDeepEqualContext {
-    JsDeepEqualPair stack[4096];
-    int depth;
-} JsDeepEqualContext;
 // array-family, not bare LMD_TYPE_ARRAY: a JS array whose elements are all
 // numeric (and a freshly built []) is stored in the LMD_TYPE_ARRAY_NUM lane,
 // so testing the generic tag alone drops such an array to the primitive path
 // and compares Item pointers — deepStrictEqual([1,2],[1,2]) was false.
 JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
 
-static int js_util_deep_equal_enter(JsDeepEqualContext* ctx, Item a, Item b) {
+static int js_util_deep_equal_enter(JsObjectPairTraversal* ctx, Item a, Item b) {
     if (!ctx) return 1;
-    for (int i = 0; i < ctx->depth; i++) {
-        if (ctx->stack[i].a.item == a.item && ctx->stack[i].b.item == b.item) return 0;
-        if (ctx->stack[i].a.item == a.item || ctx->stack[i].b.item == b.item) return -1;
-    }
-    if (ctx->depth >= (int)(sizeof(ctx->stack) / sizeof(ctx->stack[0]))) return -1;
-    ctx->stack[ctx->depth].a = a;
-    ctx->stack[ctx->depth].b = b;
-    ctx->depth++;
-    return 1;
+    return ctx->enter(a, b);
 }
 
-static void js_util_deep_equal_leave(JsDeepEqualContext* ctx) {
-    if (ctx && ctx->depth > 0) ctx->depth--;
+static void js_util_deep_equal_leave(JsObjectPairTraversal* ctx) {
+    if (ctx) ctx->leave();
 }
 
 static bool js_util_is_nan_number(Item value) {
@@ -1653,7 +1637,7 @@ static bool js_util_is_error_like_value(Item value) {
     return js_util_has_constructor_prototype(value, "Error", 5);
 }
 
-static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bool strict);
+static Item js_util_isDeepEqual_impl(Item a, Item b, JsObjectPairTraversal* ctx, bool strict);
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_util_key_is_symbol, (Item key), (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE))
 
@@ -1722,7 +1706,7 @@ static Item js_util_find_matching_key(Item keys, Item key) {
     return ItemNull;
 }
 
-static bool js_util_compare_enumerable_properties(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static bool js_util_compare_enumerable_properties(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     Item keys_a = js_util_enumerable_own_keys(a, strict);
     Item keys_b = js_util_enumerable_own_keys(b, strict);
     int64_t la = js_array_length(keys_a);
@@ -1742,7 +1726,7 @@ static bool js_util_compare_enumerable_properties(Item a, Item b, JsDeepEqualCon
 }
 
 static bool js_util_compare_unordered_collection(Item a, Item b,
-        JsDeepEqualContext* ctx, bool strict, bool is_map) {
+        JsObjectPairTraversal* ctx, bool strict, bool is_map) {
     Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
     Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
     if (it2i(size_a) != it2i(size_b)) return false;
@@ -1793,7 +1777,7 @@ static bool js_util_date_time_equal(Item a, Item b) {
     return av == bv;
 }
 
-static bool js_util_regexp_slots_equal(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static bool js_util_regexp_slots_equal(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     if (!js_util_is_real_regexp(a) || !js_util_is_real_regexp(b)) return false;
     const char* names[] = {"source", "flags", "lastIndex", NULL};
     const int lens[] = {6, 5, 9, 0};
@@ -1830,7 +1814,7 @@ static bool js_util_is_boxed_primitive(Item value) {
     return found;
 }
 
-static bool js_util_boxed_primitive_equal(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static bool js_util_boxed_primitive_equal(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     if (!js_util_is_boxed_primitive(a) || !js_util_is_boxed_primitive(b)) return false;
     if (js_class_id(a) != js_class_id(b)) return false;
     bool af = false;
@@ -1845,7 +1829,7 @@ static bool js_util_boxed_primitive_equal(Item a, Item b, JsDeepEqualContext* ct
     return true;
 }
 
-static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static Item js_util_isDeepEqual_impl(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     // Deep equality uses SameValueZero for NaN; loose mode additionally starts
     // primitive comparison with == before recursing into containers.
     if (js_util_is_nan_number(a) && js_util_is_nan_number(b)) {
@@ -2125,8 +2109,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
 }
 
 static Item js_util_is_deep_equal_mode(Item a, Item b, bool strict) {
-    JsDeepEqualContext ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    JsObjectPairTraversal ctx;
     return js_util_isDeepEqual_impl(a, b, &ctx, strict);
 }
 JS_FORWARD_ITEM(js_util_isDeepStrictEqual, (Item a, Item b), js_util_is_deep_equal_mode, (a, b, true))

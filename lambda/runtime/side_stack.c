@@ -266,6 +266,24 @@ uint64_t* lambda_side_root_alloc_n(size_t slot_count) {
         slot_count);
 }
 
+bool lambda_side_root_pop_n_for(Context* runtime_context, size_t slot_count) {
+    if (!runtime_context || !runtime_context->side_root_base ||
+            !runtime_context->side_root_top ||
+            runtime_context->side_root_top < runtime_context->side_root_base) {
+        return false;
+    }
+    size_t live_slots = (size_t)(runtime_context->side_root_top -
+        runtime_context->side_root_base);
+    if (slot_count > live_slots) return false;
+    runtime_context->side_root_top -= slot_count;
+    return true;
+}
+
+bool lambda_side_root_pop_n(size_t slot_count) {
+    return lambda_side_root_pop_n_for((Context*)eval_context_tls_runtime(),
+        slot_count);
+}
+
 uint64_t* lambda_side_number_alloc_for(Context* runtime_context) {
     if (!runtime_context ||
             !lambda_side_stack_ensure_for(runtime_context, 0, 1)) {
