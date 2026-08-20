@@ -645,6 +645,7 @@ typedef struct VMap VMap;
 typedef struct Element Element;
 typedef struct Object Object;
 typedef struct Function Function;
+struct TypeMethod;
 typedef struct Decimal Decimal;
 typedef struct Complex Complex;
 typedef struct TypePattern TypePattern;
@@ -1138,6 +1139,9 @@ struct Function {
     // natively-compiled and foreign entries.
     const void* def;
     struct Script* def_module;  // owner of def's const_list / type_list / slab
+    // Non-null only for a T0 bound object method. Its receiver lives in the
+    // one-field closure environment so the collector traces it like a capture.
+    const struct TypeMethod* method;
 };
 
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
@@ -2208,6 +2212,8 @@ extern "C" {
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object_fill(Object* obj, ...);
+    // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
+    Object* object_fill_items(Object* obj, const Item* values, int value_count);
 
     // these getters use the runtime number side stack
     Item array_get(Array *array, int64_t index);

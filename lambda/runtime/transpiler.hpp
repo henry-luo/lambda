@@ -160,6 +160,11 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 // Shared AST/MIR helpers.
 bool has_typed_params(AstFuncNode* fn_node);
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
+// Object literals carry only the supplied named fields.  Construction must
+// align each value with its declared ShapeEntry so omitted fields can run their
+// declared defaults instead of being shifted into a later storage lane.
+AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
+    const ShapeEntry* shape);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);

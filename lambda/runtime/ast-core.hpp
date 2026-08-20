@@ -141,6 +141,10 @@ typedef enum AstNodeType : uint16_t {
     // braced error-handler body; it is distinct from `~` current-item state.
     AST_NODE_CURRENT_ERROR = 545,
     AST_NODE_PATTERN_ISLAND = 546,
+    // A group clause owns a linked list of these; keeping the key distinct
+    // prevents generic AST visitors from casting its smaller layout as the
+    // enclosing AstGroupClause.
+    AST_NODE_GROUP_KEY = 547,
 } AstNodeType;
 
 typedef enum Operator {
@@ -630,6 +634,22 @@ typedef struct AstCompoundAssignNode : AstAssignNode {
     AstNode *key;
     AstNode *value;
 } AstCompoundAssignNode;
+
+// A vector comparison produces an ArrayNum bool mask, while a source numeric
+// literal may still carry the general ARRAY AST type until it is constructed.
+// T0 shares this syntactic admission test between planning and execution; the
+// runtime fn_index_assign helper still validates the actual ArrayNum lanes and
+// shape before it mutates.
+static inline bool ast_is_direct_numeric_mask_assignment(AstNode* node) {
+    if (!node || node->node_type != AST_NODE_INDEX_ASSIGN_STAM) return false;
+    AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)node;
+    AstNode* key = assignment->key;
+    AstNode* object = assignment->object;
+    return key && !key->next && key->type &&
+        key->type->type_id == LMD_TYPE_ARRAY_NUM && object && object->type &&
+        (object->type->type_id == LMD_TYPE_ARRAY ||
+         object->type->type_id == LMD_TYPE_ARRAY_NUM);
+}
 
 // --- Shared AST shape helpers (promoted from transpile-mir.cpp, rule 13) ---
 // Both tiers need the same answers about an assignment target, so the walks

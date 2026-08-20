@@ -368,19 +368,72 @@ static inline bool ast_type_func_has_var_parameter(const TypeFunc* signature) {
 // `any[]` is still a declaration contract, but its element boundary accepts
 // every Item. T0's ordinary COW setter therefore supplies the full contract;
 // only a narrower element type needs the checked-store runtime entry.
-static inline bool ast_declared_type_is_open_any_array(Type* declared) {
-    if (!declared || declared->type_id != LMD_TYPE_TYPE ||
-            declared->kind != TYPE_KIND_UNARY ||
-            ((TypeUnary*)declared)->op != OPERATOR_REPEAT) {
-        return false;
+static inline Type* ast_declared_array_element(Type* declared) {
+    if (!declared) return NULL;
+    if (declared->type_id == LMD_TYPE_TYPE &&
+            declared->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)declared)->op == OPERATOR_REPEAT) {
+        return type_field_unwrap_simple_decl(((TypeUnary*)declared)->operand);
     }
-    Type* element = type_field_unwrap_simple_decl(((TypeUnary*)declared)->operand);
+    Type* semantic = type_field_unwrap_simple_decl(declared);
+    if (!semantic || semantic->type_id != LMD_TYPE_ARRAY || semantic == &TYPE_LIST) {
+        return NULL;
+    }
+    TypeArray* array = (TypeArray*)semantic;
+    return !array->item_patterns && array->nested
+        ? type_field_unwrap_simple_decl(array->nested) : NULL;
+}
+
+static inline bool ast_declared_type_is_open_any_array(Type* declared) {
+    Type* element = ast_declared_array_element(declared);
     return element && element->type_id == LMD_TYPE_ANY;
 }
 
 static inline bool ast_declared_type_is_map(Type* declared) {
     Type* semantic = type_field_unwrap_simple_decl(declared);
     return semantic && semantic->type_id == LMD_TYPE_MAP;
+}
+
+// Object fields take precedence over methods at member lookup time. Keep the
+// same table walk available to both T0 admission and execution so a callable
+// field cannot be mistaken for a bound method.
+static inline TypeMethod* ast_lookup_object_method(TypeObject* object,
+        const String* name) {
+    if (!object || !name) return NULL;
+    for (TypeObject* owner = object; owner; owner = owner->base) {
+        for (ShapeEntry* field = owner->shape; field; field = field->next) {
+            if (field->name && field->name->length == name->len &&
+                    memcmp(field->name->str, name->chars, name->len) == 0) {
+                return NULL;
+            }
+        }
+    }
+    for (TypeObject* owner = object; owner; owner = owner->base) {
+        for (TypeMethod* method = owner->methods; method; method = method->next) {
+            if (method->name && method->name->length == name->len &&
+                    memcmp(method->name->str, name->chars, name->len) == 0) {
+                return method;
+            }
+        }
+    }
+    return NULL;
+}
+
+// A top-level `any` contract carries no narrower occurrence or element
+// invariant. It therefore needs the ordinary runtime COW setter, unlike a
+// declared map/array contract that must route through its checked setter.
+static inline bool ast_declared_type_is_open_item(Type* declared) {
+    Type* semantic = type_field_unwrap_simple_decl(declared);
+    if (!semantic) return false;
+    if (semantic->type_id == LMD_TYPE_ANY) return true;
+    // `any | error` is normalized to the same open value contract at its
+    // mutation boundary, but it may still retain its union graph in the AST.
+    if (!lambda_type_is_union(semantic)) return false;
+    TypeBinary* binary = (TypeBinary*)semantic;
+    Type* left = type_field_unwrap_simple_decl(binary->left);
+    Type* right = type_field_unwrap_simple_decl(binary->right);
+    return (left && left->type_id == LMD_TYPE_ANY) ||
+        (right && right->type_id == LMD_TYPE_ANY);
 }
 
 static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
@@ -455,6 +508,7 @@ typedef struct AstGroupKey : AstNode {
 typedef struct AstGroupClause : AstNode {
     AstGroupKey *keys;  // linked list of key specs
     String* name;       // group binding name (from 'into name')
+    NameEntry* entry;   // post-group binding for `into name`
     int key_count;
 } AstGroupClause;
 
@@ -774,6 +828,10 @@ typedef struct NamespaceEntry {
 } NamespaceEntry;
 
 typedef struct Transpiler : Script {
+    // The Script that will retain this AST after the stack-local transpiler is
+    // adopted. Object methods need this stable owner for their interpreter
+    // closures; `(Script*)this` is valid only during construction.
+    Script* script_owner;
     TSParser* parser;
     Runtime* runtime;
 
