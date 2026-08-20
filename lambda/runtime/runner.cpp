@@ -2216,6 +2216,12 @@ void runtime_reset_heap(Runtime* runtime) {
         edit_bridge_destroy();
         render_map_destroy();
         tmpl_state_destroy();
+        // Template entries retain both name-pool strings and JIT body pointers
+        // from this evaluation. Keeping them across heap replacement let the
+        // next script dispatch through unmapped code (D5.4.3).
+        TemplateRegistry* template_registry = cleanup_context->template_registry;
+        cleanup_context->template_registry = NULL;
+        template_registry_destroy(template_registry);
 
         if (runtime->js_runtime_used) {
             // Cross-language JS caches retain Items from the current heap.
