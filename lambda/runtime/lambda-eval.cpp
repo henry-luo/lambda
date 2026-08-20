@@ -8891,11 +8891,10 @@ void fn_map_set(Item map_item, Item key, Item value) {
         if (identity_key) {
             // Symbol/private diagnostic bytes are not property identity.
             name_matches = entry->name_id != NAME_ID_NONE && entry->name_id == key_id;
-        } else if (entry->name && entry->name->str && entry->name->length == key_len) {
+        } else if (entry->key_kind == NAME_KEY_STRING) {
             // Ordinary Input fields have no NameId, so this is the explicit
             // byte-confirmation seam; pointer equality is never identity.
-            name_matches = entry->key_kind == NAME_KEY_STRING &&
-                memcmp(entry->name->str, key_cstr, key_len) == 0;
+            name_matches = shape_field_name_equals(entry, key_cstr, key_len);
         }
         if (name_matches) {
             TypeId field_type = entry->type->type_id;

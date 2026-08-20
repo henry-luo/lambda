@@ -2364,8 +2364,7 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
                     result = nested_result;
                 }
             }
-        } else if (key && field->name && field->name->length == key->len &&
-                memcmp(field->name->str, key->chars, key->len) == 0) {
+        } else if (key && shape_field_name_equals(field, key->chars, key->len)) {
             // Some element/input shape transitions preserve an older identity
             // while replacing the spelling. The NameId fast path therefore
             // confirms bytes before selecting a slot; this is the correctness

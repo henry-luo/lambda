@@ -312,6 +312,32 @@ typedef struct ShapeEntry {
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
 } ShapeEntry;
 
+// Both shape walks (map_get_by_name_id_keyed and fn_map_set) confirm a field by
+// its NAME BYTES, because a NameId alone is not identity for element/input
+// shapes whose spelling can drift from the id they preserve. That byte
+// confirmation is correct and stays. What was wrong is HOW it was spelled:
+// field names are short identifiers, so the libc memcmp CALL costs more than
+// the comparison it performs -- a sampled richards2 spent 43% of its runtime in
+// _platform_memcmp reached from these two walks, on names like "id" and "link".
+// Compare inline at identifier length and keep memcmp only where its vectorised
+// loop actually pays. Reads the same authoritative bytes, so every shape
+// resolves exactly as before (D4.6.1v2-D4.6.2v2).
+static inline bool shape_field_name_equals(const ShapeEntry* entry,
+        const char* chars, size_t len) {
+    if (!entry || !entry->name || !entry->name->str || !chars) return false;
+    if (entry->name->length != len) return false;
+    const char* name = entry->name->str;
+    // Identifier-length names never reach memcmp's vectorised regime, so the
+    // whole comparison stays inline; measured against a first-byte-reject
+    // variant that still called memcmp for the tail, this full inline form was
+    // worth a further 10 points on richards and 14 on json (untyped).
+    if (len > 32) return memcmp(name, chars, len) == 0;
+    for (size_t i = 0; i < len; i++) {
+        if (name[i] != chars[i]) return false;
+    }
+    return true;
+}
+
 // A1: Property hash table — inline open-addressing table for O(1) property lookup.
 // For objects with ≤32 hash-indexed properties (covers >99% of JS objects), uses
 // a small fixed table indexed by FNV-1a hash. Each slot stores a ShapeEntry
