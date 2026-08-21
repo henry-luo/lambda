@@ -522,6 +522,10 @@ endef
 # Core: only parsers needed by lambda.exe (Lambda, JS, TS, LaTeX)
 tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
+# Release frontends use the direct RD/Pratt parser, so do not build the
+# otherwise-unused Lambda Tree-sitter archive for release or release-profile.
+tree-sitter-release-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+
 # All: includes jube-only parsers (Python, Bash, Ruby)
 tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_RUBY_LIB)
 
@@ -533,7 +537,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
     lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
-	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
+	    tree-sitter-libs tree-sitter-core-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
@@ -760,7 +764,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-release-compile: $(TS_ENUM_H) tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -782,7 +786,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-release-profile: $(TS_ENUM_H) tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
