@@ -1358,6 +1358,11 @@ struct JubeHostNodePermissionAPI {
     // denial. A callback-style client captures that exception before posting.
     Item (*check_fs_read)(const char* path);
     Item (*check_fs_write)(const char* path);
+    // Node-core owns the process.permission object; policy evaluation and
+    // grant mutation stay behind this host table.
+    bool (*enabled)(void);
+    Item (*process_permission_has)(Item scope, Item resource);
+    Item (*process_permission_drop)(Item scope, Item resource);
 };
 
 // Worker/message-port objects remain host-owned because their transfer and

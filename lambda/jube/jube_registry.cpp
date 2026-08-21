@@ -10,7 +10,7 @@
 #include "../format/format.h"
 #include "../input/css/dom_element.hpp"
 #include "../js/js_class.h"
-#include "../js/js_permission.h"
+#include "jube_node_permission.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_typed_array.h"
 #include "../js/js_state_guards.h"
@@ -51,8 +51,6 @@
 #include <dlfcn.h>
 #include <dirent.h>
 #endif
-
-extern "C" void js_crypto_node_runtime_detach(void* session);
 
 #define JUBE_STATIC_MODULE_CAPACITY 64
 #define JUBE_MANIFEST_DEPENDENCY_CAPACITY 32
@@ -733,9 +731,6 @@ extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_utils_namespace(void);
 extern "C" Item js_get_child_process_namespace(void);
-extern "C" Item js_get_crypto_namespace(void);
-extern "C" Item js_get_dns_namespace(void);
-extern "C" Item js_get_dns_promises_namespace(void);
 extern "C" Item js_get_net_namespace(void);
 extern "C" Item js_get_internal_js_stream_socket_constructor(void);
 extern "C" Item js_get_tls_namespace(void);
@@ -775,6 +770,9 @@ extern "C" void js_net_default_auto_select_family_set(bool enabled);
 extern "C" int js_net_default_auto_select_family_timeout_get(void);
 extern "C" bool js_net_default_auto_select_family_timeout_set(int timeout_ms);
 extern "C" int js_permission_has_net(void);
+extern "C" int js_permission_enabled(void);
+extern "C" Item js_process_permission_has(Item scope, Item resource);
+extern "C" Item js_process_permission_drop(Item scope, Item resource);
 extern "C" Item js_permission_make_net_error(const char* syscall, const char* resource);
 static Item jube_host_node_throw_type_error_code(void* session, const char* code,
                                                   const char* message);
@@ -837,6 +835,7 @@ static bool jube_host_node_permission_has_fs_read(const char* path);
 static bool jube_host_node_permission_has_fs_write(const char* path);
 static Item jube_host_node_permission_check_fs_read(const char* path);
 static Item jube_host_node_permission_check_fs_write(const char* path);
+static bool jube_host_node_permission_enabled(void);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val,
                                          Item* args, int arg_count);
@@ -1293,6 +1292,9 @@ static const JubeHostNodePermissionAPI jube_host_node_permission_api = {
     jube_host_node_permission_has_fs_write,
     jube_host_node_permission_check_fs_read,
     jube_host_node_permission_check_fs_write,
+    jube_host_node_permission_enabled,
+    js_process_permission_has,
+    js_process_permission_drop,
 };
 
 static const JubeHostWorkerAPI jube_host_node_worker_api = {
@@ -3481,6 +3483,10 @@ static Item jube_host_node_permission_check_fs_write(const char* path) {
     return js_permission_check_fs_write(path);
 }
 
+static bool jube_host_node_permission_enabled(void) {
+    return js_permission_enabled() != 0;
+}
+
 static Item jube_host_node_throw_type_error_code(void* session, const char* code,
                                                   const char* message) {
     if (!jube_host_node_session_is_live(session) || !code || !message) return ItemNull;
@@ -3831,9 +3837,6 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         {"internal/fs/promises", js_get_internal_fs_promises_namespace},
         {"internal/fs/utils", js_get_internal_fs_utils_namespace},
         {"child_process", js_get_child_process_namespace},
-        {"crypto", js_get_crypto_namespace},
-        {"dns", js_get_dns_namespace},
-        {"dns/promises", js_get_dns_promises_namespace},
         {"net", js_get_net_namespace},
         {"internal/js_stream_socket", js_get_internal_js_stream_socket_constructor},
         {"tls", js_get_tls_namespace},
@@ -6335,7 +6338,6 @@ void jube_modules_runtime_detach(void) {
     }
     jube_node_shared_primitives_detach(session);
     node_trace_events_runtime_detach(session);
-    js_crypto_node_runtime_detach(session);
     jube_node_async_cancel_session(session);
     jube_node_resource_cleanup(active_session);
     jube_node_session_module_states_destroy(active_session);

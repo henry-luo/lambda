@@ -535,7 +535,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -545,7 +545,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
-	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
+	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic
 
 # Help target - shows available commands
 help:
@@ -890,6 +890,14 @@ build-node-net: build build-windows-host-import
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-net
 	@ls -lh modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll 2>/dev/null || true
 
+build-node-crypto: build build-windows-host-import
+	@echo "Building external node-crypto Jube module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native node-crypto $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-crypto
+	@ls -lh modules/node-crypto/node-crypto.dylib modules/node-crypto/node-crypto.so modules/node-crypto/node-crypto.dll 2>/dev/null || true
+
 build-node-zlib: build build-windows-host-import
 	@echo "Building external node-zlib Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
@@ -913,6 +921,7 @@ endef
 $(eval $(call release_node_module,core))
 $(eval $(call release_node_module,fs))
 $(eval $(call release_node_module,net))
+$(eval $(call release_node_module,crypto))
 $(eval $(call release_node_module,zlib))
 
 # The release language module is built independently, then copied next to the
@@ -929,12 +938,12 @@ release-lang-python: release $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
 
 # Standard and full Jube packages deliberately reuse the identical host.  The
 # full package adds language modules; it never recompiles a second runtime.
-package-standard: release-node-core release-node-fs release-node-net release-node-zlib
+package-standard: release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib
 	@mkdir -p release-standard
 	@cp release/lambda release-standard/lambda
 	@mkdir -p release-standard/modules
 	@cp modules/module-set.json release-standard/modules/module-set.json
-	# The module set advertises node-core, node-fs, and node-net, so their images must ship
+	# The module set advertises node-core, node-fs, node-net, and node-crypto, so their images must ship
 	# with the compatibility bundle instead of falling back to host providers.
 	@mkdir -p release-standard/modules/node-core
 	@cp release/modules/node-core/module.json release-standard/modules/node-core/module.json
@@ -945,10 +954,13 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 	@mkdir -p release-standard/modules/node-net
 	@cp release/modules/node-net/module.json release-standard/modules/node-net/module.json
 	@cp release/modules/node-net/node-net.dylib release/modules/node-net/node-net.so release/modules/node-net/node-net.dll release-standard/modules/node-net/ 2>/dev/null || true
+	@mkdir -p release-standard/modules/node-crypto
+	@cp release/modules/node-crypto/module.json release-standard/modules/node-crypto/module.json
+	@cp release/modules/node-crypto/node-crypto.dylib release/modules/node-crypto/node-crypto.so release/modules/node-crypto/node-crypto.dll release-standard/modules/node-crypto/ 2>/dev/null || true
 	@mkdir -p release-standard/modules/node-zlib
 	@cp release/modules/node-zlib/module.json release-standard/modules/node-zlib/module.json
 	@cp release/modules/node-zlib/node-zlib.dylib release/modules/node-zlib/node-zlib.so release/modules/node-zlib/node-zlib.dll release-standard/modules/node-zlib/ 2>/dev/null || true
-	@for module in node-core node-fs node-net node-zlib; do \
+	@for module in node-core node-fs node-net node-crypto node-zlib; do \
 		if ! find "release-standard/modules/$$module" -maxdepth 1 -type f \
 			\( -name "$$module.dylib" -o -name "$$module.so" -o -name "$$module.dll" \) \
 			-print -quit | rg -q .; then \
@@ -1328,6 +1340,18 @@ test-jube-node-zlib-parity: build-node-zlib build-node-core
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
 	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic.out
 	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-dynamic/dynamic.out
+
+# N6 leaf delivery proof: DNS remains owned by node-net and crypto resolves
+# through its own node-crypto image; neither namespace is a node-core fallback.
+test-jube-node-net-crypto-dynamic: build-node-net build-node-crypto build-node-core
+	@mkdir -p temp/node-net-crypto-dynamic/node-core temp/node-net-crypto-dynamic/node-net temp/node-net-crypto-dynamic/node-crypto
+	@cp modules/node-core/module.json temp/node-net-crypto-dynamic/node-core/module.json
+	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-net-crypto-dynamic/node-core/ 2>/dev/null || true
+	@cp modules/node-net/module.json temp/node-net-crypto-dynamic/node-net/module.json
+	@cp modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll temp/node-net-crypto-dynamic/node-net/ 2>/dev/null || true
+	@cp modules/node-crypto/module.json temp/node-net-crypto-dynamic/node-crypto/module.json
+	@cp modules/node-crypto/node-crypto.dylib modules/node-crypto/node-crypto.so modules/node-crypto/node-crypto.dll temp/node-net-crypto-dynamic/node-crypto/ 2>/dev/null || true
+	@JUBE_MODULE_PATH=./temp/node-net-crypto-dynamic ./lambda.exe js test/node/jube_node_net_crypto_dynamic.js --no-log | diff -u test/node/jube_node_net_crypto_dynamic.txt -
 
 release-jube: package-jube
 	@ln -sfn lambda release-jube/lambda-jube

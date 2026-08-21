@@ -1,7 +1,7 @@
-#include "js_permission.h"
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "../jube/jube_registry.h"
+#include "jube_node_permission.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "jube_registry.h"
 #include "../module/node_core/node_runtime_state.hpp"
 #include <ctype.h>
 #include <errno.h>

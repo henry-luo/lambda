@@ -52,6 +52,13 @@
 > and DataView inputs plus a shared-storage Buffer-view constructor; detached
 > and out-of-bounds states remain host-validated. This is preparation for the
 > Buffer implementation move, not a claim that the namespace is migrated.
+> The DNS and Node crypto namespace implementations have now moved into the
+> `node-net` and `node-crypto` Jube source groups, respectively; permission
+> policy is hosted by `jube_node_permission.cpp`, while `node-core` owns only
+> the Node-visible `process.permission` object. Their manifests, dependency
+> metadata, and dynamic registry smoke are landed. This is the namespace
+> ownership step required by D7.3.2/D7.3.3; the provider-table and fully
+> shielded async/rooting conversion required by D7.4.2 remains follow-up work.
 > The N3.3 process inventory is now committed under
 > `test/benchmark/hosted_node/`: host-core retains startup, queue, lifecycle,
 > signal, IPC, and resource-table surfaces, while `node-core` installs the
@@ -69,9 +76,9 @@
 > The first node-net ownership slice is now registered as its own Jube module:
 > `net`, `internal/net`, `internal/js_stream_socket`, `dns`, and
 > `dns/promises` no longer belong to node-core's descriptor table. The module
-> presently delegates namespace implementation to the host while stream and
-> DNS work services are extracted; static and isolated dynamic parity cover
-> that boundary. `net.isIP`, `net.isIPv4`, and `net.isIPv6` are the first
+> now owns the moved DNS namespace implementation; stream work services and
+> the remaining net transport split are still being extracted. Static and
+> isolated dynamic parity cover that boundary. `net.isIP`, `net.isIPv4`, and
 > concrete node-net exports: they now parse through the module's platform-only
 > implementation and opaque Jube value/script/root services under normal and
 > forced-GC static/dynamic gates. `net` now also owns the public default
@@ -80,9 +87,9 @@
 > validates Node's boolean and positive-timeout contract. The pure
 > `internal/net` namespace and `net._normalizeArgs` now build in node-net as
 > well, preserving the host parser's normalized-args marker. `dns.lookupSync`
-> is the first DNS operation with a module-local platform implementation
-> (`getaddrinfo` + `inet_ntop`); its host namespace registration is gone and
-> normal/forced-GC static/dynamic coverage exercises the moved paths.
+> and the asynchronous DNS namespace now have module-local implementations
+> (`getaddrinfo` + `inet_ntop`); the host namespace registration is gone and
+> normal dynamic coverage exercises the moved paths.
 > The network service now also owns the permission decision and non-throwing
 > `ERR_ACCESS_DENIED` construction needed by the forthcoming `work_submit`
 > DNS lifecycle, so a module resolver cannot bypass policy through libc.
@@ -1151,6 +1158,12 @@ manifest/build target from the N4 generator → dynamic flip → absent negative
   OpenSSL soft dependency may appear in the image import table.
 - [ ] **N6c — prepare the three-way crypto split and extract Node crypto**
   (JN14 as superseded by JA1).
+  - [x] Move the Node crypto namespace into `node-crypto`, move DNS into the
+    `node-net` leaf, and host permission policy under `jube_node_permission`;
+    add manifests, dependency metadata, and the dynamic registry smoke. This
+    records the DSO/manifest ownership boundary of D7.3.2/D7.3.3; the
+    strict `jube.h` and fully shielded async/provider boundary required by
+    D7.3.3/D7.4.2 remains follow-up work.
   Sub-task order: (1) extract one host-owned, versioned crypto-provider table
   over the existing static mbedTLS/digest implementation; (2) `node-crypto`
   module (the node:crypto surface, ≈6–7k lines after the split); (3) leave

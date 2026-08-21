@@ -173,7 +173,6 @@ static Item node_core_diagnostics_channel_namespace(void) {
 NODE_CORE_HOST_NAMESPACE(node_core_internal_fs_promises_namespace, "internal/fs/promises")
 NODE_CORE_HOST_NAMESPACE(node_core_internal_fs_utils_namespace, "internal/fs/utils")
 NODE_CORE_HOST_NAMESPACE(node_core_child_process_namespace, "child_process")
-NODE_CORE_HOST_NAMESPACE(node_core_crypto_namespace, "crypto")
 NODE_CORE_HOST_NAMESPACE(node_core_tls_namespace, "tls")
 NODE_CORE_HOST_NAMESPACE(node_core_http_namespace, "http")
 NODE_CORE_HOST_NAMESPACE(node_core_https_namespace, "https")
@@ -402,7 +401,6 @@ static const char* const node_core_diagnostics_channel_specifiers[] = { "diagnos
 static const char* const node_core_internal_fs_promises_specifiers[] = { "internal/fs/promises" };
 static const char* const node_core_internal_fs_utils_specifiers[] = { "internal/fs/utils" };
 static const char* const node_core_child_process_specifiers[] = { "child_process" };
-static const char* const node_core_crypto_specifiers[] = { "crypto" };
 static const char* const node_core_tls_specifiers[] = { "tls" };
 static const char* const node_core_http_specifiers[] = {
     "http", "_http_agent", "_http_common", "_http_server", "_http_outgoing",
@@ -472,7 +470,6 @@ static const JubeNamespaceDef node_core_namespaces[] = {
     {node_core_internal_fs_promises_specifiers, 1, node_core_internal_fs_promises_namespace, NULL, 0},
     {node_core_internal_fs_utils_specifiers, 1, node_core_internal_fs_utils_namespace, NULL, 0},
     {node_core_child_process_specifiers, 1, node_core_child_process_namespace, NULL, 0},
-    {node_core_crypto_specifiers, 1, node_core_crypto_namespace, NULL, 0},
     {node_core_tls_specifiers, 1, node_core_tls_namespace, NULL, 0},
     {node_core_http_specifiers, 5, node_core_http_namespace, NULL, 0},
     {node_core_https_specifiers, 1, node_core_https_namespace, NULL, 0},

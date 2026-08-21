@@ -5,6 +5,10 @@
 #include <cstring>
 #include <climits>
 
+extern "C" Item js_get_dns_namespace(void);
+extern "C" Item js_get_dns_promises_namespace(void);
+extern "C" void js_dns_reset(void);
+
 static const JubeHostAPI* node_net_host = NULL;
 static void* node_net_session = NULL;
 
@@ -622,10 +626,12 @@ static Item node_net_internal_socket_namespace(void) {
     return node_net_host_namespace("internal/js_stream_socket");
 }
 static Item node_net_dns_namespace(void) {
-    return node_net_install_dns_helpers(node_net_host_namespace("dns"));
+    // DNS is a leaf of this image now; resolving the public name through the
+    // host namespace table would route the module back into its retired owner.
+    return node_net_install_dns_helpers(js_get_dns_namespace());
 }
 static Item node_net_dns_promises_namespace(void) {
-    return node_net_host_namespace("dns/promises");
+    return js_get_dns_promises_namespace();
 }
 
 static const char* const node_net_specifiers[] = { "net" };
@@ -699,7 +705,7 @@ static void node_net_runtime_attach(void* session) {
 }
 
 static void node_net_runtime_reset(void* session) {
-    (void)session;
+    if (session == node_net_session) js_dns_reset();
 }
 
 static void node_net_runtime_detach(void* session) {

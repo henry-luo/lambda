@@ -22,8 +22,6 @@ extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 extern "C" void js_reset_buffer_module(void);
-extern "C" void js_crypto_reset(void);
-extern "C" void js_dns_reset(void);
 extern "C" void js_readline_reset(void);
 extern "C" void js_stream_reset(void);
 extern "C" void js_net_reset(void);
@@ -58,8 +56,6 @@ static void js_reset_core_module_caches(void) {
     js_fs_reset();
     js_util_reset();
     js_reset_buffer_module();
-    js_crypto_reset();
-    js_dns_reset();
     js_readline_reset();
     js_stream_reset();
     js_net_reset();

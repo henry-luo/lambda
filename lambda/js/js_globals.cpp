@@ -12,7 +12,7 @@
 #include "js_typed_array.h"
 #include "js_dom_events.h"
 #include "js_error_codes.h"
-#include "js_permission.h"
+#include "../jube/jube_node_permission.h"
 #include "js_property_attrs.h"
 #include "js_host_hooks.h"
 #include "js_props.h"
@@ -59,7 +59,6 @@ extern "C" Item js_get_typed_array_base();
 extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_get_buffer_namespace(void);
-extern "C" Item js_get_crypto_namespace(void);
 extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
                                                        Item value);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
@@ -71,6 +70,14 @@ JS_FORWARD_STATIC_VOID( js_globals_set_native_method, (Item object, const char* 
 
 typedef Item (*JsLazyGlobalBuilder)(void);
 
+static Item js_get_jube_crypto_namespace(void) {
+    Item namespace_item = ItemNull;
+    if (jube_specifier_resolve("crypto", &namespace_item) == JUBE_SPECIFIER_RESOLVED) {
+        return namespace_item;
+    }
+    return ItemNull;
+}
+
 struct JsLazyGlobalSpec {
     const char* name;
     size_t name_length;
@@ -80,7 +87,7 @@ struct JsLazyGlobalSpec {
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"process", 7, js_get_process_object_value},
     {"Buffer", 6, js_get_buffer_namespace},
-    {"crypto", 6, js_get_crypto_namespace},
+    {"crypto", 6, js_get_jube_crypto_namespace},
 };
 
 static void js_install_lazy_host_globals(Item global) {
@@ -3621,14 +3628,6 @@ extern "C" Item js_get_process_object_value(void) {
         }
 
         js_set_key_cstr(js_process_object, "execArgv", js_get_process_exec_argv());
-
-        // process.permission — present only when Node permission model is enabled.
-        if (js_permission_enabled()) {
-            Item permission = js_new_object();
-            js_set_native_key(permission, js_name_item("has", 3), js_process_permission_has);
-            js_set_native_key(permission, js_name_item("drop", 4), js_process_permission_drop);
-            js_set_key_cstr(js_process_object, "permission", permission);
-        }
 
         // config — minimal process.config for Node.js compat
         {

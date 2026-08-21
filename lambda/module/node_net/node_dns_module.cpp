@@ -1,21 +1,21 @@
 /**
- * js_dns.cpp — Node.js-style 'dns' module for LambdaJS
+ * node_dns_module.cpp — Node.js-style 'dns' module for LambdaJS
  *
  * Provides dns.lookup() and dns.resolve() backed by libuv uv_getaddrinfo.
  * Registered as built-in module 'dns' via js_module_get().
  */
-#include "js_runtime.h"
-#include "js_node_uv.hpp"
-#include "js_node_common.hpp"
-#include "js_runtime_state.hpp"
-#include "js_event_loop.h"
-#include "js_error_codes.h"
-#include "js_permission.h"
-#include "../lambda-data.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/uv_loop.h"
-#include "../../lib/mem.h"
+#include "../../js/js_runtime.h"
+#include "../../js/js_node_uv.hpp"
+#include "../../js/js_node_common.hpp"
+#include "../../js/js_runtime_state.hpp"
+#include "../../js/js_event_loop.h"
+#include "../../js/js_error_codes.h"
+#include "../../jube/jube_node_permission.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/uv_loop.h"
+#include "../../../lib/mem.h"
 
 #include <cstring>
 #include <cstdio>
@@ -771,19 +771,21 @@ static Item make_dns_resolve_code_error(const char* code, const char* message,
 }
 
 static void dns_ensure_cares_channelwrap(void) {
-    Item cares = js_internal_binding(make_string_item("cares_wrap"));
-    if (get_type_id(cares) != LMD_TYPE_MAP) return;
+    RootFrame roots(5);
+    Rooted<Item> binding_name(roots, make_string_item("cares_wrap"));
+    Rooted<Item> cares(roots, js_internal_binding(binding_name.get()));
+    if (get_type_id(cares.get()) != LMD_TYPE_MAP) return;
 
-    Item ctor = js_get_key_cstr(cares, "ChannelWrap");
-    if (!is_callable(ctor)) {
-        ctor = js_new_native_constructor(js_dns_cares_query_default);
-        js_set_key_cstr(cares, "ChannelWrap", ctor);
+    Rooted<Item> ctor(roots, js_get_key_cstr(cares.get(), "ChannelWrap"));
+    if (!is_callable(ctor.get())) {
+        ctor.set(js_new_native_constructor(js_dns_cares_query_default));
+        js_set_key_cstr(cares.get(), "ChannelWrap", ctor.get());
     }
 
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (!js_node_is_property_carrier(proto)) {
-        proto = js_new_object();
-        js_set_key_cstr(ctor, "prototype", proto);
+    Rooted<Item> proto(roots, js_get_key_cstr(ctor.get(), "prototype"));
+    if (!js_node_is_property_carrier(proto.get())) {
+        proto.set(js_new_object());
+        js_set_key_cstr(ctor.get(), "prototype", proto.get());
     }
 
     const char* methods[] = {
@@ -791,9 +793,9 @@ static void dns_ensure_cares_channelwrap(void) {
         "queryNs", "querySrv", "queryTxt", "getHostByAddr", NULL
     };
     for (int i = 0; methods[i]; i++) {
-        Item key = make_string_item(methods[i]);
-        if (!is_callable(js_get_key_default(proto, key))) {
-            js_set_native_key(proto, key, js_dns_cares_query_default);
+        Rooted<Item> key(roots, make_string_item(methods[i]));
+        if (!is_callable(js_get_key_default(proto.get(), key.get()))) {
+            js_set_native_key(proto.get(), key.get(), js_dns_cares_query_default);
         }
     }
 }
@@ -1572,6 +1574,9 @@ static Item dns_make_resolver_constructor(bool promise_mode) {
 }
 
 extern "C" Item js_get_dns_promises_namespace(void) {
+    // The namespace is published only after its methods are installed; register
+    // the owner slot first so forced collection cannot reclaim this partial image.
+    dns_register_roots_once();
     if (dns_promises_namespace.item != 0) return dns_promises_namespace;
 
     dns_ensure_cares_channelwrap();
@@ -1597,6 +1602,9 @@ extern "C" Item js_get_dns_promises_namespace(void) {
 }
 
 extern "C" Item js_get_dns_namespace(void) {
+    // The namespace is published only after its methods are installed; register
+    // the owner slot first so forced collection cannot reclaim this partial image.
+    dns_register_roots_once();
     if (dns_namespace.item != 0) return dns_namespace;
 
     dns_ensure_cares_channelwrap();

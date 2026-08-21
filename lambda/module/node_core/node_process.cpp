@@ -529,7 +529,7 @@ static Item node_process_getgroups(void) {
 #endif
 
 template <typename Target>
-static bool node_process_install_method(Item process, const char* name,
+static bool node_process_install_method_on(Item owner, const char* name,
         Target target, int adapter_arity) {
     if (!node_process_host || !node_process_host->value || !node_process_host->script ||
             !node_process_host->value->string_from_utf8_n || !node_process_host->value->property_set ||
@@ -543,7 +543,7 @@ static bool node_process_install_method(Item process, const char* name,
         node_process_host->node->roots->root_frame_end(&frame);
         return false;
     }
-    *process_root = process.item;
+    *process_root = owner.item;
     Item key = node_process_host->value->string_from_utf8_n(name, strlen(name));
     *key_root = key.item;
     Item callback = jube_new_function(node_process_host->script, target,
@@ -552,6 +552,48 @@ static bool node_process_install_method(Item process, const char* name,
     // Both key and callback allocation can move process before publication.
     node_process_host->value->property_set((Item){.item = *process_root},
         (Item){.item = *key_root}, (Item){.item = *function_root});
+    node_process_host->node->roots->root_frame_end(&frame);
+    return true;
+}
+
+template <typename Target>
+static bool node_process_install_method(Item process, const char* name,
+        Target target, int adapter_arity) {
+    return node_process_install_method_on(process, name, target, adapter_arity);
+}
+
+static bool node_process_install_permission(Item process) {
+    if (!node_process_host || !node_process_host->node ||
+            !node_process_host->node->permission ||
+            !node_process_host->node->permission->enabled ||
+            !node_process_host->node->permission->enabled()) return true;
+    if (!node_process_host->value || !node_process_host->value->new_object ||
+            !node_process_host->value->property_set) return false;
+    JubeRootFrame frame = {};
+    if (!node_process_root_frame(&frame, 3)) return false;
+    uint64_t* process_root = node_process_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* permission_root = node_process_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* key_root = node_process_host->node->roots->root_frame_take_slot(&frame);
+    if (!process_root || !permission_root || !key_root) {
+        node_process_host->node->roots->root_frame_end(&frame);
+        return false;
+    }
+    *process_root = process.item;
+    *permission_root = node_process_host->value->new_object().item;
+    if (!node_process_install_method_on((Item){.item = *permission_root}, "has",
+            node_process_host->node->permission->process_permission_has, 2) ||
+            !node_process_install_method_on((Item){.item = *permission_root}, "drop",
+            node_process_host->node->permission->process_permission_drop, 2)) {
+        node_process_host->node->roots->root_frame_end(&frame);
+        return false;
+    }
+    Item key = node_process_host->value->string_from_utf8_n("permission", 10);
+    *key_root = key.item;
+    // The permission key is rooted because publication may allocate while the
+    // host creates or updates the process property.
+    node_process_host->value->property_set((Item){.item = *process_root},
+        (Item){.item = *key_root},
+        (Item){.item = *permission_root});
     node_process_host->node->roots->root_frame_end(&frame);
     return true;
 }
@@ -604,7 +646,10 @@ int node_process_init(const JubeHostAPI* host) {
             !host->script->make_number || !host->script->bigint_from_decimal ||
             !host->script->new_function || !host->node->error ||
             !host->node->error->throw_type_error_code || !host->node->error->throw_range_error_code ||
-            !host->node->error->throw_system_error || !host->node->error->throw_error_code) return -1;
+            !host->node->error->throw_system_error || !host->node->error->throw_error_code ||
+            !host->node->permission || !host->node->permission->enabled ||
+            !host->node->permission->process_permission_has ||
+            !host->node->permission->process_permission_drop) return -1;
     node_process_host = host;
     return 0;
 }
@@ -625,6 +670,7 @@ void node_process_runtime_attach(void* session) {
     Item process = node_process_host->node->runtime->session_process(session);
     if (process.item == ItemNull.item) return;
     node_process_session = session;
+    node_process_install_permission(process);
     node_process_install_method(process, "memoryUsage", node_process_memory_usage, 0);
     node_process_install_method(process, "cwd", node_process_cwd, 0);
     node_process_install_method(process, "chdir", node_process_chdir, 1);
