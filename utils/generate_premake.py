@@ -524,6 +524,15 @@ class PremakeGenerator:
             self.config['libraries'] = existing_libs
             vlog(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
 
+    def _release_excluded_libraries(self) -> set[str]:
+        """Return archives intentionally absent from optimized host builds.
+
+        The direct Lambda parser is the release frontend. Keeping this list in
+        the build config lets debug/reference configurations retain the
+        Tree-sitter oracle without making the release link depend on it.
+        """
+        return set(self.config.get('release_exclude_libraries', []))
+
     def _get_consolidated_includes(self) -> List[str]:
         """Get consolidated include directories from global and platform-specific configurations"""
         includes = []
@@ -839,7 +848,8 @@ class PremakeGenerator:
             host_machine in ('aarch64', 'arm64') else '"-march=native"'
         self.premake_content.extend([
             '    filter "configurations:release"',
-            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE" }',
+            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE"' +
+            ''.join(f', "{define}"' for define in self.config.get('release_defines', [])) + ' }',
             '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
             '        symbols "Off"',
             '        optimize "Speed"   -- -O3 (honors build_lambda_config.json release intent)',
@@ -860,7 +870,8 @@ class PremakeGenerator:
         self.premake_content.extend([
             '    ',
             '    filter "configurations:release_profile"',
-            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE", "LAMBDA_JS_EXEC_PROFILE" }',
+            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE", "LAMBDA_JS_EXEC_PROFILE"' +
+            ''.join(f', "{define}"' for define in self.config.get('release_defines', [])) + ' }',
             '        -- LAMBDA_JS_EXEC_PROFILE: keep JS execution instrumentation in an optimized build',
             '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
             '        symbols "Off"',
@@ -3187,6 +3198,7 @@ class PremakeGenerator:
                          if d not in self.external_libraries or
                          not self.external_libraries[d].get('optional') or
                          self._optional_library_available(self.external_libraries[d])]
+        release_excluded_libraries = self._release_excluded_libraries()
 
         # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included
         # in the main program - they are only for development and testing
@@ -3367,6 +3379,7 @@ class PremakeGenerator:
 
         # Add static library linkoptions
         static_libs = []
+        debug_only_static_libs = []
         frameworks = []
         dynamic_libs = []
 
@@ -3391,7 +3404,10 @@ class PremakeGenerator:
                     # Static library
                     if not lib_path.startswith('/') and not lib_path.startswith('-l'):
                         lib_path = f"../../{lib_path}"
-                    static_libs.append(lib_path)
+                    if dep in release_excluded_libraries:
+                        debug_only_static_libs.append(lib_path)
+                    else:
+                        static_libs.append(lib_path)
 
         # Add static libraries to linkoptions
         if static_libs:
@@ -3443,6 +3459,26 @@ class PremakeGenerator:
                 '    '
             ])
 
+        # The Lambda Tree-sitter archive is a debug/reference-only oracle.
+        # Keep it available to debug configurations while making its absence
+        # explicit in both optimized host configurations.
+        if debug_only_static_libs:
+            for configuration in ('debug', 'debug_profile'):
+                self.premake_content.extend([
+                    f'    filter "configurations:{configuration}"',
+                    '        linkoptions {',
+                ])
+                for lib_path in debug_only_static_libs:
+                    self.premake_content.append(f'            "{lib_path}",')
+                self.premake_content.extend([
+                    '        }',
+                    '    ',
+                ])
+            self.premake_content.extend([
+                '    filter {}',
+                '    ',
+            ])
+
         # Add platform-specific linker options
         output = self.config.get('output', 'lambda.exe')
         if 'linux' in output.lower():
@@ -3457,6 +3493,8 @@ class PremakeGenerator:
             linux_libs = []
             for dep in dependencies:
                 if dep in self.external_libraries:
+                    if dep in release_excluded_libraries:
+                        continue
                     lib_info = self.external_libraries[dep]
 
                     # Skip libraries with link type "none"

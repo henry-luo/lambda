@@ -792,14 +792,23 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
 }
 
 static bool lambda_tree_parser_selected(void) {
+#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
+    // release builds have no Lambda Tree-sitter language to select.
+    return false;
+#else
     const char* mode = shell_getenv("LAMBDA_PARSER");
     return mode && (strcmp(mode, "tree") == 0 ||
         strcmp(mode, "tree-sitter") == 0);
+#endif
 }
 
 static bool lambda_parser_compare_selected(void) {
+#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
+    return false;
+#else
     const char* mode = shell_getenv("LAMBDA_PARSER");
     return mode && strcmp(mode, "compare") == 0;
+#endif
 }
 
 static bool initialize_script_ast_storage(Transpiler* tp) {

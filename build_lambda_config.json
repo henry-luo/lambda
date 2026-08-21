@@ -69,6 +69,12 @@
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
   },
+  "release_defines": [
+    "LAMBDA_NO_TREE_SITTER_LAMBDA"
+  ],
+  "release_exclude_libraries": [
+    "tree-sitter-lambda"
+  ],
   "includes": [
     ".",
     "lambda/mir",

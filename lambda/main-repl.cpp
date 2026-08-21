@@ -139,6 +139,12 @@ StatementStatus check_statement_completeness(TSParser* parser, const char* sourc
         return STMT_INCOMPLETE;
     }
 
+    // release builds omit the Lambda Tree-sitter grammar; the direct parser
+    // performs the definitive syntax check when completed input is loaded.
+    if (!parser) {
+        return STMT_COMPLETE;
+    }
+
     // Now use Tree-sitter for more sophisticated checking
     TSTree* tree = lambda_parse_source(parser, source);
     if (!tree) {
