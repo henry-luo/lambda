@@ -14,11 +14,14 @@
 #include "heap_api.h"
 #include "type_contract.hpp"
 #include "lambda-number-types.hpp"
+#include "lambda-number-runtime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include <stdlib.h>
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
+extern "C" Item pn_output2_mir(Item source, Item target);
+extern "C" Item pn_output_append_mir(Item source, Item target);
 
 // ---------------------------------------------------------------------------
 // Tier selection
@@ -268,6 +271,7 @@ public:
 // ---------------------------------------------------------------------------
 
 static Item eval_expr(InterpFrame* f, AstNode* node);
+static Item interp_item_at(Item source, int64_t index);
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions);
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
 static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded);
@@ -1512,9 +1516,9 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
     case LMD_TYPE_INT:   return INTERP_ARRAY_INT;
     case LMD_TYPE_FLOAT: return INTERP_ARRAY_FLOAT;
     case LMD_TYPE_UINT64:
-        // Full-width values must use the same ELEM_UINT64 carrier as MIR:
-        // generic storage cannot prove the declared u64[] lane across an
-        // indexed write and later direct read.
+        // Declared u64[] literals use the same ELEM_UINT64 carrier as MIR;
+        // generic mixed arrays are handled by the lane-preserving read bridge
+        // in interp_item_at rather than by widening this compact declaration.
         return INTERP_ARRAY_UINT64;
     case LMD_TYPE_NUM_SIZED:
         // The AST records the homogeneous NumSized subtype on `nested`; using
@@ -1949,6 +1953,39 @@ static Item eval_match(InterpFrame* f, AstMatchNode* node) {
 // on one predicate.
 extern bool has_current_item_ref(AstNode* node);
 
+// Generic arrays own their wide scalar payload in the tail of the same
+// container.  `array_get` intentionally canonicalizes a small u64 through the
+// generic scalar reader, but a Lambda value read must retain its declared
+// numeric identity just like the static MIR carrier.  Re-home that payload in
+// the current number extent before publishing it from T0 (D3.2.2).
+static Item interp_preserve_array_u64(Item source, int64_t index, Item value) {
+    if (get_type_id(source) != LMD_TYPE_ARRAY || !source.array ||
+            index < 0 || index >= source.array->length ||
+            array_has_native_lane(source.array)) return value;
+    // Native nullable lanes deliberately store raw words in `items`; treating
+    // those words as Item values would dereference a lane such as `1` as a
+    // pointer while probing its TypeId. Only generic Item arrays may be
+    // inspected for a preserved u64 carrier (D3.2.2).
+    Item raw = source.array->items[index];
+    if (get_type_id(raw) == LMD_TYPE_UINT64) {
+        return box_uint64_value(raw.get_uint64());
+    }
+    return value;
+}
+
+static Item interp_item_at(Item source, int64_t index) {
+    Item value = item_at(source, index);
+    return interp_preserve_array_u64(source, index, value);
+}
+
+static Item interp_iter_val_at(Item source, SymbolKeyList* keys, int64_t index,
+        int key_filter, bool key_only) {
+    Item value = key_only
+        ? iter_key_at(source, keys, index, key_filter)
+        : iter_val_at(source, keys, index, key_filter);
+    return key_only ? value : interp_preserve_array_u64(source, index, value);
+}
+
 // Mirrors transpile_pipe: `a | b` maps b over a's members with `~`/`~#` bound,
 // `a where b` filters a by b, and a `~`-free `a | f(x)` injects a as f's first
 // argument. A scalar left operand is lifted to a one-element stream.
@@ -2035,7 +2072,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
                 current = left.get();
                 key = (Item){.item = i2it(i)};
             } else {
-                current = item_at(left.get(), i);
+                current = interp_item_at(left.get(), i);
                 key = (Item){.item = i2it(i)};
             }
             item_slot.set(current);
@@ -2157,9 +2194,8 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
 
     bool ok = true;
     for (int64_t i = 0; i < length && ok; i++) {
-        Item current = loop->key_only
-            ? iter_key_at(coll_slot.get(), keys, i, key_filter)
-            : iter_val_at(coll_slot.get(), keys, i, key_filter);
+        Item current = interp_iter_val_at(coll_slot.get(), keys, i, key_filter,
+            loop->key_only);
         interp_write_binding(f, value_entry, current);
         if (index_entry) {
             interp_write_binding(f, index_entry,
@@ -2229,9 +2265,8 @@ static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
 
     for (int64_t i = 0; i < length; i++) {
         Scratch row_slot(f);
-        row_slot.set(loop->key_only
-            ? iter_key_at(collection_slot.get(), keys, i, key_filter)
-            : iter_val_at(collection_slot.get(), keys, i, key_filter));
+        row_slot.set(interp_iter_val_at(collection_slot.get(), keys, i,
+            key_filter, loop->key_only));
         interp_write_binding(f, value_entry, row_slot.get());
         if (index_entry) {
             interp_write_binding(f, index_entry,
@@ -2413,9 +2448,8 @@ static bool interp_join_collect_source(ForCtx* fc, AstLoopNode* loop,
 
     for (int64_t i = 0; i < length; i++) {
         Scratch row_slot(f);
-        row_slot.set(loop->key_only
-            ? iter_key_at(collection_slot.get(), keys, i, key_filter)
-            : iter_val_at(collection_slot.get(), keys, i, key_filter));
+        row_slot.set(interp_iter_val_at(collection_slot.get(), keys, i,
+            key_filter, loop->key_only));
         interp_write_binding(f, value_entry, row_slot.get());
         Scratch source_index(f);
         if (index_entry) {
@@ -2529,6 +2563,71 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
     }
 
     Array* tuples = (Array*)(uintptr_t)tuples_slot.get().item;
+    if (for_node->group) {
+        // Join rows are tuple Elements, so grouping must collect the already
+        // joined row carrier before switching to the `into` scope.  Running
+        // the ordinary one-source collector here would re-evaluate the first
+        // source and lose the join cardinality (S10.1.3).
+        Scratch group_rows_slot(f);
+        Scratch group_keys_slot(f);
+        group_rows_slot.set(interp_ptr_item(array_plain()));
+        group_keys_slot.set(interp_ptr_item(array_plain()));
+        int64_t source_count = tuples ? tuples->length : 0;
+        for (int64_t i = 0; i < source_count; i++) {
+            tuples = (Array*)(uintptr_t)tuples_slot.get().item;
+            if (!tuples || i >= tuples->length) break;
+            Scratch tuple_slot(f);
+            tuple_slot.set(tuples->items[i]);
+            interp_join_bind_tuple(fc, first, NULL, tuple_slot.get());
+            bool keep = true;
+            if (!interp_for_apply_row_clauses(fc, &keep)) break;
+            if (keep) {
+                Array* rows = (Array*)(uintptr_t)group_rows_slot.get().item;
+                if (rows) array_push(rows, tuple_slot.get());
+                if (!interp_for_append_group_key(fc, group_keys_slot.home())) break;
+            }
+            if (i + 1 < source_count) interp_note_backedge(f);
+        }
+        if (interp_frame_pending(f)) return ItemNull;
+
+        Scratch aliases_slot(f);
+        aliases_slot.set(interp_ptr_item(array_plain()));
+        for (AstGroupKey* spec = for_node->group->keys; spec;
+                spec = (AstGroupKey*)((AstNode*)spec)->next) {
+            Scratch alias_slot(f);
+            alias_slot.set((Item){.item = s2it(heap_create_name(
+                spec->alias ? spec->alias->chars : ""))});
+            Array* aliases = (Array*)(uintptr_t)aliases_slot.get().item;
+            if (aliases) array_push(aliases, alias_slot.get());
+        }
+        Scratch groups_slot(f);
+        groups_slot.set(interp_ptr_item(fn_group_by_keys_items(
+            group_rows_slot.get(), group_keys_slot.get(), aliases_slot.get())));
+        Array* groups = (Array*)(uintptr_t)groups_slot.get().item;
+        int64_t group_count = groups ? groups->length : 0;
+        bool grouped_ok = true;
+        for (int64_t i = 0; i < group_count && grouped_ok; i++) {
+            groups = (Array*)(uintptr_t)groups_slot.get().item;
+            if (!groups || i >= groups->length) break;
+            Scratch group_slot(f);
+            group_slot.set(groups->items[i]);
+            interp_write_binding(f, for_node->group->entry, group_slot.get());
+            grouped_ok = interp_for_emit_value(fc);
+            if (f->signal == EvalSignal::BROKE) {
+                interp_clear_loop_signal(f);
+                break;
+            }
+            if (f->signal == EvalSignal::CONTINUED) {
+                interp_clear_loop_signal(f);
+                grouped_ok = true;
+            }
+            if (grouped_ok && i + 1 < group_count) interp_note_backedge(f);
+        }
+        if (!result_demanded) return ItemNull;
+        return interp_for_finalize_output(f, for_node,
+            out_slot.home(), key_slot.home());
+    }
+
     int64_t tuple_count = tuples ? tuples->length : 0;
     bool ok = true;
     for (int64_t i = 0; i < tuple_count && ok; i++) {
@@ -2831,7 +2930,7 @@ static bool interp_exec_decompose(InterpFrame* f, AstDecomposeNode* dec) {
         // root across every extraction because either helper can allocate.
         Item value = dec->is_named
             ? item_attr(source.get(), name->chars)
-            : item_at(source.get(), i);
+            : interp_item_at(source.get(), i);
         interp_write_binding(f, entry, value);
     }
     return true;
@@ -2913,8 +3012,9 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
         break;
     }
     default:
-        // TYPE_STAM / OBJECT_TYPE / patterns / views are P1 work; the pre-scan
-        // has already routed scripts containing them to the JIT fallback.
+        // Type/object/pattern definitions publish through their expression or
+        // compile-time carriers; no slab value is needed for this declaration
+        // arm. View/state declarations remain outside the T0 plan boundary.
         break;
     }
 }
@@ -3031,6 +3131,22 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return eval_binary(f, (AstBinaryNode*)node);
     case AST_NODE_PIPE:
         return eval_pipe(f, (AstBinaryNode*)node);
+    case AST_NODE_PIPE_FILE_STAM: {
+        // legacy pipe-to-file AST nodes are statement-shaped, but their runtime
+        // contract is still the same boxed source/target call as MIR lowering;
+        // evaluate the source first so a target allocation cannot observe a
+        // stale unrooted source (D5.3.3).
+        AstBinaryNode* pipe = (AstBinaryNode*)node;
+        Scratch source(f);
+        source.set(eval_expr(f, pipe->left));
+        if (interp_frame_pending(f)) return source.get();
+        Scratch target(f);
+        target.set(eval_expr(f, pipe->right));
+        if (interp_frame_pending(f)) return target.get();
+        return pipe->op == OPERATOR_PIPE_APPEND
+            ? pn_output_append_mir(source.get(), target.get())
+            : pn_output2_mir(source.get(), target.get());
+    }
     case AST_NODE_MATCH_EXPR:
         return eval_match(f, (AstMatchNode*)node);
     case AST_NODE_CURRENT_ITEM:
@@ -3123,6 +3239,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item index_value = eval_expr(f, field->field);
         Scratch index_slot(f);
         index_slot.set(index_value);
+        int64_t plain_index = 0;
+        if (lambda_item_to_int64_exact(index_slot.get(), &plain_index) &&
+                get_type_id(obj.get()) == LMD_TYPE_ARRAY) {
+            return interp_item_at(obj.get(), plain_index);
+        }
         return fn_index(obj.get(), index_slot.get());
     }
     case AST_NODE_ARRAY:

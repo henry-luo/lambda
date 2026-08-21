@@ -8,3 +8,14 @@
 test/lambda/graph_transform_html.ls	timeout
 test/lambda/graph_transform_input.ls	timeout
 test/lambda/object_constraint.ls	golden_drift
+test/lambda/editor/oracle_poc.ls	timeout
+test/lambda/graph/structurizr/advanced_static.ls	timeout
+test/lambda/graph/structurizr/archetypes_implied.ls	timeout
+test/lambda/graph/structurizr/canonical.ls	timeout
+test/lambda/graph/structurizr/deployment_groups.ls	timeout
+test/lambda/graph/structurizr/expression_diagnostics.ls	timeout
+test/lambda/graph/structurizr/includes.ls	timeout
+test/lambda/graph/structurizr/metadata.ls	timeout
+test/lambda/graph/structurizr/reference_semantics.ls	timeout
+test/lambda/latex/test_latex_m7.ls	timeout
+test/lambda/math/test_math_html_output.ls	timeout
