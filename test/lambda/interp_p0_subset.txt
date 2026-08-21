@@ -10,8 +10,10 @@
 # `run` scripts are procedural and must be invoked as `lambda.exe run <script>`
 # — invoking them directly executes no `main` and silently compares empty
 # output, which is exactly how a real run-mode defect stayed hidden.
+test/lambda/agg_null_absence.ls	direct
 test/lambda/array_dynamic_index.ls	direct
 test/lambda/array_float.ls	direct
+test/lambda/arraynum_transform_preserve.ls	direct
 test/lambda/at_membership.ls	direct
 test/lambda/binary_decode.ls	direct
 test/lambda/binary_elements.ls	direct
@@ -27,6 +29,7 @@ test/lambda/chained_comparisons.ls	direct
 test/lambda/child_query.ls	direct
 test/lambda/closure.ls	direct
 test/lambda/closure_advanced.ls	direct
+test/lambda/compact_typed_arrays.ls	direct
 test/lambda/comment.ls	direct
 test/lambda/comp_expr.ls	direct
 test/lambda/comp_expr_edge.ls	direct
@@ -42,6 +45,7 @@ test/lambda/decimal_big.ls	direct
 test/lambda/decimal_poison_c14c.ls	direct
 test/lambda/decimal_tiers.ls	direct
 test/lambda/empty_string.ls	direct
+test/lambda/eq_total.ls	direct
 test/lambda/eq_decimal_float.ls	direct
 test/lambda/eq_element.ls	direct
 test/lambda/eq_fn.ls	direct
@@ -60,9 +64,15 @@ test/lambda/for_element_spread.ls	direct
 test/lambda/for_element_filter.ls	direct
 test/lambda/for_expr_content.ls	direct
 test/lambda/for_decompose.ls	direct
+test/lambda/for_clauses_test.ls	direct
+test/lambda/for_group_test.ls	direct
+test/lambda/for_join_s3b_test.ls	direct
+test/lambda/for_join_test.ls	direct
 test/lambda/interp_for_window.ls	direct
 test/lambda/format_html_svg_attrs.ls	direct
 test/lambda/forward_ref.ls	direct
+test/lambda/fuzzy_crash_regression.ls	direct
+test/lambda/graph_layout.ls	direct
 test/lambda/func.ls	direct
 test/lambda/func_inferred_nullable_native_call.ls	direct
 test/lambda/func_param.ls	direct
@@ -113,6 +123,7 @@ test/lambda/map_duplicate_key_lookup.ls	direct
 test/lambda/map_element_attrs.ls	direct
 test/lambda/map_spread_override.ls	direct
 test/lambda/match_expr.ls	direct
+test/lambda/match_string_pattern.ls	direct
 test/lambda/math_native_lowering_edges.ls	direct
 test/lambda/math_random.ls	direct
 test/lambda/method_call.ls	direct
@@ -161,7 +172,6 @@ test/lambda/sized_numeric_bitwise_go.ls	direct
 test/lambda/sized_numeric_mixed_expr.ls	direct
 test/lambda/sized_numeric_type_annot.ls	direct
 test/lambda/sized_numeric_u64_mixed.ls	direct
-test/lambda/sized_numeric_ushr.ls	direct
 test/lambda/slice_clamp.ls	direct
 test/lambda/slice_float_indices.ls	direct
 test/lambda/slice_negative_null_offsets.ls	direct
@@ -179,6 +189,9 @@ test/lambda/string_nul_compare.ls	direct
 test/lambda/string_ord_chr.ls	direct
 test/lambda/string_prefix_suffix.ls	direct
 test/lambda/string_range.ls	direct
+test/lambda/string_pattern.ls	direct
+test/lambda/string_pattern_ops.ls	direct
+test/lambda/string_pattern_syntax.ls	direct
 test/lambda/structural_equality.ls	direct
 test/lambda/sys_fn.ls	direct
 test/lambda/sys_func_int_returns.ls	direct
@@ -212,6 +225,8 @@ test/lambda/type_negation.ls	direct
 test/lambda/type_occurrence.ls	direct
 test/lambda/type_or_narrowing.ls	direct
 test/lambda/type_pattern.ls	direct
+test/lambda/symbol_pattern.ls	direct
+test/lambda/test_string_pattern_integration.ls	direct
 test/lambda/typed_array_bool.ls	direct
 test/lambda/typed_array_broadcast.ls	direct
 test/lambda/typed_array_image_analyze.ls	direct
@@ -233,7 +248,6 @@ test/lambda/typed_array_view_gc.ls	direct
 test/lambda/typed_array_views.ls	direct
 test/lambda/typed_map_direct_access.ls	direct
 test/lambda/typed_param_string.ls	direct
-test/lambda/uint64_storage_lifetime.ls	direct
 test/lambda/unboxed_field_access.ls	direct
 test/lambda/unboxed_sys_func.ls	direct
 test/lambda/value.ls	direct
@@ -395,3 +409,22 @@ test/lambda/pdf/phase3_path.ls	run
 test/lambda/pdf/phase69_anisotropic_text_matrix.ls	run
 test/lambda/pdf/phase7_inline_image.ls	run
 test/lambda/pdf/phase7_text_state.ls	run
+test/lambda/graph_layout_custom.ls	direct
+test/lambda/graph_layout_direction.ls	direct
+test/lambda/graph_transform_paint.ls	direct
+test/lambda/import_error_destr.ls	direct
+test/lambda/import_pub_types.ls	direct
+test/lambda/io_sqlite_for_clauses.ls	direct
+test/lambda/name_member.ls	direct
+test/lambda/number_model_realign.ls	direct
+test/lambda/object.ls	direct
+test/lambda/object_default.ls	direct
+test/lambda/object_inherit.ls	direct
+test/lambda/object_pattern.ls	direct
+test/lambda/sized_numeric_semantics.ls	direct
+test/lambda/typed_array_axis_reduce.ls	direct
+test/lambda/typed_array_format.ls	direct
+test/lambda/typed_array_iter.ls	direct
+test/lambda/typed_array_reduce.ls	direct
+test/lambda/typed_array_vector_ops.ls	direct
+test/lambda/uint64_support_parity.ls	direct

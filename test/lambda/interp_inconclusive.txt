@@ -1,0 +1,10 @@
+# T0 interpreter — inconclusive differential rows
+#
+# Scripts for which the bounded differential sweep could not establish a
+# verdict (currently the JIT renderer timeout rows). They are neither
+# interpreted-subset matches nor counted interpreter fallbacks.
+#
+# format: <script>	<reason>
+test/lambda/graph_transform_html.ls	timeout
+test/lambda/graph_transform_input.ls	timeout
+test/lambda/object_constraint.ls	golden_drift

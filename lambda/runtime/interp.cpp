@@ -531,6 +531,15 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
     return interp_ptr_item(typed);
 }
 
+static bool interp_declared_optional_array(Type* type) {
+    Type* semantic = type_field_unwrap_simple_decl(type);
+    if (!semantic || semantic->type_id != LMD_TYPE_TYPE ||
+            semantic->kind != TYPE_KIND_UNARY ||
+            ((TypeUnary*)semantic)->op != OPERATOR_OPTIONAL) return false;
+    Type* base = type_field_unwrap_simple_decl(((TypeUnary*)semantic)->operand);
+    return base && base->type_id == LMD_TYPE_ARRAY;
+}
+
 static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
         Type* declared_type, const char* boundary) {
     value = interp_coerce_declared_array(f, value, declared_type, boundary);
@@ -543,7 +552,28 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
         // int contract until a later write observes the wrong representation.
         return lambda_type_check(source_root.get(), declared_type, boundary);
     }
-    return interp_coerce_declared_numeric(f, value, declared_type, boundary);
+    Type* target = unwrap_simple_type_type(declared_type);
+    if (!target) return value;
+    if (interp_declared_optional_array(target)) {
+        TypeId actual = get_type_id(value);
+        if (actual == LMD_TYPE_NULL || actual == LMD_TYPE_RANGE ||
+                actual == LMD_TYPE_ARRAY || actual == LMD_TYPE_ARRAY_NUM) {
+            // `array?` is the open nullable container contract; the validator
+            // treats its max-length metadata as an occurrence bound, unlike MIR.
+            return value;
+        }
+    }
+    LambdaNumericKind numeric_kind = lambda_numeric_kind_from_type(target);
+    if (numeric_kind != LAMBDA_NUM_INVALID || target->type_id == LMD_TYPE_NUM_SIZED ||
+            target->type_id == LMD_TYPE_UINT64) {
+        return interp_coerce_declared_numeric(f, value, declared_type, boundary);
+    }
+    // Explicit non-numeric contracts (including unions) still form runtime
+    // admission boundaries; leaving them unchecked let T0 publish a rejected
+    // assignment that MIR returns through its checked-boundary edge.
+    Scratch source_root(f);
+    source_root.set(value);
+    return lambda_type_check(source_root.get(), declared_type, boundary);
 }
 
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
@@ -2972,6 +3002,16 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (decl && (decl->node_type == AST_NODE_STRING_PATTERN ||
                 decl->node_type == AST_NODE_SYMBOL_PATTERN)) {
             TypePattern* pattern = (TypePattern*)decl->type;
+            // Direct multi-declaration reductions can leave a later pattern
+            // unindexed even though its TypePattern AST is valid. Materialize
+            // that deferred identity at first use so T0 and MIR share the
+            // same module-local type-list carrier.
+            if (pattern && pattern->pattern_index < 0 &&
+                    !compile_runtime_pattern(f->module->pool, f->module->type_list,
+                        pattern, ((AstPatternDefNode*)decl)->as,
+                        ((AstPatternDefNode*)decl)->is_symbol)) {
+                return ItemError;
+            }
             // Pattern definitions never own a slab binding: the shared
             // prepass registers their TypePattern in this module's type list,
             // which is the same const-pattern carrier MIR materializes.
@@ -3264,6 +3304,13 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         value = interp_coerce_declared_binding(f, value, target->declared_type,
             "declared assignment binding");
+        if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
+                !lambda_type_accepts_error(target->declared_type)) {
+            // A fresh checked-assignment failure returns before publishing the
+            // rejected value, matching MIR's emit_return_if_item_error edge.
+            interp_signal(f, EvalSignal::RETURNED, value);
+            return value;
+        }
         interp_write_binding(f, target, value);
         AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
         // A direct assignment body is the function result in MIR. Other

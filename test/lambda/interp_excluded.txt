@@ -4,65 +4,29 @@
 # runs on the whole-module JIT path instead, counted in the run summary
 # (`interp: … fallback=N`) — there are no silent caps (design risk R4).
 #
-# This file and interp_p0_subset.txt partition the corpus; regenerate both
-# together with test/interp/refresh_lists.py.
+# This file, interp_p0_subset.txt, and interp_inconclusive.txt partition the
+# classified corpus; regenerate all three with test/interp/refresh_lists.py.
 #
 # `node:none` means the pre-scan never ran: the script does not compile on
 # either tier, or its whole import cone was rejected before it was reached.
 #
 # format: <script>	node:<first unsupported kind>
-test/lambda/agg_null_absence.ls	node:AST_NODE_NAMED_ARG
-test/lambda/arraynum_transform_preserve.ls	node:AST_NODE_ARRAY
 test/lambda/binary_js_bridge.ls	node:AST_NODE_IMPORT
-test/lambda/compact_typed_arrays.ls	node:AST_NODE_ARRAY
 test/lambda/edit_bridge.ls	node:AST_NODE_VIEW
-test/lambda/eq_total.ls	node:AST_NODE_ARRAY
-test/lambda/for_clauses_test.ls	node:AST_NODE_FOR_EXPR
-test/lambda/for_group_test.ls	node:AST_NODE_FOR_EXPR
-test/lambda/for_join_s3b_test.ls	node:AST_NODE_LOOP
-test/lambda/for_join_test.ls	node:AST_NODE_LOOP
-test/lambda/fuzzy_crash_regression.ls	node:AST_NODE_OBJECT_TYPE
-test/lambda/graph_layout.ls	node:AST_NODE_FOR_EXPR
-test/lambda/graph_layout_custom.ls	node:AST_NODE_FOR_EXPR
-test/lambda/graph_layout_direction.ls	node:AST_NODE_FOR_EXPR
-test/lambda/graph_transform_html.ls	node:AST_NODE_ASSIGN
-test/lambda/graph_transform_input.ls	node:AST_NODE_ASSIGN
-test/lambda/graph_transform_paint.ls	node:AST_NODE_FOR_EXPR
-test/lambda/import_error_destr.ls	node:AST_NODE_IMPORT
 test/lambda/import_js.ls	node:AST_NODE_IMPORT
 test/lambda/import_js_naming.ls	node:AST_NODE_IMPORT
-test/lambda/import_pub_types.ls	node:AST_NODE_IMPORT
-test/lambda/io_sqlite_for_clauses.ls	node:AST_NODE_FOR_EXPR
 test/lambda/js_array_props_tail_bridge.ls	node:AST_NODE_IMPORT
 test/lambda/map_object_robustness.ls	node:none
-test/lambda/match_string_pattern.ls	node:AST_NODE_STRING_PATTERN
-test/lambda/name_member.ls	node:AST_NODE_OBJECT_TYPE
-test/lambda/number_model_realign.ls	node:AST_NODE_SYS_FUNC
-test/lambda/object.ls	node:AST_NODE_OBJECT_TYPE
-test/lambda/object_constraint.ls	node:AST_NODE_OBJECT_TYPE
-test/lambda/object_default.ls	node:AST_NODE_OBJECT_TYPE
 test/lambda/object_direct_access.ls	node:none
-test/lambda/object_inherit.ls	node:AST_NODE_OBJECT_TYPE
-test/lambda/object_pattern.ls	node:AST_NODE_OBJECT_TYPE
 test/lambda/object_update.ls	node:AST_NODE_OBJECT_TYPE
 test/lambda/render_map.ls	node:AST_NODE_VIEW
 test/lambda/sized_numeric_annotation_edges.ls	node:AST_NODE_ASSIGN
 test/lambda/sized_numeric_collections.ls	node:AST_NODE_ARRAY
-test/lambda/sized_numeric_semantics.ls	node:AST_NODE_ARRAY
-test/lambda/string_pattern.ls	node:AST_NODE_STRING_PATTERN
-test/lambda/string_pattern_ops.ls	node:AST_NODE_STRING_PATTERN
-test/lambda/string_pattern_syntax.ls	node:AST_NODE_STRING_PATTERN
-test/lambda/symbol_pattern.ls	node:AST_NODE_STRING_PATTERN
-test/lambda/test_string_pattern_integration.ls	node:AST_NODE_STRING_PATTERN
-test/lambda/typed_array_axis_reduce.ls	node:AST_NODE_NAMED_ARG
-test/lambda/typed_array_format.ls	node:AST_NODE_ARRAY
-test/lambda/typed_array_iter.ls	node:AST_NODE_ARRAY
 test/lambda/typed_array_ndim_index.ls	node:AST_NODE_INDEX_EXPR
-test/lambda/typed_array_reduce.ls	node:AST_NODE_ARRAY
 test/lambda/typed_array_transpose.ls	node:AST_NODE_INDEX_EXPR
-test/lambda/typed_array_vector_ops.ls	node:AST_NODE_ARRAY
 test/lambda/typed_param_direct_access.ls	node:none
-test/lambda/uint64_support_parity.ls	node:AST_NODE_ARRAY
+test/lambda/sized_numeric_ushr.ls	node:AST_NODE_ARRAY
+test/lambda/uint64_storage_lifetime.ls	node:AST_NODE_IMPORT
 test/lambda/view_state.ls	node:AST_NODE_VIEW
 test/lambda/view_template.ls	node:AST_NODE_VIEW
 test/lambda/chart/test_annotation.ls	node:AST_NODE_FOR_EXPR

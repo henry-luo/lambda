@@ -1498,6 +1498,19 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
     case AST_NODE_RETURN_STAM:
         plan_mark_tail_calls(((AstReturnNode*)node)->value, fn);
         break;
+    case AST_NODE_BLOCK: {
+        // The direct parser wraps a function body in a block of expression
+        // statements. Tail position belongs only to that block's final
+        // statement; skipping this wrapper leaves direct-parser self recursion
+        // on the native interpreter stack instead of the established TCO loop.
+        AstNode* last = ((AstBlockNode*)node)->statements;
+        while (last && last->next) last = last->next;
+        if (last) plan_mark_tail_calls(last, fn);
+        break;
+    }
+    case AST_NODE_EXPR_STMT:
+        plan_mark_tail_calls(((AstExprStmtNode*)node)->expression, fn);
+        break;
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {
         // Only the block's value expression is a tail position; declarations
