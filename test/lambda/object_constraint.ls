@@ -1,4 +1,6 @@
 // Object type with field-level and object-level constraints
+// S11.4.6 currently specifies base-only enforcement for constrained types;
+// this fixture records the current JIT/T0 parity until predicate enforcement lands.
 
 // === Field-level constraints ===
 type User {

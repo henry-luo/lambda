@@ -7,7 +7,6 @@
 # format: <script>	<reason>
 test/lambda/graph_transform_html.ls	timeout
 test/lambda/graph_transform_input.ls	timeout
-test/lambda/object_constraint.ls	golden_drift
 test/lambda/editor/oracle_poc.ls	timeout
 test/lambda/graph/structurizr/advanced_static.ls	timeout
 test/lambda/graph/structurizr/archetypes_implied.ls	timeout

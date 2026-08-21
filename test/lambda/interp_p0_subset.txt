@@ -425,6 +425,7 @@ test/lambda/object.ls	direct
 test/lambda/object_default.ls	direct
 test/lambda/object_inherit.ls	direct
 test/lambda/object_pattern.ls	direct
+test/lambda/object_constraint.ls	direct
 test/lambda/sized_numeric_semantics.ls	direct
 test/lambda/sized_numeric_annotation_edges.ls	direct
 test/lambda/sized_numeric_ushr.ls	direct
