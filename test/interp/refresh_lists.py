@@ -39,13 +39,22 @@ EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_TIER=interp)
 # runs on the whole-module JIT path instead, counted in the run summary
 # (`interp: … fallback=N`) — there are no silent caps (design risk R4).
 #
-# This file and interp_p0_subset.txt partition the corpus; regenerate both
-# together with test/interp/refresh_lists.py.
+# This file, interp_p0_subset.txt, and interp_inconclusive.txt partition the
+# classified corpus; regenerate all three with this script.
 #
 # `node:none` means the pre-scan never ran: the script does not compile on
 # either tier, or its whole import cone was rejected before it was reached.
 #
 # format: <script>\tnode:<first unsupported kind>
+"""
+
+INCONCLUSIVE_HEADER = """# T0 interpreter — inconclusive differential rows
+#
+# Scripts for which the bounded differential sweep could not establish a
+# verdict. They are neither interpreted-subset matches nor counted
+# interpreter fallbacks.
+#
+# format: <script>\t<reason>
 """
 
 
@@ -82,9 +91,29 @@ def main() -> int:
 
     rows = [l.rstrip("\n").split("\t") for l in open(args.sweep)
             if not l.startswith("#") and l.strip()]
-    match = [r[0] for r in rows if r[1] == "match"]
-    fallback = [r[0] for r in rows if r[1] == "fallback"]
+    # Preserve a reviewed golden-drift ruling across a later tier sweep. The
+    # sweep compares T0 with JIT, while the committed subset gate also compares
+    # both against the checked-in golden; a stale golden must not be promoted
+    # back into the subset until that oracle is repaired.
+    golden_drift = {}
+    try:
+        with open("test/lambda/interp_inconclusive.txt") as f:
+            for line in f:
+                if line.startswith("test/"):
+                    fields = line.rstrip("\n").split("\t")
+                    if len(fields) > 1 and fields[1] == "golden_drift":
+                        golden_drift[fields[0]] = fields[1]
+    except OSError:
+        pass
+    match = [r[0] for r in rows
+             if r[1] == "match" and r[0] not in golden_drift]
+    fallback = [r[0] for r in rows
+                if r[1] == "fallback" and r[0] not in golden_drift]
     mismatch = [r[0] for r in rows if r[1] == "mismatch"]
+    inconclusive = [(r[0], r[1]) for r in rows
+                    if r[1] not in ("match", "fallback", "mismatch")
+                    and r[0] not in golden_drift]
+    inconclusive.extend(golden_drift.items())
 
     if mismatch:
         # A divergence is a T0 bug by definition (SI3). Refusing to commit lists
@@ -107,7 +136,13 @@ def main() -> int:
         for s, r in reasons:
             f.write(f"{s}\tnode:{r}\n")
 
+    with open("test/lambda/interp_inconclusive.txt", "w") as f:
+        f.write(INCONCLUSIVE_HEADER)
+        for s, verdict in inconclusive:
+            f.write(f"{s}\t{verdict}\n")
+
     print(f"subset={len(match)} excluded={len(fallback)} "
+          f"inconclusive={len(inconclusive)} "
           f"procedural={sum(1 for s in match if mode_of(s) == 'run')}")
     for kind, count in collections.Counter(r for _, r in reasons).most_common(10):
         print(f"  {count:4d}  {kind}")

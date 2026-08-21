@@ -269,6 +269,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_RAISE_EXPR:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_PIPE_FILE_STAM:
     // --- P1.1: comprehensions ---
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
@@ -415,53 +416,47 @@ static bool interp_integer_literal(AstNode* node) {
 // direct numeric literal (or its plain alias) and every coordinate is a fixed
 // integer. The static proof keeps generic tuple-like indexing and effectful
 // coordinate evaluation on MIR while retaining c15's axis-bound behavior.
+// Keep the N-D read proof aligned with the runtime carrier. `reshape` and
+// `transpose` return ArrayNum views even though their registry result type is
+// `any`; rejecting those aliases would route valid ArrayNum indexing to MIR
+// solely because the type graph forgets the concrete carrier.
+static bool interp_array_num_expr(AstNode* node, int depth) {
+    if (!node || depth >= 16) return false;
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_ARRAY) {
+        int64_t shape[AST_COW_PATH_MAX] = {};
+        ArrayNumElemType element = ELEM_INT;
+        return detect_ndim_literal(node, shape, AST_COW_PATH_MAX,
+            &element, true) >= 1;
+    }
+    if (node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (!entry || !entry->node || entry->node->node_type != AST_NODE_ASSIGN) {
+            return false;
+        }
+        return interp_array_num_expr(((AstNamedNode*)entry->node)->as, depth + 1);
+    }
+    if (node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)node;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
+    SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+    if (!info || (info->fn != SYSFUNC_RESHAPE && info->fn != SYSFUNC_TRANSPOSE)) {
+        return false;
+    }
+    return call->argument && interp_array_num_expr(call->argument, depth + 1);
+}
+
 static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
     object = ast_unwrap_primary(object);
-    if (!object || object->node_type != AST_NODE_IDENT) return false;
-    NameEntry* entry = ((AstIdentNode*)object)->entry;
-    if (!interp_binding_is_ndim_array(entry, 0)) return false;
+    if (!interp_array_num_expr(object, 0)) return false;
     int count = 0;
     for (AstNode* index = first_index; index; index = index->next) {
         if (count >= AST_COW_PATH_MAX || !interp_integer_literal(index)) return false;
         count++;
     }
     return count >= 2;
-}
-
-static bool interp_type_may_be_uint64(Type* type) {
-    if (!type) return false;
-    if (type->type_id == LMD_TYPE_UINT64) return true;
-    if (!lambda_type_is_union(type)) return false;
-    TypeBinary* binary = (TypeBinary*)type;
-    return interp_type_may_be_uint64(binary->left) ||
-        interp_type_may_be_uint64(binary->right);
-}
-
-static bool interp_array_has_generic_uint64_read(AstArrayNode* array) {
-    TypeArray* array_type = array ? (TypeArray*)array->type : NULL;
-    Type* nested = array_type ? array_type->nested : NULL;
-    // These are eval_array's compact numeric carriers, whose indexed reads
-    // preserve the source lane through array_num_read_item. Any other array
-    // layout is generic, where scalar_storage_read intentionally canonicalizes
-    // a small borrowed u64 to int; admit neither representation as equivalent.
-    if (nested && (nested->type_id == LMD_TYPE_INT ||
-            nested->type_id == LMD_TYPE_FLOAT ||
-            nested->type_id == LMD_TYPE_UINT64 ||
-            nested->type_id == LMD_TYPE_NUM_SIZED)) {
-        return false;
-    }
-    for (AstNode* item = array ? array->item : NULL; item; item = item->next) {
-        if (interp_type_may_be_uint64(item->type)) return true;
-        if ((item->node_type == AST_NODE_FOR_EXPR ||
-                item->node_type == AST_NODE_SPREAD ||
-                item->node_type == AST_NODE_PIPE) &&
-                item->type && (item->type->type_id == LMD_TYPE_ARRAY ||
-                item->type->type_id == LMD_TYPE_ARRAY_NUM) &&
-                interp_type_may_be_uint64(((TypeArray*)item->type)->nested)) {
-            return true;
-        }
-    }
-    return false;
 }
 
 // `a[i] = v` normally needs a statically integral subscript before it can use
@@ -581,15 +576,6 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     if (!interp_kind_supported(node->node_type)) {
         sc->ok = false;
         sc->reject = node->node_type;
-        return;
-    }
-    if (node->node_type == AST_NODE_ARRAY &&
-            interp_array_has_generic_uint64_read((AstArrayNode*)node)) {
-        // A generic u64 read lacks a lane-preserving runtime representation.
-        // Keep the entire module on MIR until that carrier exists rather than
-        // re-tagging the narrowed scalar after array_get has lost its contract.
-        sc->ok = false;
-        sc->reject = AST_NODE_ARRAY;
         return;
     }
     if (node->node_type == AST_NODE_PIPE) {
@@ -827,39 +813,16 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    // Comprehension clauses with their own lowering shapes. Ordered streams
-    // and one-source grouping share the runtime helpers MIR uses; equi-join
-    // tuple streams remain on the JIT until their own slice lands.
+    // Comprehension clauses with their own lowering shapes. Ordered streams,
+    // grouped rows, and equi-join tuple streams share the runtime helpers MIR
+    // uses; only malformed group bindings remain fail-closed.
     if (node->node_type == AST_NODE_FOR_EXPR || node->node_type == AST_NODE_FOR_STAM) {
         AstForNode* fr = (AstForNode*)node;
-        // Unordered window clauses lower after the complete stream, so their
-        // body effects are independent of the selected output. Admit only the
-        // expression form; statement windows have no result stream to select.
-        if ((fr->limit || fr->offset) && node->node_type != AST_NODE_FOR_EXPR) {
+        if (fr->group && !fr->group->entry) {
+            // Every grouped form needs a real post-group binding; joined rows
+            // are collected by the same tuple-group path as MIR.
             sc->ok = false;
             sc->reject = node->node_type;
-            return;
-        }
-        if (fr->group && (!fr->group->entry ||
-                !fr->loop || fr->loop->next)) {
-            // MIR grouping deliberately supports one source before tuple
-            // grouping; keep the same semantic boundary in T0.
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
-        bool has_join = false;
-        for (AstNode* l = fr->loop; l; l = l->next) {
-            AstLoopNode* lp = (AstLoopNode*)l;
-            if (lp->on || lp->join_keys || lp->optional) {
-                has_join = true;
-            }
-        }
-        if (has_join && fr->group) {
-            // MIR currently chooses join lowering before group handling; T0
-            // keeps joined grouping pinned until that combined contract lands.
-            sc->ok = false;
-            sc->reject = AST_NODE_FOR_EXPR;
             return;
         }
     }
@@ -1497,6 +1460,19 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
         break;
     case AST_NODE_RETURN_STAM:
         plan_mark_tail_calls(((AstReturnNode*)node)->value, fn);
+        break;
+    case AST_NODE_BLOCK: {
+        // The direct parser wraps a function body in a block of expression
+        // statements. Tail position belongs only to that block's final
+        // statement; skipping this wrapper leaves direct-parser self recursion
+        // on the native interpreter stack instead of the established TCO loop.
+        AstNode* last = ((AstBlockNode*)node)->statements;
+        while (last && last->next) last = last->next;
+        if (last) plan_mark_tail_calls(last, fn);
+        break;
+    }
+    case AST_NODE_EXPR_STMT:
+        plan_mark_tail_calls(((AstExprStmtNode*)node)->expression, fn);
         break;
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {

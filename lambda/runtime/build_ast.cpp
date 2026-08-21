@@ -12857,6 +12857,16 @@ static void direct_object_add_method(LambdaDirectAstSink* sink, AstNode* method)
     method_name->length = fn->name->len;
     tm->name = method_name;
     tm->fn_type = (TypeFunc*)fn->type;
+    // T0 binds methods from the AST definition; without the direct-builder
+    // identity fields it sees a name-only method and evaluates the member as
+    // a non-callable value instead of entering the interpreted body.
+    tm->ast_def = fn;
+    tm->ast_module = sink->tp->script_owner;
+    tm->arity = 0;
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        tm->arity++;
+    }
     tm->is_proc = method->node_type == AST_NODE_PROC;
     if (!sink->object_type->methods) sink->object_type->methods = tm;
     else sink->object_type->methods_last->next = tm;
@@ -14730,6 +14740,69 @@ static Type* direct_loop_value_type(Transpiler* tp, AstNode* source,
     return set_type_any(tp, ANY_LOOP_SRC);
 }
 
+// The direct reduction builder constructs a join predicate before the binding
+// reduction installs its new loop name. Reattach only unresolved identifiers
+// for that binding; otherwise T0 evaluates `c.id`/`r.id` as ItemError while MIR
+// still resolves the same source name during lowering (D7.2.1/D8.1.1v2).
+static void direct_rebind_join_ident(AstNode* node, String* name,
+        NameEntry* entry) {
+    if (!node || !name || !entry) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (!ident->entry && ident->name && ident->name->len == name->len &&
+                memcmp(ident->name->chars, name->chars, name->len) == 0) {
+            ident->entry = entry;
+            if (entry->node && entry->node->type) ident->type = entry->node->type;
+        }
+        return;
+    }
+    case AST_NODE_PRIMARY:
+        direct_rebind_join_ident(((AstPrimaryNode*)node)->expr, name, entry);
+        return;
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        direct_rebind_join_ident(binary->left, name, entry);
+        direct_rebind_join_ident(binary->right, name, entry);
+        return;
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
+        direct_rebind_join_ident(((AstUnaryNode*)node)->operand, name, entry);
+        return;
+    case AST_NODE_MEMBER_EXPR: {
+        // Dotted field names are keys, not bindings; only the object side can
+        // refer to the just-installed loop variable.
+        direct_rebind_join_ident(((AstFieldNode*)node)->object, name, entry);
+        return;
+    }
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        direct_rebind_join_ident(field->object, name, entry);
+        if (!field->field || field->field->node_type != AST_NODE_IDENT)
+            direct_rebind_join_ident(field->field, name, entry);
+        return;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        direct_rebind_join_ident(call->function, name, entry);
+        for (AstNode* arg = call->argument; arg; arg = arg->next)
+            direct_rebind_join_ident(arg, name, entry);
+        return;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        direct_rebind_join_ident(branch->cond, name, entry);
+        direct_rebind_join_ident(branch->then, name, entry);
+        direct_rebind_join_ident(branch->otherwise, name, entry);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
 AstNode* build_loop_from_parts(Transpiler* tp, LambdaSourceSpan span,
         LambdaToken name_token, LambdaToken index_token, uint32_t flags,
         AstNode* index_type, AstNode* source, AstNode* join) {
@@ -14765,7 +14838,11 @@ AstNode* build_loop_from_parts(Transpiler* tp, LambdaSourceSpan span,
         lambda_ast_register_name(tp, index);
     }
     lambda_ast_register_name(tp, (AstNamedNode*)loop);
-    if (join) build_join_key_specs(tp, loop, join);
+    if (join) {
+        NameEntry* loop_entry = lookup_name_in_current_scope(tp, loop->name);
+        direct_rebind_join_ident(join, loop->name, loop_entry);
+        build_join_key_specs(tp, loop, join);
+    }
     if (loop->optional && !join) {
         record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
             "optional for binding requires an `on` condition");
@@ -15585,8 +15662,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
             return direct_ast_value(child0);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_GROUP_KEY) {
+            // Group keys have a smaller layout than the owning clause; the
+            // planner uses this tag to avoid treating a key as a clause entry.
             AstGroupKey* key = (AstGroupKey*)alloc_ast_node_from_span(tp,
-                AST_NODE_GROUP_CLAUSE, reduction->span, sizeof(AstGroupKey));
+                AST_NODE_GROUP_KEY, reduction->span, sizeof(AstGroupKey));
             key->expr = child0;
             key->alias = reduction->detail_token.kind
                 ? name_pool_create_strview(tp->name_pool,
@@ -15611,6 +15690,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
             grouped->name = group->name;
             grouped->type = &TYPE_ELMT;
             lambda_ast_register_name(tp, grouped);
+            // The aggregate scope is entered before `into` is registered;
+            // retain its NameEntry so T0 can publish the materialized group
+            // without re-looking the binding up in the closed row scope.
+            group->entry = lookup_name_in_current_scope(tp, group->name);
             return direct_ast_value((AstNode*)group);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_ORDER) {

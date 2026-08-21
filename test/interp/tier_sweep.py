@@ -44,8 +44,15 @@ def run(script, tier, timeout, procedural=False):
             else:
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                except (ProcessLookupError, PermissionError):
+                    # Sandboxed macOS workers may deny process-group signaling
+                    # even though the direct child is ours; fall back to the
+                    # child handle so one renderer timeout cannot abort the
+                    # whole P1 partition refresh (R4).
+                    try:
+                        proc.kill()
+                    except (ProcessLookupError, PermissionError):
+                        pass
             # A renderer can fork a helper into another session while retaining
             # stdout/stderr. Draining with communicate() after killing the
             # direct process then waits forever for that inherited pipe, even
