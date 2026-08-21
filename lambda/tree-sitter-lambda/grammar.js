@@ -186,11 +186,15 @@ module.exports = grammar({
     $._key,
   ],
 
-  // `type` is BOTH a base-type keyword (so `type(x)` stays an ordinary call)
-  // and the introducer of a type declaration. Under S16.1.3 juxtaposition,
-  // `type E { … }` would otherwise also read as three adjacent statements —
-  // the type value, an identifier, and a map — so the declaration rules carry
-  // a higher precedence than `base_type` to claim the keyword.
+  conflicts: $ => [
+    // `type` is BOTH a base-type keyword (so `type(x)` stays an ordinary call)
+    // and the introducer of a type declaration. Under S16.1.3 juxtaposition
+    // `type E { … }` also reads as three adjacent statements — the type value,
+    // an identifier, and a map — so GLR must explore both and the higher
+    // precedence on the declaration rules picks the declaration.
+    [$.base_type, $.object_type],
+    [$.base_type, $.type_stam],
+  ],
 
   precedences: $ => [
     [
@@ -855,7 +859,7 @@ module.exports = grammar({
       'function', 'error', 'string', 'symbol',
       'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32',
     ))),
-    base_type: $ => prec(1, choice($._base_type_kw, 'type')),
+    base_type: $ => choice($._base_type_kw, 'type'),
 
     occurrence: $ => choice('?', '+', '*', $.occurrence_count),
     occurrence_count: $ => prec(2, choice(

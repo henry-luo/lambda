@@ -8388,21 +8388,17 @@
       }
     },
     "base_type": {
-      "type": "PREC",
-      "value": 1,
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "SYMBOL",
-            "name": "_base_type_kw"
-          },
-          {
-            "type": "STRING",
-            "value": "type"
-          }
-        ]
-      }
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_base_type_kw"
+        },
+        {
+          "type": "STRING",
+          "value": "type"
+        }
+      ]
     },
     "occurrence": {
       "type": "CHOICE",
@@ -10331,7 +10327,16 @@
       "name": "comment"
     }
   ],
-  "conflicts": [],
+  "conflicts": [
+    [
+      "base_type",
+      "object_type"
+    ],
+    [
+      "base_type",
+      "type_stam"
+    ]
+  ],
   "precedences": [
     [
       {
