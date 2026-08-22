@@ -11,6 +11,3 @@
 # either tier, or its whole import cone was rejected before it was reached.
 #
 # format: <script>	node:<first unsupported kind>
-test/lambda/map_object_robustness.ls	node:none
-test/lambda/object_direct_access.ls	node:none
-test/lambda/typed_param_direct_access.ls	node:none

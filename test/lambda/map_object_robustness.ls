@@ -196,20 +196,20 @@ manhattan({x: 0, y: 0}, {x: 3, y: 4})
 // ============================================================
 
 // 8a: fn method with float field arithmetic
-type Vec2 { x: float, y: float; fn length() => math.sqrt(x * x + y * y) }
+type Vec2 { x: float, y: float, fn length() => math.sqrt(x * x + y * y) }
 let vec = <Vec2 x: 3.0, y: 4.0>
 '=8a='
 vec.length()
 
 // 8b: pn method mutating int field
-type Counter { val: int = 0; pn add(n: int) { val = val + n } }
+type Counter { val: int = 0, pn add(n: int) { val = val + n } }
 let cnt = <Counter val: 10>
 '=8b='
 cnt.add(5)
 cnt.val
 
 // 8c: multiple pn calls in sequence
-type Accum { total: int = 0; pn add(n: int) { total = total + n } }
+type Accum { total: int = 0, pn add(n: int) { total = total + n } }
 let ac = <Accum total: 0>
 '=8c='
 ac.add(10)
@@ -218,13 +218,13 @@ ac.add(30)
 ac.total
 
 // 8d: fn method returning list of typed fields
-type PtObj { x: int, y: int; fn to_list() => [x, y] }
+type PtObj { x: int, y: int, fn to_list() => [x, y] }
 let po = <PtObj x: 7, y: 8>
 '=8d='
 po.to_list()
 
 // 8e: fn method with parameter + field arithmetic
-type Adder { base: int; fn add_to(n: int) => base + n }
+type Adder { base: int, fn add_to(n: int) => base + n }
 let ad = <Adder base: 100>
 '=8e='
 ad.add_to(23)
@@ -242,8 +242,8 @@ circ.color
 circ.radius
 
 // 9b: inherited method call
-type Animal { name: string; fn speak() => name ++ " says ..." }
-type Dog : Animal { breed: string; fn speak() => name ++ " says woof!" }
+type Animal { name: string, fn speak() => name ++ " says ..." }
+type Dog : Animal { breed: string, fn speak() => name ++ " says woof!" }
 let dog = <Dog name: "Rex", breed: "Lab">
 '=9b='
 dog.speak()
@@ -260,7 +260,7 @@ dog is object
 
 // 10a: int mutation and subsequent read
 type Wallet {
-    balance: int = 0;
+    balance: int = 0,
     pn deposit(n: int) {
         balance = balance + n
     }
@@ -276,7 +276,7 @@ wallet.balance
 
 // 10b: bool toggle mutation
 type Toggle {
-    on: bool = false;
+    on: bool = false,
     pn flip() {
         on = not on
     }
@@ -295,17 +295,17 @@ t.on
 
 // 11a: valid constraint
 type Positive { val: int that (~ > 0) }
-'=11a='
+'=11a=';
 <Positive val: 5> is Positive
 
 // 11b: invalid constraint
-'=11b='
+'=11b=';
 <Positive val: -1> is Positive
 
 // 11c: object-level constraint
-type Range { lo: int, hi: int; that (~.hi > ~.lo) }
-'=11c='
-<Range lo: 1, hi: 10> is Range
+type Range { lo: int, hi: int, that (~.hi > ~.lo) }
+'=11c=';
+<Range lo: 1, hi: 10> is Range;
 <Range lo: 10, hi: 1> is Range
 
 // ============================================================
@@ -315,12 +315,12 @@ type Range { lo: int, hi: int; that (~.hi > ~.lo) }
 // 12a: all defaults
 type Cfg { host: string = "localhost", port: int = 8080, debug: bool = false }
 let cfg = <Cfg>
-'=12a='
+'=12a=';
 [cfg.host, cfg.port, cfg.debug]
 
 // 12b: partial override
 let cfg2 = <Cfg host: "example.com">
-'=12b='
+'=12b=';
 [cfg2.host, cfg2.port]
 
 // ============================================================
@@ -331,7 +331,7 @@ let cfg2 = <Cfg host: "example.com">
 type Base = {x: int, y: int}
 let base: Base = {x: 1, y: 2}
 let ext = {*:base, z: 3}
-'=13a='
+'=13a=';
 [ext.x, ext.y, ext.z]
 
 // ============================================================
@@ -342,7 +342,7 @@ let ext = {*:base, z: 3}
 type Point2 { x: float, y: float }
 let orig = <Point2 x: 1.0, y: 2.0>
 let moved = <Point2 *:orig, x: 10.0>
-'=14a='
+'=14a=';
 [moved.x, moved.y]
 
 // ============================================================
@@ -389,7 +389,7 @@ alias.x + alias.y
 // ============================================================
 
 // 19a: object constraint using implicit name (hi, lo instead of ~.hi, ~.lo)
-type Range2 { lo: int, hi: int; that (hi > lo) }
-'=19a='
-<Range2 lo: 1, hi: 10> is Range2
+type Range2 { lo: int, hi: int, that (hi > lo) }
+'=19a=';
+<Range2 lo: 1, hi: 10> is Range2;
 <Range2 lo: 10, hi: 1> is Range2

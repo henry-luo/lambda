@@ -82,6 +82,8 @@ test/lambda/fuzzy_crash_regression.ls	direct
 test/lambda/graph_layout.ls	direct
 test/lambda/graph_layout_custom.ls	direct
 test/lambda/graph_layout_direction.ls	direct
+test/lambda/graph_transform_html.ls	run
+test/lambda/graph_transform_input.ls	run
 test/lambda/graph_transform_paint.ls	direct
 test/lambda/grammar_reduce5_scanner.ls	direct
 test/lambda/handler_current_error.ls	direct
@@ -140,6 +142,7 @@ test/lambda/len_iter_law.ls	direct
 test/lambda/let_for_array.ls	direct
 test/lambda/map_duplicate_key_lookup.ls	direct
 test/lambda/map_element_attrs.ls	direct
+test/lambda/map_object_robustness.ls	run
 test/lambda/map_spread_override.ls	direct
 test/lambda/match_expr.ls	direct
 test/lambda/match_string_pattern.ls	direct
@@ -164,6 +167,7 @@ test/lambda/object_constraint.ls	direct
 test/lambda/object_default.ls	direct
 test/lambda/object_inherit.ls	direct
 test/lambda/object_pattern.ls	direct
+test/lambda/object_direct_access.ls	run
 test/lambda/object_update.ls	direct
 test/lambda/oob_read_null.ls	direct
 test/lambda/parent_access.ls	direct
@@ -291,6 +295,7 @@ test/lambda/typed_array_vectorized_math.ls	direct
 test/lambda/typed_array_view_gc.ls	direct
 test/lambda/typed_array_views.ls	direct
 test/lambda/typed_map_direct_access.ls	direct
+test/lambda/typed_param_direct_access.ls	run
 test/lambda/typed_param_string.ls	direct
 test/lambda/uint64_storage_lifetime.ls	direct
 test/lambda/uint64_support_parity.ls	direct
