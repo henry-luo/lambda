@@ -1955,6 +1955,18 @@ external-scanner state around consecutive extras, not with the carry logic
 itself. Trading corpus regressions for one obscure corner is the wrong way
 round, so the change was backed out and the scanner stays stateless.
 
+**Two repair attempts failed (2026-08-22).** Making the scanner OWN comments
+— emitting them as an external token and carrying the line break in one byte
+of state — works for the guard itself but breaks ~320 other files. The carry
+goes stale: the reasoning was that COMMENT, being valid wherever extras are,
+would have the scanner consulted at every token and so cleared every time. It
+is not. When no external is valid for several tokens, `nl_pending` survives
+past its comment and wrongly blocks a later SAME-LINE operator
+(`width - left_margin` two lines below a comment). A second variant, keeping
+the leading `/` inside the emitted token, additionally mis-positions the
+internal lexer on the division path. Both were reverted; the harness asserts
+nothing here, and this note stands in place of the fix.
+
 **Assessment.** The divergence is one-directional and benign for the
 cross-check lane: the reference grammar accepts a little more than
 production, and the compare lane flags the opposite direction (source

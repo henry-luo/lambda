@@ -1,7 +1,7 @@
 import model: lambda.package.graph.model
 import normalize: lambda.package.graph.normalize
 
-let invalid = <graph direction: "sideways";
+let invalid = <graph direction: "sideways",
   <node id: "A">
   <node id: "A">
   <edge id: "same", from: "A", to: "B">

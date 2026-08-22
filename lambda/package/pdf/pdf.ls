@@ -155,7 +155,7 @@ pub fn pdf_to_html(pdf, opts) {
     }
     else {
         let render_count = _render_page_count(n, opts)
-        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)]
+        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)];
         // Inject @font-face rules for embedded fonts so the browser uses
         // the actual glyphs (not OS fallback). Done here — once per doc —
         // rather than per page so the rule appears once.

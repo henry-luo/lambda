@@ -126,7 +126,7 @@ pub fn render(node, context, render_fn) {
 }
 
 fn wrap_cfrac_fraction(frac_box) {
-    let el = <span class: css.MFRAC;
+    let el = <span class: css.MFRAC,
             null_delim_el(css.OPEN)
             frac_box.element
         >
@@ -279,29 +279,29 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
     let denom_style = "height:" ++ util.fmt_em_ceil2(geom.denom_ch) ++ ";display:inline-block" ++ fs_suffix
     let line_style = "height:" ++ util.fmt_em_ceil2(geom.rule_height) ++ ";display:inline-block"
     let pstrut_style = "height:" ++ util.fmt_em_ceil2(geom.pstrut)
-    let el = <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.vlist_h);
-                <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(geom.denom_top);
+    let el = <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.vlist_h),
+                <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(geom.denom_top),
                     <span class: css.PSTRUT, style: pstrut_style>
-                    <span style: denom_style;
+                    <span style: denom_style,
                         for (e in denom_elements) e
                     >
                 >
-                <span style: "top:" ++ util.fmt_em_ceil2(geom.line_top);
+                <span style: "top:" ++ util.fmt_em_ceil2(geom.line_top),
                     <span class: css.PSTRUT, style: pstrut_style>
                     <span class: css.FRAC_LINE, style: line_style>
                 >
-                <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(geom.numer_top);
+                <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(geom.numer_top),
                     <span class: css.PSTRUT, style: pstrut_style>
-                    <span style: numer_style;
+                    <span style: numer_style,
                         for (e in numer_elements) e
                     >
                 >
             >
-            <span class: css.VLIST_S; "​">
+            <span class: css.VLIST_S, "​">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.depth_holder)>
         >
     >
@@ -328,25 +328,25 @@ fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
     let denom_elements = box.elements_of(denom_box)
     let numer_style = frac_child_style(spec.numer_child_height, spec.child_font_pct)
     let denom_style = frac_child_style(spec.denom_child_height, spec.child_font_pct)
-    let el = <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height);
-                <span class: css.CENTER, style: "top:" ++ util.fmt_em(spec.numer_top);
+    let el = <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height),
+                <span class: css.CENTER, style: "top:" ++ util.fmt_em(spec.numer_top),
                     <span class: css.PSTRUT, style: "height:3em">
-                    <span style: numer_style;
+                    <span style: numer_style,
                         for (el in numer_elements) el
                     >
                 >
-                <span class: css.CENTER, style: "top:" ++ util.fmt_em(spec.denom_top);
+                <span class: css.CENTER, style: "top:" ++ util.fmt_em(spec.denom_top),
                     <span class: css.PSTRUT, style: "height:3em">
-                    <span style: denom_style;
+                    <span style: denom_style,
                         for (el in denom_elements) el
                     >
                 >
             >
-            <span class: css.VLIST_S; "\u200B">
+            <span class: css.VLIST_S, "\u200B">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.depth_holder)>
         >
     >
@@ -461,7 +461,7 @@ fn null_delim_el(cls) {
 }
 
 fn wrap_default_fraction(frac_box) {
-    let el = <span class: css.MFRAC;
+    let el = <span class: css.MFRAC,
             null_delim_el(css.OPEN)
             frac_box.element
             null_delim_el(css.CLOSE)
@@ -477,7 +477,7 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
     let content_boxes = (for (p in [left_box, frac_box, right_box] where p != null) p)
     let elements = box.child_elements(content_boxes)
     let combined = box.hbox(content_boxes)
-    let el = <span class: css.MFRAC;
+    let el = <span class: css.MFRAC,
             for (el in elements) el
         >
     ml_delimited_fraction_wrapper(el, combined)
@@ -504,7 +504,7 @@ fn delimiter_box(delim, frac_box, atom_type) {
     let h = if (frac_box.delim_height != null) frac_box.delim_height else 0.75
     let d = if (frac_box.delim_depth != null) frac_box.delim_depth else 0.25
     {
-        element: <span class: cls; delim>,
+        element: <span class: cls, delim>,
         height: h,
         depth: d,
         width: 0.4,

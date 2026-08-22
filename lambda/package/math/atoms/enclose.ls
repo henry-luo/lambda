@@ -26,7 +26,7 @@ pub fn render_box(node, context, render_fn) {
 // bordered box (\boxed, \fbox, \bbox)
 fn render_bordered(content_box) {
     box.ml_box_full(
-        <span style: "border:1px solid;padding:0.1em"; content_box.element>,
+        <span style: "border:1px solid;padding:0.1em", content_box.element>,
         content_box.height + 0.15,
         content_box.depth + 0.15,
         content_box.width + 0.3,
@@ -49,12 +49,12 @@ fn render_bbox(content_box, node) {
     let overlay_style = "box-sizing:border-box;position:absolute;top:" ++ fmt_bbox_dim(spec.overlay_top) ++
         ";left:0;height:" ++ util.fmt_em(spec.overlay_height) ++ ";width:100%" ++ spec.box_style
     box.ml_box_full(
-        <span style: outer_style;
+        <span style: outer_style,
             <span class: "lm_box", style: overlay_style>
             <span style: "display:inline-block;position:relative;height:" ++
                 util.fmt_em(content_box.height) ++ ";vertical-align:" ++
-                util.fmt_em(0.0 - content_box.height);
-                for (child in children) child
+                util.fmt_em(0.0 - content_box.height)
+, for (child in children) child
             >
         >,
         spec.height,
@@ -123,8 +123,8 @@ fn render_lap(content_box, align) {
         else "lm_clap"
     let children = box.elements_of(content_box)
     box.ml_box_full(
-        <span class: cls;
-            <span class: "lm_inner";
+        <span class: cls,
+            <span class: "lm_inner",
                 for (child in children) child
             >
             <span class: "lm_fix">
@@ -158,7 +158,7 @@ pub fn render_phantom(node, context, render_fn) {
 // full phantom — invisible but takes up full space
 fn render_full_phantom(content_box) {
     box.ml_box_full(
-        <span style: "visibility:hidden;display:inline-block"; content_box.element>,
+        <span style: "visibility:hidden;display:inline-block", content_box.element>,
         content_box.height,
         content_box.depth,
         content_box.width,
@@ -172,7 +172,7 @@ fn render_full_phantom(content_box) {
 // hphantom — invisible, zero height/depth, keeps width
 fn render_hphantom(content_box) {
     box.ml_box(
-        <span style: "visibility:hidden;display:inline-block;height:0"; content_box.element>,
+        <span style: "visibility:hidden;display:inline-block;height:0", content_box.element>,
         0.0,
         0.0,
         content_box.width,
@@ -183,7 +183,7 @@ fn render_hphantom(content_box) {
 // vphantom — invisible, zero width, keeps height/depth
 fn render_vphantom(content_box) {
     box.ml_box_full(
-        <span style: "visibility:hidden;display:inline-block;width:0"; content_box.element>,
+        <span style: "visibility:hidden;display:inline-block;width:0", content_box.element>,
         content_box.height,
         content_box.depth,
         0.0,
@@ -200,7 +200,7 @@ fn render_smash(content_box, node) {
     let zero_h = if (opts == "b") false else true
     let zero_d = if (opts == "t") false else true
     box.ml_box_full(
-        <span style: "display:inline-block"; content_box.element>,
+        <span style: "display:inline-block", content_box.element>,
         if (zero_h) 0.0 else content_box.height,
         if (zero_d) 0.0 else content_box.depth,
         content_box.width,
@@ -338,7 +338,7 @@ fn fmt_large_rule_dim(v) {
     let scaled = int(round(v * 10.0))
     let s = string(abs(scaled))
     let body = if (len(s) <= 1) "0." ++ s
-        else slice(s, 0, len(s) - 1) ++ "." ++ slice(s, len(s) - 1, len(s))
+        else slice(s, 0, len(s) - 1) ++ "." ++ slice(s, len(s) - 1, len(s));
     (if (scaled < 0) "-" else "") ++ body ++ "em"
 }
 

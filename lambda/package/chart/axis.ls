@@ -33,7 +33,7 @@ fn merge_config(config) {
 }
 
 // ============================================================
-// Temporal tick lab, , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , el formatting
+// Temporal tick label formatting
 // ============================================================
 
 fn temporal_auto_format(lo_ms, hi_ms) {

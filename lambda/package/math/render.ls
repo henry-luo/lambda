@@ -126,7 +126,7 @@ fn render_symbol(node, context) {
 fn render_symbol_command(node, context) {
     let cmd_text = get_text(node)
     let unicode = sym.lookup_symbol(cmd_text)
-    let display_text = if (unicode != null) unicode else cmd_text
+    let display_text = if (unicode, != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
     let cls = symbol_font_class(cmd_text, context)
     if (is_standalone_long_arrow_command(cmd_text))

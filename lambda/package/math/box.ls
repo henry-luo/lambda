@@ -287,13 +287,13 @@ fn text_depth_for(text, cls) {
 fn text_element(text, cls) {
     let style = text_style(text, cls)
     if (cls and style != null) {
-        <span class: cls, style: style; text>
+        <span class: cls, style: style, text>
     } else if (cls) {
-        <span class: cls; text>
+        <span class: cls, text>
     } else if (style != null) {
-        <span style: style; text>
+        <span style: style, text>
     } else {
-        <span; text>
+        <span text>
     }
 }
 
@@ -509,7 +509,7 @@ fn ml_hbox_valid(valid, children, total_width, suppress_text_depth,
                  suppress_operator_height, sup_min_shift_base, scripted_child,
                  subscripted_child, subscripted_upright_child) {
     let bx = ml_box_full(
-        <span class: css.BASE;
+        <span class: css.BASE,
             for (child in children) child
         >,
         max((for (v in valid) hbox_height_of(v, suppress_operator_height))),
@@ -662,7 +662,7 @@ fn build_vbox(children) {
     // child CSS top = height + shift - child.box.height
     let items = (for (c in children,
                       let ct = height + c.shift - c.box.height)
-        <span style: "position:absolute;top:" ++ util.fmt_em(ct) ++ ";left:0;width:100%;text-align:center";
+        <span style: "position:absolute;top:" ++ util.fmt_em(ct) ++ ";left:0;width:100%;text-align:center",
             c.box.element
         >
     )
@@ -674,7 +674,7 @@ fn build_vbox(children) {
                      ";width:" ++ util.fmt_em(max_width) ++
                      ";height:" ++ util.fmt_em(total_h)
 
-    let vbox_el = <span style: vbox_style;
+    let vbox_el = <span style: vbox_style,
         for (item in items) item
     >
     {
@@ -871,9 +871,9 @@ fn ml_vlist_width(children, i, acc) {
 
 fn ml_vlist_element(items, pstrut, max_pos, min_pos) {
     if (min_pos >= 0.0) {
-        let el = <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(max_pos);
+        let el = <span class: css.VLIST_T,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(max_pos),
                     for (it in items) ml_vlist_child_wrap(it, pstrut)
                 >
             >
@@ -881,14 +881,14 @@ fn ml_vlist_element(items, pstrut, max_pos, min_pos) {
         el
     }
     else {
-        let el = <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(max_pos);
+        let el = <span class: css.VLIST_T2,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(max_pos),
                     for (it in items) ml_vlist_child_wrap(it, pstrut)
                 >
-                <span class: css.VLIST_S; "​">
+                <span class: css.VLIST_S, "​">
             >
-            <span class: css.VLIST_R;
+            <span class: css.VLIST_R,
                 <span class: css.VLIST, style: "height:" ++ util.fmt_ml_em(0.0 - min_pos)>
             >
         >
@@ -899,14 +899,14 @@ fn ml_vlist_element(items, pstrut, max_pos, min_pos) {
 fn ml_vlist_child_wrap(it, pstrut) {
     let style = ml_vlist_wrap_style(it, pstrut)
     if (it.classes != null) {
-        let el = <span class: it.classes, style: style;
+        let el = <span class: it.classes, style: style,
             <span class: css.PSTRUT, style: "height:" ++ util.fmt_ml_em(pstrut)>
             ml_vlist_child_body(it)
         >
         el
     }
     else {
-        let el = <span style: style;
+        let el = <span style: style,
             <span class: css.PSTRUT, style: "height:" ++ util.fmt_ml_em(pstrut)>
             ml_vlist_child_body(it)
         >
@@ -924,8 +924,8 @@ fn ml_vlist_wrap_style(it, pstrut) {
 fn ml_vlist_child_body(it) {
     if (it.no_wrap == true) it.box.element
     else {
-        let body_elements = elements_of(it.box)
-        <span style: "height:" ++ util.fmt_ml_em(it.box.height + it.box.depth) ++ ";display:inline-block";
+        let body_elements = elements_of(it.box);
+        <span style: "height:" ++ util.fmt_ml_em(it.box.height + it.box.depth) ++ ";display:inline-block",
             for (el in body_elements) el
         >
     }
@@ -942,8 +942,8 @@ pub fn make_struts(bx) {
     let h = bx.height
     let d = bx.depth
     if (d != 0.0) {
-        let strut_bottom_style = "height:" ++ util.fmt_em(h + d) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
-        <span;
+        let strut_bottom_style = "height:" ++ util.fmt_em(h + d) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d);
+        <span
             <span class: css.STRUT,
                   style: "height:" ++ util.fmt_em(h)>
             <span class: css.STRUT_BOTTOM,
@@ -951,7 +951,7 @@ pub fn make_struts(bx) {
             bx.element
         >
     } else {
-        <span;
+        <span
             <span class: css.STRUT,
                   style: "height:" ++ util.fmt_em(h)>
             bx.element
@@ -965,7 +965,7 @@ pub fn make_struts(bx) {
 
 // wrap a box with a CSS class
 pub fn with_class(bx, cls) => {
-    element: <span class: cls; bx.element>,
+    element: <span class: cls, bx.element>,
     height: bx.height,
     depth: bx.depth,
     width: bx.width,
@@ -981,7 +981,7 @@ pub fn with_class(bx, cls) => {
 
 // wrap a box with inline style string
 pub fn with_style(bx, style_str) => {
-    element: <span style: style_str; bx.element>,
+    element: <span style: style_str, bx.element>,
     height: bx.height,
     depth: bx.depth,
     width: bx.width,
@@ -997,7 +997,7 @@ pub fn with_scale(bx, scale) {
     else
         (let pct = (round(scale * 1000.0) / 10.0) ++ "%",
          {
-            element: <span style: "font-size:" ++ pct; bx.element>,
+            element: <span style: "font-size:" ++ pct, bx.element>,
             height: bx.height * scale,
             depth: bx.depth * scale,
             width: bx.width * scale,
@@ -1014,7 +1014,7 @@ pub fn with_color(bx, color) {
     else
         (let children = elements_of(bx),
          {
-        element: <span style: "color:" ++ color;
+        element: <span style: "color:" ++ color,
             for (child in children) child
         >,
 	        height: bx.height,

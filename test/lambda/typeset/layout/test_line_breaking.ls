@@ -63,8 +63,8 @@ fn test_break_opportunity_detection() {
     assert(is_break_opportunity(text, 11), "Hyphen should be break opportunity")  // After "word2-"
     
     // Test non-break positions
-    assert(!is_break_opportunity(text, 2), "Middle of word should not be break opportunity")
-    assert(!is_break_opportunity(text, 0), "Start of text should not be break opportunity")
+    assert(not is_break_opportunity(text, 2), "Middle of word should not be break opportunity")
+    assert(not is_break_opportunity(text, 0), "Start of text should not be break opportunity")
     
     line_breaker_destroy(breaker)
     destroy_context(ctx)

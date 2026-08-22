@@ -29,7 +29,7 @@ view any state flag: false {
   string(flag)
 }
 on click() {
-  flag = !flag
+  flag = not flag
 }
 apply(null)
 0

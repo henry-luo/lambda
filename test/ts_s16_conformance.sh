@@ -100,6 +100,12 @@ run R "line-start ^ is dual-role"          'fn f() { 1 }\nlet r = f()\n^ { 0 }\n
 run R "line-start / is dual-role"          'let a = 4\na\n/ 2\n'
 run A "comment between statements"         'let a = 1\n// note\nlet b = 2\n'
 run A "block comment inside expression"    'let a = 1 /* c */ + 2\n'
+# §7.17 is a KNOWN LIMITATION of the reference grammar: a comment between an
+# expression and a line-start dual-role token defeats the guard here (the C
+# parser, which is production, rejects correctly). Two attempts at scanner-owned
+# comments failed — see the design doc — so no assertion is made for it.
+run A "comment inside array literal"        'let a = [1, /* x */ 2]\n'
+run A "leading file comment"                '// header\nlet a = 1\na\n'
 # §7.17: these two are asserted in the C harness only — the reference grammar
 # cannot see a line break tree-sitter already consumed as an extra.
 run A "comment carry does not go stale"     'let a = 1\n/* c */ and 1 + 2\n'

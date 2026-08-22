@@ -33,7 +33,7 @@ fn render_one(note, x_scale, y_scale, plot_w, plot_h, theme) {
 // Text annotation at a data position
 // ============================================================
 
-fn render_text_note(, , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , note, x_scale, y_scale, theme) {
+fn render_text_note(note, x_scale, y_scale, theme) {
     let x = if (note.x != null and x_scale)
         float(scale.scale_apply(x_scale, note.x))
     else if (note.px != null) float(note.px)

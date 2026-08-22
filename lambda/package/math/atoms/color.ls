@@ -50,7 +50,7 @@ pub fn with_background(content_box, bg_color) {
         ";display:inline-block;position:relative"
     let children = box.elements_of(content_box)
     {
-        element: <span class: css.BG, style: style;
+        element: <span class: css.BG, style: style,
             for (child in children) child
         >,
         height: content_box.height,

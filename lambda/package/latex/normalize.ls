@@ -134,72 +134,72 @@ fn rebuild_element(el, new_children) {
         // section-like: preserve title
         case 'section' {
             let t = el.title
-            if (t != null) { <section title: t; for c in new_children { c }> } else { <section; for c in new_children { c }> }
+            if (t != null) { <section title: t, for c in new_children { c }> } else { <section for c in new_children { c }> }
         }
         case 'subsection' {
             let t = el.title
-            if (t != null) { <subsection title: t; for c in new_children { c }> } else { <subsection; for c in new_children { c }> }
+            if (t != null) { <subsection title: t, for c in new_children { c }> } else { <subsection for c in new_children { c }> }
         }
         case 'subsubsection' {
             let t = el.title
-            if (t != null) { <subsubsection title: t; for c in new_children { c }> } else { <subsubsection; for c in new_children { c }> }
+            if (t != null) { <subsubsection title: t, for c in new_children { c }> } else { <subsubsection for c in new_children { c }> }
         }
         case 'paragraph' {
             let t = el.title
-            if (t != null) { <paragraph title: t; for c in new_children { c }> } else { <paragraph; for c in new_children { c }> }
+            if (t != null) { <paragraph title: t, for c in new_children { c }> } else { <paragraph for c in new_children { c }> }
         }
         case 'subparagraph' {
             let t = el.title
-            if (t != null) { <subparagraph title: t; for c in new_children { c }> } else { <subparagraph; for c in new_children { c }> }
+            if (t != null) { <subparagraph title: t, for c in new_children { c }> } else { <subparagraph for c in new_children { c }> }
         }
         // math: preserve source and ast
         case 'inline_math' {
             let s = el.source
             let a = el.ast
-            if (a != null) { <inline_math source: s, ast: a; for c in new_children { c }> } else if (s != null) { <inline_math source: s; for c in new_children { c }> } else { <inline_math; for c in new_children { c }> }
+            if (a != null) { <inline_math source: s, ast: a, for c in new_children { c }> } else if (s != null) { <inline_math source: s, for c in new_children { c }> } else { <inline_math for c in new_children { c }> }
         }
         case 'display_math' {
             let s = el.source
             let a = el.ast
-            if (a != null) { <display_math source: s, ast: a; for c in new_children { c }> } else if (s != null) { <display_math source: s; for c in new_children { c }> } else { <display_math; for c in new_children { c }> }
+            if (a != null) { <display_math source: s, ast: a, for c in new_children { c }> } else if (s != null) { <display_math source: s, for c in new_children { c }> } else { <display_math for c in new_children { c }> }
         }
         // common text-containing elements: rebuild with just children
-        case 'textbf':      <textbf; for c in new_children { c }>
-        case 'textit':      <textit; for c in new_children { c }>
-        case 'emph':        <emph; for c in new_children { c }>
-        case 'underline':   <underline; for c in new_children { c }>
-        case 'texttt':      <texttt; for c in new_children { c }>
-        case 'textsf':      <textsf; for c in new_children { c }>
-        case 'textsc':      <textsc; for c in new_children { c }>
-        case 'textsl':      <textsl; for c in new_children { c }>
-        case 'textrm':      <textrm; for c in new_children { c }>
-        case 'curly_group':  <curly_group; for c in new_children { c }>
-        case 'brack_group':  <brack_group; for c in new_children { c }>
-        case 'group':        <group; for c in new_children { c }>
-        case 'text_group':   <text_group; for c in new_children { c }>
-        case 'item':         <item; for c in new_children { c }>
-        case 'caption':      <caption; for c in new_children { c }>
-        case 'footnote':     <footnote; for c in new_children { c }>
-        case 'href':         <href; for c in new_children { c }>
-        case 'quote':        <quote; for c in new_children { c }>
-        case 'quotation':    <quotation; for c in new_children { c }>
-        case 'verse':        <verse; for c in new_children { c }>
-        case 'center':       <center; for c in new_children { c }>
-        case 'abstract':     <abstract; for c in new_children { c }>
-        case 'latex_document': <latex_document; for c in new_children { c }>
-        case 'document':     <document; for c in new_children { c }>
-        case 'itemize':      <itemize; for c in new_children { c }>
-        case 'enumerate':    <enumerate; for c in new_children { c }>
-        case 'description':  <description; for c in new_children { c }>
-        case 'figure':       <figure; for c in new_children { c }>
-        case 'table':        <table; for c in new_children { c }>
-        case 'tabular':      <tabular; for c in new_children { c }>
-        case 'minipage':     <minipage; for c in new_children { c }>
-        case 'multicols':    <multicols; for c in new_children { c }>
-        case 'flushleft':    <flushleft; for c in new_children { c }>
-        case 'flushright':   <flushright; for c in new_children { c }>
-        case 'verbatim':     <verbatim; for c in new_children { c }>
-        case 'accent':       <accent; for c in new_children { c }>
+        case 'textbf':      <textbf for c in new_children { c }>
+        case 'textit':      <textit for c in new_children { c }>
+        case 'emph':        <emph for c in new_children { c }>
+        case 'underline':   <underline for c in new_children { c }>
+        case 'texttt':      <texttt for c in new_children { c }>
+        case 'textsf':      <textsf for c in new_children { c }>
+        case 'textsc':      <textsc for c in new_children { c }>
+        case 'textsl':      <textsl for c in new_children { c }>
+        case 'textrm':      <textrm for c in new_children { c }>
+        case 'curly_group':  <curly_group for c in new_children { c }>
+        case 'brack_group':  <brack_group for c in new_children { c }>
+        case 'group':        <group for c in new_children { c }>
+        case 'text_group':   <text_group for c in new_children { c }>
+        case 'item':         <item for c in new_children { c }>
+        case 'caption':      <caption for c in new_children { c }>
+        case 'footnote':     <footnote for c in new_children { c }>
+        case 'href':         <href for c in new_children { c }>
+        case 'quote':        <quote for c in new_children { c }>
+        case 'quotation':    <quotation for c in new_children { c }>
+        case 'verse':        <verse for c in new_children { c }>
+        case 'center':       <center for c in new_children { c }>
+        case 'abstract':     <abstract for c in new_children { c }>
+        case 'latex_document': <latex_document for c in new_children { c }>
+        case 'document':     <document for c in new_children { c }>
+        case 'itemize':      <itemize for c in new_children { c }>
+        case 'enumerate':    <enumerate for c in new_children { c }>
+        case 'description':  <description for c in new_children { c }>
+        case 'figure':       <figure for c in new_children { c }>
+        case 'table':        <table for c in new_children { c }>
+        case 'tabular':      <tabular for c in new_children { c }>
+        case 'minipage':     <minipage for c in new_children { c }>
+        case 'multicols':    <multicols for c in new_children { c }>
+        case 'flushleft':    <flushleft for c in new_children { c }>
+        case 'flushright':   <flushright for c in new_children { c }>
+        case 'verbatim':     <verbatim for c in new_children { c }>
+        case 'accent':       <accent for c in new_children { c }>
         // unknown tags: return original element as-is
         default: el
     }

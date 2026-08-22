@@ -165,14 +165,14 @@ fn render_prime_script_count(count, context) {
     let vlist_h = if (compact and cramped) 0.68 else if (compact) 0.76 else 0.81
     let top_em = if (compact and cramped) "-3.28em" else if (compact) "-3.36em" else "-3.41em"
     let prime_text = repeat_prime_text(count, "")
-    let el = <span class: css.MSUBSUP;
-        <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h);
-                    <span style: "top:" ++ top_em ++ ";margin-right:0.05em";
+    let el = <span class: css.MSUBSUP,
+        <span class: css.VLIST_T,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h),
+                    <span style: "top:" ++ top_em ++ ";margin-right:0.05em",
                         <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.39em;display:inline-block;font-size: 70%";
-                            <span class: css.CMR; prime_text>
+                        <span style: "height:0.39em;display:inline-block;font-size: 70%",
+                            <span class: css.CMR, prime_text>
                         >
                     >
                 >

@@ -144,28 +144,28 @@
 // Quarter boundaries
 "Quarter boundaries";
 (t'2025-01-01'.quarter); // Jan = Q1
-(t'2025-03-31'.quarter)           // Mar = Q1
-(t'2025-04-01'.quarter)           // Apr = Q2
-(t'2025-07-01'.quarter)           // Jul = Q3
-(t'2025-10-01'.quarter)           // Oct = Q4
+(t'2025-03-31'.quarter); // Mar = Q1
+(t'2025-04-01'.quarter); // Apr = Q2
+(t'2025-07-01'.quarter); // Jul = Q3
+(t'2025-10-01'.quarter); // Oct = Q4
 (t'2025-12-31'.quarter)           // Dec = Q4
 
 // Midnight and edge times
-"Time boundaries"
-(t'00:00:00'.hour)                // Midnight hour
-(t'23:59:59'.hour)                // Last hour
-(t'23:59:59'.minute)              // Last minute
-(t'23:59:59'.second)              // Last second
+"Time boundaries";
+(t'00:00:00'.hour); // Midnight hour
+(t'23:59:59'.hour); // Last hour
+(t'23:59:59'.minute); // Last minute
+(t'23:59:59'.second); // Last second
 (t'12:00:00.999'.millisecond)     // Max millisecond
 
 // Year boundaries
-"Year boundaries"
-(t'0001-01-01'.year)              // Year 1 AD
+"Year boundaries";
+(t'0001-01-01'.year); // Year 1 AD
 (t'2999-12-31'.year)              // Far future (within range)
 
 // Extraction preserves components
-"Extraction preserves components"
-(t'2024-02-29T23:59:59'.date.day)     // Feb 29 preserved
-(t'2024-02-29T23:59:59'.date.month)   // Month preserved
-(t'2024-02-29T23:59:59'.time.hour)    // Hour preserved
+"Extraction preserves components";
+(t'2024-02-29T23:59:59'.date.day); // Feb 29 preserved
+(t'2024-02-29T23:59:59'.date.month); // Month preserved
+(t'2024-02-29T23:59:59'.time.hour); // Hour preserved
 (t'2024-02-29T23:59:59'.time.second)  // Second preserved
