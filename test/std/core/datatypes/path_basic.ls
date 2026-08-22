@@ -13,7 +13,7 @@ http.api.example.com
 https.secure.api
 
 // ===== Relative path =====
-.test.input.dir;
+\.test.input.dir;
 
 // ===== Path with quoted segments =====
 /.etc.'nginx.conf';

@@ -882,6 +882,19 @@ void run_repl(Runtime *runtime) {
         // Statement is complete - add to history and execute
         size_t saved_history_len = repl_history->length;
         if (repl_history->length > 0) {
+            // S16.2.3: each REPL entry is its own statement. Joining them with a
+            // bare newline let a dual-role lead (`[`, `(`, `-`, ...) read as a
+            // continuation of the previous entry, so `1 + 1` then `[1,2,3]`
+            // failed to parse instead of evaluating. `;` is the explicit
+            // separator that repair calls for; skip it when one is already
+            // there, since an empty statement slot is itself an error.
+            size_t tail = repl_history->length;
+            while (tail > 0 && (repl_history->str[tail - 1] == '\n' ||
+                    repl_history->str[tail - 1] == ' ' ||
+                    repl_history->str[tail - 1] == '\t')) { tail--; }
+            if (tail > 0 && repl_history->str[tail - 1] != ';') {
+                strbuf_append_str(repl_history, ";");
+            }
             strbuf_append_str(repl_history, "\n");
         }
         strbuf_append_str(repl_history, pending_input->str);

@@ -2405,6 +2405,16 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
                         parser->current.span.start_byte}, bindings, binding);
             }
             LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+            if (is_public) {
+                // S16.9.1 made `pub` a modifier that composes with `let`, but the
+                // flag is only honoured on a DECLARATION reduction. Reducing
+                // `pub let` as a plain statement dropped it silently, so the
+                // binding was never exported and `mod.name` read as an
+                // undefined variable while `pub fn` kept working.
+                return parser_reduce_tokens(parser, LAMBDA_REDUCE_DECLARATION,
+                    LAMBDA_REDUCTION_FORM_NONE, span, first, (LambdaToken){0},
+                    LAMBDA_REDUCTION_FLAG_PUBLIC, &bindings, 1);
+            }
             return parser_reduce(parser, LAMBDA_REDUCE_STATEMENT, span, &bindings, 1);
         }
         if (is_public) {
@@ -2553,7 +2563,26 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
                  statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE ||
                  statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF ||
                  statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB));
-        if (closed_tail) continue;
+        if (closed_tail) {
+            // §7.14 makes the separator UNNECESSARY after a closed tail, not
+            // illegal — S16.1.2 still admits one `;` between any two
+            // statements, and `let`/`type` already accept it. Skipping the
+            // consume left the `;` to be read as the next statement.
+            if (parser_accept(parser, LAMBDA_TOK_SEMICOLON)) {
+                if (parser->current.kind == terminator ||
+                        parser->current.kind == LAMBDA_TOK_EOF) {
+                    parser_set_error(parser, "trailing ';' is not a statement separator",
+                        terminator);
+                    return 0;
+                }
+                if (parser->current.kind == LAMBDA_TOK_SEMICOLON) {
+                    parser_set_error(parser, "empty statement between ';' separators",
+                        terminator);
+                    return 0;
+                }
+            }
+            continue;
+        }
         // S16.1.2: `;` is a STRICT separator — exactly one, between two
         // statements. A trailing `;` (nothing but the terminator after it) and
         // a doubled `;` are both syntax errors.

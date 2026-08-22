@@ -95,6 +95,14 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
     }
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, message, &location);
     if (!error) return;
+    if (separated_relation) {
+        // The Tree-sitter path attaches the repair to this same diagnosis
+        // (lambda-error.cpp); dropping it here left the C parser naming the
+        // ambiguity without telling the user how to resolve it.
+        error->help = mem_strdup(
+            "Use parentheses to group the comparison expression, e.g. (\"a\" < \"b\").",
+            MEM_CAT_TEMP);
+    }
     if (tp->errors) arraylist_append(tp->errors, error);
     else err_free(error);
     tp->error_count++;

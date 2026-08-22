@@ -15519,8 +15519,11 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // Keep a committed path reduction alive after a semantic path
             // rejection; the enclosing expression must report the error
             // rather than dereference a null reduction value (D8.1.1v3).
+            // must be a full AstPathNode: the node is tagged AST_NODE_PATH_EXPR,
+            // so the transpiler casts and reads `authority` — a bare AstNode
+            // allocation left that read past the end of the object.
             node = alloc_ast_node_from_span(tp, AST_NODE_PATH_EXPR,
-                reduction->span, sizeof(AstNode));
+                reduction->span, sizeof(AstPathNode));
             node->type = &TYPE_ERROR;
         }
         return direct_ast_value(node);

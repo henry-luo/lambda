@@ -277,6 +277,13 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
      false, &TYPE_INT64, true},
+    // `i64` is the defined type spelling (S16.8.3 / the sized-int family), and
+    // every sibling — i8/i16/i32/u8/u16/u32/u64/f32 — is callable as a
+    // conversion. i64 was the one gap: it maps to LMD_TYPE_INT64 rather than the
+    // NUM_SIZED family that makes the others callable, so it needs this row.
+    {SYSFUNC_INT64, "i64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
+     false, &TYPE_INT64, true},
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_float", FPTR(fn_float), NULL, NULL, false, 0,

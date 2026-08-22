@@ -190,7 +190,7 @@ TEST(LambdaRdParserPoc, ReportsIncompleteDelimitedExpression) {
 
 TEST(LambdaRdParserPoc, KeepsTypeAndStaticPathAsCommittedSourceSlots) {
     const char* source =
-        "fn select(record: {id: int, tags: [string]}) => .records.~~.id\n"
+        "fn select(record: {id: int, tags: [string]}) => \\.records.~~.id\n"
         "let selected = select(data).?int\n";
     LambdaParseMetrics metrics = {};
     LambdaParseError error = {};
@@ -203,7 +203,7 @@ TEST(LambdaRdParserPoc, KeepsTypeAndStaticPathAsCommittedSourceSlots) {
     EXPECT_EQ(recorder.type_count, 2);
     EXPECT_EQ(recorder.path_count, 1);
     EXPECT_EQ(strncmp(source + recorder.type_span.start_byte, "int", 3), 0);
-    EXPECT_EQ(strncmp(source + recorder.path_span.start_byte, ".records.~~.id", 14), 0);
+    EXPECT_EQ(strncmp(source + recorder.path_span.start_byte, "\\.records.~~.id", 15), 0);
 }
 
 TEST(LambdaRdParserPoc, PublishesCommittedTokenFormsAndCompletePrattSpans) {
@@ -227,7 +227,7 @@ TEST(LambdaRdParserPoc, PublishesCommittedTokenFormsAndCompletePrattSpans) {
 }
 
 TEST(LambdaRdParserPoc, PublishesCommittedNamedAndCollectionItemForms) {
-    const char* source = "{item: 1}\ncall(option: 2)\n<tag title: \"x\">";
+    const char* source = "{item: 1}\ncall(option: 2);\n<tag title: \"x\">";
     LambdaParseError error = {};
     ReductionMetadataRecorder recorder = {};
     LambdaParseSink sink = {record_reduction_metadata};
@@ -264,7 +264,7 @@ TEST(LambdaRdParserPoc, PublishesProceduralAssignmentTargetAndValue) {
 TEST(LambdaRdParserPoc, ParsesTypeAliasAndObjectDeclarationShells) {
     const char* source =
         "type Id = int | string\n"
-        "type Record { id: Id, tags: [string]; fn label() => .id }\n";
+        "type Record { id: Id, tags: [string], fn label() => \\.id }\n";
     LambdaParseError error = {};
     EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
@@ -286,8 +286,8 @@ TEST(LambdaRdParserPoc, DistinguishesTypeDeclarationFromTypeFunctionCall) {
 
 TEST(LambdaRdParserPoc, ParsesElementAttributesAndContentBoundary) {
     const char* source =
-        "<svg.root width: float(width), 'aria-label': label;\n"
-        "  <text fill: color; text_value>\n"
+        "<svg.root width: float(width), 'aria-label': label,\n"
+        "  <text fill: color, text_value>\n"
         ">\n";
     LambdaParseError error = {};
     EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
@@ -299,10 +299,10 @@ TEST(LambdaRdParserPoc, ParsesQualifiedAttributesAndDirectElementContent) {
         "<svg.rect\n"
         "  svg.width: 100,\n"
         "  svg.height: 50>\n"
-        "let doc = <doc <paragraph; \"Hello\">>\n"
-        "let rich = <div; <strong; \"Alpha\"> <span; \"Beta\">>\n"
-        "let typed_tag = <list; <string; \"entry\">>\n"
-        "let path_child = <svg; .rect>\n";
+        "let doc = <doc <paragraph \"Hello\">>\n"
+        "let rich = <div <strong \"Alpha\"> <span \"Beta\">>\n"
+        "let typed_tag = <list <string \"entry\">>\n"
+        "let path_child = <svg \\.rect>\n";
     LambdaParseError error = {};
     EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
@@ -420,7 +420,7 @@ TEST(LambdaRdParserPoc, ParsesBindingListsAndPublicAssignments) {
         "let a = 123, b = a * 2, c = a + 2\n"
         "let left, right = pair\n"
         "let key, value at record\n"
-        "pub exported = a\n"
+        "pub let exported = a\n"
         "pn update() { var first, second = pair; var count = 0 }\n"
         "pn read_state(state) { return state.count }\n";
     LambdaParseError error = {};
@@ -430,8 +430,8 @@ TEST(LambdaRdParserPoc, ParsesBindingListsAndPublicAssignments) {
 
 TEST(LambdaRdParserPoc, ParsesNewlineContinuationAfterValueIntroducers) {
     const char* source =
-        "pub DEFAULT =\n"
-        "  <style; \"body\">\n"
+        "pub let DEFAULT =\n"
+        "  <style \"body\">\n"
         "let settings = {\n"
         "  palette:\n"
         "    [\"blue\", \"red\"]\n"
@@ -461,7 +461,7 @@ TEST(LambdaRdParserPoc, ParsesContextualNamesPathsAndMatchPatterns) {
         "pn step() { var fn = 1 }\n"
         "let schema = {default: /.src.**}\n"
         "let fields = [for (key:int, value in items) key]\n"
-        "let node = <node; if (len(fields) > 0) { <item; \"present\"> }>\n"
+        "let node = <node if (len(fields) > 0) { <item \"present\"> }>\n"
         "match score {\n"
         "  case 90 to 100: \"A\"\n"
         "  case int that (~ > 0): \"positive\"\n"
@@ -489,11 +489,11 @@ TEST(LambdaRdParserPoc, ParsesMultilineTypesJoinsAndAdjacentContentForms) {
         "let percent: int that 0 <= ~ <= 100 = 50\n"
         "let union: int |\n"
         "  string = 1\n"
-        "let path_parts = [.a.1, record.1]\n"
+        "let path_parts = [\\.a.1, record.1]\n"
         "let joined = [for (left in lefts, right in rights on left.id == right.id) right]\n"
         "let xml = input('test.xml'),\n"
-        "  more_xml = input('more.xml')\n"
-        "<root> <item> \"one\" <item> \"two\"\n"
+        "  more_xml = input('more.xml');\n"
+        "<root> <item> \"one\" <item> \"two\";\n"
         "<item> is element\n"
         "pn store(var data, i) { if (data[i] == null) { data[i] = 1 data[i] = 2 } }\n";
     LambdaParseError error = {};
