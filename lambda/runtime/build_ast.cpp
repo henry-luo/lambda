@@ -13819,23 +13819,43 @@ static AstNode* direct_start_node(Transpiler* tp, LambdaSourceSpan span,
     return (AstNode*)start;
 }
 
+// S12.3.3: a user-defined field or method on the receiver shadows a
+// method-eligible builtin of the same name. `out_has_user_member` reports any
+// match, field or method, so the caller can suppress the builtin even when the
+// match is a plain field — a field carries no TypeMethod to return, and
+// returning NULL alone would let the builtin capture the call.
 static TypeMethod* direct_lookup_object_method(Transpiler* tp,
-        AstNode* receiver, StrView name) {
+        AstNode* receiver, StrView name, bool* out_has_user_member) {
+    if (out_has_user_member) *out_has_user_member = false;
     if (!receiver || !receiver->type) return NULL;
     Type* receiver_type = receiver->type;
-    if (receiver_type->type_id != LMD_TYPE_OBJECT ||
+    if (!is_map_family_type_id(receiver_type->type_id) ||
             is_global_simple_type(receiver_type)) return NULL;
+    if (receiver_type->type_id != LMD_TYPE_OBJECT) {
+        // maps, vmaps, and elements carry shape entries but no method table.
+        FOR_EACH_MAP_FIELD((TypeMap*)receiver_type, field) {
+            if (field->name && field->name->length == name.length &&
+                    strncmp(field->name->str, name.str, name.length) == 0) {
+                if (out_has_user_member) *out_has_user_member = true;
+                break;
+            }
+        }
+        return NULL;
+    }
     TypeObject* object_type = (TypeObject*)receiver_type;
     for (TypeObject* owner = object_type; owner; owner = owner->base) {
         for (ShapeEntry* field = owner->shape; field; field = field->next) {
             if (field->name && field->name->length == name.length &&
                     strncmp(field->name->str, name.str, name.length) == 0) {
-                return NULL; // fields shadow methods, matching the CST path.
+                // fields shadow methods, matching the CST path.
+                if (out_has_user_member) *out_has_user_member = true;
+                return NULL;
             }
         }
         for (TypeMethod* method = owner->methods; method; method = method->next) {
             if (method->name && method->name->length == name.length &&
                     strncmp(method->name->str, name.str, name.length) == 0) {
+                if (out_has_user_member) *out_has_user_member = true;
                 return method;
             }
         }
@@ -13889,19 +13909,11 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
                 if (entry && entry->node) {
                     call->function = entry->node;
                     effective = entry->node;
-                } else {
-                    // Method-only builtins (for example `map.set`) are
-                    // registered under their receiver-aware arity and are
-                    // not visible through ordinary name lookup.
-                    TypeId object_type = object->type ? object->type->type_id : LMD_TYPE_ANY;
-                    info = get_sys_func_for_method(&field_name, arg_count,
-                        object_type);
-                    if (info) {
-                        method_call = true;
-                        call->argument = object;
-                        object->next = arguments;
-                    }
                 }
+                // otherwise fall through to the shared receiver-aware lookup
+                // below. Resolving a method-only builtin here skipped the
+                // user-member check and let `sum`/`avg` shadow an identically
+                // named object method, violating S12.3.3.
             }
         }
         if (!info && field && field->node_type == AST_NODE_IDENT) {
@@ -13912,14 +13924,15 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
             StrView field_name = strview_init(((AstIdentNode*)field)->name->chars,
                 ((AstIdentNode*)field)->name->len);
             TypeId object_type = receiver && receiver->type ? receiver->type->type_id : LMD_TYPE_ANY;
+            bool receiver_has_member = false;
             TypeMethod* user_method = direct_lookup_object_method(tp, receiver,
-                field_name);
+                field_name, &receiver_has_member);
             if (user_method) {
                 user_method_found = true;
                 user_method_is_proc = user_method->is_proc;
                 user_method_receiver = receiver;
                 user_method_name = field_name;
-            } else {
+            } else if (!receiver_has_member) {
                 info = get_sys_func_for_method(&field_name, arg_count, object_type);
                 if (info) {
                     method_call = true;

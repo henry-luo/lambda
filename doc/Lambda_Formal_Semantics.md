@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 9.0.0 (2026-08-21)
+**Spec version:** 9.1.0 (2026-08-22)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1169,6 +1169,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.3.2** Two dynamic-call restrictions are deliberate: a dynamic call
   with named arguments is rejected, and a dynamic call to a `var`/inout
   signature is rejected (a value span carries no writable caller location).
+- **S12.3.3** **A member call resolves against the receiver first.** For map,
+  element, and object types, `x.name(...)` looks up a user-defined field or
+  method named `name` on `x` BEFORE any method-eligible builtin, so a member
+  shadows a system function of the same name — a map field or object method
+  called `sum` wins over the built-in `sum()`. Without this, every builtin
+  name would be a latent trap in user types, and the failure is silent: the
+  builtin accepts the receiver as its first argument and returns its own
+  result rather than erroring. The shadow-proof accessor for intrinsic names
+  remains `name(item)` (S15.4).
 
 ### S12.4 Resources
 

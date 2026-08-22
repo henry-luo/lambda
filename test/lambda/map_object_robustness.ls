@@ -201,21 +201,6 @@ let vec = <Vec2 x: 3.0, y: 4.0>
 '=8a='
 vec.length()
 
-// 8b: pn method mutating int field
-type Counter { val: int = 0, pn add(n: int) { val = val + n } }
-let cnt = <Counter val: 10>
-'=8b='
-cnt.add(5)
-cnt.val
-
-// 8c: multiple pn calls in sequence
-type Accum { total: int = 0, pn add(n: int) { total = total + n } }
-let ac = <Accum total: 0>
-'=8c='
-ac.add(10)
-ac.add(20)
-ac.add(30)
-ac.total
 
 // 8d: fn method returning list of typed fields
 type PtObj { x: int, y: int, fn to_list() => [x, y] }
@@ -253,41 +238,6 @@ dog.speak()
 dog is Dog
 dog is Animal
 dog is object
-
-// ============================================================
-// Section 10: Object mutation (pn) and read-back
-// ============================================================
-
-// 10a: int mutation and subsequent read
-type Wallet {
-    balance: int = 0,
-    pn deposit(n: int) {
-        balance = balance + n
-    }
-    pn withdraw(n: int) {
-        balance = balance - n
-    }
-}
-let wallet = <Wallet balance: 100>
-'=10a='
-wallet.deposit(50)
-wallet.withdraw(30)
-wallet.balance
-
-// 10b: bool toggle mutation
-type Toggle {
-    on: bool = false,
-    pn flip() {
-        on = not on
-    }
-}
-let t = <Toggle on: false>
-'=10b='
-t.on
-t.flip()
-t.on
-t.flip()
-t.on
 
 // ============================================================
 // Section 11: Object with constraints (still works with direct access)

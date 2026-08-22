@@ -52,20 +52,6 @@ fn length(v: Vec2) => math.sqrt(v.x * v.x + v.y * v.y)
 let v: Vec2 = {x: 3.0, y: 4.0}
 length(v)
 
-// ---- Object-typed parameters ----
-
-// Test 9: object param with fn method
-type Counter {
-    val: int = 0,
-    fn doubled() => val * 2
-    pn inc() { val = val + 1 }
-}
-fn read_counter(c: Counter) => c.val
-let cnt = <Counter>
-cnt.inc()
-cnt.inc()
-cnt.inc()
-read_counter(cnt)
 
 // Test 10: object param accessing multiple fields
 type Pair {

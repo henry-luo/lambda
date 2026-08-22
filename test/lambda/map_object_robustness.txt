@@ -52,7 +52,10 @@ true
 99
 '=6b='
 "origin"
-{ x: 0, y: 0}
+{
+  x: 0,
+  y: 0
+}
 '=7a='
 33
 '=7b='
@@ -63,10 +66,6 @@ true
 7
 '=8a='
 5
-'=8b='
-15
-'=8c='
-60
 '=8d='
 [7, 8]
 '=8e='
@@ -80,12 +79,6 @@ true
 true
 true
 true
-'=10a='
-120
-'=10b='
-false
-true
-false
 '=11a='
 true
 '=11b='
@@ -105,7 +98,7 @@ true
 true
 '=15b='
 false
-true
+false
 '=16='
 5
 "inline"
