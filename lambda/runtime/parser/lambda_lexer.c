@@ -394,6 +394,18 @@ static LambdaTokenKind lexer_scan_number(LambdaLexer* lexer) {
     return floating ? LAMBDA_TOK_FLOAT : LAMBDA_TOK_INTEGER;
 }
 
+// §7.16: a numeric literal may not run straight into an identifier. Without
+// this, `123abc` lexes as `123` plus the identifier `abc` and S16.1.3
+// juxtaposition takes the identifier as the NEXT STATEMENT — a silent split
+// whose failure only surfaces later as an undefined name. `0b1010` behaves the
+// same way, which is what §7.5 leaves behind by not defining a binary literal.
+// This is the general form of the §7.3 `1f32` defect; the suffix families
+// (`1i32`, `1f32`, `1n`, `1m`, `4j`, `0xFF`) are consumed before the check, so
+// only genuinely adjacent identifiers are rejected.
+static bool lexer_number_runs_into_identifier(LambdaLexer* lexer) {
+    return lexer_is_ident_start(lexer);
+}
+
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length) {
     if (!lexer) return;
     lexer->source = source ? source : "";
@@ -454,6 +466,9 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     if (lexer_is_digit(ch) || (ch == '.' && lexer_is_digit(lexer_peek(lexer, 1)) &&
             !lexer_dot_continues_member_target(lexer, start))) {
         LambdaTokenKind kind = lexer_scan_number(lexer);
+        if (lexer_number_runs_into_identifier(lexer)) {
+            return lexer_error_token(lexer, start, line, column);
+        }
         return lexer_make_token(kind, start, line, column, lexer->offset);
     }
 

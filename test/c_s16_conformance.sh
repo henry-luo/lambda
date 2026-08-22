@@ -14,7 +14,9 @@ run() {
   local exp="$1" name="$2" src="$3"
   printf '%b' "$src" > "$WORK/case.ls"
   out=$("$ROOT/lambda.exe" "$WORK/case.ls" --no-log 2>&1)
-  if echo "$out" | grep -qE 'Failed to parse|parser rejected|syntax error|Script execution failed'; then got=R; else got=A; fi
+  # Match the PARSE error code only: a script can parse fine and still fail at
+  # run time (an unresolved import, say), which must not read as a rejection.
+  if echo "$out" | grep -qE 'error\[E100\]'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
 }
@@ -104,5 +106,67 @@ echo "--- §7.2 not binds loose (value checks) ---"
 runval "not 1 == 2  is not (1 == 2)"     'true'  'not 1 == 2\n'
 runval "not 1 in [1,2] is not (1 in ..)" 'false' 'not 1 in [1,2]\n'
 runval "not a and 1 is (not a) and 1"    'false' 'let a = 1\nnot a and 1\n'
+echo "--- corner: line-start continuation & guards ---"
+run A "unfinished call bracket continues"  'fn f(x) { x }\nlet v = f(\n1)\n'
+run A "unfinished index bracket continues" 'let m = {a: 1}\nlet v = m[\n"a"]\n'
+run A "explicit ; then dual-role line"     'let m = {a: 1};\n["a"]\n'
+run A "trailing operator continues"        'let a = 1 +\n2\n'
+run A "continuation word opens line"       'let a = 1\nlet b = a\nand 1\n'
+run A "pipe opens line"                    'let d = [1,2]\nlet n = d\n|> len(~)\n'
+run R "line-start * is dual-role"          'let a = [1]\na\n*a\n'
+run R "line-start ^ is dual-role"          'fn f() { 1 }\nlet r = f()\n^ { 0 }\n'
+run R "line-start / is dual-role"          'let a = 4\na\n/ 2\n'
+run A "comment between statements"         'let a = 1\n// note\nlet b = 2\n'
+run A "block comment inside expression"    'let a = 1 /* c */ + 2\n'
+run R "comment cannot rescue line-start +"  'let a = 1\n/* c */ + 2\n'
+run R "line comment cannot rescue either"   'let a = 1\n// c\n+ 2\n'
+run A "comment carry does not go stale"     'let a = 1\n/* c */ and 1 + 2\n'
+run A "comment inside array literal"        'let a = [1, /* x */ 2]\n'
+run A "leading file comment"                '// header\nlet a = 1\na\n'
+echo "--- corner: 7.15 dot handling ---"
+run A "fluent chain bare member"           'let m = {a: 1}\nlet v = m\n.a\n'
+run A "fluent chain call"                  'let d = [1]\nlet n = d\n.len()\n'
+run R "line-start .digit stays dual-role"  'let a = 1\na\n.5\n'
+run A "relative path statement"            'let p = \\.a.b\np\n'
+run A "rooted path statement"              'let p = /.a.b\np\n'
+run R "bare-dot relative path retired"     'let p = .a.b\np\n'
+echo "--- corner: 5.9v3 braces ---"
+run A "empty braces as value"              'let m = {}\nm\n'
+run A "handler brace same line"            'fn f() { 1 }\nlet r = f() ^ { 0 }\nr\n'
+run R "handler brace on next line"         'fn f() { 1 }\nlet r = f() ^\n{ 0 }\nr\n'
+run A "bare propagate then ; then block"   'fn f() { 1 }\nlet r = f()^;\n{ 0 }\n'
+run A "empty braces in fn control body"    'let r = if (1) {} else {}\nr\n'
+run R "bare {} statement in pn is dead"    'pn main() { {} }\n'
+run A "empty map value in pn is fine"      'pn main() { let m = {} m }\n'
+run A "block expression value"             'let v = { let y = 1 y + 1 }\nv\n'
+run A "nested block expressions"           'let v = { let y = { 1 } y }\nv\n'
+run A "arrow empty body"                   'let f = (x) => {}\nf(1)\n'
+run A "if paren block body"                'let r = if (1) { 2 } else { 3 }\nr\n'
+echo "--- corner: control forms ---"
+run A "nested dangling else"               'let r = if (1) if (0) 2 else 3 else 4\nr\n'
+run A "for bare with clauses"              'for x in [1,2] where x > 0 { x }\n'
+run A "for paren with clauses"             'let r = for (x in [1,2] where x > 0) x\nr\n'
+run R "bare while cond opening with ("     'pn main() { while (1)*2 { 3 } }\n'
+echo "--- corner: 7.14 closed vs open tail ---"
+run R "open: arrow body then ( line"       'fn f() => 1\n(2)\n'
+run A "closed: view decl then [ line"      'view P: int { 1 }\n[0]\n'
+run A "closed: object type then [ line"    'type E { a: int }\n[0]\n'
+run A "closed: import then [ line"         'import math\n[1, 2]\n'
+run A "closed: import then ( line"         'import math\n(1)\n'
+run A "import list still uses ,"           'import math, sys\n1\n'
+run A "dotted module continues a line"     'import math\n.sub\n1\n'
+echo "--- corner: 7.4 / 7.16 numerics ---"
+run A "separators in float"                'let a = 1_000.5_5\na\n'
+run A "separators in exponent"             'let a = 1e1_0\na\n'
+run A "hex with separators"                'let a = 0xFF_FF\na\n'
+run R "number runs into identifier"        'let a = 123abc\n'
+run R "binary-literal habit rejected"      'let a = 0b1010\n'
+run R "trailing underscore"                'let a = 1_\n'
+echo "--- corner: element scope (S16.5.1) ---"
+run A "element then following statement"   '<p "x">\n1\n'
+run A "let-bound element then statement"   'let e = <p "x">\n1\n'
+run A "nested element children"            '<div <b "x"> <i "y">>\n'
+run A "element with no content"            '<p>\n1\n'
+
 echo
 echo "pass=$pass fail=$fail"

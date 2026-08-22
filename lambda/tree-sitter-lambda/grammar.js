@@ -170,9 +170,13 @@ module.exports = grammar({
     // A new statement starts here: emitted only before a start-only token,
     // which is disjoint from every guarded operator above.
     $._stmt_boundary,
+    // S16.5.1: the element-scope variant, where `<` starts a child item.
+    $._elem_stmt_boundary,
     // The next token is not `(`: gates bare `if`/`while` heads (S16.6.2) and
     // the bare `apply` statement (§7.7).
     $._not_paren,
+    // §7.16: a numeric literal may not run straight into an identifier.
+    $._num_boundary,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -247,6 +251,10 @@ module.exports = grammar({
 
     document: $ => optional($.content),
 
+    // §7.17: `comment` is declared BOTH here and in `externals`. The scanner
+    // emits it wherever it runs, so a line break in front of a comment is
+    // carried to the next token; this rule is the fallback tree-sitter uses in
+    // positions where the scanner is not consulted and during error recovery.
     comment: _ => token(prec(1, choice(
       seq('//', /[^\r\n\u2028\u2029]*/),
       seq('/*', /[^*]*\*+([^/*][^*]*\*+)*/, '/'),
@@ -289,6 +297,11 @@ module.exports = grammar({
       $.break_stam,
       $.continue_stam,
       $.apply_stam,
+      // An import's tail is a module NAME, and no dual-role token can continue
+      // one (`,` `:` `.` `\\` are its only continuations), so the `;` the open
+      // set would demand guards nothing: `import math [1,2]` is two items on
+      // one line as well as two.
+      $._import_stam,
       // Bare-spelling `if`/`for` end in a braced body that admits no postfix.
       // Their parenthesized spellings take a greedy expression body and are
       // therefore open, as is any `if` carrying an `else` (the else body is an
@@ -298,7 +311,6 @@ module.exports = grammar({
     ),
 
     _open_stam: $ => choice(
-      $._import_stam,
       $.let_stam,
       $.var_stam,
       $.fn_expr_stam,
@@ -357,8 +369,14 @@ module.exports = grammar({
 
     binary: _ => token(seq("b'", repeat1(/[^']/), "'")),
 
-    _number: $ => choice(
-      $.imaginary, $.integer, $.float, $.decimal, $.sized_integer, $.sized_float,
+    // §7.16: every numeric literal carries a zero-width boundary guard, so a
+    // digit running into an identifier (`123abc`, `0b1010`, `1_`) is a lexical
+    // error rather than a number plus a silently juxtaposed statement. This is
+    // the general form of the §7.3 `1f32` bug.
+    _number: $ => seq(
+      choice($.imaginary, $.integer, $.float, $.decimal,
+        $.sized_integer, $.sized_float),
+      $._num_boundary,
     ),
 
     imaginary: _ => token(seq(
@@ -457,7 +475,7 @@ module.exports = grammar({
     // child. Parentheses remain islands: `(a > b)` re-enters the full grammar.
     element_content: $ => seq(
       $._element_statement,
-      repeat(seq(choice(';', $._stmt_boundary), $._element_statement)),
+      repeat(seq(choice(';', $._elem_stmt_boundary), $._element_statement)),
     ),
 
     _element_statement: $ => choice(

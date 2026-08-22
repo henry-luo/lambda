@@ -171,6 +171,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "_import_stam"
+        },
+        {
+          "type": "SYMBOL",
           "name": "_if_closed"
         },
         {
@@ -182,10 +186,6 @@
     "_open_stam": {
       "type": "CHOICE",
       "members": [
-        {
-          "type": "SYMBOL",
-          "name": "_import_stam"
-        },
         {
           "type": "SYMBOL",
           "name": "let_stam"
@@ -390,31 +390,40 @@
       }
     },
     "_number": {
-      "type": "CHOICE",
+      "type": "SEQ",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "imaginary"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "imaginary"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "integer"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "float"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "decimal"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "sized_integer"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "sized_float"
+            }
+          ]
         },
         {
           "type": "SYMBOL",
-          "name": "integer"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "float"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "decimal"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "sized_integer"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "sized_float"
+          "name": "_num_boundary"
         }
       ]
     },
@@ -2426,7 +2435,7 @@
                   },
                   {
                     "type": "SYMBOL",
-                    "name": "_stmt_boundary"
+                    "name": "_elem_stmt_boundary"
                   }
                 ]
               },
@@ -10775,7 +10784,15 @@
     },
     {
       "type": "SYMBOL",
+      "name": "_elem_stmt_boundary"
+    },
+    {
+      "type": "SYMBOL",
       "name": "_not_paren"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_num_boundary"
     },
     {
       "type": "SYMBOL",

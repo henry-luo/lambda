@@ -39,6 +39,10 @@ typedef struct LambdaRdParser {
     uint32_t stop_at_element_close;
     uint32_t stop_at_element_attribute_close;
     LambdaTokenKind prev_kind;
+    // §5.9v3: a bare `{}` statement is dead code in a procedural body (an
+    // empty block, or a discarded empty map), so it is rejected there. In
+    // value and content position `{}` remains a meaningful empty map.
+    uint32_t procedural_depth;
     bool last_statement_self_delimiting;
     bool last_statement_assignment;
     uint32_t expression_depth;
@@ -1520,13 +1524,15 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
 static int infix_binding_power(LambdaRdParser* parser, LambdaTokenKind kind,
         bool* right_associative) {
     *right_associative = false;
-    if (kind == LAMBDA_TOK_GT && parser->stop_at_element_close &&
-            (parser->stop_at_element_attribute_close ||
-             parser->next.kind == LAMBDA_TOK_LT ||
-             parser->next.kind == LAMBDA_TOK_STRING ||
-             parser->next.kind == LAMBDA_TOK_LBRACE ||
-             parser->next.kind == LAMBDA_TOK_DOT ||
-             !token_starts_expression(parser->next.kind))) return -1;
+    // S16.5.1 / §5.10: inside element scope the symbol relationals are NOT
+    // operators at all — `>` unconditionally terminates and `<` opens a child.
+    // The old heuristic asked what followed the `>`, so `<p "x">` ⏎ `1` read
+    // the close as a comparison against the next statement and then ran to EOF.
+    // Comparisons inside an element use a parenthesized island, which lifts
+    // these flags (see parse_prefix), or the keyword operators.
+    if (parser->stop_at_element_close &&
+            (kind == LAMBDA_TOK_GT || kind == LAMBDA_TOK_LT ||
+             kind == LAMBDA_TOK_GT_EQ || kind == LAMBDA_TOK_LT_EQ)) return -1;
     switch (kind) {
     case LAMBDA_TOK_PIPE_FORWARD:
     case LAMBDA_TOK_THAT: return LAMBDA_BP_PIPE;
@@ -1671,6 +1677,16 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
         }
         if (parser_accept(parser, LAMBDA_TOK_CARET)) {
             uint32_t handler_child_count = 1;
+            // §3.6: the handler body must open on the same line as its `^`.
+            // Across a line break `{` is dual-role — handler body, or a new map
+            // or block statement after a bare propagate — so neither reading
+            // may win silently (S16.2.3).
+            if (parser->current.kind == LAMBDA_TOK_LBRACE && parser->current.nl_before) {
+                parser_set_error(parser,
+                    "a handler body must open on the same line as its '^'",
+                    LAMBDA_TOK_LBRACE);
+                return 0;
+            }
             bool handler = parser_accept(parser, LAMBDA_TOK_LBRACE);
             if (handler) {
                 parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
@@ -1889,7 +1905,9 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser,
         child = parse_expression(parser, 0);
     } else if (parser_accept(parser, LAMBDA_TOK_LBRACE)) {
         flags |= LAMBDA_REDUCTION_FLAG_BODY_BLOCK;
+        if (is_proc) parser->procedural_depth++;
         child = parse_content(parser, LAMBDA_TOK_RBRACE);
+        if (is_proc) parser->procedural_depth--;
         if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after function body")) return 0;
     } else {
         parser_set_error(parser, "expected a function body", LAMBDA_TOK_LBRACE);
@@ -2444,6 +2462,14 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         }
         LambdaToken statement_token = parser->current;
         LambdaTokenKind statement_first = statement_token.kind;
+        if (parser->procedural_depth && statement_first == LAMBDA_TOK_LBRACE &&
+                parser->next.kind == LAMBDA_TOK_RBRACE) {
+            // §5.9v3: dead under either reading — a no-op block or a discarded
+            // empty map. This design answers meaningless input with an error.
+            parser_set_error(parser, "an empty '{}' statement has no effect",
+                LAMBDA_TOK_RBRACE);
+            return 0;
+        }
         LambdaParseValue statement = parse_statement(parser);
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         content = parser_content_append(parser,
@@ -2461,6 +2487,9 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         bool closed_tail =
             statement_first == LAMBDA_TOK_BREAK ||
             statement_first == LAMBDA_TOK_CONTINUE ||
+            // An import ends on a module NAME, which no dual-role token can
+            // continue, so it needs no separator before the next statement.
+            statement_first == LAMBDA_TOK_IMPORT ||
             (parser->prev_kind == LAMBDA_TOK_RBRACE &&
                 (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN ||
                  statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW ||

@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 // External scanner for tree-sitter-lambda — S16 Surface Syntax guards.
@@ -37,6 +38,8 @@
 // side effects.
 
 enum TokenType {
+    // ORDER IS LOAD-BEARING: this enum must match grammar.js `externals`
+    // element for element, or every token id shifts.
     // Guarded operator tokens. Each CONSUMES its own lexeme and is emitted only
     // when the operator sits on the same line as its left operand. They are
     // separate tokens rather than one zero-width guard because a zero-width
@@ -52,7 +55,17 @@ enum TokenType {
     MEMBER_DOT,
     POSTFIX_CARET,
     STMT_BOUNDARY,
+    // S16.5.1: inside an element, `<` is never an operator — it always opens a
+    // child — so it starts a juxtaposed content item where at statement level
+    // it would be dual-role. Element content therefore needs its own boundary
+    // token; the two differ only in how `<` is classified.
+    ELEM_STMT_BOUNDARY,
     NOT_PAREN,
+    // §7.16: emitted (zero-width) after a numeric literal only when the very
+    // next character cannot continue an identifier. Withholding it makes
+    // `123abc` and `0b1010` LEXICAL errors instead of silent splits into a
+    // number plus a juxtaposed statement.
+    NUM_BOUNDARY,
     // Never emitted. Tree-sitter marks every external token valid during error
     // recovery; this sentinel is valid nowhere in the grammar, so seeing it
     // means recovery is running and the scanner should decline.
@@ -60,7 +73,7 @@ enum TokenType {
 };
 
 void *tree_sitter_lambda_external_scanner_create(void) {
-    return NULL;
+    return NULL;  // stateless by design; see the §7.17 note below
 }
 
 void tree_sitter_lambda_external_scanner_destroy(void *payload) {
@@ -134,9 +147,12 @@ static bool is_continuation_word(const char *w, unsigned n) {
 // / < .`) and everything continuation-only (`|> | & % > = ! == != <= >=`, the
 // word operators) returns false. The caller has already marked the token end,
 // so every advance here is pure inspection.
-static bool classify_start(TSLexer *lexer) {
+static bool classify_start(TSLexer *lexer, bool element_scope) {
     int32_t c = lexer->lookahead;
     if (lexer->eof(lexer)) { return false; }
+    // S16.5.1: `<` opens a child element in element scope, so it starts an item
+    // there even though it is dual-role everywhere else.
+    if (c == '<' && element_scope) { return true; }
 
     switch (c) {
         // continuation-only, dual-role, closers, and separators alike: none of
@@ -192,6 +208,15 @@ bool tree_sitter_lambda_external_scanner_scan(
     // parse state, and recovery marks every external valid.
     if (valid_symbols[ERROR_SENTINEL]) { return false; }
 
+    // §7.16 must inspect the character IMMEDIATELY after the literal, so it is
+    // tested before any whitespace is skipped.
+    if (valid_symbols[NUM_BOUNDARY]) {
+        if (is_identifier_start(lexer->lookahead)) { return false; }
+        lexer->mark_end(lexer);
+        lexer->result_symbol = NUM_BOUNDARY;
+        return true;
+    }
+
     // Skip whitespace and comments, remembering whether a line break was
     // crossed. This is the one thing grammar rules cannot see for themselves.
     bool saw_newline = false;
@@ -206,7 +231,10 @@ bool tree_sitter_lambda_external_scanner_scan(
         // a zero-width token.
         lexer->mark_end(lexer);
         if (lexer->lookahead != '/') { break; }
-        lexer->advance(lexer, true);
+        // Not skipped: if this turns out to open a comment the character must
+        // be inside the emitted token, and if it turns out to be division the
+        // mark_end above already sits in front of it.
+        lexer->advance(lexer, false);
         if (lexer->lookahead == '/') {
             while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
                 lexer->advance(lexer, true);
@@ -216,17 +244,18 @@ bool tree_sitter_lambda_external_scanner_scan(
         if (lexer->lookahead == '*') {
             lexer->advance(lexer, true);
             int32_t prev = 0;
+            bool closed = false;
             while (!lexer->eof(lexer)) {
                 if (lexer->lookahead == '\n') { saw_newline = true; }
                 if (prev == '*' && lexer->lookahead == '/') {
                     lexer->advance(lexer, true);
-                    prev = 0;
+                    closed = true;
                     break;
                 }
                 prev = lexer->lookahead;
                 lexer->advance(lexer, true);
             }
-            if (prev == 0) { continue; }
+            if (closed) { continue; }
             return false;  // unterminated block comment
         }
         // A real `/`: division, or the root path step. The scanner has already
@@ -282,7 +311,24 @@ bool tree_sitter_lambda_external_scanner_scan(
                 if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0); }
                 break;
             case '^':
-                if (valid_symbols[POSTFIX_CARET]) { return emit_op(lexer, POSTFIX_CARET, 0); }
+                // §3.6: `^` is followed either by nothing (propagate) or by a
+                // handler brace, so `{` after it is DUAL-ROLE. Decide here, at
+                // the caret: blocking only the handler path would let GLR fall
+                // through to propagate-plus-a-block-statement, which is the
+                // silent split S16.1.1 forbids. A `{` on a later line yields
+                // NEITHER token, so the parse fails loudly.
+                if (valid_symbols[POSTFIX_CARET]) {
+                    lexer->advance(lexer, false);
+                    lexer->mark_end(lexer);
+                    bool brace_newline = false;
+                    while (is_space(lexer->lookahead)) {
+                        if (lexer->lookahead == '\n') { brace_newline = true; }
+                        lexer->advance(lexer, false);
+                    }
+                    if (lexer->lookahead == '{' && brace_newline) { return false; }
+                    lexer->result_symbol = POSTFIX_CARET;
+                    return true;
+                }
                 break;
             default: break;
         }
@@ -313,7 +359,11 @@ bool tree_sitter_lambda_external_scanner_scan(
     // operator above. When a line opens with a dual-role token, NEITHER a guard
     // nor this boundary is emitted, so both readings are blocked and the parse
     // fails loudly — S16.2.3, "neither reading wins by default".
-    if (valid_symbols[STMT_BOUNDARY] && classify_start(lexer)) {
+    if (valid_symbols[ELEM_STMT_BOUNDARY] && classify_start(lexer, true)) {
+        lexer->result_symbol = ELEM_STMT_BOUNDARY;
+        return true;
+    }
+    if (valid_symbols[STMT_BOUNDARY] && classify_start(lexer, false)) {
         lexer->result_symbol = STMT_BOUNDARY;
         return true;
     }
