@@ -41,10 +41,7 @@ type ListItemElement = <li [string | ParagraphElement]*>
 // Function types
 type StringProcessor = fn (input: string) string
 type ContactValidator = fn (contact: Contact) bool
-// a bracketed return type collides with the `T[n]` occurrence suffix, so the
-// array return is named
-type IntArray = [int*]
-type MapFunction = fn (input: [string*]) IntArray
+type MapFunction = fn (input: [string*]) int[]
 
 // Recursive structures
 type TreeNode = {
