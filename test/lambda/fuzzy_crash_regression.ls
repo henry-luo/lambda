@@ -18,7 +18,7 @@
 'Crash 3: ~ in type method'
 type Vec {
     x: float,
-    y: float;
+    y: float,
     fn translate(dx: float, dy: float) => <Vec *:~, x: x + dx, y: y + dy>
     fn scale(factor: float) => <Vec *:~, x: x * factor, y: y * factor>
 }
@@ -28,7 +28,7 @@ v.scale(2.0) != null
 
 // === Crash 4: len() on null from optional query ===
 'Crash 4: len on null from query'
-let items = <root>
+let items = <root>;
     <item> "a"
     <item> "b"
 len(items?item)

@@ -74,7 +74,7 @@ fn label_text(raw, fallback, graph_name, edge_name = null) {
     "\\L", fallback)
 }
 
-fn label_element(value) => if (value == null or value == "") null else <label; value>
+fn label_element(value) => if (value == null or value == "") null else <label value>
 
 fn graphviz_style(value) {
   let style = lower(text(value, "style", ""));
@@ -119,7 +119,7 @@ fn graphviz_cluster(value, clusters, graph_name, height, geometry) {
       x: if (box != null) box.x else null, y: if (box != null) box.y else null,
       width: if (box != null) box.width else null,
       height: if (box != null) box.height else null,
-      'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value);
+      'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value),
     if (label != null) { label }
   >
 }
@@ -134,7 +134,7 @@ fn graphviz_node(value, clusters, graph_name, height, geometry) {
       x: if (box != null) box.x else null, y: if (box != null) box.y else null,
       width: if (box != null) box.width else null,
       height: if (box != null) box.height else null,
-      'dash-array': graphviz_style(value);
+      'dash-array': graphviz_style(value),
     if (label != null) { label }
   >
 }

@@ -25,7 +25,7 @@ len({a: null, b: 2}); [for (i in {a: null, b: 2}) i]
 len(null); [for (i in null) i]
 
 "-- KNOWN DIVERGENCE: element len counts children, iteration adds attrs --"
-len(<elmt a: 1, b: 2, "text">); [for (i in <elmt a: 1, b: 2; "text">) i]
+len(<elmt a: 1, b: 2, "text">); [for (i in <elmt a: 1, b: 2, "text">) i]
 
 "-- count(): splicing is syntactic, not a value property (see 8.3) --"
 // a for-expression and a spread splice at the construction site...

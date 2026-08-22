@@ -68,7 +68,7 @@ fn canonical_label(value, fallback = null) {
   let source = model.label_source(value, fallback);
   let format = model.label_format(value);
   if (source == null) { null }
-  else { <label format: format; source> }
+  else { <label format: format, source> }
 }
 
 fn canonical_content(value, label, preserve_other_children, authored_children = null) {
@@ -83,7 +83,7 @@ fn canonical_content(value, label, preserve_other_children, authored_children = 
     else [];
   if (label == null and len(lowered) == 0) { null }
   else {
-    let result = <content;
+    let result = <content
       for (child in lowered) child
     >
     result
@@ -105,7 +105,7 @@ fn canonical_node(node) {
   let ports = [*authored_ports, for (i, name in generated_names)
     <port id: name, side: "auto",
       offset: (float(i) + 0.5) / float(len(generated_names))>];
-  <node *:attrs;
+  <node *:attrs,
     if (label != null) { label }
     if (content != null) { content }
     for (port in ports) port
@@ -117,7 +117,7 @@ fn canonical_edge(edge) {
   let attrs = map(edge);
   let label = canonical_label(edge);
   let content = canonical_content(edge, label, false);
-  <edge *:attrs;
+  <edge *:attrs,
     if (label != null) { label }
     if (content != null) { content }
     for (child in noncanonical_children(edge)) child
@@ -130,7 +130,7 @@ fn canonical_subgraph(subgraph) {
     string(subgraph.id) else null;
   let label = canonical_label(subgraph, fallback);
   let content = canonical_content(subgraph, label, false);
-  <subgraph *:attrs;
+  <subgraph *:attrs,
     if (label != null) { label }
     if (content != null) { content }
     for (child in noncanonical_children(subgraph)) canonical_child(child)
@@ -150,7 +150,7 @@ fn canonical_child(child) {
 
 fn canonical_graph(graph) {
   let attrs = map(graph);
-  <graph *:attrs;
+  <graph *:attrs,
     for (child in model.child_items(graph)) canonical_child(child)
   >
 }
@@ -205,7 +205,7 @@ fn merged_source_node(groups, node) {
   let values = if (node.id != null) groups[string(node.id)] else [node];
   let final_declaration = values[len(values) - 1];
   let attrs = merge_node_attrs_at(values, 0, {});
-  <node *:attrs;
+  <node *:attrs,
     // mermaid redeclarations replace authored node content, while ports remain
     // cumulative metadata attached to the graph-global node identity.
     for (child in model.child_items(final_declaration)
@@ -225,7 +225,7 @@ fn merged_source_children(groups, container) => [
 
 fn merged_source_subgraph(groups, subgraph) {
   let attrs = map(subgraph);
-  <subgraph *:attrs;
+  <subgraph *:attrs,
     for (child in merged_source_children(groups, subgraph)) child
   >
 }
@@ -233,7 +233,7 @@ fn merged_source_subgraph(groups, subgraph) {
 fn merge_mermaid_source_graph(graph) {
   let attrs = {*:map(graph), 'ir-stage': "canonical"};
   let groups = node_declaration_groups(graph);
-  <graph *:attrs;
+  <graph *:attrs,
     for (child in merged_source_children(groups, graph)) child
   >
 }
@@ -331,7 +331,7 @@ fn resolve_dot_edge(edge, entries) {
   let to = resolve_dot_endpoint(edge, "to", entries);
   let attrs = {*:map(edge), 'from-port': from.port, 'from-compass': from.compass,
     'to-port': to.port, 'to-compass': to.compass};
-  <edge *:attrs;
+  <edge *:attrs,
     for (child in model.child_items(edge)) child
   >
 }
@@ -341,7 +341,7 @@ fn resolve_dot_child(child, entries) {
   else if (model.tag(child) == "edge") resolve_dot_edge(child, entries)
   else if (model.tag(child) == "subgraph") {
     let attrs = map(child);
-    <subgraph *:attrs;
+    <subgraph *:attrs,
       for (nested in model.child_items(child)) resolve_dot_child(nested, entries)
     >
   }
@@ -367,7 +367,7 @@ fn resolve_dot_compass_ports(graph) {
   if (len(needed) == 0) graph
   else {
     let attrs = map(graph);
-    <graph *:attrs;
+    <graph *:attrs,
       for (child in model.child_items(graph)) resolve_dot_child(child, entries)
     >
   }

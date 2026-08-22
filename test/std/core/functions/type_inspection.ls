@@ -16,7 +16,7 @@ type('hello')
 
 // ===== name() =====
 name(<div>)
-name(<p; "hello">)
+name(<p "hello">)
 name(<span class: "test">)
 
 // ===== len() =====
@@ -31,5 +31,5 @@ len({})
 // ===== Method-style =====
 42.type()
 "hello".type()
-"hello".len()
+"hello".len();
 [1, 2, 3].len()

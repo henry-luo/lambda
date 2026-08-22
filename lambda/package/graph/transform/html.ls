@@ -274,8 +274,8 @@ fn fixed_shape_style(node, parsed, palette) {
 
 fn fixed_shape_content(content, node) =>
   <content style: "display:block;box-sizing:border-box;grid-area:1/1;z-index:1;" ++
-      node_padding_css(node);
-    for (child in content) child
+      node_padding_css(node)
+, for (child in content) child
   >
 
 fn html_port(entry, index) {
@@ -355,8 +355,8 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
         "display:inline-grid;box-sizing:border-box;align-items:center;justify-items:center;" ++
           font_css(node, palette.node_text) ++ ";white-space:" ++
           (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++ ";"
-        else node_style(node, parsed_style, palette);
-    if (fixed_shape) {
+        else node_style(node, parsed_style, palette)
+, if (fixed_shape) {
       <'node-shape' style: fixed_shape_style(node, parsed_style, palette)>
       fixed_shape_content(content, node)
     }
@@ -465,7 +465,7 @@ fn html_cluster_label(entry, index, palette) {
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
           "background:" ++ palette.graph_background ++ ";" ++ font_css(group, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
-          ";pointer-events:none;";
+          ";pointer-events:none;",
       for (child in if (content != null) content else graph_content.lower(label, format)) child
     >
   }
@@ -487,7 +487,7 @@ fn html_edge_label(edge, index, group, palette) {
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
           "background:" ++ palette.graph_background ++ ";" ++ font_css(edge, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
-          ";pointer-events:none;";
+          ";pointer-events:none;",
       for (child in if (content != null) content else graph_content.lower(label, format)) child
     >
   }
@@ -510,7 +510,7 @@ fn html_annotation(annotation, owner_kind, owner_id, index, palette) {
           "background:" ++ palette.graph_background ++ ";" ++
           font_css(annotation, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
-          ";pointer-events:none;";
+          ";pointer-events:none;",
       for (child in graph_content.lower(label, format)) child
     >
   }
@@ -607,6 +607,6 @@ pub fn to_html(graph, opts = null) {
       'data-compound': source_attr(graph, "compound", null),
       'data-use-splines': if (route_mode == "curved") "true" else "false",
       style: "position:relative;background:" ++ graph_background ++ ";" ++
-        font_css(graph, palette.node_text);
-    for child in children { child }>
+        font_css(graph, palette.node_text)
+, for child in children { child }>
 }

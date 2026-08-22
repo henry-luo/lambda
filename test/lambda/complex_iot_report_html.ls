@@ -360,29 +360,29 @@ fn progress_bar(value, max_val, color) {
     let percentage = (value / max_val) * 100.0
     let bar_class = "progress-bar bg-" ++ color
     let bar_style = "width: " ++ format_number(percentage, 1) ++ "%"
-    let bar_text = format_number(percentage, 1) ++ "%"
+    let bar_text = format_number(percentage, 1) ++ "%";
     <div class:"progress"
-        <div class:bar_class, style:bar_style; bar_text>
+, <div class:bar_class, style:bar_style, bar_text>
     >
 }
 
 fn info_item(label_text, value_content) {
     <div class:"info-item"
-        <div class:"label"; label_text>
-        <div class:"value"; value_content>
+, <div class:"label", label_text>
+        <div class:"value", value_content>
     >
 }
 
 fn metric_card(label_text, value_text, description_text) {
     <div class:"metric-card"
-        <div class:"label"; label_text>
-        <div class:"value"; value_text>
-        <div class:"description"; description_text>
+, <div class:"label", label_text>
+        <div class:"value", value_text>
+        <div class:"description", description_text>
     >
 }
 
 fn alert_box(alert_class, content) {
-    <div class:("alert-box " ++ alert_class), style:"margin-top: 15px;"; content>
+    <div class:("alert-box " ++ alert_class), style:"margin-top: 15px;", content>
 }
 
 // Sample IoT sensor data

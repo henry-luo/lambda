@@ -60,34 +60,34 @@ let any_null: any = null;
 (any_int > any_string);
 (any_int > any_true);
 (any_int > any_null) is null;
-(any_float > any_null) is null
-(any_true > any_false)
-(any_null > any_null) is null
+(any_float > any_null) is null;
+(any_true > any_false);
+(any_null > any_null) is null;
 
 // ===== Less Than or Equal (<=) =====
-(1 <= 2)
-(2 <= 1)
-(1 <= 1)
-(42 <= 42.0)
-(42 <= 43.0)
-("abc" <= "abc")
-("abc" <= "def")
-("def" <= "abc")
+(1 <= 2);
+(2 <= 1);
+(1 <= 1);
+(42 <= 42.0);
+(42 <= 43.0);
+("abc" <= "abc");
+("abc" <= "def");
+("def" <= "abc");
 // Invalid
-(any_int <= any_string)
-(any_int <= any_true)
-(any_int <= any_null) is null
+(any_int <= any_string);
+(any_int <= any_true);
+(any_int <= any_null) is null;
 
 // ===== Greater Than or Equal (>=) =====
-(2 >= 1)
-(1 >= 2)
-(1 >= 1)
-(42.0 >= 42)
-(43.0 >= 42)
-("abc" >= "abc")
-("def" >= "abc")
-("abc" >= "def")
+(2 >= 1);
+(1 >= 2);
+(1 >= 1);
+(42.0 >= 42);
+(43.0 >= 42);
+("abc" >= "abc");
+("def" >= "abc");
+("abc" >= "def");
 // Invalid
-(any_int >= any_string)
-(any_int >= any_true)
+(any_int >= any_string);
+(any_int >= any_true);
 (any_int >= any_null) is null

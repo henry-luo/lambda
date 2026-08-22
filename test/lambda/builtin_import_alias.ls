@@ -1,6 +1,6 @@
 // Test built-in module aliased import: import m:math;
 // Use alias prefix m. instead of math.
-import m:math;
+import m:math,
 
 "1. math functions with alias"
 m.sqrt(16)

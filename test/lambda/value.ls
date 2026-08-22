@@ -26,9 +26,9 @@ k:[120, 1e-2], l:[121], m:[true, 124], n:{a:'hello', b:0.5}}
 b:456, c:789>
 <elmt> <elmt a:123> <elmt "text">
 <elmt a:123, "text"; 111>
-<elmt a:123, b:'symbol', c:<d>; "text"; 222; <br> <br>; <br> "test" " and " "
+<elmt a:123, b:'symbol', c:<d>, "text"; 222; <br> <br>; <br> "test" " and " "
 more text">
-<elmt [456]; "text"; 789; {a:123}; 'symbol'; [1,2,"many items to test list_push"]; <br> <br> <br> "test"; " and "; "more text" ++ "!">
+<elmt [456]; "text"; 789; {a:123}, 'symbol'; [1,2,"many items to test list_push"]; <br> <br> <br> "test"; " and "; "more text" ++ "!">
 <body a:'b', b:123, c:true; 123; "text"
     <div b:123, c:true; "test";
         <span b:123, c:true; "test"; 123; "a">; 123;

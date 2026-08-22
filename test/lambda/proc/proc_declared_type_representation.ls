@@ -32,8 +32,8 @@ pn build_str(n: int) string {
 }
 
 // ---------------------------------------------------------------------------
-// B. declared int/int64/float bound from an `integer`-carrier expression.
-// len() is int64 but ordinary arithmetic widens to the semantic `integer`
+// B. declared int/i64/float bound from an `integer`-carrier expression.
+// len() is i64 but ordinary arithmetic widens to the semantic `integer`
 // carrier, which is LMD_TYPE_DECIMAL at runtime. With no coercion the decimal
 // pointer Item was stored into a register later read as a native lane: the
 // binding read back as <error>, and as a loop counter it never terminated.
@@ -70,7 +70,7 @@ pn main() {
     show("pad_string", pad_string("1234"))
     var direct: int = int(5n)
     show("int_from_integer_literal", direct)
-    var as_i64 = int64(9 - len("abcd"))
+    var as_i64 = i64(9 - len("abcd"))
     show("int64_from_len_expr", as_i64)
     var as_float: float = float(9n)
     show("float_from_integer", as_float)

@@ -5,7 +5,7 @@ import compartment: .compartment
 fn description_row(description) =>
   <div class: "graph-state-description",
       'data-label-format': description["label-format"],
-      style: "display:block;text-align:left;white-space:normal;padding:1px 2px;";
+      style: "display:block;text-align:left;white-space:normal;padding:1px 2px;",
     string(description.value)
   >
 
@@ -18,7 +18,7 @@ fn state_content(node, descriptions) =>
     <div class: "graph-state-marker graph-state-" ++ string(node["state-kind"]),
         style: if (node["state-kind"] == "fork" or node["state-kind"] == "join")
           "display:block;width:42px;height:4px;" else
-          "display:block;width:16px;height:16px;";
+          "display:block;width:16px;height:16px;",
       " "
     >
   else null

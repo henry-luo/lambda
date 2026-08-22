@@ -52,7 +52,7 @@ let el1 = <span class: "test", style: "color:red">
 
 // ---- text_of ----
 "29. text_of string:"; util.text_of("hello")
-"30. text_of element:"; util.text_of(<span; "content">)
+"30. text_of element:"; util.text_of(<span "content">)
 
 // ---- constants ----
 "31. PT_PER_EM:"; util.PT_PER_EM

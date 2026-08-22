@@ -6,7 +6,7 @@ p.y
 
 // Methods: zero-arg and one-arg
 type Counter {
-    value: int;
+    value: int,
     fn double() => value * 2
     fn add(n: int) => value + n
 }

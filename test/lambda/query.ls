@@ -18,9 +18,9 @@ len("hello".?string)   // 1 — self-inclusive
 // === 3. Element query ===
 "--- element query ---"
 let page = <div class: "main",
-    <p; "text1">
-    <span; "text2">
-    <div id: "inner"; <p; "text3">>
+    <p "text1">
+    <span "text2">
+    <div id: "inner", <p "text3">>
 >
 
 len(page?<p>)          // 2 (finds both <p>)
@@ -30,9 +30,9 @@ len(page?<span>)       // 1
 
 // === 4. Element query recurses with .? ===
 "--- .? recurses ---"
-let deep = <div;
-    <div;
-        <p; "deep">
+let deep = <div
+    <div
+        <p "deep">
     >
 >
 len(deep?<p>)          // 1 (recursive, not self-inclusive)

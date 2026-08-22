@@ -90,5 +90,5 @@ fn longer(a: string, b: string) {
 // ============================================
 
 "8. Element len"
-let el = <div; "a"; "b"; "c">
+let el = <div "a"; "b"; "c">
 len(el)

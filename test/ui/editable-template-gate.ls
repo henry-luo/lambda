@@ -3,7 +3,7 @@
 
 edit <editable_template_probe> state text: "seed", status: "ready" {
   <div id:"surface", contenteditable:"true", tabindex:"0", text>
-  <output id:"state"; status ++ ":" ++ text>
+  <output id:"state", status ++ ":" ++ text>
 }
 on beforeinput(evt) {
   if (evt.input_intent != null) {

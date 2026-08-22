@@ -43,7 +43,7 @@ let s: i64 = -1i64;
 "=== off-lane joins are unchanged ===";
 // i64 against `int` widens to the exact integer tower, not the wrapping lane
 [a + 1, type(a + 1)];
-[int64(2000000000000) - 100, type(int64(2000000000000) - 100)];
+[i64(2000000000000) - 100, type(i64(2000000000000) - 100)];
 // i64 against a binary float joins in the float lane
 [2i64 * 1.5, type(2i64 * 1.5)]
 // a narrow sized operand is a packed Item, not a wide lane

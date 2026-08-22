@@ -1,7 +1,7 @@
 // Loop-carried representation widening.
 //
-// `var s = 0` is an int-lane binding; `s + <int64>` types as DECIMAL (int and
-// int64 join in the exact INTEGER domain). The assignment therefore widens the
+// `var s = 0` is an int-lane binding; `s + <i64>` types as DECIMAL (int and
+// i64 join in the exact INTEGER domain). The assignment therefore widens the
 // binding to a boxed carrier — but a loop body is emitted in ONE pass, so the
 // read of `s` at the loop top must already agree with that carrier, and the
 // return-lane proof must see the loop's assignment as a reassignment.
@@ -53,7 +53,7 @@ pn plain_int(n: int) {
   return acc
 }
 
-// CONTROL: a declared int64 accumulator types as int64 throughout
+// CONTROL: a declared i64 accumulator types as i64 throughout
 pn declared_i64(n: int) {
   var s = 0i64
   for (i in 1 to n) { s = s + 999999999999999i64 }

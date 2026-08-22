@@ -1,4 +1,4 @@
-// uint64 should participate anywhere the runtime accepts int64 numeric values.
+// uint64 should participate anywhere the runtime accepts i64 numeric values.
 
 "=== scalar math ==="
 math.sqrt(4u64)

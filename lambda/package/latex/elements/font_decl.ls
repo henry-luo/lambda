@@ -60,6 +60,6 @@ pub fn wrap_font_decl(tag_str, items) {
 // wrap rendered items in a div with alignment style
 // callers guarantee tag_str is a valid alignment declaration key
 pub fn wrap_align_decl(tag_str, items) {
-    let style = ALIGN_DECL_STYLES[tag_str]
-    <div class: "latex-" ++ tag_str, style: style; for c in items { c }>
+    let style = ALIGN_DECL_STYLES[tag_str];
+    <div class: "latex-" ++ tag_str, style: style, for c in items { c }>
 }

@@ -299,7 +299,7 @@ fn resolve_ref(elements, value) {
     let exact = [for (entry in elements where entry.identifier == value) entry.id];
     let suffix = [for (entry in elements
       where ends_with(ent, , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , ry.identifier, "." ++ value)) entry.id];
-    if (len(exact) == 1) exact[0]
+    if (len(exact) == 1) exact[0];
     else if (len(suffix) == 1) suffix[0]
     else value
   }

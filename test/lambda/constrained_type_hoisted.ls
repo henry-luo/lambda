@@ -55,7 +55,7 @@ type Scores = [Positive];
 // this pins the parse, not the enforcement.
 type Range {
     start: int,
-    end: int that ~ >= 0;
+    end: int that ~ >= 0,
     that ~.end > ~.start
 }
 let range_ok = <Range start: 1, end: 5>

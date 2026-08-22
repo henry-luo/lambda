@@ -24,6 +24,6 @@ let el = <item id:"i1", empty:null, "child">
 "child" in el
 'id' in el
 
-'=== for at ==='
+'=== for at ===';
 [for (k at el) k]
 

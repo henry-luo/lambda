@@ -202,9 +202,9 @@
 
 // Verify vector creation works correctly
 [1, 2, 3];
-[1.5, 2.5, 3.5]
-[1, 2.5, 3]
-[]
+[1.5, 2.5, 3.5];
+[1, 2.5, 3];
+[];
 [42]
 
 "End of Vector Basic Operations Tests"

@@ -3,7 +3,7 @@
 //
 // Run: ./lambda.exe test/readable/readability_test.ls
 
-import readability: .utils.readability;
+import readability: .utils.readability,
 
 // Test case directory
 let TEST_PAGES_DIR = "./readability/test/test-pages/";
@@ -35,7 +35,7 @@ fn run_test(test_name) {
             passed: false,
             error: "Failed to load source: " ++ (html_content)
         }
-    };
+    }
     
     // Load expected metadata
     let expected_json = read(metadata_path);
@@ -45,7 +45,7 @@ fn run_test(test_name) {
             passed: false,
             error: "Failed to load expected metadata: " ++ (expected_json)
         }
-    };
+    }
     
     let expected = input(expected_json, 'json);
     if (expected is error) {

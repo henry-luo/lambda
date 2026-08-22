@@ -9,6 +9,6 @@ fn make_adder(n) {
     inner
 }
 
-let add = make_adder(int64(5000000000))
+let add = make_adder(i64(5000000000))
 
 add(1)

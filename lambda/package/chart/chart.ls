@@ -33,7 +33,7 @@ pub fn render(chart_el) {
 pub fn render_spec(spec) {
     if (spec is element) render(spec)
     else if (spec.concat) render_concat(spec)
-    else if (spec.repeat_row or spec.repeat_column) render_repeat(spec)
+    else if (spec.re, , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , peat_row or spec.repeat_column) render_repeat(spec)
     else dispatch(spec)
 }
 

@@ -16,9 +16,9 @@ len("hello".?string)
 
 // ===== Element query =====
 let page = <div class: "main",
-    <p; "text1">
-    <span; "text2">
-    <div id: "inner"; <p; "text3">>
+    <p "text1">
+    <span "text2">
+    <div id: "inner", <p "text3">>
 >
 len(page?<p>)
 len(page?<div>)
@@ -26,9 +26,9 @@ len(page.?<div>)
 len(page?<span>)
 
 // ===== Deep recursion =====
-let deep = <div;
-    <div;
-        <p; "deep">
+let deep = <div
+    <div
+        <p "deep">
     >
 >
 len(deep?<p>)

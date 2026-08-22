@@ -10,7 +10,7 @@ import opt: lambda.package.math.optimize
 
 // ---- single element box (no merge needed) ----
 let box1 = {
-    element: <span class: "mord" "x">,
+    element: <span class: "mord", "x">,
     height: 0.7, depth: 0.0, width: 0.5,
     type: "mord", italic: 0.0, skew: 0.0
 }
@@ -22,8 +22,8 @@ let r1 = opt.coalesce(box1)
 // ---- two mergeable spans ----
 let box2 = {
     element: <span class: "lm_mathit"
-        <span class: "mord" "x">
-        <span class: "mord" "y">>,
+, <span class: "mord", "x">
+        <span class: "mord", "y">>,
     height: 0.7, depth: 0.0, width: 1.0,
     type: "mord", italic: 0.0, skew: 0.0
 }
@@ -34,8 +34,8 @@ let r2 = opt.coalesce(box2)
 // ---- non-mergeable spans (different classes) ----
 let box3 = {
     element: <span class: "lm_mathit"
-        <span class: "mord" "x">
-        <span class: "mbin" "+">>,
+, <span class: "mord", "x">
+        <span class: "mbin", "+">>,
     height: 0.7, depth: 0.0, width: 1.2,
     type: "mord", italic: 0.0, skew: 0.0
 }
@@ -45,8 +45,8 @@ let r3 = opt.coalesce(box3)
 // ---- span with style (should not merge) ----
 let box4 = {
     element: <span class: "lm_mathit"
-        <span class: "mord", style: "color:red" "a">
-        <span class: "mord" "b">>,
+, <span class: "mord", style: "color:red", "a">
+        <span class: "mord", "b">>,
     height: 0.7, depth: 0.0, width: 1.0,
     type: "mord", italic: 0.0, skew: 0.0
 }
@@ -55,7 +55,7 @@ let r4 = opt.coalesce(box4)
 
 // ---- preserves box metrics ----
 let box5 = {
-    element: <span class: "mord" "z">,
+    element: <span class: "mord", "z">,
     height: 0.8, depth: 0.2, width: 0.6,
     type: "mord", italic: 0.1, skew: 0.05
 }
@@ -69,9 +69,9 @@ let r5 = opt.coalesce(box5)
 // ---- three mergeable spans ----
 let box6 = {
     element: <span class: "lm_cmr"
-        <span class: "mord" "a">
-        <span class: "mord" "b">
-        <span class: "mord" "c">>,
+, <span class: "mord", "a">
+        <span class: "mord", "b">
+        <span class: "mord", "c">>,
     height: 0.7, depth: 0.0, width: 1.5,
     type: "mord", italic: 0.0, skew: 0.0
 }

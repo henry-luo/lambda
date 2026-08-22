@@ -194,7 +194,7 @@ fn local_font_families() => {
 
 // wrap output in standalone HTML with style tag
 pub fn wrap_standalone(content_el, options = null) =>
-    <span;
-        <style; get_stylesheet(options)>
+    <span
+        <style get_stylesheet(options)>
         content_el
     >

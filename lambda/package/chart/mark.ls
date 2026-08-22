@@ -33,7 +33,7 @@ pub fn bar(data, ctx, mark_config) {
 
     let bars = (for (d in data) (
         let x_val = d[x_field],
-        let y_val = float(d[y_field]),
+        let y_val =, float(d[y_field]),
         let x_pos = float(scale.scale_apply(x_scale, x_val)),
         let y2_pos = if (y2_field) float(scale.scale_apply(y_scale, float(d[y2_field]))) else null,
         let raw_bar_w = if (mark_config and mark_config.width) float(mark_config.width)

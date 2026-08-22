@@ -203,20 +203,20 @@ if (numbers[0] > 0) {
 
 "=== EDGE CASES AND ERROR CONDITIONS ==="
 
-'# Empty collections'
-(for (x in []) x)  // empty array
+'# Empty collections';
+(for (x in []) x); // empty array
 (for (y in {}) y)  // empty map
 
-'# Null handling'
-(let maybe_null = null, if (maybe_null) "has value" else "is null")
+'# Null handling';
+(let maybe_null = null, if (maybe_null) "has value" else "is null");
 (for (item in [1, null, 3]) (if (item) item else "empty"))
 
-'# Zero and negative numbers'
-(let zero = 0, if (zero) 'truthy' else 'falsy')
-(let negative = -5, if (negative > 0) 'positive' else 'not positive')
+'# Zero and negative numbers';
+(let zero = 0, if (zero) 'truthy' else 'falsy');
+(let negative = -5, if (negative > 0) 'positive' else 'not positive');
 (for (n in -2 to 2) (if (n == 0) "zero" else n))
 
-"# Very nested expressions"
+"# Very nested expressions";
 (let a = 1,
  let b = (let x = a + 1, x * 2),
  let c = (if (b > 3) (for (i in 1 to b) i) else [b]),

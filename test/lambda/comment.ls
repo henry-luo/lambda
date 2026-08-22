@@ -79,4 +79,4 @@ d
 99
 
 "17. Comment after nested elements"
-<ul; <li; "item1">; <li; "item2">> // comment after nested
+<ul <li "item1">; <li "item2">> // comment after nested

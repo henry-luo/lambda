@@ -77,7 +77,7 @@ pn test_let_semicolon() {
 pn test_break_semicolon() {
     var x = 0
     while (true) {
-        x = x + 1; if (x == 3) { break; }
+        x = x + 1; if (x == 3) { break }
     }
     x  // should be 3
 }
@@ -87,7 +87,7 @@ pn test_continue_semicolon() {
     var sum = 0
     var i = 0
     while (i < 6) {
-        i = i + 1; if (i % 2 == 0) { continue; }
+        i = i + 1; if (i % 2 == 0) { continue }
         sum = sum + i
     }
     sum  // should be 9 (1+3+5)

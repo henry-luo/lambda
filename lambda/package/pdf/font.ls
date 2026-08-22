@@ -94,7 +94,7 @@ fn _contains_loop(s: string, needle: string, i: int, limit: int) {
 fn _contains(s: string, needle: string) {
     let n = int(len(s))
     let m = int(len(needle))
-    if (m == 0) { true };
+    if (m == 0) { true }
     else if (n < m) { false }
     else { _contains_loop(s, needle, 0, n - m) }
 }
@@ -320,7 +320,7 @@ fn _pick_info(s14_info, fallback_info) {
 fn _has_flag(flags, mask) {
     // Lambda has no bitwise ops in the path used here; integer
     // arithmetic via mod/div is sufficient for single-bit checks.
-    let q = flags div mask
+    let q = flags div mask;
     (q - ((q div 2) * 2)) == 1
 }
 

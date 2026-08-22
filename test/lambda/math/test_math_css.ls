@@ -56,7 +56,7 @@ let katex_ss = css.get_stylesheet({font_option: "katex"})
 "39. stylesheet katex omits local main font:"; not contains(katex_ss, "Computer Modern Serif")
 
 // ---- wrap_standalone() ----
-let wrapped = css.wrap_standalone(<span; "x">)
+let wrapped = css.wrap_standalone(<span "x">)
 "40. wrap tag:"; name(wrapped)
 "41. wrap has style child:"; name(wrapped[0])
 "42. wrap has content:"; name(wrapped[1])

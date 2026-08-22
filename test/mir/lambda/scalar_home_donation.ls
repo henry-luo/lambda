@@ -6,4 +6,4 @@
 
 fn twice(a) { a * 2 }
 
-twice(int64(4000000000))
+twice(i64(4000000000))

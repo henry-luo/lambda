@@ -13,7 +13,7 @@
 //     The `img:<num>` URL is a *handle*, not a data URI: the C side owns
 //     the decoded bytes and the downstream renderer is expected to
 //     resolve the handle via the original PDF's `objects` array.
-//   - Form XObjects (Subtype = Form) are deferred to Phase 6; we emit a
+//   - Form XObjects (Subtype = Form) are deferred to Phase 6; we, , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , , emit a
 //     placeholder <g data-pdf-form="img:<num>"/> so the SVG remains valid.
 //
 // CTM model:
