@@ -3,8 +3,10 @@
 **Status**: RATIFIED 2026-08-21 as `S16 Surface Syntax`
 (`doc/Lambda_Formal_Semantics.md` v9.0.0). Unimplemented — every S16 ruling
 carries the `*` mark; see Appendix A for the conformance list. §7 audit
-rulings (points 19–31) decided 2026-08-21; §7.13 fully resolved — batch
-ratification into the spec is unblocked.
+rulings (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
+(closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided but
+not yet implemented. No open audit items remain; batch ratification of the
+decided set is unblocked.
 **Scope**: Statement separation, the role of the line break, and cross-line
 expression continuation in Lambda surface syntax.
 **Spec linkage**: This document is the decision record; **`S16` is the
@@ -717,6 +719,78 @@ and REPL paths.
 
 ---
 
+### 4.5 Implementation status (2026-08-21)
+
+**Tree-sitter grammar: implemented and verified.** The three-file split is
+collapsed into one `grammar.js` stating the whole language, and
+`src/scanner.c` is rewritten from sub-language extraction to the S16 guards.
+A 50-case conformance harness (accept *and* reject cases across S16.1–S16.6
+and §7.1–§7.11) passes 50/50.
+
+*Design change forced by the implementation.* The guards were first written
+as a single zero-width `_join` marker, as §4.4 anticipated. That fails: a
+zero-width token pushes the precedence-deciding operator two symbols out of
+lookahead range and breaks LR(1) resolution for the whole operator tier
+(`a ++ b • _join …` cannot choose between reduce and shift). The working
+design makes each guarded operator its own **consumed** external token —
+`_bin_plus`, `_bin_minus`, `_bin_star`, `_bin_slash`, `_bin_lt`,
+`_call_lparen`, `_index_lbracket`, `_member_dot`, `_postfix_caret` — emitted
+only when the operator shares a line with its left operand, plus the
+zero-width `_stmt_boundary` and `_not_paren`. Precedence then resolves at
+one-token lookahead as usual. The disjointness argument survives intact: a
+guarded operator token and `_stmt_boundary` are never both emissible, so a
+line-start dual-role token yields neither and the parse fails loudly.
+
+*Second implementation finding.* `type` had to leave value position. It is
+both a base-type keyword (`type(x)`) and a declaration introducer, so under
+S16.1.3 juxtaposition `type E { … }` also read as three adjacent statements
+— type value, identifier, map — and that reading won. `base_type` keeps
+`type` for the type language; value position uses the base-type keywords
+without it, and `type(x)` is reinstated as an explicit call form, separated
+from a declaration by one token of lookahead (`(` vs an identifier).
+
+*Post-implementation note: the §7.14 closed-tail refinement was decided
+AFTER the 50/50 milestone below; both parsers and both harnesses still
+implement the blanket statement-boundary rule and need re-tuning.*
+
+**C parser: implemented and verified.** `test/c_s16_conformance.sh` mirrors
+the reference harness case for case and passes 50/50, so both front ends
+accept and reject the same language. The central move matches S16.1.1
+exactly: **line breaks no longer reach the parser at all.**
+`parser_next_significant` collapses every NEWLINE run into an `nl_before`
+flag on the following token, and that flag is the only thing the S16 rules
+consult. Everything else follows from it — the Pratt loop and
+`parse_postfix` break on a dual-role token carrying the flag,
+`parse_content` implements strict `;` plus juxtaposition, and three
+ad-hoc newline heuristics (`newline_starts_root_path`, `newlines_lead_to`,
+`assignment_statement_starts`) were deleted outright because the rule now
+covers what they approximated. `parse_type_slot`'s annotation boundary
+moved to the same flag, which is O3 discharged on the C side: type space
+now shares the S16.2.2 continuation set instead of keeping a private one.
+
+**Build integration: done.** `ts-enum.h` regenerates cleanly; the C++ CST
+path was migrated as scoped above (retired extraction tokens and their four
+now-dead builders removed, `SYM_IF_STAM`/`SYM_FOR_STAM`/`SYM_RAISE_STAM`
+dropped, `SYM_WHILE_STAM` remapped to `sym_while_expr`). The Makefile drops
+`GRAMMAR_COMMON_JS` for `GRAMMAR_SCANNER_C`, retires `grammar-sync-check`
+and `generate-grammar-full` with the two grammar files and their `utils/`
+scripts, and gains `make test-grammar-s16`, which runs both harnesses.
+
+**Corpus migration scale.** 21 of the first 60 `test/lambda/*.ls` files
+already parse clean; the other 39 exhibit exactly the predicted S16 classes
+— most commonly a line-start `[` or `(` after a complete statement
+(`fn a() { … }` ⏎ `[pick(2)]`), which is the S16.2.3 error and takes a `;`.
+As designed, every one surfaces as a parse error rather than a silent
+reinterpretation. A front-end cross-check over the same corpus found the
+two parsers agreeing everywhere; the only apparent divergences were the C
+parser resolving *imports* into un-migrated library sources — e.g.
+`lambda/package/graph/transform/paint.ls:154` still spells the retired
+element divider (`else <g;`), which §7.11 replaced with the boundary comma.
+The package library is therefore part of the migration surface, not just
+`test/`.
+
+---
+
 ---
 
 ## 5. Unified `if` / `for` / `while` Forms
@@ -762,14 +836,25 @@ condition. This gives every program exactly one parse:
 **Consequence (decided): a bare-form condition must not start with `(`.**
 
 ```
-if (a+b)*2 { ... }        // SYNTAX ERROR
-if ((a+b)*2) { ... }      // correct: paren form, braced body
+if ((a+b)*2) { ... }      // the intended spelling: paren form, braced body
+if (a+b)*2 { ... }        // NOT an error — see the correction below
 ```
 
-The committed paren-form reading of the first line takes `(a+b)` as the
-condition and then meets `* 2`, which cannot begin a body expression — the
-parser reports the form error rather than guessing, naming the rewrite
-(wrap the full condition). This is the mirror image of Go's
+*Correction (2026-08-21, from the Tree-sitter implementation).* An earlier
+draft of this section claimed `if (a+b)*2 { … }` is a syntax error because
+`* 2` "cannot begin a body expression." That reasoning predates §7.10 and
+§7.12, which keep `*` (spread) and `+` (identity/coercion) as PREFIX
+operators — so `*2` is a perfectly good body expression, and the line
+parses as paren-form `if (a+b) *2` followed by a juxtaposed `{ … }` block.
+Verified against the generated parser. The commitment rule itself stands
+and is implemented (`_not_paren`): `(` after `if`/`while` selects the paren
+form, so a bare head may not begin with `(`, and a body that opens with a
+continuation-only token — `if (1) == 2 { … }` — is still a loud error.
+What cannot be enforced grammatically is the *reader's* misgrouping, since
+banning prefix-operator bodies would also ban the legitimate
+`if (c) -1 else 1`. This belongs to the diagnostics backlog (§7.13): warn
+when a paren-form body opens with a prefix operator on the same line, and
+suggest wrapping the condition. This is the mirror image of Go's
 composite-literal-in-condition restriction, and it is the entire price of
 having two spellings. `for` pays nothing: loop declarations must begin with
 an identifier, so `(` after `for` is never ambiguous. `while`'s bare-form
@@ -1029,8 +1114,13 @@ for scalars".
 8. `if` / `for` / `while` unify to one node with two spellings: paren head
    with any-expression body, or bare head with braced body (§5.1); `(` after
    the keyword commits to the paren form (§5.2).
-9. A bare-form condition must not start with `(` — `if (a+b)*2 { }` is a
-   syntax error; the rewrite is the paren form `if ((a+b)*2) { }` (§5.2).
+9. `(` after `if`/`while` commits to the paren form, so a bare-form
+   condition must not start with `(` (§5.2). Corrected 2026-08-21: the
+   example `if (a+b)*2 { }` is NOT an error — `*` is a prefix operator
+   (§7.10), so it parses as paren-form with body `*2` plus a juxtaposed
+   block. A body opening with a continuation-only token still errors; the
+   misgrouping risk is a lint, since banning prefix bodies would ban
+   `if (c) -1`.
 10. `else` is optional in both spellings; absent else yields `null` in value
     position, nothing in content position; dangling else binds nearest;
     `else`/`case`/`default` are continuation-only keywords under Rule 3
@@ -1141,14 +1231,14 @@ for scalars".
     greedy values), while **content and statements juxtapose**. Object
     types: one comma list, `, that expr` = object-level constraint (no new
     keyword), `, fn` = method (load-bearing vs fn types). Elements: strict
-    attr commas; tag→content juxtaposes (`<div "str">`); the boundary
-    comma is **optional** — always permitted, required at ambiguity
-    (`<div a: x, (y)>`, `<svg, .rect>`; `<div a:1, b:2, "text">` and
-    `<div a:1, b:2 "text">` both legal; a banned-unless-required variant
-    was rejected as too strict) — the one deliberately optional delimiter
-    in the language, confined to one structural position; also the one
-    sanctioned dangling-looking separator (ruling-15 carve-out: the comma
-    is the disambiguator/marker). `;` has exactly one role language-wide:
+    attr commas; the boundary comma is a **biconditional** (v2) — present
+    exactly when the element has both attributes and content:
+    `<div "text">` and `<div a:1>` take none, `<div a:1, "text">` requires
+    one, and both `<div a:1 "text">` and `<div, "text">` are errors. This
+    retires the language's last optional delimiter, so ruling 15 now has no
+    exception; rule 1 is safe only because §7.15 dissolved the
+    `<svg .rect>`-vs-`<svg, .rect>` case. `;` has exactly one role
+    language-wide:
     statement separation. S2.4.3v2 needs a `;`→`,` amendment (§7.11).
 31. Unary `+` is kept (identity + string→number coercion), and `+` stays
     in the S16.2.3 banned set — class consistency over per-token
@@ -1166,6 +1256,30 @@ for scalars".
     extraction externals — but a *small* scanner remains, since newline
     awareness is impossible in pure grammar rules (`extras` hides
     whitespace). Its new job is only the S16 guards (§4.4).
+33. Closed-tail juxtaposition (supersedes the blanket token-class rule at
+    statement boundaries): a line-start dual-role token errors only when
+    the previous statement ends in an EXPRESSION; after a structural closer
+    of a non-postfixable construct (fn/pn/type{}/view bodies, braced
+    if/for/while, match) or a self-complete keyword, it starts the next
+    statement — "after a block, never `;`". Open-tail carve-outs: let/var/
+    assign, type aliases (`type T = int` ⏎ `[3]` is the occurrence
+    ambiguity), `=>` bodies, `return`, and every bare expression including
+    maps/blocks/elements (primaries take postfix — closed-TAIL, not
+    closed-bracket). Declarations are NOT expressions — `(fn () {})[1]` is
+    impossible by design; parens promote non-primary exprs
+    (`(match x {…})[0]`). Golden test holds: closed-tail juxtaposition has
+    identical two-item readings in both spellings. Decided, not yet
+    re-implemented; S16.1.3/S16.2.3 take a v2 (§7.14).
+34. The relative path is respelled `\.a.b` (rooted `/.a.b` unchanged):
+    lexically free, `\` already carries path flavour from its import-
+    separator role, and unlike the `./a.b` front-runner it does not collide
+    with S10.5.1's postfix root step `value./.name`. Consequence: `.ident`
+    at a line start is pure member continuation, so the S16.2.4 carve-out
+    widens from `.ident(` calls to full leading-dot fluent chains. `.` is
+    sub-classified rather than retired from the dual-role set — `.digit`
+    stays dual-role because `a.5` is member access with an integer field.
+    Imports are unaffected — `import .mod` has a keyword introducer, so no
+    ambiguity exists to escape. S2.4.1 takes a v3, S16.2.4 a v2 (§7.15).
 
 **Open** *(O1 and O2 resolved above — decided points 13–14)***:**
 
@@ -1486,22 +1600,52 @@ type E { a: int, z: string, that ~.a > 0, fn render() => ... }
   else starts content, with no separator. `<` needs none either (§5.10:
   never an operator in element scope). Tag-to-content juxtaposition is the
   design default: `<div "str">` is the normal spelling.
-- **The boundary comma is optional: always permitted, required at
-  ambiguity.** It is required exactly where the first content item could
-  continue the previous phrase — content starting with `( [ - + * ^ / .`
-  after a greedy attr value, and the path-child-vs-qualified-tag case
-  `<svg, .rect>` (S2.4.3v2 maximal munch). Everywhere else it may be
-  written or omitted: `<div a:1, b:2, "text">` and `<div a:1, b:2 "text">`
-  are both legal. (A fully strict variant — boundary comma banned unless
-  required — was drafted first and rejected as too strict: erroring on a
-  harmless comma at one structural position buys no safety, and the
-  boundary comma is a *marker* of where the attr list ends, not a list
-  separator, so list-regime strictness does not apply to it.) This is the
-  one deliberately optional delimiter in the language, confined to a
-  single structural position, and the one sanctioned "dangling-looking"
-  separator (ruling-15 carve-out: in `<svg, .rect>` and `<elmt, content>`
-  the comma *is* the disambiguator/marker — successor of the old leading
-  `;`).
+- **The boundary comma is a BICONDITIONAL: present exactly when the element
+  has both attributes and content** (v2, decided 2026-08-21 — the third and
+  final form of this rule).
+
+  ```
+  <div "text">                 // content only — NO comma
+  <div a: 1, "text">           // both — comma REQUIRED
+  <div a: 1 "text">            // SYNTAX ERROR — missing boundary comma
+  <div a: 1>                   // attrs only — no comma
+  <div, "text">                // SYNTAX ERROR — no attrs, so no comma
+  ```
+
+  It settles the greedy attribute value deterministically rather than by
+  lookahead luck: `<div a: x (y)>` makes the call `x(y)` the attribute
+  value, `<div a: x, (y)>` makes `(y)` content. The comma's presence IS the
+  discriminator, so nothing is guessed.
+
+  **Revision history, because this rule moved twice.** It began as the `;`
+  divider; the first version of §7.11 replaced it with a comma that was
+  "always permitted, required at ambiguity" — the one deliberately optional
+  delimiter in the language, carved out of ruling 15. That exception is now
+  retired: the biconditional is checkable in one sentence and restores
+  ruling 15's no-optional-delimiters doctrine without exception.
+
+  **The cost, stated plainly: `<div a: 1 "text">` is lost.** That spelling
+  — attributes running straight into content, exactly as HTML writes it —
+  is the one form worth wanting here, and it is rejected. It cannot be kept
+  without making the comma OPTIONAL (legal both with and without), which is
+  precisely the exception this ruling exists to remove: an optional
+  delimiter at a structural position means the reader must know which
+  content-leading tokens are hazardous before they can predict whether the
+  comma is required. Syntactic simplicity wins over the nicer spelling, and
+  the trade is accepted knowingly.
+
+  The consolation is that the required form is still better than the markup
+  it replaces: `<div a: 1, "text">` against HTML's
+  `<div a="1">text</div>` — one delimiter instead of a repeated closing
+  tag, and no tag-name duplication to keep in sync.
+
+  **Rule 1 (no comma when there are no attributes) is only safe because of
+  §7.15.** The leading comma existed for exactly one case — `<svg .rect>`
+  (maximal-munch qualified tag) versus `<svg, .rect>` (tag plus path child,
+  S2.4.3v2). Respelling the relative path `\.` dissolved it: `.rect` can no
+  longer be a path, so `<svg \.rect>` is unambiguous with no comma at all.
+  Banning the leading comma before §7.15 would have reintroduced a real
+  ambiguity.
 
 **What remains of `;` in these scopes:** statements inside element content
 still use it, as everywhere — `<div let x = 1; x + 1>` — that is the one
@@ -1537,7 +1681,7 @@ semantics, and the S16.2.3 banned set is final: `( [ - + * ^ / < .`
 was different: `!` left the family entirely rather than becoming an
 exception within it).
 
-### 7.13 Remaining audit items — ALL RESOLVED
+### 7.13 Remaining audit items — ALL RESOLVED (as of the first pass; §7.14–§7.15 were added by the post-implementation review)
 
 Every §7 audit ruling is now decided; the batch ratification into the
 spec (S16 v2 amendments plus the S10/S2 touchpoints noted in §7.1–§7.12)
@@ -1563,3 +1707,474 @@ is unblocked. Dispositions of the final two items:
   (`"Hello " name "!"`) is acknowledged as a limited workaround for the
   time being, not the final answer.
 
+### 7.14 Closed-tail juxtaposition (decided; supersedes the uniform token-class rule)
+
+The first implementation applied S16.2.3 as a blanket token-class rule:
+after ANY statement, a line-start dual-role token was an error. That made
+`fn pick2(x) { … }` ⏎ `[pick(2), pick2(130)]` demand a `;` after the
+declaration — a separator no brace language requires, and the single most
+common class in the corpus migration. The refinement:
+
+1. **Statement → statement: juxtapose, no `;`.** (Already the S16.1.3 rule
+   for start-token-led statements.)
+2. **Closed-tail statement → expression: juxtapose, no `;`** — including
+   expressions led by dual-role tokens.
+3. **Expression → expression: `;` required before a dual-role lead** — the
+   existing S16.2.3 rule, unchanged.
+
+**The sound boundary is the statement's TAIL, not its kind.** A statement is
+*closed* when it ends in a structural closer of a non-postfixable construct —
+the `}` of a `fn`/`pn`/`type { }`/`view` body, a braced `if`/`for`/`while`
+body, a `match` arm list — or is a self-complete keyword (`break`,
+`continue`, bare `apply`). No dual-role token has any grammatical attachment
+to a closed form (you cannot call, index, or subtract from a declaration;
+`if`/`match` are not primaries, so postfix cannot attach), so a following
+dual-role-led expression is the ONLY reading. A statement is *open* when it
+ends in a greedy expression, and rule 3 applies. The open-tail carve-outs,
+each with its ambiguity exhibit:
+
+- `let` / `var` / assignment: `let x = arr` ⏎ `[0]` — the split would
+  silently hide an intended `arr[0]` (the Go/ASI silent-split failure §1.7
+  forbids).
+- (`import` was originally classified open and was moved to the CLOSED set
+  on 2026-08-22: its tail is a module NAME, which only `,` `:` `.` `\\` can
+  continue — never a dual-role token — so the separator guarded nothing.
+  `import math [1, 2]` is two items on one line as well as two.)
+- `type` aliases: `type T = int` ⏎ `[3]` — `[3]` is occurrence syntax
+  (`int[3]`): a genuine two-reading ambiguity, not just a trap.
+- Arrow bodies: `fn f() => x` ⏎ `(y)` — `(y)` could only mean the call.
+- `return` with its greedy optional value.
+- **Every bare expression — maps, blocks, elements included**: these are
+  *primaries* and take postfix bare (`{a: 1, b: 2}["a"]` is an index on one
+  line), so they sit on the open side despite visually ending in a closer.
+  This is the trap in any "ends with `}`" mental shortcut: the rule is
+  closed-*tail* (non-postfixable construct), never closed-*bracket*.
+
+**The golden test DERIVES the classification (ruled).** The open/closed
+boundary is not an enumerated list but a consequence of S16.1.1: **a tail
+is open exactly when the one-line spelling glues.** If `let x = arr` ⏎
+`[0]` were accepted as two items, newline→space would yield
+`let x = arr [0]` — which parses as the ONE-item `arr[0]` — so acceptance
+would change meaning across spellings and violate the invariant; rejection
+is forced, not chosen. Same for `type T = int` ⏎ `[3]` versus the
+occurrence `int[3]`. Conversely, closed tails juxtapose because their
+one-line spelling does not glue either: `fn a() {1} [1, 2]` is declaration
++ array statement in BOTH spellings — probe-confirmed that the parser
+errors identically on the one-line form today, proving the one-expr
+reading never existed (`index_expr` requires a `primary_expr` operand;
+`fn_stam` is not an expression). Juxtaposition does not create a reading;
+it stops rejecting the only one there was.
+
+**Repair spellings are uniform across every open tail** — let/type
+declarations exactly like maps and elements: split the bracket for one
+expression (`let x = arr[` ⏎ `0]`, `type T = int[` ⏎ `3]`), or `;` for two
+statements (`let x = arr;` ⏎ `[0]`, `type T = int;` ⏎ `[3]`). One rule,
+one pair of repairs, everywhere.
+
+**Declarations are not expressions (decided, now explicit).**
+`(fn () {})[1]` is impossible by design, not by accident: `fn`, `pn`,
+`type`, and `view` declarations live outside expression space; only their
+NAMES enter expressions. Immediate invocation uses an arrow
+(`((x) => x * 2)(3)`); indexing a value-producing braced form promotes it
+with parens (`(match x { … })[0]`, `(if (c) {…} else {…})[0]`) — parens are
+what lift a non-primary expression to primary, uniformly in both spellings.
+
+**Cross-line postfix on primaries (confirmed, no change).** `{a: 1, b: 2}` ⏎
+`["a"]` is rejected (rule 3); the two spellings are
+`{a: 1, b: 2}[` ⏎ `"a"]` (unfinished expression continues, S16.2.1) for one
+expression, and `{a: 1, b: 2};` ⏎ `["a"]` for two. Both already work in both
+parsers.
+
+The teachable rule: **"after a block, never `;`; after an expression, `;`
+before `( [ - + * / < . ^`."** This matches C/Go/Rust muscle memory (no
+separator after a function body) and removes the majority of the corpus
+migration edits. It knowingly reverses the earlier uniformity argument
+(§4.5's harness encoded the blanket rule): the context cost is one bit —
+"did the last statement end in an expression?" — which the reader resolves
+visually at the `}`.
+
+**Implementation status: DONE in both front ends** (61/61 each,
+`make test-grammar-s16`). Tree-sitter splits the statement list into
+`_closed_stam` / `_open_stam`, so `_stmt_boundary` is only demanded after
+open tails; `if_expr` and `for_expr` split by spelling
+(`_if_closed`/`_if_open`, `_for_closed`/`_for_open`) because the bare
+spelling ends on a structural brace while the parenthesized one ends on a
+greedy expression. That split reopened the dangling-else decision at the
+grammar level, resolved per S16.6.3 by ranking `_if_open` above
+`_if_closed` so the nearest `if` claims the `else`. The C parser tracks the
+previous token kind and treats a statement as closed when it ended on `}`
+under a block-form keyword, or is `break`/`continue`. S16.1.3/S16.2.3 take
+a v2 at batch ratification.
+
+One case the implementation caught that the ruling had not: the TYPE slot
+needed the same guard. `type T = int` ⏎ `[3]` was being absorbed as the
+occurrence `int[3]`, because `[` is dual-role in type space too (`int[3]`
+occurrence versus `[int]` array type). `occurrence_count` now takes the
+guarded same-line bracket, matching the C parser, which already reached
+this through `parse_type_slot`.
+
+### 7.15 Relative-path introducer: `\.a.b` (decided)
+
+**Problem.** The relative path spelled `.a.b`, whose introducer is the
+member-access dot — the reason `.` sits in the dual-role set at all, and a
+standing reader hazard now that §7.14 legalizes `fn f() {}` ⏎
+`.config.load()`: a line-start `.a.b` reads as a member continuation to a
+human even where the parser knows better.
+
+**Ruling: the relative path is `\.a.b`.** The rooted form is unchanged
+(`/.a.b`). Options considered:
+
+| Option | Verdict | Why |
+|---|---|---|
+| `~.a.b` | rejected | `~.a` already means member `a` of the PIPE context item — a different context notion than the resolution universe; overloading erases the distinction, and paths must work with no `~` bound |
+| `path.a.b` | rejected | `path` cannot become a keyword: it is a hot identifier in a data/document language, and `path.a` is already member syntax on a variable named `path` |
+| `*.a.b` | rejected | breaks the §7.10 wildcard doctrine — `*` is the unit wildcard, so `*.a.b` reads as a glob ("any one first segment, then a.b"), not "relative from here" |
+| `..a.b` | rejected | lexically free, but `..` means PARENT everywhere in the world, while Lambda's parent step is `~~` — a permanent teaching tax |
+| `./a.b` | rejected (was front-runner) | the universal relative spelling, but it collides with S10.5.1's postfix root step `value./.name`: `./` would then appear in BOTH line-start and postfix position, one dot apart |
+| **`\.a.b`** | **ADOPTED** | lexically free (today `\` appears only in the `\(` / `\symbol(` pattern-island tags and as the alternative import-path separator); `\` already carries a path flavour from that import role; and it leaves `./` untouched, so the postfix-root-step collision never arises |
+
+The decisive point over `./a.b` is the last one: choosing `./` for the
+relative introducer would have created the very ambiguity this ruling
+exists to remove, merely relocating it from `.` to `./`. `\.` touches no
+existing path spelling.
+
+**Payoff — with one correction to an earlier overclaim.** Retiring the
+bare-`.` relative path means `.ident` at a line start has no start reading
+left, so member access becomes its only meaning: the S16.2.4 carve-out
+generalizes from `.ident(` CALLS to **full leading-dot fluent chains**
+(`data` ⏎ `.filter(…)` ⏎ `.count`), the Swift/Kotlin style, on any member.
+
+But `.` does **not** leave the dual-role set, contrary to the draft of this
+section: `member_expr` admits an INTEGER field (`$.integer`), so `a.5` is
+member access and `.5` is also a float literal — a live two-reading case
+after a line break. `.` therefore becomes **sub-classified** rather than
+retired: `.ident` is pure continuation, `.digit` stays dual-role. The
+banned set becomes `( [ - + * ^ / <` plus `.digit`; the scanner already
+sub-classifies `.` by its next character, so this costs no new machinery.
+(A follow-on could retire integer member fields in favour of `[n]`
+indexing, which would let `.` leave the set completely — not ruled here.)
+
+**The mental model: `\` escapes the dot out of member access.** Reading
+`\.` as an escaped dot is not a hazard to be tolerated — it is exactly the
+right intuition, and the reason the spelling works. A bare `.` means member
+access; prefixing the escape character says *this dot is not member
+access, it introduces a path*. (`\.` also shares its first character with
+the pattern-island tags `\(` / `\symbol(`, which diverge at the second
+character, so no lexical conflict arises.)
+
+**Imports keep `.mod` (decided).** The escape is needed only where the
+ambiguity is: EXPRESSION position, where `.` collides with member access.
+An import has a keyword introducer, so `import .mod` can only be a module
+path — nothing to disambiguate and nothing to escape. `import .mod` and
+`import \mod` both stand as they are; the new introducer does not
+propagate there. This keeps `\.` meaning precisely one thing — "path,
+not member" — rather than becoming a general relative-path decoration.
+
+**Spec impact.** `S2.4.1` takes a **v3** at batch ratification (the
+relative form respelled), and S16.2.4 takes a v2 (the carve-out widened
+from `.ident(` to any `.ident`).
+
+**Implementation status: DONE in both front ends.** Tree-sitter spells the
+relative form `\\.` in `path_expr`; the C lexer emits a dedicated
+`LAMBDA_TOK_PATH_REL` for it. Both widen the member-dot carve-out to any
+`.ident` across a line break while keeping `.digit` dual-role — on the C
+side that needed an extra test, since the lexer folds `.5` into a single
+FLOAT token, so the token KIND alone cannot see the leading dot.
+
+A further ambiguity dissolved as a side effect: `<svg .rect>` versus
+`<svg, .rect>` (qualified tag versus tag-plus-path-child, S2.4.3v2's
+motivating case) no longer competes at all — with the relative path
+respelled, `.rect` cannot be a path, so `<svg .rect>` is unambiguously the
+qualified tag and the path-child form is `<svg, \\.rect>`.
+
+### 7.16 Digit-adjacent identifiers (OPEN — found by the implementation audit)
+
+**Finding.** `let a = 123abc` parses as `let a = 123` followed by the
+statement `abc`, and `let a = 0b1010` as `let a = 0` followed by `b1010`.
+Neither is an error: S16.1.3 juxtaposition happily takes the identifier as
+the next statement, so a typo or a habitual `0b` literal becomes a silent
+two-statement split whose failure surfaces later as an undefined name.
+
+**This is the §7.3 bug class, unfixed.** `1f32` had exactly this shape — a
+number running into an identifier-like suffix, lexing as two tokens with a
+context-dependent result — and §7.3 fixed it by making the spelling a valid
+literal. The general case remains: no language admits `123abc`, and the
+juxtaposition rule is what turns it from a lexical error into a silent
+split.
+
+**Candidate ruling (not decided).** Make a digit immediately followed by an
+identifier-start character a LEXICAL error, after the existing suffix
+families are matched (`1i32`, `1f32`, `1n`, `1m`, `4j`, `0xFF`). Juxtaposed
+statements would then require a separator or whitespace — `123 abc` — which
+costs nothing anyone writes deliberately. §7.5's ruling is unaffected
+either way: it decided that no binary/octal literal FORM exists, which
+remains true; this is about what `0b1010` should do instead of silently
+splitting.
+
+**Ruling: adopted and implemented.** A digit immediately followed by an
+identifier-start character is a LEXICAL error, checked after the suffix
+families are matched (`1i32`, `1f32`, `1n`, `1m`, `4j`, `0xFF`), so every
+valid literal is unaffected while `123abc`, `0b1010`, and `1_` are rejected.
+Juxtaposed statements simply need the whitespace nobody omits deliberately
+(`123 abc`). §7.5 is untouched: it decided that no binary/octal literal FORM
+exists, which stays true — this decides what `0b1010` does *instead* of
+silently splitting.
+
+The C lexer checks adjacency directly. Tree-sitter cannot express the
+constraint in a regex (no lookahead), so `_number` carries a zero-width
+`_num_boundary` guard that the external scanner withholds when the next
+character continues an identifier — and, uniquely among the guards, it is
+tested BEFORE any whitespace is skipped, since adjacency is the whole
+point.
+
+### 7.17 Known limitation: a comment can defeat the line-start guard in Tree-sitter
+
+`let a = 1` ⏎ `/* c */ + 2` is correctly rejected by the C parser (S16.2.3:
+`+` is dual-role at a line start) but ACCEPTED by the Tree-sitter reference
+grammar, which reads it as one continued expression.
+
+**Cause.** The scanner is stateless by design, so incremental parsing and
+GLR speculation stay safe. It detects a line break only in whitespace it
+skips itself. Here it skips the newline, declines to emit a guard, and
+returns false — whereupon Tree-sitter consumes the newline and the comment
+as `extras` and re-invokes the scanner *after* them, where no line break is
+visible any more. Making the scanner remember the break across invocations
+would require state that cannot be cleared reliably, because the scanner is
+not consulted at every token.
+
+**A fix was attempted and reverted (2026-08-22).** The obvious remedy is to
+let the scanner OWN comments — declare `comment` as an external so the
+scanner is consulted at every token position, and carry the line break in
+one byte of state cleared by the next invocation. That does fix the case
+(both `1` ⏎ `/* c */ + 2` and the `//` form reject correctly, with no stale
+carry), but it regressed real corpus files: a function preceded by **three
+or more consecutive comments** started rejecting an ordinary `x < 0` inside
+its body. Allocating the scanner state per instance rather than sharing a
+static did not help, so the interaction is with how Tree-sitter checkpoints
+external-scanner state around consecutive extras, not with the carry logic
+itself. Trading corpus regressions for one obscure corner is the wrong way
+round, so the change was backed out and the scanner stays stateless.
+
+**Assessment.** The divergence is one-directional and benign for the
+cross-check lane: the reference grammar accepts a little more than
+production, and the compare lane flags the opposite direction (source
+Tree-sitter rejects but the C parser accepts). The production parser is
+correct, so no shipped program is mis-parsed. The two cases are asserted in
+`test/c_s16_conformance.sh` only, with a comment in the TS suite saying
+why. Revisit if the scanner ever needs state for another reason — but only
+with the corpus cross-check as the gate.
+
+### 7.18 `;` has exactly one role — and why `,` cannot replace it
+
+**The inventory (audited 2026-08-22, both parsers, probe-verified).** After
+§7.7 retired `apply;`, §7.11 retired the element and object-type dividers,
+and ruling 15 banned terminator/trailing use, `;` means **statement
+separation and nothing else**. It is legal in exactly the places a statement
+list occurs — fourteen contexts, all the same role:
+
+| Context | Example |
+|---|---|
+| document top level | `let a = 1; a` |
+| block expression | `{ let y = 1; y }` |
+| `fn` body | `fn f() { let a = 1; a }` |
+| `pn` body | `pn main() { let a = 1; a }` |
+| element content | `<div "a"; "b">` |
+| `if` braced body | `if 1 { let a = 1; a }` |
+| `else` braced body | same shape |
+| `for` braced body | `for x in [1] { let a = x; a }` |
+| `while` body | `while 0 { let a = 1; a }` |
+| `match` arm braced body | `case int { let a = 1; a }` |
+| handler body | `f() ^ { let a = 0; a }` |
+| handler value arm | `~ { let a = 1; a }` |
+| `view`/`edit` body | `view P: int { let a = 1; a }` |
+| `on` event-handler body | `on click() { let a = 1; a }` |
+
+These correspond exactly to the `parse_content` call sites in the C parser
+and the `content` / `element_content` / `_body_block` / `_braced`
+references in the grammar. Everywhere else `;` is a syntax error, verified
+in both parsers: object-type members, map items, array items, call
+arguments, parameter lists, and attribute lists all take `,`.
+
+One nuance: `import math; sys` parses, but not as an import separator — it
+is `import math`, statement separation, then a bare `sys` expression. The
+import list itself is `import math, sys`.
+
+That single role is the clearest measure of what this design bought. The
+grammar began with `;` as a statement terminator, an element attr/content
+divider, an object-type section divider, and a fused `apply;` lexeme, plus
+an optional-trailing allowance — five jobs. It now has one.
+
+**Why `,` cannot finish the job.** The tempting last step is to replace
+`;` with `,` and drop the character entirely — `{ a, b }` instead of
+`{ a; b }`. It does not work, for a reason the `let` grammar makes
+concrete. Lambda already overloads `,` inside a declaration, and both
+overloads compose (probe-verified with values):
+
+```
+let a = 1, b = 2                    // multi-declare: two declarations
+let a, b = [1, 2]                   // decomposition: two targets, one value
+let a, b = [1,2], c, d = [3,4]      // BOTH at once — a=1 b=2 c=3 d=4
+let a, b = [1,2], c = 5             // decomposition then multi-declare
+let a = 1, b, c = [2,3]             // multi-declare then decomposition
+```
+
+The comma is already the declaration separator *and* the decomposition
+separator, told apart only by where the first `=`/`at` falls (§7.8). Making
+it the statement separator too would give `{ let y = 1, y + 1 }` no
+determinate reading: the `,` could continue the declaration list or end the
+statement, and the parser cannot know until it has consumed an arbitrary
+amount of what follows. `;` earns its place precisely by being the one
+delimiter the declaration grammar does not use — which is also why
+`{ let y = 1; y }` reads correctly while `{ let y = 1, y }` does not.
+
+**`let` binds differently at statement and expression level (recorded
+2026-08-22; probe-verified).** The comma overloads above are a statement-level
+grammar. In expression position — the parenthesized `let` chain — each binding
+needs its own `let`:
+
+| Form | statement | expression |
+|---|---|---|
+| `let a = 1, b = 2` | ✓ | ✗ |
+| `let a, b = [1,2]` (decomposition) | ✓ | ✓ |
+| `let a, b = [1,2], c, d = [3,4]` | ✓ | ✗ |
+| `(let a = 1, let b = 2, a + b)` | — | ✓ |
+
+So decomposition works in both, but *chaining* declarations is
+`(let a, b = [1,2], let c, d = [3,4], a + d)` at expression level.
+
+This is structural rather than an oversight, and it is the same
+"where does the list end" problem that produced the element boundary comma
+(§7.11) and the closed/open tail rule (§7.14). An expression-level `let`
+chain is TERMINATED BY ITS RESULT EXPRESSION, so the parser needs a marker
+for "another declaration follows" — the repeated `let` is that marker, and
+it decides with one token of lookahead. Admit the bare comma-list form and
+`(let a = 1, b, c)` has no determinate reading: `b, c` is equally a
+decomposition awaiting its `=` and the result expression. At statement level
+no result expression competes, so the comma list is unambiguous there.
+
+### 7.19 Considered and rejected: `,` everywhere (`{ , , , }`)
+
+The last simplification available was to retire `;` entirely and separate
+statements with `,` as well — one delimiter for the whole language, nothing
+to toggle between. It was compared against the current `{ ; ; ; }` design
+and **rejected 2026-08-22**.
+
+**The deciding reason: Lambda is not a pure expression language.** Lisp can
+get away with one separator because it has one kind of thing. Lambda
+deliberately has BOTH expressions and statements — declarations, control
+forms, procedural bodies — and that distinction is real, not incidental.
+The delimiters should therefore mirror it rather than blur it:
+**`,` separates items inside an expression-level construct; `;` separates
+statements.** Merging them would not remove a concept, only hide one that
+still exists. The programmer already carries the distinction in their head;
+the two delimiters make it visible on the page.
+
+**Pros of `,` everywhere.** One delimiter to learn and type; no switching
+between `,` and `;` as the reader moves between construct interiors and
+statement lists; a more homogeneous, data-like surface — arguably a fit for
+a language whose subject matter is data and documents.
+
+**Cons, in the order that decided it.**
+
+1. **The pro is smaller than it looks, because `;` is already rare.** Under
+   S16.1.3 juxtaposition and §7.14 closed tails, idiomatic Lambda contains
+   almost no semicolons: statements juxtapose, and `;` surfaces only at
+   genuine ambiguity points. Meanwhile `,` is everywhere — every map, array,
+   call, parameter list, attribute list. The change would make the RARE
+   delimiter adopt the UBIQUITOUS one's spelling, and the rare one is rare
+   precisely because it marks the places a reader most needs a distinct
+   signal.
+2. **Four declaration forms collide, not just `let`.** Every comma-list
+   declaration would have to repeat its keyword: `let a = 1, let b = 2`;
+   likewise `var` and `type T = int, let U = string`. Multi-declare and
+   decomposition chaining (§7.18) — among the most common statements in the
+   language — become verbose.
+3. **`import` becomes genuinely ambiguous**, not merely verbose.
+   `import math, sys` is an import list today, while `import math; sys` is
+   an import followed by a bare `sys` statement. With one delimiter those
+   two readings collapse, re-introducing an ambiguity the current split
+   resolves for free.
+4. **It moves the overloading rather than removing it.** §7.18 records that
+   `;` now has exactly ONE role, down from five. Comma-only does not
+   eliminate a delimiter; it gives `,` FOUR roles — list items,
+   multi-declare, decomposition, statements — which is the opposite
+   direction from every other ruling here.
+5. **`{ a, b }` reads as a collection literal** to anyone arriving from any
+   other language, and sits right next to `{a: 1}` meaning a map. The
+   §5.9v3 interior test still distinguishes them mechanically, but the
+   reader is the one who pays.
+6. **Erlang is the precedent, and it is a known wart.** Erlang separates
+   expressions in a body with `,` (and clauses with `;`), which is among the
+   most commonly cited complaints about its syntax.
+
+**What would change the answer.** If Lambda's identity were "everything is
+a comma-separated sequence" — a homogeneous, data-shaped surface with no
+statement/expression split to express — comma-only would serve that
+identity and the verbosity would be its honest price. That is a coherent
+language; it is simply not this one.
+
+### 7.20 Fluent chains and the dotted module name are one rule
+
+§7.15 retired the bare-`.` relative path, which left `.ident` at a line
+start with no start reading — member access became its only meaning. The
+S16.2.4 carve-out therefore widened from the `.ident(` CALL form to ANY
+member, and that is what makes leading-dot chains work:
+
+```
+data
+.filter(fn (x) => x > 0)
+.map(fn (x) => x * 2)
+.count
+```
+
+**The same rule explains the dotted module name.** `import math` ⏎ `.sub`
+continues into the module `math.sub`, which looks odd in isolation but is
+not a special case: it is `.ident`-continues applied to an import. Guarding
+it was considered and rejected — allowing leading-dot chains in expressions
+while forbidding them after `import` would be two rules where one suffices,
+and the golden test is satisfied either way (`import math .sub` on one line
+is also `math.sub`, so no line break changes meaning).
+
+Note the deliberate asymmetry with the other module separator: `import a` ⏎
+`\\b` IS rejected, because `\\` is a START token (it opens `\\.` paths and
+`\\(` pattern islands) rather than a continuation. The two separators
+diverge because their token classes diverge, which is the rule doing its
+job rather than an inconsistency.
+
+### 7.21 Two rulings that shipped unimplemented (found by the second audit, now closed)
+
+A ruling-by-ruling audit on 2026-08-22 — probing the ledger rather than
+re-running the suite — found two rulings that were never enforced. Both were
+shared gaps, not divergences: the parsers agreed with each other and
+disagreed with the design.
+
+**§3.6 handler brace, same line as its `^`.** `f() ^` ⏎ `{ 0 }` parsed as a
+propagate followed by a separate block statement, while `f() ^ { 0 }` on one
+line is a handler — different parse trees for the same token stream modulo a
+line break, which is an S16.1.1 violation.
+
+The framework names the cause exactly: after `f() ^` the expression is
+*complete but extensible*, so a following `{` is DUAL-ROLE — handler body,
+or a new map/block statement — and S16.2.3 requires that neither reading
+win. The fix must be applied AT THE CARET, not at the brace: blocking only
+the handler path lets GLR fall through to propagate-plus-a-statement, which
+is the silent split itself. So the scanner now looks past the `^`, and if a
+`{` follows across a line break it emits NO caret token at all, failing the
+parse loudly. The C parser makes the same check on the brace's `nl_before`
+flag. Repairs: keep the brace on the caret's line, or write `f()^;` ⏎
+`{ … }` for a bare propagate followed by a block.
+
+**§5.9v3 bare `{}` at procedural statement position.** `pn main() { {} }`
+parsed. It is dead under either reading — a no-op block or a discarded empty
+map — and this design answers meaningless input with an error. The C parser
+now tracks procedural-body depth and rejects it there; `{}` remains a
+meaningful empty map in value and content position, and in `fn` control
+bodies. This rule is procedural-context-sensitive, so it is asserted in the
+C suite only.
+
+**Method note.** Both were invisible to the conformance suite AND to the
+corpus cross-check, which agreed at 100% throughout. Corpus agreement proves
+only that the two front ends match each other; it cannot show that either
+matches the DESIGN. Only probing the ledger ruling by ruling finds this
+class — and for anything involving precedence or evaluation, only value
+assertions do (§7.2 shipped unimplemented for exactly that reason).

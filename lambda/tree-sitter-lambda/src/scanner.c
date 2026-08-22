@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 // External scanner for tree-sitter-lambda — S16 Surface Syntax guards.
@@ -37,6 +38,8 @@
 // side effects.
 
 enum TokenType {
+    // ORDER IS LOAD-BEARING: this enum must match grammar.js `externals`
+    // element for element, or every token id shifts.
     // Guarded operator tokens. Each CONSUMES its own lexeme and is emitted only
     // when the operator sits on the same line as its left operand. They are
     // separate tokens rather than one zero-width guard because a zero-width
@@ -52,7 +55,17 @@ enum TokenType {
     MEMBER_DOT,
     POSTFIX_CARET,
     STMT_BOUNDARY,
+    // S16.5.1: inside an element, `<` is never an operator — it always opens a
+    // child — so it starts a juxtaposed content item where at statement level
+    // it would be dual-role. Element content therefore needs its own boundary
+    // token; the two differ only in how `<` is classified.
+    ELEM_STMT_BOUNDARY,
     NOT_PAREN,
+    // §7.16: emitted (zero-width) after a numeric literal only when the very
+    // next character cannot continue an identifier. Withholding it makes
+    // `123abc` and `0b1010` LEXICAL errors instead of silent splits into a
+    // number plus a juxtaposed statement.
+    NUM_BOUNDARY,
     // Never emitted. Tree-sitter marks every external token valid during error
     // recovery; this sentinel is valid nowhere in the grammar, so seeing it
     // means recovery is running and the scanner should decline.
@@ -60,7 +73,7 @@ enum TokenType {
 };
 
 void *tree_sitter_lambda_external_scanner_create(void) {
-    return NULL;
+    return NULL;  // stateless by design; see the §7.17 note below
 }
 
 void tree_sitter_lambda_external_scanner_destroy(void *payload) {
@@ -134,9 +147,12 @@ static bool is_continuation_word(const char *w, unsigned n) {
 // / < .`) and everything continuation-only (`|> | & % > = ! == != <= >=`, the
 // word operators) returns false. The caller has already marked the token end,
 // so every advance here is pure inspection.
-static bool classify_start(TSLexer *lexer) {
+static bool classify_start(TSLexer *lexer, bool element_scope) {
     int32_t c = lexer->lookahead;
     if (lexer->eof(lexer)) { return false; }
+    // S16.5.1: `<` opens a child element in element scope, so it starts an item
+    // there even though it is dual-role everywhere else.
+    if (c == '<' && element_scope) { return true; }
 
     switch (c) {
         // continuation-only, dual-role, closers, and separators alike: none of
@@ -192,6 +208,15 @@ bool tree_sitter_lambda_external_scanner_scan(
     // parse state, and recovery marks every external valid.
     if (valid_symbols[ERROR_SENTINEL]) { return false; }
 
+    // §7.16 must inspect the character IMMEDIATELY after the literal, so it is
+    // tested before any whitespace is skipped.
+    if (valid_symbols[NUM_BOUNDARY]) {
+        if (is_identifier_start(lexer->lookahead)) { return false; }
+        lexer->mark_end(lexer);
+        lexer->result_symbol = NUM_BOUNDARY;
+        return true;
+    }
+
     // Skip whitespace and comments, remembering whether a line break was
     // crossed. This is the one thing grammar rules cannot see for themselves.
     bool saw_newline = false;
@@ -206,7 +231,10 @@ bool tree_sitter_lambda_external_scanner_scan(
         // a zero-width token.
         lexer->mark_end(lexer);
         if (lexer->lookahead != '/') { break; }
-        lexer->advance(lexer, true);
+        // Not skipped: if this turns out to open a comment the character must
+        // be inside the emitted token, and if it turns out to be division the
+        // mark_end above already sits in front of it.
+        lexer->advance(lexer, false);
         if (lexer->lookahead == '/') {
             while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
                 lexer->advance(lexer, true);
@@ -216,17 +244,18 @@ bool tree_sitter_lambda_external_scanner_scan(
         if (lexer->lookahead == '*') {
             lexer->advance(lexer, true);
             int32_t prev = 0;
+            bool closed = false;
             while (!lexer->eof(lexer)) {
                 if (lexer->lookahead == '\n') { saw_newline = true; }
                 if (prev == '*' && lexer->lookahead == '/') {
                     lexer->advance(lexer, true);
-                    prev = 0;
+                    closed = true;
                     break;
                 }
                 prev = lexer->lookahead;
                 lexer->advance(lexer, true);
             }
-            if (prev == 0) { continue; }
+            if (closed) { continue; }
             return false;  // unterminated block comment
         }
         // A real `/`: division, or the root path step. The scanner has already
@@ -239,11 +268,13 @@ bool tree_sitter_lambda_external_scanner_scan(
     // bare `apply` statement (§7.7). It is only valid where the parser is
     // choosing between a parenthesized form and a bare one, so it never
     // competes with the operator guards.
-    if (valid_symbols[NOT_PAREN]) {
-        if (!slash_pending && lexer->lookahead == '(') { return false; }
+    if (valid_symbols[NOT_PAREN] && (slash_pending || lexer->lookahead != '(')) {
         lexer->result_symbol = NOT_PAREN;
         return true;
     }
+    // A `(` here means NOT_PAREN does not apply — but the state may still want
+    // a call guard (`apply(x)` is an ordinary call, `apply` alone is the bare
+    // statement), so fall through rather than declining outright.
 
     if (slash_pending) {
         // `/` is dual-role: division (continuation) or a rooted path step
@@ -280,37 +311,47 @@ bool tree_sitter_lambda_external_scanner_scan(
                 if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0); }
                 break;
             case '^':
-                if (valid_symbols[POSTFIX_CARET]) { return emit_op(lexer, POSTFIX_CARET, 0); }
+                // §3.6: `^` is followed either by nothing (propagate) or by a
+                // handler brace, so `{` after it is DUAL-ROLE. Decide here, at
+                // the caret: blocking only the handler path would let GLR fall
+                // through to propagate-plus-a-block-statement, which is the
+                // silent split S16.1.1 forbids. A `{` on a later line yields
+                // NEITHER token, so the parse fails loudly.
+                if (valid_symbols[POSTFIX_CARET]) {
+                    lexer->advance(lexer, false);
+                    lexer->mark_end(lexer);
+                    bool brace_newline = false;
+                    while (is_space(lexer->lookahead)) {
+                        if (lexer->lookahead == '\n') { brace_newline = true; }
+                        lexer->advance(lexer, false);
+                    }
+                    if (lexer->lookahead == '{' && brace_newline) { return false; }
+                    lexer->result_symbol = POSTFIX_CARET;
+                    return true;
+                }
                 break;
             default: break;
         }
     }
 
-    // `.` member access. Same line always; across a line break only for the
-    // S16.2.4 carve-out `.ident(`, which cannot be a path body (paths have no
-    // call syntax) nor a float, and so is unambiguously a member CALL.
+    // `.` member access. S16.2.4v2 (§7.15): now that the relative path is
+    // spelled `\.`, a `.` followed by an identifier has no start reading left —
+    // member access is its only meaning — so it continues across a line break
+    // for ANY member, not just the `.ident(` call form. That is what enables
+    // full leading-dot fluent chains. `.digit` remains dual-role, because
+    // `a.5` is member access with an integer field while `.5` is a float.
     if (c == '.' && valid_symbols[MEMBER_DOT]) {
         lexer->advance(lexer, false);
         int32_t after = lexer->lookahead;
-        // `.?` is the query operator and `.5` a float: neither is member access.
-        if (after == '?' || is_digit(after)) { return false; }
-        // The token is the dot itself; every advance past this point is pure
-        // lookahead and cannot extend it.
+        if (after == '?') { return false; }              // `.?` query operator
+        // `.digit` stays dual-role: same line it is the integer member field,
+        // across a break it could equally be a float literal starting a
+        // statement, so neither reading may win.
+        if (is_digit(after) && saw_newline) { return false; }
         lexer->mark_end(lexer);
-        if (!saw_newline) {
-            lexer->result_symbol = MEMBER_DOT;
-            return true;
-        }
-        if (is_identifier_start(after)) {
-            while (is_identifier_continue(lexer->lookahead)) {
-                lexer->advance(lexer, false);
-            }
-            if (lexer->lookahead == '(') {
-                lexer->result_symbol = MEMBER_DOT;
-                return true;
-            }
-        }
-        return false;
+        if (saw_newline && !is_identifier_start(after)) { return false; }
+        lexer->result_symbol = MEMBER_DOT;
+        return true;
     }
 
     // --- statement juxtaposition (S16.1.3) --------------------------------
@@ -318,7 +359,11 @@ bool tree_sitter_lambda_external_scanner_scan(
     // operator above. When a line opens with a dual-role token, NEITHER a guard
     // nor this boundary is emitted, so both readings are blocked and the parse
     // fails loudly — S16.2.3, "neither reading wins by default".
-    if (valid_symbols[STMT_BOUNDARY] && classify_start(lexer)) {
+    if (valid_symbols[ELEM_STMT_BOUNDARY] && classify_start(lexer, true)) {
+        lexer->result_symbol = ELEM_STMT_BOUNDARY;
+        return true;
+    }
+    if (valid_symbols[STMT_BOUNDARY] && classify_start(lexer, false)) {
         lexer->result_symbol = STMT_BOUNDARY;
         return true;
     }

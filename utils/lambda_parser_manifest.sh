@@ -11,16 +11,14 @@ cd "$repo_root"
 output_path=${1:-temp/lambda-parser-poc/manifest.tsv}
 mkdir -p "$(dirname "$output_path")"
 
-grammar_common_hash=$(shasum -a 256 lambda/tree-sitter-lambda/grammar-common.js | awk '{print $1}')
-grammar_full_hash=$(shasum -a 256 lambda/tree-sitter-lambda/grammar-lambda.js | awk '{print $1}')
+scanner_hash=$(shasum -a 256 lambda/tree-sitter-lambda/src/scanner.c | awk '{print $1}')
 grammar_shipped_hash=$(shasum -a 256 lambda/tree-sitter-lambda/grammar.js | awk '{print $1}')
 scanner_hash=$(shasum -a 256 lambda/tree-sitter-lambda/src/scanner.c | awk '{print $1}')
 
 {
     printf '# lambda-parser-poc-manifest-v1\n'
     printf '# git_commit\t%s\n' "$(git rev-parse HEAD)"
-    printf '# grammar-common.js.sha256\t%s\n' "$grammar_common_hash"
-    printf '# grammar-lambda.js.sha256\t%s\n' "$grammar_full_hash"
+    printf '# scanner.c.sha256\t%s\n' "$scanner_hash"
     printf '# grammar.js.sha256\t%s\n' "$grammar_shipped_hash"
     printf '# scanner.c.sha256\t%s\n' "$scanner_hash"
     printf 'path\tbytes\tsha256\n'
