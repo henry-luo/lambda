@@ -122,12 +122,26 @@ struct InterpErrorContext {
     InterpErrorContext* prev;
 };
 
+// A view activation overlays its state/handler parameters on the ordinary
+// frame bindings. These entries remain rooted in the activation's RootSpan;
+// the chain itself is interpreter control state only.
+struct InterpViewBinding {
+    NameEntry* entry;
+    uint64_t* value;
+    uint64_t* model;
+    const char* template_ref;
+    const char* state_name;
+    bool is_state;
+    InterpViewBinding* prev;
+};
+
 struct InterpState {
     EvalContext* ctx;
     Runtime*     runtime;
     InterpFrame* top;
     InterpContext* contexts;
     InterpErrorContext* errors;
+    InterpViewBinding* view_bindings;
     // The current subscript owner for a nested `last` expression. This points
     // at a live frame slot and is restored when that subscript completes.
     uint64_t*    last_index_item;
@@ -224,6 +238,19 @@ Item interp_call(Function* fn, const Item* args, int argc);
 #ifdef __cplusplus
 }
 #endif
+
+// Apply() dispatches an interpreter-owned view through this bridge. Edit
+// templates remain on the generated registry path; retained event callbacks
+// borrow their document EvalContext when no script runner is active.
+extern "C" Item interp_eval_view_template(Context* context, Script* module,
+                                           AstViewNode* view, Item model);
+
+// Event dispatch uses the same overlay for interpreted view handlers. The
+// bridge is inert for generated MIR entries, which retain their existing ABI.
+extern "C" Item interp_eval_view_handler(Context* context, Script* module,
+                                          AstViewNode* view,
+                                          AstEventHandler* handler,
+                                          Item model, Item event);
 
 // Called by the shared dynamic dispatcher immediately before invoking a T0
 // function. On success it upgrades that Function in place to its published

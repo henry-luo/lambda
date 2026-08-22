@@ -15,7 +15,10 @@
 #include "type_contract.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
+#include "template_registry.h"
+#include "template_state.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include "../../lib/url.h"
 #include <stdlib.h>
 
@@ -416,6 +419,12 @@ static bool interp_is_object_field_entry(const NameEntry* entry) {
 
 static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
     if (!entry) return ItemNull;
+    for (InterpViewBinding* binding = f->st ? f->st->view_bindings : NULL;
+            binding; binding = binding->prev) {
+        if (binding->entry == entry && binding->value) {
+            return (Item){.item = *binding->value};
+        }
+    }
     if (interp_is_object_field_entry(entry)) {
         if (!f->method_self || !entry->name) {
             log_error("interp: object field read escaped its method frame");
@@ -455,6 +464,20 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
 
 static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
     if (!entry) return;
+    for (InterpViewBinding* binding = f->st ? f->st->view_bindings : NULL;
+            binding; binding = binding->prev) {
+        if (binding->entry != entry || !binding->value) continue;
+        *binding->value = value.item;
+        if (binding->is_state && binding->model && binding->template_ref &&
+                binding->state_name) {
+            // State writes must update the shared store, not only the
+            // activation overlay; tmpl_state_set also marks the render-map
+            // entry dirty for the next reconciliation pass.
+            tmpl_state_set((Item){.item = *binding->model}, binding->template_ref,
+                binding->state_name, value);
+        }
+        return;
+    }
     if (interp_is_object_field_entry(entry)) {
         if (!f->method_self || !entry->name) {
             log_error("interp: object field write escaped its method frame");
@@ -512,9 +535,16 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
         Type* declared_type, const char* boundary) {
     if (!f || item_is_error(value)) return value;
     Type* element = ast_declared_array_element(declared_type);
-    if (!element || element->type_id == LMD_TYPE_ANY) return value;
+    if (!element) return value;
     Scratch source_root(f);
     source_root.set(value);
+    if (element->type_id == LMD_TYPE_ANY) {
+        // MIR widens an ArrayNum at an any[] declaration boundary; retaining
+        // its packed N-D carrier would make later scalar indexing flatten a
+        // row instead of replacing the boxed sequence element.
+        void* boxed = ensure_typed_array(source_root.get(), LMD_TYPE_ANY);
+        return boxed ? interp_ptr_item(boxed) : ItemError;
+    }
     LaneStorageDesc lane = {};
     if (lambda_type_lane_storage_desc(element, &lane) &&
             (lane.nullable || lane.kind == LANE_STORAGE_POINTER)) {
@@ -3960,6 +3990,38 @@ extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
 
 static __thread InterpState* g_interp_state = NULL;
 static InterpState* interp_current_state(void) { return g_interp_state; }
+static uint32_t interp_depth_budget(void);
+
+// Retained DOM events execute after the script runner has unwound its T0
+// state. Borrow the event's EvalContext for one activation instead of treating
+// the absent runner state as a semantic failure; nested script execution still
+// keeps its existing state untouched.
+class InterpStateGuard {
+    InterpState state_;
+    InterpState* saved_;
+    bool owns_;
+public:
+    explicit InterpStateGuard(Context* host)
+            : state_{}, saved_(g_interp_state), owns_(false) {
+        if (g_interp_state || !host) return;
+        EvalContext* eval_context = (EvalContext*)host;
+        state_.ctx = eval_context;
+        state_.runtime = eval_context->runtime;
+        state_.mode = EvalMode::RUNTIME;
+        state_.depth_limit = interp_depth_budget();
+        state_.depth = state_.depth_limit;
+        g_interp_state = &state_;
+        owns_ = true;
+    }
+
+    ~InterpStateGuard() {
+        if (owns_) g_interp_state = saved_;
+    }
+
+    InterpState* get() const { return g_interp_state; }
+    InterpStateGuard(const InterpStateGuard&) = delete;
+    InterpStateGuard& operator=(const InterpStateGuard&) = delete;
+};
 
 // const accepts only literal scalar syntax. The same eval_expr walker still
 // performs the operation, but this narrow admission guarantees a fold cannot
@@ -4179,6 +4241,224 @@ static uint32_t interp_depth_budget(void) {
     return (uint32_t)value;
 }
 
+static void interp_register_view_template(Script* script, AstViewNode* view,
+        int ordinal) {
+    if (!script || !view || !g_template_registry || !view->body) return;
+
+    TemplateSpecificity specificity = TMPL_SPEC_CATCHALL;
+    TypeId match_type = LMD_TYPE_ANY;
+    const char* match_tag = NULL;
+    int match_tag_len = 0;
+    AstNode* pattern = view->pattern;
+    if (pattern && pattern->type) {
+        TypeId tid = pattern->type->type_id;
+        if (tid == LMD_TYPE_TYPE) {
+            TypeType* type_value = (TypeType*)pattern->type;
+            if (type_value->type && type_value->type->type_id != LMD_TYPE_ANY) {
+                match_type = type_value->type->type_id;
+                specificity = TMPL_SPEC_SIMPLE_TYPE;
+                if (match_type == LMD_TYPE_ELEMENT) {
+                    TypeElmt* element_type = (TypeElmt*)type_value->type;
+                    if (element_type->name.str && element_type->name.length > 0) {
+                        match_tag = element_type->name.str;
+                        match_tag_len = (int)element_type->name.length;
+                        specificity = element_type->length > 0
+                            ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
+                    }
+                }
+            }
+        } else if (tid != LMD_TYPE_ANY) {
+            match_type = tid;
+            specificity = TMPL_SPEC_SIMPLE_TYPE;
+        }
+    }
+    if (view->name) specificity = TMPL_SPEC_NAMED;
+
+    template_registry_add(g_template_registry,
+        view->name ? view->name->chars : NULL, view->is_edit, NULL, specificity,
+        match_type, match_tag, match_tag_len, 0, 0);
+    TemplateEntry* entry = g_template_registry->last;
+    if (!entry) return;
+    const char* generated_ref = view->name ? view->name->chars : NULL;
+    if (!generated_ref) {
+        char ref[48];
+        snprintf(ref, sizeof(ref), "_interp_view_%d", ordinal);
+        generated_ref = name_pool_create_len(script->name_pool, ref,
+            strlen(ref))->chars;
+    }
+    entry->template_ref = generated_ref;
+    entry->interp_view = view;
+    entry->interp_module = script;
+    for (AstEventHandler* handler = view->handler; handler;
+            handler = handler->next_handler) {
+        if (handler->event) {
+            template_entry_add_interp_handler(entry, handler->event->chars,
+                handler, view, script);
+        }
+    }
+    log_debug("interp: registered view ref=%s type=%d state=%d handlers=%d",
+        generated_ref, (int)match_type, view->state ? 1 : 0,
+        view->handler ? 1 : 0);
+}
+
+static void interp_register_view_templates(Script* script) {
+    if (!script || script->interp_views_registered || !g_template_registry ||
+            !script->ast_root) return;
+    AstNode* top = ((AstScript*)script->ast_root)->child;
+    int ordinal = 0;
+    for (AstNode* item = top; item; item = item->next) {
+        AstNode* view_item = item;
+        if (item->node_type == AST_NODE_CONTENT) {
+            view_item = ((AstListNode*)item)->item;
+        }
+        while (view_item) {
+            if (view_item->node_type == AST_NODE_VIEW) {
+                interp_register_view_template(script, (AstViewNode*)view_item,
+                    ordinal++);
+            }
+            view_item = item->node_type == AST_NODE_CONTENT
+                ? view_item->next : NULL;
+        }
+    }
+    script->interp_views_registered = true;
+}
+
+static NameEntry* interp_view_scope_entry(NameScope* scope, String* name) {
+    if (!scope || !name) return NULL;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (entry->name == name || (entry->name &&
+                entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0)) {
+            return entry;
+        }
+    }
+    return interp_view_scope_entry(scope->parent, name);
+}
+
+static const char* interp_view_template_ref(AstViewNode* view) {
+    if (!view) return NULL;
+    if (view->name) return view->name->chars;
+    if (!g_template_registry) return NULL;
+    for (TemplateEntry* entry = g_template_registry->first; entry;
+            entry = entry->next) {
+        if (entry->interp_view == view) return entry->template_ref;
+    }
+    return NULL;
+}
+
+static int interp_view_state_count(AstViewNode* view, AstEventHandler* handler) {
+    int count = 0;
+    if (view) {
+        for (AstStateEntry* state = view->state; state;
+                state = state->next_state) count++;
+    }
+    if (handler && handler->param) count++;
+    return count;
+}
+
+static Item interp_eval_view_activation(Context* host, Script* module,
+        AstViewNode* view, AstNode* body, AstEventHandler* handler,
+        Item model, Item event) {
+    if (!host || !module || !view || !body) {
+        log_error("interp: view invocation has no active interpreter");
+        return ItemError;
+    }
+    InterpStateGuard state_guard(host);
+    InterpState* st = state_guard.get();
+    if (!st || !st->ctx) {
+        log_error("interp: view invocation has no EvalContext");
+        return ItemError;
+    }
+    InterpFrameGuard guard(st, NULL, module, &module->interp_plan, NULL, 0);
+    if (!guard.valid()) return ItemError;
+    InterpFrame* frame = guard.frame();
+    void** saved_consts = st->ctx->consts;
+    void* saved_type_list = st->ctx->type_list;
+    st->ctx->consts = module->const_list ? module->const_list->data : NULL;
+    st->ctx->type_list = module->type_list;
+    Scratch model_slot(frame);
+    model_slot.set(model);
+    InterpContextGuard occurrence(st, model_slot.home(), NULL);
+    const char* template_ref = interp_view_template_ref(view);
+    if (!template_ref) {
+        log_error("interp: view has no registered template reference");
+        st->ctx->consts = saved_consts;
+        st->ctx->type_list = saved_type_list;
+        return ItemError;
+    }
+
+    int binding_count = interp_view_state_count(view, handler);
+    RootSpan value_roots((size_t)binding_count);
+    InterpViewBinding* bindings = binding_count
+        ? (InterpViewBinding*)mem_calloc((size_t)binding_count,
+            sizeof(InterpViewBinding), MEM_CAT_EVAL) : NULL;
+    InterpViewBinding* saved_bindings = st->view_bindings;
+    st->view_bindings = saved_bindings;
+    Item result = ItemError;
+    int binding_index = 0;
+    bool setup_ok = binding_count == 0 || (value_roots.valid() && bindings);
+    if (setup_ok) {
+        for (AstStateEntry* state = view->state; state && setup_ok;
+                state = state->next_state) {
+            NameEntry* entry = interp_view_scope_entry(view->vars, state->name);
+            if (!entry) {
+                log_error("interp: view state '%s' has no binding entry",
+                    state->name ? state->name->chars : "<unnamed>");
+                setup_ok = false;
+                break;
+            }
+            Item default_value = state->value ? eval_expr(frame, state->value) : ItemNull;
+            if (interp_frame_pending(frame)) {
+                setup_ok = false;
+                break;
+            }
+            value_roots.words()[binding_index] = default_value.item;
+            Item initial = tmpl_state_get_or_init(model_slot.get(), template_ref,
+                state->name->chars,
+                (Item){.item = value_roots.words()[binding_index]});
+            value_roots.words()[binding_index] = initial.item;
+            bindings[binding_index] = {entry, &value_roots.words()[binding_index],
+                model_slot.home(), template_ref, state->name->chars, true,
+                st->view_bindings};
+            st->view_bindings = &bindings[binding_index++];
+        }
+        if (setup_ok && handler && handler->param) {
+            NameEntry* entry = handler->param->entry;
+            if (!entry) entry = interp_view_scope_entry(handler->vars,
+                handler->param->name);
+            if (!entry) {
+                log_error("interp: view handler parameter has no binding entry");
+                setup_ok = false;
+            } else {
+                value_roots.words()[binding_index] = event.item;
+                bindings[binding_index] = {entry, &value_roots.words()[binding_index],
+                    model_slot.home(), template_ref, NULL, false,
+                    st->view_bindings};
+                st->view_bindings = &bindings[binding_index++];
+            }
+        }
+    }
+    if (setup_ok) result = eval_expr(frame, body);
+    st->view_bindings = saved_bindings;
+    if (bindings) mem_free(bindings);
+    st->ctx->consts = saved_consts;
+    st->ctx->type_list = saved_type_list;
+    if (interp_frame_pending(frame)) return interp_signal_payload(frame);
+    return result;
+}
+
+extern "C" Item interp_eval_view_template(Context* host, Script* module,
+        AstViewNode* view, Item model) {
+    return interp_eval_view_activation(host, module, view,
+        view ? view->body : NULL, NULL, model, ItemNull);
+}
+
+extern "C" Item interp_eval_view_handler(Context* host, Script* module,
+        AstViewNode* view, AstEventHandler* handler, Item model, Item event) {
+    return interp_eval_view_activation(host, module, view,
+        handler ? handler->body : NULL, handler, model, event);
+}
+
 // Runs one module's top level in its own frame. Used for every module in the
 // import cone and for the main script, so an initializer sees exactly the same
 // environment either way.
@@ -4283,6 +4563,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
     runner->context->type_list = script->type_list;
+    interp_register_view_templates(script);
     return interp_execute_top_level_nodes(runner, st, script, root->child, run_main);
 }
 

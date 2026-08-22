@@ -813,6 +813,7 @@ struct Script : Input {
     bool interp_supported;          // pre-scan found only P0/P1-covered kinds
     AstNodeType interp_reject_kind; // first unsupported kind, for the log line
     uint32_t interp_satellite_count; // unique MIR satellite image sequence
+    bool interp_views_registered;   // T0 view entries published in this context
 
     // P4 keeps each incrementally parsed REPL fragment alive because every
     // AstNode retains Tree-sitter spans into its source tree. `source` aliases

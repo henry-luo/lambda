@@ -310,6 +310,10 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PATTERN_ISLAND:
     // --- P1.3: documents, paths, queries ---
     case AST_NODE_ELEMENT:
+    // View and edit declarations register an interpreter body against the
+    // active `~` context; unsupported native editor operations still fail
+    // closed through the scan below.
+    case AST_NODE_VIEW:
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
@@ -381,6 +385,9 @@ static bool interp_binding_is_ndim_array(NameEntry* entry, int depth) {
             entry->node->node_type != AST_NODE_ASSIGN) {
         return false;
     }
+    // The any[] declaration boundary widens an N-D numeric literal to a boxed
+    // Array, so its later scalar index writes do not need row-aware admission.
+    if (ast_declared_type_is_open_any_array(entry->declared_type)) return false;
     AstNode* init = ast_unwrap_primary(((AstNamedNode*)entry->node)->as);
     if (!init) return false;
     if (init->node_type == AST_NODE_IDENT) {
@@ -576,6 +583,33 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     if (!interp_kind_supported(node->node_type)) {
         sc->ok = false;
         sc->reject = node->node_type;
+        return;
+    }
+    if (node->node_type == AST_NODE_VIEW) {
+        AstViewNode* view = (AstViewNode*)node;
+        if (!view->body) {
+            // Both view and edit bodies are ordinary `~` activations. The
+            // scanner still rejects any editor-only native ABI encountered
+            // below, but the template boundary itself needs no generated
+            // function pointer.
+            sc->ok = false;
+            sc->reject = AST_NODE_VIEW;
+            return;
+        }
+        if (view->pattern) interp_scan_visit(view->pattern, ctx);
+        for (AstNode* param = (AstNode*)view->param; param; param = param->next) {
+            interp_scan_visit(param, ctx);
+        }
+        if (sc->ok && view->body) interp_scan_visit(view->body, ctx);
+        for (AstStateEntry* state = view->state; sc->ok && state;
+                state = state->next_state) {
+            if (state->value) interp_scan_visit(state->value, ctx);
+        }
+        for (AstEventHandler* handler = view->handler; sc->ok && handler;
+                handler = handler->next_handler) {
+            if (handler->param) interp_scan_visit((AstNode*)handler->param, ctx);
+            if (handler->body) interp_scan_visit(handler->body, ctx);
+        }
         return;
     }
     if (node->node_type == AST_NODE_PIPE) {
@@ -1361,11 +1395,15 @@ static uint32_t plan_need(AstNode* node) {
             return 14 + widest;
         }
         if (!fr->group) {
-            // The ordinary recursive iterator's existing conservative shape:
-            // one accumulator home above its widest structural child.
+            // eval_for always reserves the output and ordering-key homes,
+            // even when the enclosing statement discards the stream;
+            // interp_for_level then publishes one collection home before
+            // evaluating each loop source. The old one-home floor omitted
+            // those fixed homes, so nested call/for bodies could exhaust the
+            // statically planned window at a GC safepoint.
             NeedAcc acc = {0};
             interp_visit_children(node, plan_need_child, &acc);
-            return 1 + acc.best;
+            return 3 + acc.best;
         }
         // Group materialization keeps the output/key streams, source, row
         // stream, key stream, and current row alive while row clauses run.
