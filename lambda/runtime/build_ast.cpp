@@ -2310,11 +2310,18 @@ void lambda_ast_register_name(Transpiler* tp, AstNamedNode* node) {
 
 AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
         LambdaSourceSpan span, StrView name, bool is_proc) {
+    // An unnamed function is an arrow/closure: AST_NODE_FUNC_EXPR, matching the
+    // CST builder. Forward declarations always carry a name, so keying on the
+    // spelling is safe. Consumers group FUNC_EXPR with FUNC everywhere, so this
+    // only restores the distinction the AST already models — it is not a
+    // behaviour change.
+    bool is_anonymous = name.length == 0;
     AstFuncNode* fn_node = (AstFuncNode*)alloc_ast_node_from_span(tp,
-        is_proc ? AST_NODE_PROC : AST_NODE_FUNC, span, sizeof(AstFuncNode));
+        is_proc ? AST_NODE_PROC : is_anonymous ? AST_NODE_FUNC_EXPR : AST_NODE_FUNC,
+        span, sizeof(AstFuncNode));
     fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-    fn_type->is_anonymous = false;
+    fn_type->is_anonymous = is_anonymous;
     fn_type->is_proc = is_proc;
     fn_type->param = NULL;
     fn_type->param_count = 0;
@@ -2325,7 +2332,10 @@ AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
     fn_type->returned = &TYPE_ANY;
     set_function_return_contract(fn_type,
         is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
-    fn_node->name = name_pool_create_strview(tp->name_pool, name);
+    // an anonymous function has no name at all, matching the CST builder —
+    // an empty String would print as `(name "")` and read as a named function.
+    fn_node->name = is_anonymous ? NULL
+        : name_pool_create_strview(tp->name_pool, name);
     // The forward declaration must be safely visible before its body exists.
     // Completion later fills these fields in place so every early reference
     // keeps the binding identity registered in the enclosing scope.

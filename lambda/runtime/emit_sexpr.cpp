@@ -22,6 +22,8 @@
 
 #include "emit_sexpr.h"
 #include "transpiler.hpp"
+#include "ast_build.hpp"          // lambda_rd_build_ast: the production C parser
+#include "../../lib/shell.h"      // shell_getenv: LAMBDA_PARSER selection
 #include "type_contract.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/file.h"
@@ -2568,6 +2570,37 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
     printf(")");
 }
 
+// The C recursive-descent parser is production; Tree-sitter is the reference
+// front end, selected explicitly via LAMBDA_PARSER=tree. Both emitters walk the
+// same AstNode tree, so the dump is parser-agnostic once the root is built.
+static bool emit_tree_parser_selected(void) {
+#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
+    return false;
+#else
+    const char* mode = shell_getenv("LAMBDA_PARSER");
+    return mode && (strcmp(mode, "tree") == 0 || strcmp(mode, "tree-sitter") == 0);
+#endif
+}
+
+static bool emit_build_ast_root(Transpiler* tp, const char* source, TSNode root) {
+    if (emit_tree_parser_selected()) {
+        tp->ast_root = build_script(tp, root);
+        return tp->ast_root != NULL;
+    }
+    AstScript* direct_root = NULL;
+    LambdaParseError parse_error = {};
+    if (lambda_rd_build_ast(tp, source, strlen(source), &direct_root,
+            &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
+        fprintf(stderr, "Error: C parser rejected '%s': %s\n",
+            tp->reference ? tp->reference : "<source>",
+            parse_error.message ? parse_error.message : "direct AST reduction failed");
+        return false;
+    }
+    tp->syntax_tree = NULL;
+    tp->ast_root = (AstNode*)direct_root;
+    return true;
+}
+
 int emit_ast_dump_file(const char* script_path) {
     EmitParseState parse;
     if (!emit_prepare_parse(script_path, &parse)) return 1;
@@ -2621,8 +2654,7 @@ int emit_ast_dump_file(const char* script_path) {
     tp.directory = import_directory;
     tp.runtime = &runtime;
 
-    tp.ast_root = build_script(&tp, root);
-    if (!tp.ast_root) {
+    if (!emit_build_ast_root(&tp, source, root)) {
         fprintf(stderr, "Error: Failed to build AST for '%s'\n", script_path);
         arraylist_free(tp.const_list);
         mem_free(import_directory);
