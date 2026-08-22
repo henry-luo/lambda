@@ -15,6 +15,8 @@
 #include "type_contract.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
+#include "../js/js_runtime.h"
+#include "module_registry.h"
 #include "template_registry.h"
 #include "template_state.h"
 #include "../../lib/log.h"
@@ -31,6 +33,8 @@ extern "C" Item pn_output_append_mir(Item source, Item target);
 // ---------------------------------------------------------------------------
 
 static LambdaTier g_lambda_tier = LAMBDA_TIER_JIT;
+
+static InterpState* interp_current_state(void);
 
 LambdaTier lambda_tier_selected(void) { return g_lambda_tier; }
 void lambda_tier_set(LambdaTier tier) { g_lambda_tier = tier; }
@@ -401,6 +405,28 @@ static void interp_write_module_slot(Script* module, int32_t slot, Item value) {
     lambda_module_var_store(state, (uint32_t)slot, value);
 }
 
+// Hosted imports are already evaluated by their language runtime and publish
+// rooted namespace values. Resolve the raw export through that membrane rather
+// than assigning it a Lambda slab slot; a qualified alias still uses the
+// declaring synthetic node name, not the importer's qualified spelling.
+static Item interp_read_cross_lang_binding(InterpState* st, NameEntry* entry) {
+    if (!st || !entry || !entry->import || !entry->import->script) return ItemNull;
+    Script* owner = entry->import->script;
+    Runtime* runtime = st->runtime ? st->runtime
+        : (st->ctx ? st->ctx->runtime : NULL);
+    ModuleDescriptor* module = runtime
+        ? module_get_for_runtime(runtime, owner->reference) : NULL;
+    AstNamedNode* declaration = entry->node ? (AstNamedNode*)entry->node : NULL;
+    const char* name = declaration && declaration->name
+        ? declaration->name->chars : (entry->name ? entry->name->chars : NULL);
+    if (!module || !name) {
+        log_error("interp: cross-language import '%s' has no namespace export",
+            owner->reference ? owner->reference : "<unknown>");
+        return ItemError;
+    }
+    return module_namespace_get(module, name);
+}
+
 // Captures are a by-value snapshot taken at closure creation (D6.2.3), so an
 // enclosing name is either this frame's own slot or an env index — never a
 // live cell. Stage 1 has no mutable upvalues (S9.1.4 via D6.2.3).
@@ -424,6 +450,9 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
         if (binding->entry == entry && binding->value) {
             return (Item){.item = *binding->value};
         }
+    }
+    if (entry->import && entry->import->is_cross_lang) {
+        return interp_read_cross_lang_binding(f->st, entry);
     }
     if (interp_is_object_field_entry(entry)) {
         if (!f->method_self || !entry->name) {
@@ -869,6 +898,9 @@ static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
         InterpFrame* caller, NameEntry* const* borrowed_entries);
 static Function* interp_make_method_closure(Script* module,
         const TypeMethod* method, Item self);
+static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
+        void* entry);
+
 
 bool interp_native_sys_item_supported(const SysFuncInfo* info) {
     if (!info || info->c_arg_conv != C_ARG_NATIVE) return false;
@@ -1058,6 +1090,24 @@ static void interp_propagate_proc_side_effect_error(InterpFrame* f,
     }
 }
 
+static Item interp_call_js_export(Function* function, const uint64_t* words,
+        int argc, uint64_t* result_home) {
+    const Item* args = (const Item*)(const void*)words;
+    switch (argc) {
+    case 0: return js_call_export_0_into(function, result_home);
+    case 1: return js_call_export_1_into(function, args[0], result_home);
+    case 2: return js_call_export_2_into(function, args[0], args[1], result_home);
+    case 3: return js_call_export_3_into(function, args[0], args[1], args[2], result_home);
+    case 4: return js_call_export_4_into(function, args[0], args[1], args[2], args[3], result_home);
+    case 5: return js_call_export_5_into(function, args[0], args[1], args[2], args[3], args[4], result_home);
+    case 6: return js_call_export_6_into(function, args[0], args[1], args[2], args[3], args[4], args[5], result_home);
+    case 7: return js_call_export_7_into(function, args[0], args[1], args[2], args[3], args[4], args[5], args[6], result_home);
+    case 8: return js_call_export_8_into(function, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], result_home);
+    default:
+        log_error("interp: JavaScript import call arity %d exceeds bridge limit", argc);
+        return ItemError;
+    }
+}
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     int source_argc = 0;
@@ -1382,6 +1432,20 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return ItemError;
     }
     Function* fn = (Function*)(uintptr_t)callee_item.item;
+    AstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
+        ? (AstIdentNode*)callee : NULL;
+    bool cross_lang_js_call = imported_ident && imported_ident->entry &&
+        imported_ident->entry->import && imported_ident->entry->import->is_cross_lang &&
+        imported_ident->entry->import->script &&
+        imported_ident->entry->import->script->profile == &js_profile;
+    if (cross_lang_js_call) {
+        if (injected || has_named_args) {
+            log_error("interp: JavaScript imports require positional arguments");
+            return ItemError;
+        }
+        uint64_t result_home = 0;
+        return interp_call_js_export(fn, words, dispatch_argc, &result_home);
+    }
     if (!injected && ast_type_func_has_var_parameter(direct_signature)) {
         NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed)) {
@@ -1450,6 +1514,23 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
     fn->def_module = module;
     fn->runtime_context = (Context*)context;
     lambda_function_set_type(fn, fn_node->type);
+
+    // Task-backed procedures use MIR's resumable state machine at their first
+    // entry. T0 owns the surrounding module activation, but it must not turn
+    // an async procedure into a synchronous AST call: publish the generated
+    // boxed satellite before the function value escapes (D8.1.1v2 / D5.1.3).
+    if (fn_node->node_type == AST_NODE_PROC && fn_node->analysis &&
+            (fn_node->analysis->may_await || fn_node->analysis->needs_task_context)) {
+        InterpState* st = interp_current_state();
+        void* entry = NULL;
+        if (st && st->runtime && compile_ast_function_satellite(
+                st->runtime, module, fn_node, &entry) && entry) {
+            interp_upgrade_function_entry(fn, fn_node, entry);
+        } else {
+            log_error("interp: async procedure '%s' could not publish its MIR satellite",
+                fn_node->name ? fn_node->name->chars : "<anonymous>");
+        }
+    }
 
     // Snapshot captures by value (D6.2.3).
     if (cap_count > 0 && creating_frame) {
@@ -1701,11 +1782,26 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     int field_count = (int)object_type->length;
     RootSpan values((size_t)(field_count > 0 ? field_count : 1));
     uint64_t* words = values.words();
+    AstNode* spread_node = ast_object_literal_spread_value(node);
+    Scratch spread(f);
+    if (spread_node) spread.set(eval_expr(f, spread_node));
     ShapeEntry* field = object_type->shape;
     for (int index = 0; index < field_count && field; index++, field = field->next) {
         AstNode* value_node = ast_object_literal_value_for_shape(node, field);
-        if (!value_node) value_node = field->default_value;
-        words[index] = value_node ? eval_expr(f, value_node).item : ItemNull.item;
+        if (value_node) {
+            words[index] = eval_expr(f, value_node).item;
+        } else if (spread_node && field->name) {
+            // Preserve `*:source` fields before typed storage conversion; an
+            // omitted float/int field must not be sent to set_field_value as a
+            // null Item, which has no numeric payload to decode.
+            Scratch key(f);
+            key.set((Item){.item = s2it(heap_create_name(field->name->str,
+                field->name->length))});
+            words[index] = fn_member(spread.get(), key.get()).item;
+        } else {
+            words[index] = field->default_value
+                ? eval_expr(f, field->default_value).item : ItemNull.item;
+        }
         if (interp_frame_pending(f)) return ItemNull;
     }
 
@@ -4561,6 +4657,17 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
         log_error("interp: could not prepare module slab for '%s'", script->reference);
         return ItemError;
     }
+    // T0 itself reads the AST pools directly, but any task-backed MIR satellite
+    // published from this module resolves literals through the same
+    // context-owned const/type image. Bind that image before the first closure
+    // can enter its generated resumable wrapper (D7.2.1).
+    if (!lambda_module_state_bind_static(script->module_state_id,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list)) {
+        log_error("interp: could not bind static module image for '%s'",
+            script->reference ? script->reference : "<none>");
+        return ItemError;
+    }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
     runner->context->type_list = script->type_list;
     interp_register_view_templates(script);
@@ -4574,6 +4681,12 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
     if (!lambda_module_state_prepare(script->module_state_id,
             script->interp_slab_count)) {
         log_error("interp: could not prepare REPL module slab for '%s'", script->reference);
+        return ItemError;
+    }
+    if (!lambda_module_state_bind_static(script->module_state_id,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list)) {
+        log_error("interp: could not bind static REPL module image");
         return ItemError;
     }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;

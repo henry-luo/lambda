@@ -524,6 +524,12 @@ static AstFuncNode* interp_static_proc_binding(NameEntry* entry, int depth) {
 static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
         InterpSyncProcScan* scan);
 
+typedef struct SatelliteScanCtx {
+    bool ok;
+} SatelliteScanCtx;
+
+static void interp_scan_satellite_node(AstNode* node, void* opaque);
+
 static void interp_sync_proc_visit(AstNode* node, void* ctx) {
     InterpSyncProcScan* scan = (InterpSyncProcScan*)ctx;
     if (!scan || !scan->ok || !node) return;
@@ -575,6 +581,33 @@ static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
     interp_sync_proc_visit(fn->body, scan);
     scan->active_count--;
     return scan->ok;
+}
+
+// Async procedures are executed by their generated MIR resumable entry, not by
+// the synchronous AST walker. Keep the same satellite structural boundary for
+// that delegated body so captures, nested definitions, member-method layouts,
+// and unsupported module bindings cannot cross the membrane accidentally.
+static bool interp_async_proc_satellite_supported(AstFuncNode* fn) {
+    if (!fn || !fn->body || fn->captures || fn->is_generator) return false;
+    SatelliteScanCtx scan = {true};
+    interp_scan_satellite_node(fn->body, &scan);
+    return scan.ok;
+}
+
+// A delegated async body can contain `start(p)` edges that the outer T0 scan
+// deliberately does not descend into. Mark those direct procedure targets so
+// their values are published as boxed task entries before the generated body
+// launches them; the flag is already the native analysis fact for that ABI.
+static void interp_mark_task_entry(AstNode* node, void* opaque) {
+    (void)opaque;
+    if (!node) return;
+    if (node->node_type == AST_NODE_START) {
+        AstStartNode* start = (AstStartNode*)node;
+        AstFuncNode* target = start->call
+            ? ast_direct_call_function(start->call) : NULL;
+        if (target && target->analysis) target->analysis->needs_task_context = true;
+    }
+    interp_visit_children(node, interp_mark_task_entry, NULL);
 }
 
 static void interp_scan_visit(AstNode* node, void* ctx) {
@@ -678,6 +711,19 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             }
         }
         AstFuncNode* direct = ast_direct_call_function(call);
+        if (call_callee && call_callee->node_type == AST_NODE_IDENT) {
+            AstIdentNode* imported = (AstIdentNode*)call_callee;
+            AstImportNode* import = imported->entry ? imported->entry->import : NULL;
+            if (import && import->is_cross_lang && import->script &&
+                    import->script->profile == &js_profile &&
+                    ast_call_has_named_args(call)) {
+                // The hosted JS membrane exposes a fixed positional bridge;
+                // it has no Lambda formal-name adapter to reorder arguments.
+                sc->ok = false;
+                sc->reject = AST_NODE_NAMED_ARG;
+                return;
+            }
+        }
         if (ast_call_has_named_args(call) && !direct &&
                 !interp_named_sys_args_supported(call_callee)) {
             // Dynamic calls have no formal layout. Pure system rows are the
@@ -723,12 +769,19 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         InterpSyncProcScan sync_scan = {.ok = true};
         bool task_backed = fn->analysis && (fn->analysis->may_await ||
             fn->analysis->needs_task_context);
-        if (fn->is_async || fn->is_generator ||
-                (task_backed && !interp_proc_body_is_synchronous(fn, &sync_scan))) {
+        bool async_satellite = task_backed &&
+            interp_async_proc_satellite_supported(fn);
+        if (task_backed && async_satellite) {
+            interp_visit_children(fn->body, interp_mark_task_entry, NULL);
+        }
+        if (fn->is_generator ||
+                (task_backed && !async_satellite &&
+                 !interp_proc_body_is_synchronous(fn, &sync_scan))) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
         }
+        if (task_backed && async_satellite) return;
     }
     // `a[i] = v`, `a.f = v`, and nested paths through a plain binding root use
     // cow_path_set: it owns every detach/relink decision (S9.1.2), while T0
@@ -828,11 +881,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    // The whole import cone must be interpretable or none of it is: a
-    // JIT-compiled module numbers its slab slots in its own lowering pass,
-    // which does not agree with this pass's numbering, so a mixed cone would
-    // read the wrong globals. Cross-language imports keep their lowering-time
-    // symbol registration and stay on the JIT entirely.
+    // Lambda imports still require one shared planned slab. Hosted JavaScript
+    // imports are different: their namespace is already evaluated and rooted
+    // by the JS runtime, so the binding is resolved through that membrane.
     if (node->node_type == AST_NODE_IMPORT) {
         AstImportNode* imp = (AstImportNode*)node;
         // An aliased import (`import alias: path`) adds *qualified* entries
@@ -840,8 +891,11 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // `node` + `import` pair as the plain entry, so plan_resolve_import
         // binds it through the identical declaration-node match. Only the
         // namespace/default/cross-language shapes have no walker equivalent.
-        if (imp->namespace_name || imp->default_name ||
-                imp->is_cross_lang || !imp->script || !imp->script->interp_supported) {
+        bool hosted_js = imp->is_cross_lang && imp->script &&
+            imp->script->profile == &js_profile;
+        if (imp->namespace_name || imp->default_name || !imp->script ||
+                (imp->is_cross_lang && !hosted_js) ||
+                (!imp->is_cross_lang && !imp->script->interp_supported)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -1162,6 +1216,16 @@ static void plan_backlink_entry(PlanCtx* pc, NameEntry* entry) {
 static bool plan_resolve_import(NameEntry* entry) {
     if (!entry->import || !entry->import->script || !entry->node) return false;
     Script* owner = entry->import->script;
+    if (entry->import->is_cross_lang) {
+        // Hosted modules publish rooted namespace values instead of Lambda
+        // module slabs. Mark the binding as externally resolved; the walker
+        // reads it through the language membrane at each use site.
+        entry->import_owner = owner;
+        entry->binding_storage = BINDING_STORAGE_MODULE;
+        entry->storage_assigned = true;
+        entry->slot = -1;
+        return true;
+    }
     AstScript* owner_root = (AstScript*)owner->ast_root;
     if (!owner_root) return false;
     for (NameEntry* d = owner_root->global_vars ? owner_root->global_vars->first : NULL;
@@ -1439,8 +1503,24 @@ static uint32_t plan_need(AstNode* node) {
         return final_clause > collect ? final_clause : collect;
     }
     case AST_NODE_MAP:
-    case AST_NODE_OBJECT_LITERAL:
         return 1 + plan_need_max_siblings(((AstMapNode*)node)->item);
+    case AST_NODE_OBJECT_LITERAL: {
+        AstObjectLiteralNode* literal = (AstObjectLiteralNode*)node;
+        // eval_object_literal keeps its optional spread home in scope even for
+        // an ordinary typed literal, then publishes the fresh object in a
+        // second home after all fields have been evaluated. The old one-home
+        // floor undercounted a literal nested in a content accumulator and
+        // let the fresh object borrow the frame's signal boundary.
+        uint32_t need = 2 + plan_need_max_siblings(literal->item);
+        if (ast_object_literal_spread_value(literal)) {
+            // A typed `*:source` literal keeps the source and a member key
+            // alive while object_fill performs numeric coercion; the ordinary
+            // one-home literal floor omitted those two simultaneous homes.
+            uint32_t spread_need = 3 + plan_need_max_siblings(literal->item);
+            if (spread_need > need) need = spread_need;
+        }
+        return need;
+    }
     case AST_NODE_ASSIGN:
     case AST_NODE_PARAM: {
         AstNamedNode* named = (AstNamedNode*)node;
@@ -1740,15 +1820,29 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
 // P2 satellite eligibility
 // ---------------------------------------------------------------------------
 
-// Satellites reuse T0's planned module slab, but do not yet carry closure
-// environments, imported module references, or the Script-wide property-key
-// image. Each rejected definition remains on the same T0 semantics path
-// (D8.1.1v2 §5.2-§5.3).
-typedef struct SatelliteScanCtx {
-    bool ok;
-} SatelliteScanCtx;
-
+// Satellites reuse T0's planned module slab. Task-backed procedures carry the
+// resumable task ABI, while the bounded synchronous path admits only reads and
+// stable imports; captures, nested definitions, generators, and replacement
+// writes remain on T0 (D8.1.1v2 §5.2-§5.3).
 bool interp_satellite_import_supported(const NameEntry* entry) {
+    // Function-local imported names are not part of the module-global scope
+    // walk. Rebind that view lazily to the already-planned export slot before
+    // the satellite membrane checks its ABI (D8.1.1v2 / D7.2.1).
+    if (entry && entry->import && !entry->import_owner && entry->import->script &&
+            !entry->import->is_cross_lang && entry->node) {
+        NameEntry* mutable_entry = (NameEntry*)entry;
+        AstScript* owner_root = (AstScript*)entry->import->script->ast_root;
+        for (NameEntry* exported = owner_root && owner_root->global_vars
+                ? owner_root->global_vars->first : NULL;
+                exported; exported = exported->next) {
+            if (exported->node != entry->node || !exported->storage_assigned) continue;
+            mutable_entry->slot = exported->slot;
+            mutable_entry->binding_storage = exported->binding_storage;
+            mutable_entry->import_owner = entry->import->script;
+            mutable_entry->storage_assigned = true;
+            break;
+        }
+    }
     if (!entry || !entry->import || entry->import->is_cross_lang ||
             !entry->import_owner || !entry->storage_assigned ||
             entry->binding_storage != BINDING_STORAGE_MODULE || entry->slot < 0) {
@@ -1757,8 +1851,9 @@ bool interp_satellite_import_supported(const NameEntry* entry) {
     // The target module must already be a planned T0 module; the satellite
     // embeds this stable module id and slot rather than asking MIR to link a
     // missing generated import symbol.
-    return entry->import_owner->interp_supported &&
+    bool supported = entry->import_owner->interp_supported &&
         entry->import_owner->interp_planned;
+    return supported;
 }
 
 static void interp_scan_satellite_node(AstNode* node, void* opaque) {
@@ -1773,19 +1868,21 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         // Nested definitions need an explicit cross-satellite closure contract.
         sc->ok = false;
         return;
-    case AST_NODE_MEMBER_EXPR:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_VIEW:
-        // Named properties depend on the Script-wide sealed key table, which
-        // is not yet shared by satellites.
+        // Member reads use the shared context key image; writes still need a
+        // boxed replacement channel that this satellite ABI does not expose.
         sc->ok = false;
         return;
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
         NameEntry* entry = ident->entry;
         if (!entry) break;
-        if (entry->import && !interp_satellite_import_supported(entry)) {
+        bool hosted_js = entry->import && entry->import->is_cross_lang &&
+            entry->import->script && entry->import->script->profile == &js_profile;
+        if (entry->import && !hosted_js &&
+                !interp_satellite_import_supported(entry)) {
             sc->ok = false;
         }
         break;
@@ -1797,9 +1894,13 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
 }
 
 bool interp_satellite_supported(const AstFuncNode* fn) {
-    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_async ||
-            fn->is_generator || fn->analysis->may_await ||
-            fn->analysis->needs_task_context) {
+    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_generator) {
+        return false;
+    }
+    bool task_backed = fn->node_type == AST_NODE_PROC &&
+        (fn->analysis->may_await || fn->analysis->needs_task_context);
+    if (task_backed) return interp_async_proc_satellite_supported((AstFuncNode*)fn);
+    if (fn->is_async || fn->analysis->may_await || fn->analysis->needs_task_context) {
         return false;
     }
     TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;

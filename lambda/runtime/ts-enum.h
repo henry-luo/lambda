@@ -275,4 +275,3 @@ enum ts_field_identifiers {
   field_variadic = 51,
   field_where = 52,
 };
-

@@ -11,40 +11,6 @@
 # either tier, or its whole import cone was rejected before it was reached.
 #
 # format: <script>	node:<first unsupported kind>
-test/lambda/binary_js_bridge.ls	node:AST_NODE_IMPORT
-test/lambda/import_js.ls	node:AST_NODE_IMPORT
-test/lambda/import_js_naming.ls	node:AST_NODE_IMPORT
-test/lambda/js_array_props_tail_bridge.ls	node:AST_NODE_IMPORT
 test/lambda/map_object_robustness.ls	node:none
 test/lambda/object_direct_access.ls	node:none
-test/lambda/object_update.ls	node:none
 test/lambda/typed_param_direct_access.ls	node:none
-test/lambda/proc/proc_async_partial_item_gc.ls	node:AST_NODE_PROC
-test/lambda/proc/proc_local_error_destructure_async.ls	node:AST_NODE_PROC
-test/lambda/proc/proc_stack_frame.ls	node:AST_NODE_PROC
-test/lambda/proc/wide_scalar_across_await.ls	node:AST_NODE_PROC
-test/lambda/conc/cancel_before_run.ls	node:AST_NODE_PROC
-test/lambda/conc/cancel_nested_cleanup.ls	node:AST_NODE_PROC
-test/lambda/conc/cancel_parked.ls	node:AST_NODE_PROC
-test/lambda/conc/colorless_chain.ls	node:AST_NODE_PROC
-test/lambda/conc/conc_worker_mod.ls	node:AST_NODE_PROC
-test/lambda/conc/imported_call.ls	node:AST_NODE_IMPORT
-test/lambda/conc/indirect_call.ls	node:AST_NODE_PROC
-test/lambda/conc/io_read.ls	node:AST_NODE_PROC
-test/lambda/conc/io_read_error.ls	node:AST_NODE_PROC
-test/lambda/conc/js_promise_wait.ls	node:AST_NODE_IMPORT
-test/lambda/conc/mailbox_full.ls	node:AST_NODE_PROC
-test/lambda/conc/message_fifo.ls	node:AST_NODE_PROC
-test/lambda/conc/no_replay.ls	node:AST_NODE_PROC
-test/lambda/conc/proc_handler_after_wait.ls	node:AST_NODE_PROC
-test/lambda/conc/proc_handler_fault_after_wait.ls	node:AST_NODE_PROC
-test/lambda/conc/scope_error_cancel.ls	node:AST_NODE_PROC
-test/lambda/conc/scope_escape.ls	node:AST_NODE_PROC
-test/lambda/conc/scope_join.ls	node:AST_NODE_PROC
-test/lambda/conc/scope_loop_exit.ls	node:AST_NODE_PROC
-test/lambda/conc/scope_return.ls	node:AST_NODE_PROC
-test/lambda/conc/select_basic.ls	node:AST_NODE_PROC
-test/lambda/conc/start_wait.ls	node:AST_NODE_PROC
-test/lambda/conc/task_system_fault.ls	node:AST_NODE_PROC
-test/lambda/conc/timeout_no_cancel.ls	node:AST_NODE_PROC
-test/lambda/conc/to_promise.ls	node:AST_NODE_IMPORT

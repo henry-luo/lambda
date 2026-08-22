@@ -194,10 +194,10 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment);
 // current walker. On false, `*reject` receives the first unsupported kind.
 bool interp_scan_supported(Script* script, AstNodeType* reject);
 
-// True only for the currently implemented P2 satellite boundary: non-async,
-// no captures/properties and only planned Lambda imports. Module bindings are
-// read from T0's shared slab; a rejected function remains T0 for semantic
-// safety.
+// True only for the currently implemented satellite boundary: task-backed
+// procedures and synchronous functions without captures, nested definitions,
+// or unsupported mutation. Module bindings are read from T0's shared slab; a
+// rejected function remains T0 for semantic safety.
 bool interp_satellite_supported(const AstFuncNode* fn);
 // True when an imported binding has a planned T0 owner and a stable module
 // slab slot. Satellite lowering uses this predicate before embedding that
