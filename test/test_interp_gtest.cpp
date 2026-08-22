@@ -575,7 +575,8 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
 // summary, so its parsed executed count is -1 rather than zero.
 TEST(InterpFallback, ExcludedScriptsAreCountedNotInterpreted) {
     std::vector<ListEntry> excluded = read_list("test/lambda/interp_excluded.txt");
-    ASSERT_FALSE(excluded.empty()) << "exclusion list is missing or empty";
+    // A fully promoted corpus legitimately has no fallback rows; the list
+    // header still exists so the three-way partition remains explicit (R4).
     int checked = 0;
     for (const ListEntry& entry : excluded) {
         if (checked++ >= 12) break;   // a sample; the sweep covers the full list

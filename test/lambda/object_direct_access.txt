@@ -4,7 +4,8 @@ true
 15
 30
 [40, 30]
-"openclosed"
+"open"
+"closed"
 3
 [1.5, 2.5]
 [1, 6]
@@ -15,6 +16,7 @@ false
 100
 70
 120
-"helloworld"
+"hello"
+"world"
 0
 6

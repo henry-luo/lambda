@@ -5,5 +5,3 @@
 # interpreter fallbacks.
 #
 # format: <script>	<reason>
-test/lambda/graph_transform_html.ls	timeout
-test/lambda/graph_transform_input.ls	timeout
