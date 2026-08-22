@@ -11,6 +11,10 @@ enum {
     LAMBDA_BP_PIPE = 10,
     LAMBDA_BP_OR = 20,
     LAMBDA_BP_AND = 30,
+    // §7.2: `not` sits between `and` and the membership tier, so
+    // `not a == b` is `not (a == b)` and `not a and b` is `(not a) and b` —
+    // the Python placement. Its operand is therefore parsed at MEMBERSHIP.
+    LAMBDA_BP_NOT = 35,
     LAMBDA_BP_MEMBERSHIP = 40,
     LAMBDA_BP_SET = 50,
     LAMBDA_BP_EQUALITY = 60,
@@ -34,6 +38,7 @@ typedef struct LambdaRdParser {
     uint32_t depth;
     uint32_t stop_at_element_close;
     uint32_t stop_at_element_attribute_close;
+    LambdaTokenKind prev_kind;
     bool last_statement_self_delimiting;
     bool last_statement_assignment;
     uint32_t expression_depth;
@@ -195,10 +200,57 @@ static void parser_set_error(LambdaRdParser* parser, const char* message,
     parser->error->message = message;
 }
 
+// S16.1.1: line breaks are not delimiters and never reach the parser. Collapse
+// every run of NEWLINE tokens into the `nl_before` flag on the token that
+// follows; that flag is the only thing the S16 rules consult.
+static LambdaToken parser_next_significant(LambdaRdParser* parser) {
+    LambdaToken token = lambda_lexer_next(&parser->lexer);
+    bool saw_newline = false;
+    while (token.kind == LAMBDA_TOK_NEWLINE) {
+        saw_newline = true;
+        token = lambda_lexer_next(&parser->lexer);
+    }
+    token.nl_before = saw_newline;
+    return token;
+}
+
+// S16.2.3: a token that could either continue the preceding expression or begin
+// a new one. After a line break neither reading may win, so both paths are
+// closed and the parse fails loudly. §7.1 removed unary `!` (so `!` is pure
+// infix and continues freely); §7.10 and §7.12 keep `*` and `+` as prefixes,
+// which is why the whole arithmetic family stays here.
+static bool token_is_dual_role(LambdaTokenKind kind) {
+    switch (kind) {
+        case LAMBDA_TOK_LPAREN:
+        case LAMBDA_TOK_LBRACKET:
+        case LAMBDA_TOK_PLUS:
+        case LAMBDA_TOK_MINUS:
+        case LAMBDA_TOK_STAR:
+        case LAMBDA_TOK_SLASH:
+        case LAMBDA_TOK_CARET:
+        case LAMBDA_TOK_LT:
+        case LAMBDA_TOK_DOT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// §7.15: `.digit` remains dual-role even though the lexer folds `.5` into a
+// single FLOAT token — across a line break it is equally a float literal
+// starting a statement and an integer member field continuing one.
+static bool token_is_dot_led_number(const LambdaRdParser* parser,
+        const LambdaToken* token) {
+    return (token->kind == LAMBDA_TOK_FLOAT || token->kind == LAMBDA_TOK_DECIMAL) &&
+        token->span.start_byte < parser->lexer.length &&
+        parser->lexer.source[token->span.start_byte] == '.';
+}
+
 static void parser_advance(LambdaRdParser* parser) {
     if (parser->status != LAMBDA_PARSE_OK) return;
+    parser->prev_kind = parser->current.kind;
     parser->current = parser->next;
-    parser->next = lambda_lexer_next(&parser->lexer);
+    parser->next = parser_next_significant(parser);
     if (parser->metrics) parser->metrics->token_count++;
     if (parser->current.kind == LAMBDA_TOK_ERROR) {
         parser_set_error(parser, "invalid token", LAMBDA_TOK_EOF);
@@ -356,16 +408,15 @@ static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
             parser_set_error(parser, "incomplete type pattern", closing_stack[nesting - 1]);
             return 0;
         }
-        if (kind == LAMBDA_TOK_NEWLINE) {
-            // Annotation operators may bracket a formatting newline, but a
-            // plain newline still belongs to content as a statement boundary.
-            if (nesting || need_atom || parser->next.kind == LAMBDA_TOK_PIPE ||
-                    parser->next.kind == LAMBDA_TOK_AMPERSAND ||
-                    parser->next.kind == LAMBDA_TOK_BANG) {
-                parser_advance(parser);
-                continue;
+        if (parser->current.nl_before && !nesting && !need_atom) {
+            // S16.2.1 keeps an unfinished pattern going (nesting/need_atom);
+            // otherwise only a type-level continuation operator may open the
+            // line. `|`, `&`, and `!` are all in the S16.2.2 continuation set,
+            // so type space needs no private rule of its own.
+            if (kind != LAMBDA_TOK_PIPE && kind != LAMBDA_TOK_AMPERSAND &&
+                    kind != LAMBDA_TOK_BANG) {
+                break;
             }
-            break;
         }
         if (need_atom) {
             if (kind == LAMBDA_TOK_BANG) {
@@ -531,7 +582,8 @@ static LambdaParseValue parse_path_slot(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
     if (parser_accept(parser, LAMBDA_TOK_SLASH)) {
         if (!parser_expect(parser, LAMBDA_TOK_DOT, "expected '.' after path root")) return 0;
-    } else if (!parser_expect(parser, LAMBDA_TOK_DOT, "expected path introducer")) {
+    } else if (!parser_expect(parser, LAMBDA_TOK_PATH_REL, "expected path introducer")) {
+        // §7.15: the relative introducer is `\.`, not a bare dot.
         return 0;
     }
     if (!parse_path_segment(parser)) return 0;
@@ -619,6 +671,8 @@ static bool element_attribute_starts(const LambdaRdParser* parser) {
 }
 
 static LambdaParseValue parse_element(LambdaRdParser* parser) {
+    bool had_attributes = false;
+    bool boundary_comma = false;
     LambdaToken first = parser->current;
     LambdaToken tag = {0};
     LambdaParseValue children[64];
@@ -673,15 +727,40 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
         children[count++] = parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
             LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE, attribute_span,
             attribute_name, &value, 1);
+        had_attributes = true;
         if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
-        parser_skip_newlines(parser);
         if (!element_attribute_starts(parser)) {
-            parser_set_error(parser, "expected an attribute after ','", LAMBDA_TOK_IDENTIFIER);
-            return 0;
+            // §7.11v2: this comma ended the attribute list rather than
+            // separating two attributes — the boundary comma, which is
+            // REQUIRED whenever an element carries both attributes and
+            // content. It is also what settles a greedy attribute value:
+            // without it, `<div a: x (y)>` makes the call `x(y)` the
+            // attribute value.
+            boundary_comma = true;
+            break;
         }
     }
-    parser_accept(parser, LAMBDA_TOK_SEMICOLON);
-    parser_accept(parser, LAMBDA_TOK_NEWLINE);
+    // §7.11v2 makes the comma a biconditional — present exactly when both
+    // attributes and content are. A leading comma with no attributes is now an
+    // error: the case that once needed it (`<svg, .rect>` versus the
+    // maximal-munch tag `svg.rect`) dissolved when §7.15 respelled the relative
+    // path `\.`, so `<svg \.rect>` is unambiguous on its own.
+    if (!had_attributes && parser->current.kind == LAMBDA_TOK_COMMA) {
+        parser_set_error(parser,
+            "an element with no attributes takes no ',' before its content",
+            LAMBDA_TOK_GT);
+        return 0;
+    }
+    if (had_attributes && !boundary_comma && parser->current.kind != LAMBDA_TOK_GT) {
+        parser_set_error(parser,
+            "expected ',' between element attributes and content",
+            LAMBDA_TOK_COMMA);
+        return 0;
+    }
+    if (boundary_comma && parser->current.kind == LAMBDA_TOK_GT) {
+        parser_set_error(parser, "trailing ',' is not a separator", LAMBDA_TOK_GT);
+        return 0;
+    }
     if (parser->current.kind != LAMBDA_TOK_GT) {
         if (count == 64) {
             parser_set_error(parser, "too many element content items in parser POC", LAMBDA_TOK_GT);
@@ -894,9 +973,14 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
         children[1] = parse_expression(parser, 0);
     }
     if (parser->status != LAMBDA_PARSE_OK) return 0;
-    parser_skip_newlines(parser);
-    if (!parser_expect(parser, LAMBDA_TOK_ELSE, "expected else branch")) return 0;
-    parser_skip_newlines(parser);
+    // S16.6.3: `else` is OPTIONAL. An absent else yields null in value
+    // position and contributes nothing in content position, which retires the
+    // ternary-style requirement the expression form used to carry.
+    if (parser->current.kind != LAMBDA_TOK_ELSE) {
+        LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        return parser_reduce(parser, LAMBDA_REDUCE_IF, span, children, 2);
+    }
+    parser_advance(parser);
     if (parser->current.kind == LAMBDA_TOK_LBRACE && !braced_expression_is_map(parser)) {
         parser_advance(parser);
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
@@ -1252,11 +1336,15 @@ static LambdaParseValue parse_while_statement(LambdaRdParser* parser) {
     parser_advance(parser);
     parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
         LAMBDA_REDUCTION_FORM_WHILE_BEGIN, first.span, first, NULL, 0);
-    if (!parser_expect(parser, LAMBDA_TOK_LPAREN, "expected '(' after while")) return 0;
+    // S16.6.1: one node, two spellings — `while (c) { }` and `while c { }`.
+    // S16.6.2: `(` right after the keyword COMMITS to the parenthesized form,
+    // so a bare condition may not begin with `(`.
+    bool paren_condition = parser_accept(parser, LAMBDA_TOK_LPAREN);
     LambdaParseValue condition = parse_expression(parser, 0);
-    if (parser->status != LAMBDA_PARSE_OK ||
-            !parser_expect(parser, LAMBDA_TOK_RPAREN, "expected ')' after while condition") ||
-            !parser_expect(parser, LAMBDA_TOK_LBRACE, "expected '{' after while condition")) return 0;
+    if (parser->status != LAMBDA_PARSE_OK) return 0;
+    if (paren_condition &&
+            !parser_expect(parser, LAMBDA_TOK_RPAREN, "expected ')' after while condition")) return 0;
+    if (!parser_expect(parser, LAMBDA_TOK_LBRACE, "expected '{' after while condition")) return 0;
     LambdaParseValue body = parse_content(parser, LAMBDA_TOK_RBRACE);
     if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after while body")) return 0;
     LambdaParseValue children[2] = {condition, body};
@@ -1355,20 +1443,52 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         value = parser_reduce_token(parser, LAMBDA_REDUCE_ATOM,
             LAMBDA_REDUCTION_FORM_TOKEN, first.span, first, NULL, 0);
     } else if (first.kind == LAMBDA_TOK_LPAREN) {
+        // §5.10: `(` opens an island. Inside it the element scope's suppression
+        // of `<`/`>` lifts, so `<div a: (1 > 0)>` is a comparison rather than a
+        // premature element close.
+        uint32_t saved_close = parser->stop_at_element_close;
+        uint32_t saved_attr_close = parser->stop_at_element_attribute_close;
+        parser->stop_at_element_close = 0;
+        parser->stop_at_element_attribute_close = 0;
         value = parse_group_or_arrow(parser);
+        parser->stop_at_element_close = saved_close;
+        parser->stop_at_element_attribute_close = saved_attr_close;
     } else if (first.kind == LAMBDA_TOK_LBRACKET) {
         value = parse_array(parser);
     } else if (first.kind == LAMBDA_TOK_LBRACE) {
-        value = parse_map(parser);
+        // §5.9v3: braces are resolved by INTERIOR, not position. A map needs
+        // `key ':'`, which statement space cannot spell, so anything else is a
+        // block expression (value = last expression). This is what gives arrow
+        // functions block bodies with no `({...})` quirk. `{}` stays a map.
+        if (braced_expression_is_map(parser) || parser->next.kind == LAMBDA_TOK_RBRACE) {
+            value = parse_map(parser);
+        } else {
+            parser_advance(parser);
+            value = parse_content(parser, LAMBDA_TOK_RBRACE);
+            if (parser->status == LAMBDA_PARSE_OK &&
+                    !parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after block")) {
+                return 0;
+            }
+        }
     } else if (first.kind == LAMBDA_TOK_LT) {
         value = parse_element(parser);
-    } else if (first.kind == LAMBDA_TOK_DOT || first.kind == LAMBDA_TOK_SLASH) {
+    } else if (first.kind == LAMBDA_TOK_PATH_REL || first.kind == LAMBDA_TOK_SLASH) {
         value = parse_path_slot(parser);
-    } else if (first.kind == LAMBDA_TOK_NOT || first.kind == LAMBDA_TOK_BANG ||
+    } else if (first.kind == LAMBDA_TOK_BANG) {
+        // §7.1: `!x` used to mean type complement and silently produced a
+        // TYPE where every C/JS habit expects negation.
+        parser_set_error(parser, "'!' is not logical negation here; use 'not'",
+            LAMBDA_TOK_NOT);
+        return 0;
+    } else if (first.kind == LAMBDA_TOK_NOT ||
             first.kind == LAMBDA_TOK_MINUS || first.kind == LAMBDA_TOK_PLUS ||
             first.kind == LAMBDA_TOK_STAR) {
         parser_advance(parser);
-        LambdaParseValue child = parse_expression(parser, LAMBDA_BP_PREFIX);
+        // §7.2: `not` is the one LOOSE prefix — it takes everything above the
+        // `and`/`or` tiers, so a comparison lands inside it. The arithmetic
+        // prefixes keep their tight binding.
+        LambdaParseValue child = parse_expression(parser,
+            first.kind == LAMBDA_TOK_NOT ? LAMBDA_BP_MEMBERSHIP : LAMBDA_BP_PREFIX);
         if (parser->status == LAMBDA_PARSE_OK) {
             LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
             value = parser_reduce_token(parser, LAMBDA_REDUCE_PREFIX,
@@ -1445,23 +1565,25 @@ static int infix_binding_power(LambdaRdParser* parser, LambdaTokenKind kind,
     }
 }
 
-static bool newline_starts_root_path(const LambdaRdParser* parser) {
-    if (!parser || parser->next.kind != LAMBDA_TOK_SLASH) return false;
-    // At statement scope `/.' is a committed logical path introducer.  Do
-    // not let the division token consume a preceding line's value before the
-    // path parser sees the root (S2.4.1v2).
-    size_t offset = parser->next.span.end_byte;
-    while (offset < parser->lexer.length &&
-            (parser->lexer.source[offset] == ' ' || parser->lexer.source[offset] == '\t')) {
-        offset++;
-    }
-    return offset < parser->lexer.length && parser->lexer.source[offset] == '.';
-}
 
 static LambdaParseValue parse_postfix(LambdaRdParser* parser,
         LambdaParseValue left, uint32_t left_start_byte) {
     for (;;) {
         LambdaToken first = parser->current;
+        // S16.2.3: `(`, `[`, `.`, and `^` all open a postfix form AND can
+        // begin a new statement, so across a line break none of them may
+        // continue this expression. The one exception is S16.2.4's `.ident(`
+        // member call, which no path body or float literal can spell.
+        if (first.nl_before && token_is_dual_role(first.kind)) {
+            // S16.2.4v2 (§7.15): with the relative path respelled `\.`, a
+            // line-start `.ident` has no start reading left, so member access
+            // continues across the break for ANY member — full leading-dot
+            // fluent chains, not just the `.ident(` call form. `.digit` stays
+            // dual-role: `a.5` is an integer member field, `.5` is a float.
+            bool member_chain = first.kind == LAMBDA_TOK_DOT &&
+                parser->next.kind == LAMBDA_TOK_IDENTIFIER;
+            if (!member_chain) return left;
+        }
         LambdaParseValue children[65] = {0};
         children[0] = left;
         if (parser_accept(parser, LAMBDA_TOK_LPAREN)) {
@@ -1589,25 +1711,13 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
     }
     left = parse_postfix(parser, left, first.span.start_byte);
     while (parser->status == LAMBDA_PARSE_OK) {
-        if (parser->current.kind == LAMBDA_TOK_NEWLINE &&
-                parser->next.kind != LAMBDA_TOK_LT && parser->next.kind != LAMBDA_TOK_GT) {
-            if (newline_starts_root_path(parser)) break;
-            // `+`/`-`/`*`/`/` can all begin a valid unary expression.  At a
-            // statement boundary they therefore start the next statement;
-            // only an unambiguous binary spelling such as `++` continues
-            // across the newline (S2.4.1v2).
-            if (parser->next.kind == LAMBDA_TOK_PLUS ||
-                    parser->next.kind == LAMBDA_TOK_MINUS ||
-                    parser->next.kind == LAMBDA_TOK_STAR ||
-                    parser->next.kind == LAMBDA_TOK_SLASH ||
-                    parser->next.kind == LAMBDA_TOK_PERCENT) break;
-            bool newline_right_associative = false;
-            if (infix_binding_power(parser, parser->next.kind,
-                    &newline_right_associative) >= min_bp) {
-                // An operator cannot begin an independent statement here, so
-                // retain the expression across a formatting line break.
-                parser_advance(parser);
-            }
+        // S16.2.2/S16.2.3: after a COMPLETE expression, an operator that can
+        // only continue (`|> | & % > == != <= >=`, `++`, `**`, every word
+        // operator) opens a line freely, so nothing is checked for it. A
+        // dual-role operator may not: the expression stops here, and
+        // parse_content turns the leftover token into the loud error.
+        if (parser->current.nl_before && token_is_dual_role(parser->current.kind)) {
+            break;
         }
         if (left_is_element && parser->stop_at_element_close &&
                 parser->current.kind == LAMBDA_TOK_LT) {
@@ -1843,9 +1953,6 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     if (!parser_expect(parser, LAMBDA_TOK_LBRACE, "expected '{' after view declaration")) return 0;
     LambdaParseValue body = parse_content(parser, LAMBDA_TOK_RBRACE);
     if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after view body")) return 0;
-    while (parser->current.kind == LAMBDA_TOK_NEWLINE && parser->next.kind == LAMBDA_TOK_ON) {
-        parser_advance(parser);
-    }
     while (parser->current.kind == LAMBDA_TOK_ON) {
         LambdaToken on = parser->current;
         parser_advance(parser);
@@ -1877,9 +1984,6 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
             LAMBDA_REDUCTION_FORM_VIEW_HANDLER_END,
             (LambdaSourceSpan){on.span.start_byte, parser->current.span.start_byte},
             event, NULL, 0);
-        while (parser->current.kind == LAMBDA_TOK_NEWLINE && parser->next.kind == LAMBDA_TOK_ON) {
-            parser_advance(parser);
-        }
     }
     LambdaParseValue view_children[2] = {parameters, body};
     LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW,
@@ -1949,9 +2053,17 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
             name, is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
         if (!parser_expect(parser, LAMBDA_TOK_LBRACE, "expected '{' after object type name")) return 0;
         while (parser->status == LAMBDA_PARSE_OK && parser->current.kind != LAMBDA_TOK_RBRACE) {
-            while (parser_accept(parser, LAMBDA_TOK_NEWLINE) || parser_accept(parser, LAMBDA_TOK_COMMA)) {}
+            // §7.11: fields, the object-level constraint, and methods are ONE
+            // comma list. The `;` section divider is retired — `;` now has a
+            // single role language-wide, statement separation.
+            while (parser_accept(parser, LAMBDA_TOK_COMMA)) {}
             if (parser->current.kind == LAMBDA_TOK_RBRACE) break;
-            if (parser_accept(parser, LAMBDA_TOK_SEMICOLON)) continue;
+            if (parser->current.kind == LAMBDA_TOK_SEMICOLON) {
+                parser_set_error(parser,
+                    "object-type members are separated by ',', not ';'",
+                    LAMBDA_TOK_COMMA);
+                return 0;
+            }
             if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN) {
                 if (!parse_function_declaration(parser, false)) return 0;
                 continue;
@@ -2041,18 +2153,28 @@ static LambdaParseValue parse_var_statement(LambdaRdParser* parser) {
         first, &declarations, 1);
 }
 
-static bool newlines_lead_to(const LambdaRdParser* parser, LambdaTokenKind kind) {
+
+static bool if_statement_body_is_map(const LambdaRdParser* parser) {
     LambdaRdParser probe = *parser;
     probe.sink = NULL;
     probe.sink_context = NULL;
     probe.metrics = NULL;
     probe.error = NULL;
-    parser_skip_newlines(&probe);
-    return probe.status == LAMBDA_PARSE_OK && probe.current.kind == kind;
+    parser_advance(&probe);
+    if (probe.current.kind == LAMBDA_TOK_LPAREN) return false;
+    (void)parse_expression(&probe, 0);
+    if (probe.status != LAMBDA_PARSE_OK) return false;
+    return braced_expression_is_map(&probe);
 }
 
 static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
+    if (if_statement_body_is_map(parser)) {
+        // S16.6.1: one node, two spellings — and §5.9v3 resolves the braces by
+        // interior, so `()` never flips the reading: `if c {a: 1}` and
+        // `if (c) {a: 1}` both yield the map.
+        return parse_if_expression(parser);
+    }
     parser_advance(parser);
     LambdaParseValue condition = parse_expression(parser, 0);
     if (parser->status != LAMBDA_PARSE_OK ||
@@ -2065,12 +2187,8 @@ static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
         LAMBDA_REDUCTION_FORM_IF_BRANCH_END, first.span, first, NULL, 0);
     LambdaParseValue children[3] = {condition, body, 0};
     uint32_t child_count = 2;
-    // Comment-only/blank lines still emit several newlines in this lexer;
-    // keep them attached to `else` rather than ending the block-if statement.
-    while (parser->current.kind == LAMBDA_TOK_NEWLINE &&
-            newlines_lead_to(parser, LAMBDA_TOK_ELSE)) {
-        parser_advance(parser);
-    }
+    // S16.2.2 classifies `else` as continuation-only, so it attaches across a
+    // line break with nothing to skip: line breaks never reach the parser.
     if (parser_accept(parser, LAMBDA_TOK_ELSE)) {
         parser_skip_newlines(parser);
         if (parser->current.kind == LAMBDA_TOK_IF) {
@@ -2157,6 +2275,15 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         return imports;
     } else {
         bool is_public = parser_accept(parser, LAMBDA_TOK_PUB);
+        if (is_public && parser->current.kind == LAMBDA_TOK_IDENTIFIER) {
+            // §7.6: `pub` modifies a declaration keyword — `pub let`, `pub fn`,
+            // `pub type`. The old spelling replaced `let` outright, so one
+            // keyword composed two different ways; `pub var` stays illegal by
+            // the modifier simply not composing with `var`.
+            parser_set_error(parser, "'pub' modifies a declaration; write 'pub let'",
+                LAMBDA_TOK_LET);
+            return 0;
+        }
         if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN) {
             return parse_function_declaration(parser, is_public);
         }
@@ -2167,7 +2294,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         // A following `(` is a normal call such as `type(value)`.
         if (parser->current.kind == LAMBDA_TOK_TYPE &&
                 parser->next.kind != LAMBDA_TOK_LPAREN &&
-                parser->next.kind != LAMBDA_TOK_NEWLINE &&
+                !parser->next.nl_before &&
                 parser->next.kind != LAMBDA_TOK_SEMICOLON &&
                 parser->next.kind != LAMBDA_TOK_EOF) {
             return parse_type_declaration(parser, is_public);
@@ -2283,15 +2410,6 @@ static bool element_content_starts_sibling(const LambdaRdParser* parser) {
     return probe.status == LAMBDA_PARSE_OK && probe.current.kind == LAMBDA_TOK_LT;
 }
 
-static bool assignment_statement_starts(const LambdaRdParser* parser) {
-    LambdaRdParser probe = *parser;
-    probe.sink = NULL;
-    probe.sink_context = NULL;
-    probe.metrics = NULL;
-    probe.error = NULL;
-    (void)parse_expression(&probe, 0);
-    return probe.status == LAMBDA_PARSE_OK && probe.current.kind == LAMBDA_TOK_EQ;
-}
 
 static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind terminator) {
     LambdaParseValue content = 0;
@@ -2299,7 +2417,6 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
     bool has_content = false;
     while (parser->status == LAMBDA_PARSE_OK && parser->current.kind != terminator &&
             parser->current.kind != LAMBDA_TOK_EOF) {
-        while (parser_accept(parser, LAMBDA_TOK_NEWLINE) || parser_accept(parser, LAMBDA_TOK_SEMICOLON)) {}
         if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) break;
         if ((parser->current.kind == LAMBDA_TOK_LT && element_content_starts_sibling(parser)) ||
                 (parser->current.kind == LAMBDA_TOK_STRING &&
@@ -2334,29 +2451,51 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
                 parser->current.span.start_byte}, content, statement);
         if (!has_content) content_start = statement_token.span.start_byte;
         has_content = true;
-        if (parser->last_statement_self_delimiting && parser->current.kind == LAMBDA_TOK_FOR) {
-            // `if cond { ... } for ... { ... }` is two unambiguous content
-            // statements; the grammar does not require a separator between
-            // their closing/opening structural delimiters.
+        if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) break;
+        // §7.14: a CLOSED-tail statement — one ending in the structural closer
+        // of a non-postfixable construct, or a self-complete keyword — needs no
+        // separator at all: no dual-role token can continue it, so the next
+        // statement simply juxtaposes ("after a block, never ';'"). The tail,
+        // not the statement kind, is what matters: `type T = int` and
+        // `fn f() => x` end in expressions and stay open.
+        bool closed_tail =
+            statement_first == LAMBDA_TOK_BREAK ||
+            statement_first == LAMBDA_TOK_CONTINUE ||
+            (parser->prev_kind == LAMBDA_TOK_RBRACE &&
+                (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN ||
+                 statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW ||
+                 statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE ||
+                 statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF ||
+                 statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB));
+        if (closed_tail) continue;
+        // S16.1.2: `;` is a STRICT separator — exactly one, between two
+        // statements. A trailing `;` (nothing but the terminator after it) and
+        // a doubled `;` are both syntax errors.
+        if (parser_accept(parser, LAMBDA_TOK_SEMICOLON)) {
+            if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) {
+                parser_set_error(parser, "trailing ';' is not a statement separator",
+                    terminator);
+                return 0;
+            }
+            if (parser->current.kind == LAMBDA_TOK_SEMICOLON) {
+                parser_set_error(parser, "empty statement between ';' separators",
+                    terminator);
+                return 0;
+            }
             continue;
         }
-        if (parser->last_statement_assignment && assignment_statement_starts(parser)) {
-            // `assign_stam` has an optional semicolon, so a procedural block
-            // may place the next unambiguous assignment directly after a call.
-            continue;
-        }
-        if ((statement_first == LAMBDA_TOK_STRING || statement_first == LAMBDA_TOK_LBRACE ||
-                statement_first == LAMBDA_TOK_LT) &&
-                (parser->current.kind == LAMBDA_TOK_STRING ||
-                 parser->current.kind == LAMBDA_TOK_LBRACE ||
-                 parser->current.kind == LAMBDA_TOK_LT)) {
-            // String/map content may repeat directly at document or element
-            // scope; scalar statements still require an explicit separator.
-            continue;
-        }
-        if (parser->current.kind != terminator && parser->current.kind != LAMBDA_TOK_EOF &&
-                parser->current.kind != LAMBDA_TOK_NEWLINE && parser->current.kind != LAMBDA_TOK_SEMICOLON) {
-            parser_set_error(parser, "expected a statement separator", LAMBDA_TOK_NEWLINE);
+        // S16.1.3: no separator is needed when the next token cannot continue
+        // the statement just parsed. S16.2.3: when it is dual-role, neither
+        // reading wins and the parse fails here, naming both repairs.
+        if (token_is_dual_role(parser->current.kind) ||
+                (parser->current.nl_before &&
+                 token_is_dot_led_number(parser, &parser->current))) {
+            parser_set_error(parser,
+                parser->current.nl_before
+                    ? "this token cannot continue the previous line; write ';' to "
+                      "start a new statement, or move it to the end of that line"
+                    : "expected a statement separator",
+                LAMBDA_TOK_SEMICOLON);
             return 0;
         }
     }
@@ -2386,8 +2525,8 @@ LambdaParseStatus lambda_rd_parse_source(const char* source, size_t length,
     parser.metrics = metrics;
     parser.error = error;
     parser.status = LAMBDA_PARSE_OK;
-    parser.current = lambda_lexer_next(&parser.lexer);
-    parser.next = lambda_lexer_next(&parser.lexer);
+    parser.current = parser_next_significant(&parser);
+    parser.next = parser_next_significant(&parser);
     if (metrics) {
         metrics->token_count = 2;
         metrics->structural_hash = UINT64_C(0xcbf29ce484222325);

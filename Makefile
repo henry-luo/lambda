@@ -167,8 +167,12 @@ endif
 # This system automatically manages the dependency chain:
 # grammar.js -> parser.c -> ts-enum.h -> C/C++ source files
 # When grammar.js is modified, the parser and enum header are automatically regenerated
+# One grammar file states the whole language. The former production/reference
+# split (grammar-common.js + grammar-lambda.js) retired with S16: Tree-sitter
+# left the production parse path, so table size stopped constraining it
+# (vibe/Lambda_Design_Syntax.md 4.4).
 GRAMMAR_JS = lambda/tree-sitter-lambda/grammar.js
-GRAMMAR_COMMON_JS = lambda/tree-sitter-lambda/grammar-common.js
+GRAMMAR_SCANNER_C = lambda/tree-sitter-lambda/src/scanner.c
 PARSER_C = lambda/tree-sitter-lambda/src/parser.c
 GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
@@ -182,7 +186,7 @@ TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 # Generate parser outputs once before deriving the symbol enum.  Independent
 # recipes used to run `tree-sitter generate` concurrently, allowing the header
 # and linked parser archive to retain different symbol-number layouts.
-$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS) $(GRAMMAR_COMMON_JS)
+$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS) $(GRAMMAR_SCANNER_C)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 $(TS_ENUM_H): $(PARSER_C) $(UPDATE_TS_ENUM_SCRIPT)
@@ -533,7 +537,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
@@ -590,6 +594,7 @@ help:
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
+	@echo "  test-grammar-s16 - S16 surface-syntax conformance (reference grammar)"
 	@echo "                     (automatic when grammar.js changes)"
 	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
 	@echo "  tree-sitter-libs - Build all tree-sitter libraries (amalgamated, no ICU)"
@@ -1459,15 +1464,14 @@ type-chart:
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
 
-# Generate a parser from grammar-lambda.js, the official FULL grammar. Test-only:
-# it backs the grammar differential check and never enters the product build.
-generate-grammar-full:
-	@TS_CLI="$(TREE_SITTER_CLI)" ./utils/generate_full_grammar.sh
-
-# Guard the two grammars against drift: they must share every core rule and
-# differ only in the type layer.
-grammar-sync-check:
-	$(PYTHON) -B utils/grammar_sync_check.py
+# S16 Surface Syntax conformance for the Tree-sitter reference grammar:
+# accept/reject pairs over the line-start classification, brace forms, control
+# forms, and the audit rulings.
+test-grammar-s16:
+	@echo "== reference grammar (tree-sitter) =="
+	@./test/ts_s16_conformance.sh
+	@echo "== production parser (C) =="
+	@./test/c_s16_conformance.sh
 
 generate-names:
 	$(PYTHON) -B utils/generate_well_known_names.py

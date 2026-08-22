@@ -11359,35 +11359,8 @@ static AstNode* build_propagate_expr(Transpiler* tp, TSNode propagate_node) {
 // parser (parse_type_pattern.cpp) turns the token's source text into the same
 // AST-node/Type shapes the CST builders used to produce.
 
-static AstNode* build_type_pattern_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_type_pattern_text(tp, src.str, src.str + src.length, node);
-    if (!built) {
-        AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node, sizeof(AstTypeNode));
-        err->type = (Type*)&LIT_TYPE_ERROR;
-        return (AstNode*)err;
-    }
-    return built;
-}
 
-static AstNode* build_primary_type_pattern_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_primary_type_text(tp, src.str, src.str + src.length, node);
-    if (!built) {
-        AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node, sizeof(AstTypeNode));
-        err->type = (Type*)&LIT_TYPE_ERROR;
-        return (AstNode*)err;
-    }
-    return built;
-}
 
-static AstNode* build_return_type_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_return_type_text(tp, src.str, src.str + src.length, node);
-    if (built) { return built; }
-    return build_function_return_contract_node(tp, node, &TYPE_ERROR,
-        &TYPE_ERROR, false);
-}
 
 static AstNode* build_return_type(Transpiler* tp, TSNode node) {
     // `return_type` remains the fielded grammar wrapper; its entire interior
@@ -11399,15 +11372,6 @@ static AstNode* build_return_type(Transpiler* tp, TSNode node) {
         &TYPE_ERROR, false);
 }
 
-static AstNode* build_view_pattern_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_view_pattern_text(tp, src.str, src.str + src.length, node);
-    if (built) { return built; }
-    AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node,
-        sizeof(AstTypeNode));
-    err->type = (Type*)&LIT_TYPE_ERROR;
-    return (AstNode*)err;
-}
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // depth guard: bail (NULL, the existing error convention) before the recursion
@@ -11469,9 +11433,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
         return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
+        // S16.6.1: one node carries both spellings — parenthesized head with
+        // an expression body, or bare head with a braced body.
         return build_for_expr(tp, expr_node);
-    case SYM_FOR_STAM:
-        return build_for_stam(tp, expr_node);
     case SYM_WHILE_STAM:
         return build_while_stam(tp, expr_node);
     case SYM_BREAK_STAM:
@@ -11480,8 +11444,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_continue_stam(tp, expr_node);
     case SYM_RETURN_STAM:
         return build_return_stam(tp, expr_node);
-    case SYM_RAISE_STAM:
-        return build_raise_stam(tp, expr_node);
     case SYM_RAISE_EXPR:
         return build_raise_expr(tp, expr_node);
     case SYM_VAR_STAM:
@@ -11491,7 +11453,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_APPLY_STAM:
         return build_apply_stam(tp, expr_node);
     case SYM_IF_EXPR:
-    case SYM_IF_STAM:
         return build_if_expr(tp, expr_node);
     case SYM_MATCH_EXPR:
         return build_match(tp, expr_node);
@@ -11611,20 +11572,12 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     case SYM_BASE_TYPE:
         return build_base_type(tp, expr_node);
-    // The type sub-language arrives as scanner tokens; the CST type node kinds
-    // that used to be dispatched here no longer exist in the trimmed grammar.
+    // The type sub-language no longer arrives as opaque scanner tokens: with
+    // Tree-sitter out of the production path (Design_Syntax 4.4) the reference
+    // grammar spells the type tiers structurally again, so the extraction-token
+    // dispatch entries retired with them.
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
-    case sym_type_pattern_token:
-    case sym_content_type_token:
-    case sym_pattern_island_token:
-        return build_type_pattern_token(tp, expr_node);
-    case sym_primary_type_pattern_token:
-        return build_primary_type_pattern_token(tp, expr_node);
-    case sym_return_type_token:
-        return build_return_type_token(tp, expr_node);
-    case sym_view_pattern_token:
-        return build_view_pattern_token(tp, expr_node);
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:

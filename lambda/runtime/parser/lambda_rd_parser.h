@@ -34,6 +34,11 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_DATETIME,
     LAMBDA_TOK_NAMED_VALUE,
     LAMBDA_TOK_PATTERN_ISLAND,
+    // §7.15: `\.` introduces a RELATIVE path. `\` reads as the escape
+    // character — "this dot is not member access, it introduces a path" — which
+    // is what frees a line-start `.ident` to mean member access and nothing
+    // else. The rooted form `/.a` is unchanged.
+    LAMBDA_TOK_PATH_REL,
 
     LAMBDA_TOK_LET,
     LAMBDA_TOK_PUB,
@@ -128,6 +133,10 @@ typedef struct LambdaToken {
     LambdaSourceSpan span;
     uint32_t line;
     uint32_t column;
+    // S16.1.1: a line break carries no meaning of its own, so NEWLINE never
+    // reaches the parser as a token. It survives only as this flag, which arms
+    // the S16.2.3 line-start classification on the token that follows.
+    bool nl_before;
 } LambdaToken;
 
 typedef struct LambdaLexer {

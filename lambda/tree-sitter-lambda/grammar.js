@@ -177,6 +177,13 @@ module.exports = grammar({
     $._error_sentinel,
   ],
 
+  conflicts: $ => [
+    // After an attribute, a `,` either separates another attribute or is the
+    // required attr-list -> content boundary (§7.11v2). Which one takes two
+    // tokens to see, so GLR forks and the losing branch dies immediately.
+    [$._attr_list],
+  ],
+
   supertypes: $ => [],
 
   inline: $ => [
@@ -186,15 +193,6 @@ module.exports = grammar({
     $._key,
   ],
 
-  conflicts: $ => [
-    // `type` is BOTH a base-type keyword (so `type(x)` stays an ordinary call)
-    // and the introducer of a type declaration. Under S16.1.3 juxtaposition
-    // `type E { … }` also reads as three adjacent statements — the type value,
-    // an identifier, and a map — so GLR must explore both and the higher
-    // precedence on the declaration rules picks the declaration.
-    [$.base_type, $.object_type],
-    [$.base_type, $.type_stam],
-  ],
 
   precedences: $ => [
     [
@@ -258,19 +256,68 @@ module.exports = grammar({
     // is no trailing form and no empty slot; both are syntax errors.
     // S16.1.3: adjacent statements need no separator at all when the second
     // begins with a start-only token, which `_stmt_boundary` certifies.
-    content: $ => seq(
-      $._statement,
-      repeat(seq(choice(';', $._stmt_boundary), $._statement)),
+    content: $ => $._stam_seq,
+
+    // §7.14: the boundary rule keys off the previous statement's TAIL, not its
+    // kind. A CLOSED tail ends in the structural closer of a non-postfixable
+    // construct, so no dual-role token can continue it and the next statement
+    // simply juxtaposes — "after a block, never `;`". An OPEN tail ends in a
+    // greedy expression, so `;` or the `_stmt_boundary` guard is required and a
+    // line-start dual-role token is the S16.2.3 error.
+    //
+    // The classification is DERIVED from the S16.1.1 golden test: a tail is
+    // open exactly when the one-line spelling would glue. `fn f() {} [0]` is
+    // two items on one line (a declaration is not an expression, and
+    // `index_expr` needs a primary), so juxtaposition changes nothing;
+    // `let x = a [0]` is ONE item on one line, so accepting a split across
+    // lines would change meaning.
+    _stam_seq: $ => choice(
+      $._open_stam,
+      $._closed_stam,
+      seq($._open_stam, choice(';', $._stmt_boundary), $._stam_seq),
+      seq($._closed_stam, optional(choice(';', $._stmt_boundary)), $._stam_seq),
     ),
 
-    _statement: $ => choice(
-      $._declaration,
-      $._expr,
-      $.assign_stam,
+    _closed_stam: $ => choice(
+      $.fn_stam,
+      $.object_type,
+      $.view_stam,
+      // Both `while` spellings take a structural body, and `match` closes on
+      // its arm list, so neither can be continued.
+      $.while_expr,
+      $.match_expr,
       $.break_stam,
       $.continue_stam,
-      $.return_stam,
       $.apply_stam,
+      // Bare-spelling `if`/`for` end in a braced body that admits no postfix.
+      // Their parenthesized spellings take a greedy expression body and are
+      // therefore open, as is any `if` carrying an `else` (the else body is an
+      // expression: `if c {} else {} [0]` glues on one line).
+      $._if_closed,
+      $._for_closed,
+    ),
+
+    _open_stam: $ => choice(
+      $._import_stam,
+      $.let_stam,
+      $.var_stam,
+      $.fn_expr_stam,
+      $.type_stam,
+      $.assign_stam,
+      $.return_stam,
+      $._if_open,
+      $._for_open,
+      $._expr_tail,
+    ),
+
+    // `_expr` minus the four control forms, which the statement level
+    // classifies for itself above.
+    _expr_tail: $ => choice(
+      $.primary_expr,
+      $.unary_expr,
+      $.not_expr,
+      $.binary_expr,
+      $.raise_expr,
     ),
 
     _declaration: $ => choice(
@@ -350,7 +397,8 @@ module.exports = grammar({
 
     // ============================ Containers ==============================
 
-    _key: $ => choice($.symbol, $.identifier, $.base_type, $.last_index, '*'),
+    _key: $ => choice($.symbol, $.identifier,
+      alias($._base_type_kw, $.base_type), $.last_index, '*'),
 
     map_item: $ => seq(field('name', $._key), ':', field('as', $._expr)),
 
@@ -390,10 +438,19 @@ module.exports = grammar({
     // qualified tag `<svg .rect>`). Content juxtaposes after that: `<div "s">`.
     element: $ => seq('<',
       field('tag', choice($.dotted_name, $.symbol, $.identifier)),
-      optional(seq($.attr, repeat(seq(',', $.attr)))),
-      optional(seq(optional(','), $.element_content)),
+      optional(choice(
+        // Attributes, then content only behind a REQUIRED boundary comma. The
+        // comma is also what settles a greedy attribute value: `<div a: x (y)>`
+        // makes the call `x(y)` the attribute, `<div a: x, (y)>` makes `(y)`
+        // content.
+        seq($._attr_list, optional(seq(',', $.element_content))),
+        // Content alone takes NO comma: `<div "text">` reads as markup should.
+        $.element_content,
+      )),
       '>',
     ),
+
+    _attr_list: $ => seq($.attr, repeat(seq(',', $.attr))),
 
     // S16.5.1: element interiors use the relational-free expression tier, so
     // `>` is unconditionally the terminator and `<` unconditionally opens a
@@ -462,7 +519,11 @@ module.exports = grammar({
       $.block,
       $.empty_braces,
       $.element,
-      $.base_type,
+      // `type` is deliberately absent from value position: it is the
+      // introducer of a type declaration, and admitting it as a bare value
+      // would let `type E { … }` read as three juxtaposed statements (S16.1.3)
+      // instead of a declaration. `type(x)` is reinstated as a call form below.
+      alias($._base_type_kw, $.base_type),
       $.pattern_island,
       $.identifier,
       $.index_expr,
@@ -485,7 +546,11 @@ module.exports = grammar({
     // errors rather than silent continuations or silent new statements.
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, 'import',
-        alias($._apply_kw, $.identifier))),
+        alias($._apply_kw, $.identifier),
+        // `type(x)` — the keyword is callable even though it is not a bare
+        // value. One token of lookahead separates it from a declaration:
+        // `(` means call, an identifier means `type Name …`.
+        alias('type', $.base_type))),
       alias($._call_lparen, '('),
       comma_sep(field('argument', choice($.named_argument, $._expr))),
       ')',
@@ -542,10 +607,17 @@ module.exports = grammar({
     // S2.4.1v2: rooted `/.a` and relative `.a`. A path expression may only
     // begin a statement — never continue one — which is why a line-start `.`
     // is an S16.2.3 error unless it is the `.ident(` member-call form.
+    // §7.15: the RELATIVE path is introduced by `\.` — `\` reads as the escape
+    // character, saying "this dot is not member access, it introduces a path".
+    // The rooted form `/.a` is unchanged. Retiring the bare-`.` relative path is
+    // what lets `.ident` at a line start mean member access and nothing else,
+    // which in turn widens the S16.2.4 carve-out to full leading-dot chains.
+    // (`./` was the front-runner but collides with S10.5.1's postfix root step
+    // `value./.name`; `\.` leaves that spelling untouched.)
     path_expr: $ => prec.right(choice(
       seq('/', '.', field('field', choice($.identifier, $.symbol,
         $.integer, $.path_wildcard, $.base_type, $.path_parent))),
-      seq('.', field('field', choice($.identifier, $.symbol,
+      seq('\\.', field('field', choice($.identifier, $.symbol,
         $.integer, $.path_wildcard, $.base_type, $.path_parent, $.path_root))),
     )),
 
@@ -689,13 +761,23 @@ module.exports = grammar({
     // makes `if (a+b)*2 { … }` a loud error instead of a second parse.
     // S16.6.3: `else` is OPTIONAL in both spellings; an absent else yields
     // null in value position. A dangling `else` binds to the nearest `if`.
-    if_expr: $ => prec.right(seq(
-      'if',
-      choice(
-        seq('(', field('cond', $._expr), ')', field('then', $._expr)),
-        seq($._not_paren, field('cond', $._expr), field('then', $._braced)),
-      ),
-      optional(seq('else', field('else', $._expr))),
+    if_expr: $ => choice($._if_closed, $._if_open),
+
+    // Split by TAIL so §7.14 can classify without re-deriving it: the bare
+    // spelling with no `else` ends on a brace that admits no postfix; every
+    // other shape ends in an expression.
+    _if_closed: $ => seq(
+      'if', $._not_paren, field('cond', $._expr), field('then', $._braced),
+    ),
+    // The split reopens the dangling-else decision at the grammar level: in
+    // `if (a) if b { } else …` the trailing `else` may close either `if`.
+    // S16.6.3 binds it to the NEAREST one, which is this rule taking it, so
+    // `_if_open` outranks `_if_closed`.
+    _if_open: $ => prec.right(1, choice(
+      seq('if', '(', field('cond', $._expr), ')', field('then', $._expr),
+        optional(seq('else', field('else', $._expr)))),
+      seq('if', $._not_paren, field('cond', $._expr), field('then', $._braced),
+        'else', field('else', $._expr)),
     )),
 
     // `while` is procedural-only and always discards its body value, so its
@@ -788,13 +870,10 @@ module.exports = grammar({
 
     // `for` needs no `_not_paren` guard: a loop declaration always begins with
     // an identifier, so `(` after `for` is unambiguously the paren spelling.
-    for_expr: $ => prec.right(seq(
-      'for',
-      choice(
-        seq('(', $._loop_head, ')', field('then', $._expr)),
-        seq($._loop_head, field('then', $._braced)),
-      ),
-    )),
+    for_expr: $ => choice($._for_closed, $._for_open),
+    _for_closed: $ => seq('for', $._loop_head, field('then', $._braced)),
+    _for_open: $ => prec.right(seq('for', '(', $._loop_head, ')',
+      field('then', $._expr))),
 
     break_stam: _ => 'break',
     continue_stam: _ => 'continue',
@@ -862,11 +941,16 @@ module.exports = grammar({
     base_type: $ => choice($._base_type_kw, 'type'),
 
     occurrence: $ => choice('?', '+', '*', $.occurrence_count),
+    // The occurrence bracket takes the same same-line guard as an index: `[` is
+    // dual-role in TYPE space too (`int[3]` is an occurrence, `[int]` an array
+    // type), so `type T = int` ⏎ `[3]` must be the S16.2.3 error rather than a
+    // silent continuation. This is O3's rule applied on the grammar side — type
+    // space shares the S16.2.2 continuation set instead of keeping its own.
     occurrence_count: $ => prec(2, choice(
-      seq('[', ']'),
-      seq('[', $.integer, ']'),
-      seq('[', $.integer, ',', $.integer, ']'),
-      seq('[', $.integer, '+', ']'),
+      seq(alias($._index_lbracket, '['), ']'),
+      seq(alias($._index_lbracket, '['), $.integer, ']'),
+      seq(alias($._index_lbracket, '['), $.integer, ',', $.integer, ']'),
+      seq(alias($._index_lbracket, '['), $.integer, '+', ']'),
     )),
 
     return_occurrence_type: $ => seq(
@@ -968,11 +1052,11 @@ module.exports = grammar({
       field('name', choice($.identifier, $.symbol)), '=',
       field('as', $._annotation_type),
     ),
-    type_stam: $ => prec(60, seq(
+    type_stam: $ => seq(
       optional(field('pub', 'pub')), 'type',
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr)))),
-    )),
+    ),
 
     that_constraint: $ => prec.right(seq('that', field('constraint', $._expr))),
 
@@ -983,7 +1067,7 @@ module.exports = grammar({
     // keyword is needed. The comma before a method is load-bearing rather than
     // stylistic: fn TYPES exist, so a bare `fn` could otherwise continue the
     // preceding field's type.
-    object_type: $ => prec(60, seq(
+    object_type: $ => seq(
       optional(field('pub', 'pub')),
       'type', field('name', choice($.identifier, $.symbol)),
       optional(seq(':', field('base', choice($.identifier, $.symbol)))),
@@ -996,7 +1080,7 @@ module.exports = grammar({
         $._type_pattern,
       ))),
       '}',
-    )),
+    ),
 
     // ==================== String / symbol pattern islands =================
 

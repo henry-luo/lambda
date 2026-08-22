@@ -64,19 +64,16 @@ extern "C" {
 
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
-#define SYM_IF_STAM sym_if_stam
 #define SYM_MATCH_EXPR sym_match_expr
 #define SYM_MATCH_ARM sym_match_arm
 #define SYM_MATCH_DEFAULT sym_match_default
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
 #define SYM_FOR_EXPR sym_for_expr
-#define SYM_FOR_STAM sym_for_stam
-#define SYM_WHILE_STAM sym_while_stam
+#define SYM_WHILE_STAM sym_while_expr
 #define SYM_BREAK_STAM sym_break_stam
 #define SYM_CONTINUE_STAM sym_continue_stam
 #define SYM_RETURN_STAM sym_return_stam
-#define SYM_RAISE_STAM sym_raise_stam
 #define SYM_RAISE_EXPR sym_raise_expr
 #define SYM_VAR_STAM sym_var_stam
 #define SYM_ASSIGN_STAM sym_assign_stam

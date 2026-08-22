@@ -239,11 +239,13 @@ bool tree_sitter_lambda_external_scanner_scan(
     // bare `apply` statement (§7.7). It is only valid where the parser is
     // choosing between a parenthesized form and a bare one, so it never
     // competes with the operator guards.
-    if (valid_symbols[NOT_PAREN]) {
-        if (!slash_pending && lexer->lookahead == '(') { return false; }
+    if (valid_symbols[NOT_PAREN] && (slash_pending || lexer->lookahead != '(')) {
         lexer->result_symbol = NOT_PAREN;
         return true;
     }
+    // A `(` here means NOT_PAREN does not apply — but the state may still want
+    // a call guard (`apply(x)` is an ordinary call, `apply` alone is the bare
+    // statement), so fall through rather than declining outright.
 
     if (slash_pending) {
         // `/` is dual-role: division (continuation) or a rooted path step
@@ -286,31 +288,24 @@ bool tree_sitter_lambda_external_scanner_scan(
         }
     }
 
-    // `.` member access. Same line always; across a line break only for the
-    // S16.2.4 carve-out `.ident(`, which cannot be a path body (paths have no
-    // call syntax) nor a float, and so is unambiguously a member CALL.
+    // `.` member access. S16.2.4v2 (§7.15): now that the relative path is
+    // spelled `\.`, a `.` followed by an identifier has no start reading left —
+    // member access is its only meaning — so it continues across a line break
+    // for ANY member, not just the `.ident(` call form. That is what enables
+    // full leading-dot fluent chains. `.digit` remains dual-role, because
+    // `a.5` is member access with an integer field while `.5` is a float.
     if (c == '.' && valid_symbols[MEMBER_DOT]) {
         lexer->advance(lexer, false);
         int32_t after = lexer->lookahead;
-        // `.?` is the query operator and `.5` a float: neither is member access.
-        if (after == '?' || is_digit(after)) { return false; }
-        // The token is the dot itself; every advance past this point is pure
-        // lookahead and cannot extend it.
+        if (after == '?') { return false; }              // `.?` query operator
+        // `.digit` stays dual-role: same line it is the integer member field,
+        // across a break it could equally be a float literal starting a
+        // statement, so neither reading may win.
+        if (is_digit(after) && saw_newline) { return false; }
         lexer->mark_end(lexer);
-        if (!saw_newline) {
-            lexer->result_symbol = MEMBER_DOT;
-            return true;
-        }
-        if (is_identifier_start(after)) {
-            while (is_identifier_continue(lexer->lookahead)) {
-                lexer->advance(lexer, false);
-            }
-            if (lexer->lookahead == '(') {
-                lexer->result_symbol = MEMBER_DOT;
-                return true;
-            }
-        }
-        return false;
+        if (saw_newline && !is_identifier_start(after)) { return false; }
+        lexer->result_symbol = MEMBER_DOT;
+        return true;
     }
 
     // --- statement juxtaposition (S16.1.3) --------------------------------
