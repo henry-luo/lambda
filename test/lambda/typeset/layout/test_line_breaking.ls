@@ -220,7 +220,7 @@ fn test_break_point_caching() {
     let breaks2 = find_line_breaks(breaker, line_ctx, text, string_length(text))
     let second_duration = current_time_millis() - start_time
     
-    assert(breaks1 != null && breaks2 != null, "Both calls should succeed")
+    assert(breaks1 != null and breaks2 != null, "Both calls should succeed")
     assert(breaks1.count == breaks2.count, "Cached result should match original")
     
     // Note: Timing test may be unreliable in small examples, but structure should be correct

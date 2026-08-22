@@ -21,7 +21,7 @@ type ContactList = [Contact+]
 type NestedArrays = [[string*]*]
 
 // Advanced union types
-type ContactMethod = email: string | phone: string | address: Address
+type ContactMethod = {email: string} | {phone: string} | {address: Address}
 type MultiUnion = string | int | bool | Contact
 
 // Complex element structures (document-like)
@@ -39,9 +39,12 @@ type ListElement = <ul [ListItemElement+]>
 type ListItemElement = <li [string | ParagraphElement]*>
 
 // Function types
-type StringProcessor = (input: string) => string
-type ContactValidator = (contact: Contact) => bool
-type MapFunction = (input: [string*]) => [int*]
+type StringProcessor = fn (input: string) string
+type ContactValidator = fn (contact: Contact) bool
+// a bracketed return type collides with the `T[n]` occurrence suffix, so the
+// array return is named
+type IntArray = [int*]
+type MapFunction = fn (input: [string*]) IntArray
 
 // Recursive structures
 type TreeNode = {

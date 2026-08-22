@@ -741,13 +741,13 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
         <div class:"header",
             <h1 "🌆 Smart City IoT Analytics Dashboard">
             <p "Real-time Urban Intelligence & Environmental Monitoring">
-            <p style:"margin-top: 10px; font-size: 0.9em;";
+            <p style:"margin-top: 10px; font-size: 0.9em;",
                 ("Generated: September 5, 2024 | Data Quality: " ++ format_number(environmental_analysis.data_quality.data_quality_score * 100.0, 1) ++ "%")
             >
         >
-        <div class:"content"
+        <div class:"content",
             // Key Metrics Overview
-            <div class:"overview-grid"
+            <div class:"overview-grid",
                 metric_card("Overall Livability Score",
                     format_number(overall_livability_score * 100.0, 1) ++ "%",
                     "City health composite index")
@@ -763,12 +763,12 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             >
 
             // Environmental Intelligence
-            <div class:"section"
+            <div class:"section",
                 <h2 class:"section-title", "🌿 Environmental Intelligence">
 
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Air Quality Status">
-                    <div class:"info-grid"
+                    <div class:"info-grid",
                         info_item("PM2.5 Average", format_number(environmental_analysis.environmental_analysis.air_quality_trends.avg_pm25, 1) ++ " µg/m³")
                         info_item("PM10 Average", format_number(environmental_analysis.environmental_analysis.air_quality_trends.avg_pm10, 1) ++ " µg/m³")
                         info_item("Trend", status_badge(environmental_analysis.environmental_analysis.air_quality_trends.pm25_trend))
@@ -782,9 +782,9 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         ])
                     }
                 >
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Climate Comfort Analysis">
-                    <div class:"info-grid"
+                    <div class:"info-grid",
                         info_item("Average Temperature", format_number(environmental_analysis.environmental_analysis.climate_analysis.avg_temperature, 1) ++ "°C")
                         info_item("Average Humidity", format_number(environmental_analysis.environmental_analysis.climate_analysis.avg_humidity, 1) ++ "%")
                         info_item("Comfort Score", format_number(environmental_analysis.environmental_analysis.climate_analysis.comfort_score * 100.0, 1) ++ "%")
@@ -793,9 +793,9 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     progress_bar(environmental_analysis.environmental_analysis.climate_analysis.comfort_score, 1.0, "success")
                 >
 
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Noise Pollution Monitoring">
-                    <div class:"info-grid"
+                    <div class:"info-grid",
                         info_item("Citywide Average", format_number(environmental_analysis.environmental_analysis.noise_analysis.avg_noise_level, 1) ++ " dB")
                         info_item("Violations", string(len(environmental_analysis.environmental_analysis.noise_analysis.noise_violations)))
                         info_item("Quiet Hours Compliance", format_number(environmental_analysis.environmental_analysis.noise_analysis.quiet_hours_compliance, 1) ++ "%")
@@ -804,30 +804,30 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             >
 
             // Traffic & Mobility Intelligence
-            <div class:"section"
+            <div class:"section",
                 <h2 class:"section-title", "🚗 Traffic & Mobility Intelligence">
 
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Traffic Flow Performance">
-                    <div class:"info-grid"
+                    <div class:"info-grid",
                         info_item("Citywide Avg Speed", format_number(traffic_analysis.traffic_summary.citywide_avg_speed, 1) ++ " km/h")
                         info_item("Total Vehicle Count", string(traffic_analysis.traffic_summary.overall_flow_rate))
                         info_item("Congestion Status", status_badge(traffic_analysis.traffic_summary.congestion_status))
                     >
 
                     <h4 style:"margin-top: 20px; margin-bottom: 10px; color: #4299e1;", "Congestion Distribution">
-                    <div style:"margin: 10px 0;"
-                        <div style:"margin-bottom: 10px;"
+                    <div style:"margin: 10px 0;",
+                        <div style:"margin-bottom: 10px;",
                             <span style:"display: inline-block; width: 150px;", "Low Congestion:">
                             progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.low_congestion),
                                         float_val(len(sample_traffic_data)), "success")
                         >
-                        <div style:"margin-bottom: 10px;"
+                        <div style:"margin-bottom: 10px;",
                             <span style:"display: inline-block; width: 150px;", "Moderate:">
                             progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.moderate_congestion),
                                         float_val(len(sample_traffic_data)), "warning")
                         >
-                        <div style:"margin-bottom: 10px;"
+                        <div style:"margin-bottom: 10px;",
                             <span style:"display: inline-block; width: 150px;", "High Congestion:">
                             progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.high_congestion),
                                         float_val(len(sample_traffic_data)), "danger")
@@ -835,7 +835,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     >
                 >
 
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Speed Analysis by Zone">
                     <table
                         <tr
@@ -881,11 +881,11 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                 }
             >
             // Energy Intelligence
-            <div class:"section"
+            <div class:"section",
                 <h2 class:"section-title", "⚡ Energy & Grid Intelligence">
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Consumption Overview">
-                    <div class:"info-grid"
+                    <div class:"info-grid",
                         info_item("Total Consumption", format_number(energy_analysis.energy_overview.total_consumption_kwh, 1) ++ " kWh")
                         info_item("Renewable Integration", format_number(energy_analysis.energy_overview.avg_renewable_integration, 1) ++ "%")
                         info_item("Grid Stability", format_number(energy_analysis.energy_overview.grid_reliability_score * 100.0, 1) ++ "%")
@@ -895,7 +895,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     progress_bar(energy_analysis.energy_overview.avg_renewable_integration, 100.0, "info")
                 >
 
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Consumption by Building Type">
                     <table
                         <tr
@@ -924,20 +924,20 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     >
                 >
 
-                <div class:"card"
+                <div class:"card",
                     <h3 class:"card-title", "Grid Dependency Distribution">
-                    <div style:"margin: 15px 0;"
-                        <div style:"margin-bottom: 10px;"
+                    <div style:"margin: 15px 0;",
+                        <div style:"margin-bottom: 10px;",
                             <span style:"display: inline-block; width: 150px;", "High Dependency:">
                             progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.high_dependency),
                                         float_val(len(sample_energy_data)), "danger")
                         >
-                        <div style:"margin-bottom: 10px;"
+                        <div style:"margin-bottom: 10px;",
                             <span style:"display: inline-block; width: 150px;", "Medium:">
                             progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.medium_dependency),
                                         float_val(len(sample_energy_data)), "warning")
                         >
-                        <div style:"margin-bottom: 10px;"
+                        <div style:"margin-bottom: 10px;",
                             <span style:"display: inline-block; width: 150px;", "Low Dependency:">
                             progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.low_dependency),
                                         float_val(len(sample_energy_data)), "success")
@@ -947,7 +947,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             >
 
             // Strategic Recommendations
-            <div class:"recommendations"
+            <div class:"recommendations",
                 <h3 "🎯 Strategic Recommendations">
                 <h4 style:"margin-top: 20px; margin-bottom: 10px;", "Immediate Priorities">
                 <ul
@@ -988,8 +988,8 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                 >
 
                 <h4 style:"margin-top: 25px; margin-bottom: 10px;", "Investment Priorities">
-                <div style:"background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 15px;"
-                    <table style:"margin: 0;"
+                <div style:"background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 15px;",
+                    <table style:"margin: 0;",
                         <tr
                             <th style:"background: #4a5568;", "Category">
                             <th style:"background: #4a5568;", "Initiative">
@@ -1014,7 +1014,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                             <td "$12.0M">
                             <td "24-36 months">
                         >
-                        <tr style:"background: #e6fffa; font-weight: 600;"
+                        <tr style:"background: #e6fffa; font-weight: 600;",
                             <td colspan:"2", <strong "Total Investment Required">>
                             <td <strong "$22.5M">>
                             <td <strong "2-3 years">>
@@ -1024,10 +1024,10 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             >
         >
 
-        <div class:"footer"
+        <div class:"footer",
             <p <strong "Smart City IoT Analytics Platform">>
             <p "Powered by Lambda Script Engine | Real-time Data Processing & Urban Intelligence">
-            <p style:"margin-top: 10px; font-size: 0.85em;"
+            <p style:"margin-top: 10px; font-size: 0.85em;",
                 ("Data sources: " ++ (environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++
                 (traffic_analysis.traffic_summary.monitoring_coverage or 0) ++ " traffic intersections, " ++
                 (energy_analysis.energy_overview.monitored_meters or 0) ++ " energy meters")

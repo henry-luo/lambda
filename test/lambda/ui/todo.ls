@@ -255,20 +255,20 @@ on delete_item(evt) {
 >
 <body
   <div class:"container",
-    <div class:"header"
+    <div class:"header",
       // dynamic element content needs the child separator; without it the
       // parser treats `data` as an attribute and rejects the member access.
       <h1 data.title>
       <p "Reactive UI — click to toggle, × to delete">
     >
-    <div class:"content"
+    <div class:"content",
       for (lst in data.lists)
         apply(<todo_list name:lst.name, items:lst.items>, {mode: "edit"})
     >
-    <div class:"footer"
+    <div class:"footer",
       let all_items = [for (lst in data.lists) for (item in lst.items) item]
       let total = len(all_items)
-      let done = len(for (item in all_items where item.done) item)
+      let done = len(for (item in all_items where item.done) item);
       ((done) ++ " of " ++ (total) ++ " tasks completed")
     >
   >

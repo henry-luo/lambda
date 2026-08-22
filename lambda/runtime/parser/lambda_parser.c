@@ -903,7 +903,13 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
         }
         if (!parser_expect(parser, LAMBDA_TOK_ARROW, "expected '=>' after arrow parameters")) return 0;
         parser_skip_newlines(parser);
+        // S16.4.2: an arrow body is fn context BY DEFINITION, even written
+        // inside a `pn` — the arrow is a functional value wherever it appears,
+        // so `() => {}` mid-procedure is still the empty map.
+        uint32_t arrow_saved_depth = parser->procedural_depth;
+        parser->procedural_depth = 0;
         children[count++] = parse_expression(parser, 0);
+        parser->procedural_depth = arrow_saved_depth;
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FUNCTION,
@@ -956,6 +962,18 @@ static bool braced_expression_is_map(const LambdaRdParser* parser) {
     return token_is_key(probe.current.kind) && probe.next.kind == LAMBDA_TOK_COLON;
 }
 
+// S16.4.2: `{}` in an `if`/`for` body is the one genuine tie — an empty
+// interior says nothing, so S16.4.1v2 cannot decide it. fn context resolves to
+// the empty MAP (control bodies produce values), pn context to the empty BLOCK
+// (their value is discarded). Every other position is already decided: value
+// position is always the empty map, and declaration bodies are always blocks.
+static bool control_body_brace_is_map(const LambdaRdParser* parser) {
+    if (braced_expression_is_map(parser)) return true;
+    return parser->current.kind == LAMBDA_TOK_LBRACE &&
+        parser->next.kind == LAMBDA_TOK_RBRACE &&
+        parser->procedural_depth == 0;
+}
+
 static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
     LambdaParseValue children[3];
@@ -965,7 +983,7 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
     if (parser->status != LAMBDA_PARSE_OK) return 0;
     if (paren_condition && !parser_expect(parser, LAMBDA_TOK_RPAREN, "expected ')' after if condition")) return 0;
     parser_skip_newlines(parser);
-    if (parser->current.kind == LAMBDA_TOK_LBRACE && !braced_expression_is_map(parser)) {
+    if (parser->current.kind == LAMBDA_TOK_LBRACE && !control_body_brace_is_map(parser)) {
         parser_advance(parser);
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN, first.span, first, NULL, 0);
@@ -985,7 +1003,7 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
         return parser_reduce(parser, LAMBDA_REDUCE_IF, span, children, 2);
     }
     parser_advance(parser);
-    if (parser->current.kind == LAMBDA_TOK_LBRACE && !braced_expression_is_map(parser)) {
+    if (parser->current.kind == LAMBDA_TOK_LBRACE && !control_body_brace_is_map(parser)) {
         parser_advance(parser);
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN, first.span, first, NULL, 0);
@@ -1007,6 +1025,11 @@ static LambdaParseValue parse_for_binding(LambdaRdParser* parser) {
     LambdaParseValue children[3];
     uint32_t child_count = 0;
     uint32_t flags = 0;
+    // NOTE: a base-type spelling is deliberately NOT accepted here. `let time`
+    // does accept one, but a base-type NAME does not shadow the type keyword —
+    // `let time = 1.5` then `time` evaluates to `datetime`, not 1.5. Until that
+    // resolution bug is fixed, rejecting the name loudly beats binding it to a
+    // value no read can ever see.
     if (!token_is_identifier_like(name.kind)) {
         parser_set_error(parser, "expected a for binding name", LAMBDA_TOK_IDENTIFIER);
         return 0;
@@ -1229,7 +1252,7 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
     // reading on `parenthesized` made `for x in l {a: x}` reject a body that
     // `for (x in l) {a: x}` accepts, which is exactly the flip the ruling bans.
     if (parser->current.kind == LAMBDA_TOK_LBRACE &&
-            braced_expression_is_map(parser)) {
+            control_body_brace_is_map(parser)) {
         children[0] = parse_expression(parser, 0);
     } else if (parser_accept(parser, LAMBDA_TOK_LBRACE)) {
         children[0] = parse_content(parser, LAMBDA_TOK_RBRACE);
@@ -1903,14 +1926,21 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser,
     uint32_t flags = function_flags;
     if (parser->last_parameter_variadic) flags |= LAMBDA_REDUCTION_FLAG_VARIADIC;
     if (raised) flags |= LAMBDA_REDUCTION_FLAG_RAISED;
+    // S16.4.2 reads `procedural_depth` to break the empty-brace tie, so the
+    // depth must track the ENCLOSING function's effect kind, not the nesting
+    // count: a `fn` written inside a `pn` is fn context, and must not inherit
+    // the outer procedural depth.
+    uint32_t saved_depth = parser->procedural_depth;
     if (parser_accept(parser, LAMBDA_TOK_ARROW)) {
         parser_skip_newlines(parser);
+        parser->procedural_depth = is_proc ? saved_depth + 1 : 0;
         child = parse_expression(parser, 0);
+        parser->procedural_depth = saved_depth;
     } else if (parser_accept(parser, LAMBDA_TOK_LBRACE)) {
         flags |= LAMBDA_REDUCTION_FLAG_BODY_BLOCK;
-        if (is_proc) parser->procedural_depth++;
+        parser->procedural_depth = is_proc ? saved_depth + 1 : 0;
         child = parse_content(parser, LAMBDA_TOK_RBRACE);
-        if (is_proc) parser->procedural_depth--;
+        parser->procedural_depth = saved_depth;
         if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after function body")) return 0;
     } else {
         parser_set_error(parser, "expected a function body", LAMBDA_TOK_LBRACE);
@@ -2209,7 +2239,7 @@ static bool if_statement_body_is_map(const LambdaRdParser* parser) {
     // the paren spelling reject every map body.
     (void)parse_expression(&probe, 0);
     if (probe.status != LAMBDA_PARSE_OK) return false;
-    return braced_expression_is_map(&probe);
+    return control_body_brace_is_map(&probe);
 }
 
 static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {

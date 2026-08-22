@@ -76,14 +76,14 @@ pub fn evaluate_suppliers(suppliers: [{id: string, performance_data: {delivery_t
         
         // Performance metrics
         let delivery_performance = {
-            avg_delivery_time: avg(for (time in delivery_data) float(time)),
+            avg_delivery_time: avg(for (delivery_t in delivery_data) float(delivery_t)),
             delivery_reliability: {
-                let on_time_deliveries = len(for (time in delivery_data) if (time <= 3) time else null);
+                let on_time_deliveries = len(for (delivery_t in delivery_data) if (delivery_t <= 3) delivery_t else null);
                 float(on_time_deliveries) / float(len(delivery_data))
             },
             delivery_variability: {
-                let mean_time = avg(for (time in delivery_data) float(time));
-                let variance = avg(for (time in delivery_data) (float(time) - mean_time) ** 2);
+                let mean_time = avg(for (delivery_t in delivery_data) float(delivery_t));
+                let variance = avg(for (delivery_t in delivery_data) (float(delivery_t) - mean_time) ** 2);
                 variance ** 0.5
             }
         };

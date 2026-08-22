@@ -50,7 +50,7 @@ pub fn process_multi_format_content(documents: [{path: string, format: symbol}])
         let analysis = analyze_document_structure(string(raw_content), doc_info.format);
         
         // Content transformation based on format
-        let transformed_content = if (doc_info.format == 'markdown) {
+        let transformed_content = if (doc_info.format == 'markdown') {
             // Extract and process Markdown elements
             {
                 headers: if (contains(string(raw_content), "#")) ["Header 1", "Header 2"] else [],
@@ -58,7 +58,7 @@ pub fn process_multi_format_content(documents: [{path: string, format: symbol}])
                 links: if (analysis.content_features.has_links) ["http://example.com"] else [],
                 code_blocks: if (analysis.content_features.has_code) ["code snippet"] else []
             }
-        } else if (doc_info.format == 'json) {
+        } else if (doc_info.format == 'json') {
             // Process JSON structure
             {
                 keys: ["key1", "key2"],  // would extract actual keys
@@ -66,7 +66,7 @@ pub fn process_multi_format_content(documents: [{path: string, format: symbol}])
                 array_count: 1,
                 object_count: 3
             }
-        } else if (doc_info.format == 'xml) {
+        } else if (doc_info.format == 'xml') {
             // Process XML structure
             {
                 root_element: "document",  // would extract actual root
@@ -95,13 +95,13 @@ pub fn process_multi_format_content(documents: [{path: string, format: symbol}])
         total_documents: len(processed_documents),
         format_distribution: {
             markdown_count: len(for (doc in processed_documents) 
-                if (doc.source.format == 'markdown) doc else null),
+                if (doc.source.format == 'markdown') doc else null),
             json_count: len(for (doc in processed_documents) 
-                if (doc.source.format == 'json) doc else null),
+                if (doc.source.format == 'json') doc else null),
             xml_count: len(for (doc in processed_documents) 
-                if (doc.source.format == 'xml) doc else null),
+                if (doc.source.format == 'xml') doc else null),
             other_count: len(for (doc in processed_documents) 
-                if (doc.source.format != 'markdown and doc.source.format != 'json and doc.source.format != 'xml) doc else null)
+                if (doc.source.format != 'markdown' and doc.source.format != 'json' and doc.source.format != 'xml') doc else null)
         },
         aggregate_statistics: {
             total_words: sum(for (doc in processed_documents) doc.analysis.statistics.word_count),
@@ -208,7 +208,7 @@ pub fn assess_content_quality(document_analysis) {
         let rec1 = if (complexity.readability_score < 30.0) "Improve readability by simplifying sentences" else null;
         let rec2 = if (not features.has_headers) "Add section headers for better structure" else null;
         let rec3 = if (stats.word_count < 100) "Consider expanding content for better depth" else null;
-        let rec4 = if (not features.has_links and doc.source.format == 'markdown) "Add relevant links to improve engagement" else null;
+        let rec4 = if (not features.has_links and doc.source.format == 'markdown') "Add relevant links to improve engagement" else null;
         
         let final_recommendations = for (rec in [rec1, rec2, rec3, rec4]) if (rec != null) rec else null;
         
@@ -241,11 +241,11 @@ pub fn assess_content_quality(document_analysis) {
 
 // Sample document sources for testing
 let sample_documents = [
-    {path: "test/input/test.md", format: 'markdown},
-    {path: "test/input/test.json", format: 'json},
-    {path: "test/input/test.xml", format: 'xml},
-    {path: "test/input/comprehensive_test.md", format: 'markdown},
-    {path: "test/input/simple.md", format: 'markdown}
+    {path: "test/input/test.md", format: 'markdown'},
+    {path: "test/input/test.json", format: 'json'},
+    {path: "test/input/test.xml", format: 'xml'},
+    {path: "test/input/comprehensive_test.md", format: 'markdown'},
+    {path: "test/input/simple.md", format: 'markdown'}
 ];
 
 // Execute comprehensive document processing pipeline

@@ -2,7 +2,7 @@
 // Tests fundamental XML structure based on actual parser output
 
 // Processing instruction like <?xml version="1.0"?>
-type XmlProcessingInstruction = <?xml
+type XmlProcessingInstruction = <'?xml'
     version: string                   // version attribute
 >
 
@@ -10,8 +10,8 @@ type XmlProcessingInstruction = <?xml
 type BookElement = <book
     id: string,                       // book id attribute
     category: string,                 // book category attribute
-    BookTitle;                        // title child element
-    BookAuthor;                       // author child element  
+    BookTitle,                        // title child element
+    BookAuthor,                       // author child element  
     BookPrice                         // price child element
 >
 

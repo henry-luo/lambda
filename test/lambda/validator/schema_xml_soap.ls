@@ -5,7 +5,7 @@
 // Root document type - must be first to be recognized as root
 type Document = <Envelope
     encodingStyle: string?,           // optional encoding style
-    SoapHeader?;                      // optional header  
+    SoapHeader?,                      // optional header  
     SoapBody                          // required body
 >
 

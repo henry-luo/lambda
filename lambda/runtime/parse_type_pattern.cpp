@@ -95,6 +95,46 @@ StrView take_word(Lexer* lx) {
     return w;
 }
 
+// Namespace-qualified element tags are dotted (`<soap.Fault>`; the `html:div`
+// spelling is retired), so a tag is a qualified name rather than a bare word.
+// `take_word` stops at the dot, which left every qualified tag in type space
+// reporting "invalid type pattern" while the same tag parsed in value space.
+// Attribute names follow the value-space spelling: a bare identifier, or a
+// single-quoted SYMBOL wherever the name is not a plain identifier
+// (`'stroke-width'`, `'xmlns:soap'`). Reading bare words only made every such
+// attribute unspellable in type space while the same element parsed in value
+// space.
+static StrView take_attr_name(Lexer* lx) {
+    skip_space(lx);
+    if (lx->p < lx->end && *lx->p == '\'') {
+        const char* q = lx->p + 1;
+        while (q < lx->end && *q != '\'' && *q != '\n') { q++; }
+        if (q >= lx->end || *q != '\'') { StrView none = {lx->p, 0}; return none; }
+        StrView w = {lx->p + 1, (size_t)(q - lx->p - 1)};
+        lx->p = q + 1;
+        return w;
+    }
+    return take_word(lx);
+}
+
+static StrView take_qualified_tag(Lexer* lx) {
+    skip_space(lx);
+    // a tag may also be a quoted SYMBOL when it is not a plain identifier —
+    // `<'?xml' …>` names the element the XML reader builds for a processing
+    // instruction, and value space already spells it that way.
+    if (lx->p < lx->end && *lx->p == '\'') { return take_attr_name(lx); }
+    StrView w = take_word(lx);
+    if (!w.length) return w;
+    const char* start = w.str;
+    while (lx->p + 1 < lx->end && lx->p[0] == '.' &&
+            is_ident_start((unsigned char)lx->p[1])) {
+        lx->p++;  // the dot binds only when a name follows it directly
+        while (lx->p < lx->end && is_ident_continue((unsigned char)*lx->p)) lx->p++;
+    }
+    w.length = (size_t)(lx->p - start);
+    return w;
+}
+
 bool word_is(StrView w, const char* s) {
     size_t n = strlen(s);
     return w.length == n && memcmp(w.str, s, n) == 0;
@@ -626,7 +666,7 @@ AstNode* parse_element_type(Lexer* lx) {
     AstElementNode* ast_node = (AstElementNode*)new_node(lx, AST_NODE_ELMT_TYPE, sizeof(AstElementNode));
     TypeElmt* type = (TypeElmt*)alloc_type(lx->tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
 
-    StrView tag = take_word(lx);
+    StrView tag = take_qualified_tag(lx);
     if (!tag.length) { fail(lx, "expected an element tag"); return NULL; }
     String* pooled = name_pool_create_strview(lx->tp->name_pool, tag);
     type->name.str = pooled->chars;
@@ -640,7 +680,7 @@ AstNode* parse_element_type(Lexer* lx) {
     // attributes: only while the next item is `name :`
     while (!at(lx, '>') && lx->p < lx->end) {
         const char* save = lx->p;
-        StrView field = take_word(lx);
+        StrView field = take_attr_name(lx);
         if (!field.length || !at(lx, ':')) { lx->p = save; break; }
         lx->p++;  // ':'
         AstNode* field_type = parse_union(lx);
