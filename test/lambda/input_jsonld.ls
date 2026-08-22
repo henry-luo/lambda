@@ -9,12 +9,12 @@ let head = html[0]
 
 // find the script element (after whitespace text nodes)
 // head children: "\n", <title>, "\n", <script type="application/ld+json">, "\n"
-let script = head[3]
+let script = head[3];
 [name(script), script.type]
 
 // the child of script should be a parsed JSON map, not a raw string
 let jsonld = script[0]
-type(jsonld)
+type(jsonld);
 
 // verify JSON-LD fields
 [jsonld["@context"], jsonld["@type"], jsonld["name"], jsonld["url"]]

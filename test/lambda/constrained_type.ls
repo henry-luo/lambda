@@ -1,29 +1,29 @@
 // Test constrained types with where clause
 
 // Basic integer range constraint
-type between5and10 = int that (5 < ~ < 10)
-(6 is between5and10)     // expected: true
-(7 is between5and10)     // expected: true
-(9 is between5and10)     // expected: true
-(5 is between5and10)     // expected: false (not > 5)
-(10 is between5and10)    // expected: false (not < 10)
-(3 is between5and10)     // expected: false
+type between5and10 = int that (5 < ~ < 10);
+(6 is between5and10); // expected: true
+(7 is between5and10); // expected: true
+(9 is between5and10); // expected: true
+(5 is between5and10); // expected: false (not > 5)
+(10 is between5and10); // expected: false (not < 10)
+(3 is between5and10); // expected: false
 (15 is between5and10)    // expected: false
 
 // Positive integer constraint
-type positive = int that (~ > 0)
-(1 is positive)          // expected: true
-(100 is positive)        // expected: true
-(0 is positive)          // expected: false
+type positive = int that (~ > 0);
+(1 is positive); // expected: true
+(100 is positive); // expected: true
+(0 is positive); // expected: false
 (-1 is positive)         // expected: false
 
 // Constraint with <= and >=
-type between1and10 = int that (~ >= 1 and ~ <= 10)
-(1 is between1and10)     // expected: true
-(5 is between1and10)     // expected: true
-(10 is between1and10)    // expected: true
-(0 is between1and10)     // expected: false
-(11 is between1and10)    // expected: false
+type between1and10 = int that (~ >= 1 and ~ <= 10);
+(1 is between1and10); // expected: true
+(5 is between1and10); // expected: true
+(10 is between1and10); // expected: true
+(0 is between1and10); // expected: false
+(11 is between1and10); // expected: false
 
 // Combined result
 [
@@ -63,7 +63,7 @@ grade(85)    // expected: "B"
 grade(75)    // expected: "C"
 grade(65)    // expected: "D"
 grade(55)    // expected: "F"
-grade(-5)    // expected: "invalid"
+grade(-5); // expected: "invalid"
 
 // Combined match results
 [

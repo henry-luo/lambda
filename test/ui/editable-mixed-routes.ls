@@ -2,7 +2,7 @@
 // standard contenteditable host uses the DOM compatibility action.
 
 edit <mixed_template_editor> state text: "template", status: "ready" {
-  <div id:"template-host", contenteditable:"true", tabindex:"0"; text>
+  <div id:"template-host", contenteditable:"true", tabindex:"0", text>
   <output id:"template-state"; status ++ ":" ++ text>
 }
 on beforeinput(evt) {

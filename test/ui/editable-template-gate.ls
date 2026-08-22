@@ -2,7 +2,7 @@
 // The handler owns the model update; Radiant must not apply a DOM fallback.
 
 edit <editable_template_probe> state text: "seed", status: "ready" {
-  <div id:"surface", contenteditable:"true", tabindex:"0"; text>
+  <div id:"surface", contenteditable:"true", tabindex:"0", text>
   <output id:"state"; status ++ ":" ++ text>
 }
 on beforeinput(evt) {

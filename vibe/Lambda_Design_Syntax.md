@@ -2178,3 +2178,42 @@ only that the two front ends match each other; it cannot show that either
 matches the DESIGN. Only probing the ledger ruling by ruling finds this
 class — and for anything involving precedence or evaluation, only value
 assertions do (§7.2 shipped unimplemented for exactly that reason).
+
+### 7.22 Optional type fields: `a?: T` (decided — a grammar addition)
+
+**The distinction.** `a?: T` and `a: T?` are different claims and the type
+language needs both:
+
+- **`a?: T`** — the FIELD is optional. It may be absent from the value
+  entirely.
+- **`a: T?`** — the field is present; its VALUE is nullable.
+
+Only the second was expressible. `attr_type` (and its pattern-position twin
+`pattern_attr_type`) accepted `name : type [= default]` with no optional
+marker, so an optional field had to be miswritten as a nullable one — losing
+the distinction — or spelled some other way entirely.
+
+**Ruling.** Both field rules take `optional(field('optional', '?'))` between
+the name and the `:`, mirroring `parameter`, which has carried the same
+marker for function arguments all along. The two markers now read alike:
+`fn f(a?: int)` and `type T { a?: int }` both mean "may be absent."
+`a?: T?` is legal and means an optional field whose value, when present, may
+be null.
+
+Surfaced by the corpus migration. (The case that raised it —
+`<meta: Meta>?` in `doc_schema.ls` — turned out NOT to need this: checked
+against `doc/Doc_Schema.md`, that construct is a child ELEMENT written with
+a stray colon, and its Lambda spelling is `<meta Meta>?`. The gap it exposed
+in the type language is real all the same, and the same file uses `a?: T`
+elsewhere, in map-type position.)
+
+The marker applies to every type-field position: `attr_type` (object-type
+fields), `pattern_attr_type` (pattern position), and `map_type_item` — a map
+type's fields are type fields too, which the first implementation missed.
+
+**Implementation status.** Both parsers accept the marker, and the C parser
+carries it as `LAMBDA_REDUCTION_FLAG_OPTIONAL` on the object-field
+reduction — the same flag parameters already use. The SEMANTIC side is not
+done: `build_ast` and the validator must treat an optional field as
+"absent is valid" rather than "null is valid", which is the point of the
+distinction and is tracked as remaining work.

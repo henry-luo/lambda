@@ -6,6 +6,6 @@
 // Checked by sized_int_boxing.mir-check (Stack API #25).
 
 let big_signed = 9223372036854775807i64
-let big_unsigned = 18446744073709551615u64
+let big_unsigned = 18446744073709551615u64;
 
 [big_signed, big_unsigned]

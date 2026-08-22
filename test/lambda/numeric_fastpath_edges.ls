@@ -130,9 +130,9 @@ all_ops(9223372036854775807i64, 18446744073709551615u64)
 all_ops(1i64, 1u64)
 
 "=== M1: comparisons through array elements (any-typed loads) ==="
-let fv = [0.5, 0.25, -0.0, 0.0]
+let fv = [0.5, 0.25, -0.0, 0.0];
 [fv[0] > fv[1], fv[0] < fv[1], fv[2] == fv[3], fv[2] < fv[3]]
-let mv = [9007199254740992.0, 9007199254740993i64]
+let mv = [9007199254740992.0, 9007199254740993i64];
 [mv[0] < mv[1], mv[0] > mv[1], mv[0] == mv[1]]
 
 "=== M1/M2: min/max and sort route through the same comparison ==="

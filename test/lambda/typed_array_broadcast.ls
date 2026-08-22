@@ -69,10 +69,10 @@ m1 / m2
 // ============================================================
 // 1-D broadcast (no shape metadata) still works as before
 // ============================================================
-'=== 1-D scalar broadcast still flat ==='
+'=== 1-D scalar broadcast still flat ===';
 [1, 2, 3] + 10
 
-'=== 1-D same length ==='
+'=== 1-D same length ===';
 [1, 2, 3] + [10, 20, 30]
 
 // ============================================================
@@ -88,5 +88,5 @@ reshape([1, 2, 3], [3, 1]) * reshape([1, 2], [2, 1])    // (3,1) vs (2,1) — di
 '=== chained ==='
 let a = reshape([1, 2, 3], [3, 1])
 let b = reshape([10, 20], [1, 2])
-let c = reshape([100, 200, 300], [3, 1])
+let c = reshape([100, 200, 300], [3, 1]);
 (a + b) * c

@@ -2,13 +2,13 @@
 // Testing all Lambda Script data types and complex combinations
 
 // === BASIC FOR EXPRESSION ===
-"# Fixed for expressions with arrays"
-(for (x in [1, 2, 3]) x * 2)
-(for (item in ["a", "b", "c"]) item ++ "!")
+"# Fixed for expressions with arrays";
+(for (x in [1, 2, 3]) x * 2);
+(for (item in ["a", "b", "c"]) item ++ "!");
 (for (num in [1, 2, 3, 4, 5]) (if (num % 2 == 0) num else 0))
 
-"# Fixed for expressions with ranges"
-(for (i in 1 to 5) i * i)
+"# Fixed for expressions with ranges";
+(for (i in 1 to 5) i * i);
 (for (j in 0 to 3) j + 10)
 
 "# For statements with arrays"
@@ -20,14 +20,14 @@ for i in 1 to 10 {
 }
 
 // === BASIC LET EXPRESSIONS vs STATEMENTS ===
-"# Let expressions with scalar types"
-(let x = 42, x + 1)  // int
-(let y = 3.14, y * 2)  // float  
-(let z = true, not z)  // bool
-(let s = "hello", s ++ " world")  // string
-(let sym = 'test', sym)  // symbol
-(let dt = t'2025-01-01', dt)  // datetime
-(let bin = b'\xDEADBEEF', bin)  // binary
+"# Let expressions with scalar types";
+(let x = 42, x + 1); // int
+(let y = 3.14, y * 2); // float  
+(let z = true, not z); // bool
+(let s = "hello", s ++ " world"); // string
+(let sym = 'test', sym); // symbol
+(let dt = t'2025-01-01', dt); // datetime
+(let bin = b'\xDEADBEEF', bin); // binary
 (let n = null, n)  // null
 
 '# Let statements with scalar types'
@@ -39,9 +39,9 @@ let binary1 = b'\xDEAD', binary2 = b'\xBEEF';
 let null_val = null;
 
 // === COMPLEX DATA STRUCTURE TESTS ===
-'# Let expressions with arrays'
-(let arr = [1, 2, 3], arr[1])
-(let nested = [[1, 2], [3, 4]], nested[0][1])
+'# Let expressions with arrays';
+(let arr = [1, 2, 3], arr[1]);
+(let nested = [[1, 2], [3, 4]], nested[0][1]);
 (let mixed = [1, "two", 3.0, true, null], mixed[2])
 
 '# Let statements with arrays'
@@ -50,9 +50,9 @@ let strings = ["a", "b", "c"];
 let bools = [true, false, true];
 let mixed_array = [42, "hello", 3.14, true, null, [1, 2]];
 
-'# Let expressions with maps'
-(let m = {a: 1, b: 2}, m.a + m.b)
-(let person = {name: "Alice", age: 30}, person.name)
+'# Let expressions with maps';
+(let m = {a: 1, b: 2}, m.a + m.b);
+(let person = {name: "Alice", age: 30}, person.name);
 (let nested_map = {outer: {inner: 42}}, nested_map.outer.inner)
 
 "# Let statements with maps"
@@ -68,20 +68,20 @@ let complex_map = {
 (let lst = [1, 2, 3], lst)
 
 // === IF EXPRESSION vs STATEMENT TESTS ===
-"# Simple if expressions"
-(if (true) 'yes' else 'no')
-(if (1 > 0) 42 else 0)
+"# Simple if expressions";
+(if (true) 'yes' else 'no');
+(if (1 > 0) 42 else 0);
 (if (false) null else 'default')
 
-"# Nested if expressions"
+"# Nested if expressions";
 (let choice = 1, if (choice == 1) 42 else if (choice == 2) 'string' else 'other')
 
-"# If expressions with let"
-(let x = 5, if (x > 3) 'big' else 'small')
+"# If expressions with let";
+(let x = 5, if (x > 3) 'big' else 'small');
 (let score = 85, if (score >= 90) 'A' else if (score >= 80) 'B' else 'C')
 
-"# Nested if expressions"
-(if (true) (if (false) 1 else 2) else 3)
+"# Nested if expressions";
+(if (true) (if (false) 1 else 2) else 3);
 (let val = 10, if (val > 5) (if (val > 15) 'very big' else 'medium') else 'small')
 
 "# If statements"
@@ -102,13 +102,13 @@ if (user.active) {
 }
 
 // === FOR EXPRESSION vs STATEMENT TESTS ===
-'# For expressions with arrays'
-(for (x in [1, 2, 3]) x * 2)
-(for (item in strings) item ++ "!")
+'# For expressions with arrays';
+(for (x in [1, 2, 3]) x * 2);
+(for (item in strings) item ++ "!");
 (for (num in numbers) (if (num % 2 == 0) num else 0))
 
-"# For expressions with ranges"
-(for (i in 1 to 5) i * i)
+"# For expressions with ranges";
+(for (i in 1 to 5) i * i);
 (for (j in 0 to 3) j + 10)
 
 "# For statements with arrays"
@@ -135,24 +135,24 @@ for index in 0 to 4 {
 
 // === COMPLEX COMBINATIONS ===
 
-"# Let with if expression inside"
+"# Let with if expression inside";
 (let data = [1, 2, 3, 4, 5], 
  let filtered = (for (x in data) if (x % 2 == 0) x else 0),
  filtered)
 
-'# If expression with let expressions in branches'
+'# If expression with let expressions in branches';
 (if ((let temp = 25, temp > 20)) 
     (let msg = "warm", msg ++ " weather")
  else 
     (let msg = "cool", msg ++ " weather"))
 
-'# For expression with if expressions'
+'# For expression with if expressions';
 (for (n in 1 to 10) 
     if (n % 3 == 0) "fizz" 
     else if (n % 5 == 0) "buzz" 
     else n)
 
-'# Nested let expressions'
+'# Nested let expressions';
 (let x = (let a = 10, let b = 20, a + b),
  let y = (let c = x * 2, c + 5),
  x + y)
@@ -186,19 +186,19 @@ if (numbers[0] > 0) {
 }
 
 // === TYPE MIXING AND EDGE CASES ===
-"# Let with different types in sequence"
+"# Let with different types in sequence";
 (let i = 42, let f = 3.14, let s = "test", let b = true,
  [i, f, s, b])
 
-"# If expressions returning different types (should unify)"
+"# If expressions returning different types (should unify)";
 (let choice = 1,
  if (choice == 1) 42
  else if (choice == 2) "string" 
  else if (choice == 3) 3.14
  else true)
 
-"# For with different collection types"
-(for (item in [1, "two", 3.0]) item)  // list
+"# For with different collection types";
+(for (item in [1, "two", 3.0]) item); // list
 (for (val in [null, true, false, 123]) val)  // array
 
 "=== EDGE CASES AND ERROR CONDITIONS ==="

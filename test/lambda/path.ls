@@ -1,28 +1,28 @@
 // Path expression tests
 // Paths use /., ., and .~~ for logical, relative, and parent paths
 
-"Basic path expressions"
-/.etc.hosts
+"Basic path expressions";
+/.etc.hosts;
 /.usr.local.bin
 http.api.example.com
 https.secure.api.example.com
 sys.config
 
-"Path with 6+ segments (tests extended path_build)"
+"Path with 6+ segments (tests extended path_build)";
 /.home.user.documents.projects.lambda.test
 
 "Path in let binding"
 let config_path = /.etc.config
 config_path
 
-"Path in array"
+"Path in array";
 [/.a, /.b, http.x]
 
 "Path in map"
 {input: /.data.input, output: /.data.output}
 
-"Path with quoted segments (dots in filenames)"
-/.etc.'nginx.conf'
+"Path with quoted segments (dots in filenames)";
+/.etc.'nginx.conf';
 /.home.user.'config.json'
 http.'api.github.com'.users
 
@@ -31,23 +31,23 @@ let segment = "config"
 let dynamic_path = /.etc[segment]
 dynamic_path
 
-"Wildcard patterns (single segment match)"
+"Wildcard patterns (single segment match)";
 /.src.*
 http.api.users.*
 
-"Wildcard patterns (recursive match)"
+"Wildcard patterns (recursive match)";
 /.src.**
 http.api.**
 
-"Quoted wildcard (literal asterisk, not a wildcard)"
-/.data.'*'
+"Quoted wildcard (literal asterisk, not a wildcard)";
+/.data.'*';
 /.data.'**'
 
 "Path type checking"
 type(/.etc.hosts)
 
 "File content (lazy loading)"
-let hosts = /.etc.hosts
+let hosts = /.etc.hosts;
 (len(hosts) > 0)
 
 "exists() function - directory exists"
@@ -59,11 +59,11 @@ exists(/.etc.hosts)
 "exists() function - non-existent path"
 exists(/.this_path_does_not_exist)
 
-"len() on directory - counts entries"
+"len() on directory - counts entries";
 (len(/.etc) > 0)
 
 "Path iteration - for loop over directory"
-let etc_items = for (item in /.etc) item
+let etc_items = for (item in /.etc) item;
 (len(etc_items) > 0)
 
 "Path iteration - collect types"

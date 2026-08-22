@@ -4,7 +4,7 @@ import model: lambda.package.graph.model
 
 pub fn content(node, config, rows) =>
   <div class: config.root_class,
-      style: "display:block;min-width:" ++ string(config.min_width) ++ "px;";
+      style: "display:block;min-width:" ++ string(config.min_width) ++ "px;",
     <div class: config.title_class,
         style: "display:block;font-weight:600;text-align:center;padding:2px 4px;";
       string(model.label_source(node, node.id))

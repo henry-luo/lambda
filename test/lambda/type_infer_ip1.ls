@@ -20,6 +20,6 @@ let block_single = (let inner = 41, inner + 1)
 let neg_num = -5
 
 // TIG16: `|` with `~` publishes the mapped element type.
-let piped = [1, 2, 3] |> ~ + 1
+let piped = [1, 2, 3] |> ~ + 1;
 
 [and_same, and_mixed, cmp_num, cmp_str, block_single, neg_num, piped]

@@ -2103,11 +2103,31 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
                     that, &constraint, 1);
                 continue;
             }
-            if (token_is_key(parser->current.kind) && parser->next.kind == LAMBDA_TOK_COLON) {
+            // §7.22: `a?: T` marks the FIELD optional — it may be absent —
+            // which is a different claim from `a: T?`, where the field is
+            // present and its VALUE is nullable.
+            // `name?` alone is an OCCURRENCE type used as content; only
+            // `name?:` is an optional field, so the `:` must be confirmed one
+            // character past the `?` before taking the field path.
+            bool optional_field = false;
+            if (parser->next.kind == LAMBDA_TOK_QUESTION) {
+                size_t at = parser->next.span.end_byte;
+                while (at < parser->lexer.length &&
+                        (parser->lexer.source[at] == ' ' ||
+                         parser->lexer.source[at] == '\t')) { at++; }
+                optional_field = at < parser->lexer.length &&
+                    parser->lexer.source[at] == ':';
+            }
+            if (token_is_key(parser->current.kind) &&
+                    (parser->next.kind == LAMBDA_TOK_COLON || optional_field)) {
                 LambdaToken field = parser->current;
                 parser_advance(parser);
-                parser_advance(parser);
-                parser_skip_newlines(parser);
+                uint32_t field_flags = 0;
+                if (parser_accept(parser, LAMBDA_TOK_QUESTION)) {
+                    field_flags |= LAMBDA_REDUCTION_FLAG_OPTIONAL;
+                }
+                if (!parser_expect(parser, LAMBDA_TOK_COLON,
+                        "expected ':' after object-type field name")) return 0;
                 LambdaParseValue type_value = 0;
                 if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
                 LambdaParseValue children[2] = {type_value, 0};
@@ -2120,7 +2140,7 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
                 parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
                     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD,
                     (LambdaSourceSpan){field.span.start_byte, parser->current.span.start_byte},
-                    field, (LambdaToken){0}, 0, children, child_count);
+                    field, (LambdaToken){0}, field_flags, children, child_count);
                 continue;
             }
             // A bare type is the object/element content schema.  Its inner

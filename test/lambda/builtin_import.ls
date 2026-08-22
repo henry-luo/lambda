@@ -4,7 +4,7 @@
 "1. math functions with prefix"
 math.sqrt(16)
 math.sin(0)
-math.cos(0)
+math.cos(0);
 [math.log(1), math.exp(0), math.pow(2, 3)]
 
 "2. math constants with prefix"

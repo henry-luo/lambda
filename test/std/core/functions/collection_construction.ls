@@ -22,8 +22,8 @@ fill(3, "x")
 // ===== range function =====
 range(1, 5)
 range(0, 10, 2)
-range(10, 0, -2)
+range(10, 0, -2);
 
 // ===== Method-style =====
-[1, 2, 3, 4, 5].take(3)
+[1, 2, 3, 4, 5].take(3);
 [1, 2, 3, 4, 5].drop(2)

@@ -2,6 +2,6 @@
 import .mod_vars
 
 [name, version, ratio]
-items
+items;
 [greeting, get_greeting()]
 get_name()

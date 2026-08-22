@@ -9,7 +9,7 @@ let orders = [
 let customers = [
   {id: 1, name: "Ada"},
   {id: 2, name: "Ben"}
-]
+];
 
 [for (o in orders, c in customers on o.cust_id == c.id
       group by c.name into g)

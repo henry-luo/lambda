@@ -13,11 +13,11 @@
 // extension is needed in the validator (mod_edit_schema.ls).
 
 // Allowed shape kinds (symbols, validated on the `kind` attr).
-pub shape_kinds = ['rect', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'freehand', 'image']
+pub let shape_kinds = ['rect', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'freehand', 'image']
 
 fn shape_kind_ok(v) => v in shape_kinds
 
-pub drawing_schema = {
+pub let drawing_schema = {
   // ───────── drawing block (one inline embed in the flow doc) ─────────
   drawing: {
     role:     'block',

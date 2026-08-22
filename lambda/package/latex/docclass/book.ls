@@ -6,7 +6,7 @@
 // ============================================================
 
 // book has chapters; chapter is the top level
-pub SECTION_LEVELS = {
+pub let SECTION_LEVELS = {
     part: 0,
     chapter: 1,
     section: 2,
@@ -16,7 +16,7 @@ pub SECTION_LEVELS = {
     subparagraph: 6
 }
 
-pub TOP_LEVEL = 1  // <h1> for \chapter
+pub let TOP_LEVEL = 1  // <h1> for \chapter
 
 // ============================================================
 // Section numbering
@@ -80,11 +80,11 @@ pub fn equation_label(counters, num) {
 // Document structure
 // ============================================================
 
-pub HAS_CHAPTERS = true
-pub HAS_PARTS = true
+pub let HAS_CHAPTERS = true
+pub let HAS_PARTS = true
 
 // book can have \frontmatter, \mainmatter, \backmatter
-pub ABSTRACT_POSITION = "after_title"
+pub let ABSTRACT_POSITION = "after_title"
 
 // ============================================================
 // Theorem numbering — book numbers by chapter: "Theorem 2.1"

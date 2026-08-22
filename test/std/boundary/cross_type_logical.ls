@@ -63,16 +63,16 @@ true or null
 false or null
 
 // ===== not with null =====
-not null
+not null;
 
 // ===== and/or with array =====
-[1] and true
-[1] and false
-[] and true
-[] and false
-[1] or true
-[1] or false
-[] or true
+[1] and true;
+[1] and false;
+[] and true;
+[] and false;
+[1] or true;
+[1] or false;
+[] or true;
 [] or false
 
 // ===== not with array =====
@@ -96,6 +96,6 @@ not {}
 1 or 2
 0 or 0
 null and null
-null or null
-[] and []
+null or null;
+[] and [];
 [] or []

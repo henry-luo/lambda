@@ -6,7 +6,7 @@
 true is bool
 null == null
 "hello" is string
-'sym' is symbol
+'sym' is symbol;
 [1, 2] is array
 {a: 1} is map
 42 is number

@@ -4,7 +4,7 @@ let ints = [3, 1, 2]
 let i8s = [3i8, 1i8, 2i8]
 let f32s = [3.5f32, 1.5f32, 2.5f32]
 
-'=== int ArrayNum carriers ==='
+'=== int ArrayNum carriers ===';
 [
   ndim(sort(ints)),
   ndim(sort(ints, 'desc')),
@@ -20,7 +20,7 @@ let f32s = [3.5f32, 1.5f32, 2.5f32]
   ndim(slice(ints, 1, 1))
 ]
 
-'=== int ArrayNum values ==='
+'=== int ArrayNum values ===';
 [
   sort(ints),
   sort(ints, 'desc'),
@@ -32,7 +32,7 @@ let f32s = [3.5f32, 1.5f32, 2.5f32]
   slice(ints, 1, 3)
 ]
 
-'=== i8 lane preservation ==='
+'=== i8 lane preservation ===';
 [
   sort(i8s)[0] is i8,
   unique([3i8, 1i8, 3i8])[0] is i8,
@@ -42,7 +42,7 @@ let f32s = [3.5f32, 1.5f32, 2.5f32]
   slice(i8s, 1, 3)[0] is i8
 ]
 
-'=== i8 values ==='
+'=== i8 values ===';
 [
   sort(i8s),
   unique([3i8, 1i8, 3i8]),
@@ -52,7 +52,7 @@ let f32s = [3.5f32, 1.5f32, 2.5f32]
   slice(i8s, 1, 3)
 ]
 
-'=== f32 lane preservation ==='
+'=== f32 lane preservation ===';
 [
   sort(f32s)[0] is f32,
   unique([3.5f32, 1.5f32, 3.5f32])[0] is f32,
@@ -62,7 +62,7 @@ let f32s = [3.5f32, 1.5f32, 2.5f32]
   slice(f32s, 1, 3)[0] is f32
 ]
 
-'=== f32 values ==='
+'=== f32 values ===';
 [
   sort(f32s),
   unique([3.5f32, 1.5f32, 3.5f32]),

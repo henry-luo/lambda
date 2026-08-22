@@ -5,7 +5,7 @@
 fn pow_float(x: float, y: float) { x ** y }
 fn pow_int(x: int, y: int) { x ** y }
 
-"1. Power operator (fn_pow_u)"
+"1. Power operator (fn_pow_u)";
 [
     pow_float(2.0, 3.0),    // 8
     pow_int(2, 10)          // 1024
@@ -17,7 +17,7 @@ fn max_float(a: float, b: float) { max(a, b) }
 fn min_int(a: int, b: int) { min(a, b) }
 fn max_int(a: int, b: int) { max(a, b) }
 
-"2. min/max two-arg (fn_min2_u, fn_max2_u)"
+"2. min/max two-arg (fn_min2_u, fn_max2_u)";
 [
     min_float(3.5, 2.5),    // 2.5
     max_float(3.5, 2.5),    // 3.5
@@ -29,7 +29,7 @@ fn max_int(a: int, b: int) { max(a, b) }
 fn abs_int(x: int) { abs(x) }
 fn abs_float(x: float) { abs(x) }
 
-"3. abs with typed args"
+"3. abs with typed args";
 [
     abs_int(-42),           // 42
     abs_float(-3.14)        // 3.14
@@ -39,7 +39,7 @@ fn abs_float(x: float) { abs(x) }
 fn sign_int(x: int) { sign(x) }
 fn sign_float(x: float) { sign(x) }
 
-"4. sign with typed args"
+"4. sign with typed args";
 [
     sign_int(-100),         // -1
     sign_int(50),           // 1
@@ -53,7 +53,7 @@ fn floor_int(x: int) { floor(x) }
 fn ceil_int(x: int) { ceil(x) }
 fn round_int(x: int) { round(x) }
 
-"5. floor/ceil/round with int (identity)"
+"5. floor/ceil/round with int (identity)";
 [
     floor_int(42),          // 42
     ceil_int(42),           // 42
@@ -64,7 +64,7 @@ fn round_int(x: int) { round(x) }
 fn cmp_with_abs(a: int, b: int) { (abs(a) < abs(b)) }
 fn max_of_abs(a: int, b: int) { max(abs(a), abs(b)) }
 
-"6. Compositions with unboxed"
+"6. Compositions with unboxed";
 [
     cmp_with_abs(-5, 10),       // true
     cmp_with_abs(-10, 5),       // false

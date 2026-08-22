@@ -2824,7 +2824,7 @@ fn render_children_scan(node, context, i, acc) {
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else if (is_prime_node(node[i]) and i + 1 < len(node) and is_prime_node(node[i + 1]))
         // MathLive folds adjacent apostrophe tokens into one prime script box;
-        // emitting one box per token makes `f''` wider and structurally wrong.
+        // emitting one box per token makes `f""` wider and structurally wrong.
         (let count = consecutive_prime_count(node, i, 0),
          let rendered = render_prime_script_count(count, context),
          render_children_scan(node, context, i + count, acc ++ [rendered]))

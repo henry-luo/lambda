@@ -53,7 +53,7 @@ false or "fallback"
 // ===== And short-circuit =====
 true and "reached"
 false and "unreached"
-null and "unreached"
+null and "unreached";
 
 // ===== Truthiness in filter =====
 [null, 1, "", "hello", false, true, 0] |> filter((x) => x)

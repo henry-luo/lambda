@@ -2,7 +2,7 @@
 // Layer: 4 | Category: integration | Covers: elements, query, namespace, transform
 
 // ===== Build document tree =====
-let doc = <html>
+let doc = <html>;
     <head>
         <title> "My Page"
         <meta charset: "utf-8">
@@ -47,15 +47,15 @@ len(divs)
 divs |> map((d) => d.class)
 
 // ===== Nested element construction =====
-let table = <table>
+let table = <table>;
     <thead>
         <tr>
             <th> "Name"
             <th> "Value"
     <tbody>
         for (i in 1 to 3)
-            <tr>
-                <th> "Item " & str(i)
+            <tr>;
+                <th> "Item " & str(i);
                 <td> str(i * 10)
 
 // ===== Query table cells =====

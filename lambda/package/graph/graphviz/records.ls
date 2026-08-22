@@ -61,7 +61,7 @@ fn parse_fields(text, i, escaped, stack, valid) {
 
 fn record_cell(field, vertical) =>
   <td 'data-record-port': field.port,
-      style: "border:1px solid currentColor;padding:4px 6px;vertical-align:middle;";
+      style: "border:1px solid currentColor;padding:4px 6px;vertical-align:middle;",
     if (field.fields != null) { record_table(field.fields, not vertical) }
     else { field.text }
   >

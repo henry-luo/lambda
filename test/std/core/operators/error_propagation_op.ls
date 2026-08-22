@@ -47,13 +47,13 @@ test_error_or_default()
 
 // ===== handler-preserved error value =====
 fn test_destructure_error() {
-    let val = fail() ^ { ^ }
+    let val = fail() ^ { ^ };
     [val == null, val is error, val.message]
 }
 test_destructure_error()
 
 fn test_destructure_success() {
-    let val = succeed() ^ { ^ }
+    let val = succeed() ^ { ^ };
     [val, val is error]
 }
 test_destructure_success()

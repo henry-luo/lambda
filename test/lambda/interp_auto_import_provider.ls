@@ -1,4 +1,4 @@
-pub offset = 10
+pub let offset = 10
 
 pub fn shift(x: int) int => x + offset
 

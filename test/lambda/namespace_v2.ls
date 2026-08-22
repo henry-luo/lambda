@@ -25,7 +25,7 @@ import xlink: 'http://www.w3.org/1999/xlink'
 // 3. Access namespaced attributes via sub-map
 // =============================================
 "5. access ns attr via sub-map"
-let el = <svg.a xlink.href: "https://example.com", xlink.title: "Ex", class: "link">
+let el = <svg.a xlink.href: "https://example.com", xlink.title: "Ex", class: "link">;
 [el.class, el.xlink.href, el.xlink.title]
 
 "6. get namespace sub-map"
@@ -39,7 +39,7 @@ el.xlink
 
 "8. map ns sub-map access"
 let m = {svg: {width: 100, height: 50}, class: "box"}
-m.svg
+m.svg;
 [m.svg.width, m.svg.height]
 
 // =============================================
@@ -50,13 +50,13 @@ svg.rect
 svg.circle
 xlink.href
 
-"10. qualified symbol equality"
-(svg.rect == svg.rect)
+"10. qualified symbol equality";
+(svg.rect == svg.rect);
 (svg.rect == svg.circle)
 
 // =============================================
 // 6. Element tag with namespace preserved
 // =============================================
 "11. element name preserved"
-let r = <svg.rect>
+let r = <svg.rect>;
 [string(r)]

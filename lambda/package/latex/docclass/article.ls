@@ -6,7 +6,7 @@
 // ============================================================
 
 // article has no chapter; section is the top level
-pub SECTION_LEVELS = {
+pub let SECTION_LEVELS = {
     section: 2,
     subsection: 3,
     subsubsection: 4,
@@ -14,7 +14,7 @@ pub SECTION_LEVELS = {
     subparagraph: 6
 }
 
-pub TOP_LEVEL = 2  // <h2> for \section
+pub let TOP_LEVEL = 2  // <h2> for \section
 
 // ============================================================
 // Section numbering
@@ -70,11 +70,11 @@ pub fn equation_label(num) {
 // ============================================================
 
 // article has no front/back matter distinction
-pub HAS_CHAPTERS = false
-pub HAS_PARTS = false
+pub let HAS_CHAPTERS = false
+pub let HAS_PARTS = false
 
 // abstract appears before \maketitle or after, depending on class options
-pub ABSTRACT_POSITION = "before_body"
+pub let ABSTRACT_POSITION = "before_body"
 
 // ============================================================
 // Theorem numbering — article uses single counter per env type

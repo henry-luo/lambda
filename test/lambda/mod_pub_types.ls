@@ -6,4 +6,4 @@ pub type Counter {
     fn double() => value * 2
 }
 
-pub x = 42
+pub let x = 42

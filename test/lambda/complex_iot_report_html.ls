@@ -352,8 +352,8 @@ fn status_badge(status) {
     else if (status == "improving" or status == "good" or status == "flowing")
         "badge badge-success"
     else
-        "badge badge-warning"
-    <span class:badge_class; status>
+        "badge badge-warning";
+    <span class:badge_class, status>
 }
 
 fn progress_bar(value, max_val, color) {

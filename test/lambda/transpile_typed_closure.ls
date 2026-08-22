@@ -11,7 +11,7 @@ fn make_adder_typed(n: int) {
     inner
 }
 
-"1. Typed outer, untyped inner"
+"1. Typed outer, untyped inner";
 [make_adder_typed(10)(5), make_adder_typed(-3)(8)]
 
 // ============================================
@@ -23,7 +23,7 @@ fn make_adder_both(n: int) {
     inner
 }
 
-"2. Both typed"
+"2. Both typed";
 [make_adder_both(10)(5), make_adder_both(-3)(8)]
 
 // ============================================
@@ -35,7 +35,7 @@ fn make_scaler(factor: int) {
     scale
 }
 
-"3. Int multiplier closure"
+"3. Int multiplier closure";
 [make_scaler(3)(10), make_scaler(5)(7)]
 
 // ============================================
@@ -47,7 +47,7 @@ fn make_guard(flag: bool) {
     guarded
 }
 
-"4. Bool typed closure"
+"4. Bool typed closure";
 [make_guard(true)(42), make_guard(false)(42)]
 
 // ============================================
@@ -59,7 +59,7 @@ fn make_greeter(prefix: string) {
     greet
 }
 
-"5. String typed closure"
+"5. String typed closure";
 [make_greeter("Hello")("World"), make_greeter("Hi")("Lambda")]
 
 // ============================================
@@ -71,7 +71,7 @@ fn make_linear(slope: int, intercept: int) {
     eval
 }
 
-"6. Multiple typed captures"
+"6. Multiple typed captures";
 [make_linear(2, 3)(5), make_linear(-1, 10)(4)]
 
 // ============================================
@@ -83,7 +83,7 @@ fn make_mixed(a: int, b) {
     apply
 }
 
-"7. Mixed typed/untyped captures"
+"7. Mixed typed/untyped captures";
 [make_mixed(3, 7)(10), make_mixed(2, 100)(5)]
 
 // ============================================
@@ -95,7 +95,7 @@ fn outer_typed(a: int) {
     inner
 }
 
-"8. Nested typed closures"
+"8. Nested typed closures";
 [outer_typed(1)(3), outer_typed(4)(6)]
 
 // ============================================
@@ -106,7 +106,7 @@ fn apply_fn(f, x) => f(x)
 let add5 = make_adder_typed(5)
 let times3 = make_scaler(3)
 
-"9. Higher-order with typed closure"
+"9. Higher-order with typed closure";
 [apply_fn(add5, 10), apply_fn(times3, 7)]
 
 // ============================================
@@ -118,7 +118,7 @@ fn make_pair_maker(first: int) {
     make_pair
 }
 
-"10. Typed closure returning container"
+"10. Typed closure returning container";
 [make_pair_maker(1)(2), make_pair_maker(10)(20)]
 
 // ============================================
@@ -131,5 +131,5 @@ fn make_offset(base: int) {
     offset
 }
 
-"11. Let variable capture"
+"11. Let variable capture";
 [make_offset(5)(10), make_offset(3)(7)]

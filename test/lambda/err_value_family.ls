@@ -46,7 +46,7 @@ t_len()
 
 '-- but the truthy family still participates: these are the discharge surfaces --'
 fn t_truthy() {
-    let a = fail() ^ { ^ }
+    let a = fail() ^ { ^ };
     [if (a) "T" else "F", not a, a or "dflt", a == a]
 }
 t_truthy()

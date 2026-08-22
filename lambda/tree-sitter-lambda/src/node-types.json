@@ -386,12 +386,26 @@
             "named": true
           },
           {
+            "type": "base_type",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
           {
             "type": "symbol",
             "named": true
+          }
+        ]
+      },
+      "optional": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "?",
+            "named": false
           }
         ]
       }
@@ -1359,6 +1373,10 @@
         },
         {
           "type": "content_type",
+          "named": true
+        },
+        {
+          "type": "dotted_name",
           "named": true
         },
         {
@@ -2834,12 +2852,26 @@
         "required": true,
         "types": [
           {
+            "type": "base_type",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
           {
             "type": "symbol",
             "named": true
+          }
+        ]
+      },
+      "optional": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "?",
+            "named": false
           }
         ]
       }

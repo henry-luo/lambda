@@ -20,7 +20,7 @@ len(m[int])
 len(m[bool])
 
 // ===== Element child query =====
-let el = <div class: "main";
+let el = <div class: "main",
     <p; "hello">
     <img src: "photo.jpg">
     "some text">

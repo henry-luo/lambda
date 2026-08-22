@@ -10,17 +10,17 @@ type NonEmpty = string that len(~) > 0
 let scored: int that 0 <= ~ <= 100 = 95
 fn doubled(x: int that ~ > 0) int { x * 2 }
 
-(5 is Positive)          // expected: true
-(0 is Positive)          // expected: false
-(50 is Percent)          // expected: true
-(150 is Percent)         // expected: false
-("hi" is NonEmpty)       // expected: true
+(5 is Positive); // expected: true
+(0 is Positive); // expected: false
+(50 is Percent); // expected: true
+(150 is Percent); // expected: false
+("hi" is NonEmpty); // expected: true
 ("" is NonEmpty)         // expected: false
 scored
 doubled(21)
 
 // === Legacy parenthesized form still parses (CT7) ===
-type LegacyPos = int that (~ > 0)
+type LegacyPos = int that (~ > 0);
 (3 is LegacyPos)         // expected: true
 
 // === Match arms, both `:` and block bodies ===
@@ -38,14 +38,14 @@ classify("s")
 // === CT2: the predicate is greedy — `| null` binds INTO the predicate,
 // it is not a type union. `null is Tricky` is therefore false: Tricky is
 // still a constrained int. Spell a union of a constrained type by naming it.
-type Tricky = int that ~ > 0 | null
+type Tricky = int that ~ > 0 | null;
 (null is Tricky)         // expected: false
-type Maybe = Positive | null
-(null is Maybe)          // expected: true
+type Maybe = Positive | null;
+(null is Maybe); // expected: true
 (5 is Maybe)             // expected: true
 
 // === CT10: named alias composes into containers ===
-type Scores = [Positive]
+type Scores = [Positive];
 ([5] is Scores)          // expected: true
 
 // === CT6: object-level constraint parses without parens ===

@@ -29,7 +29,7 @@
 // ===== Chained expressions =====
 "=== chained ==="
 10i8 * 20i16 + 5u32
-100u8 - 10i8 + 3.14
+100u8 - 10i8 + 3.14;
 (2i8 + 3i16) * (4u8 + 5u16)
 
 // ===== Division producing float =====
@@ -57,7 +57,7 @@
 2i16 ** 10
 
 // ===== Unary on mixed results =====
-"=== unary ==="
+"=== unary ===";
 -(42i8 + 8u8)
 abs(-100i32 + 50i16)
 

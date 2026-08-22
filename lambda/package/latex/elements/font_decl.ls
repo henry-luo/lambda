@@ -53,8 +53,8 @@ pub fn align_decl_style(tag_str) {
 // wrap rendered items in a span with font declaration style
 // callers guarantee tag_str is a valid font declaration key
 pub fn wrap_font_decl(tag_str, items) {
-    let style = FONT_DECL_STYLES[tag_str]
-    <span class: "latex-" ++ tag_str, style: style; for c in items { c }>
+    let style = FONT_DECL_STYLES[tag_str];
+    <span class: "latex-" ++ tag_str, style: style, for c in items { c }>
 }
 
 // wrap rendered items in a div with alignment style

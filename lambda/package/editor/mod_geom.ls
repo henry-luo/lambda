@@ -151,7 +151,7 @@ pub fn point_in_ellipse(p, bbox) {
   if (rx == 0.0 or ry == 0.0) { false }
   else {
     let dx = (p.x - c.x) / rx
-    let dy = (p.y - c.y) / ry
+    let dy = (p.y - c.y) / ry;
     ((dx * dx + dy * dy) <= 1.0)
   }
 }
@@ -274,7 +274,7 @@ pub fn find_shape_by_id(doc, id) => find_shape_node(doc, id, [])
 // Geometric hit-test  (hit-test.ts)
 // ===========================================================================
 
-pub HIT_TOLERANCE = 4.0   // px
+pub let HIT_TOLERANCE = 4.0   // px
 
 fn segment_hit_at(points, pp, i, n) {
   if (i + 1 >= n) { false }
@@ -293,7 +293,7 @@ pub fn hit_test_shape(shape, p) {
     if (kind == 'rect') { rect_contains(bbox, pp) }
     else if (kind == 'ellipse') { point_in_ellipse(pp, bbox) }
     else if (kind == 'line') {
-      let ep = get_line_endpoints(shape)
+      let ep = get_line_endpoints(shape);
       (point_to_segment_dist(pp, ep.a, ep.b) <= HIT_TOLERANCE)
     }
     else if (kind == 'polyline' or kind == 'path' or kind == 'freehand') {

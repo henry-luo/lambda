@@ -36,7 +36,7 @@ unbox_test(box_test(5), box_test(3))  // (5*2) + (3*2) = 16
 // Note: In Lambda, 0 is truthy (only null/false are falsy)
 fn nonzero(x: int) { x }
 let r1 = if (nonzero(1)) "yes" else "no"  // "yes"
-let r2 = if (nonzero(0)) "yes" else "no"  // "yes" (0 is truthy in Lambda)
+let r2 = if (nonzero(0)) "yes" else "no"; // "yes" (0 is truthy in Lambda)
 [r1, r2]
 
 // Test 8: Typed function returning different types (conditional)

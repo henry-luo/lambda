@@ -24,21 +24,21 @@ v.x - v.y
 
 // ===== BOOL fields =====
 type Flags = {a: bool, b: bool}
-let f: Flags = {a: true, b: false}
+let f: Flags = {a: true, b: false};
 [f.a, f.b]
 
 // ===== STRING fields =====
 type Name = {first: string, last: string}
-let n: Name = {first: "Alice", last: "Smith"}
+let n: Name = {first: "Alice", last: "Smith"};
 [n.first, n.last]
 
 // ===== Mixed type map — boxing preserved per field =====
 type Person = {name: string, age: int, active: bool}
-let alice: Person = {name: "Alice", age: 30, active: true}
-[alice.name, alice.age + 5, alice.active]
+let alice: Person = {name: "Alice", age: 30, active: true};
+[alice.name, alice.age + 5, alice.active];
 
 // ===== Fields in list context (box on demand) =====
-[p.x, p.y]
+[p.x, p.y];
 [alice.name, alice.age, alice.active]
 
 // ===== Function with typed params =====

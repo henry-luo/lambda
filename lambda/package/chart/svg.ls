@@ -10,7 +10,7 @@ import util: .util
 pub fn svg_root(width: int, height: int, children) {
     <svg xmlns: "http://www.w3.org/2000/svg",
          width: width, height: height,
-         viewBox: "0 0 " ++ (width) ++ " " ++ (height);
+         viewBox: "0 0 " ++ (width) ++ " " ++ (height),
         for (child in children) child
     >
 }

@@ -94,7 +94,7 @@ fn _render_page_parts(pdf, page, page_index, opts) {
     let paths = [for (p in r.paths) p]
     let texts = [for (t in r.texts) t]
     let flip_group = _flip_group_list(rect, paths)
-    let label_kids = _label_children(rect, page_index, opts)
+    let label_kids = _label_children(rect, page_index, opts);
 
     let children = [svg.page_background(rect, bg),
                     for (p in flip_group) p,

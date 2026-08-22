@@ -94,7 +94,7 @@ pub fn set_fill(st, color_str) {
 // so that text drawn under render-mode 1/2 picks up the active stroke.
 pub fn set_stroke(st, color_str) {
     { *: _base_state(st), stroke: color_str }
-}
+};
 
 pub fn set_opacity(st, fa, sa) {
     { *: _base_state(st), fill_opacity: fa, stroke_opacity: sa }

@@ -35,7 +35,7 @@ len(arr)
 arr |> ~ * 2
 
 // filter sized array
-arr that ~ == 30
+arr that ~ == 30;
 
 // concatenation
 [1i8, 2i8] ++ [3i8, 4i8]

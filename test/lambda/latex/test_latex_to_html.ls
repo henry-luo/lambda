@@ -9,7 +9,7 @@ import to_html: lambda.package.latex.to_html
 "1. span:"; to_html.to_html(<span "hello">)
 
 // ---- element with class ----
-"2. class:"; to_html.to_html(<div class: "foo" "text">)
+"2. class:"; to_html.to_html(<div class: "foo", "text">)
 
 // ---- void element ----
 "3. br:"; to_html.to_html(<br>)
@@ -19,7 +19,7 @@ import to_html: lambda.package.latex.to_html
 "5. nested:"; to_html.to_html(<div <p "inner">>)
 
 // ---- element with style ----
-"6. style:"; to_html.to_html(<span style: "color:red" "styled">)
+"6. style:"; to_html.to_html(<span style: "color:red", "styled">)
 
 // ---- plain string ----
 "7. string:"; to_html.to_html("plain text")
@@ -35,6 +35,6 @@ import to_html: lambda.package.latex.to_html
 "11. multi:"; to_html.to_html(<p "a" <em "b"> "c">)
 
 // ---- element with id ----
-"12. id attr:"; contains(to_html.to_html(<h1 id: "sec1" "Title">), "id=")
+"12. id attr:"; contains(to_html.to_html(<h1 id: "sec1", "Title">), "id=")
 
 "===== ALL LATEX TO_HTML TESTS DONE ====="

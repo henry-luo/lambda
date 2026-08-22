@@ -15,7 +15,7 @@ true != false
 
 // ===== Int × Float (numeric promotion) =====
 42 == 42.0
-0 == 0.0
+0 == 0.0;
 -5 == -5.0
 42 != 43.0
 0.0 != 1
@@ -62,12 +62,12 @@ null == 0
 null == ""
 null == 0.0
 null == []
-null == {}
+null == {};
 
 // ===== Array equality =====
-[1, 2] == [1, 2]
-[] == []
-[1] == [1, 2]
+[1, 2] == [1, 2];
+[] == [];
+[1] == [1, 2];
 [1] == 1
 
 // ===== Map equality =====
@@ -85,7 +85,7 @@ null == {}
 null != 0
 null != false
 null != ""
-null != null
+null != null;
 [1] != [1]
 {a: 1} != {a: 1}
 

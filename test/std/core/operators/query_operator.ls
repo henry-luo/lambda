@@ -9,13 +9,13 @@ len(data?float)
 
 // ===== Self-inclusive .? vs non-inclusive ? =====
 len(42?int)
-len(42.?int)
+len(42.?int);
 (42.?int)[0]
 len("hello"?string)
 len("hello".?string)
 
 // ===== Element query =====
-let page = <div class: "main";
+let page = <div class: "main",
     <p; "text1">
     <span; "text2">
     <div id: "inner"; <p; "text3">>

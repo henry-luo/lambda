@@ -1,4 +1,4 @@
-let source = <node id: "a", label: "Alpha", custom: 42; "old content">
+let source = <node id: "a", label: "Alpha", custom: 42, "old content">
 let attrs = map(source)
 let rebuilt = <node *:attrs; "new content">
 

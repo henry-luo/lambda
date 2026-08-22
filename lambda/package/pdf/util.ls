@@ -38,7 +38,7 @@ pub fn fmt_rgb(r, g, b) {
 // Identity / default matrices
 // ============================================================
 
-pub IDENTITY = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+pub let IDENTITY = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 
 // True when a 6-element matrix equals the identity within 1e-6 tolerance.
 pub fn is_identity(m) {
@@ -94,7 +94,7 @@ pub fn hex_digit_value(c: string) {
 }
 
 pub fn is_hex_digit(c: string) {
-    let k = ord(c)
+    let k = ord(c);
     ((k >= 48) and (k <= 57)) or ((k >= 65) and (k <= 70)) or ((k >= 97) and (k <= 102))
 }
 

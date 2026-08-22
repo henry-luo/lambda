@@ -22,13 +22,13 @@ typed_add(10, 20)
 
 // ===== Arrow returning string =====
 let greet = (name: string) => "Hi, " & name
-greet("Lambda")
+greet("Lambda");
 
 // ===== Inline in map =====
-[1, 2, 3, 4, 5] |> map((x) => x * x)
+[1, 2, 3, 4, 5] |> map((x) => x * x);
 
 // ===== Inline in filter =====
-[1, 2, 3, 4, 5, 6] |> filter((x) => x % 2 == 0)
+[1, 2, 3, 4, 5, 6] |> filter((x) => x % 2 == 0);
 
 // ===== Inline in reduce =====
 [1, 2, 3, 4] |> reduce((acc, x) => acc + x)
@@ -46,7 +46,7 @@ add5(0)
 // ===== Arrow with block body =====
 let process = (x) => {
     let doubled = x * 2
-    let tripled = x * 3
+    let tripled = x * 3;
     [doubled, tripled]
 }
 process(5)

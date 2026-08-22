@@ -140,13 +140,13 @@ fn render_picture_para(para, unitlength_str) {
         let vb = "0 0 " ++ fmt(svg_w) ++ " " ++ fmt(svg_h)
 
         let start_idx = find_first_command_idx(para, 0, n)
-        let svg_children = process_commands(para, start_idx, n, 0.4, sc, h, ox, oy, [])
+        let svg_children = process_commands(para, start_idx, n, 0.4, sc, h, ox, oy, []);
 
         <svg class: "latex-picture",
              xmlns: "http://www.w3.org/2000/svg",
              viewBox: vb,
              width: fmt(svg_w) ++ "px",
-             height: fmt(svg_h) ++ "px";
+             height: fmt(svg_h) ++ "px",
             for child in svg_children { child }
         >
     }

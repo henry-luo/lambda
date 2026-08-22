@@ -43,7 +43,12 @@ function qualified_name($, precedence) {
   return prec.left(precedence, seq(
     choice($.identifier, $.symbol),
     repeat1(prec.left(precedence, seq(
-      token(prec(precedence, '.')),
+      // Either dot may arrive here. In a position where a member expression is
+      // also possible — an element interior, where `xml` could equally begin
+      // content — the scanner emits the guarded `_member_dot` and the internal
+      // high-precedence dot is never produced, so a namespaced NAME must accept
+      // both spellings or `<div xml.lang: "en">` cannot parse.
+      choice(token(prec(precedence, '.')), alias($._member_dot, '.')),
       choice($.identifier, $.symbol),
     ))),
   ));
@@ -186,6 +191,14 @@ module.exports = grammar({
     // required attr-list -> content boundary (§7.11v2). Which one takes two
     // tokens to see, so GLR forks and the losing branch dies immediately.
     [$._attr_list],
+    // §7.22 made `a?` ambiguous inside a type body: an optional FIELD marker
+    // (`a?: T`) or an occurrence TYPE used as content (`a?`). The `:` decides,
+    // one token later.
+    // §7.22 made a leading name inside a type body ambiguous: a FIELD name
+    // (`a?: T`, `a: T`) or a bare content TYPE (`a?`, `a`). The `:` decides,
+    // one or two tokens later.
+    [$._field_name, $.primary_type],
+    [$._field_name, $.base_type],
   ],
 
   supertypes: $ => [],
@@ -415,8 +428,15 @@ module.exports = grammar({
 
     // ============================ Containers ==============================
 
+    // Names, not types: a field/attribute may be spelled with a base-type
+    // keyword (`type: string`, `string: int`), which is what the C parser's
+    // `token_is_key` has always allowed.
+    _field_name: $ => choice($.symbol, $.identifier,
+      alias($._base_type_kw, $.base_type), alias('type', $.base_type)),
+
     _key: $ => choice($.symbol, $.identifier,
-      alias($._base_type_kw, $.base_type), $.last_index, '*'),
+      alias($._base_type_kw, $.base_type), alias('type', $.base_type),
+      $.last_index, '*'),
 
     map_item: $ => seq(field('name', $._key), ':', field('as', $._expr)),
 
@@ -989,21 +1009,27 @@ module.exports = grammar({
     )),
     array_type: $ => seq('[', comma_sep($._type_pattern), ']'),
     map_type_item: $ => seq(
-      field('name', choice($.identifier, $.symbol)), ':',
-      field('as', $._type_pattern),
+      field('name', $._field_name),
+      optional(field('optional', '?')),  // §7.22: optional FIELD, as in object types
+      ':', field('as', $._type_pattern),
     ),
     map_type: $ => seq('{',
       optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)))), '}',
     ),
 
     pattern_attr_type: $ => prec(1, seq(
-      field('name', choice($.symbol, $.identifier)),
+      field('name', $._field_name),
+      // §7.22: `a?: T` marks the FIELD optional (it may be absent);
+      // `a: T?` makes the VALUE nullable. The two are different claims.
+      optional(field('optional', '?')),
       ':', field('as', $._type_pattern),
       optional(seq('=', field('default', $._non_null_literal))),
     )),
     content_type: $ => seq($._type_pattern, repeat(seq(',', $._type_pattern))),
 
-    element_type: $ => seq('<', $.identifier, choice(
+    // A namespace-qualified tag is legal in an element VALUE (S2.4.3v2), so an
+    // element TYPE must admit one too — `type T = <soap.Fault …>`.
+    element_type: $ => seq('<', choice($.dotted_name, $.identifier), choice(
       seq(alias($.pattern_attr_type, $.attr),
         repeat(seq(',', alias($.pattern_attr_type, $.attr))),
         optional(seq(',', $.content_type))),
@@ -1061,7 +1087,8 @@ module.exports = grammar({
     )),
 
     attr_type: $ => prec(1, seq(
-      field('name', choice($.symbol, $.identifier)),
+      field('name', $._field_name),
+      optional(field('optional', '?')),  // §7.22: optional FIELD
       ':', field('as', $._annotation_type),
       optional(seq('=', field('default', $._element_expr))),
     )),

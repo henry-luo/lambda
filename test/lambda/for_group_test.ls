@@ -6,14 +6,14 @@ let sales = [
   {region: "west", amount: 10},
   {region: "east", amount: 7},
   {region: "west", amount: 5}
-]
+];
 
 // Single inferred key: group attr is g.region; members are children.
 [for (x in sales group by x.region into g)
   {region: g.region, n: len(g), first: g[0].amount, total: sum(g |> ~["amount"])}]
 
 // Numeric tower coherence and null grouping.
-let xs = [1, 1.0, 2, null, null]
+let xs = [1, 1.0, 2, null, null];
 [for (x in xs group by x as value into g) {value: g.value, n: len(g)}]
 
 // Multiple inferred keys with post-group ordering.

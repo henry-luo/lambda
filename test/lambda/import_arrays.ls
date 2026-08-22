@@ -4,7 +4,7 @@ import .mod_arrays
 
 // int array indexing (ArrayInt - must use array_int_get, not array_get)
 int_arr[0]
-int_arr[4]
+int_arr[4];
 
 // string array indexing (Array of Items)
 [str_arr[1], str_arr[3]]

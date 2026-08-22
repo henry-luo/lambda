@@ -94,7 +94,7 @@ fn _form_matrix(m) {
          util.num(m[3]), util.num(m[4]), util.num(m[5])]
     }
     else { util.IDENTITY }
-}
+};
 
 // Look up a Form XObject by name and return enough information to
 // recursively interpret its content stream. Returns null when the name

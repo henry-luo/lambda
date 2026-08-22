@@ -21,10 +21,10 @@ decimal_edge * 1
 decimal_edge + 0.5
 
 // Preserve already-correct fixed-width and comparison behavior.
-max_u64 + 1u64
--max_u64
-(max_u64 > 1)
-(max_u64 < 0)
+max_u64 + 1u64;
+-max_u64;
+(max_u64 > 1);
+(max_u64 < 0);
 (-1 == max_u64)
 
 // A raw signed value whose top byte matches the INT64 Item tag is still a value.

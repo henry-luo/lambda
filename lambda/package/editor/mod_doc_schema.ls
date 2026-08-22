@@ -10,7 +10,7 @@
 import .mod_md_schema
 import .mod_drawing_schema
 
-pub doc_schema = {
+pub let doc_schema = {
   // ── flow-doc (markdown subset) entries ──
   doc:        md_schema.doc,
   paragraph:  md_schema.paragraph,
@@ -42,4 +42,4 @@ pub doc_schema = {
   label:         drawing_schema.label
 }
 
-pub doc_default_block = md_default_block
+pub let doc_default_block = md_default_block

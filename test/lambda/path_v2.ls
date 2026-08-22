@@ -1,7 +1,7 @@
 // Lambda path v2 syntax and occurrence navigation regression coverage.
 let data = [[1, 2], [3, 4]]
 let indexed = [10, 20]
-let record = {name: 30}
+let record = {name: 30};
 [
   /.a.b,
   .a.b,

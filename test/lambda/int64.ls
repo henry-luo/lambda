@@ -35,13 +35,13 @@ int64(2000000000000) - 100
 50 * int64(3000000000)
 int64(8000000000000) / 200
 
-"=== ArrayInt64 Construction and Operations ==="
+"=== ArrayInt64 Construction and Operations ===";
 
 // Test 7: ArrayInt64 construction
-[int64(1), int64(2), int64(3), int64(4), int64(5)]
+[int64(1), int64(2), int64(3), int64(4), int64(5)];
 
 // Test 8: ArrayInt64 with large values
-[int64(1000000000000), int64(2000000000000), int64(3000000000000)]
+[int64(1000000000000), int64(2000000000000), int64(3000000000000)];
 
 // Test 9: Mixed construction (should promote to ArrayInt64)
 [42, int64(1000000000000), 100]
@@ -82,13 +82,13 @@ avg(large_arr64)
 min(large_arr64)
 max(large_arr64)
 
-"=== ArrayInt64 Arithmetic Operations ==="
+"=== ArrayInt64 Arithmetic Operations ===";
 
 // Test 17: ArrayInt64 addition
-[int64(100), int64(200)] + [int64(300), int64(400)]
+[int64(100), int64(200)] + [int64(300), int64(400)];
 
 // Test 18: ArrayInt64 subtraction
-[int64(500), int64(600)] - [int64(100), int64(200)]
+[int64(500), int64(600)] - [int64(100), int64(200)];
 
 // Test 19: ArrayInt64 multiplication
 [int64(10), int64(20)] * [int64(5), int64(3)]
@@ -106,7 +106,7 @@ min(single64)
 max(single64)
 
 // Test 22: Zero values
-int64(0)
+int64(0);
 [int64(0), int64(0), int64(0)]
 sum([int64(0), int64(0), int64(0)])
 
@@ -116,7 +116,7 @@ sum(neg_arr64)
 min(neg_arr64)
 max(neg_arr64)
 
-"=== Complex Mixed Operations ==="
+"=== Complex Mixed Operations ===";
 
 // Test 24: Complex expression with mixed types
 (int64(1000) + 500) * int64(2)

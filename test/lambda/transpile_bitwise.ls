@@ -5,7 +5,7 @@
 // Section 1: Basic bitwise operations
 // ============================================
 
-"1. Basic bitwise ops"
+"1. Basic bitwise ops";
 [
     band(255, 15),       // 15
     bor(240, 15),        // 255
@@ -26,7 +26,7 @@ fn typed_bnot(a: int) { bnot(a) }
 fn typed_shl(a: int, b: int) { shl(a, b) }
 fn typed_shr(a: int, b: int) { shr(a, b) }
 
-"2. Typed function bitwise ops"
+"2. Typed function bitwise ops";
 [
     typed_band(255, 15),
     typed_bor(240, 15),
@@ -57,7 +57,7 @@ fn test_bit(val: int, bit: int) {
     band(val, shl(1, bit)) != 0
 }
 
-"3. Computed bitwise"
+"3. Computed bitwise";
 [
     mask_low_bits(255, 4),     // 15
     set_bit(0, 3),             // 8
@@ -73,7 +73,7 @@ fn test_bit(val: int, bit: int) {
 fn untyped_band(a, b) { band(a, b) }
 fn untyped_bor(a, b) { bor(a, b) }
 
-"4. Untyped bitwise"
+"4. Untyped bitwise";
 [
     untyped_band(255, 15),
     untyped_bor(240, 15)
@@ -92,21 +92,21 @@ fn decode_g(rgb: int) { band(shr(rgb, 8), 255) }
 fn decode_b(rgb: int) { band(rgb, 255) }
 
 "5. RGB encode/decode"
-let color = encode_rgb(255, 128, 64)
+let color = encode_rgb(255, 128, 64);
 [color, decode_r(color), decode_g(color), decode_b(color)]
 
 // ============================================
 // Section 6: Bitwise in list context (boxing result)
 // ============================================
 
-"6. Bitwise results boxed in list"
+"6. Bitwise results boxed in list";
 [band(7, 3), bor(4, 2), bxor(5, 3), bnot(-1), shl(3, 2), shr(12, 2)]
 
 // ============================================
 // Section 7: Edge cases
 // ============================================
 
-"7. Edge cases"
+"7. Edge cases";
 [
     band(0, 0),         // 0
     bor(0, 0),          // 0

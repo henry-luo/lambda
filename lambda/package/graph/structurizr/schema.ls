@@ -298,7 +298,7 @@ pub fn attach(workspace, values) {
   let attrs = map(workspace);
   let existing = [for (block in children(workspace, "diagnostics"))
     for (value in children(block, "diagnostic")) value];
-  <'c4-workspace' *:attrs;
+  <'c4-workspace' *:attrs,
     for (child in children(workspace) where graph_model.tag(child) != "diagnostics") child
     <diagnostics;
       for (value in existing) value

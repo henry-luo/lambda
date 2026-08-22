@@ -2,11 +2,11 @@
 // Test new math functions: trunc, math.hypot, math.log1p
 
 // Section 1: Math constants
-"1. Math constants"
+"1. Math constants";
 [math.pi, math.e, math.max_int, type(math.max_int)]
 
 // Section 2: trunc - truncate toward zero
-"2. trunc"
+"2. trunc";
 [
     trunc(3.7),       // 3
     trunc(-3.7),      // -3 (NOT -4 like floor)
@@ -16,7 +16,7 @@
 ]
 
 // Section 3: math.hypot - Euclidean distance
-"3. math.hypot"
+"3. math.hypot";
 [
     math.hypot(3, 4),      // 5
     math.hypot(0, 0),      // 0
@@ -25,7 +25,7 @@
 ]
 
 // Section 4: math.log1p - ln(1+x), precise for small x
-"4. math.log1p"
+"4. math.log1p";
 [
     math.log1p(0),         // 0
     math.log1p(1),         // ln(2)
@@ -42,7 +42,7 @@ fn typed_trunc(x: float) { trunc(x) }
 fn typed_hypot(a: float, b: float) { math.hypot(a, b) }
 fn typed_log1p(x: float) { math.log1p(x) }
 
-"6. Typed arguments (native path)"
+"6. Typed arguments (native path)";
 [
     typed_trunc(3.7),
     typed_trunc(-3.7),
@@ -51,7 +51,7 @@ fn typed_log1p(x: float) { math.log1p(x) }
 ]
 
 // Section 7: Constants in expressions
-"7. Constants in expressions"
+"7. Constants in expressions";
 [
     math.sin(math.pi),         // ~0
     math.cos(math.pi),         // -1

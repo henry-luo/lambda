@@ -3,7 +3,7 @@ fn inner(...) => [len(varg()), varg(0)]
 
 fn scoped(...) {
     let before = len(varg())
-    let nested = inner(9, 8)
+    let nested = inner(9, 8);
     [before, nested, len(varg()), varg(0)]
 }
 

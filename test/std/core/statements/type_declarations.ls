@@ -91,7 +91,7 @@ str(task[0])
 // ===== Type occurrence annotations =====
 type NumberList = int[]
 type MaybeString = string?
-5 is int
+5 is int;
 [1, 2, 3] is int[]
 null is string?
 "hello" is string?

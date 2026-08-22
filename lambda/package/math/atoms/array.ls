@@ -141,7 +141,7 @@ fn render_aligned_cell_parts(children, cell_ctx, render_fn, i, acc) {
     if (i >= len(children)) acc
     else if (is_prime_child(children[i]) and i + 1 < len(children) and is_prime_child(children[i + 1]))
         // aligned cells bypass render.ls sequence scanning; fold adjacent
-        // apostrophes here so `f''` emits one double-prime script box.
+        // apostrophes here so `f""` emits one double-prime script box.
         (let count = consecutive_prime_children(children, i, 0),
          render_aligned_cell_parts(children, cell_ctx, render_fn, i + count,
             acc ++ [render_prime_script_count(count, cell_ctx)]))

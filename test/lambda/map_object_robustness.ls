@@ -18,7 +18,7 @@ w.val
 // 1b: many fields (verify byte offset correctness)
 type Wide = {a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int}
 let wd: Wide = {a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8}
-'=1b='
+'=1b=';
 [wd.a, wd.d, wd.h]
 wd.a + wd.b + wd.c + wd.d + wd.e + wd.f + wd.g + wd.h
 
@@ -26,7 +26,7 @@ wd.a + wd.b + wd.c + wd.d + wd.e + wd.f + wd.g + wd.h
 type Pair = {x: int, y: int}
 let p1: Pair = {x: 1, y: 2}
 let p2: Pair = {x: 100, y: 200}
-'=1c='
+'=1c=';
 [p1.x, p1.y, p2.x, p2.y]
 
 // 1d: same field name across different types
@@ -38,7 +38,7 @@ let ta: TA = {val: 42}
 let tb: TB = {val: 3.14}
 let tc: TC = {val: "hello"}
 let td: TD = {val: true}
-'=1d='
+'=1d=';
 [ta.val, tb.val, tc.val, td.val]
 
 // ============================================================
@@ -92,7 +92,7 @@ type V3 = {x: int, y: int, z: int}
 let v: V3 = {x: 2, y: 3, z: 5}
 '=4a='
 v.x + v.y + v.z
-v.x * v.y * v.z
+v.x * v.y * v.z;
 (v.x + v.y) * v.z
 
 // 4b: float field arithmetic (no push_d heap alloc)
@@ -112,7 +112,7 @@ rat.a / rat.b
 let cmp: Pair = {x: -5, y: 10}
 let r1 = (if (cmp.x > 0) "pos" else "non-pos")
 let r2 = (if (cmp.y > 0) "pos" else "non-pos")
-'=4d='
+'=4d=';
 [r1, r2]
 
 // 4e: int field equality/inequality

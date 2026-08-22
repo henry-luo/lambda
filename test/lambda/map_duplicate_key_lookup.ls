@@ -10,7 +10,7 @@ d1.b
 // duplicate keys with a type change between them
 let d2 = {x: "str", x: 30}
 d2.x
-let d3 = {y: 7, y: "seven"}
+let d3 = {y: 7, y: "seven"};
 [d3.y]
 
 // three writers of the same key
@@ -44,5 +44,5 @@ s5.q
 s5.r
 
 // missing key on a map with duplicates stays absent
-let miss = {a: 1, a: 2}
+let miss = {a: 1, a: 2};
 [miss.zzz]

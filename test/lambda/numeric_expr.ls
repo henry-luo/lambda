@@ -10,11 +10,11 @@
 10 div 3
 2 ** 3
 
-"Negative Numbers:"
--5 + 3
--5 - 3
--5 * 3
--10 / 3
+"Negative Numbers:";
+-5 + 3;
+-5 - 3;
+-5 * 3;
+-10 / 3;
 -10 div 3
 
 "Float Operations:"
@@ -35,9 +35,9 @@
 9.0 / 3
 
 "Modulo Operations (%):"
-17 % 5
+17 % 5;
 -17 % 5
-17 % -5
+17 % -5;
 -17 % -5
 100 % 7
 0 % 5
@@ -61,49 +61,49 @@ null % 3
 
 "Unary Operations - Fast Path (C operators) - Numeric Types:"
 let num = 42
-let float_val = 3.14
-+num
--num  
-+float_val
+let float_val = 3.14;
++num;
+-num;
++float_val;
 -float_val
 
 "Unary Operations - Runtime Functions - String to Number Casting:"
 let str_int = "123"
 let str_float = "3.14"
-let str_negative = "-42"
-+str_int
--str_int
-+str_float
--str_float
-+str_negative
+let str_negative = "-42";
++str_int;
+-str_int;
++str_float;
+-str_float;
++str_negative;
 -str_negative
 
 "Unary Operations - Runtime Functions - Symbol to Number Casting:"  
 let sym_int = '456'
-let sym_float = '2.71'
-+sym_int
--sym_int
-+sym_float
+let sym_float = '2.71';
++sym_int;
+-sym_int;
++sym_float;
 -sym_float
 
 "Unary Operations - Error Cases - Invalid String/Symbol:"
 let str_invalid = "hello"
-let sym_invalid = 'world'
-+str_invalid
--str_invalid
-+sym_invalid
+let sym_invalid = 'world';
++str_invalid;
+-str_invalid;
++sym_invalid;
 -sym_invalid
 
 "Unary Operations - Error Cases - Unsupported Types:"
 let bool_val = true
-let null_val = null
-+bool_val
--bool_val
-+null_val
+let null_val = null;
++bool_val;
+-bool_val;
++null_val;
 -null_val
 
-"Unary Operations - Mixed Expressions:"
-+("42") + -("10")
+"Unary Operations - Mixed Expressions:";
++("42") + -("10");
 -("3.14") * +("2")
 
 "Division by Zero:"
@@ -163,16 +163,16 @@ true div false
 
 "Edge Cases:"
 0.000000001 / 1000000
-999999999999999999.0 + 1
+999999999999999999.0 + 1;
 -999999999999999999.0 - 1
 
 "More Edge Cases:"
 1e-10 * 1e10
 1e15 / 1e-5
 0.1 ** 50
-50 ** 0.1
+50 ** 0.1;
 (-1) ** 2.5
-2.0 / 0.0
+2.0 / 0.0;
 -2.0 / 0.0
 0.0 / 0.0
 1.0 / (-0.0)
@@ -182,13 +182,13 @@ true div false
 2 ** 0
 0 ** 2
 0 ** 0
-2 ** (-1)
-(-2) ** 3
+2 ** (-1);
+(-2) ** 3;
 (-2) ** 2
 
-"Complex Expressions:"
+"Complex Expressions:";
 (5 + 3) * 2
-5 + (3 * 2)
+5 + (3 * 2);
 (10 / 2) ** 2
 
 "Operator Precedence Tests:"
@@ -196,7 +196,7 @@ true div false
 2 * 3 + 4 * 5 - 1
 10 - 5 * 2 + 3 / 1.5
 4 ** 2 + 3 * 2 - 1
-5 + 3 * 2 ** 2 - 4 / 2
+5 + 3 * 2 ** 2 - 4 / 2;
 (1 + 2) * (3 + 4) / (2 - 1)
 10 / (2 + 3) * 4 - 1
 3 ** (2 + 1) - 2 * (4 + 1)
@@ -209,7 +209,7 @@ true div false
 1.0 / 3.0 * 3.0
 
 "Large Numbers:"
-9223372036854775807.0 + 1
+9223372036854775807.0 + 1;
 -9223302036854775808.0 - 1
 
 "Concatenation: "

@@ -1,6 +1,6 @@
 // P3: `that` clauses execute in the interpreter's pure, fuel-bounded mode.
 type Positive = int that ~ > 0
-type NonEmpty = string that len(~) > 0
+type NonEmpty = string that len(~) > 0;
 
 [
   3 is Positive,

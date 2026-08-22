@@ -13,7 +13,7 @@ import .mod_md_schema
 import .mod_source_pos
 import .mod_transaction
 
-pub editor_schemas = {
+pub let editor_schemas = {
   markdown: markdown_schema,
   commonmark_strict: commonmark_strict_schema,
   html5_subset: html5_subset_schema,

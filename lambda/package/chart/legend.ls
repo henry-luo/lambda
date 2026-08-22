@@ -9,7 +9,7 @@ import scale: .scale
 // Default legend configuration
 // ============================================================
 
-pub default_legend_config = {
+pub let default_legend_config = {
     symbol_size: 10,
     symbol_padding: 5,
     label_font_size: 11,

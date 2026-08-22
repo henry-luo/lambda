@@ -9,7 +9,7 @@ import scale: .scale
 // Default axis configuration
 // ============================================================
 
-pub default_axis_config = {
+pub let default_axis_config = {
     tick_size: 5,
     tick_count: 8,
     label_font_size: 11,

@@ -10,7 +10,7 @@ null != null
 null == 0
 null == false
 null + 1
-null * 2
+null * 2;
 [null, null, null]
 let m = {a: null}
 m

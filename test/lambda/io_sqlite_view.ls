@@ -19,7 +19,7 @@ db.data.cheap_products[1].price
 
 // third cheap product
 db.data.cheap_products[2].name
-db.data.cheap_products[2].price
+db.data.cheap_products[2].price;
 
 // iteration over view data
 [for (p in db.data.cheap_products) p.name]

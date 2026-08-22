@@ -94,7 +94,7 @@ fn _contains_loop(s: string, needle: string, i: int, limit: int) {
 fn _contains(s: string, needle: string) {
     let n = int(len(s))
     let m = int(len(needle))
-    if (m == 0) { true }
+    if (m == 0) { true };
     else if (n < m) { false }
     else { _contains_loop(s, needle, 0, n - m) }
 }

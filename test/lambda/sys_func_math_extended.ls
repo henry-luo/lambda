@@ -1,7 +1,7 @@
 // Test new math functions: inverse trig, hyperbolic, exp/log variants, pow, cbrt
 
 // Section 1: Inverse trigonometric functions
-"1. Inverse trigonometric"
+"1. Inverse trigonometric";
 [
     math.asin(0),          // 0
     math.asin(1),          // pi/2 ≈ 1.5707963268
@@ -14,7 +14,7 @@
 ]
 
 // Section 2: Hyperbolic functions
-"2. Hyperbolic"
+"2. Hyperbolic";
 [
     math.sinh(0),          // 0
     math.sinh(1),          // 1.1752011936
@@ -25,7 +25,7 @@
 ]
 
 // Section 3: Inverse hyperbolic functions
-"3. Inverse hyperbolic"
+"3. Inverse hyperbolic";
 [
     math.asinh(0),         // 0
     math.asinh(1),         // 0.8813735870
@@ -36,7 +36,7 @@
 ]
 
 // Section 4: Exponential/logarithmic variants
-"4. Exp/log variants"
+"4. Exp/log variants";
 [
     math.exp2(0),          // 1
     math.exp2(3),          // 8
@@ -49,7 +49,7 @@
 ]
 
 // Section 5: Power and cube root
-"5. Power and cube root"
+"5. Power and cube root";
 [
     math.pow(2, 3),        // 8
     math.pow(2, 0.5),      // sqrt(2) ≈ 1.4142135624
@@ -75,7 +75,7 @@ fn typed_exp2(x: float) { math.exp2(x) }
 fn typed_atan2(y: float, x: float) { math.atan2(y, x) }
 fn typed_pow(a: float, b: float) { math.pow(a, b) }
 
-"7. Typed arguments (native path)"
+"7. Typed arguments (native path)";
 [
     typed_asin(0.5),
     typed_sinh(1.0),

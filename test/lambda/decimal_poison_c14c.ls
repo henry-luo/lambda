@@ -4,7 +4,7 @@ let one = 1m
 let positive = one div zero
 let negative = -one % zero
 let not_a_number = zero div zero
-let poison_map = map([positive, "decimal", inf, "float"])
+let poison_map = map([positive, "decimal", inf, "float"]);
 
 [
     [type(positive), positive, one % zero, negative, not_a_number, zero % zero],

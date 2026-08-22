@@ -2,7 +2,7 @@
 // Layer: 1 | Category: datatype | Covers: path types, schemes, wildcards
 
 // ===== Path literals =====
-/.etc.hosts
+/.etc.hosts;
 /.usr.local.bin
 
 // ===== Path type check =====
@@ -13,19 +13,19 @@ http.api.example.com
 https.secure.api
 
 // ===== Relative path =====
-.test.input.dir
+.test.input.dir;
 
 // ===== Path with quoted segments =====
-/.etc.'nginx.conf'
+/.etc.'nginx.conf';
 /.home.user.'config.json'
 
 // ===== Path in let binding =====
 let config = /.etc.config
-config
+config;
 
 // ===== Wildcard patterns =====
-/.src.*
-/.src.**
+/.src.*;
+/.src.**;
 
 // ===== Path in collections =====
 [/.a, /.b, http.x]
@@ -34,7 +34,7 @@ config
 // ===== Dynamic segment =====
 let segment = "config"
 let dynamic = /.etc[segment]
-dynamic
+dynamic;
 
 // ===== Path with 6+ segments =====
 /.home.user.documents.projects.lambda.test

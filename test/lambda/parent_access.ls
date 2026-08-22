@@ -5,12 +5,12 @@
 let node = {name: "child", parent: {name: "root", parent: null}}
 node.parent
 
-"Parent name via member"
+"Parent name via member";
 (node.parent).name
 
 // Test 2: double parent access on nested structure
 "Double parent field"
-let deep = {name: "leaf", parent: {name: "mid", parent: {name: "top", parent: null}}}
+let deep = {name: "leaf", parent: {name: "mid", parent: {name: "top", parent: null}}};
 (deep.parent.parent).name
 
 // Test 3: parent access on path - get parent directory
@@ -23,8 +23,8 @@ p.~~.~~
 
 // Test 4: parent access chained with member access
 "Chained parent field value"
-let tree = {value: 10, parent: {value: 20, parent: {value: 30, parent: null}}}
+let tree = {value: 10, parent: {value: 20, parent: {value: 30, parent: null}}};
 (tree.parent).value
 
-"Double parent field value"
+"Double parent field value";
 (tree.parent.parent).value

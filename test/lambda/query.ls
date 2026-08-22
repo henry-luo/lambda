@@ -10,14 +10,14 @@ len(data?float)        // 3 (int is subtype of float, finds 1, 2, 3.14)
 // === 2. Self-inclusive .? vs non-inclusive ? on scalars ===
 "--- self-inclusive scalar ---"
 len(42?int)            // 0 — ? is not self-inclusive
-len(42.?int)           // 1 — .? is self-inclusive
+len(42.?int); // 1 — .? is self-inclusive
 (42.?int)[0]           // 42
 len("hello"?string)    // 0 — not self-inclusive
 len("hello".?string)   // 1 — self-inclusive
 
 // === 3. Element query ===
 "--- element query ---"
-let page = <div class: "main";
+let page = <div class: "main",
     <p; "text1">
     <span; "text2">
     <div id: "inner"; <p; "text3">>

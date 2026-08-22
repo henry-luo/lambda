@@ -10,7 +10,7 @@ import util: .util
 
 // CSS for the multi-page document. Kept inline so the generated HTML is
 // self-contained.
-pub DEFAULT_CSS =
+pub let DEFAULT_CSS =
     ".pdf-document { background: #f1f3f5; padding: 16px; margin: 0; }\n" ++
     ".pdf-page { display: block; box-sizing: border-box; position: relative; overflow: hidden; " ++
         "max-width: 100%; margin: 0 auto 16px auto; padding: 0; " ++

@@ -46,7 +46,7 @@ let e9: {a: int, b: [string]} = {a: 1, b: ["x"]}
 let fnty: fn(a: int) int = (a: int) int => a
 
 // E10: a type alias terminates at the line end — the next line is a statement
-type Alias = int
-[3]
+type Alias = int;
+[3];
 
 [e1, e2, e3, e4, e5, e6, classify(5), classify(-1), classify("s"), e8.a, e9.a, fnty(7)]

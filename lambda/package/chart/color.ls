@@ -5,13 +5,13 @@
 // ============================================================
 
 // Tableau 10 — default categorical palette
-pub category10 = [
+pub let category10 = [
     "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
     "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"
 ]
 
 // Extended 20-color palette
-pub category20 = [
+pub let category20 = [
     "#4e79a7", "#a0cbe8", "#f28e2b", "#ffbe7d", "#e15759",
     "#ff9d9a", "#76b7b2", "#8cd17d", "#b6992d", "#f1ce63",
     "#499894", "#86bcb6", "#e15759", "#ff9da7", "#79706e",
@@ -19,19 +19,19 @@ pub category20 = [
 ]
 
 // Set 1 — bold colors
-pub set1 = [
+pub let set1 = [
     "#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00",
     "#ffff33", "#a65628", "#f781bf", "#999999"
 ]
 
 // Pastel 1
-pub pastel1 = [
+pub let pastel1 = [
     "#fbb4ae", "#b3cde3", "#ccebc5", "#decbe4", "#fed9a6",
     "#ffffcc", "#e5d8bd", "#fddaec", "#f2f2f2"
 ]
 
 // Dark 2
-pub dark2 = [
+pub let dark2 = [
     "#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e",
     "#e6ab02", "#a6761d", "#666666"
 ]
@@ -40,24 +40,24 @@ pub dark2 = [
 // Sequential color schemes (for quantitative data)
 // ============================================================
 
-pub blues = ["#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#084594"]
-pub greens = ["#e5f5e0", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#005a32"]
-pub reds = ["#fee0d2", "#fcbba1", "#fc9272", "#fb6a4a", "#ef3b2c", "#cb181d", "#99000d"]
-pub oranges = ["#feedde", "#fdd0a2", "#fdae6b", "#fd8d3c", "#f16913", "#d94801", "#8c2d04"]
-pub purples = ["#f2f0f7", "#dadaeb", "#bcbddc", "#9e9ac8", "#807dba", "#6a51a3", "#4a1486"]
-pub greys = ["#f7f7f7", "#d9d9d9", "#bdbdbd", "#969696", "#737373", "#525252", "#252525"]
+pub let blues = ["#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#084594"]
+pub let greens = ["#e5f5e0", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#005a32"]
+pub let reds = ["#fee0d2", "#fcbba1", "#fc9272", "#fb6a4a", "#ef3b2c", "#cb181d", "#99000d"]
+pub let oranges = ["#feedde", "#fdd0a2", "#fdae6b", "#fd8d3c", "#f16913", "#d94801", "#8c2d04"]
+pub let purples = ["#f2f0f7", "#dadaeb", "#bcbddc", "#9e9ac8", "#807dba", "#6a51a3", "#4a1486"]
+pub let greys = ["#f7f7f7", "#d9d9d9", "#bdbdbd", "#969696", "#737373", "#525252", "#252525"]
 
 // ============================================================
 // Diverging color schemes
 // ============================================================
 
-pub red_blue = ["#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac"]
-pub spectral = ["#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#e6f598", "#abdda4", "#66c2a5", "#3288bd"]
+pub let red_blue = ["#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac"]
+pub let spectral = ["#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#e6f598", "#abdda4", "#66c2a5", "#3288bd"]
 
 // ============================================================
 // Default mark color
 // ============================================================
-pub default_color = "#4e79a7"
+pub let default_color = "#4e79a7"
 
 // ============================================================
 // Color scheme lookup

@@ -57,11 +57,11 @@ show(9007199254740991 + 2)
 show(9007199254740991 * 3)
 
 "=== vectors and folds ==="
-let lane = [255u8, 1u8] + [1u8, 2u8]
+let lane = [255u8, 1u8] + [1u8, 2u8];
 [type(lane[0]), lane]
-let wide = [7i64, 9i64] / [2u64, 2u64]
+let wide = [7i64, 9i64] / [2u64, 2u64];
 [type(wide[0]), wide]
-let quotient = [7i64, 9i64] div [2u64, 2u64]
+let quotient = [7i64, 9i64] div [2u64, 2u64];
 [type(quotient[0]), quotient]
 show(sum([127i8, 1i8]))
 show(sum([9223372036854775807i64, 1i64]))
@@ -69,7 +69,7 @@ show(sum([9007199254740991, 2]))
 show(math.prod([64i8, 2i8]))
 show(math.mean([1i8, 2i8]))
 show(math.mean([1i64, 2i64]))
-let running = math.cumsum([127i8, 1i8, 1i8])
+let running = math.cumsum([127i8, 1i8, 1i8]);
 [type(running[0]), running]
 
 "=== exact comparisons and selection ==="
@@ -95,9 +95,9 @@ let read_small = make_reader(1u64)
 let read_wide = make_reader(18446744073709551615u64)
 show(read_small())
 show(read_wide())
-let stored = [1u64 + 1, 18446744073709551615u64 + 1]
+let stored = [1u64 + 1, 18446744073709551615u64 + 1];
 [[type(stored[0]), stored[0]], [type(stored[1]), stored[1]]]
-let record = {small: 1i64 + 1, wide: 18446744073709551615u64 + 1}
+let record = {small: 1i64 + 1, wide: 18446744073709551615u64 + 1};
 [[type(record.small), record.small], [type(record.wide), record.wide]]
 show(add_one(1u64))
 show(add_one(18446744073709551615u64))

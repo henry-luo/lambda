@@ -94,7 +94,7 @@ fn _initial_run_state(fonts, init_ctm, inherited_st) {
             fonts: fonts,
             fill_cs: inherited_st.fill_cs,
             stroke_cs: inherited_st.stroke_cs,
-            soft_mask: inherited_st.soft_mask
+            soft_mask: inherited_st.soft_mask;
         }
     }
 }

@@ -19,7 +19,7 @@ let m2 = map(["pi", 3.14, "e", 2.718])
 m2.pi
 
 // Test 6: Boolean values in map
-let m3 = map(["active", true, "deleted", false])
+let m3 = map(["active", true, "deleted", false]);
 [m3.active, m3.deleted]
 
 // Test 7: String with spaces
@@ -32,18 +32,18 @@ let outer = map(["child", inner])
 outer.child.x
 
 // Test 9: For-loop with 'in' (k, v)
-let m5 = map(["a", 1, "b", 2, "c", 3])
-[for (k, v in m5) k ++ "=" ++ (v)]
+let m5 = map(["a", 1, "b", 2, "c", 3]);
+[for (k, v in m5) k ++ "=" ++ (v)];
 
 // Test 10: For-loop collect values
-[for (k, v in m5) v]
+[for (k, v in m5) v];
 
 // Test 11: For-loop single-variable (key only) - use two-var form
 [for (k, v in m5) k]
 
 // Test 12: Integer keys
 let m6 = map([1, "one", 2, "two", 3, "three"])
-len(m6)
+len(m6);
 
 // Test 13: Integer key for-loop
 [for (k, v in m6) v]
@@ -54,7 +54,7 @@ len(m7)
 
 // Test 15: Boolean keys
 let m8 = map([true, "yes", false, "no"])
-len(m8)
+len(m8);
 
 // Test 16: Bool key for-loop
 [for (k, v in m8) v]
@@ -65,7 +65,7 @@ len(big)
 
 // Test 18: Mixed key types in construction
 let m9 = map(["name", "test", 42, "answer", true, "flag"])
-len(m9)
+len(m9);
 
 // Final result - collect key tests
 [len(map()), m1.name, m1.age, len(m1), m2.pi, m3.active, m4.greeting, outer.child.x, len(m5), len(m6), len(m7), len(m8), len(big), len(m9)]
