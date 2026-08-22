@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 8.0.0 (2026-08-19)
+**Spec version:** 9.0.0 (2026-08-21)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -12,7 +12,8 @@ records govern the history and preserve the full deliberations.
 ruling of §4.6. A revised ruling keeps its ID with a version suffix
 (`S4.6.2v2`), replacing its predecessor in place; superseded text is not
 carried. The spec itself uses semantic versioning: MAJOR — an existing ruling
-changed meaning; MINOR — rulings added; PATCH — editorial.
+changed meaning, **or** added rulings break existing programs; MINOR —
+rulings added compatibly; PATCH — editorial.
 
 **Implementation marks.** A ruling marked `*` is not, or only partially,
 implemented; Appendix A carries the footnote. Unmarked rulings are believed
@@ -37,7 +38,9 @@ PD9–PD16 / FC1–FC11
 RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
 R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
-C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md)).
+C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md));
+surface syntax
+([`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md)).
 PTH1v2, PTH2v2, PTH3–PTH15, PTH16v2, PTH17–PTH29
 ([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
@@ -1342,6 +1345,116 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
 
 ---
 
+## S16 Surface Syntax
+
+Syntax is ruled here because it decides meaning: separation, brace role, and
+element scope each select *which program* a text denotes. A dedicated formal
+syntax document may follow; until it does, this section is the single source.
+Argued in [`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md), cited
+below by its section.
+
+### S16.1 Whitespace and separation
+
+- **S16.1.1*** **Line breaks carry no meaning.** Replacing any line break in
+  an accepted program with a space yields the same program with the same
+  semantics. The converse direction may *reject* — inserting a line break can
+  make a valid program a syntax error (S16.2.3) — but never reinterprets one.
+  [Design_Syntax §3.1]
+- **S16.1.2*** `;` is a **strict separator** between statements — never a
+  terminator, and `,` obeys the same discipline in every list. A separator
+  sits between two items: trailing separators (`{ a; b; }`, `[1, 2,]`,
+  `f(a, b,)`) and empty slots (`{ a; ; b }`, `[1, , 2]`) are syntax errors.
+  A block's value remains its last expression; no separator can discard it.
+  [Design_Syntax §3.2]
+- **S16.1.3*** Adjacent statements need **no separator** when the second
+  begins with a token that cannot continue the first — keyword-led
+  statements, literals, identifiers, `{`. `;` is required only to resolve
+  genuine ambiguity. [Design_Syntax §3.2–3.3]
+
+### S16.2 Line-start classification
+
+- **S16.2.1*** An **incomplete** expression continues across a line break
+  unconditionally: a trailing operator, an unclosed bracket, or a keyword
+  form awaiting its remainder binds the next line. [Design_Syntax §3.2]
+- **S16.2.2*** After a **complete** expression, a line-start token that can
+  only continue an expression does continue it: `|> | & ? .? ** ++ % > =`,
+  `== != <= >=`, and the word operators `and or to in is at div that eq ne
+  lt le ge gt`, plus `else case default`. These are unambiguous in any
+  position and need no separator. [Design_Syntax §3.3]
+- **S16.2.3*** After a complete expression, a line-start **dual-role** token
+  — one that could either continue the expression or start a new one:
+  `( [ - + * ! ^ / < .` — is a **syntax error**. Neither reading wins by
+  default; the repair is explicit (`;` to separate, or move the token to the
+  end of the previous line to continue). This is what makes S16.1.1 hold:
+  the parser never guesses, so a line break can never silently split or
+  merge. [Design_Syntax §3.1, §3.3]
+- **S16.2.4*** One carve-out: `.` `ident` `(` at line start is **member-call
+  continuation**, sanctioning fluent chains. Path bodies have no call syntax,
+  so the form is unambiguous. Bare `.name` (path) and `.123` (float) at line
+  start remain S16.2.3 errors. [Design_Syntax §3.4]
+- **S16.2.5*** `return` followed by a line break and a start token returns
+  that value: `return` ⏎ `42` is `return 42`. A bare return is `return`
+  followed by a separator or the closing brace. The JS restricted-production
+  trap is fixed by inversion, not by a special rule. [Design_Syntax §3.3]
+
+### S16.3 Juxtaposition
+
+- **S16.3.1*** Juxtaposition **sequences, never combines.** Adjacent
+  expressions are separate statements or content items; no juxtaposed form
+  denotes a value computed from its neighbours. The general `expr expr expr`
+  construct (application, unit suffixes) is therefore permanently
+  unavailable — S16.1.3 claims that syntax space. Constructs needing operand
+  adjacency must use an introducer keyword, a sigil, or explicit delimiters.
+  [Design_Syntax §3.8]
+
+### S16.4 Braces
+
+- **S16.4.1*** `{ ... }` is resolved by **position, unconditionally**. In
+  body position — the braced body of a control form, `fn`/`pn`/`view`, a
+  match arm, or a handler — it is always a **block**; `{}` there is the
+  empty block, and map-item content there is a syntax error. Everywhere else
+  it is always a **map**; `{}` is the empty map. A map value in body position
+  is parenthesized (`if (c) ({a: 1})`) or block-wrapped. Lambda has no
+  free-standing block statement, so no statement/expression brace ambiguity
+  arises. [Design_Syntax §5.9]
+
+### S16.5 Element scope
+
+- **S16.5.1*** Inside an element — attribute values and bare content
+  expressions — `< > <= >=` **are not operators.** `>` always terminates the
+  element, `<` always opens a child. A comparison there is written as a
+  parenthesized island (`attr: (a > b)`), inside which the full expression
+  grammar returns, or with the keyword operators, which are element-wise by
+  S10.2.2 and agree with the symbol forms on scalars only. Removing the
+  reading, rather than ranking two readings, is what keeps S16.1.1 true at
+  the markup boundary. [Design_Syntax §5.10]
+
+### S16.6 Control forms
+
+- **S16.6.1*** `if`, `for`, and `while` each have **one node with two
+  spellings**: parenthesized head with any-expression body
+  (`if (c) e`), or bare head with braced body (`if c { … }`). There is no
+  separate statement form; the expression/statement distinction is semantic,
+  not syntactic. [Design_Syntax §5.1]
+- **S16.6.2*** `(` immediately after `if` or `while` **commits** to the
+  parenthesized spelling. Consequently a bare head must not begin with `(`:
+  `if (a+b)*2 { … }` is a syntax error, repaired as `if ((a+b)*2) { … }`.
+  `for` is unaffected — loop declarations begin with an identifier.
+  [Design_Syntax §5.2]
+- **S16.6.3*** `else` is **optional** in both spellings. An absent else
+  yields `null` in value position and contributes nothing in content
+  position. A dangling `else` binds to the nearest `if`. [Design_Syntax §5.4]
+- **S16.6.4*** `match` keeps its single braced form: its braces delimit an
+  arm list, not a body, so no parenthesized spelling exists.
+  [Design_Syntax §5.5]
+- **S16.6.5*** The expression/statement distinction is enforced by semantic
+  analysis on the S12.1 effect boundary, not by grammar: `break`/`continue`
+  and `while` are procedural-only; a `for` is a comprehension in functional
+  context and an effect loop in procedural context. [Design_Syntax §5.6,
+  S12.1]
+
+---
+
 ## Appendix A — Implementation Footnotes
 
 Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
@@ -1383,6 +1496,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
+| S16.1–S16.6 (all) | Ratified 2026-08-21, wholly unimplemented — today's grammar terminates statements on line breaks (`statement_end` precedence tier plus a high-precedence linebreak token racing `/\s/` in `extras`), which S16.1.1 retires. Implementation: `_same_line` guard tokens and a `_member_call_dot` token (S16.2.4) in the external scanner, applied in both `grammar.js` and `grammar-lambda.js`. Known conformance bugs: `scan_type_pattern` continues a type pattern on a line-start `!` (`scanner.c:229`), which S16.2.3 classifies as dual-role — the scanner's continuation set must be a subset of S16.2.2's, in the four sibling type scanners too; `return` ⏎ *value* today returns null (S16.2.5). Migration is mechanical: every difference surfaces as a syntax error except S16.2.5 sites, which silently gain their value and need diff review. Diagnostics carry the design's usability — each S16.2.3 rejection must name both repairs. |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
 
 ## Appendix B — Open Design Issues
@@ -1441,6 +1555,9 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO33** A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in assignment position — document or delete.
 - **SO34** `emit()` vs `send()` — two event vocabularies coexist; state the boundary explicitly.
 
+**Surface syntax**
+- **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
@@ -1460,6 +1577,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
+| S16 surface syntax | Design_Syntax §3–§5 (18 decided points) | `Lambda_Design_Syntax.md` |
 
 The decision records preserve the full deliberations — every alternative that
 lost and the arguments that did not persuade. This specification is their
