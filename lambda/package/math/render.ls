@@ -126,7 +126,7 @@ fn render_symbol(node, context) {
 fn render_symbol_command(node, context) {
     let cmd_text = get_text(node)
     let unicode = sym.lookup_symbol(cmd_text)
-    let display_text = if (unicode, != null) unicode else cmd_text
+    let display_text = if (unicode != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
     let cls = symbol_font_class(cmd_text, context)
     if (is_standalone_long_arrow_command(cmd_text))
@@ -153,7 +153,7 @@ fn render_standalone_long_arrow(cmd_text) {
     // MathLive uses SVG extensible arrows for standalone long-arrow commands;
     // the Unicode glyph fallback has taller glyph metrics and loses the slices.
     box.ml_box_full(
-        <span style: "position:relative"; body.element>,
+        <span style: "position:relative", body.element>,
         body.height,
         body.depth,
         body.width,
@@ -224,7 +224,7 @@ fn render_relation(node, context) {
 fn render_perp_symbol(display) {
     // MathLive's U+27C2 relation carries Main-Regular descent; without it the
     // root hbox omits the bottom strut for `EF \perp GH`.
-    box.ml_box_full(<span class: css.CMR; display>, 0.7, 0.19444, 0.8,
+    box.ml_box_full(<span class: css.CMR, display>, 0.7, 0.19444, 0.8,
         "mrel", 0.0, 0.0, 0.7)
 }
 
@@ -257,14 +257,14 @@ fn render_prime_script_count(count, context) {
     let vlist_h = if (compact and cramped) 0.68 else if (compact) 0.76 else 0.81
     let top_em = if (compact and cramped) "-3.28em" else if (compact) "-3.36em" else "-3.41em"
     let prime_text = repeat_prime_text(count, "")
-    let el = <span class: css.MSUBSUP;
-        <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h);
-                    <span style: "top:" ++ top_em ++ ";margin-right:0.05em";
+    let el = <span class: css.MSUBSUP,
+        <span class: css.VLIST_T,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h),
+                    <span style: "top:" ++ top_em ++ ";margin-right:0.05em",
                         <span class: css.PSTRUT, style: "height:3em">
-                        <span style: "height:0.39em;display:inline-block;font-size: 70%";
-                            <span class: css.CMR; prime_text>
+                        <span style: "height:0.39em;display:inline-block;font-size: 70%",
+                            <span class: css.CMR, prime_text>
                         >
                     >
                 >
@@ -435,7 +435,7 @@ fn render_unknown_command_node(node, name_str, context) {
     // The leading `\` (cmr backslash: height 0.75, depth 0.25) governs the
     // error token's vertical extent.
     let err_box = box.ml_box_full(
-        <span class: css.classes([css.ERROR, css.CMR]); "\\" ++ name_str>,
+        <span class: css.classes([css.ERROR, css.CMR]), "\\" ++ name_str>,
         0.75,
         0.25,
         0.4 * float(len(name_str) + 1),
@@ -466,7 +466,7 @@ fn render_unknown_command_node(node, name_str, context) {
 fn unknown_numeric_args(node) {
     let arg_texts = (for (child in node
         where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
-        plain_text(child))
+        plain_text(child));
     (len(arg_texts) > 0) and all_plain_number_text(arg_texts, 0)
 }
 
@@ -477,7 +477,7 @@ fn all_plain_number_text(items, i) {
 }
 
 fn box_with_serial_boundary(bx, atom_type) => {
-    element: <span class: "lm_boundary";
+    element: <span class: "lm_boundary",
         for (el in box.elements_of(bx)) el
     >,
     height: bx.height,
@@ -503,10 +503,10 @@ fn render_limit_operator_symbol(text, context) {
     let metrics = if (use_large) large_op_metrics(text) else small_op_metrics(text)
     // Italic correction (mostly \\int with italic=0.44445 → margin-right:0.45em)
     let op_el = if (metrics.italic > 0.0)
-        <span class: op_cls, style: "margin-right:" ++ util.fmt_em_ceil2(metrics.italic); text>
-        else <span class: op_cls; text>
+        <span class: op_cls, style: "margin-right:" ++ util.fmt_em_ceil2(metrics.italic), text>
+        else <span class: op_cls, text>
     box.ml_box_full(
-        <span class: css.OP_GROUP;
+        <span class: css.OP_GROUP,
             op_el
         >,
         metrics.h_raw,
@@ -562,7 +562,7 @@ fn render_class_command(node, context) {
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         wrap_content_element(
-            <span class: class_name;
+            <span class: class_name,
                 for (el in children) el
             >,
             content_box,
@@ -577,7 +577,7 @@ fn render_css_id_command(node, context) {
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         wrap_content_element(
-            <span id: id_name;
+            <span id: id_name,
                 for (el in children) el
             >,
             content_box,
@@ -592,7 +592,7 @@ fn render_html_data_command(node, context) {
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         wrap_content_element(
-            <span math_data_attrs: attrs;
+            <span math_data_attrs: attrs,
                 for (el in children) el
             >,
             content_box,
@@ -704,7 +704,7 @@ fn render_not_overlay_group_text(base_text) {
 }
 
 fn render_not_slash() {
-    box.ml_box_full(<span class: css.CMR; "\uE020">,
+    box.ml_box_full(<span class: css.CMR, "\uE020">,
         0.7, 0.19, 0.5, "mrel", 0.0, 0.0, 0.7)
 }
 
@@ -714,14 +714,14 @@ fn render_not_overlay(base_text) {
 
 fn render_not_overlay_text(base_text, cls, atom_type) {
     let base_box = box.text_box(base_text, cls, atom_type)
-    let overlay_el = <span class: css.BASE;
-        <span class: "lm_rlap";
-            <span class: "lm_inner";
-                <span class: css.CMR; "\uE020">
+    let overlay_el = <span class: css.BASE,
+        <span class: "lm_rlap",
+            <span class: "lm_inner",
+                <span class: css.CMR, "\uE020">
             >
             <span class: "lm_fix">
         >
-        <span class: cls; base_text>
+        <span class: cls, base_text>
     >
     box.ml_box_full(overlay_el, 0.7, 0.19, base_box.width, atom_type, 0.0, 0.0, 0.7)
 }
@@ -751,7 +751,7 @@ fn render_generic_rule_command(node, context) {
 }
 
 fn render_placeholder(context) =>
-    box.ml_box(<span style: "height:0;display:inline-block;font-size: 50%"; "\u00A0">,
+    box.ml_box(<span style: "height:0;display:inline-block;font-size: 50%", "\u00A0">,
         0.0, 0.0, 0.0, "mord")
 
 fn is_generic_box_command(name_str) {
@@ -934,7 +934,7 @@ fn render_ensuremath_text(content) {
         let inner_box = render_node(ast, ctx.text_context())
         let children = box.elements_of(inner_box)
         box.ml_box_full(
-            <span class: css.TEXT;
+            <span class: css.TEXT,
                 for (el in children) el
             >,
             inner_box.height,
@@ -1008,7 +1008,7 @@ fn render_text_textcolor_content(content) {
         let color_box = text_color_box(body, color.resolve_raw(color_name))
         let elems = text_content_elements(before_box, color_box)
         text_content_special_box(
-            <span class: css.BASE;
+            <span class: css.BASE,
                 for (el in elems) el
             >,
             0.65,
@@ -1019,8 +1019,8 @@ fn render_text_textcolor_content(content) {
 }
 
 fn text_color_box(text, color_value) => {
-    element: <span style: "color:" ++ color_value;
-        <span class: css.TEXT; text>
+    element: <span style: "color:" ++ color_value,
+        <span class: css.TEXT, text>
     >,
     height: 0.65,
     depth: 0.08,
@@ -1041,7 +1041,7 @@ fn render_tiny_text_content(content, tiny_idx) {
     let after_box = if (after != "") tiny_text_box(after) else null
     let elems = text_content_elements(before_box, after_box)
     box.ml_box_full(
-        <span class: css.BASE;
+        <span class: css.BASE,
             for (el in elems) el
         >,
         0.7,
@@ -1069,8 +1069,8 @@ fn text_content_special_box(el, h, d, w) => {
 }
 
 fn tiny_text_box(text) => {
-    element: <span style: "font-size: 50%";
-        <span class: css.TEXT; text>
+    element: <span style: "font-size: 50%",
+        <span class: css.TEXT, text>
     >,
     height: 0.35,
     depth: 0.04,
@@ -1281,7 +1281,7 @@ fn render_overline_vlist(base_box, context) {
         {box: line_box, no_wrap: true},
         {kern: rule}
     ], 0.0, "ord")
-    let el = <span class: "overline";
+    let el = <span class: "overline",
         stack.element
     >
     // MathLive's overline uses VBox({shift:0}) with [inner, 3*rule, line, rule];
@@ -1300,7 +1300,7 @@ fn render_underline_vlist(base_box, context) {
         {box: line_box, shift: line_shift, no_wrap: true},
         {box: base_box, shift: 0.0}
     ], "ord")
-    let el = <span class: "underline";
+    let el = <span class: "underline",
         stack.element
     >
     // MathLive's underline is the overline stack mirrored below the baseline:
@@ -1377,33 +1377,33 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
     let vlist_h = util.ceil_em2(base_h - clearance + accent_h)
     // Centering margin per MathLive: (base.width - accent.width)/2.
     let margin_left = accent_margin_left(accent_key, base_node, base_box)
-    let vlist_body = <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vlist_h);
-        <span style: "top:-3em";
+    let vlist_body = <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vlist_h),
+        <span style: "top:-3em",
             <span class: css.PSTRUT, style: "height:3em">
-            <span style: "height:" ++ fmt_accent_em(base_wrap_h) ++ ";display:inline-block";
+            <span style: "height:" ++ fmt_accent_em(base_wrap_h) ++ ";display:inline-block",
                 for (el in base_elements) el
             >
         >
-        <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_margin(margin_left);
+        <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_margin(margin_left),
             <span class: css.PSTRUT, style: "height:3em">
-            <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
+            <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block", accent_text>
         >
     >
-    let main_row = <span class: css.VLIST_R;
+    let main_row = <span class: css.VLIST_R,
         vlist_body
     >
     // descender bases need MathLive's two-row vlist so the root strut keeps
     // the base descent instead of flattening `\tilde{y}` onto the baseline.
-    let el = if (base_box.depth > 0.0) <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            vlist_body
-            <span class: css.VLIST_S; "\u200B">
+    let el = if (base_box.depth > 0.0) <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            vlist_body;
+            <span class: css.VLIST_S, "\u200B">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(util.ceil_em2(base_box.depth))>
         >
     >
-    else <span class: css.VLIST_T;
+    else <span class: css.VLIST_T,
         main_row
     >
     accent_box(el, vlist_h, base_box.depth, base_box.width)
@@ -1440,23 +1440,23 @@ fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_heig
     let accent_top = 0.0 - pstrut - (base_box.height - clearance + accent_lift)
     let margin_left = wide_accent_margin_left(accent_key, base_node, base_box)
     let depth_holder = util.ceil_em2(base_box.depth)
-    let el = <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
-                <span style: "top:" ++ fmt_accent_em(0.0 - pstrut);
+    let el = <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight),
+                <span style: "top:" ++ fmt_accent_em(0.0 - pstrut),
                     <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
-                    <span style: "height:" ++ fmt_accent_em(base_body_h) ++ ";display:inline-block";
+                    <span style: "height:" ++ fmt_accent_em(base_body_h) ++ ";display:inline-block",
                         for (el in base_elements) el
                     >
                 >
-                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
+                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left),
                     <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
-                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
+                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block", accent_text>
                 >
             >
-            <span class: css.VLIST_S; "\u200B">
+            <span class: css.VLIST_S, "\u200B">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(depth_holder)>
         >
     >
@@ -1704,12 +1704,12 @@ fn make_svg_accent_box(svg_name) {
 
 fn svg_accent_element(svg_name) {
     let h = svg_accent_height(svg_name)
-    let outer_h = floor(h * 50.0) / 100.0
-    <span style: "display:inline-block;height:" ++ svg_accent_num(outer_h) ++ "em;min-width:0";
-        <span class: "lm_stretchy", style: "height:" ++ svg_accent_num(h) ++ "em";
+    let outer_h = floor(h * 50.0) / 100.0;
+    <span style: "display:inline-block;height:" ++ svg_accent_num(outer_h) ++ "em;min-width:0",
+        <span class: "lm_stretchy", style: "height:" ++ svg_accent_num(h) ++ "em",
             <svg width: "100%", height: svg_accent_num(h) ++ "em",
                  viewBox: "0 0 " ++ svg_accent_viewbox_width(svg_name) ++ " " ++ svg_accent_viewbox_height(svg_name),
-                 preserveAspectRatio: "none";
+                 preserveAspectRatio: "none",
                 <path fill: "currentcolor", d: svg_accent_path(svg_name)>
             >
         >
@@ -1784,23 +1784,23 @@ fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height
     let accent_top = util.ceil_em2(0.0 - pstrut - (base_box.height - clearance + accent_lift))
     let margin_left = util.ceil_em2((base_box.width - accent_glyph_width(accent_key)) / 2.0)
     let body_height = util.ceil_em2(base_box.height + base_box.depth)
-    let el = <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
-                <span style: "top:" ++ fmt_accent_em(base_top);
+    let el = <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight),
+                <span style: "top:" ++ fmt_accent_em(base_top),
                     <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
-                    <span style: "height:" ++ fmt_accent_em(body_height) ++ ";display:inline-block";
+                    <span style: "height:" ++ fmt_accent_em(body_height) ++ ";display:inline-block",
                         base_box.element
                     >
                 >
-                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
+                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left),
                     <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
-                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
+                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block", accent_text>
                 >
             >
-            <span class: css.VLIST_S; "\u200B">
+            <span class: css.VLIST_S, "\u200B">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:0.2em">
         >
     >
@@ -1808,7 +1808,7 @@ fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height
 }
 
 fn missing_accent_base_box() =>
-    box.ml_box_full(<span class: css.CMR; "□">, 0.7, 0.2, 0.8, "mord", 0.0, 0.0, 0.7)
+    box.ml_box_full(<span class: css.CMR, "□">, 0.7, 0.2, 0.8, "mord", 0.0, 0.0, 0.7)
 
 fn accent_box(el, h, d, w) => {
     element: el,
@@ -1860,7 +1860,7 @@ fn accent_body_height_precise(key) {
 }
 
 fn fmt_accent_em(v) {
-    let rounded = round(v * 100.0) / 100.0
+    let rounded = round(v * 100.0) / 100.0;
     (rounded) ++ "em"
 }
 
@@ -1906,7 +1906,7 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
         else if (is_shallow_small_delim(left_char) or is_shallow_small_delim(right_char))
         0.24 else 0.25
     box.ml_box_full(
-        <span class: css.LEFT_RIGHT, style: style_attr;
+        <span class: css.LEFT_RIGHT, style: style_attr,
             left_el
             for (el in content_elements) el
             right_el
@@ -1938,14 +1938,14 @@ fn is_shallow_small_delim(ch) {
 
 fn small_delim_el(ch, side_class) {
     if (ch == ".") {
-        let cls = css.classes([css.NULLDELIMITER, side_class])
+        let cls = css.classes([css.NULLDELIMITER, side_class]);
         <span class: cls, style: "width:0.12em">
     } else if (delims.is_corner_delim(ch)) {
-        let cls = css.classes([css.SMALL_DELIM, side_class])
-        <span class: cls, style: "top:0.08em;font-size: 70%"; ch>
+        let cls = css.classes([css.SMALL_DELIM, side_class]);
+        <span class: cls, style: "top:0.08em;font-size: 70%", ch>
     } else {
-        let cls = css.classes([css.SMALL_DELIM, side_class])
-        <span class: cls; ch>
+        let cls = css.classes([css.SMALL_DELIM, side_class]);
+        <span class: cls, ch>
     }
 }
 
@@ -1978,7 +1978,7 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let out_h = if (table_brace) util.ceil_em2(box_h) else box_h
     let out_d = if (table_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
     box.ml_box_full(
-        <span class: css.LEFT_RIGHT, style: style_attr;
+        <span class: css.LEFT_RIGHT, style: style_attr,
             for (el in elements) el
         >,
         out_h,
@@ -2296,7 +2296,7 @@ fn is_single_alpha_delim(text) {
 }
 
 fn render_unknown_command(cmd) {
-    let bx = box.ml_box_full(<span class: css.classes([css.ERROR, css.CMR]); cmd>,
+    let bx = box.ml_box_full(<span class: css.classes([css.ERROR, css.CMR]), cmd>,
         0.7, 0.0, 0.4 * float(len(cmd)), "mord", 0.0, 0.0, 0.7)
     box_with_error(bx, "unknown-command")
 }
@@ -2368,7 +2368,7 @@ fn render_radical(node, context) {
         [index_box.element, sqrt_sign_element(spec), sqrt_vlist_element(spec, body_elements)]
     else
         [sqrt_unindexed_element(spec, body_elements)]
-    let el = <span class: css.BASE;
+    let el = <span class: css.BASE,
         for (child in child_elements) child
     >
     radical_box(el, spec, body_box.width + 0.52, context)
@@ -2388,7 +2388,7 @@ fn radical_box(el, spec, width, context) => {
 }
 
 fn sqrt_unindexed_element(spec, body_elements) {
-    <span style: "display:inline-block;height:" ++ util.fmt_em(spec.visual_total);
+    <span style: "display:inline-block;height:" ++ util.fmt_em(spec.visual_total),
         sqrt_sign_element(spec)
         sqrt_vlist_element(spec, body_elements)
     >
@@ -2398,12 +2398,12 @@ fn sqrt_sign_element(spec) {
     let cls = spec.sign_class
     let sign_style = if (spec.sign_top == null) null else "top:" ++ util.fmt_em(spec.sign_top)
     if (sign_style == null) {
-        <span class: css.SQRT_SIGN;
-            <span class: cls; "\u221A">
+        <span class: css.SQRT_SIGN,
+            <span class: cls, "\u221A">
         >
     } else {
-        <span class: css.SQRT_SIGN, style: sign_style;
-            <span class: cls; "\u221A">
+        <span class: css.SQRT_SIGN, style: sign_style,
+            <span class: cls, "\u221A">
         >
     }
 }
@@ -2421,17 +2421,17 @@ fn sqrt_vlist_height(spec) {
 
 fn sqrt_small_vlist_element(spec, body_elements) {
     let body_style = "height:" ++ fmt_sqrt_body_height(spec.body_height) ++ ";display:inline-block"
-    let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut)
-    <span class: css.VLIST_T;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(sqrt_vlist_height(spec));
-                <span style: "top:" ++ util.fmt_em(spec.body_top);
+    let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut);
+    <span class: css.VLIST_T,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(sqrt_vlist_height(spec)),
+                <span style: "top:" ++ util.fmt_em(spec.body_top),
                     <span class: css.PSTRUT, style: pstrut_style>
-                    <span style: body_style;
+                    <span style: body_style,
                         for (child in body_elements) child
                     >
                 >
-                <span style: "top:" ++ util.fmt_em(spec.line_top);
+                <span style: "top:" ++ util.fmt_em(spec.line_top),
                     <span class: css.PSTRUT, style: pstrut_style>
                     <span class: css.SQRT_LINE, style: "height:" ++ util.fmt_em(spec.line_height) ++ ";display:inline-block">
                 >
@@ -2442,24 +2442,24 @@ fn sqrt_small_vlist_element(spec, body_elements) {
 
 fn sqrt_tall_vlist_element(spec, body_elements) {
     let body_style = "height:" ++ util.fmt_em(spec.body_height) ++ ";display:inline-block"
-    let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut)
-    <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(sqrt_vlist_height(spec));
-                <span style: "top:" ++ util.fmt_em(spec.body_top);
+    let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut);
+    <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(sqrt_vlist_height(spec)),
+                <span style: "top:" ++ util.fmt_em(spec.body_top),
                     <span class: css.PSTRUT, style: pstrut_style>
-                    <span style: body_style;
+                    <span style: body_style,
                         for (child in body_elements) child
                     >
                 >
-                <span style: "top:" ++ util.fmt_em(spec.line_top);
+                <span style: "top:" ++ util.fmt_em(spec.line_top),
                     <span class: css.PSTRUT, style: pstrut_style>
                     <span class: css.SQRT_LINE, style: "height:" ++ util.fmt_em(spec.line_height) ++ ";display:inline-block">
                 >
             >
-            <span class: css.VLIST_S; "\u200B">
+            <span class: css.VLIST_S, "\u200B">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.depth_holder)>
         >
     >
@@ -2495,14 +2495,14 @@ fn render_sqrt_index(index_box, context, compact_index) {
         else if (is_sized) "48.24%"
         else "50%"
     {
-        element: <span class: css.SQRT_INDEX;
-            <span class: css.VLIST_T;
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(h);
-                        <span style: "top:" ++ util.fmt_em(top);
+        element: <span class: css.SQRT_INDEX,
+            <span class: css.VLIST_T,
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(h),
+                        <span style: "top:" ++ util.fmt_em(top),
                             <span class: css.PSTRUT, style: "height:3em">
                             <span style: "height:" ++ fmt_sqrt_body_height(child_h) ++
-                                ";display:inline-block;font-size: " ++ child_font;
+                                ";display:inline-block;font-size: " ++ child_font,
                                 for (child in elements) child
                             >
                         >
@@ -2912,7 +2912,7 @@ fn render_error_node(node, context) {
 
 fn render_unknown_display_command(text) {
     {
-        element: <span class: css.classes([css.ERROR, css.CMR]); text>,
+        element: <span class: css.classes([css.ERROR, css.CMR]), text>,
         height: 0.7,
         depth: 0.0,
         width: 0.4 * float(len(text)),
@@ -3038,7 +3038,7 @@ fn render_color_switch_tail(node, context, i) {
     let hb = transparent_hbox(spaced)
     let elements = box.child_elements(spaced)
     box_with_suppress_depth({
-        element: <span style: "color:" ++ color_value;
+        element: <span style: "color:" ++ color_value,
             for (el in elements) el
         >,
         height: hb.height,
@@ -3125,7 +3125,7 @@ fn render_size_switch_tail(node, context, i) {
     let report_height = if (scale > 2.0) round(scaled_height * 100.0) / 100.0 else scaled_height
     let report_depth = if (scale > 2.0) round(scaled_depth * 100.0) / 100.0 else scaled_depth
     {
-        element: <span style: "font-size: " ++ pct;
+        element: <span style: "font-size: " ++ pct,
             for (el in elements) el
         >,
         height: report_height,
@@ -3172,7 +3172,7 @@ fn style_wrap_box(bx, style_text) {
 }
 
 fn ml_style_wrap_box(bx, style_text) => {
-    element: <span style: style_text;
+    element: <span style: style_text,
         for (el in box.elements_of(bx)) el
     >,
     height: bx.height,
@@ -3241,7 +3241,7 @@ fn render_textcolor_sequence(node, context, i) {
         [render_dollar_math_group(content_arg, context)]
     else if (content_text == "red")
         [
-            box.make_box(<span class: css.MATHIT, style: "margin-right:0.03em"; "r">,
+            box.make_box(<span class: css.MATHIT, style: "margin-right:0.03em", "r">,
                 0.7, 0.08, 0.5, "mord"),
             render_text("ed", context)
         ]
@@ -3250,7 +3250,7 @@ fn render_textcolor_sequence(node, context, i) {
     let hb = transparent_hbox(spaced)
     let elements = box.child_elements(spaced)
     box_with_suppress_depth({
-        element: <span style: "color:" ++ color_value;
+        element: <span style: "color:" ++ color_value,
             for (el in elements) el
         >,
         height: hb.height,

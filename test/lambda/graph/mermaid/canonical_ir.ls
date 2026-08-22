@@ -6,12 +6,12 @@ fn item_kind(value) => if (value is element) string(name(value)) else "text"
 
 fn content_kinds(value) => [for (child in model.content_items(value)) item_kind(child)]
 
-let legacy = <graph direction: "TB", custom: "graph-meta";
+let legacy = <graph direction: "TB", custom: "graph-meta",
   <subgraph id: "group", label: "Group **One**", 'label-format': "markdown",
-      custom: "subgraph-meta";
+      custom: "subgraph-meta",
     <node id: "A", label: "The **API**", 'label-format': "markdown", custom: 42>
-    <node id: "B", custom: "rich-block";
-      <section class: "details"; <strong; "Nested"> " block">
+    <node id: "B", custom: "rich-block",
+      <section class: "details", <strong "Nested"> " block">
     >
     <edge id: "e0", from: "A", to: "B", label: "<b>calls</b>",
         'label-format': "html", custom: "edge-meta">
@@ -26,10 +26,10 @@ let html = transform.to_html(once.graph)
 let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
   where child is element and string(name(child)) == "node") child]
 
-let authored = <graph direction: "LR";
-  <node id: "C", custom: "preserved";
-    <label format: "html"; "<b>C</b>">
-    <content; <strong; "C">>
+let authored = <graph direction: "LR",
+  <node id: "C", custom: "preserved",
+    <label format: "html", "<b>C</b>">
+    <content <strong "C">>
   >
 >
 let authored_result = normalize.normalize(authored)

@@ -299,7 +299,7 @@ fn resolve_ref(elements, value) {
     let exact = [for (entry in elements where entry.identifier == value) entry.id];
     let suffix = [for (entry in elements
       where ends_with(entry.identifier, "." ++ value)) entry.id];
-    if (len(exact) == 1) exact[0];
+    if (len(exact) == 1) exact[0]
     else if (len(suffix) == 1) suffix[0]
     else value
   }
@@ -497,7 +497,7 @@ fn c4_element(value, terminology) =>
       else if (value.kind == "container-instance") "container" else value.kind),
     description: value.description, technology: value.technology,
     'model-ref': value.model_ref,
-    'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
+    'source-start': value.source["source-start"], 'source-end': value.source["source-end"],
     for (tag in value.tags) <tag name: tag>
     for (property in value.properties)
       <property name: property.name, value: property.value,
@@ -522,7 +522,7 @@ fn c4_relationship(value) =>
     archetype: value.archetype,
     implied: value.implied, 'implied-from': value.implied_from,
     description: value.description, technology: value.technology,
-    'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
+    'source-start': value.source["source-start"], 'source-end': value.source["source-end"],
     for (tag in value.tags) <tag name: tag>
     for (property in value.properties)
       <property name: property.name, value: property.value,
@@ -541,7 +541,7 @@ fn c4_view(value, elements) =>
     environment: resolve_ref(elements, value.environment),
     'base-key': value.base_key, 'filter-mode': value.filter_mode,
     direction: value.direction, 'rank-sep': value.rank_sep, 'node-sep': value.node_sep,
-    'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
+    'source-start': value.source["source-start"], 'source-end': value.source["source-end"],
     for (rule in value.includes) <include expression: rule.expression,
       'source-start': rule.source["source-start"], 'source-end': rule.source["source-end"],
       'source-line': rule.source["source-line"], 'source-column': rule.source["source-column"]>
@@ -561,7 +561,7 @@ fn c4_view(value, elements) =>
 
 fn c4_style(value) =>
   <'c4-style' 'target-kind': value.target_kind, tag: value.tag,
-    'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
+    'source-start': value.source["source-start"], 'source-end': value.source["source-end"],
     for (property in value.properties) <property name: property.name, value: property.value>
   >
 
@@ -569,8 +569,8 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
     terminology, group_separator, model_properties, source) =>
   <'c4-workspace' name: name, description: description,
     flavor: "structurizr", 'ir-stage': "canonical", 'identifier-mode': mode,
-    'group-separator': group_separator;
-    <'c4-model';
+    'group-separator': group_separator,
+    <'c4-model'
       for (property in model_properties)
         <property name: property.name, value: property.value,
           'source-start': property.source["source-start"],
@@ -578,19 +578,19 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
       for (entry in elements) c4_element(entry, terminology)
       for (entry in relationships) c4_relationship(entry)
     >
-    <'c4-views';
+    <'c4-views'
       for (diagram in views) c4_view(diagram, elements)
     >
-    <'c4-styles';
+    <'c4-styles'
       for (style in styles) c4_style(style)
     >
-    <'c4-terminology';
+    <'c4-terminology'
       for (term in terminology)
         <term kind: term.kind, value: term.value,
           'source-start': term.source["source-start"],
           'source-end': term.source["source-end"]>
     >
-    <diagnostics;
+    <diagnostics
       for (value in graph_model.diagnostics(source)) value
     >
   >

@@ -5,12 +5,12 @@
 // Root RSS element - defined first to be recognized as root
 type Document = <rss
     version: string,                  // RSS version (required attribute)
-    encoding: string?;                // optional encoding attribute (demonstrates optional fields)
+    encoding: string?,                // optional encoding attribute (demonstrates optional fields)
     RssChannel                        // single channel (required child element)
 >
 
 // Channel contains child elements - using open content model
-type RssChannel = <channel;
+type RssChannel = <channel
     any*                              // allow any child elements (open content model)
 >
 
@@ -27,7 +27,7 @@ type RssLastBuildDate = <lastBuildDate string>
 type RssTtl = <ttl string>
 
 // Item contains child elements - using open content model
-type RssItem = <item;
+type RssItem = <item
     any*                              // allow any child elements (open content model)
 >
 

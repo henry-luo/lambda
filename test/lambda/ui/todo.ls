@@ -94,7 +94,7 @@ on delete_item(evt) {
 // HTML page — outer shell built directly, items rendered via apply()
 // ============================================================================
 
-<html lang:"en"
+<html lang:"en",
 <head
   <meta charset:"UTF-8">
   <title "Lambda Todo App">
@@ -254,11 +254,11 @@ on delete_item(evt) {
   >
 >
 <body
-  <div class:"container"
+  <div class:"container",
     <div class:"header"
       // dynamic element content needs the child separator; without it the
       // parser treats `data` as an attribute and rejects the member access.
-      <h1; data.title>
+      <h1 data.title>
       <p "Reactive UI — click to toggle, × to delete">
     >
     <div class:"content"

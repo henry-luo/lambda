@@ -58,7 +58,7 @@ fn _label_children(rect, page_index, opts) {
 fn _flip_group_list(rect, paths) {
     if (len(paths) == 0) { [] }
     else {
-        let flip_xform = coords.y_flip_transform(rect.y + rect.h)
+        let flip_xform = coords.y_flip_transform(rect.y + rect.h);
         [svg.group(flip_xform, paths)]
     }
 }

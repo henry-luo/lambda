@@ -3,7 +3,7 @@
 // Root library element - defined first to be recognized as root
 type Document = <library
     name: string?,                    // optional library name attribute
-    established: string?;             // optional establishment year
+    established: string?,             // optional establishment year
     LibraryBook*                      // child elements
 >
 
@@ -18,7 +18,7 @@ type AuthorInfo = <author
 // Book element type for library
 type LibraryBook = <book
     id: string,                      // required book id
-    isbn: string?;                   // optional isbn
+    isbn: string?,                   // optional isbn
     title: string,                   // primitive type
     category: string?,               // optional field  
     AuthorInfo*                      // child elements

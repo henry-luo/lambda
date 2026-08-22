@@ -9,9 +9,9 @@ type XmlProcessingInstruction = <?xml
 // Book element with id and category attributes and child elements
 type BookElement = <book
     id: string,                       // book id attribute
-    category: string;                 // book category attribute
-    BookTitle,                        // title child element
-    BookAuthor,                       // author child element  
+    category: string,                 // book category attribute
+    BookTitle;                        // title child element
+    BookAuthor;                       // author child element  
     BookPrice                         // price child element
 >
 
@@ -21,7 +21,7 @@ type BookAuthor = <author string>
 type BookPrice = <price string>
 
 // Root element - flexible to match any root tag but with some structure
-type Document = <root;
+type Document = <root
     SimpleElement*                    // zero or more simple elements
 >
 

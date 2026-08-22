@@ -288,7 +288,7 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
     let table_class = table_environment_class(env_name)
-    let el = <span class: table_class;
+    let el = <span class: table_class,
         for el in children { el }
     >
     ml_table_box(el, metrics, total_w, nrows)
@@ -355,16 +355,16 @@ fn array_col_sep(width) =>
 
 fn build_column(row_boxes, col, align, metrics) {
     let cls = "col-align-" ++ align
-    let row_spans = build_column_rows(row_boxes, col, metrics, 0, [])
-    <span class: cls;
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em(metrics.vlist_height);
+    let row_spans = build_column_rows(row_boxes, col, metrics, 0, []);
+    <span class: cls,
+        <span class: css.VLIST_T2,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(metrics.vlist_height),
                     for row_span in row_spans { row_span }
                 >
-                <span class: css.VLIST_S; "\u200B">
+                <span class: css.VLIST_S, "\u200B">
             >
-            <span class: css.VLIST_R;
+            <span class: css.VLIST_R,
                 <span class: css.VLIST, style: "height:" ++ util.fmt_em(metrics.depth_holder)>
             >
         >
@@ -377,9 +377,9 @@ fn build_column_rows(row_boxes, col, metrics, row, acc) {
         let cell = cell_at(row_boxes, row, col)
         let top = row_top(metrics, row)
         let cell_height = row_cell_height(metrics, row)
-        let span = <span style: "top:" ++ util.fmt_em(top);
+        let span = <span style: "top:" ++ util.fmt_em(top),
             <span class: css.PSTRUT, style: "height:" ++ util.fmt_em(metrics.pstrut)>
-            <span style: "height:" ++ util.fmt_em(cell_height) ++ ";display:inline-block";
+            <span style: "height:" ++ util.fmt_em(cell_height) ++ ";display:inline-block",
                 for child in box.elements_of(cell) { child }
             >
         >
@@ -655,7 +655,7 @@ fn wrap_with_delimiters(table_box, ld, rd, row_count) {
     let h_raw = if (stacked_brace) util.ceil_em2(box_h) else box_h
     let d_raw = if (stacked_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
     box.ml_box_full(
-        <span style: "display:inline-block";
+        <span style: "display:inline-block",
             for child in children { child }
         >,
         h_raw,
@@ -742,7 +742,7 @@ fn render_plain_sized_delim(ch, level) {
         else if (level == 3) css.DELIM_SIZE3
         else css.DELIM_SIZE4
     let raw = matrix_sized_raw(level)
-    box.ml_box_full(<span class: cls; ch>, raw.h, raw.d, 0.4, "ord", 0.0, 0.0, raw.h)
+    box.ml_box_full(<span class: cls, ch>, raw.h, raw.d, 0.4, "ord", 0.0, 0.0, raw.h)
 }
 
 // full-precision Size1–4 delimiter glyph extent (axis-centred U+0028 metrics,
@@ -790,28 +790,28 @@ fn render_extensible_matrix_paren_delim(ch, row_count) {
     let first_ext_top = bottom_top - 1.15
     let top_top = (0.0 - 4.03) - extra
     box.ml_box_full(
-        <span class: "lm_delim-mult";
-            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h);
-                        <span style: "top:" ++ util.fmt_em(bottom_top);
+        <span class: "lm_delim-mult",
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2",
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h),
+                        <span style: "top:" ++ util.fmt_em(bottom_top),
                             <span class: css.PSTRUT, style: "height:3.16em">
-                            <span style: "height:1.81em;display:inline-block"; chars[0]>
+                            <span style: "height:1.81em;display:inline-block", chars[0]>
                         >
                         for i in 0 to (ext_count - 1) {
-                            <span style: "top:" ++ util.fmt_em(first_ext_top - float(i) * 0.6);
+                            <span style: "top:" ++ util.fmt_em(first_ext_top - float(i) * 0.6),
                                 <span class: css.PSTRUT, style: "height:3.16em">
-                                <span style: "height:0.61em;display:inline-block"; chars[1]>
+                                <span style: "height:0.61em;display:inline-block", chars[1]>
                             >
                         }
-                        <span style: "top:" ++ util.fmt_em(top_top);
+                        <span style: "top:" ++ util.fmt_em(top_top),
                             <span class: css.PSTRUT, style: "height:3.16em">
-                            <span style: "height:1.81em;display:inline-block"; chars[2]>
+                            <span style: "height:1.81em;display:inline-block", chars[2]>
                         >
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
                 >
             >
@@ -830,20 +830,20 @@ fn render_two_piece_matrix_delim(ch) {
     let pieces = matrix_two_piece_chars(ch)
     let tops = [0.0 - 2.25, 0.0 - 4.03]
     box.ml_box_full(
-        <span class: "lm_delim-mult";
-            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:2.04em";
+        <span class: "lm_delim-mult",
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2",
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:2.04em",
                         for i in 0 to 1 {
-                            <span style: "top:" ++ util.fmt_em(tops[i]);
+                            <span style: "top:" ++ util.fmt_em(tops[i]),
                                 <span class: css.PSTRUT, style: "height:3.16em">
-                                <span style: "height:1.81em;display:inline-block"; pieces[i]>
+                                <span style: "height:1.81em;display:inline-block", pieces[i]>
                             >
                         }
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:1.56em">
                 >
             >
@@ -867,20 +867,20 @@ fn render_brace_mult_delim() {
     ]
     let heights = [0.91, 0.3, 0.3, 0.3, 0.3, 1.81, 0.3, 0.3, 0.3, 0.3, 0.91]
     box.ml_box_full(
-        <span class: "lm_delim-mult";
-            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:3.22em";
+        <span class: "lm_delim-mult",
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2",
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:3.22em",
                         for i in 0 to 10 {
-                            <span style: "top:" ++ util.fmt_em(tops[i]);
+                            <span style: "top:" ++ util.fmt_em(tops[i]),
                                 <span class: css.PSTRUT, style: "height:3.15em">
-                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block"; pieces[i]>
+                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block", pieces[i]>
                             >
                         }
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:2.76em">
                 >
             >

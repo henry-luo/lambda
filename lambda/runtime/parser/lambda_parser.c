@@ -1225,7 +1225,10 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
     }
     if (parenthesized && !parser_expect(parser, LAMBDA_TOK_RPAREN, "expected ')' after for clauses")) return 0;
     if (parenthesized) parser_skip_newlines(parser);
-    if (parenthesized && parser->current.kind == LAMBDA_TOK_LBRACE &&
+    // S16.4.1v2: the interior decides, in BOTH spellings — gating the map
+    // reading on `parenthesized` made `for x in l {a: x}` reject a body that
+    // `for (x in l) {a: x}` accepts, which is exactly the flip the ruling bans.
+    if (parser->current.kind == LAMBDA_TOK_LBRACE &&
             braced_expression_is_map(parser)) {
         children[0] = parse_expression(parser, 0);
     } else if (parser_accept(parser, LAMBDA_TOK_LBRACE)) {
@@ -2199,7 +2202,11 @@ static bool if_statement_body_is_map(const LambdaRdParser* parser) {
     probe.metrics = NULL;
     probe.error = NULL;
     parser_advance(&probe);
-    if (probe.current.kind == LAMBDA_TOK_LPAREN) return false;
+    // S16.4.1v2: the brace is resolved by its INTERIOR, so a parenthesized head
+    // must not flip the reading — `if c {a: 1}` and `if (c) {a: 1}` are the same
+    // program. Bailing out on LPAREN here (an Option-2 leftover, where a paren
+    // head committed to an expression body and `{` was therefore a block) made
+    // the paren spelling reject every map body.
     (void)parse_expression(&probe, 0);
     if (probe.status != LAMBDA_PARSE_OK) return false;
     return braced_expression_is_map(&probe);

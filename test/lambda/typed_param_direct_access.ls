@@ -66,7 +66,7 @@ diff_pair(pr)
 // Test 11: two object params of different types
 type NamedVal {
     label: string,
-    num: int,
+    num: int
 }
 fn format_nv(nv: NamedVal) => nv.label ++ "=" ++ (nv.num)
 let nv1 = <NamedVal label: "score", num: 42>

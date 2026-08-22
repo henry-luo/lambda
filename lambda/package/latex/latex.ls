@@ -92,7 +92,7 @@ fn postprocess(html, info) {
 }
 
 fn wrap_with_footnotes(body, footnotes_el) {
-    <div class: "latex-output";
+    <div class: "latex-output",
         body
         footnotes_el
     >
@@ -102,9 +102,9 @@ fn render_footnotes_section(info) {
     let footnotes = info.footnotes
     if (len(footnotes) == 0) null
     else (
-        <section class: "latex-footnotes";
+        <section class: "latex-footnotes",
             <hr>
-            <ol;
+            <ol
                 for (fn_entry in footnotes)
                     render_footnote_item(fn_entry, info)
             >
@@ -114,11 +114,11 @@ fn render_footnotes_section(info) {
 
 fn render_footnote_item(fn_entry, info) {
     let fn_num = fn_entry.number
-    let content = dispatcher.render_children_of(fn_entry.node, info)
-    <li id: "fn-" ++ (fn_num);
+    let content = dispatcher.render_children_of(fn_entry.node, info);
+    <li id: "fn-" ++ (fn_num),
         for c in content { c }
         " "
-        <a class: "footnote-backref", href: "#fnref-" ++ (fn_num); "\u21A9">
+        <a class: "footnote-backref", href: "#fnref-" ++ (fn_num), "\u21A9">
     >
 }
 
@@ -129,17 +129,17 @@ fn render_footnote_item(fn_entry, info) {
 fn wrap_standalone(html, info, options) {
     let stylesheet = css.get_stylesheet()
     let math_stylesheet = math_css.get_stylesheet(options)
-    let title_text = get_title_or_default(info.title)
+    let title_text = get_title_or_default(info.title);
 
-    <html lang: "en";
-        <head;
+    <html lang: "en",
+        <head
             <meta charset: "utf-8">
             <meta name: "viewport", content: "width=device-width, initial-scale=1">
-            <title; title_text>
-            <style; stylesheet>
-            <style; math_stylesheet>
+            <title title_text>
+            <style stylesheet>
+            <style math_stylesheet>
         >
-        <body;
+        <body
             html
         >
     >

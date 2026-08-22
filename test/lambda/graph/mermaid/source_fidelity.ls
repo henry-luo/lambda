@@ -8,7 +8,7 @@ let html = transform.to_html(graph)
 let nodes = [for (child in model.child_items(html)
   where child is element and model.tag(child) == "node") child]
 let html_edges = [for (child in model.child_items(html)
-  where child is element and model.tag(child) == "edge") child]
+  where child is element and model.tag(child) == "edge") child];
 
 [
   [graph[0].value, graph[1].value, html["data-node-sep"], html["data-curve"],

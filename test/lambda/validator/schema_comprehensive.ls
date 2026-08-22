@@ -11,12 +11,12 @@ type DocumentHeader = {
 }
 
 // Element types for structured content
-type HeadingElement = <h1 level: int, id: string?, class: string*; string>
-type ParagraphElement = <p id: string?, class: string*; string>
-type LinkElement = <a href: string, title: string?, target: string?; string>
-type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?; string?>
-type CodeElement = <code lang: string?, class: string*; string>
-type ListElement = <ul listType: string?, class: string*; string+>
+type HeadingElement = <h1 level: int, id: string?, class: string*, string>
+type ParagraphElement = <p id: string?, class: string*, string>
+type LinkElement = <a href: string, title: string?, target: string?, string>
+type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?, string?>
+type CodeElement = <code lang: string?, class: string*, string>
+type ListElement = <ul listType: string?, class: string*, string+>
 
 // Union types for flexible content
 type ContentElement = HeadingElement | ParagraphElement | LinkElement | ImageElement | CodeElement | ListElement
@@ -69,4 +69,4 @@ type Section = {
 }
 
 // Main document type with all features - now as an element type to match HTML parser output
-type Document = <html lang: string?, class: string*, id: string?, title: string?; ContentElement*>
+type Document = <html lang: string?, class: string*, id: string?, title: string?, ContentElement*>

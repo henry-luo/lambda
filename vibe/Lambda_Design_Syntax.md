@@ -1,20 +1,40 @@
 # Lambda Design: Syntax — Line Delimiters and Expression Continuation
 
 **Status**: RATIFIED 2026-08-21 as `S16 Surface Syntax`
-(`doc/Lambda_Formal_Semantics.md` v9.0.0). Unimplemented — every S16 ruling
-carries the `*` mark; see Appendix A for the conformance list. §7 audit
-rulings (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
-(closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided but
-not yet implemented. No open audit items remain; batch ratification of the
-decided set is unblocked.
+(`doc/Lambda_Formal_Semantics.md`), amended through **spec v10.0.0**
+(2026-08-22). Partially implemented — most S16 rulings still carry the `*`
+mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
+(points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
+(closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
+
+> **The body states current rulings only.** Superseded wording has been
+> moved out to **Appendix S — Superseded Rulings**, struck through and
+> annotated with what replaced it. Nothing there is normative. Currently
+> held: S.1 the blanket dual-role rule (§3.2/§3.3, replaced by §7.14) and
+> S.2 the `{ ... }` Options 1 and 2 (§5.9, replaced by v3).
+>
+> **Ratification erratum (2026-08-22).** §5.9's rejected **Option 2** was
+> ratified into the spec as S16.4.1 by mistake, making `if (c) {a: 1}` a
+> syntax error and prescribing `if (c) ({a: 1})` as its repair. §5.9 **v3**
+> was and remains the ruling: **interior decides, and grouping parens never
+> flip the reading**. Corrected in spec v10.0.0 as S16.4.1v2 + S16.4.2 +
+> S16.4.3. The C parser still implements the erratum for the paren-head
+> spelling (Appendix A).
+
 **Scope**: Statement separation, the role of the line break, and cross-line
 expression continuation in Lambda surface syntax.
 **Spec linkage**: This document is the decision record; **`S16` is the
 authority.** Cite `S16.#` in discussion and downstream docs, not this
-document's section numbers. Map: §3.1 → S16.1.1, §3.2 → S16.1.2–S16.1.3 +
-S16.2.1, §3.3 → S16.2.2–S16.2.3 + S16.2.5, §3.4 → S16.2.4, §3.8 → S16.3.1,
-§5.9 → S16.4.1, §5.10 → S16.5.1, §5.1–§5.6 → S16.6.1–S16.6.5. A future
-formal syntax document is tracked as `SO35`.
+document's section numbers. Map: §3.1 → S16.1.1, §3.2 → S16.1.2–S16.1.3v2 +
+S16.2.1, §3.3 → S16.2.2v2–S16.2.3v2 + S16.2.5, §3.4 → S16.2.4v2, §3.6 →
+S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
+§5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
+S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
+§7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
+S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7.
+**Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
+and 32 (two parsers, §4.4) stay here. A future formal syntax document is
+tracked as `SO35`.
 
 ---
 
@@ -360,15 +380,23 @@ classified into exactly one of three classes:
 - **Start tokens** — tokens that can *only* start a new expression/statement
   and can never continue one. A new statement begins; no `;` is needed
   (safe juxtaposition).
-- **Dual-role tokens** — tokens that could do either. **Syntax error.** The
-  user must either write `;` (to start a new statement) or move the token to
-  the end of the previous line (to continue). There is no default.
+- **Dual-role tokens** — tokens that could do either. **Syntax error, but
+  only expression → expression.** After a *closed-tail* statement — a
+  brace-closed declaration, `import`, and the rest of the closed set — a
+  dual-role-led expression juxtaposes with no `;` (§7.14). Where the error
+  does apply, the user must either write `;` (to start a new statement) or
+  move the token to the end of the previous line (to continue). There is no
+  default. *(The original blanket form of this rule is in Appendix S.1.)*
 
 Rule 3 is the heart of the design: ambiguity is resolved by *refusing to
 guess*, which is what makes whitespace insensitivity (goal 1) and loud-never-
 silent enforcement simultaneously achievable.
 
 ### 3.3 Token classification
+
+The token *classes* below are normative. Their **application** is scoped by
+§7.14: a line-start dual-role token is an error only expression → expression,
+never after a closed-tail statement.
 
 **Continuation tokens (allowed at line start; expression continues):**
 
@@ -423,7 +451,8 @@ is unambiguously a new statement:
 { let x = 1 let y = 2 x + y }     // legal, no ';' needed
 ```
 
-**Dual-role tokens (syntax error at line start after a complete expression):**
+**Dual-role tokens (error at line start after a complete *expression* — see
+§7.14 for the closed-tail exemption):**
 
 | Token | Continuation reading | Start reading |
 |---|---|---|
@@ -944,14 +973,12 @@ it; an interim Option-2 draft had deleted it). `match_expr` is untouched.
 ### 5.9 `{ ... }`: interior decides; context breaks the empty tie; parens never matter (decided, v3)
 
 `{ ... }` is both the map literal and the block form. This ruling reached
-its final shape in three steps on 2026-08-21: **Option 1** (interior-shape
-dual reading, ≈ the pre-S16 implementation) was rejected for its ambiguous
-`{}` and its pn-statement map restriction; **Option 2** (position decides
-unconditionally: body braces always block, everything else always map) was
-adopted, then found to cost ugly escapes (`if (c) ({a: 1})`,
-`{ {a: 1} }`) and to leave arrow functions without block bodies; **v3**
-(this section) supersedes both. The spec ruling S16.4.1 takes a v2 at
-batch ratification.
+its final shape in three steps on 2026-08-21.
+
+Two earlier options were considered and rejected; **Option 2 was ratified
+into the spec by mistake** and is the source of the `if (c) ({a: 1})`
+erratum. Both are struck out in **Appendix S.2** — do not implement or
+ratify them. The three rules below are the ruling.
 
 **The three rules:**
 
@@ -1161,9 +1188,12 @@ for scalars".
     (dead either way). Always-block (structural): fn/pn/view/on bodies,
     braced match arms, handler arms, `while` bodies (pn-only, value
     discarded). Arrows are fn context even inside pn. Lint:
-    `for (x in l) {}` empty-map comprehension. Earlier forms — Option 1
-    (interior-only, ambiguous `{}`) and Option 2 (position-only, ugly
-    escapes, no arrow blocks) — superseded; S16.4.1 takes a v2 (§5.9).
+    `for (x in l) {}` empty-map comprehension. Earlier forms — ~~Option 1
+    (interior-only, ambiguous `{}`)~~ and ~~Option 2 (position-only, ugly
+    escapes, no arrow blocks)~~ — **OBSOLETE**. Option 2 was ratified into
+    the spec by mistake as S16.4.1 and corrected on 2026-08-22 to
+    S16.4.1v2 + S16.4.2 + S16.4.3 (spec v10.0.0); see the erratum in the
+    header and §5.9.
 17. Inside element scope (attribute values and bare content expressions),
     `<` `>` `<=` `>=` are not operators: `>` always terminates, `<` always
     opens a child element. Comparisons there use parenthesized islands
@@ -2229,3 +2259,105 @@ reduction — the same flag parameters already use. The SEMANTIC side is not
 done: `build_ast` and the validator must treat an optional field as
 "absent is valid" rather than "null is valid", which is the point of the
 distinction and is tracked as remaining work.
+
+---
+
+### 7.23 Script top level is element content (decided — ratified as S16.7)
+
+**Question.** A script body is a sequence of statements whose results are
+observable. Is that sequence a *list* of results, or *content*? The two differ
+observably, because content normalizes and containers do not.
+
+**Ruling.** The top level is **element content**, modelled as the content of a
+virtual `<file …>` / `<script …>` element. Two reasons, in order of weight:
+
+1. **The syntax was designed to unify with element content.** Top-level
+   juxtaposition (§7.14), separation (§3), and line-start classification (§3.2)
+   are not a separate statement grammar that happens to resemble element
+   content — they *are* the element-content rules applied to a file. Modelling
+   the top level as a list would leave that unification as a coincidence.
+2. **The mental model is teachable and complete.** "A script is the content of
+   a virtual `<file>` element" answers, in one sentence, why bare strings
+   juxtapose, why an `else`-less `if` contributes nothing, and why a script
+   that produces a document produces it directly rather than wrapping it.
+
+**Consequences — top level normalizes like content.**
+
+- **Nulls are stripped.** A `null` reaching content contributes nothing,
+  however it arose: written literally, read from a missing key (S7.1.1), or
+  produced by an `else`-less `if` (S16.6.3). If stripping empties the content,
+  the script's value is a single residual `null`.
+- **Adjacent strings merge**, *after* stripping — so `"a" ⏎ null ⏎ "b"` is
+  `"ab"`, not `"a" "b"`. The removed null does not separate its neighbours.
+- **Containers do not normalize.** `[1, null, 2]` keeps its null. To observe a
+  null, put it in a value (`let r = [s.b]`); a bare `null` statement is
+  invisible by design.
+
+**Accepted cost.** A bare missing-key read at top level prints nothing, which
+reads as silent data loss to someone expecting list semantics. This is the
+same class of trap the line-start ban (§3.2) was written to remove, and it is
+accepted here only because the content model is the primitive: `<d "a" null
+"b">` must yield `"ab"`, and the top level cannot diverge from the element
+form it is defined as.
+
+**Implementation status.** Already conformant — no engine change was required.
+`list_push` (`lambda/runtime/collection_runtime.cpp`) skips `LMD_TYPE_NULL`,
+and adjacent-string merging is the existing content-normalization rule (§7.9).
+Verified at top level and in element position: `"a" ⏎ "b" ⏎ "c"` → `"abc"`,
+`"a" ⏎ null ⏎ "b"` → `"ab"`, `<d "a" null "b">` → `"ab"`, `null` → `null`,
+`[1, null, 2]` → `[1, null, 2]`. S16.7.1–S16.7.3 are therefore ratified
+**unmarked**, unlike the rest of S16.
+
+---
+
+## Appendix S — Superseded Rulings
+
+Text that once stated a ruling and no longer does. It is kept for the
+decision record only. **Nothing in this appendix is normative**; each entry
+names what replaced it. Struck-through text is the superseded wording
+verbatim.
+
+### S.1 Blanket dual-role rule (§3.2 Rule 3, §3.3) — SUPERSEDED by §7.14
+
+> ~~**Dual-role tokens** — tokens that could do either. **Syntax error.** The
+> user must either write `;` (to start a new statement) or move the token to
+> the end of the previous line (to continue). There is no default.~~
+>
+> ~~**Dual-role tokens (syntax error at line start after a complete
+> expression)**~~
+
+**Why it fell.** Applied after *any* statement, the rule made
+`fn pick2(x) { … }` ⏎ `[pick(2), pick2(130)]` demand a `;` after the
+declaration — a separator no brace language requires, and the single largest
+class in the corpus migration.
+
+**Replacement:** §7.14 closed-tail juxtaposition. The error survives only
+expression → expression; after a closed-tail statement a dual-role-led
+expression juxtaposes freely. The token *classes* of §3.3 were never
+superseded — only this application of them.
+
+### S.2 `{ ... }` Options 1 and 2 (§5.9) — SUPERSEDED by §5.9 v3
+
+> - ~~**Option 1** — interior-shape dual reading (≈ the pre-S16
+>   implementation).~~ Rejected: ambiguous `{}`, and a pn-statement map
+>   restriction.
+> - ~~**Option 2** — position decides unconditionally: body braces always
+>   block, everything else always map; a map value in body position is
+>   parenthesized (`if (c) ({a: 1})`) or block-wrapped.~~ Adopted briefly,
+>   then rejected: ugly escapes, and it leaves arrow functions without block
+>   bodies. **This is the version that was mistakenly ratified into the spec
+>   as S16.4.1 on 2026-08-21**; corrected to S16.4.1v2 + S16.4.2 + S16.4.3
+>   on 2026-08-22 (spec v10.0.0). If you find `if (c) ({a: 1})` presented as
+>   a required repair anywhere, it is Option 2 residue — the parens are
+>   unnecessary.
+>
+
+**Replacement:** §5.9 **v3** — interior decides, context breaks the empty
+tie, and grouping parens never flip the reading. Ratified as
+**S16.4.1v2 + S16.4.2 + S16.4.3** (spec v10.0.0, 2026-08-22).
+
+**Erratum.** Option 2 was ratified into the spec as S16.4.1 on 2026-08-21 by
+mistake, making `if (c) {a: 1}` a syntax error and prescribing
+`if (c) ({a: 1})` as the repair. Any occurrence of that repair anywhere in
+the tree is Option 2 residue — the parens are unnecessary. The C parser
+still implements the erratum for the paren-head spelling (spec Appendix A).

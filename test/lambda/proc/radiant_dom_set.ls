@@ -1,4 +1,4 @@
-import radiant;
+import radiant
 
 pn main() {
     let doc = radiant.load("test/js/dom_identity.html")

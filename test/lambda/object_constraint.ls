@@ -6,7 +6,7 @@
 type User {
     name: string that (len(~) > 0),
     age: int that (0 <= ~ and ~ <= 150),
-    email: string,
+    email: string
 }
 
 // valid user passes all constraints

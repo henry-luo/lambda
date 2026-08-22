@@ -8,7 +8,7 @@ fn children(value, wanted) => [
 let source = (input("test/lambda/graph/structurizr/this_relationships.dsl",
   {type: "graph", flavor: "structurizr"})) ^ { null }
 let workspace = structurizr.normalize(source)
-let c4_model = children(workspace, "c4-model")[0]
+let c4_model = children(workspace, "c4-model")[0];
 
 [for (relation in children(c4_model, "c4-relationship"))
   [relation.id, relation.source, relation.destination, relation.description]]

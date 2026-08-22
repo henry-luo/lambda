@@ -8,13 +8,13 @@ let data = [
 ]
 
 let spec =
-<repeat;
-    <row; ["a", "b"]>
-    <column; ["b", "c"]>
-    <chart width: 150, height: 150;
+<repeat
+    <row ["a", "b"]>
+    <column ["b", "c"]>
+    <chart width: 150, height: 150,
         <data values: data>
         <mark type: "point">
-        <encoding;
+        <encoding
             <x field: {repeat: "column"}, dtype: "quantitative">
             <y field: {repeat: "row"}, dtype: "quantitative">
         >

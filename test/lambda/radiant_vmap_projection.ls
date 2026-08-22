@@ -1,4 +1,4 @@
-import radiant;
+import radiant
 
 fn vmap_projection(parent, children, ctx) {
   let child = children[0];

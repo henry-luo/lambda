@@ -380,16 +380,16 @@ fn render_document(el, info) {
     let doc_body = util.find_child(el, 'document')
     if (doc_body != null) { render_body(doc_body, info) }
     else {
-        let items = render_children(el, 0, info)
-        <article class: "latex-document latex-" ++ info.docclass;
+        let items = render_children(el, 0, info);
+        <article class: "latex-document latex-" ++ info.docclass,
             for c in items { c }
         >
     }
 }
 
 fn render_body(el, info) {
-    let items = render_children(el, 0, info)
-    <article class: "latex-document latex-" ++ info.docclass;
+    let items = render_children(el, 0, info);
+    <article class: "latex-document latex-" ++ info.docclass,
         for c in items { c }
     >
 }
@@ -398,8 +398,8 @@ fn render_maketitle(info) {
     let title_div = render_maketitle_div("title", info.title_el, info.title, info)
     let author_div = render_maketitle_div("author", info.author_el, info.author, info)
     let date_div = render_maketitle_div("date", info.date_el, info.date, info)
-    let parts = [title_div, author_div, date_div] that (~ != null)
-    <header class: "latex-title";
+    let parts = [title_div, author_div, date_div] that (~ != null);
+    <header class: "latex-title",
         for c in parts { c }
     >
 }
@@ -408,11 +408,11 @@ fn render_maketitle(info) {
 fn render_maketitle_div(css_class, el, fallback_text, info) {
     if (el != null and el is element) {
         let items = render_children(el, 0, info)
-        if (len(items) > 0) { <div class: css_class; for c in items { c }> }
-        else if (fallback_text != null) { <div class: css_class; fallback_text> }
+        if (len(items) > 0) { <div class: css_class, for c in items { c }> }
+        else if (fallback_text != null) { <div class: css_class, fallback_text> }
         else { null }
     }
-    else if (fallback_text != null) { <div class: css_class; fallback_text> }
+    else if (fallback_text != null) { <div class: css_class, fallback_text> }
     else { null }
 }
 
@@ -420,15 +420,15 @@ fn render_toc(info) {
     if (len(info.headings) == 0) { null }
     else {
         let items = (for (h in info.headings, let cls = "toc-l" ++ (h.level))
-            <li class: cls;
-                <a href: "#" ++ h.id;
-                    if (h.number != null) { <span class: "sec-num"; h.number> }
+            <li class: cls,
+                <a href: "#" ++ h.id,
+                    if (h.number != null) { <span class: "sec-num", h.number> }
                     h.text
                 >
-            >)
-        <nav class: "latex-toc";
-            <div class: "toc-title"; "Contents">
-            <ul; for item in items { item }>
+            >);
+        <nav class: "latex-toc",
+            <div class: "toc-title", "Contents">
+            <ul for item in items { item }>
         >
     }
 }
@@ -451,18 +451,18 @@ fn render_heading(el, info, html_level) {
         else if (title_text != "") [title_text]
         else []
 
-    let num_span = if (sec_num != null) <span class: "sec-num"; sec_num ++ " "> else null
+    let num_span = if (sec_num != null) <span class: "sec-num", sec_num ++ " "> else null
     build_heading_el(html_level, title_id, num_span, title_children)
 }
 
 fn build_heading_el(level, id, num_span, children) {
     match level {
-        case 1: <h1 id: id; if (num_span != null) { num_span } for c in children { c }>
-        case 2: <h2 id: id; if (num_span != null) { num_span } for c in children { c }>
-        case 3: <h3 id: id; if (num_span != null) { num_span } for c in children { c }>
-        case 4: <h4 id: id; if (num_span != null) { num_span } for c in children { c }>
-        case 5: <h5 id: id; if (num_span != null) { num_span } for c in children { c }>
-        default: <h6 id: id; if (num_span != null) { num_span } for c in children { c }>
+        case 1: <h1 id: id, if (num_span != null) { num_span } for c in children { c }>
+        case 2: <h2 id: id, if (num_span != null) { num_span } for c in children { c }>
+        case 3: <h3 id: id, if (num_span != null) { num_span } for c in children { c }>
+        case 4: <h4 id: id, if (num_span != null) { num_span } for c in children { c }>
+        case 5: <h5 id: id, if (num_span != null) { num_span } for c in children { c }>
+        default: <h6 id: id, if (num_span != null) { num_span } for c in children { c }>
     }
 }
 
@@ -490,7 +490,7 @@ fn render_paragraph(el, info) {
                 if (len(parts) == 1) parts[0]
                 else parts
             }
-            else { <p; for c in items { c }> }
+            else { <p for c in items { c }> }
         }
     }
 }
@@ -544,16 +544,16 @@ fn render_paragraph_with_decl(el, info, decl_tag) {
     let items = render_children(el, 0, info)
     if (len(items) == 0) { null }
     else if (font_decl.is_font_decl(decl_tag)) {
-        let style = font_decl.font_decl_style(decl_tag)
-        <p style: style; for c in items { c }>
+        let style = font_decl.font_decl_style(decl_tag);
+        <p style: style, for c in items { c }>
     }
     else if (color.is_color_decl(decl_tag)) {
-        let style = color.color_decl_style(find_decl_el(el, decl_tag), info.custom_colors)
-        <p style: style; for c in items { c }>
+        let style = color.color_decl_style(find_decl_el(el, decl_tag), info.custom_colors);
+        <p style: style, for c in items { c }>
     }
     else {
-        let style = font_decl.align_decl_style(decl_tag)
-        <p style: style; for c in items { c }>
+        let style = font_decl.align_decl_style(decl_tag);
+        <p style: style, for c in items { c }>
     }
 }
 
@@ -578,12 +578,12 @@ fn split_blocks_rec(items, i, n, current, acc) {
 // so they don't get wrapped in <p> tags (which is invalid HTML)
 fn flush_as_paragraph(items) {
     if (has_block_child(items)) split_around_blocks(items)
-    else [<p; for c in items { c }>]
+    else [<p for c in items { c }>]
 }
 
 fn flush_inline(items, acc) {
     if (len(items) == 0) acc
-    else acc ++ [<p; for c in items { c }>]
+    else acc ++ [<p for c in items { c }>]
 }
 
 fn has_block_child(items) {
@@ -634,22 +634,22 @@ fn is_block_tag(tag) {
 fn render_styled(el, info, html_tag) {
     let items = render_children(el, 0, info)
     match html_tag {
-        case "b": <strong; for c in items { c }>
-        case "i": <em; for c in items { c }>
-        case "em": <em; for c in items { c }>
-        case "u": <u; for c in items { c }>
-        default: <span; for c in items { c }>
+        case "b": <strong for c in items { c }>
+        case "i": <em for c in items { c }>
+        case "em": <em for c in items { c }>
+        case "u": <u for c in items { c }>
+        default: <span for c in items { c }>
     }
 }
 
 fn render_code(el, info) {
-    let items = render_children(el, 0, info)
-    <code class: "latex-code"; for c in items { c }>
+    let items = render_children(el, 0, info);
+    <code class: "latex-code", for c in items { c }>
 }
 
 fn render_verb(el) {
-    let t = util.text_of(el)
-    <code class: "latex-code"; t>
+    let t = util.text_of(el);
+    <code class: "latex-code", t>
 }
 
 // verb_command: raw token text like "\verb|hello|" — extract content between delimiters
@@ -658,22 +658,22 @@ fn render_verb_command(el) {
     // format: \verb<delim><content><delim> — skip "\verb" (5 chars), then delimiter
     let body = slice(raw, 5, len(raw))
     if (len(body) >= 2) {
-        let content = slice(body, 1, len(body) - 1)
-        <code class: "latex-code"; content>
+        let content = slice(body, 1, len(body) - 1);
+        <code class: "latex-code", content>
     }
-    else { <code class: "latex-code"; body> }
+    else { <code class: "latex-code", body> }
 }
 
 fn render_font(el, info, css_class) {
-    let items = render_children(el, 0, info)
-    <span class: css_class; for c in items { c }>
+    let items = render_children(el, 0, info);
+    <span class: css_class, for c in items { c }>
 }
 
 fn render_size(el, info, cmd_name) {
     let size = sym.get_font_size(cmd_name)
     let items = render_children(el, 0, info)
-    if (size != null) { <span style: "font-size:" ++ size; for c in items { c }> }
-    else { <span; for c in items { c }> }
+    if (size != null) { <span style: "font-size:" ++ size, for c in items { c }> }
+    else { <span for c in items { c }> }
 }
 
 fn render_accent(el, info) {
@@ -694,20 +694,20 @@ fn render_math_env(el, info) {
 
 fn render_itemize(el, info) {
     let flat = flatten_paragraphs(el)
-    let items = split_list_items(flat, info)
-    <ul class: "latex-itemize"; for li in items { li }>
+    let items = split_list_items(flat, info);
+    <ul class: "latex-itemize", for li in items { li }>
 }
 
 fn render_enumerate(el, info) {
     let flat = flatten_paragraphs(el)
-    let items = split_list_items(flat, info)
-    <ol class: "latex-enumerate"; for li in items { li }>
+    let items = split_list_items(flat, info);
+    <ol class: "latex-enumerate", for li in items { li }>
 }
 
 fn render_description(el, info) {
     let flat = flatten_paragraphs(el)
-    let items = split_desc_items(flat, info)
-    <dl class: "latex-description"; for item in items { item }>
+    let items = split_desc_items(flat, info);
+    <dl class: "latex-description", for item in items { item }>
 }
 
 fn flatten_paragraphs(node) {
@@ -745,10 +745,10 @@ fn split_list_items(flat, info) {
 
 fn split_items_rec(flat, i, n, current, acc, info) {
     if (i >= n) {
-        if (len(current) > 0) acc ++ [<li; for c in current { c }>]
+        if (len(current) > 0) acc ++ [<li for c in current { c }>]
         else acc
     } else if (is_item_node(flat[i])) {
-        let flushed = if (len(current) > 0) acc ++ [<li; for c in current { c }>]
+        let flushed = if (len(current) > 0) acc ++ [<li for c in current { c }>]
             else acc
         // check for custom label on \item[label]
         let custom = get_item_custom_label(flat[i])
@@ -766,10 +766,10 @@ fn split_items_rec(flat, i, n, current, acc, info) {
 // handle items with custom labels — suppress default marker
 fn split_items_custom_rec(flat, i, n, current, acc, info) {
     if (i >= n) {
-        if (len(current) > 0) acc ++ [<li style: "list-style-type:none"; for c in current { c }>]
+        if (len(current) > 0) acc ++ [<li style: "list-style-type:none", for c in current { c }>]
         else acc
     } else if (is_item_node(flat[i])) {
-        let flushed = if (len(current) > 0) acc ++ [<li style: "list-style-type:none"; for c in current { c }>]
+        let flushed = if (len(current) > 0) acc ++ [<li style: "list-style-type:none", for c in current { c }>]
             else acc
         let custom = get_item_custom_label(flat[i])
         if (custom != null)
@@ -786,7 +786,7 @@ fn split_items_custom_rec(flat, i, n, current, acc, info) {
 // get custom label from \item[label] as a rendered span, or null
 fn get_item_custom_label(item_node) {
     let opt = util.find_child(item_node, 'brack_group')
-    if (opt != null) { <span class: "latex-item-label"; util.text_of(opt) ++ " "> }
+    if (opt != null) { <span class: "latex-item-label", util.text_of(opt) ++ " "> }
     else { null }
 }
 
@@ -799,7 +799,7 @@ fn split_desc_rec(flat, i, n, acc, term, content, info) {
     else if (is_item_node(flat[i])) {
         let flushed = flush_desc(acc, term, content)
         let label_text = get_item_label(flat[i])
-        let new_term = if (label_text != null) <dt; label_text> else <dt>
+        let new_term = if (label_text != null) <dt label_text> else <dt>
         split_desc_rec(flat, i + 1, n, flushed, new_term, [], info)
     } else {
         let rendered = render_node(flat[i], info)
@@ -810,10 +810,10 @@ fn split_desc_rec(flat, i, n, acc, term, content, info) {
 
 fn flush_desc(acc, term, content) {
     if (term != null) {
-        let dd = if (len(content) > 0) <dd; for c in content { c }> else <dd>
+        let dd = if (len(content) > 0) <dd for c in content { c }> else <dd>
         acc ++ [term, dd]
     } else if (len(content) > 0) {
-        acc ++ [<dd; for c in content { c }>]
+        acc ++ [<dd for c in content { c }>]
     } else { acc }
 }
 
@@ -832,29 +832,29 @@ fn get_item_label(item_node) {
 fn render_env_block(el, info, html_tag, css_class) {
     let items = render_children(el, 0, info)
     match html_tag {
-        case "blockquote": <blockquote class: css_class; for c in items { c }>
-        default: <div class: css_class; for c in items { c }>
+        case "blockquote": <blockquote class: css_class, for c in items { c }>
+        default: <div class: css_class, for c in items { c }>
     }
 }
 
 fn render_env_div(el, info, css_class, style) {
     let items = render_children(el, 0, info)
     if (style != null) {
-        <div class: css_class, style: style; for c in items { c }>
+        <div class: css_class, style: style, for c in items { c }>
     } else {
-        <div class: css_class; for c in items { c }>
+        <div class: css_class, for c in items { c }>
     }
 }
 
 fn render_verbatim_env(el) {
-    let t = util.text_of(el)
-    <pre class: "latex-verbatim"; <code; t>>
+    let t = util.text_of(el);
+    <pre class: "latex-verbatim", <code t>>
 }
 
 fn render_abstract(el, info) {
-    let items = render_children(el, 0, info)
-    <div class: "latex-abstract";
-        <div class: "abstract-title"; "Abstract">
+    let items = render_children(el, 0, info);
+    <div class: "latex-abstract",
+        <div class: "abstract-title", "Abstract">
         for c in items { c }
     >
 }
@@ -867,13 +867,13 @@ fn render_figure(el, info) {
     // look up figure number from info
     let fig_num = get_figure_num(el, info)
     let caption_el = if (cap_text != null) (
-        <figcaption;
-            <strong; "Figure " ++ (fig_num) ++ ": ">
+        <figcaption
+            <strong "Figure " ++ (fig_num) ++ ": ">
             cap_text
         >
-    ) else null
+    ) else null;
 
-    <figure class: "latex-figure";
+    <figure class: "latex-figure",
         for c in items { c }
         if (caption_el != null) { caption_el }
     >
@@ -898,8 +898,8 @@ fn check_figure_match(figures, text, i) {
 fn render_multicols(el, info) {
     let col_group = util.find_child(el, 'curly_group')
     let cols = if (col_group != null) util.text_of(col_group) else "2"
-    let items = render_children(el, 0, info)
-    <div class: "latex-multicols", style: "column-count:" ++ trim(cols);
+    let items = render_children(el, 0, info);
+    <div class: "latex-multicols", style: "column-count:" ++ trim(cols),
         for c in items { c }
     >
 }
@@ -911,9 +911,9 @@ fn render_multicols(el, info) {
 fn render_theorem_env(el, info, display_name, env_type) {
     let items = render_children(el, 0, info)
     let env_num = get_theorem_num(el, info, env_type)
-    let heading = display_name ++ " " ++ (env_num) ++ "."
-    <div class: "latex-theorem latex-" ++ env_type;
-        <strong class: "latex-theorem-head"; heading>
+    let heading = display_name ++ " " ++ (env_num) ++ ".";
+    <div class: "latex-theorem latex-" ++ env_type,
+        <strong class: "latex-theorem-head", heading>
         " "
         for c in items { c }
     >
@@ -927,12 +927,12 @@ fn render_theorem_like(el, info, display_name, env_type) {
 }
 
 fn render_proof_env(el, info) {
-    let items = render_children(el, 0, info)
-    <div class: "latex-proof";
-        <em class: "latex-proof-head"; "Proof.">
+    let items = render_children(el, 0, info);
+    <div class: "latex-proof",
+        <em class: "latex-proof-head", "Proof.">
         " "
         for c in items { c }
-        <span class: "latex-qed"; "\u25A1">
+        <span class: "latex-qed", "\u25A1">
     >
 }
 
@@ -962,13 +962,13 @@ fn render_table_env(el, info) {
     let cap_text = if (caption != null) util.text_of(caption) else null
     let tab_num = get_table_num(el, info)
     let caption_el = if (cap_text != null) (
-        <div class: "latex-table-caption";
-            <strong; "Table " ++ (tab_num) ++ ": ">
+        <div class: "latex-table-caption",
+            <strong "Table " ++ (tab_num) ++ ": ">
             cap_text
         >
-    ) else null
+    ) else null;
 
-    <div class: "latex-table-wrapper";
+    <div class: "latex-table-wrapper",
         if (caption_el != null) { caption_el }
         for c in items { c }
     >
@@ -993,9 +993,9 @@ fn check_table_match(tables, text, i) {
 fn render_tabular(el, info) {
     let col_spec = parse_col_spec(el)
     let content = find_tabular_content(el)
-    let rows = split_rows(content, col_spec, info)
-    <table class: "latex-tabular";
-        <tbody;
+    let rows = split_rows(content, col_spec, info);
+    <table class: "latex-tabular",
+        <tbody
             for row in rows { row }
         >
     >
@@ -1214,15 +1214,15 @@ fn cell_to_td_aligned(c, align) {
 }
 
 fn cell_to_td_plain(c) {
-    if (c is array) { <td; for item in c { item }> }
-    else if (c != null) { <td; c> }
+    if (c is array) { <td for item in c { item }> }
+    else if (c != null) { <td c> }
     else { <td> }
 }
 
 fn cell_to_td_styled(c, align) {
     let style = "text-align: " ++ align
-    if (c is array) { <td style: style; for item in c { item }> }
-    else if (c != null) { <td style: style; c> }
+    if (c is array) { <td style: style, for item in c { item }> }
+    else if (c != null) { <td style: style, c> }
     else { <td style: style> }
 }
 
@@ -1239,8 +1239,8 @@ fn all_cells_empty(cells, i) {
 }
 
 fn make_row_inner(cells, col_spec) {
-    let tds = build_tds(cells, col_spec, 0, 0, [])
-    <tr; for td in tds { td }>
+    let tds = build_tds(cells, col_spec, 0, 0, []);
+    <tr for td in tds { td }>
 }
 
 fn build_tds(cells, col_spec, ci, col, acc) {
@@ -1265,8 +1265,8 @@ fn emit_multicol_td(cells, col_spec, ci, col, acc, cell) {
 }
 
 fn multicol_td(cell) {
-    let c = cell.content
-    <td colspan: string(cell.colspan), style: "text-align: " ++ cell.align; c>
+    let c = cell.content;
+    <td colspan: string(cell.colspan), style: "text-align: " ++ cell.align, c>
 }
 
 fn emit_multirow_td(cells, col_spec, ci, col, acc, cell) {
@@ -1277,8 +1277,8 @@ fn emit_multirow_td(cells, col_spec, ci, col, acc, cell) {
 
 fn multirow_td(cell, align) {
     let c = cell.content
-    if (align == "left") { <td rowspan: string(cell.rowspan); c> }
-    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ align; c> }
+    if (align == "left") { <td rowspan: string(cell.rowspan), c> }
+    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ align, c> }
 }
 
 fn emit_regular_td(cells, col_spec, ci, col, acc, cell) {
@@ -1318,7 +1318,7 @@ fn replace_last(arr, new_val) {
 // ============================================================
 
 fn render_label(el, info) {
-    let label_name = trim(util.text_of(el))
+    let label_name = trim(util.text_of(el));
     <a id: util.slugify(label_name)>
 }
 
@@ -1326,11 +1326,11 @@ fn render_ref(el, info) {
     let ref_name = trim(util.text_of(el))
     let label_info = util.lookup(info.labels, ref_name)
     if (label_info != null) {
-        <a class: "latex-ref", href: "#" ++ label_info.id;
+        <a class: "latex-ref", href: "#" ++ label_info.id,
             label_info.number
         >
     } else {
-        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name);
+        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name),
             "??"
         >
     }
@@ -1341,12 +1341,12 @@ fn render_autoref(el, info) {
     let label_info = util.lookup(info.labels, ref_name)
     if (label_info != null) {
         let prefix = autoref_prefix(label_info.type)
-        let display = prefix ++ label_info.number
-        <a class: "latex-ref latex-autoref", href: "#" ++ label_info.id;
+        let display = prefix ++ label_info.number;
+        <a class: "latex-ref latex-autoref", href: "#" ++ label_info.id,
             display
         >
     } else {
-        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name);
+        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name),
             "??"
         >
     }
@@ -1373,12 +1373,12 @@ fn render_nameref(el, info) {
     let label_info = util.lookup(info.labels, ref_name)
     if (label_info != null) {
         let title_val = label_info.title
-        let display = get_nameref_display(title_val, label_info.number)
-        <a class: "latex-ref latex-nameref", href: "#" ++ label_info.id;
+        let display = get_nameref_display(title_val, label_info.number);
+        <a class: "latex-ref latex-nameref", href: "#" ++ label_info.id,
             display
         >
     } else {
-        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name);
+        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name),
             "??"
         >
     }
@@ -1393,20 +1393,20 @@ fn get_nameref_display(title_val, number_val) {
 fn render_href(el, info) {
     let n = len(el)
     let url = if (n > 0) util.text_of(el[0]) else "#"
-    let display = if (n > 1) render_children(el, 1, info) else [url]
-    <a href: url; for d in display { d }>
+    let display = if (n > 1) render_children(el, 1, info) else [url];
+    <a href: url, for d in display { d }>
 }
 
 fn render_url(el) {
-    let url = util.text_of(el)
-    <a class: "latex-url", href: url; url>
+    let url = util.text_of(el);
+    <a class: "latex-url", href: url, url>
 }
 
 fn render_cite(el, info) {
     let cite_key = trim(util.text_of(el))
     let bib_num = find_bib_num(info.bibitems, cite_key, 0)
-    let display_num = if (bib_num > 0) string(bib_num) else "?"
-    <a class: "latex-cite", href: "#bib-" ++ cite_key; "[" ++ display_num ++ "]">
+    let display_num = if (bib_num > 0) string(bib_num) else "?";
+    <a class: "latex-cite", href: "#bib-" ++ cite_key, "[" ++ display_num ++ "]">
 }
 
 fn find_bib_num(bibitems, key, i) {
@@ -1421,10 +1421,10 @@ fn check_bib_match(bibitems, key, i) {
 }
 
 fn render_bibliography(el, info) {
-    let items = render_bib_items(el, info)
-    <section class: "latex-bibliography";
-        <h2; "References">
-        <ol class: "latex-bib-list";
+    let items = render_bib_items(el, info);
+    <section class: "latex-bibliography",
+        <h2 "References">
+        <ol class: "latex-bib-list",
             for item in items { item }
         >
     >
@@ -1528,7 +1528,7 @@ fn finish_bib_list(cur_key, cur_content, acc) {
 }
 
 fn make_bib_li(key, content) {
-    <li id: "bib-" ++ key;
+    <li id: "bib-" ++ key,
         for c in content { c }
     >
 }
@@ -1540,9 +1540,9 @@ fn make_bib_li(key, content) {
 fn render_footnote(el, info) {
     let content_text = trim(util.text_of(el))
     let fn_key = util.slugify(content_text)
-    let fn_num = find_footnote_num(info.footnotes, fn_key, 0)
-    <sup class: "latex-footnote-ref";
-        <a href: "#fn-" ++ (fn_num), id: "fnref-" ++ (fn_num);
+    let fn_num = find_footnote_num(info.footnotes, fn_key, 0);
+    <sup class: "latex-footnote-ref",
+        <a href: "#fn-" ++ (fn_num), id: "fnref-" ++ (fn_num),
             string(fn_num)
         >
     >
@@ -1566,7 +1566,7 @@ fn find_footnote_by_key(footnotes, key, i) {
 // ============================================================
 
 fn render_latex_logo() {
-    <span class: "latex-logo";
+    <span class: "latex-logo",
         "L"
         <sup "A">
         "T"
@@ -1576,7 +1576,7 @@ fn render_latex_logo() {
 }
 
 fn render_tex_logo() {
-    <span class: "tex-logo";
+    <span class: "tex-logo",
         "T"
         <sub "E">
         "X"
@@ -1584,13 +1584,13 @@ fn render_tex_logo() {
 }
 
 fn render_latex2e_logo() {
-    <span class: "latex-logo";
+    <span class: "latex-logo",
         "L"
         <sup "A">
         "T"
         <sub "E">
         "X"
-        <span class: "latex-2e"; "2">
+        <span class: "latex-2e", "2">
         <i "\u03B5">
     >
 }
@@ -1679,7 +1679,7 @@ fn render_group(el, info) {
         let items = render_children(el, 0, info)
         if (len(items) == 0) null
         else if (len(items) == 1) items[0]
-        else <span; for c in items { c }>
+        else <span for c in items { c }>
     }
 }
 
@@ -1770,8 +1770,8 @@ fn build_img_style(opts) {
 }
 
 fn render_marginpar(el, info) {
-    let items = render_children(el, 0, info)
-    <span class: "latex-cmd-marginpar"; for c in items { c }>
+    let items = render_children(el, 0, info);
+    <span class: "latex-cmd-marginpar", for c in items { c }>
 }
 
 fn render_generic(el, info) {
@@ -1794,16 +1794,16 @@ fn render_custom_theorem(el, info, thm_def) {
     if (thm_def.numbered) {
         // look up counter from theorems list
         let env_num = get_theorem_num(el, info, env_type)
-        let heading = display_name ++ " " ++ (env_num) ++ "."
-        <div class: "latex-theorem latex-" ++ env_type;
-            <strong class: "latex-theorem-head"; heading>
+        let heading = display_name ++ " " ++ (env_num) ++ ".";
+        <div class: "latex-theorem latex-" ++ env_type,
+            <strong class: "latex-theorem-head", heading>
             " "
             for c in items { c }
         >
     } else {
         // unnumbered variant
-        <div class: "latex-theorem latex-" ++ env_type;
-            <strong class: "latex-theorem-head"; display_name ++ ".">
+        <div class: "latex-theorem latex-" ++ env_type,
+            <strong class: "latex-theorem-head", display_name ++ ".">
             " "
             for c in items { c }
         >
@@ -1816,7 +1816,7 @@ fn render_macro_invocation(el, info, macro_def) {
     let rendered = render_items(body_items, 0, len(body_items), info, [])
     if (len(rendered) == 0) null
     else if (len(rendered) == 1) rendered[0]
-    else <span; for c in rendered { c }>
+    else <span for c in rendered { c }>
 }
 
 fn build_macro_args(el, macro_def) {
@@ -1827,7 +1827,7 @@ fn build_macro_args(el, macro_def) {
 
 fn has_optional_arg(el) {
     if (len(el) > 0) {
-        let first = el[0]
+        let first = el[0];
         (first is element and string(name(first)) == "brack_group")
     }
     else { false }
@@ -1859,6 +1859,6 @@ fn render_generic_default(el, info) {
         let items = render_children(el, 0, info)
         if (len(items) == 0) null
         else if (len(items) == 1) items[0]
-        else <span class: "latex-cmd-" ++ name(el); for c in items { c }>
+        else <span class: "latex-cmd-" ++ name(el), for c in items { c }>
     }
 }
