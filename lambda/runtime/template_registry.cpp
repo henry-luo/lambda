@@ -11,6 +11,9 @@
 
 extern __thread EvalContext* context;
 
+extern "C" Item interp_eval_view_template(Context* context, Script* module,
+                                           AstViewNode* view, Item model);
+
 TemplateRegistry** template_registry_current_slot(void) {
     if (!context) {
         log_error("template-registry: no bound EvalContext");
@@ -103,6 +106,25 @@ void template_entry_add_handler(TemplateEntry* entry,
 
     log_debug("template_entry_add_handler: tmpl=%s event=%s",
               entry->name ? entry->name : "(anon)", event_name);
+}
+
+void template_entry_add_interp_handler(TemplateEntry* entry,
+                                       const char* event_name,
+                                       AstEventHandler* handler,
+                                       AstViewNode* view,
+                                       Script* module) {
+    if (!entry || !event_name || !handler || !view || !module) return;
+    TemplateHandlerEntry* h = (TemplateHandlerEntry*)mem_calloc(1,
+        sizeof(TemplateHandlerEntry), MEM_CAT_SYSTEM);
+    if (!h) return;
+    h->event_name = event_name;
+    h->interp_handler = handler;
+    h->interp_view = view;
+    h->interp_module = module;
+    h->next = entry->handlers;
+    entry->handlers = h;
+    log_debug("template_entry_add_interp_handler: tmpl=%s event=%s",
+        entry->name ? entry->name : "(anon)", event_name);
 }
 
 TemplateEntry* template_registry_find_ref(TemplateRegistry* registry,
@@ -232,11 +254,16 @@ TemplateEntry* template_registry_match(TemplateRegistry* registry,
 
 // invoke a template body function
 static Item invoke_template(TemplateEntry* tmpl, Item target) {
-    if (!tmpl || !tmpl->body_func) return ItemNull;
+    if (!tmpl) return ItemNull;
     if (!context) {
         log_error("template invoke: no bound EvalContext");
         return ItemError;
     }
+    if (tmpl->interp_view) {
+        return interp_eval_view_template((Context*)context, tmpl->interp_module,
+            tmpl->interp_view, target);
+    }
+    if (!tmpl->body_func) return ItemNull;
     // Host dispatch establishes the canonical context once; generated code
     // receives it explicitly and never reloads `_lambda_rt`.
     typedef Item (*template_body_fn)(Context*, Item);

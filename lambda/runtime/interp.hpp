@@ -122,12 +122,26 @@ struct InterpErrorContext {
     InterpErrorContext* prev;
 };
 
+// A view activation overlays its state/handler parameters on the ordinary
+// frame bindings. These entries remain rooted in the activation's RootSpan;
+// the chain itself is interpreter control state only.
+struct InterpViewBinding {
+    NameEntry* entry;
+    uint64_t* value;
+    uint64_t* model;
+    const char* template_ref;
+    const char* state_name;
+    bool is_state;
+    InterpViewBinding* prev;
+};
+
 struct InterpState {
     EvalContext* ctx;
     Runtime*     runtime;
     InterpFrame* top;
     InterpContext* contexts;
     InterpErrorContext* errors;
+    InterpViewBinding* view_bindings;
     // The current subscript owner for a nested `last` expression. This points
     // at a live frame slot and is restored when that subscript completes.
     uint64_t*    last_index_item;
@@ -180,10 +194,10 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment);
 // current walker. On false, `*reject` receives the first unsupported kind.
 bool interp_scan_supported(Script* script, AstNodeType* reject);
 
-// True only for the currently implemented P2 satellite boundary: non-async,
-// no captures/properties and only planned Lambda imports. Module bindings are
-// read from T0's shared slab; a rejected function remains T0 for semantic
-// safety.
+// True only for the currently implemented satellite boundary: task-backed
+// procedures and synchronous functions without captures, nested definitions,
+// or unsupported mutation. Module bindings are read from T0's shared slab; a
+// rejected function remains T0 for semantic safety.
 bool interp_satellite_supported(const AstFuncNode* fn);
 // True when an imported binding has a planned T0 owner and a stable module
 // slab slot. Satellite lowering uses this predicate before embedding that
@@ -224,6 +238,19 @@ Item interp_call(Function* fn, const Item* args, int argc);
 #ifdef __cplusplus
 }
 #endif
+
+// Apply() dispatches an interpreter-owned view through this bridge. Edit
+// templates remain on the generated registry path; retained event callbacks
+// borrow their document EvalContext when no script runner is active.
+extern "C" Item interp_eval_view_template(Context* context, Script* module,
+                                           AstViewNode* view, Item model);
+
+// Event dispatch uses the same overlay for interpreted view handlers. The
+// bridge is inert for generated MIR entries, which retain their existing ABI.
+extern "C" Item interp_eval_view_handler(Context* context, Script* module,
+                                          AstViewNode* view,
+                                          AstEventHandler* handler,
+                                          Item model, Item event);
 
 // Called by the shared dynamic dispatcher immediately before invoking a T0
 // function. On success it upgrades that Function in place to its published

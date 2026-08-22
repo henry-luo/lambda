@@ -96,6 +96,14 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
     return NULL;
 }
 
+AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
+    if (!literal) return NULL;
+    for (AstNode* item = literal->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) return item;
+    }
+    return NULL;
+}
+
 bool has_fixed_shape(TypeMap* map_type) {
     if (!map_type->struct_name) return false;
     if (!map_type->shape || map_type->length == 0) return false;

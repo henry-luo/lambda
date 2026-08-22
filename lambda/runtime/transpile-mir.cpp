@@ -199,6 +199,9 @@ struct MirTranspiler {
     MIR_reg_t module_state_reg;
     uint32_t global_var_slot_count;
     ArrayList* property_keys;
+    // Satellite key indices are local to this image but resolve through the
+    // owner's append-only context image after its existing T0 keys.
+    uint32_t satellite_property_key_base;
     // Tail of the entry prologue chain used for module-state and static-key
     // materialization. It is reset with module_state_reg at each function
     // boundary so an entry register never crosses MIR functions.
@@ -4556,10 +4559,15 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
     // definition. The cache is function-qualified because property_keys is
     // module-wide while virtual registers are function-local (D4.6.1v2-D4.6.2v2).
     MIR_reg_t state = emit_module_state(mt);
+    uint32_t state_index = index;
+    if (mt->satellite_target) {
+        if (index > UINT32_MAX - mt->satellite_property_key_base) return 0;
+        state_index += mt->satellite_property_key_base;
+    }
     mt->em.insert_after = mt->module_state_tail;
     MIR_reg_t result = emit_call_2(mt, "lambda_module_name_id_at", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, state),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_index));
     MIR_insn_t inserted_tail = mt->em.insert_after;
     mt->em.insert_after = 0;
     if (!result) return 0;
@@ -21255,22 +21263,50 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return o;
         }
 
+        AstNode* spread_node = ast_object_literal_spread_value(obj_lit);
+        MIR_reg_t spread_item = 0;
+        int spread_root = -1;
+        if (spread_node) {
+            spread_item = transpile_box_item(mt, spread_node);
+            spread_root = create_gc_root_slot(mt, spread_item);
+        }
+
         MIR_op_t* val_ops = LAMBDA_ALLOCA(val_count, MIR_op_t);
         ShapeEntry* field = obj_type->shape;
         int vi = 0;
         for (; field; field = field->next) {
             AstNode* value_node = ast_object_literal_value_for_shape(obj_lit, field);
-            if (!value_node) value_node = field->default_value;
+            MIR_reg_t val = 0;
             if (value_node) {
-                MIR_reg_t val = transpile_box_item(mt, value_node);
-                val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
+                val = transpile_box_item(mt, value_node);
+            } else if (spread_root >= 0 && field->name) {
+                // The old path passed ItemNull for an omitted typed field;
+                // set_field_value then decoded null as a float/int payload and
+                // crashed before the object update could return. Read the
+                // spread source field first, preserving typed storage coercion.
+                spread_item = load_gc_root_slot(mt, spread_root, "object_spread");
+                String* key_name = name_pool_create_strview(mt->name_pool,
+                    (StrView){field->name->str, field->name->length});
+                uint32_t key_index = module_property_key_index(mt, key_name);
+                if (key_index == UINT32_MAX) {
+                    log_error("object spread: unable to register field key '%.*s'",
+                        (int)field->name->length, field->name->str);
+                    return 0;
+                }
+                MIR_reg_t key = emit_module_property_key_load(mt, key_index);
+                val = emit_call_2(mt, "fn_member_by_id", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, spread_item),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            } else if (field->default_value) {
+                val = transpile_box_item(mt, field->default_value);
             } else {
                 MIR_reg_t nul = new_reg(mt, "objnull", MIR_T_I64);
                 uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nul),
                     MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                val_ops[vi++] = MIR_new_reg_op(mt->ctx, nul);
+                val = nul;
             }
+            val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
         }
 
         // call object_fill(o, val1, val2, ...) — variadic
@@ -26591,6 +26627,9 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
     mt.ast_index = ast_index;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
+    mt.satellite_property_key_base = satellite_target && interp_module_owner
+        ? lambda_module_state_property_key_count(interp_module_owner->module_state_id)
+        : 0;
     mt.source = source;
     mt.is_main = true;
     mt.type_list = type_list;
@@ -26907,6 +26946,39 @@ static bool make_satellite_module_names(Script* script, uint32_t sequence,
     return true;
 }
 
+static void register_cross_lang_pub_fns(Runtime* runtime, AstImportNode* imp);
+
+// Encode one satellite's local key table before appending it to the owner's
+// context image. The MIR emitter indexes this exact order (D4.6.1v2).
+static bool build_property_key_image(ArrayList* property_keys,
+        PropertyKeySpec* specs, uint32_t capacity, uint32_t* out_bytes) {
+    uint32_t count = property_keys ? (uint32_t)property_keys->length : 0;
+    uint64_t header = (uint64_t)count * sizeof(PropertyKeySpec);
+    if (!specs || !out_bytes || header > capacity || header > UINT32_MAX) return false;
+    uint32_t bytes_size = (uint32_t)header;
+    memset(specs, 0, capacity);
+    for (uint32_t index = 0; index < count; index++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
+            property_keys, (int)index);
+        if (!entry || !entry->name) return false;
+        PropertyKeySpec* spec = &specs[index];
+        spec->predefined_id = entry->predefined_id;
+        if (entry->predefined_id == NAME_ID_NONE) {
+            uint64_t need = (uint64_t)entry->name->len + 1;
+            if (need > UINT32_MAX - bytes_size ||
+                    bytes_size + need > capacity) return false;
+            spec->name_offset = bytes_size;
+            spec->name_length = entry->name->len;
+            memcpy((uint8_t*)specs + bytes_size, entry->name->chars,
+                entry->name->len);
+            bytes_size += entry->name->len;
+            ((uint8_t*)specs)[bytes_size++] = '\0';
+        }
+    }
+    *out_bytes = bytes_size;
+    return true;
+}
+
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         const AstFuncNode* fn, void** out_boxed_entry) {
     if (out_boxed_entry) *out_boxed_entry = NULL;
@@ -26941,6 +27013,18 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     AstScript* source_root = (AstScript*)script->ast_root;
     satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
 
+    // A satellite links its own MIR module directly, so it must publish the
+    // hosted JS export pointers that the ordinary module compiler registers
+    // before MIR_link (D7.2.2).
+    for (AstNode* child = source_root ? source_root->child : NULL;
+            child; child = child->next) {
+        if (child->node_type != AST_NODE_IMPORT) continue;
+        AstImportNode* imp = (AstImportNode*)child;
+        if (imp->is_cross_lang && import_is_js(imp)) {
+            register_cross_lang_pub_fns(runtime, imp);
+        }
+    }
+
     MirModuleArtifacts artifacts = {};
     ArrayList* property_keys = NULL;
     transpile_mir_ast_named(script->jit_context, &satellite_root, script->source,
@@ -26948,11 +27032,32 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
         &script->ast_index);
     if (property_keys && property_keys->length != 0) {
-        // The eligibility scan should make this unreachable. Refuse publication
-        // if it ever drifts instead of giving satellites unequal key layouts.
-        log_error("interp-tier: satellite unexpectedly emitted property keys");
-        arraylist_free(property_keys);
-        return false;
+        uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
+        for (int index = 0; index < property_keys->length; index++) {
+            MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
+                property_keys, index);
+            if (!entry || !entry->name || entry->predefined_id != NAME_ID_NONE) continue;
+            capacity += (uint64_t)entry->name->len + 1;
+        }
+        if (capacity > UINT32_MAX) {
+            log_error("interp-tier: satellite property key image is too large");
+            arraylist_free(property_keys);
+            return false;
+        }
+        PropertyKeySpec* image = (PropertyKeySpec*)mem_calloc(1,
+            (size_t)capacity, MEM_CAT_EVAL);
+        uint32_t bytes_size = 0;
+        bool image_ok = image && build_property_key_image(property_keys, image,
+            (uint32_t)capacity, &bytes_size);
+        bool linked = image_ok && lambda_module_state_append_property_keys(
+            script->module_state_id, image, (uint32_t)property_keys->length,
+            bytes_size);
+        mem_free(image);
+        if (!linked) {
+            log_error("interp-tier: satellite property key image could not link");
+            arraylist_free(property_keys);
+            return false;
+        }
     }
     if (property_keys) arraylist_free(property_keys);
 
@@ -27140,21 +27245,22 @@ static bool finalize_module_property_key_specs(MIR_context_t ctx,
     }
     uint8_t* bytes = (uint8_t*)bss_item->addr;
     PropertyKeySpec* specs = (PropertyKeySpec*)bytes;
-    uint32_t bytes_size = (uint32_t)((size_t)property_keys->length * sizeof(PropertyKeySpec));
+    uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
     for (int index = 0; index < property_keys->length; index++) {
-        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(property_keys, index);
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
+            property_keys, index);
         if (!entry || !entry->name) return false;
-        PropertyKeySpec* spec = &specs[index];
-        memset(spec, 0, sizeof(*spec));
-        spec->predefined_id = entry->predefined_id;
-        if (spec->predefined_id == NAME_ID_NONE) {
-            if (entry->name->len > UINT32_MAX - bytes_size - 1) return false;
-            spec->name_offset = bytes_size;
-            spec->name_length = entry->name->len;
-            memcpy(bytes + bytes_size, entry->name->chars, entry->name->len);
-            bytes_size += entry->name->len;
-            bytes[bytes_size++] = '\0';
+        if (entry->predefined_id == NAME_ID_NONE) {
+            capacity += (uint64_t)entry->name->len + 1;
         }
+    }
+    if (capacity > UINT32_MAX) return false;
+    uint32_t bytes_size = 0;
+    if (!build_property_key_image(property_keys, specs, (uint32_t)capacity,
+            &bytes_size)) {
+        // The BSS size was computed from the same entries; a failure here is
+        // an internal image-shape violation rather than a recoverable input.
+        return false;
     }
     layout->property_key_bytes_size = bytes_size;
     layout->property_key_specs = specs;
