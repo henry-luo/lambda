@@ -82,7 +82,7 @@ let transformed: string = numeric_outcome(1, false) ^ {
     "error"
 } ~ {
     "value"
-}
+};
 
 [success, failure, soft_error, null_value, false_value, handled_member,
     outer_error_value, shadowed_value, nested_outer_error, nested_outer_value,

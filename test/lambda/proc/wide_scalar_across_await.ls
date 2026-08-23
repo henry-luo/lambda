@@ -2,7 +2,7 @@
 // A suspension is a re-homing barrier (D5.1.3), and under the companion-lane
 // return convention (RV5) the async spill tracker must only ever observe
 // resolved Items — never a pending lane-1 Item whose payload rides a register
-// that dies at the next call. int64 and out-of-band (subnormal) doubles are the
+// that dies at the next call. i64 and out-of-band (subnormal) doubles are the
 // two wide representations that can be returned, so both cross the await here,
 // as call results and as values derived from them.
 fn wide_int() { 9007199254740993i64 }

@@ -48,10 +48,10 @@ let safe1 = process("10", "2") or "default"
 safe1
 
 let safe2 = process("abc", "1") or "fallback"
-safe2
+safe2;
 
 // ===== expr is error check =====
-(process("10", "2") ^ { ^ }) is error
+(process("10", "2") ^ { ^ }) is error;
 (process("abc", "1") ^ { ^ }) is error
 
 // ===== Error chain =====

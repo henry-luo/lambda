@@ -11,7 +11,7 @@
 -2.718
 0
 15000000000
-'=== float() from int64 ==='
+'=== float() from i64 ==='
 1000000
 -999999
 '=== float() from decimal ==='

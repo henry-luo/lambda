@@ -3,12 +3,12 @@
 
 // Basic element types matching Markdown parser output
 // Element syntax: <name attr1: type, attr2: type; content_type>
-type HeadingElement = <h1 level: int?; string>
-type ParagraphElement = <p id: string?, class: string*; string>
-type LinkElement = <a href: string, title: string?, target: string?; string>
-type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?; string?>
-type CodeElement = <code lang: string?, class: string*; string>
-type ListElement = <ul listType: string?, class: string*; string+>
+type HeadingElement = <h1 level: int?, string>
+type ParagraphElement = <p id: string?, class: string*, string>
+type LinkElement = <a href: string, title: string?, target: string?, string>
+type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?, string?>
+type CodeElement = <code lang: string?, class: string*, string>
+type ListElement = <ul listType: string?, class: string*, string+>
 
 // Union types for flexible content
 type ContentElement = HeadingElement | ParagraphElement | LinkElement | ImageElement | CodeElement | ListElement
@@ -61,4 +61,4 @@ type Section = {
 }
 
 // Main document type with all features - now as doc element to match Markdown parser output
-type Document = <doc version: string?, title: string?; ContentElement*>
+type Document = <doc version: string?, title: string?, ContentElement*>

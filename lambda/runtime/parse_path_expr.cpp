@@ -202,6 +202,15 @@ bool parse_path_root_or_scheme(PathLexer* lx, PathScheme* scheme,
         *scheme = PATH_SCHEME_REL;
         return true;
     }
+    // S16.9.4: the relative path is introduced by `\.` — the bare `.a.b`
+    // spelling was retired so that a line-start `.name` is member continuation
+    // (S16.2.4v2). Without this the introducer never matched, the path failed
+    // to parse, and the caller's error node was mistaken for a real path.
+    if (*lx->p == '\\' && lx->p + 1 < lx->end && lx->p[1] == '.') {
+        lx->p += 2;
+        *scheme = PATH_SCHEME_REL;
+        return true;
+    }
 
     const char* start = lx->p;
     if (!parse_path_scheme(lx, scheme)) {

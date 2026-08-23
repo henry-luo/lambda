@@ -24,6 +24,9 @@ typedef enum TemplateSpecificity {
 typedef struct TemplateHandlerEntry {
     const char* event_name;     // event name (e.g., "click", "init") — interned pointer
     fn_ptr handler_func;        // compiled handler: Item handler(Item model)
+    struct AstEventHandler* interp_handler; // T0 handler body, when present
+    struct AstViewNode* interp_view;         // owning T0 view
+    struct Script* interp_module;            // owning module for const/type lookup
     struct TemplateHandlerEntry* next;
 } TemplateHandlerEntry;
 
@@ -52,6 +55,12 @@ typedef struct TemplateEntry {
 
     // Event handlers
     TemplateHandlerEntry* handlers;  // linked list of compiled event handlers
+
+    // A T0 view/edit entry has no generated function pointer. The interpreter
+    // evaluates its body against the active `~` context when apply()
+    // dispatches here; generated MIR entries leave these fields null.
+    struct AstViewNode* interp_view;
+    struct Script* interp_module;
 
     struct TemplateEntry* next; // linked list
 } TemplateEntry;
@@ -95,6 +104,14 @@ TemplateEntry* template_registry_find_ref(TemplateRegistry* registry,
 void template_entry_add_handler(TemplateEntry* entry,
                                 const char* event_name,
                                 fn_ptr handler_func);
+
+// Register an AST-owned handler for an interpreter view. Generated handlers
+// continue to use template_entry_add_handler and their erased MIR ABI.
+void template_entry_add_interp_handler(TemplateEntry* entry,
+                                       const char* event_name,
+                                       struct AstEventHandler* handler,
+                                       struct AstViewNode* view,
+                                       struct Script* module);
 
 // The registry is semantic state of the active EvalContext. The compatibility
 // name preserves existing lowering code while preventing process-global

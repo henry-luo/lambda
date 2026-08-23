@@ -10,7 +10,7 @@ len(temperatures)
 temperatures |> sum()
 temperatures |> avg()
 temperatures |> min()
-temperatures |> max()
+temperatures |> max();
 
 // ===== Range =====
 (temperatures |> max()) - (temperatures |> min())

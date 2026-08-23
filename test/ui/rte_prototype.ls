@@ -64,10 +64,10 @@ fn text_has_mark(marks, mark) => text_has_mark_at(marks, mark, 0, len(marks))
 
 fn render_text_leaf(leaf) {
   let content0 = if (leaf.text == "") { "\u200B" } else { leaf.text }
-  let content1 = if (text_has_mark(leaf.marks, 'code')) { <code; content0> } else { content0 }
-  let content2 = if (text_has_mark(leaf.marks, 'u')) { <u; content1> } else { content1 }
-  let content3 = if (text_has_mark(leaf.marks, 'em')) { <em; content2> } else { content2 }
-  if (text_has_mark(leaf.marks, 'strong')) { <strong; content3> } else { content3 }
+  let content1 = if (text_has_mark(leaf.marks, 'code')) { <code content0> } else { content0 }
+  let content2 = if (text_has_mark(leaf.marks, 'u')) { <u content1> } else { content1 }
+  let content3 = if (text_has_mark(leaf.marks, 'em')) { <em content2> } else { content2 }
+  if (text_has_mark(leaf.marks, 'strong')) { <strong content3> } else { content3 }
 }
 
 let initial_editor_doc = node('doc', [for (child in initial_body) mark_to_editor(child)])
@@ -162,39 +162,39 @@ view any { ~ }
 
 view map {
   if (~.kind == 'text') { render_text_leaf(~) }
-  else if (~.kind == 'node' and ~.tag == 'doc') { <div class:"doc-body"; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'h1') { <h1; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'h2') { <h2; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'h3') { <h3; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'h4') { <h4; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'h5') { <h5; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'h6') { <h6; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and (~.tag == 'p' or ~.tag == 'paragraph')) { <p; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'span') { <span; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'strong') { <strong; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'em') { <em; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'u') { <u; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and (~.tag == 'code_block' or ~.tag == 'pre')) { <pre; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'code') { <code; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and (~.tag == 'ul' or ~.tag == 'list')) { <ul; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'ol') { <ol; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'li') { <li; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'blockquote') { <blockquote; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'a') { <a href:attr_value(~, 'href'); *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'doc') { <div class:"doc-body", *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h1') { <h1 *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h2') { <h2 *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h3') { <h3 *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h4') { <h4 *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h5') { <h5 *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h6') { <h6 *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'p' or ~.tag == 'paragraph')) { <p *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'span') { <span *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'strong') { <strong *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'em') { <em *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'u') { <u *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'code_block' or ~.tag == 'pre')) { <pre *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'code') { <code *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'ul' or ~.tag == 'list')) { <ul *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'ol') { <ol *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'li') { <li *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'blockquote') { <blockquote *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'a') { <a href:attr_value(~, 'href'), *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'img') { <img src:attr_value(~, 'src'), alt:attr_value(~, 'alt')> }
   else if (~.kind == 'node' and ~.tag == 'hr') { <hr> }
-  else if (~.kind == 'node' and ~.tag == 'table') { <table; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'thead') { <thead; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'tbody') { <tbody; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'tfoot') { <tfoot; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'tr') { <tr; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'th') { <th; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and ~.tag == 'td') { <td; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node') { <div; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'table') { <table *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'thead') { <thead *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'tbody') { <tbody *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'tfoot') { <tfoot *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'tr') { <tr *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'th') { <th *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'td') { <td *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node') { <div *[for (c in ~.content) apply(c)]> }
   else { "" }
 }
 
-view <h1> { <h1; apply;> }
+view <h1> { <h1 apply;> }
 view <h2> { <h2; apply;> }
 view <h3> { <h3; apply;> }
 view <h4> { <h4; apply;> }

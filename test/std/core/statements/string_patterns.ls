@@ -60,5 +60,5 @@ type three_chars = \(.[3])
 "abcd" is three_chars
 
 // ===== Used in filter =====
-type upper_pat = \(("A" to "Z")+)
+type upper_pat = \(("A" to "Z")+);
 ["HELLO", "world", "FOO", "bar", "BAZ"] |> filter((s) => s is upper_pat)

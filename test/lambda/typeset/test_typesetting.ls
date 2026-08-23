@@ -1,9 +1,9 @@
-# Typesetting System Test
+// Typesetting System Test
 
-# This Lambda script demonstrates the new typesetting system
-# It shows how to create documents and render them to SVG pages
+// This Lambda script demonstrates the new typesetting system
+// It shows how to create documents and render them to SVG pages
 
-# Create a simple document with text and math
+// Create a simple document with text and math
 doc_content = <document>
     {
         'title': 'Test Document',
@@ -46,7 +46,7 @@ doc_content = <document>
     </paragraph>
 </document>
 
-# Typeset the document with custom options
+// Typeset the document with custom options
 typeset_options = {
     'page_size': 'A4',
     'font_family': 'Times New Roman',
@@ -55,10 +55,10 @@ typeset_options = {
     'line_height': 1.2
 }
 
-# Render the document to SVG pages
+// Render the document to SVG pages
 svg_pages = typeset(doc_content, typeset_options)
 
-# Output each page as a separate SVG file
+// Output each page as a separate SVG file
 page_num = 1
 for page in svg_pages {
     filename = 'test_document_page_' ++ page_num ++ '.svg'
@@ -69,7 +69,7 @@ for page in svg_pages {
 
 print('Typesetting complete. Generated ', len(svg_pages), ' pages.')
 
-# Example of typesetting just a mathematical expression
+// Example of typesetting just a mathematical expression
 math_expr = input('test_equation.math', {'type': 'math', 'flavor': 'latex'})
 math_pages = typeset(math_expr, {
     'display_style': 'block',
@@ -80,13 +80,13 @@ math_pages = typeset(math_expr, {
 output('math_equation.svg', math_pages[0].svg_content, 'svg')
 print('Generated mathematical expression: math_equation.svg')
 
-# Example of typesetting from Markdown
+// Example of typesetting from Markdown
 markdown_content = '
-# Test Markdown Document
+// Test Markdown Document
 
 This is a **bold** statement with *italic* text.
 
-## Mathematical Content
+//# Mathematical Content
 
 The quadratic formula is: $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$
 
@@ -94,7 +94,7 @@ And here is a display equation:
 
 $$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$
 
-### Lists
+//## Lists
 
 - First item
 - Second item with `inline code`
@@ -104,7 +104,7 @@ $$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$
 2. Numbered item two
 3. Numbered item three
 
-### Tables
+//## Tables
 
 | Column 1 | Column 2 | Column 3 |
 |----------|----------|----------|
@@ -136,7 +136,7 @@ for page in md_pages {
 
 print('Generated Markdown document with ', len(md_pages), ' pages.')
 
-# Demonstrate LaTeX document processing
+// Demonstrate LaTeX document processing
 latex_content = '
 \\documentclass{article}
 \\usepackage{amsmath}

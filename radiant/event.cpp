@@ -53,6 +53,10 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
 // thread-local eval context used by heap allocation functions
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
+extern "C" Item interp_eval_view_handler(Context* context, Script* module,
+                                           AstViewNode* view,
+                                           AstEventHandler* handler,
+                                           Item model, Item event);
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 
@@ -714,11 +718,15 @@ static DomDocument* event_context_find_focused_document(DomDocument* doc,
     return event_context_find_focused_document_in_view(doc->view_tree->root, depth);
 }
 
-static Item call_template_event_handler(fn_ptr handler_func, Item model_item,
-                                        Item event_item) {
+static Item call_template_event_handler(TemplateHandlerEntry* entry,
+                                        Item model_item, Item event_item) {
     if (!context) {
         log_error("template event: no bound EvalContext");
         return ItemError;
+    }
+    if (entry && entry->interp_handler) {
+        return interp_eval_view_handler((Context*)context, entry->interp_module,
+            entry->interp_view, entry->interp_handler, model_item, event_item);
     }
     typedef Item (*TemplateEventHandlerFn)(Context*, Item, Item);
     union {
@@ -727,7 +735,7 @@ static Item call_template_event_handler(fn_ptr handler_func, Item model_item,
     } handler;
     // template_registry stores generated handlers as erased fn_ptr; event
     // handlers receive the host-bound canonical context explicitly.
-    handler.raw = handler_func;
+    handler.raw = entry ? entry->handler_func : NULL;
     return handler.typed((Context*)context, model_item, event_item);
 }
 
@@ -2098,7 +2106,7 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                                     uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
                                     // invoke parent handler with (parent_source_item, event_data)
-                                    call_template_event_handler(h->handler_func,
+                                    call_template_event_handler(h,
                                         lookup.source_item, event_data);
 
                                     if (tmpl->is_edit &&
@@ -2262,7 +2270,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
                                 // invoke handler: Item handler(Item model, Item event)
-                                call_template_event_handler(h->handler_func,
+                                call_template_event_handler(h,
                                     lookup.source_item, event_item);
 
                                 auto t_handler = high_resolution_clock::now();

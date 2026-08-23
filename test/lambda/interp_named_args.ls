@@ -1,5 +1,5 @@
 fn rect(left, top, width, height) => [left, top, width, height]
-fn config(host = "localhost", port = 8080, debug = false) => [host, port, debug]
+fn config(host = "localhost", port = 8080, debug = false) => [host, port, debug];
 
 [
   rect(height: 50, width: 100, top: 20, left: 10),

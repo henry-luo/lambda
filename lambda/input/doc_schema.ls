@@ -240,7 +240,7 @@ type AttrType = {
 // Core document structure types
 type Document {
     version: string,
-    <meta: Meta>?,
+    <meta Meta>?,
     <body>
 }
 
@@ -252,30 +252,30 @@ type Body { BlockContent* }
 
 // Block-level elements
 type Para { id: string?, class: CssClass?, 'data-*': DataAttrs?, InlineContent* }
-type LineBlock { BaseAttrs, <line: InlineContent*>* }
+type LineBlock { BaseAttrs, <line InlineContent*>* }
 type CodeBlock { CodeAttrs, string }
 type RawBlock { RawAttrs, string }
 type BlockQuote { BaseAttrs, BlockContent* }
 type Header { HeaderAttrs, InlineContent* }
 type HorizontalRule { BaseAttrs }
 type Div { BaseAttrs, BlockContent* }
-type Figure { BaseAttrs, <img>, <figcaption: InlineContent*>? }
+type Figure { BaseAttrs, <img>, <figcaption InlineContent*>? }
 
 // List elements
-type OrderedList { ListAttrs, <li: BlockContent*>* }
-type BulletList { BaseAttrs, <li: BlockContent*>* }
+type OrderedList { ListAttrs, <li BlockContent*>* }
+type BulletList { BaseAttrs, <li BlockContent*>* }
 type DefinitionList {
     BaseAttrs,
-    (<dt: InlineContent*>, <dd: BlockContent*>)*
+    (<dt InlineContent*>, <dd BlockContent*>)*
 }
 
 // Table elements
 type Table {
     BaseAttrs,
-    <caption: InlineContent*>?,
-    <colgroup: <col: ColAttrs>*>?,
-    <thead: <tr: (<th: TableCellAttrs, BlockContent*> | <td: TableCellAttrs, BlockContent*>)*>*>?,
-    <tbody: <tr: (<th: TableCellAttrs, BlockContent*> | <td: TableCellAttrs, BlockContent*>)*>*>?
+    <caption InlineContent*>?,
+    <colgroup <col ColAttrs>*>?,
+    <thead <tr (<th TableCellAttrs, BlockContent*> | <td TableCellAttrs, BlockContent*>)*>*>?,
+    <tbody <tr (<th TableCellAttrs, BlockContent*> | <td TableCellAttrs, BlockContent*>)*>*>?
 }
 
 // Inline elements
@@ -295,7 +295,7 @@ type Space { BaseAttrs }
 type SoftBreak { BaseAttrs }
 
 // Citation elements
-type Cite { BaseAttrs, <citation: CitationAttrs>* }
+type Cite { BaseAttrs, <citation CitationAttrs>* }
 type Note { BaseAttrs, BlockContent* }
 type Math { MathAttrs, string }
 

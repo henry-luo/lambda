@@ -45,15 +45,15 @@ fn emit_ml_latex(result_box) {
     let d = result_box.depth
     let h_em = util.fmt_ml_em(h)
     if (d == 0.0) {
-        <span class: css.LATEX;
+        <span class: css.LATEX,
             <span class: css.STRUT, style: "height:" ++ h_em>
             result_box.element
         >
     } else {
         let total_em = util.fmt_ml_em(h + d)
         let depth_em = util.fmt_ml_em(0.0 - d)
-        let strut_bottom_style = "height:" ++ total_em ++ ";vertical-align:" ++ depth_em
-        <span class: css.LATEX;
+        let strut_bottom_style = "height:" ++ total_em ++ ";vertical-align:" ++ depth_em;
+        <span class: css.LATEX,
             <span class: css.STRUT, style: "height:" ++ h_em>
             <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
             result_box.element

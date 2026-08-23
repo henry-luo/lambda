@@ -1,10 +1,12 @@
 // Object type with field-level and object-level constraints
+// S11.4.6 currently specifies base-only enforcement for constrained types;
+// this fixture records the current JIT/T0 parity until predicate enforcement lands.
 
 // === Field-level constraints ===
 type User {
     name: string that (len(~) > 0),
     age: int that (0 <= ~ and ~ <= 150),
-    email: string;
+    email: string
 }
 
 // valid user passes all constraints
@@ -26,7 +28,7 @@ bad_age2 is User
 // === Object-level constraints ===
 type DateRange {
     start: int,
-    end: int;
+    end: int,
     that (~.end > ~.start)
 }
 
@@ -39,7 +41,7 @@ invalid_range is DateRange
 // === Combined field + object constraints ===
 type Config {
     min: int that (~ >= 0),
-    max: int that (~ >= 0);
+    max: int that (~ >= 0),
     that (~.max > ~.min)
 }
 

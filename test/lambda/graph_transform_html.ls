@@ -1,6 +1,6 @@
 import transform: lambda.package.graph.transform
 
-let rich = <strong; "Rich">
+let rich = <strong "Rich">
 let result = transform.to_html({
   directed: true,
   nodes: [

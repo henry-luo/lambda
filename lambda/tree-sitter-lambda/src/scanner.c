@@ -2,41 +2,78 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
-// External scanner for tree-sitter-lambda.
+// External scanner for tree-sitter-lambda — S16 Surface Syntax guards.
 //
-// This scanner delimits the type language and the path sub-DSL: type forms,
-// string/symbol pattern islands,
-// and complete dotted path bodies arrive at the parser as opaque tokens. The
-// scanner only finds where a token ENDS — it never builds runtime objects. The
-// Lambda-side direct parsers consume the source spans. See
-// vibe/Lambda_Grammar_Reduce5.md.
+// Role (see vibe/Lambda_Design_Syntax.md §4.4): Tree-sitter is Lambda's
+// OFFICIAL GRAMMAR and cross-checking reference; the C recursive-descent
+// parser in lambda/runtime/parser/ is production. Because parse-table size no
+// longer constrains this grammar, the former sub-language extraction tokens
+// (type patterns, view patterns, path bodies) are gone — those are ordinary
+// grammar rules again. What CANNOT be expressed in grammar rules is newline
+// awareness: `/\s/` lives in `extras` and is invisible to the parser. That is
+// this scanner's whole remaining job.
 //
-// The split matters: this file is compiled standalone by the package's language
-// bindings, so it must not reach into the Lambda runtime, and tree-sitter may
-// run it speculatively during GLR ambiguity and error recovery, so it stays
-// free of side effects.
+// It emits three zero-width guards, all pure functions of the lookahead
+// position (no state, so serialize/deserialize stay empty and incremental
+// parsing is safe):
+//
+//   JOIN           the previous expression CONTINUES here (S16.2.2/S16.2.3)
+//   STMT_BOUNDARY  a new statement STARTS here            (S16.1.3)
+//   NOT_PAREN      the next token is not '('              (S16.6.2, §7.7)
+//
+// JOIN and STMT_BOUNDARY are mutually exclusive by construction: JOIN is
+// emitted only before a DUAL-role token, STMT_BOUNDARY only before a START
+// token. That disjointness is what lets both be valid in the same parse state
+// without the scanner having to guess which the parser wants. When a line
+// starts with a dual-role token, NEITHER is emitted, so both the continuation
+// and the new-statement path are blocked and the parse fails loudly — which is
+// exactly S16.2.3 ("neither reading wins by default").
+//
+// The scanner is compiled standalone by the package's language bindings, so it
+// must not reach into the Lambda runtime, and tree-sitter may run it
+// speculatively during GLR ambiguity and error recovery, so it stays free of
+// side effects.
 
 enum TokenType {
-    TYPE_PATTERN_TOKEN,
-    PRIMARY_TYPE_PATTERN_TOKEN,
-    PATTERN_ISLAND_TOKEN,
-    // Content position needs its own token: there, a bare name may instead be a
-    // FIELD name (`type T { a: int }`), and only the ':' after it tells the two
-    // apart. Sharing TYPE_PATTERN_TOKEN would consume the name before the
-    // parser ever sees the ':'.
-    CONTENT_TYPE_TOKEN,
-    // The declaration-only `T (^ E)?` type sub-form.
-    RETURN_TYPE_TOKEN,
-    // The complete view/edit model pattern (primary or `|` union).
-    VIEW_PATTERN_TOKEN,
-    // Everything after the grammar-owned rooted `/` then `.`, or relative `.`.
-    PATH_BODY_TOKEN,
+    // ORDER IS LOAD-BEARING: this enum must match grammar.js `externals`
+    // element for element, or every token id shifts.
+    // Guarded operator tokens. Each CONSUMES its own lexeme and is emitted only
+    // when the operator sits on the same line as its left operand. They are
+    // separate tokens rather than one zero-width guard because a zero-width
+    // marker would push the precedence-deciding token two symbols out of
+    // lookahead range and break LR(1) resolution for the operator tiers.
+    BIN_PLUS,
+    BIN_MINUS,
+    BIN_STAR,
+    BIN_SLASH,
+    BIN_LT,
+    CALL_LPAREN,
+    INDEX_LBRACKET,
+    MEMBER_DOT,
+    POSTFIX_CARET,
+    STMT_BOUNDARY,
+    // S16.5.1: inside an element, `<` is never an operator — it always opens a
+    // child — so it starts a juxtaposed content item where at statement level
+    // it would be dual-role. Element content therefore needs its own boundary
+    // token; the two differ only in how `<` is classified.
+    ELEM_STMT_BOUNDARY,
+    NOT_PAREN,
+    // §7.16: emitted (zero-width) after a numeric literal only when the very
+    // next character cannot continue an identifier. Withholding it makes
+    // `123abc` and `0b1010` LEXICAL errors instead of silent splits into a
+    // number plus a juxtaposed statement.
+    NUM_BOUNDARY,
+    // Never emitted. Tree-sitter marks every external token valid during error
+    // recovery; this sentinel is valid nowhere in the grammar, so seeing it
+    // means recovery is running and the scanner should decline.
+    ERROR_SENTINEL,
 };
 
 void *tree_sitter_lambda_external_scanner_create(void) {
-    return NULL;
+    return NULL;  // stateless by design; see the §7.17 note below
 }
 
 void tree_sitter_lambda_external_scanner_destroy(void *payload) {
@@ -56,16 +93,13 @@ void tree_sitter_lambda_external_scanner_deserialize(
     (void)length;
 }
 
-static bool is_horizontal_space(int32_t ch) {
-    return ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v';
-}
-
 static bool is_space(int32_t ch) {
-    return is_horizontal_space(ch) || ch == '\r' || ch == '\n';
+    return ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v' ||
+        ch == '\r' || ch == '\n';
 }
 
 static bool is_identifier_start(int32_t ch) {
-    return ch == '$' || ch == '_' || ch == '\\' ||
+    return ch == '$' || ch == '_' ||
         (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch >= 0x80;
 }
 
@@ -77,560 +111,92 @@ static bool is_digit(int32_t ch) {
     return ch >= '0' && ch <= '9';
 }
 
-static bool is_hex_digit(int32_t ch) {
-    return is_digit(ch) || (ch >= 'a' && ch <= 'f') ||
-        (ch >= 'A' && ch <= 'F');
-}
-
-// ---------------------------------------------------------------------------
-// shared lexing helpers
-// ---------------------------------------------------------------------------
-
-// Skip whitespace and comments as extras. `skip` marks them as not belonging to
-// the token, so a token never starts with or trails whitespace.
-static void skip_extras(TSLexer *lexer) {
-    for (;;) {
-        if (is_space(lexer->lookahead)) {
-            lexer->advance(lexer, true);
-        }
-        else if (lexer->lookahead == '/') {
-            // a comment is an extra; anything else beginning with '/' belongs to
-            // the caller, so this must not consume it
-            lexer->mark_end(lexer);
-            lexer->advance(lexer, true);
-            if (lexer->lookahead == '/') {
-                while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
-                    lexer->advance(lexer, true);
-                }
-            }
-            else if (lexer->lookahead == '*') {
-                lexer->advance(lexer, true);
-                int32_t prev = 0;
-                while (!lexer->eof(lexer) && !(prev == '*' && lexer->lookahead == '/')) {
-                    prev = lexer->lookahead;
-                    lexer->advance(lexer, true);
-                }
-                if (!lexer->eof(lexer)) { lexer->advance(lexer, true); }
-            }
-            else {
-                return;  // a lone '/', already past it — caller sees the rest
-            }
-        }
-        else { return; }
+// S16.2.2 continuation words: they cannot begin a statement, so a line may
+// start with one and the expression simply continues. `else`, `case`, and
+// `default` join the operator words because they continue their enclosing
+// construct; the `for`-clause words (`where`, `group`, `by`, `order`, `asc`,
+// `desc`, `limit`, `offset`, `into`) and the view-declaration `on` are here for
+// the same reason — each is only ever a continuation of the form it belongs to.
+static bool is_continuation_word(const char *w, unsigned n) {
+    switch (n) {
+        case 2:
+            return !strcmp(w, "or") || !strcmp(w, "to") || !strcmp(w, "in") ||
+                !strcmp(w, "is") || !strcmp(w, "at") || !strcmp(w, "eq") ||
+                !strcmp(w, "ne") || !strcmp(w, "lt") || !strcmp(w, "le") ||
+                !strcmp(w, "ge") || !strcmp(w, "gt") || !strcmp(w, "by") ||
+                !strcmp(w, "on");
+        case 3:
+            return !strcmp(w, "and") || !strcmp(w, "div") || !strcmp(w, "asc");
+        case 4:
+            return !strcmp(w, "that") || !strcmp(w, "else") ||
+                !strcmp(w, "case") || !strcmp(w, "desc") || !strcmp(w, "into");
+        case 5:
+            return !strcmp(w, "where") || !strcmp(w, "group") ||
+                !strcmp(w, "order") || !strcmp(w, "limit");
+        case 6:
+            return !strcmp(w, "offset");
+        case 7:
+            return !strcmp(w, "default");
+        default:
+            return false;
     }
 }
 
-// Consume a quoted string or symbol literal, escapes included. Assumes the
-// opening quote is the current lookahead.
-static void consume_quoted(TSLexer *lexer, int32_t quote) {
-    lexer->advance(lexer, false);
-    while (!lexer->eof(lexer) && lexer->lookahead != quote) {
-        if (lexer->lookahead == '\\') { lexer->advance(lexer, false); }
-        if (lexer->eof(lexer)) { return; }
-        lexer->advance(lexer, false);
-    }
-    if (!lexer->eof(lexer)) { lexer->advance(lexer, false); }  // closing quote
-}
-
-// Mirrors grammar-common.js `symbol`: non-empty, single-line, and restricted
-// to the same simple/Unicode escapes. This is shared by path and qualified-name
-// segments so an opaque scanner token cannot widen the ordinary symbol lexer.
-static bool scan_symbol_literal(TSLexer *lexer) {
-    if (lexer->lookahead != '\'') { return false; }
-    lexer->advance(lexer, false);
-    bool any = false;
-    while (!lexer->eof(lexer) && lexer->lookahead != '\'') {
-        if (lexer->lookahead == '\n' || lexer->lookahead == '\r') { return false; }
-        if (lexer->lookahead != '\\') {
-            any = true;
-            lexer->advance(lexer, false);
-            continue;
-        }
-
-        lexer->advance(lexer, false);
-        int32_t escaped = lexer->lookahead;
-        if (escaped == '\'' || escaped == '\\' || escaped == '/' ||
-                escaped == 'b' || escaped == 'f' || escaped == 'n' ||
-                escaped == 'r' || escaped == 't') {
-            any = true;
-            lexer->advance(lexer, false);
-            continue;
-        }
-        if (escaped != 'u') { return false; }
-        lexer->advance(lexer, false);
-        if (lexer->lookahead == '{') {
-            lexer->advance(lexer, false);
-            if (!is_hex_digit(lexer->lookahead)) { return false; }
-            do { lexer->advance(lexer, false); }
-            while (is_hex_digit(lexer->lookahead));
-            if (lexer->lookahead != '}') { return false; }
-            lexer->advance(lexer, false);
-        }
-        else {
-            for (int i = 0; i < 4; i++) {
-                if (!is_hex_digit(lexer->lookahead)) { return false; }
-                lexer->advance(lexer, false);
-            }
-        }
-        any = true;
-    }
-    if (!any || lexer->lookahead != '\'') { return false; }
-    lexer->advance(lexer, false);
-    return true;
-}
-
-// Read an identifier/keyword into buf (truncated, always NUL-terminated) and
-// report its true length. Advances past the whole word.
-static unsigned consume_word(TSLexer *lexer, char *buf, unsigned cap) {
-    unsigned n = 0;
-    while (is_identifier_continue(lexer->lookahead)) {
-        if (n + 1 < cap) { buf[n] = (char)lexer->lookahead; }
-        n++;
-        lexer->advance(lexer, false);
-    }
-    buf[n + 1 < cap ? n : cap - 1] = '\0';
-    return n;
-}
-
-// Consume a `\( ... )` / `\symbol( ... )` island body, balanced, strings aware.
-// Assumes the opening '\\' is the current lookahead. Returns false if what
-// follows is not actually an island tag.
-static bool consume_island(TSLexer *lexer) {
-    lexer->advance(lexer, false);  // backslash
-    if (lexer->lookahead != '(') {
-        // tagged form: \symbol( — the tag is one token, no space before '('
-        char tag[16];
-        unsigned n = consume_word(lexer, tag, sizeof(tag));
-        if (n == 0 || lexer->lookahead != '(') { return false; }
-    }
-    lexer->advance(lexer, false);  // '('
-    int depth = 1;
-    while (!lexer->eof(lexer) && depth > 0) {
-        int32_t c = lexer->lookahead;
-        if (c == '"' || c == '\'') { consume_quoted(lexer, c); continue; }
-        if (c == '(') { depth++; }
-        else if (c == ')') { depth--; }
-        lexer->advance(lexer, false);
-    }
-    return depth == 0;
-}
-
-// A word that continues a type pattern rather than ending it. `to` joins two
-// range bounds; `fn` opens a function type whose parameter list follows.
-static bool is_pattern_continuation_word(const char *w, unsigned n) {
-    return (n == 2 && strcmp(w, "to") == 0) || (n == 2 && strcmp(w, "fn") == 0);
-}
-
-// After a newline at depth 0 the pattern ends unless what follows can only be a
-// continuation: the binary type operators and `to` cannot start a statement, so
-// seeing one means the annotation wraps onto the next line. A word needs its
-// full spelling checked, which only the word reader can do — hence the pending
-// flag rather than a single-character guess.
-static bool operator_continues_after_newline(int32_t c) {
-    return c == '|' || c == '&' || c == '!';
-}
-
-// ---------------------------------------------------------------------------
-// type pattern: the whole annotation-position type sub-language, one token
-// ---------------------------------------------------------------------------
-
-static bool scan_type_pattern(TSLexer *lexer, bool primary_only, bool *out_bare_word) {
-    skip_extras(lexer);
+// True when the token at the lookahead position can only BEGIN a statement —
+// never continue the preceding expression. Everything dual-role (`( [ - + * ^
+// / < .`) and everything continuation-only (`|> | & % > = ! == != <= >=`, the
+// word operators) returns false. The caller has already marked the token end,
+// so every advance here is pure inspection.
+static bool classify_start(TSLexer *lexer, bool element_scope) {
+    int32_t c = lexer->lookahead;
     if (lexer->eof(lexer)) { return false; }
+    // S16.5.1: `<` opens a child element in element scope, so it starts an item
+    // there even though it is dual-role everywhere else.
+    if (c == '<' && element_scope) { return true; }
 
-    int depth = 0;
-    bool any = false;            // any content accepted yet
-    bool expect_primary = true;  // at a position where a primary type may start
-    bool newline_pending = false; // a depth-0 newline whose continuation is undecided
-    int d0_atoms = 0;            // name-like atoms (words, quoted literals) at depth 0
-    bool d0_other = false;       // anything else seen at depth 0
-    if (out_bare_word) { *out_bare_word = false; }
-
-    for (;;) {
-        int32_t c = lexer->lookahead;
-        if (lexer->eof(lexer)) { break; }
-
-        // --- whitespace / newline ------------------------------------------
-        if (is_space(c)) {
-            bool saw_newline = false;
-            while (is_space(lexer->lookahead)) {
-                if (lexer->lookahead == '\n') { saw_newline = true; }
-                lexer->advance(lexer, false);
-            }
-            // comments inside a pattern are extras too
-            while (lexer->lookahead == '/') {
-                lexer->mark_end(lexer);  // pin: a lone '/' must not be consumed
-                lexer->advance(lexer, false);
-                if (lexer->lookahead == '/') {
-                    while (!lexer->eof(lexer) && lexer->lookahead != '\n') { lexer->advance(lexer, false); }
-                    saw_newline = true;
-                }
-                else if (lexer->lookahead == '*') {
-                    lexer->advance(lexer, false);
-                    int32_t prev = 0;
-                    while (!lexer->eof(lexer) && !(prev == '*' && lexer->lookahead == '/')) {
-                        prev = lexer->lookahead;  lexer->advance(lexer, false);
-                    }
-                    if (!lexer->eof(lexer)) { lexer->advance(lexer, false); }
-                }
-                else { break; }
-                while (is_space(lexer->lookahead)) {
-                    if (lexer->lookahead == '\n') { saw_newline = true; }
-                    lexer->advance(lexer, false);
-                }
-            }
-            if (primary_only) { break; }
-            // A newline ends the annotation unless the pattern is unfinished
-            // (trailing operator) or the next line opens with something that
-            // cannot begin a statement.
-            if (saw_newline && depth == 0 && !expect_primary) {
-                int32_t next = lexer->lookahead;
-                if (operator_continues_after_newline(next)) { continue; }
-                // only `to` continues among words; the word reader confirms it
-                if (is_identifier_start(next)) { newline_pending = true; continue; }
-                break;
-            }
-            continue;
-        }
-
-        // --- comment directly against the previous token ---------------------
-        if (c == '/') {
-            lexer->mark_end(lexer);
-            lexer->advance(lexer, false);
-            if (lexer->lookahead == '/') {
-                while (!lexer->eof(lexer) && lexer->lookahead != '\n') { lexer->advance(lexer, false); }
-                continue;
-            }
-            if (lexer->lookahead == '*') {
-                lexer->advance(lexer, false);
-                int32_t prev = 0;
-                while (!lexer->eof(lexer) && !(prev == '*' && lexer->lookahead == '/')) {
-                    prev = lexer->lookahead;  lexer->advance(lexer, false);
-                }
-                if (!lexer->eof(lexer)) { lexer->advance(lexer, false); }
-                continue;
-            }
-            break;  // a bare '/' is not type syntax
-        }
-
-        // --- literals --------------------------------------------------------
-        if (c == '"' || c == '\'') {
-            consume_quoted(lexer, c);
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = false;
-            // a quoted literal can be a FIELD NAME ('type': string), so it
-            // counts as a name-like atom for the content decline rule
-            if (depth == 0) { d0_atoms++; }
-            if (primary_only && depth == 0) { break; }
-            continue;
-        }
-
-        // --- string/symbol pattern island -----------------------------------
-        if (c == '\\') {
-            if (!consume_island(lexer)) { break; }
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = false;
-            if (primary_only && depth == 0) { break; }
-            continue;
-        }
-
-        // --- identifiers, base-type keywords, `to`, and the `that` stop ------
-        if (is_identifier_start(c)) {
-            char word[8];
-            unsigned n = consume_word(lexer, word, sizeof(word));
-            // `that` closes the pattern and opens the constraint predicate: it
-            // is never part of a pattern (CT1v2), so leave it for the parser.
-            if (depth == 0 && n == 4 && strcmp(word, "that") == 0) { break; }
-            // A word on the next line only continues the pattern when it is
-            // `to`; anything else starts a new statement, and the token ended
-            // back at the line break.
-            if (newline_pending) {
-                newline_pending = false;
-                if (!(n == 2 && strcmp(word, "to") == 0)) { break; }
-            }
-            lexer->mark_end(lexer);
-            any = true;
-            if (depth == 0) { d0_atoms++; }
-            expect_primary = is_pattern_continuation_word(word, n);
-            if (primary_only && depth == 0 && !expect_primary) { break; }
-            continue;
-        }
-
-        // --- numeric literals -------------------------------------------------
-        if (is_digit(c) || (c == '-' && expect_primary)) {
-            lexer->advance(lexer, false);
-            while (is_digit(lexer->lookahead) || lexer->lookahead == '.' ||
-                   lexer->lookahead == 'e' || lexer->lookahead == 'E' ||
-                   is_identifier_continue(lexer->lookahead)) {
-                lexer->advance(lexer, false);
-            }
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = false;
-            if (primary_only && depth == 0) { break; }
-            continue;
-        }
-
-        // --- brackets ---------------------------------------------------------
-        if (c == '(' || c == '[' || c == '{' || c == '<') {
-            // At depth 0 an opening brace only belongs to the pattern where a
-            // primary may start (map/tuple/array/element type). Otherwise it is
-            // the enclosing construct's body — a match-arm block, say — and the
-            // pattern ends here. `[` is the exception: after a primary it is an
-            // occurrence count (int[3]).
-            if (depth == 0 && !expect_primary && c != '[') { break; }
-            if (depth == 0) { d0_other = true; }
-            depth++;
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = (c != '[');
-            continue;
-        }
-        if (c == ')' || c == ']' || c == '}' || c == '>') {
-            if (depth == 0) { break; }  // belongs to the enclosing construct
-            depth--;
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = false;
-            if (primary_only && depth == 0) { break; }
-            continue;
-        }
-
-        // --- operators and separators ----------------------------------------
-        if (depth > 0) {
-            // inside brackets everything is pattern content: field colons,
-            // commas, literal attr defaults (CT8v2), occurrence counts
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            any = true;
-            if (c == ',' || c == ':' || c == '|' || c == '&' || c == '!' || c == '=') {
-                expect_primary = true;
-            }
-            continue;
-        }
-        if (primary_only) { break; }
-        if (c == '|' || c == '&' || c == '!') {
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            any = true;  d0_other = true;  expect_primary = true;
-            continue;
-        }
-        if (c == '^' && !expect_primary) {
-            // The only `^` a pattern can contain is a fn type's raised-channel
-            // marker (`fn() T^`, `fn() T^E`): value annotations lost `^`
-            // entirely (CT3v2), so this cannot be the old union sugar.
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = true;
-            continue;
-        }
-        if (c == '?' || c == '+' || c == '*') {
-            // occurrence suffix on the primary just completed
-            if (expect_primary && c != '!') { break; }
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            any = true;  expect_primary = false;
-            continue;
-        }
-        // ',' '=' ';' ':' and anything else at depth 0 ends the pattern
-        break;
-    }
-
-    // one name-like atom and nothing else: could be a field/view name instead
-    if (out_bare_word) { *out_bare_word = (any && !d0_other && d0_atoms == 1); }
-    return any;
-}
-
-// ---------------------------------------------------------------------------
-// declaration return contracts and view patterns
-// ---------------------------------------------------------------------------
-
-static bool scan_return_type_atom(TSLexer *lexer, char *out_word,
-        unsigned out_word_cap, unsigned *out_length) {
-    if (!is_identifier_start(lexer->lookahead)) { return false; }
-    char discarded_word[16];
-    char *word = out_word ? out_word : discarded_word;
-    unsigned word_cap = out_word ? out_word_cap : sizeof(discarded_word);
-    unsigned length = consume_word(lexer, word, word_cap);
-    if (out_length) { *out_length = length; }
-    while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-    if (lexer->lookahead == '?' || lexer->lookahead == '+' || lexer->lookahead == '*') {
-        lexer->advance(lexer, false);
-        return true;
-    }
-    if (lexer->lookahead != '[') { return true; }
-    lexer->advance(lexer, false);
-    while (!lexer->eof(lexer) && lexer->lookahead != ']') {
-        lexer->advance(lexer, false);
-    }
-    if (lexer->eof(lexer)) { return false; }
-    lexer->advance(lexer, false);
-    return true;
-}
-
-static bool is_return_type_statement_keyword(const char *word, unsigned length) {
-    return (length == 2 && strcmp(word, "if") == 0) ||
-        (length == 2 && strcmp(word, "fn") == 0) ||
-        (length == 2 && strcmp(word, "pn") == 0) ||
-        (length == 2 && strcmp(word, "on") == 0) ||
-        (length == 3 && strcmp(word, "for") == 0) ||
-        (length == 3 && strcmp(word, "let") == 0) ||
-        (length == 3 && strcmp(word, "var") == 0) ||
-        (length == 3 && strcmp(word, "pub") == 0) ||
-        (length == 4 && strcmp(word, "else") == 0) ||
-        (length == 4 && strcmp(word, "view") == 0) ||
-        (length == 4 && strcmp(word, "edit") == 0) ||
-        (length == 4 && strcmp(word, "type") == 0) ||
-        (length == 4 && strcmp(word, "case") == 0) ||
-        (length == 5 && strcmp(word, "while") == 0) ||
-        (length == 5 && strcmp(word, "match") == 0) ||
-        (length == 5 && strcmp(word, "raise") == 0) ||
-        (length == 5 && strcmp(word, "state") == 0) ||
-        (length == 5 && strcmp(word, "apply") == 0) ||
-        (length == 6 && strcmp(word, "return") == 0) ||
-        (length == 7 && strcmp(word, "default") == 0) ||
-        (length == 8 && strcmp(word, "continue") == 0) ||
-        (length == 8 && strcmp(word, "function") == 0);
-}
-
-static bool scan_return_type_token(TSLexer *lexer) {
-    skip_extras(lexer);
-    char first_word[16];
-    unsigned first_length = 0;
-    if (!scan_return_type_atom(lexer, first_word, sizeof(first_word),
-            &first_length)) { return false; }
-    // A return slot may start with an alias, but a control-flow keyword such
-    // as `else {` is never an alias. Refusing it prevents this opaque token
-    // from swallowing ordinary statement bodies during GLR recovery.
-    if (is_return_type_statement_keyword(first_word, first_length)) { return false; }
-    lexer->mark_end(lexer);
-
-    bool saw_raised_channel = false;
-    for (;;) {
-        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-        if (lexer->lookahead == '^' && !saw_raised_channel) {
-            lexer->advance(lexer, false);
-            lexer->mark_end(lexer);
-            saw_raised_channel = true;
-            while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-            if (!scan_return_type_atom(lexer, NULL, 0, NULL)) { break; }
-            lexer->mark_end(lexer);
-            continue;
-        }
-        if (lexer->lookahead != '|' && lexer->lookahead != '&' && lexer->lookahead != '!') {
-            break;
-        }
-        lexer->advance(lexer, false);
-        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-        // A partial union here is an expression operator (notably `|>`), not
-        // a return contract. Do not turn its left identifier into a token.
-        if (!scan_return_type_atom(lexer, NULL, 0, NULL)) { return false; }
-        lexer->mark_end(lexer);
-    }
-    // `return_type` is declaration-only. During recovery the GLR parser can
-    // offer it beside an ordinary expression (`raise error(...)`), so require
-    // the declaration continuation before committing to this opaque token.
-    while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-    if (lexer->lookahead == '{') { return true; }
-    if (lexer->lookahead == '=') {
-        lexer->advance(lexer, false);
-        return lexer->lookahead == '>';
-    }
-    if (!is_identifier_start(lexer->lookahead)) { return false; }
-    char word[8];
-    unsigned length = consume_word(lexer, word, sizeof(word));
-    return length == 5 && strcmp(word, "state") == 0;
-}
-
-// Mirrors grammar-lambda.js `_view_pattern_primary` inside the opaque token.
-static bool scan_view_pattern_primary(TSLexer *lexer) {
-    if (lexer->lookahead == '<') {
-        int depth = 0;
-        do {
-            int32_t ch = lexer->lookahead;
-            if (ch == '"' || ch == '\'') { consume_quoted(lexer, ch); continue; }
-            if (ch == '<') { depth++; }
-            else if (ch == '>') { depth--; }
-            lexer->advance(lexer, false);
-        } while (!lexer->eof(lexer) && depth > 0);
-        return depth == 0;
-    }
-    if (!is_identifier_start(lexer->lookahead)) { return false; }
-    char word[16];
-    consume_word(lexer, word, sizeof(word));
-    return true;
-}
-
-static bool scan_view_pattern_token(TSLexer *lexer) {
-    skip_extras(lexer);
-    bool first_is_word = is_identifier_start(lexer->lookahead);
-    if (!scan_view_pattern_primary(lexer)) { return false; }
-    lexer->mark_end(lexer);
-
-    // `view name: Pattern` must leave the leading name to the ordinary
-    // identifier rule; only the colon distinguishes it from a bare pattern.
-    if (first_is_word) {
-        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-        if (lexer->lookahead == ':') { return false; }
-    }
-
-    while (lexer->lookahead == '|') {
-        lexer->advance(lexer, false);
-        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-        if (!scan_view_pattern_primary(lexer)) { return true; }
-        lexer->mark_end(lexer);
-        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-    }
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// path body
-// ---------------------------------------------------------------------------
-
-// Mirrors one static path segment in grammar-common.js. Bracket expressions
-// stay in the general grammar and therefore terminate this external token.
-static bool scan_path_body_segment(TSLexer *lexer) {
-    if (lexer->lookahead == '~') {
-        lexer->advance(lexer, false);
-        if (lexer->lookahead != '~') { return false; }
-        lexer->advance(lexer, false);
-        return true;
-    }
-    if (lexer->lookahead == '/') {
-        lexer->advance(lexer, false);
-        return true;
-    }
-    if (lexer->lookahead == '*') {
-        lexer->advance(lexer, false);
-        if (lexer->lookahead == '*') { lexer->advance(lexer, false); }
-        return true;
-    }
-    if (lexer->lookahead == '\'') {
-        return scan_symbol_literal(lexer);
-    }
-    if (is_digit(lexer->lookahead)) {
-        do { lexer->advance(lexer, false); } while (is_digit(lexer->lookahead));
-        return true;
-    }
-    if (is_identifier_start(lexer->lookahead)) {
-        char word[16];
-        consume_word(lexer, word, sizeof(word));
-        return true;
-    }
-    return false;
-}
-
-static bool scan_path_body_token(TSLexer *lexer) {
-    if (!scan_path_body_segment(lexer)) { return false; }
-    lexer->mark_end(lexer);
-    while (lexer->lookahead == '.') {
-        lexer->advance(lexer, false);
-        if (!scan_path_body_segment(lexer)) {
-            // A trailing/member dot belongs to the outer expression grammar.
+    switch (c) {
+        // continuation-only, dual-role, closers, and separators alike: none of
+        // them opens a statement.
+        case '|': case '&': case '%': case '?': case '>': case '=': case '!':
+        case '-': case '(': case '[': case '^': case '/': case '<': case '.':
+        case ')': case ']': case '}': case ',': case ';': case ':':
+            return false;
+        // `+` and `*` are dual-role as prefixes, so they never open a
+        // juxtaposed statement either.
+        case '+': case '*':
+            return false;
+        case '{': case '~': case '"': case '\'': case '\\':
             return true;
-        }
-        lexer->mark_end(lexer);
+        default: break;
     }
+
+    if (is_digit(c)) { return true; }
+
+    if (is_identifier_start(c)) {
+        char word[16];
+        unsigned n = 0;
+        while (is_identifier_continue(lexer->lookahead)) {
+            if (n + 1 < sizeof(word)) { word[n] = (char)lexer->lookahead; }
+            n++;
+            lexer->advance(lexer, false);
+        }
+        if (n >= sizeof(word)) { return true; }  // too long to be a keyword
+        word[n] = '\0';
+        return !is_continuation_word(word, n);
+    }
+
+    return true;
+}
+
+// Emit a guarded operator token, consuming its lexeme. `reject_next` names a
+// character that turns the operator into a different, UNGUARDED token (`++`,
+// `**`, `<=`, `.?`): those can only ever continue an expression, so they are
+// free to open a line and must be left to the internal lexer.
+static bool emit_op(TSLexer *lexer, enum TokenType type, int32_t reject_next) {
+    lexer->advance(lexer, false);
+    if (reject_next && lexer->lookahead == reject_next) { return false; }
+    lexer->mark_end(lexer);
+    lexer->result_symbol = type;
     return true;
 }
 
@@ -638,67 +204,167 @@ bool tree_sitter_lambda_external_scanner_scan(
     void *payload, TSLexer *lexer, const bool *valid_symbols) {
     (void)payload;
 
-    // The retired START probe used to skip leading whitespace before the
-    // island probe ran. Preserve that scanner-entry invariant explicitly;
-    // using skip_extras here would also inspect '/' and steal rooted paths.
-    while (is_space(lexer->lookahead)) {
-        lexer->advance(lexer, true);
-    }
+    // Decline during error recovery: the guards only make sense against a real
+    // parse state, and recovery marks every external valid.
+    if (valid_symbols[ERROR_SENTINEL]) { return false; }
 
-    // Islands are first-class values. Probe only their unambiguous backslash
-    // prefix: full skip_extras would inspect a rooted path's '/', which must remain
-    // available to the complete-path scanner below.
-    if (valid_symbols[PATTERN_ISLAND_TOKEN] && lexer->lookahead == '\\' &&
-            consume_island(lexer)) {
+    // §7.16 must inspect the character IMMEDIATELY after the literal, so it is
+    // tested before any whitespace is skipped.
+    if (valid_symbols[NUM_BOUNDARY]) {
+        if (is_identifier_start(lexer->lookahead)) { return false; }
         lexer->mark_end(lexer);
-        lexer->result_symbol = PATTERN_ISLAND_TOKEN;
+        lexer->result_symbol = NUM_BOUNDARY;
         return true;
     }
 
-    // Content position: a bare name may be a FIELD name instead, and only the
-    // ':' after it tells the two apart — scan fully, decline on `word :`.
-    if (valid_symbols[CONTENT_TYPE_TOKEN]) {
-        bool bare_word = false;
-        if (scan_type_pattern(lexer, false, &bare_word)) {
-            bool name_prefix = false;
-            if (bare_word) {
-                // peek with skip=false: a skip-advance MOVES the token start
-                // (vendored lexer.c:235), and a start past mark_end clamps the
-                // token to zero width; non-skip advances past mark_end are
-                // plain lookahead
-                while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
-                name_prefix = (lexer->lookahead == ':');
-            }
-            if (!name_prefix) {
-                lexer->result_symbol = CONTENT_TYPE_TOKEN;
-                return true;
-            }
+    // Skip whitespace and comments, remembering whether a line break was
+    // crossed. This is the one thing grammar rules cannot see for themselves.
+    bool saw_newline = false;
+    bool slash_pending = false;
+    for (;;) {
+        while (is_space(lexer->lookahead)) {
+            if (lexer->lookahead == '\n') { saw_newline = true; }
+            lexer->advance(lexer, true);
         }
-        return false;  // a field name: let the parser lex it as an identifier
+        // Mark the zero-width position BEFORE inspecting further, so a `/` that
+        // turns out to be division rather than a comment does not end up inside
+        // a zero-width token.
+        lexer->mark_end(lexer);
+        if (lexer->lookahead != '/') { break; }
+        // Not skipped: if this turns out to open a comment the character must
+        // be inside the emitted token, and if it turns out to be division the
+        // mark_end above already sits in front of it.
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == '/') {
+            while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
+                lexer->advance(lexer, true);
+            }
+            continue;
+        }
+        if (lexer->lookahead == '*') {
+            lexer->advance(lexer, true);
+            int32_t prev = 0;
+            bool closed = false;
+            while (!lexer->eof(lexer)) {
+                if (lexer->lookahead == '\n') { saw_newline = true; }
+                if (prev == '*' && lexer->lookahead == '/') {
+                    lexer->advance(lexer, true);
+                    closed = true;
+                    break;
+                }
+                prev = lexer->lookahead;
+                lexer->advance(lexer, true);
+            }
+            if (closed) { continue; }
+            return false;  // unterminated block comment
+        }
+        // A real `/`: division, or the root path step. The scanner has already
+        // advanced past it, and mark_end sits before it.
+        slash_pending = true;
+        break;
     }
 
-    if (valid_symbols[RETURN_TYPE_TOKEN] && scan_return_type_token(lexer)) {
-        lexer->result_symbol = RETURN_TYPE_TOKEN;
+    // NOT_PAREN gates the bare spelling of `if`/`while` heads (S16.6.2) and the
+    // bare `apply` statement (§7.7). It is only valid where the parser is
+    // choosing between a parenthesized form and a bare one, so it never
+    // competes with the operator guards.
+    if (valid_symbols[NOT_PAREN] && (slash_pending || lexer->lookahead != '(')) {
+        lexer->result_symbol = NOT_PAREN;
+        return true;
+    }
+    // A `(` here means NOT_PAREN does not apply — but the state may still want
+    // a call guard (`apply(x)` is an ordinary call, `apply` alone is the bare
+    // statement), so fall through rather than declining outright.
+
+    if (slash_pending) {
+        // `/` is dual-role: division (continuation) or a rooted path step
+        // (start). Only the same-line division reading is guarded here.
+        if (valid_symbols[BIN_SLASH] && !saw_newline) {
+            lexer->mark_end(lexer);
+            lexer->result_symbol = BIN_SLASH;
+            return true;
+        }
+        return false;
+    }
+
+    int32_t c = lexer->lookahead;
+
+    // --- guarded operators: same line only --------------------------------
+    if (!saw_newline) {
+        switch (c) {
+            case '+':
+                if (valid_symbols[BIN_PLUS]) { return emit_op(lexer, BIN_PLUS, '+'); }
+                break;
+            case '-':
+                if (valid_symbols[BIN_MINUS]) { return emit_op(lexer, BIN_MINUS, 0); }
+                break;
+            case '*':
+                if (valid_symbols[BIN_STAR]) { return emit_op(lexer, BIN_STAR, '*'); }
+                break;
+            case '<':
+                if (valid_symbols[BIN_LT]) { return emit_op(lexer, BIN_LT, '='); }
+                break;
+            case '(':
+                if (valid_symbols[CALL_LPAREN]) { return emit_op(lexer, CALL_LPAREN, 0); }
+                break;
+            case '[':
+                if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0); }
+                break;
+            case '^':
+                // §3.6: `^` is followed either by nothing (propagate) or by a
+                // handler brace, so `{` after it is DUAL-ROLE. Decide here, at
+                // the caret: blocking only the handler path would let GLR fall
+                // through to propagate-plus-a-block-statement, which is the
+                // silent split S16.1.1 forbids. A `{` on a later line yields
+                // NEITHER token, so the parse fails loudly.
+                if (valid_symbols[POSTFIX_CARET]) {
+                    lexer->advance(lexer, false);
+                    lexer->mark_end(lexer);
+                    bool brace_newline = false;
+                    while (is_space(lexer->lookahead)) {
+                        if (lexer->lookahead == '\n') { brace_newline = true; }
+                        lexer->advance(lexer, false);
+                    }
+                    if (lexer->lookahead == '{' && brace_newline) { return false; }
+                    lexer->result_symbol = POSTFIX_CARET;
+                    return true;
+                }
+                break;
+            default: break;
+        }
+    }
+
+    // `.` member access. S16.2.4v2 (§7.15): now that the relative path is
+    // spelled `\.`, a `.` followed by an identifier has no start reading left —
+    // member access is its only meaning — so it continues across a line break
+    // for ANY member, not just the `.ident(` call form. That is what enables
+    // full leading-dot fluent chains. `.digit` remains dual-role, because
+    // `a.5` is member access with an integer field while `.5` is a float.
+    if (c == '.' && valid_symbols[MEMBER_DOT]) {
+        lexer->advance(lexer, false);
+        int32_t after = lexer->lookahead;
+        if (after == '?') { return false; }              // `.?` query operator
+        // `.digit` stays dual-role: same line it is the integer member field,
+        // across a break it could equally be a float literal starting a
+        // statement, so neither reading may win.
+        if (is_digit(after) && saw_newline) { return false; }
+        lexer->mark_end(lexer);
+        if (saw_newline && !is_identifier_start(after)) { return false; }
+        lexer->result_symbol = MEMBER_DOT;
         return true;
     }
 
-    if (valid_symbols[VIEW_PATTERN_TOKEN] && scan_view_pattern_token(lexer)) {
-        lexer->result_symbol = VIEW_PATTERN_TOKEN;
+    // --- statement juxtaposition (S16.1.3) --------------------------------
+    // Emitted only before a START token, which is disjoint from every guarded
+    // operator above. When a line opens with a dual-role token, NEITHER a guard
+    // nor this boundary is emitted, so both readings are blocked and the parse
+    // fails loudly — S16.2.3, "neither reading wins by default".
+    if (valid_symbols[ELEM_STMT_BOUNDARY] && classify_start(lexer, true)) {
+        lexer->result_symbol = ELEM_STMT_BOUNDARY;
         return true;
     }
-
-    if (valid_symbols[PATH_BODY_TOKEN] && scan_path_body_token(lexer)) {
-        lexer->result_symbol = PATH_BODY_TOKEN;
-        return true;
-    }
-
-    if (valid_symbols[TYPE_PATTERN_TOKEN] && scan_type_pattern(lexer, false, NULL)) {
-        lexer->result_symbol = TYPE_PATTERN_TOKEN;
-        return true;
-    }
-
-    if (valid_symbols[PRIMARY_TYPE_PATTERN_TOKEN] && scan_type_pattern(lexer, true, NULL)) {
-        lexer->result_symbol = PRIMARY_TYPE_PATTERN_TOKEN;
+    if (valid_symbols[STMT_BOUNDARY] && classify_start(lexer, false)) {
+        lexer->result_symbol = STMT_BOUNDARY;
         return true;
     }
 

@@ -58,7 +58,7 @@ fn _label_children(rect, page_index, opts) {
 fn _flip_group_list(rect, paths) {
     if (len(paths) == 0) { [] }
     else {
-        let flip_xform = coords.y_flip_transform(rect.y + rect.h)
+        let flip_xform = coords.y_flip_transform(rect.y + rect.h);
         [svg.group(flip_xform, paths)]
     }
 }
@@ -94,7 +94,7 @@ fn _render_page_parts(pdf, page, page_index, opts) {
     let paths = [for (p in r.paths) p]
     let texts = [for (t in r.texts) t]
     let flip_group = _flip_group_list(rect, paths)
-    let label_kids = _label_children(rect, page_index, opts)
+    let label_kids = _label_children(rect, page_index, opts);
 
     let children = [svg.page_background(rect, bg),
                     for (p in flip_group) p,
@@ -155,7 +155,7 @@ pub fn pdf_to_html(pdf, opts) {
     }
     else {
         let render_count = _render_page_count(n, opts)
-        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)]
+        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)];
         // Inject @font-face rules for embedded fonts so the browser uses
         // the actual glyphs (not OS fallback). Done here — once per doc —
         // rather than per page so the rule appears once.

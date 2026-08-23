@@ -61,7 +61,7 @@ true and error("x")
 // ===== Error in map value =====
 let m = {ok: 42, fail: error("nope")}
 m.ok
-m.fail is error
+m.fail is error;
 
 // ===== Filter out errors =====
 [1, error("a"), 2, error("b"), 3] |> filter((x) => x is int)

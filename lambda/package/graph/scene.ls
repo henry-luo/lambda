@@ -71,7 +71,7 @@ fn label_for(elements, role, id_key, id) => first_or([
 fn scene_label(label) {
   let rendered = if (label == null) "" else normalized_text(label);
   let text = if (rendered != "") rendered else string(attr(label, "data-label", ""));
-  if (text == "") null else <label; text>
+  if (text == "") null else <label text>
 }
 
 fn route_point(token) {
@@ -125,7 +125,7 @@ fn scene_node(node, graph_box) {
       fill: attr(node, "data-fill", null), stroke: attr(node, "data-stroke", null),
       'stroke-width': nullable_number_attr(node, "data-stroke-width"),
       color: attr(node, "data-color", null), opacity: nullable_number_attr(node, "data-opacity"),
-      'dash-array': attr(node, "data-dash-array", null);
+      'dash-array': attr(node, "data-dash-array", null),
     if (label != null) { label }
   >
 }
@@ -138,7 +138,7 @@ fn scene_cluster(cluster, labels, graph_box) {
       x: box.x, y: box.y, width: box.width, height: box.height,
       fill: attr(cluster, "data-fill", null), stroke: attr(cluster, "data-stroke", null),
       'stroke-width': nullable_number_attr(cluster, "data-stroke-width"),
-      opacity: nullable_number_attr(cluster, "data-opacity");
+      opacity: nullable_number_attr(cluster, "data-opacity"),
     if (label != null) { label }
   >
 }
@@ -169,9 +169,9 @@ fn scene_edge(edge, labels, nodes) {
       stroke: attr(edge, "data-stroke", null),
       'stroke-width': nullable_number_attr(edge, "data-stroke-width"),
       opacity: nullable_number_attr(edge, "data-opacity"),
-      'dash-array': attr(edge, "data-dash-array", null);
+      'dash-array': attr(edge, "data-dash-array", null),
     if (label != null) { label }
-    <route;
+    <route
       for (point in points) point
     >
   >
@@ -194,7 +194,7 @@ pub fn from_svg(source) {
   let graph = first_or([for (entry in descendants(parsed_document)
     where attr(entry, "data-graph-role", "") == "graph") entry]);
   if (graph == null) {
-    <'graph-scene' status: "invalid";
+    <'graph-scene' status: "invalid",
       <diagnostic code: "graph-scene.missing-root", severity: "error">
     >
   } else {
@@ -216,7 +216,7 @@ pub fn from_svg(source) {
       where attr(entry, "data-graph-role", "") == "annotation")
       scene_annotation(entry, box)];
     <'graph-scene' direction: string(attr(graph, "data-direction", "TB")),
-        width: box.width, height: box.height;
+        width: box.width, height: box.height,
       for (cluster in clusters) cluster
       for (node in nodes) node
       for (edge in edges) edge

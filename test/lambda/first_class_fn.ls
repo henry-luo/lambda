@@ -18,7 +18,7 @@ let h = (a: int, b: int) => a * b
 fn apply(func, x) => func(x)
 
 // Function for apply test
-fn square(n) => n * n
+fn square(n) => n * n;
 
 // All test results in a single output array
 [

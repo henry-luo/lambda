@@ -81,7 +81,7 @@ fn curry_add(a) {
     }
     add_b
 }
-let t10 = curry_add(1)(2)(3)
+let t10 = curry_add(1)(2)(3);
 // expect: 6
 
 // Final result: array of all test values

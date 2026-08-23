@@ -219,7 +219,7 @@ fn validate_node(schema, node, path) {
     let nested = for (i in 0 to len(kids) - 1)
         if (type(kids[i]) == element)
           validate_node(schema, kids[i], [*path, i])
-        else []
+        else [];
     [*attr_violations, *mark_violations, *local, *(for (vs in nested) for (v in vs) v)]
   }
 }

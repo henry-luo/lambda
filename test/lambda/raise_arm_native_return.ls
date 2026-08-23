@@ -26,21 +26,21 @@ let int_bad = twice(-21) ^ { ^ }
 let wide_ok = wide(true) ^ { ^ }
 let wide_bad = wide(false) ^ { ^ }
 
-"destructure"
-[ok, ok is error]
-[bad, bad is error]
-[flip_ok, flip_ok is error]
-[flip_bad, flip_bad is error]
-[int_ok, int_ok is error]
-[int_bad, int_bad is error]
-[wide_ok, wide_ok is error]
+"destructure";
+[ok, ok is error];
+[bad, bad is error];
+[flip_ok, flip_ok is error];
+[flip_bad, flip_bad is error];
+[int_ok, int_ok is error];
+[int_bad, int_bad is error];
+[wide_ok, wide_ok is error];
 [wide_bad, wide_bad is error]
-"or-recovery"
+"or-recovery";
 // the int error case is the one that regressed historically: the native
 // numeric operand path must not consume the error lane before `or` contains it
-[half(6.0) or 99.0, half(-6.0) or 99.0]
-[twice(3) or 99, twice(-3) or 99]
+[half(6.0) or 99.0, half(-6.0) or 99.0];
+[twice(3) or 99, twice(-3) or 99];
 [wide(true) or 7i64, wide(false) or 7i64]
-"arithmetic on a recovered value"
-(half(10.0) or 0.0) + 1.0
+"arithmetic on a recovered value";
+(half(10.0) or 0.0) + 1.0;
 (twice(-2) or 10) + 1

@@ -5,7 +5,7 @@
 // Section 1: Basic div and mod
 // ============================================
 
-"1. Basic div and mod"
+"1. Basic div and mod";
 [
     10 div 3,           // 3
     17 % 5,             // 2
@@ -22,7 +22,7 @@
 fn int_div(a: int, b: int) { a div b }
 fn int_mod(a: int, b: int) { a % b }
 
-"2. Typed int div/mod"
+"2. Typed int div/mod";
 [
     int_div(10, 3),     // 3
     int_div(17, 5),     // 3
@@ -42,7 +42,7 @@ fn is_even(n: int) { n % 2 == 0 }
 fn is_odd(n: int) { n % 2 != 0 }
 fn quotient_remainder(a: int, b: int) { [a div b, a % b] }
 
-"4. Div/mod in expressions"
+"4. Div/mod in expressions";
 [
     is_even(10),         // true
     is_even(7),          // false
@@ -59,7 +59,7 @@ fn digit_sum(n: int) {
     n % 10 + (n div 10) % 10 + (n div 100) % 10
 }
 
-"5. Digit sum via div/mod"
+"5. Digit sum via div/mod";
 [
     digit_sum(123),     // 6
     digit_sum(999),     // 27
@@ -72,7 +72,7 @@ fn digit_sum(n: int) {
 
 "6. Div/mod with variables"
 let x = 42
-let y = 10
+let y = 10;
 [x div y, x % y]
 
 // ============================================
@@ -82,5 +82,5 @@ let y = 10
 fn untyped_div(a, b) { a div b }
 fn untyped_mod(a, b) { a % b }
 
-"7. Untyped div/mod"
+"7. Untyped div/mod";
 [untyped_div(17, 5), untyped_mod(17, 5)]

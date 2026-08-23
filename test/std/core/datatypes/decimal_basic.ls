@@ -2,7 +2,7 @@
 // Layer: 3 | Category: datatype | Covers: decimal literal, arithmetic, type
 
 123.456m
-0n
+0n;
 -99.99m
 type(123.456m)
 123.456m is decimal

@@ -317,9 +317,18 @@ static bool lexer_scan_island(LambdaLexer* lexer) {
 }
 
 static void lexer_scan_digits(LambdaLexer* lexer, bool hexadecimal) {
-    while (hexadecimal ? lexer_is_hex_digit(lexer_peek(lexer, 0)) :
-            lexer_is_digit(lexer_peek(lexer, 0))) {
-        lexer_advance_byte(lexer);
+    for (;;) {
+        char ch = lexer_peek(lexer, 0);
+        bool is_digit = hexadecimal ? lexer_is_hex_digit(ch) : lexer_is_digit(ch);
+        if (is_digit) { lexer_advance_byte(lexer); continue; }
+        // §7.4: a separator is only a separator BETWEEN two digits, so a
+        // trailing or doubled `_` ends the literal instead of joining it.
+        if (ch == '_') {
+            char next = lexer_peek(lexer, 1);
+            bool next_digit = hexadecimal ? lexer_is_hex_digit(next) : lexer_is_digit(next);
+            if (next_digit) { lexer_advance_byte(lexer); continue; }
+        }
+        break;
     }
 }
 
@@ -376,13 +385,25 @@ static LambdaTokenKind lexer_scan_number(LambdaLexer* lexer) {
         lexer_scan_digits(lexer, false);
         return LAMBDA_TOK_SIZED_INTEGER;
     }
-    if (lexer_peek(lexer, 0) == 'f' && lexer_is_digit(lexer_peek(lexer, 1))) {
+    if (lexer_peek(lexer, 0) == 'f' && lexer_is_digit(lexer_peek(lexer, 1))) {  // §7.3
         lexer_advance_byte(lexer);
         lexer_scan_digits(lexer, false);
         return LAMBDA_TOK_SIZED_FLOAT;
     }
     (void)hexadecimal;
     return floating ? LAMBDA_TOK_FLOAT : LAMBDA_TOK_INTEGER;
+}
+
+// §7.16: a numeric literal may not run straight into an identifier. Without
+// this, `123abc` lexes as `123` plus the identifier `abc` and S16.1.3
+// juxtaposition takes the identifier as the NEXT STATEMENT — a silent split
+// whose failure only surfaces later as an undefined name. `0b1010` behaves the
+// same way, which is what §7.5 leaves behind by not defining a binary literal.
+// This is the general form of the §7.3 `1f32` defect; the suffix families
+// (`1i32`, `1f32`, `1n`, `1m`, `4j`, `0xFF`) are consumed before the check, so
+// only genuinely adjacent identifiers are rejected.
+static bool lexer_number_runs_into_identifier(LambdaLexer* lexer) {
+    return lexer_is_ident_start(lexer);
 }
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length) {
@@ -430,6 +451,11 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     // A Unicode escape is an identifier unit; only the remaining backslash
     // forms begin a pattern island.
     if (ch == '\\' && lexer_unicode_escape_length(lexer) == 0) {
+        if (lexer_peek(lexer, 1) == '.') {  // §7.15 relative-path introducer
+            lexer_advance_byte(lexer);
+            lexer_advance_byte(lexer);
+            return lexer_make_token(LAMBDA_TOK_PATH_REL, start, line, column, lexer->offset);
+        }
         if (lexer_scan_island(lexer)) {
             return lexer_make_token(LAMBDA_TOK_PATTERN_ISLAND, start, line, column, lexer->offset);
         }
@@ -440,6 +466,9 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     if (lexer_is_digit(ch) || (ch == '.' && lexer_is_digit(lexer_peek(lexer, 1)) &&
             !lexer_dot_continues_member_target(lexer, start))) {
         LambdaTokenKind kind = lexer_scan_number(lexer);
+        if (lexer_number_runs_into_identifier(lexer)) {
+            return lexer_error_token(lexer, start, line, column);
+        }
         return lexer_make_token(kind, start, line, column, lexer->offset);
     }
 
@@ -583,6 +612,7 @@ const char* lambda_token_kind_name(LambdaTokenKind kind) {
     switch (kind) {
     case LAMBDA_TOK_EOF: return "eof";
     case LAMBDA_TOK_ERROR: return "error";
+    case LAMBDA_TOK_PATH_REL: return "\\.";
     case LAMBDA_TOK_NEWLINE: return "newline";
     case LAMBDA_TOK_IDENTIFIER: return "identifier";
     case LAMBDA_TOK_BASE_TYPE: return "base_type";

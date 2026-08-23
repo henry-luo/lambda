@@ -9,7 +9,7 @@ pn boxed_stable(value: int) string {
 }
 
 pn boxed_wide(value: int) {
-    return int64(value)
+    return i64(value)
 }
 
 pn boxed_unknown(value: any) any {

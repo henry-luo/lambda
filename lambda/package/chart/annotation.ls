@@ -47,11 +47,11 @@ fn render_text_note(note, x_scale, y_scale, theme) {
     let font_size = if (note.font_size) note.font_size else 11
     let anchor = if (note.anchor) note.anchor else "start"
     let dy = if (note.dy) note.dy else 0
-    let dx = if (note.dx) note.dx else 0
+    let dx = if (note.dx) note.dx else 0;
     <text x: float(x) + float(dx), y: float(y) + float(dy),
           'text-anchor': anchor,
           'font-size': font_size,
-          fill: color;
+          fill: color,
         text_str
     >
 }

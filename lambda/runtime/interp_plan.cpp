@@ -269,6 +269,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_RAISE_EXPR:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_PIPE_FILE_STAM:
     // --- P1.1: comprehensions ---
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM:
@@ -309,6 +310,10 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PATTERN_ISLAND:
     // --- P1.3: documents, paths, queries ---
     case AST_NODE_ELEMENT:
+    // View and edit declarations register an interpreter body against the
+    // active `~` context; unsupported native editor operations still fail
+    // closed through the scan below.
+    case AST_NODE_VIEW:
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
@@ -380,6 +385,9 @@ static bool interp_binding_is_ndim_array(NameEntry* entry, int depth) {
             entry->node->node_type != AST_NODE_ASSIGN) {
         return false;
     }
+    // The any[] declaration boundary widens an N-D numeric literal to a boxed
+    // Array, so its later scalar index writes do not need row-aware admission.
+    if (ast_declared_type_is_open_any_array(entry->declared_type)) return false;
     AstNode* init = ast_unwrap_primary(((AstNamedNode*)entry->node)->as);
     if (!init) return false;
     if (init->node_type == AST_NODE_IDENT) {
@@ -415,53 +423,47 @@ static bool interp_integer_literal(AstNode* node) {
 // direct numeric literal (or its plain alias) and every coordinate is a fixed
 // integer. The static proof keeps generic tuple-like indexing and effectful
 // coordinate evaluation on MIR while retaining c15's axis-bound behavior.
+// Keep the N-D read proof aligned with the runtime carrier. `reshape` and
+// `transpose` return ArrayNum views even though their registry result type is
+// `any`; rejecting those aliases would route valid ArrayNum indexing to MIR
+// solely because the type graph forgets the concrete carrier.
+static bool interp_array_num_expr(AstNode* node, int depth) {
+    if (!node || depth >= 16) return false;
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_ARRAY) {
+        int64_t shape[AST_COW_PATH_MAX] = {};
+        ArrayNumElemType element = ELEM_INT;
+        return detect_ndim_literal(node, shape, AST_COW_PATH_MAX,
+            &element, true) >= 1;
+    }
+    if (node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (!entry || !entry->node || entry->node->node_type != AST_NODE_ASSIGN) {
+            return false;
+        }
+        return interp_array_num_expr(((AstNamedNode*)entry->node)->as, depth + 1);
+    }
+    if (node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)node;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
+    SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+    if (!info || (info->fn != SYSFUNC_RESHAPE && info->fn != SYSFUNC_TRANSPOSE)) {
+        return false;
+    }
+    return call->argument && interp_array_num_expr(call->argument, depth + 1);
+}
+
 static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
     object = ast_unwrap_primary(object);
-    if (!object || object->node_type != AST_NODE_IDENT) return false;
-    NameEntry* entry = ((AstIdentNode*)object)->entry;
-    if (!interp_binding_is_ndim_array(entry, 0)) return false;
+    if (!interp_array_num_expr(object, 0)) return false;
     int count = 0;
     for (AstNode* index = first_index; index; index = index->next) {
         if (count >= AST_COW_PATH_MAX || !interp_integer_literal(index)) return false;
         count++;
     }
     return count >= 2;
-}
-
-static bool interp_type_may_be_uint64(Type* type) {
-    if (!type) return false;
-    if (type->type_id == LMD_TYPE_UINT64) return true;
-    if (!lambda_type_is_union(type)) return false;
-    TypeBinary* binary = (TypeBinary*)type;
-    return interp_type_may_be_uint64(binary->left) ||
-        interp_type_may_be_uint64(binary->right);
-}
-
-static bool interp_array_has_generic_uint64_read(AstArrayNode* array) {
-    TypeArray* array_type = array ? (TypeArray*)array->type : NULL;
-    Type* nested = array_type ? array_type->nested : NULL;
-    // These are eval_array's compact numeric carriers, whose indexed reads
-    // preserve the source lane through array_num_read_item. Any other array
-    // layout is generic, where scalar_storage_read intentionally canonicalizes
-    // a small borrowed u64 to int; admit neither representation as equivalent.
-    if (nested && (nested->type_id == LMD_TYPE_INT ||
-            nested->type_id == LMD_TYPE_FLOAT ||
-            nested->type_id == LMD_TYPE_UINT64 ||
-            nested->type_id == LMD_TYPE_NUM_SIZED)) {
-        return false;
-    }
-    for (AstNode* item = array ? array->item : NULL; item; item = item->next) {
-        if (interp_type_may_be_uint64(item->type)) return true;
-        if ((item->node_type == AST_NODE_FOR_EXPR ||
-                item->node_type == AST_NODE_SPREAD ||
-                item->node_type == AST_NODE_PIPE) &&
-                item->type && (item->type->type_id == LMD_TYPE_ARRAY ||
-                item->type->type_id == LMD_TYPE_ARRAY_NUM) &&
-                interp_type_may_be_uint64(((TypeArray*)item->type)->nested)) {
-            return true;
-        }
-    }
-    return false;
 }
 
 // `a[i] = v` normally needs a statically integral subscript before it can use
@@ -522,6 +524,12 @@ static AstFuncNode* interp_static_proc_binding(NameEntry* entry, int depth) {
 static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
         InterpSyncProcScan* scan);
 
+typedef struct SatelliteScanCtx {
+    bool ok;
+} SatelliteScanCtx;
+
+static void interp_scan_satellite_node(AstNode* node, void* opaque);
+
 static void interp_sync_proc_visit(AstNode* node, void* ctx) {
     InterpSyncProcScan* scan = (InterpSyncProcScan*)ctx;
     if (!scan || !scan->ok || !node) return;
@@ -575,6 +583,33 @@ static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
     return scan->ok;
 }
 
+// Async procedures are executed by their generated MIR resumable entry, not by
+// the synchronous AST walker. Keep the same satellite structural boundary for
+// that delegated body so captures, nested definitions, member-method layouts,
+// and unsupported module bindings cannot cross the membrane accidentally.
+static bool interp_async_proc_satellite_supported(AstFuncNode* fn) {
+    if (!fn || !fn->body || fn->captures || fn->is_generator) return false;
+    SatelliteScanCtx scan = {true};
+    interp_scan_satellite_node(fn->body, &scan);
+    return scan.ok;
+}
+
+// A delegated async body can contain `start(p)` edges that the outer T0 scan
+// deliberately does not descend into. Mark those direct procedure targets so
+// their values are published as boxed task entries before the generated body
+// launches them; the flag is already the native analysis fact for that ABI.
+static void interp_mark_task_entry(AstNode* node, void* opaque) {
+    (void)opaque;
+    if (!node) return;
+    if (node->node_type == AST_NODE_START) {
+        AstStartNode* start = (AstStartNode*)node;
+        AstFuncNode* target = start->call
+            ? ast_direct_call_function(start->call) : NULL;
+        if (target && target->analysis) target->analysis->needs_task_context = true;
+    }
+    interp_visit_children(node, interp_mark_task_entry, NULL);
+}
+
 static void interp_scan_visit(AstNode* node, void* ctx) {
     ScanCtx* sc = (ScanCtx*)ctx;
     if (!sc->ok || !node) return;
@@ -583,13 +618,31 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         sc->reject = node->node_type;
         return;
     }
-    if (node->node_type == AST_NODE_ARRAY &&
-            interp_array_has_generic_uint64_read((AstArrayNode*)node)) {
-        // A generic u64 read lacks a lane-preserving runtime representation.
-        // Keep the entire module on MIR until that carrier exists rather than
-        // re-tagging the narrowed scalar after array_get has lost its contract.
-        sc->ok = false;
-        sc->reject = AST_NODE_ARRAY;
+    if (node->node_type == AST_NODE_VIEW) {
+        AstViewNode* view = (AstViewNode*)node;
+        if (!view->body) {
+            // Both view and edit bodies are ordinary `~` activations. The
+            // scanner still rejects any editor-only native ABI encountered
+            // below, but the template boundary itself needs no generated
+            // function pointer.
+            sc->ok = false;
+            sc->reject = AST_NODE_VIEW;
+            return;
+        }
+        if (view->pattern) interp_scan_visit(view->pattern, ctx);
+        for (AstNode* param = (AstNode*)view->param; param; param = param->next) {
+            interp_scan_visit(param, ctx);
+        }
+        if (sc->ok && view->body) interp_scan_visit(view->body, ctx);
+        for (AstStateEntry* state = view->state; sc->ok && state;
+                state = state->next_state) {
+            if (state->value) interp_scan_visit(state->value, ctx);
+        }
+        for (AstEventHandler* handler = view->handler; sc->ok && handler;
+                handler = handler->next_handler) {
+            if (handler->param) interp_scan_visit((AstNode*)handler->param, ctx);
+            if (handler->body) interp_scan_visit(handler->body, ctx);
+        }
         return;
     }
     if (node->node_type == AST_NODE_PIPE) {
@@ -658,6 +711,19 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             }
         }
         AstFuncNode* direct = ast_direct_call_function(call);
+        if (call_callee && call_callee->node_type == AST_NODE_IDENT) {
+            AstIdentNode* imported = (AstIdentNode*)call_callee;
+            AstImportNode* import = imported->entry ? imported->entry->import : NULL;
+            if (import && import->is_cross_lang && import->script &&
+                    import->script->profile == &js_profile &&
+                    ast_call_has_named_args(call)) {
+                // The hosted JS membrane exposes a fixed positional bridge;
+                // it has no Lambda formal-name adapter to reorder arguments.
+                sc->ok = false;
+                sc->reject = AST_NODE_NAMED_ARG;
+                return;
+            }
+        }
         if (ast_call_has_named_args(call) && !direct &&
                 !interp_named_sys_args_supported(call_callee)) {
             // Dynamic calls have no formal layout. Pure system rows are the
@@ -703,12 +769,19 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         InterpSyncProcScan sync_scan = {.ok = true};
         bool task_backed = fn->analysis && (fn->analysis->may_await ||
             fn->analysis->needs_task_context);
-        if (fn->is_async || fn->is_generator ||
-                (task_backed && !interp_proc_body_is_synchronous(fn, &sync_scan))) {
+        bool async_satellite = task_backed &&
+            interp_async_proc_satellite_supported(fn);
+        if (task_backed && async_satellite) {
+            interp_visit_children(fn->body, interp_mark_task_entry, NULL);
+        }
+        if (fn->is_generator ||
+                (task_backed && !async_satellite &&
+                 !interp_proc_body_is_synchronous(fn, &sync_scan))) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
         }
+        if (task_backed && async_satellite) return;
     }
     // `a[i] = v`, `a.f = v`, and nested paths through a plain binding root use
     // cow_path_set: it owns every detach/relink decision (S9.1.2), while T0
@@ -808,11 +881,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    // The whole import cone must be interpretable or none of it is: a
-    // JIT-compiled module numbers its slab slots in its own lowering pass,
-    // which does not agree with this pass's numbering, so a mixed cone would
-    // read the wrong globals. Cross-language imports keep their lowering-time
-    // symbol registration and stay on the JIT entirely.
+    // Lambda imports still require one shared planned slab. Hosted JavaScript
+    // imports are different: their namespace is already evaluated and rooted
+    // by the JS runtime, so the binding is resolved through that membrane.
     if (node->node_type == AST_NODE_IMPORT) {
         AstImportNode* imp = (AstImportNode*)node;
         // An aliased import (`import alias: path`) adds *qualified* entries
@@ -820,46 +891,26 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // `node` + `import` pair as the plain entry, so plan_resolve_import
         // binds it through the identical declaration-node match. Only the
         // namespace/default/cross-language shapes have no walker equivalent.
-        if (imp->namespace_name || imp->default_name ||
-                imp->is_cross_lang || !imp->script || !imp->script->interp_supported) {
+        bool hosted_js = imp->is_cross_lang && imp->script &&
+            imp->script->profile == &js_profile;
+        if (imp->namespace_name || imp->default_name || !imp->script ||
+                (imp->is_cross_lang && !hosted_js) ||
+                (!imp->is_cross_lang && !imp->script->interp_supported)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
         }
     }
-    // Comprehension clauses with their own lowering shapes. Ordered streams
-    // and one-source grouping share the runtime helpers MIR uses; equi-join
-    // tuple streams remain on the JIT until their own slice lands.
+    // Comprehension clauses with their own lowering shapes. Ordered streams,
+    // grouped rows, and equi-join tuple streams share the runtime helpers MIR
+    // uses; only malformed group bindings remain fail-closed.
     if (node->node_type == AST_NODE_FOR_EXPR || node->node_type == AST_NODE_FOR_STAM) {
         AstForNode* fr = (AstForNode*)node;
-        // Unordered window clauses lower after the complete stream, so their
-        // body effects are independent of the selected output. Admit only the
-        // expression form; statement windows have no result stream to select.
-        if ((fr->limit || fr->offset) && node->node_type != AST_NODE_FOR_EXPR) {
+        if (fr->group && !fr->group->entry) {
+            // Every grouped form needs a real post-group binding; joined rows
+            // are collected by the same tuple-group path as MIR.
             sc->ok = false;
             sc->reject = node->node_type;
-            return;
-        }
-        if (fr->group && (!fr->group->entry ||
-                !fr->loop || fr->loop->next)) {
-            // MIR grouping deliberately supports one source before tuple
-            // grouping; keep the same semantic boundary in T0.
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
-        bool has_join = false;
-        for (AstNode* l = fr->loop; l; l = l->next) {
-            AstLoopNode* lp = (AstLoopNode*)l;
-            if (lp->on || lp->join_keys || lp->optional) {
-                has_join = true;
-            }
-        }
-        if (has_join && fr->group) {
-            // MIR currently chooses join lowering before group handling; T0
-            // keeps joined grouping pinned until that combined contract lands.
-            sc->ok = false;
-            sc->reject = AST_NODE_FOR_EXPR;
             return;
         }
     }
@@ -1165,6 +1216,16 @@ static void plan_backlink_entry(PlanCtx* pc, NameEntry* entry) {
 static bool plan_resolve_import(NameEntry* entry) {
     if (!entry->import || !entry->import->script || !entry->node) return false;
     Script* owner = entry->import->script;
+    if (entry->import->is_cross_lang) {
+        // Hosted modules publish rooted namespace values instead of Lambda
+        // module slabs. Mark the binding as externally resolved; the walker
+        // reads it through the language membrane at each use site.
+        entry->import_owner = owner;
+        entry->binding_storage = BINDING_STORAGE_MODULE;
+        entry->storage_assigned = true;
+        entry->slot = -1;
+        return true;
+    }
     AstScript* owner_root = (AstScript*)owner->ast_root;
     if (!owner_root) return false;
     for (NameEntry* d = owner_root->global_vars ? owner_root->global_vars->first : NULL;
@@ -1398,11 +1459,15 @@ static uint32_t plan_need(AstNode* node) {
             return 14 + widest;
         }
         if (!fr->group) {
-            // The ordinary recursive iterator's existing conservative shape:
-            // one accumulator home above its widest structural child.
+            // eval_for always reserves the output and ordering-key homes,
+            // even when the enclosing statement discards the stream;
+            // interp_for_level then publishes one collection home before
+            // evaluating each loop source. The old one-home floor omitted
+            // those fixed homes, so nested call/for bodies could exhaust the
+            // statically planned window at a GC safepoint.
             NeedAcc acc = {0};
             interp_visit_children(node, plan_need_child, &acc);
-            return 1 + acc.best;
+            return 3 + acc.best;
         }
         // Group materialization keeps the output/key streams, source, row
         // stream, key stream, and current row alive while row clauses run.
@@ -1438,8 +1503,24 @@ static uint32_t plan_need(AstNode* node) {
         return final_clause > collect ? final_clause : collect;
     }
     case AST_NODE_MAP:
-    case AST_NODE_OBJECT_LITERAL:
         return 1 + plan_need_max_siblings(((AstMapNode*)node)->item);
+    case AST_NODE_OBJECT_LITERAL: {
+        AstObjectLiteralNode* literal = (AstObjectLiteralNode*)node;
+        // eval_object_literal keeps its optional spread home in scope even for
+        // an ordinary typed literal, then publishes the fresh object in a
+        // second home after all fields have been evaluated. The old one-home
+        // floor undercounted a literal nested in a content accumulator and
+        // let the fresh object borrow the frame's signal boundary.
+        uint32_t need = 2 + plan_need_max_siblings(literal->item);
+        if (ast_object_literal_spread_value(literal)) {
+            // A typed `*:source` literal keeps the source and a member key
+            // alive while object_fill performs numeric coercion; the ordinary
+            // one-home literal floor omitted those two simultaneous homes.
+            uint32_t spread_need = 3 + plan_need_max_siblings(literal->item);
+            if (spread_need > need) need = spread_need;
+        }
+        return need;
+    }
     case AST_NODE_ASSIGN:
     case AST_NODE_PARAM: {
         AstNamedNode* named = (AstNamedNode*)node;
@@ -1497,6 +1578,19 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
         break;
     case AST_NODE_RETURN_STAM:
         plan_mark_tail_calls(((AstReturnNode*)node)->value, fn);
+        break;
+    case AST_NODE_BLOCK: {
+        // The direct parser wraps a function body in a block of expression
+        // statements. Tail position belongs only to that block's final
+        // statement; skipping this wrapper leaves direct-parser self recursion
+        // on the native interpreter stack instead of the established TCO loop.
+        AstNode* last = ((AstBlockNode*)node)->statements;
+        while (last && last->next) last = last->next;
+        if (last) plan_mark_tail_calls(last, fn);
+        break;
+    }
+    case AST_NODE_EXPR_STMT:
+        plan_mark_tail_calls(((AstExprStmtNode*)node)->expression, fn);
         break;
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {
@@ -1726,15 +1820,29 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
 // P2 satellite eligibility
 // ---------------------------------------------------------------------------
 
-// Satellites reuse T0's planned module slab, but do not yet carry closure
-// environments, imported module references, or the Script-wide property-key
-// image. Each rejected definition remains on the same T0 semantics path
-// (D8.1.1v2 §5.2-§5.3).
-typedef struct SatelliteScanCtx {
-    bool ok;
-} SatelliteScanCtx;
-
+// Satellites reuse T0's planned module slab. Task-backed procedures carry the
+// resumable task ABI, while the bounded synchronous path admits only reads and
+// stable imports; captures, nested definitions, generators, and replacement
+// writes remain on T0 (D8.1.1v2 §5.2-§5.3).
 bool interp_satellite_import_supported(const NameEntry* entry) {
+    // Function-local imported names are not part of the module-global scope
+    // walk. Rebind that view lazily to the already-planned export slot before
+    // the satellite membrane checks its ABI (D8.1.1v2 / D7.2.1).
+    if (entry && entry->import && !entry->import_owner && entry->import->script &&
+            !entry->import->is_cross_lang && entry->node) {
+        NameEntry* mutable_entry = (NameEntry*)entry;
+        AstScript* owner_root = (AstScript*)entry->import->script->ast_root;
+        for (NameEntry* exported = owner_root && owner_root->global_vars
+                ? owner_root->global_vars->first : NULL;
+                exported; exported = exported->next) {
+            if (exported->node != entry->node || !exported->storage_assigned) continue;
+            mutable_entry->slot = exported->slot;
+            mutable_entry->binding_storage = exported->binding_storage;
+            mutable_entry->import_owner = entry->import->script;
+            mutable_entry->storage_assigned = true;
+            break;
+        }
+    }
     if (!entry || !entry->import || entry->import->is_cross_lang ||
             !entry->import_owner || !entry->storage_assigned ||
             entry->binding_storage != BINDING_STORAGE_MODULE || entry->slot < 0) {
@@ -1743,8 +1851,9 @@ bool interp_satellite_import_supported(const NameEntry* entry) {
     // The target module must already be a planned T0 module; the satellite
     // embeds this stable module id and slot rather than asking MIR to link a
     // missing generated import symbol.
-    return entry->import_owner->interp_supported &&
+    bool supported = entry->import_owner->interp_supported &&
         entry->import_owner->interp_planned;
+    return supported;
 }
 
 static void interp_scan_satellite_node(AstNode* node, void* opaque) {
@@ -1759,19 +1868,21 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         // Nested definitions need an explicit cross-satellite closure contract.
         sc->ok = false;
         return;
-    case AST_NODE_MEMBER_EXPR:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_VIEW:
-        // Named properties depend on the Script-wide sealed key table, which
-        // is not yet shared by satellites.
+        // Member reads use the shared context key image; writes still need a
+        // boxed replacement channel that this satellite ABI does not expose.
         sc->ok = false;
         return;
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
         NameEntry* entry = ident->entry;
         if (!entry) break;
-        if (entry->import && !interp_satellite_import_supported(entry)) {
+        bool hosted_js = entry->import && entry->import->is_cross_lang &&
+            entry->import->script && entry->import->script->profile == &js_profile;
+        if (entry->import && !hosted_js &&
+                !interp_satellite_import_supported(entry)) {
             sc->ok = false;
         }
         break;
@@ -1783,9 +1894,13 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
 }
 
 bool interp_satellite_supported(const AstFuncNode* fn) {
-    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_async ||
-            fn->is_generator || fn->analysis->may_await ||
-            fn->analysis->needs_task_context) {
+    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_generator) {
+        return false;
+    }
+    bool task_backed = fn->node_type == AST_NODE_PROC &&
+        (fn->analysis->may_await || fn->analysis->needs_task_context);
+    if (task_backed) return interp_async_proc_satellite_supported((AstFuncNode*)fn);
+    if (fn->is_async || fn->analysis->may_await || fn->analysis->needs_task_context) {
         return false;
     }
     TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;

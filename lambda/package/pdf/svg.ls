@@ -13,7 +13,7 @@ import util: .util
 pub fn svg_root(view_box: string, width, height, children) {
     <svg xmlns: "http://www.w3.org/2000/svg",
          viewBox: view_box,
-         width: util.fmt_num(width), height: util.fmt_num(height);
+         width: util.fmt_num(width), height: util.fmt_num(height),
         for (c in children) c
     >
 }
@@ -25,7 +25,7 @@ pub fn svg_pdf_root(view_box: string, width, height, children, pdf) {
     let root =
         <svg xmlns: "http://www.w3.org/2000/svg",
              viewBox: view_box,
-             width: util.fmt_num(width), height: util.fmt_num(height);
+             width: util.fmt_num(width), height: util.fmt_num(height),
             for (c in children) c
         >
     pdf_register_svg_image_resolver(root, pdf)
@@ -36,13 +36,13 @@ pub fn svg_pdf_root(view_box: string, width, height, children, pdf) {
 // ============================================================
 
 pub fn group(xform: string, children) {
-    <g transform: xform;
+    <g transform: xform,
         for (c in children) c
     >
 }
 
 pub fn group_class(cls: string, children) {
-    <g class: cls;
+    <g class: cls,
         for (c in children) c
     >
 }
@@ -57,7 +57,7 @@ pub fn text_run(xform: string, font_family: string, font_size,
     <text transform: xform,
           'font-family': font_family,
           'font-size':   util.fmt_num(font_size),
-          fill: fill;
+          fill: fill,
         content
     >
 }

@@ -54,14 +54,14 @@ pub fn handle_request(ctx, path, method) {
     if (path == prefix ++ "/openapi.json" and method == "get")
         {
             status: 200,
-            headers: {"Content-Type": "application/json"},
+            headers: {'Content-Type': "application/json"},
             body: ctx.spec_json
         }
 
     else if (path == prefix ++ "/docs" and method == "get")
         {
             status: 200,
-            headers: {"Content-Type": "text/html"},
+            headers: {'Content-Type': "text/html"},
             body: ctx.docs_html
         }
 
@@ -111,7 +111,7 @@ pub fn error_response(result) {
     }, 'json');
     {
         status: 400,
-        headers: {"Content-Type": "application/json"},
+        headers: {'Content-Type': "application/json"},
         body: body
     }
 }
@@ -127,7 +127,7 @@ pub fn server_error_response(result) {
     }, 'json');
     {
         status: 500,
-        headers: {"Content-Type": "application/json"},
+        headers: {'Content-Type': "application/json"},
         body: body
     }
 }

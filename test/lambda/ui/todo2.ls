@@ -10,24 +10,24 @@ let data_dir = './test/lambda/ui/data/todo/'
 
 // Todo item component: toggle, delete, inline edit, notes textarea
 view <todo_item> state toggled: false, editing: false, edit_text: "", edit_notes: "" {
-  let done = if (toggled) (!~.done) else ~.done
+  let done = if (toggled) (not ~.done) else ~.done
   let check_mark = if (done) "✓" else "○"
   let done_class = if (done) "todo-item done" else "todo-item"
-  let notes = if (~.notes != null) ~.notes else ""
+  let notes = if (~.notes != null) ~.notes else "";
   <li class:done_class, draggable:"true", dragdata:"todo-item"
-    <span class:"checkbox"; check_mark>
+, <span class:"checkbox", check_mark>
     <div class:"item-content"
-      if (editing) {
+, if (editing) {
         <input type:"text", class:"inline-edit", value:edit_text, autofocus:"true">
         <textarea class:"notes-edit", rows:"3", value:edit_notes, placeholder:"Add notes...">
       } else {
-        <span class:"todo-text"; ~.text>
+        <span class:"todo-text", ~.text>
         if (notes != "") {
-          <span class:"todo-notes"; notes>
+          <span class:"todo-notes", notes>
         }
       }
     >
-    <span class:"delete-btn"; "×">
+    <span class:"delete-btn", "×">
   >
 }
 on click(evt) {
@@ -152,27 +152,27 @@ edit <todo_list> state adding: false, new_text: "", drag_over: false {
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
   let count_text = (done_count) ++ "/" ++ (item_count)
-  let header_class = if (drag_over) "list-header drop-active" else "list-header"
+  let header_class = if (drag_over) "list-header drop-active" else "list-header";
   <div class:"todo-list"
-    <div class:header_class, dropzone:"todo-item"
-      <span class:"list-name"; ~.name>
-      <span class:"list-count"; count_text>
+, <div class:header_class, dropzone:"todo-item"
+, <span class:"list-name", ~.name>
+      <span class:"list-count", count_text>
     >
     <ul class:"items"
-      for (item in items)
+, for (item in items)
         apply(<todo_item text:item.text, done:item.done, id:item.id, notes:item.notes>)
     >
     if (adding) {
       <div class:"add-inline"
-        <input type:"text", class:"inline-add-input", placeholder:"What needs to be done?", value:new_text, autofocus:"true">
+, <input type:"text", class:"inline-add-input", placeholder:"What needs to be done?", value:new_text, autofocus:"true">
       >
     }
     <div class:"add-row"
-      <span class:"add-icon"; "+">
+, <span class:"add-icon", "+">
     >
     if (done_count > 0) {
       <div class:"list-actions"
-        <button class:"clear-done-btn"; "Clear completed">
+, <button class:"clear-done-btn", "Clear completed">
       >
     }
   >
@@ -242,16 +242,16 @@ on drop(evt) {
 view <file_entry> state pending_delete: false {
   if (pending_delete) {
     <div class:"file-entry confirm-delete"
-      <span class:"confirm-text"; "Delete?">
-      <span class:"confirm-yes"; "Yes">
-      <span class:"confirm-no"; "No">
+, <span class:"confirm-text", "Delete?">
+      <span class:"confirm-yes", "Yes">
+      <span class:"confirm-no", "No">
     >
   } else {
-    let active_class = if (~.name == ~.active) "file-entry active" else "file-entry"
+    let active_class = if (~.name == ~.active) "file-entry active" else "file-entry";
     <div class:active_class
-      <span class:"file-icon"; "📄">
-      <span class:"file-name"; ~.name>
-      <span class:"file-delete"; "×">
+, <span class:"file-icon", "📄">
+      <span class:"file-name", ~.name>
+      <span class:"file-delete", "×">
     >
   }
 }
@@ -281,10 +281,10 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", 
 
   // load active file data
   let active_path = data_dir ++ eff_active ++ ".json"
-  let file_data = (if (eff_active != "") input(active_path, 'json') else null) ^ { null }
+  let file_data = (if (eff_active != "") input(active_path, 'json') else null) ^ { null };
 
   <html lang:"en"
-  <head
+, <head
     <meta charset:"UTF-8">
     <title "Lambda Todo App v2">
     <style
@@ -596,42 +596,42 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", 
   >
   <body
     <div class:"container"
-      <div class:"header"
-        <h1 "Todo App">
+, <div class:"header"
+, <h1 "Todo App">
         <p "Two-column layout with file management">
       >
       <div class:"app-layout"
-        <div class:"file-panel"
-          <div class:"panel-title"; "Todo Files">
+, <div class:"file-panel"
+, <div class:"panel-title", "Todo Files">
           for (name in file_names)
             apply(<file_entry name:name, active:eff_active>)
           if (creating_file) {
             <div class:"file-entry"
-              <input type:"text", class:"new-file-input", placeholder:"filename", value:new_file_name, autofocus:"true">
+, <input type:"text", class:"new-file-input", placeholder:"filename", value:new_file_name, autofocus:"true">
             >
           } else {
             <div class:"new-file-btn"
-              <span class:"add-icon"; "+">
+, <span class:"add-icon", "+">
               <span "New file">
             >
           }
         >
         if (file_data != null) {
           <div class:"todo-panel"
-            for (lst in file_data.lists)
+, for (lst in file_data.lists)
               apply(<todo_list name:lst.name, items:lst.items>, {mode: "edit"})
           >
         } else {
           <div class:"empty-panel"
-            <span "Select a file to view">
+, <span "Select a file to view">
           >
         }
       >
       <div class:"footer"
-        if (file_data != null) {
+, if (file_data != null) {
           let all_items = [for (lst in file_data.lists) for (item in lst.items) item]
           let total = len(all_items)
-          let done_total = len(for (item in all_items where item.done) item)
+          let done_total = len(for (item in all_items where item.done) item);
           ((done_total) ++ " of " ++ (total) ++ " tasks completed")
         } else {
           "No file selected"

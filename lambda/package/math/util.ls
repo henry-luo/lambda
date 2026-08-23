@@ -15,7 +15,7 @@ pub fn fmt_fixed(x, decimals) {
     let scaled = int(round(abs(x) * float(factor)))
     let whole = int(scaled / factor)
     let frac = scaled % factor
-    let frac_s = pad_left(string(frac), decimals, "0")
+    let frac_s = pad_left(string(frac), decimals, "0");
     (if (x < 0.0) "-" else "") ++ (whole) ++ "." ++ frac_s
 }
 
@@ -66,7 +66,7 @@ fn fmt_large_em(x) {
     let scaled = int(round(x * 10.0))
     let s = string(abs(scaled))
     let body = if (len(s) <= 1) "0." ++ s
-        else slice(s, 0, len(s) - 1) ++ "." ++ slice(s, len(s) - 1, len(s))
+        else slice(s, 0, len(s) - 1) ++ "." ++ slice(s, len(s) - 1, len(s));
     (if (scaled < 0) "-" else "") ++ body ++ "em"
 }
 
@@ -125,5 +125,5 @@ pub fn text_of(el) {
 // Constants
 // ============================================================
 
-pub PT_PER_EM = 10.0
-pub SCRIPT_SPACE = 0.05
+pub let PT_PER_EM = 10.0
+pub let SCRIPT_SPACE = 0.05

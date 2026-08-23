@@ -1,5 +1,5 @@
 // Test: Integer64 Basic
-// Layer: 1 | Category: datatype | Covers: int64 type fundamentals
+// Layer: 1 | Category: datatype | Covers: i64 type fundamentals
 
 // ===== Int64 literals (L suffix) =====
 0L
@@ -8,7 +8,7 @@
 9999999999L
 
 // ===== Type checks =====
-(42L is int64)
+(42L is i64)
 type(42L)
 
 // ===== Int64 arithmetic =====
@@ -23,7 +23,7 @@ type(42L)
 1000000L * 1000000L
 
 // ===== Int64 conversion =====
-int64(42)
+i64(42)
 string(42L)
 
 // ===== Int64 comparison =====

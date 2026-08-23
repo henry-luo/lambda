@@ -7,20 +7,20 @@ import macros: lambda.package.latex.macros
 
 // ---- get_defs: simple \newcommand ----
 let nc1 = <newcommand <curly_group "\\hello"> <curly_group "world">>
-let defs1 = macros.get_defs(<document ;nc1>)
+let defs1 = macros.get_defs(<document nc1>)
 "1. def count:"; len(defs1)
 "2. def name:"; defs1[0].name
 "3. def params 0:"; defs1[0].params
 
 // ---- get_defs: \newcommand with params ----
 let nc2 = <newcommand <curly_group "\\greet"> <brack_group "1"> <curly_group "Hello #1">>
-let defs2 = macros.get_defs(<document ;nc2>)
+let defs2 = macros.get_defs(<document nc2>)
 "4. params 1:"; defs2[0].params
 "5. body text:"; defs2[0].body is element
 
 // ---- get_defs: \newcommand with optional arg ----
 let nc3 = <newcommand <curly_group "\\opt"> <brack_group "1"> <brack_group "default"> <curly_group "Hi #1">>
-let defs3 = macros.get_defs(<document ;nc3>)
+let defs3 = macros.get_defs(<document nc3>)
 "6. opt params:"; defs3[0].params
 "7. default_arg:"; defs3[0].default_arg
 

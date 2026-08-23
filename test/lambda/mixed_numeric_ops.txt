@@ -10,21 +10,21 @@
 25
 "6. 10 * 2.5:"
 25
-"7. int64 * float:"
+"7. i64 * float:"
 15000000
-"8. float * int64:"
+"8. float * i64:"
 15000000
-"9. int * int64:"
+"9. int * i64:"
 100000000
-"10. int64 * int:"
+"10. i64 * int:"
 100000000
 "11. float - int:"
 7.5
 "12. int - float:"
 7.5
-"13. int64 - float:"
+"13. i64 - float:"
 9999999.5
-"14. float - int64:"
+"14. float - i64:"
 -999998.5
 "15. float / int:"
 2.5

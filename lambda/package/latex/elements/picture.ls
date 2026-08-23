@@ -140,13 +140,13 @@ fn render_picture_para(para, unitlength_str) {
         let vb = "0 0 " ++ fmt(svg_w) ++ " " ++ fmt(svg_h)
 
         let start_idx = find_first_command_idx(para, 0, n)
-        let svg_children = process_commands(para, start_idx, n, 0.4, sc, h, ox, oy, [])
+        let svg_children = process_commands(para, start_idx, n, 0.4, sc, h, ox, oy, []);
 
         <svg class: "latex-picture",
              xmlns: "http://www.w3.org/2000/svg",
              viewBox: vb,
              width: fmt(svg_w) ++ "px",
-             height: fmt(svg_h) ++ "px";
+             height: fmt(svg_h) ++ "px",
             for child in svg_children { child }
         >
     }
@@ -395,7 +395,7 @@ fn cy(y, ht, sc) { flip_y(y, ht) * sc }
 
 fn make_line(px, py, dx, dy, length, sw, sc, ht) {
     let x2 = px + line_dx(dx, length)
-    let y2 = py + line_dy(dx, dy, length)
+    let y2 = py + line_dy(dx, dy, length);
     <line x1: fmt(cx(px, sc)), y1: fmt(cy(py, ht, sc)),
           x2: fmt(cx(x2, sc)), y2: fmt(cy(y2, ht, sc)),
           stroke: "black", 'stroke-width': fmt(sw), fill: "none">
@@ -419,7 +419,7 @@ fn make_arrowhead(tx, ty, ddx, ddy) {
         let py2 = by - ux * sz * 0.4
         let pts = fmt(tx) ++ "," ++ fmt(ty) ++ " " ++
                   fmt(px1) ++ "," ++ fmt(py1) ++ " " ++
-                  fmt(px2) ++ "," ++ fmt(py2)
+                  fmt(px2) ++ "," ++ fmt(py2);
         <polygon points: pts, fill: "black">
     }
 }
@@ -431,7 +431,7 @@ fn make_vector(px, py, dx, dy, length, sw, sc, ht) {
     let sy1 = fmt(cy(py, ht, sc))
     let sx2 = fmt(cx(x2, sc))
     let sy2 = fmt(cy(y2, ht, sc))
-    let arrow = make_arrowhead(cx(x2, sc), cy(y2, ht, sc), cx(x2, sc) - cx(px, sc), cy(y2, ht, sc) - cy(py, ht, sc))
+    let arrow = make_arrowhead(cx(x2, sc), cy(y2, ht, sc), cx(x2, sc) - cx(px, sc), cy(y2, ht, sc) - cy(py, ht, sc));
     [<line x1: sx1, y1: sy1, x2: sx2, y2: sy2,
            stroke: "black", 'stroke-width': fmt(sw), fill: "none">,
      arrow]
@@ -475,7 +475,7 @@ fn make_oval(px, py, ow, oh, part, sw, sc, ht) {
         <ellipse cx: fmt(ocx), cy: fmt(ocy), rx: fmt(rx), ry: fmt(ry),
                  fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
     } else {
-        let d = build_oval_arc(ocx, ocy, rx, ry, part)
+        let d = build_oval_arc(ocx, ocy, rx, ry, part);
         <path d: d, fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
     }
 }
@@ -513,13 +513,13 @@ fn build_oval_arc(ocx, ocy, rx, ry, part) {
 fn make_qbezier(x1, y1, x2, y2, x3, y3, sw, sc, ht) {
     let d = "M " ++ fmt(cx(x1, sc)) ++ " " ++ fmt(cy(y1, ht, sc)) ++
             " Q " ++ fmt(cx(x2, sc)) ++ " " ++ fmt(cy(y2, ht, sc)) ++
-            " " ++ fmt(cx(x3, sc)) ++ " " ++ fmt(cy(y3, ht, sc))
+            " " ++ fmt(cx(x3, sc)) ++ " " ++ fmt(cy(y3, ht, sc));
     <path d: d, fill: "none", stroke: "black", 'stroke-width': fmt(sw)>
 }
 
 fn make_text(px, py, text, sc, ht) {
     <text x: fmt(cx(px, sc)), y: fmt(cy(py, ht, sc)),
-          'font-size': "14px", fill: "black";
+          'font-size': "14px", fill: "black",
         text
     >
 }

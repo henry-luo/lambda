@@ -35,7 +35,7 @@ let dynamic_shorthand = shorthand_error_body
 let dynamic_optional = optional_body
 let closure_body = make_closure()
 let imported_body = imported
-let accepted_value: int | error = source_value_declared(45)
+let accepted_value: int | error = source_value_declared(45);
 
 [
   implicit_body(source_fail(0 - 1)) or 10,

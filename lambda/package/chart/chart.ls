@@ -398,7 +398,7 @@ fn render_arc(spec) {
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color,
              spec.title
          >]
     else children0;
@@ -406,7 +406,7 @@ fn render_arc(spec) {
     // legend
     let children = if (legend_el)
         [*children1,
-         <g transform: svg.translate(lay.legend_x, lay.legend_y); legend_el>]
+         <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
     else children1;
 
     svg.svg_root(width, height, children)
@@ -585,7 +585,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     let children1 = if (spec.title)
         [*children0,
          <text x: lay.total_w / 2.0, y: lay.title_y,
-               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color,
              spec.title
          >]
     else children0;
@@ -593,7 +593,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     // legend
     let children = if (legend_el)
         [*children1,
-         <g transform: svg.translate(lay.legend_x, lay.legend_y); legend_el>]
+         <g transform: svg.translate(lay.legend_x, lay.legend_y), legend_el>]
     else children1;
 
     svg.svg_root(width, height, children)
@@ -629,10 +629,10 @@ fn render_faceted(spec) {
          let cell_spec = {*:spec, data: cell_data, facet: null, title: null},
          let cell_svg = dispatch(cell_spec),
          let pos = layout.facet_cell_pos(flay, i))
-        <g transform: svg.translate(pos.x, pos.y + flay.header_h);
+        <g transform: svg.translate(pos.x, pos.y + flay.header_h),
             <text x: sub_w / 2.0, y: -4.0,
                   'text-anchor': "middle", 'font-size': 12, 'font-weight': "bold",
-                  fill: theme.title_color;
+                  fill: theme.title_color,
                 string(fk)
             >
             cell_svg
@@ -645,7 +645,7 @@ fn render_faceted(spec) {
     let children = if (spec.title)
         [*children0,
          <text x: flay.total_w / 2.0, y: float(spec.padding.top) + 16.0,
-               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color;
+               'text-anchor': "middle", 'font-size': theme.title_font_size, 'font-weight': "bold", fill: theme.title_color,
              spec.title
          >]
     else children0;
@@ -690,7 +690,7 @@ fn render_concat(spec) {
 
     // wrap each sub-svg in a translated group
     let groups = for (i in 0 to (n - 1))
-        <g transform: svg.translate(items[i].x, items[i].y);
+        <g transform: svg.translate(items[i].x, items[i].y),
             sub_svgs[i]
         >;
 

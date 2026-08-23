@@ -5,5 +5,5 @@ fn might_fail(x) int^ {
     else x * 10
 }
 
-pub safe_val = might_fail(5) ^ { ^ }
-pub fail_val = might_fail(-1) ^ { ^ }
+pub let safe_val = might_fail(5) ^ { ^ }
+pub let fail_val = might_fail(-1) ^ { ^ }

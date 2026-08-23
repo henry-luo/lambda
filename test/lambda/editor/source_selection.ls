@@ -8,8 +8,8 @@ import lambda.package.editor.mod_doc
 //     <paragraph "See " <strong "this"> " example.">
 //   >
 let doc = <doc
-  <paragraph; "Hello world.">
-  <paragraph; "See " <strong; "this"> " example.">
+  <paragraph "Hello world.">
+  <paragraph "See " <strong "this"> " example.">
 >
 
 // ---------------------------------------------------------------------------

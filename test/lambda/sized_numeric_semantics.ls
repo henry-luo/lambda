@@ -23,8 +23,8 @@
 5 is u8
 1i16 is f16
 int is integer
-float is decimal
-[1i8] is [int]
+float is decimal;
+[1i8] is [int];
 [1.5] is [i8]
 
 "=== f64 type ==="

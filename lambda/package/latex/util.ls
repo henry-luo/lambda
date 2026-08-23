@@ -220,7 +220,7 @@ pub fn attr_or(el, attr_name, default_val) {
 pub fn rebuild_with_children(el, new_kids) {
     // if children haven't changed (same length), return original
     if (len(new_kids) == len(el)) el
-    else <group; for c in new_kids { c }>
+    else <group for c in new_kids { c }>
 }
 
 // get text content of the Nth child

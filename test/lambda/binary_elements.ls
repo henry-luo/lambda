@@ -2,7 +2,7 @@
 let bytes = b'\x00ADFF'
 let joined = b'\xDEAD' ++ b'\xBEEF'
 let nul_joined = b'\x00FF' ++ b'\x00AD'
-let iterated = [for (byte in bytes) byte]
+let iterated = [for (byte in bytes) byte];
 [
   bytes[0],
   bytes[0] is u8,

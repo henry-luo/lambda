@@ -1,6 +1,6 @@
 // Semantic HTML transform and Radiant custom-layout installation.
 
-import radiant;
+import radiant
 import graph_layout: .layout
 import normalize: .normalize
 import scene: .scene

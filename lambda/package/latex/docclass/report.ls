@@ -7,7 +7,7 @@
 // ============================================================
 
 // report has chapters but no parts; similar to book
-pub SECTION_LEVELS = {
+pub let SECTION_LEVELS = {
     chapter: 1,
     section: 2,
     subsection: 3,
@@ -16,7 +16,7 @@ pub SECTION_LEVELS = {
     subparagraph: 6
 }
 
-pub TOP_LEVEL = 1  // <h1> for \chapter
+pub let TOP_LEVEL = 1  // <h1> for \chapter
 
 // ============================================================
 // Section numbering
@@ -75,10 +75,10 @@ pub fn equation_label(counters, num) {
 // Document structure
 // ============================================================
 
-pub HAS_CHAPTERS = true
-pub HAS_PARTS = false
+pub let HAS_CHAPTERS = true
+pub let HAS_PARTS = false
 
-pub ABSTRACT_POSITION = "separate_page"  // report puts abstract on its own page
+pub let ABSTRACT_POSITION = "separate_page"  // report puts abstract on its own page
 
 // ============================================================
 // Theorem numbering — report numbers by chapter like book

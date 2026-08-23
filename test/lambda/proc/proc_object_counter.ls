@@ -1,6 +1,6 @@
 // Object `pn` methods borrow a mutable receiver and write fields back to it.
 type Counter {
-    value: int = 0;
+    value: int = 0,
     pn increment() {
         value = value + 1
     }

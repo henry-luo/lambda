@@ -206,8 +206,8 @@ fn delim_box(el, h, d, w, atom_type, h_raw, d_raw) =>
 
 fn sized_delim_el(cls, ch, atom_type) {
     let side = side_class(atom_type)
-    let all_cls = css.classes([side, cls])
-    <span class: all_cls; ch>
+    let all_cls = css.classes([side, cls]);
+    <span class: all_cls, ch>
 }
 
 fn render_null_delim(atom_type) {
@@ -269,7 +269,7 @@ pub fn is_surd_delim(ch) {
 pub fn render_corner(ch, atom_type) {
     let side = side_class(atom_type)
     let cls = css.classes([css.SMALL_DELIM, side])
-    box.ml_box_full(<span class: cls, style: "top:0.08em;font-size: 70%"; ch>,
+    box.ml_box_full(<span class: cls, style: "top:0.08em;font-size: 70%", ch>,
         0.65, 0.15, 0.4, atom_type, 0.0, 0.0, 0.65)
 }
 
@@ -296,15 +296,15 @@ fn render_vertical_mult_box(ch, target_height, atom_type, use_stacked_fields) {
     let box_d = if (use_stacked_fields) spec.depth_holder else raw.d
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     box.ml_box_full(
-        <span class: cls;
-            <span class: "delim-size1 lm_vlist-t lm_vlist-t2";
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.vlist_h);
+        <span class: cls,
+            <span class: "delim-size1 lm_vlist-t lm_vlist-t2",
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.vlist_h),
                         for (piece in pieces) piece
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.depth_holder)>
                 >
             >
@@ -325,20 +325,20 @@ fn render_brace_level4_mult(ch, atom_type) {
     let heights = [0.91, 1.81, 0.91]
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     box.ml_box_full(
-        <span class: cls;
-            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:2.02em";
+        <span class: cls,
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2",
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:2.02em",
                         for i in 0 to 2 {
-                            <span style: "top:" ++ util.fmt_em(tops[i]);
+                            <span style: "top:" ++ util.fmt_em(tops[i]),
                                 <span class: css.PSTRUT, style: "height:3.15em">
-                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block"; chars[i]>
+                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block", chars[i]>
                             >
                         }
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:1.56em">
                 >
             >
@@ -366,15 +366,15 @@ fn render_extensible_recipe_delim(delim, atom_type) {
     let pieces = extensible_recipe_pieces(spec, 0, [])
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     box.ml_box_full(
-        <span class: cls;
-            <span class: spec.inner_class;
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:1.44em";
+        <span class: cls,
+            <span class: spec.inner_class,
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:1.44em",
                         for (piece in pieces) piece
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:0.96em">
                 >
             >
@@ -392,9 +392,9 @@ fn render_extensible_recipe_delim(delim, atom_type) {
 fn extensible_recipe_pieces(spec, i, acc) {
     if (i >= len(spec.chars)) acc
     else
-        (let piece = <span style: "top:" ++ util.fmt_em(spec.tops[i]);
+        (let piece = <span style: "top:" ++ util.fmt_em(spec.tops[i]),
              <span class: css.PSTRUT, style: "height:" ++ util.fmt_em(spec.pstrut)>
-             <span style: "height:" ++ util.fmt_em(spec.heights[i]) ++ ";display:inline-block"; spec.chars[i]>
+             <span style: "height:" ++ util.fmt_em(spec.heights[i]) ++ ";display:inline-block", spec.chars[i]>
          >,
          extensible_recipe_pieces(spec, i + 1, acc ++ [piece]))
 }
@@ -556,9 +556,9 @@ fn target_height_to_level(ht) {
 fn stk_pieces(spec, ch, i, acc) {
     if (i >= len(spec.tops)) acc
     else
-        (let piece = <span style: "top:" ++ util.fmt_em_ceil2(spec.tops[i]);
+        (let piece = <span style: "top:" ++ util.fmt_em_ceil2(spec.tops[i]),
              <span class: css.PSTRUT, style: "height:" ++ util.fmt_em_ceil2(spec.pstrut)>
-             <span style: "height:" ++ util.fmt_em_ceil2(spec.glyph_h) ++ ";display:inline-block"; ch>
+             <span style: "height:" ++ util.fmt_em_ceil2(spec.glyph_h) ++ ";display:inline-block", ch>
          >,
          stk_pieces(spec, ch, i + 1, acc ++ [piece]))
 }

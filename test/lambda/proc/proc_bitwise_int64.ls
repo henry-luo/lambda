@@ -2,7 +2,7 @@
 // len() returns INT64 — this tests that shr/shl/band/bor/bxor/bnot
 // correctly handle INT64 values without incorrectly unboxing them.
 // Regression test for MIR transpiler bug: bitwise inline emitters
-// called it2i() on raw native int64 values, treating them as tagged Items.
+// called it2i() on raw native i64 values, treating them as tagged Items.
 
 pn main() {
     // len() returns INT64 — use it as operand for all bitwise ops

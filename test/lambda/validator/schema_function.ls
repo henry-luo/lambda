@@ -1,7 +1,7 @@
 // Schema for function types - demonstrates fn_type syntax
-type SimpleFunction = (int, int) => int
-type ComplexFunction = (string, any) => string
-type Callback = (any) => void
+type SimpleFunction = fn (int, int) int
+type ComplexFunction = fn (string, any) string
+type Callback = fn (any) void
 
 type FunctionTypes = {
     simple_function: {

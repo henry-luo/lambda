@@ -14,19 +14,19 @@ let data_b = [
 ]
 
 let spec =
-<hconcat;
-    <chart width: 200, height: 150;
+<hconcat
+    <chart width: 200, height: 150,
         <data values: data_a>
         <mark type: "bar">
-        <encoding;
+        <encoding
             <x field: "cat", dtype: "nominal">
             <y field: "val", dtype: "quantitative">
         >
     >
-    <chart width: 200, height: 150;
+    <chart width: 200, height: 150,
         <data values: data_b>
         <mark type: "line">
-        <encoding;
+        <encoding
             <x field: "x", dtype: "quantitative">
             <y field: "y", dtype: "quantitative">
         >

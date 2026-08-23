@@ -6945,6 +6945,11 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         case LMD_TYPE_DTIME:
             titem.datetime_ptr = value.get_datetime_ptr();
             break;
+        case LMD_TYPE_DECIMAL:
+            // Abstract numeric map fields use TypedItem storage; preserve the
+            // decimal owner so integer-domain decimals round-trip as values.
+            titem.decimal = value.get_decimal();
+            break;
         case LMD_TYPE_STRING:
             titem.string = value.get_safe_string();
             break;

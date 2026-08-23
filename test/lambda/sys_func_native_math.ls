@@ -6,7 +6,7 @@ fn trig_sin(x: float) { math.sin(x) }
 fn trig_cos(x: float) { math.cos(x) }
 fn trig_tan(x: float) { math.tan(x) }
 
-"1. Trigonometric functions (native)"
+"1. Trigonometric functions (native)";
 [
     trig_sin(0.0),          // 0
     trig_sin(1.5707963268), // ~1 (pi/2)
@@ -21,7 +21,7 @@ fn math_log(x: float) { math.log(x) }
 fn math_log10(x: float) { math.log10(x) }
 fn math_exp(x: float) { math.exp(x) }
 
-"2. Exponential and logarithmic (native)"
+"2. Exponential and logarithmic (native)";
 [
     math_sqrt(4.0),         // 2
     math_sqrt(9.0),         // 3
@@ -37,7 +37,7 @@ fn math_floor(x: float) { floor(x) }
 fn math_ceil(x: float) { ceil(x) }
 fn math_round(x: float) { round(x) }
 
-"3. Rounding functions (native)"
+"3. Rounding functions (native)";
 [
     math_abs(-5.5),     // 5.5
     math_abs(3.3),      // 3.3
@@ -53,7 +53,7 @@ fn math_round(x: float) { round(x) }
 fn int_sqrt(x: int) { math.sqrt(x) }
 fn int_abs(x: int) { abs(x) }
 
-"4. Int argument (promoted to double)"
+"4. Int argument (promoted to double)";
 [
     int_sqrt(16),       // 4
     int_abs(-10)        // 10
@@ -63,7 +63,7 @@ fn int_abs(x: int) { abs(x) }
 fn untyped_sqrt(x) { math.sqrt(x) }
 fn untyped_sin(x) { math.sin(x) }
 
-"5. Untyped argument (runtime fn_*)"
+"5. Untyped argument (runtime fn_*)";
 [
     untyped_sqrt(25),   // 5
     untyped_sin(0)      // 0
@@ -73,7 +73,7 @@ fn untyped_sin(x) { math.sin(x) }
 fn hypotenuse(a: float, b: float) { math.sqrt(a*a + b*b) }
 fn normalize_angle(x: float) { math.sin(x) / math.cos(x) }  // same as math.tan(x)
 
-"6. Chained math operations"
+"6. Chained math operations";
 [
     hypotenuse(3.0, 4.0),       // 5
     normalize_angle(0.0)        // 0
@@ -84,7 +84,7 @@ fn safe_sqrt(x: float) {
     if (x < 0.0) 0.0 else math.sqrt(x) 
 }
 
-"7. Math in conditionals"
+"7. Math in conditionals";
 [
     safe_sqrt(9.0),     // 3
     safe_sqrt(-1.0)     // 0 (protected)
@@ -97,7 +97,7 @@ fn factorial_approx(n: int) {
     else math.sqrt(6.2831853 * n) * math.exp(n * math.log(n) - n)
 }
 
-"8. Math in recursive/complex expressions"
+"8. Math in recursive/complex expressions";
 [
     factorial_approx(5),    // ~120 (actual 120)
     factorial_approx(10)    // ~3628800 (actual 3628800)

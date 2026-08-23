@@ -4,10 +4,10 @@
 'hello'
 'world'
 'my_symbol'
-type('hello')
-('hello' is symbol)
-('hello' == 'hello')
-('hello' != 'world')
+type('hello');
+('hello' is symbol);
+('hello' == 'hello');
+('hello' != 'world');
 ('abc' == 'abc')
-symbol("test")
+symbol("test");
 ['a', 'b', 'c']

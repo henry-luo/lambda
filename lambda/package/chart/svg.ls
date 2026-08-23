@@ -10,7 +10,7 @@ import util: .util
 pub fn svg_root(width: int, height: int, children) {
     <svg xmlns: "http://www.w3.org/2000/svg",
          width: width, height: height,
-         viewBox: "0 0 " ++ (width) ++ " " ++ (height);
+         viewBox: "0 0 " ++ (width) ++ " " ++ (height),
         for (child in children) child
     >
 }
@@ -33,7 +33,7 @@ pub fn line(x1, y1, x2, y2, stroke, stroke_width) {
 }
 
 pub fn text_el(x, y, content) {
-    <text x: x, y: y; content>
+    <text x: x, y: y, content>
 }
 
 pub fn path_el(d: string) {
@@ -42,17 +42,17 @@ pub fn path_el(d: string) {
 
 pub fn group(xform: string, children) {
     (if (xform)
-        <g transform: xform;
+        <g transform: xform,
             for (child in children) child
         >
     else
-        <g;
+        <g
             for (child in children) child
         >)
 }
 
 pub fn group_class(cls: string, children) {
-    <g class: cls;
+    <g class: cls,
         for (child in children) child
     >
 }
@@ -155,7 +155,7 @@ pub fn rotate(angle, cx, cy) string {
 // ============================================================
 
 pub fn defs(children) {
-    <defs;
+    <defs
         for (child in children) child
     >
 }
@@ -165,13 +165,13 @@ pub fn linear_gradient(id: string, x1, y1, x2, y2, stops) {
         let op = if (s.opacity) s.opacity else 1.0,
         <stop offset: s.offset, 'stop-color': s.color, 'stop-opacity': op>
     );
-    <linearGradient id: id, x1: x1, y1: y1, x2: x2, y2: y2;
+    <linearGradient id: id, x1: x1, y1: y1, x2: x2, y2: y2,
         for (el in stop_els) el
     >
 }
 
 pub fn clip_path_el(id: string, children) {
-    <clipPath id: id;
+    <clipPath id: id,
         for (child in children) child
     >
 }

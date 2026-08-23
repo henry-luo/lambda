@@ -9,17 +9,17 @@ import util: lambda.package.latex.util
 
 // \mbox{text} — prevent line breaks within text
 pub fn render_mbox(items) {
-    <span class: "latex-mbox", style: "white-space:nowrap"; for c in items { c }>
+    <span class: "latex-mbox", style: "white-space:nowrap", for c in items { c }>
 }
 
 // \fbox{text} — framed box
 pub fn render_fbox(items) {
-    <span class: "latex-fbox", style: "border:1px solid;padding:3pt"; for c in items { c }>
+    <span class: "latex-fbox", style: "border:1px solid;padding:3pt", for c in items { c }>
 }
 
 // \frame{text} — frame with no padding (TeX primitive)
 pub fn render_frame(items) {
-    <span class: "latex-frame", style: "border:1px solid"; for c in items { c }>
+    <span class: "latex-frame", style: "border:1px solid", for c in items { c }>
 }
 
 // ============================================================
@@ -30,15 +30,15 @@ pub fn render_frame(items) {
 // el children: [brack_group(width)?, brack_group(pos)?, ...content]
 pub fn render_makebox(el, content_items) {
     let parsed = parse_brack_args(el)
-    let style = build_makebox_style(parsed.width, parsed.pos)
-    <span class: "latex-makebox", style: style; for c in content_items { c }>
+    let style = build_makebox_style(parsed.width, parsed.pos);
+    <span class: "latex-makebox", style: style, for c in content_items { c }>
 }
 
 // \framebox[width][pos]{text} — like makebox with a border
 pub fn render_framebox(el, content_items) {
     let parsed = parse_brack_args(el)
-    let style = build_makebox_style(parsed.width, parsed.pos) ++ ";border:1px solid;padding:3pt"
-    <span class: "latex-framebox", style: style; for c in content_items { c }>
+    let style = build_makebox_style(parsed.width, parsed.pos) ++ ";border:1px solid;padding:3pt";
+    <span class: "latex-framebox", style: style, for c in content_items { c }>
 }
 
 // \parbox[pos]{width}{text}
@@ -49,8 +49,8 @@ pub fn render_parbox(el, content_items) {
     let style = build_parbox_style(parsed.width, parsed.pos)
     // content_items[0] is the width text (skip it), rest is actual content
     let body = if (len(content_items) > 1) slice(content_items, 1, len(content_items))
-               else content_items
-    <div class: "latex-parbox", style: style; for c in body { c }>
+               else content_items;
+    <div class: "latex-parbox", style: style, for c in body { c }>
 }
 
 // \raisebox{lift}[height][depth]{text}
@@ -60,8 +60,8 @@ pub fn render_raisebox(el, content_items) {
     let lift = if (len(content_items) > 0) trim(string(content_items[0])) else "0pt"
     let body = if (len(content_items) > 1) slice(content_items, 1, len(content_items))
                else []
-    let style = "display:inline-block;position:relative;bottom:" ++ lift
-    <span class: "latex-raisebox", style: style; for c in body { c }>
+    let style = "display:inline-block;position:relative;bottom:" ++ lift;
+    <span class: "latex-raisebox", style: style, for c in body { c }>
 }
 
 // ============================================================
@@ -70,32 +70,32 @@ pub fn render_raisebox(el, content_items) {
 
 // \llap{text} — left overlap (zero width, content extends left)
 pub fn render_llap(items) {
-    <span class: "latex-llap", style: "display:inline-block;width:0;text-align:right;overflow:visible"; for c in items { c }>
+    <span class: "latex-llap", style: "display:inline-block;width:0;text-align:right;overflow:visible", for c in items { c }>
 }
 
 // \rlap{text} — right overlap (zero width, content extends right)
 pub fn render_rlap(items) {
-    <span class: "latex-rlap", style: "display:inline-block;width:0;text-align:left;overflow:visible"; for c in items { c }>
+    <span class: "latex-rlap", style: "display:inline-block;width:0;text-align:left;overflow:visible", for c in items { c }>
 }
 
 // \smash{text} — zero height, content overflows
 pub fn render_smash(items) {
-    <span class: "latex-smash", style: "display:inline-block;height:0;vertical-align:baseline;overflow:visible"; for c in items { c }>
+    <span class: "latex-smash", style: "display:inline-block;height:0;vertical-align:baseline;overflow:visible", for c in items { c }>
 }
 
 // \phantom{text} — invisible, but takes up space
 pub fn render_phantom(items) {
-    <span class: "latex-phantom", style: "visibility:hidden"; for c in items { c }>
+    <span class: "latex-phantom", style: "visibility:hidden", for c in items { c }>
 }
 
 // \hphantom{text} — phantom with zero height
 pub fn render_hphantom(items) {
-    <span class: "latex-hphantom", style: "visibility:hidden;display:inline-block;height:0;overflow:hidden"; for c in items { c }>
+    <span class: "latex-hphantom", style: "visibility:hidden;display:inline-block;height:0;overflow:hidden", for c in items { c }>
 }
 
 // \vphantom{text} — phantom with zero width
 pub fn render_vphantom(items) {
-    <span class: "latex-vphantom", style: "visibility:hidden;display:inline-block;width:0;overflow:hidden"; for c in items { c }>
+    <span class: "latex-vphantom", style: "visibility:hidden;display:inline-block;width:0;overflow:hidden", for c in items { c }>
 }
 
 // ============================================================

@@ -95,6 +95,14 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
     }
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, message, &location);
     if (!error) return;
+    if (separated_relation) {
+        // The Tree-sitter path attaches the repair to this same diagnosis
+        // (lambda-error.cpp); dropping it here left the C parser naming the
+        // ambiguity without telling the user how to resolve it.
+        error->help = mem_strdup(
+            "Use parentheses to group the comparison expression, e.g. (\"a\" < \"b\").",
+            MEM_CAT_TEMP);
+    }
     if (tp->errors) arraylist_append(tp->errors, error);
     else err_free(error);
     tp->error_count++;
@@ -792,14 +800,23 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
 }
 
 static bool lambda_tree_parser_selected(void) {
+#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
+    // release builds have no Lambda Tree-sitter language to select.
+    return false;
+#else
     const char* mode = shell_getenv("LAMBDA_PARSER");
     return mode && (strcmp(mode, "tree") == 0 ||
         strcmp(mode, "tree-sitter") == 0);
+#endif
 }
 
 static bool lambda_parser_compare_selected(void) {
+#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
+    return false;
+#else
     const char* mode = shell_getenv("LAMBDA_PARSER");
     return mode && strcmp(mode, "compare") == 0;
+#endif
 }
 
 static bool initialize_script_ast_storage(Transpiler* tp) {

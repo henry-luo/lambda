@@ -9,7 +9,7 @@ import scale: .scale
 // Default legend configuration
 // ============================================================
 
-pub default_legend_config = {
+pub let default_legend_config = {
     symbol_size: 10,
     symbol_padding: 5,
     label_font_size: 11,
@@ -46,7 +46,7 @@ pub fn color_legend(categories, color_scale, title_text, config) {
         <text x: 0, y: float(cfg.title_font_size),
               'font-size': cfg.title_font_size,
               'font-weight': "bold",
-              fill: cfg.title_color;
+              fill: cfg.title_color,
             title_text
         >
     else null;
@@ -56,14 +56,14 @@ pub fn color_legend(categories, color_scale, title_text, config) {
         (let cat = categories[i],
         let y_pos = y_start + float(i) * row_h,
         let c = scale.scale_apply(color_scale, cat),
-        <g class: "legend-entry", transform: svg.translate(0, y_pos);
+        <g class: "legend-entry", transform: svg.translate(0, y_pos),
             <rect x: 0, y: 0,
                   width: sym_size, height: sym_size,
                   fill: c, rx: 2>
             <text x: float(sym_size) + cfg.symbol_padding,
                   y: float(sym_size) - 1.0,
                   'font-size': cfg.label_font_size,
-                  fill: cfg.label_color;
+                  fill: cfg.label_color,
                 string(cat)
             >
         >)
@@ -88,7 +88,7 @@ pub fn gradient_legend(sc, title_text, config) {
         <text x: 0, y: float(cfg.title_font_size),
               'font-size': cfg.title_font_size,
               'font-weight': "bold",
-              fill: cfg.title_color;
+              fill: cfg.title_color,
             title_text
         >
     else null;
@@ -108,11 +108,11 @@ pub fn gradient_legend(sc, title_text, config) {
     let domain = sc.domain;
     let labels = [
         <text x: float(bar_w) + 4.0, y: y_start + 10.0,
-              'font-size': cfg.label_font_size, fill: cfg.label_color;
+              'font-size': cfg.label_font_size, fill: cfg.label_color,
             util.fmt_num(domain[1])
         >,
         <text x: float(bar_w) + 4.0, y: y_start + float(bar_h),
-              'font-size': cfg.label_font_size, fill: cfg.label_color;
+              'font-size': cfg.label_font_size, fill: cfg.label_color,
             util.fmt_num(domain[0])
         >
     ];

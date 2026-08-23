@@ -74,7 +74,7 @@ fn label_text(raw, fallback, graph_name, edge_name = null) {
     "\\L", fallback)
 }
 
-fn label_element(value) => if (value == null or value == "") null else <label; value>
+fn label_element(value) => if (value == null or value == "") null else <label value>
 
 fn graphviz_style(value) {
   let style = lower(text(value, "style", ""));
@@ -119,7 +119,7 @@ fn graphviz_cluster(value, clusters, graph_name, height, geometry) {
       x: if (box != null) box.x else null, y: if (box != null) box.y else null,
       width: if (box != null) box.width else null,
       height: if (box != null) box.height else null,
-      'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value);
+      'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value),
     if (label != null) { label }
   >
 }
@@ -134,7 +134,7 @@ fn graphviz_node(value, clusters, graph_name, height, geometry) {
       x: if (box != null) box.x else null, y: if (box != null) box.y else null,
       width: if (box != null) box.width else null,
       height: if (box != null) box.height else null,
-      'dash-array': graphviz_style(value);
+      'dash-array': graphviz_style(value),
     if (label != null) { label }
   >
 }
@@ -146,14 +146,14 @@ fn graphviz_edge(value, index, objects, directed, graph_name, height, geometry, 
   let to = if (head != null) string(head.name) else "";
   let edge_name = from ++ (if (directed) "->" else "--") ++ to;
   let label = label_element(label_text(value.label, null, graph_name, edge_name));
-  <edge id: if (edge_ids != null and index < len(edge_ids)) edge_ids[index]
+  <edge id: if (edge_ids != null and (index < len(edge_ids))) edge_ids[index]
       else "edge-" ++ string(index), from: from, to: to,
       'marker-start': marker(value, directed, true),
       'marker-end': marker(value, directed, false), stroke: value.color,
-      'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value);
+      'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value),
     if (label != null) { label }
     if (geometry and value.pos != null) {
-      <route; for (point in route_points(value.pos, height))
+      <route for (point in route_points(value.pos, height))
         <point x: point.x, y: point.y>
       >
     }
@@ -168,7 +168,7 @@ pub fn from_dot_json(value, geometry = false, edge_ids = null) {
   let graph_name = text(value, "name", "");
   let directed = value.directed == true;
   let height = graph_height(value);
-  <'graph-scene' direction: direction(value);
+  <'graph-scene' direction: direction(value),
     for (entry in clusters) graphviz_cluster(entry, clusters, graph_name, height, geometry)
     for (entry in nodes) graphviz_node(entry, clusters, graph_name, height, geometry)
     for (i, entry in values(value, "edges"))
@@ -183,7 +183,7 @@ fn canonical_cluster(entry) {
   let label = canonical_label(value);
   <cluster id: string(value.id), parent: entry.parent, fill: value.fill,
       stroke: value.stroke, 'stroke-width': value["stroke-width"],
-      'dash-array': value["stroke-dasharray"];
+      'dash-array': value["stroke-dasharray"],
     if (label != null) { label }
   >
 }
@@ -193,7 +193,7 @@ fn canonical_node(entry) {
   let label = canonical_label(value);
   <node id: string(value.id), shape: if (value.shape != null) value.shape else "ellipse",
       group: entry.group, fill: value.fill, stroke: value.stroke,
-      'stroke-width': value["stroke-width"], 'dash-array': value["stroke-dasharray"];
+      'stroke-width': value["stroke-width"], 'dash-array': value["stroke-dasharray"],
     if (label != null) { label }
   >
 }
@@ -205,14 +205,14 @@ fn canonical_edge(value, index, directed) {
       'marker-end': if (value["arrow-head"] != null) value["arrow-head"]
         else if (directed) "normal" else "none",
       stroke: value.stroke, 'stroke-width': value["stroke-width"],
-      'dash-array': value["stroke-dasharray"];
+      'dash-array': value["stroke-dasharray"],
     if (label != null) { label }
   >
 }
 
 pub fn from_canonical(graph) {
   let directed = graph.directed == true;
-  <'graph-scene' direction: model.direction(graph);
+  <'graph-scene' direction: model.direction(graph),
     for (entry in model.visual_subgraph_entries(graph)) canonical_cluster(entry)
     for (entry in model.node_entries(graph)) canonical_node(entry)
     for (i, value in model.edges(graph)) canonical_edge(value, i, directed)

@@ -1,11 +1,11 @@
-#!/usr/bin/env lambda
+// #!/usr/bin/env lambda   // (shebang: not parseable — no shebang support)
 
-# Test script for refined Lambda Typesetting System
-# Demonstrates device-independent view tree creation and multi-format rendering
+// Test script for refined Lambda Typesetting System
+// Demonstrates device-independent view tree creation and multi-format rendering
 
 print("Testing Refined Lambda Typesetting System...")
 
-# Create sample document content
+// Create sample document content
 doc_content = <document title:"Sample Research Paper">
     <metadata>
         <author>"Dr. Jane Smith"</author>
@@ -73,7 +73,7 @@ doc_content = <document title:"Sample Research Paper">
     </table>
 </document>
 
-# Test 1: Create device-independent view tree
+// Test 1: Create device-independent view tree
 print("\\n=== Test 1: Creating View Tree ===")
 
 typeset_options = {
@@ -86,7 +86,7 @@ typeset_options = {
     'optimize_layout': true
 }
 
-# Create view tree - this is the core device-independent representation
+// Create view tree - this is the core device-independent representation
 view_tree = typeset(doc_content, typeset_options)
 
 print("View tree created successfully!")
@@ -96,7 +96,7 @@ print("- Total nodes:", view_tree.stats.total_nodes)
 print("- Text runs:", view_tree.stats.text_runs)
 print("- Math elements:", view_tree.stats.math_elements)
 
-# Test 2: Serialize view tree as Lambda element tree
+// Test 2: Serialize view tree as Lambda element tree
 print("\\n=== Test 2: Lambda Element Tree Serialization ===")
 
 serialization_options = {
@@ -110,10 +110,10 @@ lambda_tree = serialize_to_lambda(view_tree, serialization_options)
 print("Lambda element tree:")
 print(lambda_tree)
 
-# Test 3: Multiple format rendering
+// Test 3: Multiple format rendering
 print("\\n=== Test 3: Multi-Format Rendering ===")
 
-# Render to HTML
+// Render to HTML
 html_options = {
     'use_semantic_html': true,
     'inline_css': false,
@@ -125,11 +125,11 @@ html_options = {
 html_output = render(view_tree, 'html', html_options)
 print("HTML output generated (", length(html_output), " characters)")
 
-# Save HTML to file
+// Save HTML to file
 write_file("output.html", html_output)
 print("HTML saved to output.html")
 
-# Render to SVG
+// Render to SVG
 svg_options = {
     'embed_fonts': true,
     'optimize_paths': true,
@@ -140,11 +140,11 @@ svg_options = {
 svg_output = render(view_tree, 'svg', svg_options)
 print("SVG output generated (", length(svg_output), " characters)")
 
-# Save SVG to file
+// Save SVG to file
 write_file("output.svg", svg_output)
 print("SVG saved to output.svg")
 
-# Render to TeX/LaTeX
+// Render to TeX/LaTeX
 tex_options = {
     'doc_class': 'article',
     'use_packages': true,
@@ -156,11 +156,11 @@ tex_options = {
 tex_output = render(view_tree, 'tex', tex_options)
 print("TeX output generated (", length(tex_output), " characters)")
 
-# Save TeX to file
+// Save TeX to file
 write_file("output.tex", tex_output)
 print("TeX saved to output.tex")
 
-# Render back to Markdown
+// Render back to Markdown
 markdown_options = {
     'flavor': 'github',
     'include_math': true,
@@ -172,19 +172,19 @@ markdown_options = {
 markdown_output = render(view_tree, 'markdown', markdown_options)
 print("Markdown output generated (", length(markdown_output), " characters)")
 
-# Save Markdown to file
+// Save Markdown to file
 write_file("output.md", markdown_output)
 print("Markdown saved to output.md")
 
-# Test 4: View tree manipulation
+// Test 4: View tree manipulation
 print("\\n=== Test 4: View Tree Manipulation ===")
 
-# Find specific nodes
+// Find specific nodes
 intro_heading = view_tree_find_by_id(view_tree, "intro")
 if intro_heading {
     print("Found introduction heading at position:", intro_heading.position)
     
-    # Modify styling
+    // Modify styling
     modify_node_style(intro_heading, {
         'color': [0, 0, 1, 1],    # Blue color
         'font_size': 18
@@ -192,7 +192,7 @@ if intro_heading {
     print("Modified heading style")
 }
 
-# Find all math elements
+// Find all math elements
 math_nodes = view_tree_find_by_type(view_tree, VIEW_NODE_MATH_ELEMENT)
 print("Found", length(math_nodes), "mathematical elements")
 
@@ -200,7 +200,7 @@ for math_node in math_nodes {
     print("- Math element at", math_node.position, "size:", math_node.size)
 }
 
-# Test 5: View tree analysis
+// Test 5: View tree analysis
 print("\\n=== Test 5: View Tree Analysis ===")
 
 stats = view_tree_calculate_stats(view_tree)
@@ -212,36 +212,36 @@ print("- Total text length:", view_tree_get_total_text_length(view_tree), "chara
 bounding_box = view_tree_get_bounding_box(view_tree)
 print("Bounding box:", bounding_box)
 
-# Test 6: Page extraction and manipulation
+// Test 6: Page extraction and manipulation
 print("\\n=== Test 6: Page Operations ===")
 
 if view_tree.page_count > 1 {
-    # Extract first page only
+    // Extract first page only
     first_page = view_tree_extract_pages(view_tree, 1, 1)
     print("Extracted first page")
     
-    # Render first page to SVG
+    // Render first page to SVG
     page_svg = render(first_page, 'svg', svg_options)
     write_file("page1.svg", page_svg)
     print("First page saved as page1.svg")
 }
 
-# Test 7: Advanced transformations
+// Test 7: Advanced transformations
 print("\\n=== Test 7: Transformations ===")
 
-# Create a scaled version
+// Create a scaled version
 scale_transform = create_scale_transform(1.2, 1.2)
 view_tree_apply_transform(view_tree, scale_transform)
 print("Applied 1.2x scale transform")
 
-# Render scaled version
+// Render scaled version
 scaled_svg = render(view_tree, 'svg', svg_options)
 write_file("output_scaled.svg", scaled_svg)
 print("Scaled version saved as output_scaled.svg")
 
 print("\\n=== All Tests Completed Successfully! ===")
 
-# Final summary
+// Final summary
 print("\\nGenerated Files:")
 print("- output.html (HTML version)")
 print("- output.svg (SVG version)")  

@@ -4,17 +4,17 @@
 // Empty collections
 len([])
 len({})
-sum([])
+sum([]);
 
 // Single element operations
 [42][0]
 len([42])
 sort([42])
-reverse([42])
+reverse([42]);
 
 // Nested arrays
-[[1, 2], [3, 4]]
-[[1, 2], [3, 4]][0]
+[[1, 2], [3, 4]];
+[[1, 2], [3, 4]][0];
 [[1, 2], [3, 4]][1]
 
 // Nested maps

@@ -18,6 +18,6 @@ let c = [for (e in sort([{n: 3, id: "a"}, {n: 1, id: "b"}], (e) => e.n)) e.id]
 
 // ties keep input order (stable)
 let d = [for (e in sort([{s: 0.0, id: "x"}, {s: 0.0, id: "a"}, {s: 1.0, id: "m"}],
-    (e) => e.s)) e.id]
+    (e) => e.s)) e.id];
 
 [a, b, c, d]

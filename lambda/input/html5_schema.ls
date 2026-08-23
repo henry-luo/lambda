@@ -9,7 +9,7 @@ type MIME = string
 type Language = string
 type Color = string
 type Number = string | int
-type Boolean = bool | 'true' | 'false' | ''
+type Boolean = bool | 'true' | 'false' | ""
 type Hidden = Boolean | 'hidden' | 'until-found'
 
 // Common attribute groups
@@ -23,10 +23,10 @@ type GlobalAttrs = {
     hidden: Hidden?,
     tabindex: int?,
     accesskey: string?,
-    contenteditable: 'true' | 'false' | ''?,
+    contenteditable: 'true' | 'false' | ""?,
     draggable: 'true' | 'false' | 'auto'?,
     dropzone: string?,
-    spellcheck: 'true' | 'false' | ''?,
+    spellcheck: 'true' | 'false' | ""?,
     translate: 'yes' | 'no'?,
     'data-*': string?
 }
@@ -121,9 +121,9 @@ type ResettableFormAssociated = element
 type LabelableFormAssociated = element
 
 // Document structure
-type HTMLDocument <
+type HTMLDocument = <
     version: '5',
-    <html: HtmlAttrs, <head>, <body>>
+    <html HtmlAttrs, <head>, <body>>
 >
 
 type HtmlAttrs = AllAttrs & {
@@ -145,7 +145,7 @@ type Base < AllAttrs & {
 
 type Link < AllAttrs & {
     href: URL?,
-    crossorigin: 'anonymous' | 'use-credentials' | ''?,
+    crossorigin: 'anonymous' | 'use-credentials' | ""?,
     rel: string?,
     media: string?,
     hreflang: Language?,
@@ -298,7 +298,7 @@ type Img < AllAttrs & {
     src: URL?,
     srcset: string?,
     sizes: string?,
-    crossorigin: 'anonymous' | 'use-credentials' | ''?,
+    crossorigin: 'anonymous' | 'use-credentials' | ""?,
     usemap: string?,
     ismap: Boolean?,
     width: Number?,
@@ -346,9 +346,9 @@ type Param < AllAttrs & {
 // Media elements
 type Video < AllAttrs & {
     src: URL?,
-    crossorigin: 'anonymous' | 'use-credentials' | ''?,
+    crossorigin: 'anonymous' | 'use-credentials' | ""?,
     poster: URL?,
-    preload: 'none' | 'metadata' | 'auto' | ''?,
+    preload: 'none' | 'metadata' | 'auto' | ""?,
     autoplay: Boolean?,
     playsinline: Boolean?,
     loop: Boolean?,
@@ -360,8 +360,8 @@ type Video < AllAttrs & {
 
 type Audio < AllAttrs & {
     src: URL?,
-    crossorigin: 'anonymous' | 'use-credentials' | ''?,
-    preload: 'none' | 'metadata' | 'auto' | ''?,
+    crossorigin: 'anonymous' | 'use-credentials' | ""?,
+    preload: 'none' | 'metadata' | 'auto' | ""?,
     autoplay: Boolean?,
     loop: Boolean?,
     muted: Boolean?,
@@ -584,7 +584,7 @@ type Script < AllAttrs & {
     charset: string?,
     async: Boolean?,
     defer: Boolean?,
-    crossorigin: 'anonymous' | 'use-credentials' | ''?,
+    crossorigin: 'anonymous' | 'use-credentials' | ""?,
     integrity: string?,
     nomodule: Boolean?,
     referrerpolicy: 'no-referrer' | 'no-referrer-when-downgrade' | 'origin' | 'origin-when-cross-origin' | 'same-origin' | 'strict-origin' | 'strict-origin-when-cross-origin' | 'unsafe-url'?

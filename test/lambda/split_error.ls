@@ -12,7 +12,7 @@ fn split_result(source, separator, keep) {
 fn test_split_errors() {
     let source = fail_string() ^ { null }
     let separator = fail_string() ^ { null }
-    let keep = fail_string() ^ { ^ }
+    let keep = fail_string() ^ { ^ };
     [
         split_result(source_err, ",", false),
         split_result("a,b", separator_err, false),

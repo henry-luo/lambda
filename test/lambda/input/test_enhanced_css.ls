@@ -35,10 +35,10 @@ if complete_stylesheet {
             margin: 2svw 3lvh;
             color: oklch(0.5 0.2 180deg);
             background: hwb(120deg 20% 30%);
-            border-color: lab(50% 20 -30);
-            font-size: 2rem;
+            'border-color': lab(50% 20 -30);
+            'font-size': 2rem;
             transform: rotate(45deg);
-            border-radius: 1cqw;
+            'border-radius': 1cqw;
         }
     "
     

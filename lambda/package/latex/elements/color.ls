@@ -109,15 +109,15 @@ fn parse_gray(spec) {
 // \textcolor{color}{text} → <span style="color:...">text</span>
 pub fn render_textcolor(el, items, custom_colors) {
     let color_raw = get_first_text(el)
-    let css_color = resolve_color(color_raw, custom_colors)
-    <span class: "latex-textcolor", style: "color:" ++ css_color; for c in items { c }>
+    let css_color = resolve_color(color_raw, custom_colors);
+    <span class: "latex-textcolor", style: "color:" ++ css_color, for c in items { c }>
 }
 
 // \colorbox{color}{text} → <span style="background-color:...;padding:...">text</span>
 pub fn render_colorbox(el, items, custom_colors) {
     let color_raw = get_first_text(el)
-    let css_color = resolve_color(color_raw, custom_colors)
-    <span class: "latex-colorbox", style: "background-color:" ++ css_color ++ ";padding:0.1em 0.2em"; for c in items { c }>
+    let css_color = resolve_color(color_raw, custom_colors);
+    <span class: "latex-colorbox", style: "background-color:" ++ css_color ++ ";padding:0.1em 0.2em", for c in items { c }>
 }
 
 // \fcolorbox{border}{bg}{text} → <span style="border:...;background-color:...">text</span>
@@ -125,8 +125,8 @@ pub fn render_fcolorbox(el, items, custom_colors) {
     let border_raw = get_child_text(el, 0)
     let bg_raw = get_child_text(el, 1)
     let border_color = resolve_color(border_raw, custom_colors)
-    let bg_color = resolve_color(bg_raw, custom_colors)
-    <span class: "latex-fcolorbox", style: "border:1px solid " ++ border_color ++ ";background-color:" ++ bg_color ++ ";padding:0.1em 0.2em"; for c in items { c }>
+    let bg_color = resolve_color(bg_raw, custom_colors);
+    <span class: "latex-fcolorbox", style: "border:1px solid " ++ border_color ++ ";background-color:" ++ bg_color ++ ";padding:0.1em 0.2em", for c in items { c }>
 }
 
 // \pagecolor{color} → null (applied via info.page_color in wrapper)
@@ -149,8 +149,8 @@ pub fn is_color_decl(tag_str) {
 
 // wrap rendered items in a span with color style
 pub fn wrap_color_decl(el, items, custom_colors) {
-    let style = color_decl_style(el, custom_colors)
-    <span class: "latex-color", style: style; for c in items { c }>
+    let style = color_decl_style(el, custom_colors);
+    <span class: "latex-color", style: style, for c in items { c }>
 }
 
 // ============================================================

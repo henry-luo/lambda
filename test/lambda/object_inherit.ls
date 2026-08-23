@@ -1,10 +1,10 @@
 // Object type inheritance
 type Shape {
-    color: string;
+    color: string,
     fn describe() => "Shape: " ++ color
 }
 type Circle : Shape {
-    radius: int;
+    radius: int,
     fn area() => radius * radius * 3
 }
 let c = <Circle color: "red", radius: 5>
@@ -25,11 +25,11 @@ c is object
 
 // Method override
 type Animal {
-    name: string;
+    name: string,
     fn speak() => name ++ " says ..."
 }
 type Dog : Animal {
-    breed: string;
+    breed: string,
     fn speak() => name ++ " says woof!"
 }
 let d = <Dog name: "Rex", breed: "Lab">

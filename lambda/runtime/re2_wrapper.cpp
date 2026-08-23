@@ -573,7 +573,15 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* pattern,
                              AstNode* pattern_ast, bool is_symbol) {
     if (!pool || !type_list || !pattern || !pattern_ast) return false;
-    if (pattern->re2) return pattern->pattern_index >= 0;
+    if (pattern->re2) {
+        if (pattern->pattern_index >= 0) return true;
+        // A direct parser may compile the regex before the module type-list
+        // publication pass. Publish that existing compiled identity instead
+        // of rejecting an otherwise valid named pattern at its first use.
+        arraylist_append(type_list, pattern);
+        pattern->pattern_index = type_list->length - 1;
+        return true;
+    }
 
     const char* error_msg = NULL;
     TypePattern* compiled = compile_pattern_ast(pool, pattern_ast, is_symbol, &error_msg);

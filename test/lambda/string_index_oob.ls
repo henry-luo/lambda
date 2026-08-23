@@ -1,7 +1,7 @@
 // out-of-range string indexing returns a real empty string.
 
 let ascii = "abc"
-let unicode = "é"
+let unicode = "é";
 
 [
     ascii[3] == "",

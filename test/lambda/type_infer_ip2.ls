@@ -18,6 +18,6 @@ let tr = trim("  x  ")
 
 // Order-preserving collection ops carry the argument's own type.
 let sorted = sort([3, 1, 2])
-let revd = reverse([1, 2, 3])
+let revd = reverse([1, 2, 3]);
 
 [s, c, fl, ce, up, tr, sorted, revd]

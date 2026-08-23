@@ -8,10 +8,10 @@ import metrics_data: .metrics_data
 // Core constants
 // ============================================================
 
-pub AXIS_HEIGHT = 0.25
-pub X_HEIGHT = 0.431
-pub PT_PER_EM = 10.0
-pub BASELINE_SKIP = 1.2
+pub let AXIS_HEIGHT = 0.25
+pub let X_HEIGHT = 0.431
+pub let PT_PER_EM = 10.0
+pub let BASELINE_SKIP = 1.2
 
 // ============================================================
 // Sigma parameters (TeX FONTDIMEN values, in em)
@@ -19,52 +19,52 @@ pub BASELINE_SKIP = 1.2
 // ============================================================
 
 // numerator shifts
-pub num1 = [0.5, 0.732, 0.925]         // display style
-pub num2 = [0.394, 0.384, 0.5]         // text style (with bar)
-pub num3 = [0.444, 0.471, 0.504]       // text style (no bar)
+pub let num1 = [0.5, 0.732, 0.925]         // display style
+pub let num2 = [0.394, 0.384, 0.5]         // text style (with bar)
+pub let num3 = [0.444, 0.471, 0.504]       // text style (no bar)
 
 // denominator shifts
-pub denom1 = [0.686, 0.752, 1.025]     // display style
-pub denom2 = [0.345, 0.344, 0.532]     // text style
+pub let denom1 = [0.686, 0.752, 1.025]     // display style
+pub let denom2 = [0.345, 0.344, 0.532]     // text style
 
 // superscript shifts
-pub sup1 = [0.413, 0.503, 0.504]       // display style
-pub sup2 = [0.363, 0.431, 0.404]       // text (not cramped)
-pub sup3 = [0.289, 0.286, 0.294]       // cramped
+pub let sup1 = [0.413, 0.503, 0.504]       // display style
+pub let sup2 = [0.363, 0.431, 0.404]       // text (not cramped)
+pub let sup3 = [0.289, 0.286, 0.294]       // cramped
 
 // subscript shifts
-pub sub1 = [0.15, 0.143, 0.2]          // normal
-pub sub2 = [0.247, 0.286, 0.4]         // with superscript
+pub let sub1 = [0.15, 0.143, 0.2]          // normal
+pub let sub2 = [0.247, 0.286, 0.4]         // with superscript
 
 // baseline drop for scripts relative to base
-pub supDrop = [0.386, 0.353, 0.494]
-pub subDrop = [0.05, 0.071, 0.1]
+pub let supDrop = [0.386, 0.353, 0.494]
+pub let subDrop = [0.05, 0.071, 0.1]
 
 // delimiter sizes
-pub delim1 = [2.39, 1.7, 1.98]         // display
-pub delim2 = [1.01, 1.157, 1.42]       // text
+pub let delim1 = [2.39, 1.7, 1.98]         // display
+pub let delim2 = [1.01, 1.157, 1.42]       // text
 
 // rule thickness
-pub defaultRuleThickness = [0.04, 0.049, 0.049]
-pub sqrtRuleThickness = [0.04, 0.04, 0.04]
+pub let defaultRuleThickness = [0.04, 0.049, 0.049]
+pub let sqrtRuleThickness = [0.04, 0.04, 0.04]
 
 // big operator spacing
-pub bigOpSpacing1 = [0.111, 0.111, 0.111]  // above gap
-pub bigOpSpacing2 = [0.166, 0.166, 0.166]  // below gap
-pub bigOpSpacing3 = [0.2, 0.2, 0.2]        // above clearance
-pub bigOpSpacing4 = [0.6, 0.611, 0.611]    // below clearance
-pub bigOpSpacing5 = [0.1, 0.143, 0.143]    // padding
+pub let bigOpSpacing1 = [0.111, 0.111, 0.111]  // above gap
+pub let bigOpSpacing2 = [0.166, 0.166, 0.166]  // below gap
+pub let bigOpSpacing3 = [0.2, 0.2, 0.2]        // above clearance
+pub let bigOpSpacing4 = [0.6, 0.611, 0.611]    // below clearance
+pub let bigOpSpacing5 = [0.1, 0.143, 0.143]    // padding
 
 // quad (1em of font)
-pub quad = [1.0, 1.171, 1.472]
+pub let quad = [1.0, 1.171, 1.472]
 
 // ============================================================
 // Font scale table (size index 1..10 → em scale factor)
 // Default size = index 5 (1.0)
 // ============================================================
 
-pub FONT_SCALE = [0.0, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074, 2.488]
-pub DEFAULT_FONT_SIZE = 5
+pub let FONT_SCALE = [0.0, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074, 2.488]
+pub let DEFAULT_FONT_SIZE = 5
 
 // ============================================================
 // Math style → metric index mapping
@@ -98,20 +98,20 @@ pub fn at(arr, i) => arr[i]
 // Default character metrics (fallback)
 // ============================================================
 
-pub DEFAULT_CHAR_HEIGHT = 0.7
-pub DEFAULT_CHAR_DEPTH = 0.2
-pub DEFAULT_CHAR_WIDTH = 0.8
-pub DEFAULT_CHAR_ITALIC = 0.0
+pub let DEFAULT_CHAR_HEIGHT = 0.7
+pub let DEFAULT_CHAR_DEPTH = 0.2
+pub let DEFAULT_CHAR_WIDTH = 0.8
+pub let DEFAULT_CHAR_ITALIC = 0.0
 
 // CJK fallback (slightly taller/wider than default)
-pub CJK_CHAR_HEIGHT = 0.9
-pub CJK_CHAR_DEPTH = 0.2
-pub CJK_CHAR_WIDTH = 1.0
+pub let CJK_CHAR_HEIGHT = 0.9
+pub let CJK_CHAR_DEPTH = 0.2
+pub let CJK_CHAR_WIDTH = 1.0
 
 // Placeholder (codepoint U+2B1A → MathLive uses larger box)
-pub PLACEHOLDER_CHAR_HEIGHT = 0.8
-pub PLACEHOLDER_CHAR_DEPTH = 0.2
-pub PLACEHOLDER_CHAR_WIDTH = 0.8
+pub let PLACEHOLDER_CHAR_HEIGHT = 0.8
+pub let PLACEHOLDER_CHAR_DEPTH = 0.2
+pub let PLACEHOLDER_CHAR_WIDTH = 0.8
 
 // ============================================================
 // EXTRA_CHARACTER_MAP — Latin-1 + Cyrillic substitutions
@@ -119,7 +119,7 @@ pub PLACEHOLDER_CHAR_WIDTH = 0.8
 // to a fallback character whose metrics we DO have.
 // ============================================================
 
-pub EXTRA_CHARACTER_MAP = {
+pub let EXTRA_CHARACTER_MAP = {
     // NBSP and ZWSP fallbacks are handled in _default_metrics (see is_cjk).
     // Latin-1
     'Å': 'A',
@@ -157,7 +157,7 @@ pub EXTRA_CHARACTER_MAP = {
 pub fn is_cjk(ch) {
     if (ch == null or len(ch) == 0) false
     else {
-        let cp = code_point(ch, 0)
+        let cp = code_point(ch, 0);
         (cp >= 12352 and cp <= 12447) or
         (cp >= 12448 and cp <= 12543) or
         (cp >= 19968 and cp <= 40879) or

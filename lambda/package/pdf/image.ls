@@ -142,12 +142,12 @@ fn _emit_image(ctm, obj_num, href_url) {
         let url = if (obj_num != 0) _img_url(obj_num) else href_url
         let outer = util.fmt_matrix(ctm)
         let elem =
-            <g transform: outer;
+            <g transform: outer,
                 <image href: url,
                        x: "0", y: "0", width: "1", height: "1",
                        preserveAspectRatio: "none",
                        transform: "matrix(1 0 0 -1 0 1)">
-            >
+            >;
         [elem]
     }
 }
@@ -169,7 +169,7 @@ fn _filter_name(f) {
 }
 
 fn _is_passthrough_filter(f) {
-    let nm = _filter_name(f)
+    let nm = _filter_name(f);
     (nm == "DCTDecode") or (nm == "DCT") or (nm == "JPXDecode")
 }
 
@@ -189,7 +189,7 @@ fn _is_device_space_name(nm) {
 fn _resolve_image_space_at(pdf, page, cs, depth) {
     let nm = util.name_of(cs)
     if (cs is array and len(cs) >= 4 and _is_indexed(cs)) {
-        let base = _resolve_image_space_at(pdf, page, cs[1], depth)
+        let base = _resolve_image_space_at(pdf, page, cs[1], depth);
         [cs[0], base, cs[2], cs[3]]
     }
     else if (nm == null) { cs }
@@ -251,9 +251,9 @@ fn _emit_form_stub(ctm, obj_num) {
     else {
         let outer = util.fmt_matrix(ctm)
         let elem =
-            <g transform: outer, 'data-pdf-form': _img_url(obj_num);
+            <g transform: outer, 'data-pdf-form': _img_url(obj_num),
                 "form-xobject"
-            >
+            >;
         [elem]
     }
 }
@@ -299,7 +299,7 @@ fn _placeholder_inline() {
               stroke: "rgb(160,160,160)",
               'stroke-width': "0.02",
               'stroke-dasharray': "0.05,0.05",
-              transform: "matrix(1 0 0 -1 0 1)">
+              transform: "matrix(1 0 0 -1 0 1)">;
     [elem]
 }
 
@@ -311,7 +311,7 @@ fn _space_type(cs) {
 }
 
 fn _is_indexed(cs) {
-    let t = _space_type(cs)
+    let t = _space_type(cs);
     (t == "Indexed") or (t == "I")
 }
 
@@ -320,7 +320,7 @@ fn _is_icc_based(cs) {
 }
 
 fn _is_tint_space(cs) {
-    let t = _space_type(cs)
+    let t = _space_type(cs);
     (t == "Separation") or (t == "DeviceN")
 }
 
@@ -542,7 +542,7 @@ fn _inline_params(info) {
 }
 
 fn _inline_pixel_rect(data, ncomp, bpc, w, cs, rw, rh, x, y) {
-    let pix = y * w + x
+    let pix = y * w + x;
     <rect x: util.fmt_num(float(x) * rw),
           y: util.fmt_num(float(y) * rh),
           width: util.fmt_num(rw),
@@ -583,7 +583,7 @@ fn _emit_inline_pixels(info) {
     }
     else {
         let rw = 1.0 / float(w)
-        let rh = 1.0 / float(h)
+        let rh = 1.0 / float(h);
         [svg.group("matrix(1 0 0 -1 0 1)",
             _emit_inline_pixels_rows(data, ncomp, bpc, w, h, cs, rw, rh, 0, []))]
     }

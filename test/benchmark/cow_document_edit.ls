@@ -4,10 +4,10 @@ pn build_document(count: int) {
     var rows = []
     var index = 0
     while (index < count) {
-        push(rows, <p id: index, revision: 0; "draft">)
+        push(rows, <p id: index, revision: 0, "draft">)
         index = index + 1
     }
-    return <article class: "draft"; rows>
+    return <article class: "draft", rows>
 }
 
 pn edit_document(var doc, rounds: int) {

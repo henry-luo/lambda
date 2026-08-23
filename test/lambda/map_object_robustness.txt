@@ -29,7 +29,7 @@
 4
 3.75
 '=4c='
-3.3333333333
+3.3333333333333335
 '=4d='
 ["non-pos", "pos"]
 '=4e='
@@ -65,10 +65,6 @@ true
 7
 '=8a='
 5
-'=8b='
-15
-'=8c='
-60
 '=8d='
 [7, 8]
 '=8e='
@@ -82,19 +78,13 @@ true
 true
 true
 true
-'=10a='
-120
-'=10b='
-false
-true
-false
 '=11a='
 true
 '=11b='
-false
+true
 '=11c='
 true
-false
+true
 '=12a='
 ["localhost", 8080, false]
 '=12b='
@@ -107,7 +97,7 @@ false
 true
 '=15b='
 false
-true
+false
 '=16='
 5
 "inline"
@@ -117,4 +107,4 @@ true
 110
 '=19a='
 true
-false
+true

@@ -163,7 +163,7 @@ fn parse_channel(ch_el) {
 // ============================================================
 
 fn parse_layer(layer_el) {
-    let count = len(layer_el)
+    let count = len(layer_el);
     (for (i in 0 to (count - 1),
           let child = layer_el[i]
           where name(child) == 'chart') parse_chart(child))

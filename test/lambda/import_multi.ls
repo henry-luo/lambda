@@ -2,7 +2,7 @@
 import .mod_vars, .mod_compute
 
 // from mod_vars
-[name, version]
+[name, version];
 
 // from mod_compute
 [doubled, total]

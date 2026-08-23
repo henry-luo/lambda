@@ -320,7 +320,7 @@ fn property_element(entry) {
 
 fn properties_element(properties) {
   if (len(properties) == 0) null
-  else <properties namespace: "graphviz";
+  else <properties namespace: "graphviz",
     for (entry in properties) property_element(entry)
   >
 }
@@ -368,8 +368,8 @@ fn node_element(entry, graph_id) {
     style: known.style, 'stroke-dasharray': known["stroke-dasharray"],
     opacity: known.opacity, radius: known.radius,
     'source-start': entry.source["source-start"], 'source-end': entry.source["source-end"],
-    'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"];
-    if (record != null) { <content; record.content> }
+    'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"],
+    if (record != null) { <content record.content> }
     let properties = properties_element(entry.properties)
     if (properties != null) { properties }
   >
@@ -403,7 +403,7 @@ fn edge_element(entry, graph_id) {
     'source-statement-column': entry.provenance["source-statement-column"],
     'source-segment-index': entry.provenance["source-segment-index"],
     'source-expansion-index': entry.provenance["source-expansion-index"],
-    'source-expansion-count': entry.provenance["source-expansion-count"];
+    'source-expansion-count': entry.provenance["source-expansion-count"],
     let properties = properties_element(entry.properties)
     if (properties != null) { properties }
   >
@@ -421,7 +421,7 @@ fn rank_constraint(scope) {
   let entry = local_scope_property(scope, "rank");
   if (entry == null or not contains(["same", "min", "max", "source", "sink"],
       lower(entry.value))) null
-  else <constraint kind: "rank", value: lower(entry.value), scope: scope.id;
+  else <constraint kind: "rank", value: lower(entry.value), scope: scope.id,
     for (id in scope.members) member_element(id)
   >
 }
@@ -430,7 +430,7 @@ fn constraints_element(scopes) {
   let values = [for (scope in scopes, let value = rank_constraint(scope)
     where value != null) value];
   if (len(values) == 0) null
-  else <constraints;
+  else <constraints
     for (value in values) value
   >
 }
@@ -583,7 +583,7 @@ fn cluster_element(scope, state, graph_id) {
     'font-size': model.optional(known, "font-size"),
     'font-color': model.optional(known, "font-color"),
     'source-start': scope.source["source-start"], 'source-end': scope.source["source-end"],
-    'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"];
+    'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"],
     let properties = properties_element(scope.properties)
     if (properties != null) { properties }
     for (entry in state.nodes where entry.owner == scope.id) node_element(entry, graph_id)
@@ -597,7 +597,7 @@ fn cluster_element(scope, state, graph_id) {
 fn scope_element(scope) {
   <subgraph id: scope.id, role: "scope", 'parent-scope': scope.parent_scope,
     'source-start': scope.source["source-start"], 'source-end': scope.source["source-end"],
-    'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"];
+    'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"],
     let properties = properties_element(scope.properties)
     if (properties != null) { properties }
     for (id in scope.members) member_element(id)
@@ -620,7 +620,7 @@ fn canonical_graph(source, state) {
     label: labels.graph(known.label, string(source.id)),
     'label-format': known["label-format"],
     'source-start': source["source-start"], 'source-end': source["source-end"],
-    'source-line': source["source-line"], 'source-column': source["source-column"];
+    'source-line': source["source-line"], 'source-column': source["source-column"],
     let properties = properties_element(state.graph_properties)
     if (properties != null) { properties }
     let constraints = constraints_element(state.scopes)

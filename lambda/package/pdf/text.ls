@@ -255,7 +255,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   fill:          svg_fill,
                   stroke:        svg_stroke,
                   'fill-opacity': util.fmt_num(fill_alpha),
-                  'stroke-opacity': util.fmt_num(stroke_alpha);
+                  'stroke-opacity': util.fmt_num(stroke_alpha),
                 content
             >
         }
@@ -274,7 +274,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   textLength:    scaled_text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
-                  stroke:        svg_stroke;
+                  stroke:        svg_stroke,
                 content
             >
         }
@@ -289,7 +289,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   textLength:    scaled_text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
-                  'fill-opacity': util.fmt_num(fill_alpha);
+                  'fill-opacity': util.fmt_num(fill_alpha),
                 content
             >
         }
@@ -307,7 +307,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   'data-pdf-width': util.fmt_num(run_advance),
                   textLength:    scaled_text_len,
                   lengthAdjust:  "spacingAndGlyphs",
-                  fill:          svg_fill;
+                  fill:          svg_fill,
                 content
             >
         }
@@ -327,7 +327,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   fill:          svg_fill,
                   stroke:        svg_stroke,
                   'fill-opacity': util.fmt_num(fill_alpha),
-                  'stroke-opacity': util.fmt_num(stroke_alpha);
+                  'stroke-opacity': util.fmt_num(stroke_alpha),
                 content
             >
         }
@@ -345,7 +345,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
-                  stroke:        svg_stroke;
+                  stroke:        svg_stroke,
                 content
             >
         }
@@ -363,7 +363,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
-                  'fill-opacity': util.fmt_num(fill_alpha);
+                  'fill-opacity': util.fmt_num(fill_alpha),
                 content
             >
         }
@@ -380,7 +380,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   'data-pdf-width': util.fmt_num(run_advance),
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
-                  fill:          svg_fill;
+                  fill:          svg_fill,
                 content
             >
         }
@@ -507,7 +507,7 @@ fn _text_space_scale(st, ctm) {
 fn _text_advance(st, ctm, txt) {
     let n = len(txt)
     let base = _text_width(st, ctm, txt)
-    let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm)
+    let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm);
     (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
@@ -515,7 +515,7 @@ fn _text_advance_codes(st, ctm, codes) {
     let n = len(codes)
     let base = _codes_width_units(st.font_info, codes) / 1000.0 * _effective_font_size(st, ctm)
     let words = len(for (c in codes where c == 32) c)
-    let spacing = ((st.char_space * float(n)) + (st.word_space * float(words))) * _text_space_scale(st, ctm)
+    let spacing = ((st.char_space * float(n)) + (st.word_space * float(words))) * _text_space_scale(st, ctm);
     (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
@@ -868,7 +868,7 @@ fn _is_overprint_dup(prev, cur) {
         else if (_content_str(prev) != _content_str(cur))                         { false }
         else {
             let dx = float(cx) - float(px)
-            let adx = if (dx < 0.0) (0.0 - dx) else dx
+            let adx = if (dx < 0.0) (0.0 - dx) else dx;
             (adx < 1.5)
         }
     }

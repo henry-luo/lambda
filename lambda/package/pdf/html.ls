@@ -10,7 +10,7 @@ import util: .util
 
 // CSS for the multi-page document. Kept inline so the generated HTML is
 // self-contained.
-pub DEFAULT_CSS =
+pub let DEFAULT_CSS =
     ".pdf-document { background: #f1f3f5; padding: 16px; margin: 0; }\n" ++
     ".pdf-page { display: block; box-sizing: border-box; position: relative; overflow: hidden; " ++
         "max-width: 100%; margin: 0 auto 16px auto; padding: 0; " ++
@@ -79,29 +79,29 @@ fn _text_span_style(t) {
 }
 
 fn _text_span(t) {
-    let width = _attr_num(t, "data-pdf-width", _attr_num(t, "textLength", 0.0))
+    let width = _attr_num(t, "data-pdf-width", _attr_num(t, "textLength", 0.0));
     <span class: "pdf-text-run", 'data-pdf-width': util.fmt_num(width),
-        'data-pdf-copy-space': _copy_space_attr(t), style: _text_span_style(t); _copy_content(t)>
+        'data-pdf-copy-space': _copy_space_attr(t), style: _text_span_style(t), _copy_content(t)>
 }
 
 pub fn text_layer(texts, width, height) {
-    let style = "width:" ++ width ++ "px;height:" ++ height ++ "px;"
-    <div class: "pdf-text-layer", style: style;
+    let style = "width:" ++ width ++ "px;height:" ++ height ++ "px;";
+    <div class: "pdf-text-layer", style: style,
         for (t in texts) _text_span(t)
     >
 }
 
 // Wrap a single <svg> element in a <div class="pdf-page" data-page="n">.
 pub fn page_div(svg_el, page_num: int) {
-    let page_style = "width: " ++ svg_el.width ++ "px;"
-    <div class: "pdf-page", 'data-page': string(page_num), style: page_style;
+    let page_style = "width: " ++ svg_el.width ++ "px;";
+    <div class: "pdf-page", 'data-page': string(page_num), style: page_style,
         svg_el
     >
 }
 
 pub fn page_div_with_text_layer(svg_el, texts, page_num: int) {
-    let page_style = "width: " ++ svg_el.width ++ "px;"
-    <div class: "pdf-page", 'data-page': string(page_num), style: page_style;
+    let page_style = "width: " ++ svg_el.width ++ "px;";
+    <div class: "pdf-page", 'data-page': string(page_num), style: page_style,
         svg_el
         text_layer(texts, svg_el.width, svg_el.height)
     >
@@ -114,13 +114,13 @@ pub fn page_div_with_text_layer(svg_el, texts, page_num: int) {
 pub fn html_shell(svgs, opts) {
     let title = if (opts and opts.title) opts.title else "PDF Document";
     let css = if (opts and opts.css) opts.css else DEFAULT_CSS;
-    <html;
-        <head;
+    <html
+        <head
             <meta charset: "utf-8">
-            <title; title>
-            <style; css>
+            <title title>
+            <style css>
         >
-        <body class: "pdf-document";
+        <body class: "pdf-document",
             for (i in 0 to (len(svgs) - 1)) page_div(svgs[i], i + 1)
         >
     >
@@ -129,13 +129,13 @@ pub fn html_shell(svgs, opts) {
 pub fn html_shell_pages(pages, opts) {
     let title = if (opts and opts.title) opts.title else "PDF Document";
     let css = if (opts and opts.css) opts.css else DEFAULT_CSS;
-    <html;
-        <head;
+    <html
+        <head
             <meta charset: "utf-8">
-            <title; title>
-            <style; css>
+            <title title>
+            <style css>
         >
-        <body class: "pdf-document";
+        <body class: "pdf-document",
             for (p in pages) p
         >
     >

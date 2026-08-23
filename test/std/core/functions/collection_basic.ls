@@ -14,7 +14,7 @@ reverse(["a", "b", "c"])
 // ===== unique =====
 unique([1, 2, 2, 3, 3, 3])
 unique(["a", "b", "a", "c"])
-unique([])
+unique([]);
 
 // ===== ++ (concatenation) =====
 [1, 2] ++ [3, 4] ++ [5, 6]
@@ -22,9 +22,9 @@ unique([])
 // ===== slice =====
 slice([1, 2, 3, 4, 5], 1, 3)
 slice([1, 2, 3, 4, 5], 2)
-slice([1, 2, 3, 4, 5], 0, 2)
+slice([1, 2, 3, 4, 5], 0, 2);
 
 // ===== Method-style =====
-[3, 1, 2].sort()
-[1, 2, 3].reverse()
+[3, 1, 2].sort();
+[1, 2, 3].reverse();
 [1, 2, 2, 3].unique()

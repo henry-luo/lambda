@@ -5,7 +5,7 @@
 // Theme presets
 // ============================================================
 
-pub light_theme = {
+pub let light_theme = {
     background: "white",
     title_color: "#333",
     title_font_size: 16,
@@ -19,7 +19,7 @@ pub light_theme = {
     mark_color: "#4e79a7"
 }
 
-pub dark_theme = {
+pub let dark_theme = {
     background: "#333",
     title_color: "#eee",
     title_font_size: 16,

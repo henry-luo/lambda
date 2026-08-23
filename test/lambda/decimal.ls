@@ -3,7 +3,7 @@
 "===== BASIC DECIMAL LITERALS ====="
 3.14159m
 2.71828m
-0.0m
+0.0m;
 -1.5m
 123456789.987654321m
 
@@ -12,7 +12,7 @@
 0.0m + (-1.5m)
 123456789.987654321m + 3.14159m
 3.14159m + 5
-10 + 2.71828m
+10 + 2.71828m;
 (-1.5m) + 0
 3.14159m + 1.5
 2.5 + 2.71828m
@@ -27,7 +27,7 @@
 5.5 - (-1.5m)
 
 "===== DECIMAL MULTIPLICATION ====="
-3.14159m * 2.71828m
+3.14159m * 2.71828m;
 (-1.5m) * (-1.5m)
 0.0m * 123456789.987654321m
 3.14159m * 2
@@ -38,7 +38,7 @@
 
 "===== DECIMAL DIVISION ====="
 3.14159m / 2.71828m
-123456789.987654321m / 3.14159m
+123456789.987654321m / 3.14159m;
 (-1.5m) / (-1.5m)
 3.14159m / 2
 10 / 2.71828m
@@ -52,7 +52,7 @@
 10 % 2.3m
 
 "===== DECIMAL POWER ====="
-2.71828m ** 2
+2.71828m ** 2;
 (-1.5m) ** 3
 3.14159m ** 0
 2.71828m ** 0.5m
@@ -79,20 +79,20 @@ decimal_val / int_val
 float_val / decimal_val
 decimal_val / float_val
 
-"===== COMPLEX EXPRESSIONS ====="
+"===== COMPLEX EXPRESSIONS =====";
 (3.14159m + 2.71828m) * (3.14159m - 2.71828m)
-3.14159m * 3.14159m + 2.71828m * 2.71828m
+3.14159m * 3.14159m + 2.71828m * 2.71828m;
 (3.14159m + 2.71828m) / (3.14159m * 2.71828m)
-3.14159m ** 2 + 2 * 3.14159m * 2.71828m + 2.71828m ** 2
-(decimal_val + int_val) * float_val
+3.14159m ** 2 + 2 * 3.14159m * 2.71828m + 2.71828m ** 2;
+(decimal_val + int_val) * float_val;
 (float_val * decimal_val) / int_val
 int_val ** 2 + decimal_val ** 2 + float_val ** 2
 
 "===== PRECISION TEST ====="
 let precise_decimal = 0.1m + 0.2m, float_addition = 0.1 + 0.2
 precise_decimal
-float_addition
-(precise_decimal == 0.3m)
+float_addition;
+(precise_decimal == 0.3m);
 (float_addition == 0.3)
 
 "===== FINANCIAL CALCULATION ====="
@@ -126,16 +126,16 @@ min_nonzero
 max_precision + min_nonzero
 max_precision - min_nonzero
 
-"===== COMPARISONS ====="
-(3.14159m == 3.14159m)
-(3.14159m == 2.71828m)
-(3.14159m > 2.71828m)
-(2.71828m < 3.14159m)
-(3.14159m >= 3.14159m)
+"===== COMPARISONS =====";
+(3.14159m == 3.14159m);
+(3.14159m == 2.71828m);
+(3.14159m > 2.71828m);
+(2.71828m < 3.14159m);
+(3.14159m >= 3.14159m);
 (2.71828m <= 3.14159m)
-"-----"
-(decimal_val > int_val)
-(decimal_val < float_val)
+"-----";
+(decimal_val > int_val);
+(decimal_val < float_val);
 (int_val >= decimal_val)
 
 "===== ZERO OPERATIONS ====="
@@ -148,16 +148,16 @@ zero / 3.14159m
 zero + zero
 zero - zero
 
-"===== DECIMAL NEGATION ====="
--3.14159m
+"===== DECIMAL NEGATION =====";
+-3.14159m;
 -0.0m
-let dval = 3.14159m
+let dval = 3.14159m;
 -dval
-let neg_dval = -1.5m
--neg_dval
--(3.14159m + 2.71828m)
-(3.14159m + 2.71828m) - 1.0m
-(1.5m) - (0.5m)
+let neg_dval = -1.5m;
+-neg_dval;
+-(3.14159m + 2.71828m);
+(3.14159m + 2.71828m) - 1.0m;
+(1.5m) - (0.5m);
 (-1.5m) - (-0.5m)
 
 "Decimal arithmetic test completed successfully"

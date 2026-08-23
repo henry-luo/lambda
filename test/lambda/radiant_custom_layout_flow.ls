@@ -1,4 +1,4 @@
-import radiant;
+import radiant
 
 let ok = radiant.register_layout("flow_smoke", (parent, children, ctx) => {
   baseline: 12,

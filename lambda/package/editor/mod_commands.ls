@@ -438,7 +438,7 @@ fn apply_cross_block_edges(blocks, prefix, suffix) {
   else if (len(blocks) == 1) { [append_content_to_block(prepend_content_to_block(blocks[0], prefix), suffix)] }
   else {
     let first = prepend_content_to_block(blocks[0], prefix)
-    let tail_block = append_content_to_block(blocks[len(blocks) - 1], suffix)
+    let tail_block = append_content_to_block(blocks[len(blocks) - 1], suffix);
     [first, *list_slice(blocks, 1, len(blocks) - 1), tail_block]
   }
 }
@@ -1966,7 +1966,7 @@ fn collect_add_col_steps_rows(rows_path, rows, col_index, row_i, row_count, acc)
   else {
     let row = rows.content[row_i]
     let next = if (row != null and is_node(row) and row.tag == 'tr') {
-      let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null }
+      let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null };
       [*acc, step_replace([*rows_path, row_i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])]
     } else { acc }
     collect_add_col_steps_rows(rows_path, rows, col_index, row_i + 1, row_count, next)
@@ -1978,7 +1978,7 @@ fn collect_add_col_steps_table(table_path, table, col_index, i, n, acc) {
   else {
     let child = table.content[i]
     let next = if (child != null and is_node(child) and child.tag == 'tr') {
-      let ref_cell = if (col_index < len(child.content)) { child.content[col_index] } else { null }
+      let ref_cell = if (col_index < len(child.content)) { child.content[col_index] } else { null };
       [*acc, step_replace([*table_path, i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])]
     } else if (child != null and is_node(child) and (child.tag == 'thead' or child.tag == 'tbody' or child.tag == 'tfoot')) {
       collect_add_col_steps_rows([*table_path, i], child, col_index, 0, len(child.content), acc)

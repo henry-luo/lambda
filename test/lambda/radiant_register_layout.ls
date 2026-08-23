@@ -1,4 +1,4 @@
-import radiant;
+import radiant
 
 let child = {
   index: 0,

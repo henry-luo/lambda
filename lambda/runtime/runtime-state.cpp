@@ -473,6 +473,13 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
     return true;
 }
 
+extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
+    EvalContext* owner = context;
+    if (!owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states || !owner->module_states[module_id]) return 0;
+    return owner->module_states[module_id]->property_key_count;
+}
+
 extern "C" Item lambda_name_id_to_item(NameId name_id) {
     if (name_id == NAME_ID_NONE) return ItemNull;
     NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,

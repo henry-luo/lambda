@@ -320,7 +320,7 @@ fn _pick_info(s14_info, fallback_info) {
 fn _has_flag(flags, mask) {
     // Lambda has no bitwise ops in the path used here; integer
     // arithmetic via mod/div is sufficient for single-bit checks.
-    let q = flags div mask
+    let q = flags div mask;
     (q - ((q div 2) * 2)) == 1
 }
 

@@ -11,7 +11,7 @@ pub fn render_inline_el(node) {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
     if (math_ast != null) math.render_inline(math_ast)
-    else <span class: "math-inline"; src>
+    else <span class: "math-inline", src>
 }
 
 // ============================================================
@@ -21,8 +21,8 @@ pub fn render_inline_el(node) {
 pub fn render_display_el(node) {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
-    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display"; src>
-    <div class: "math-display-container"; math_html>
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>;
+    <div class: "math-display-container", math_html>
 }
 
 // ============================================================
@@ -32,8 +32,8 @@ pub fn render_display_el(node) {
 pub fn render_equation_el(node) {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
-    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display"; src>
-    <div class: "latex-equation"; math_html>
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>;
+    <div class: "latex-equation", math_html>
 }
 
 // ============================================================
@@ -43,6 +43,6 @@ pub fn render_equation_el(node) {
 pub fn render_math_env_el(node, env_name) {
     let math_ast = node.ast
     let src = if (node.source != null) node.source else ""
-    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display"; src>
-    <div class: "math-display-container"; math_html>
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>;
+    <div class: "math-display-container", math_html>
 }

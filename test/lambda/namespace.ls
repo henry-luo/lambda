@@ -16,7 +16,7 @@ import xlink: 'http://www.w3.org/1999/xlink'
 <svg .rect>
 
 "1b. explicit content boundary admits relative path child"
-<svg; .rect>
+<svg \.rect>
 
 "2. namespaced attributes (desugared to sub-maps)"
 <svg.rect svg.width: 100, svg.height: 50>
@@ -33,15 +33,15 @@ import xlink: 'http://www.w3.org/1999/xlink'
 'world'
 'multi-word-symbol'
 
-"5. symbol equality"
-('hello' == 'hello')
-('hello' == 'world')
+"5. symbol equality";
+('hello' == 'hello');
+('hello' == 'world');
 ('abc' == 'abc')
 
 "6. symbol type checks"
-type('hello')
-('hello' is symbol)
-('hello' is string)
+type('hello');
+('hello' is symbol);
+('hello' is string);
 (123 is symbol)
 
 // =============================================
@@ -77,8 +77,8 @@ replace('hello-world', '-', '_')
 // =============================================
 // Section 5: Symbol in collections
 // =============================================
-"13. symbol array"
-['hello', 'world', 'test']
+"13. symbol array";
+['hello', 'world', 'test'];
 ('hello' in ['hello', 'world'])
 
 "14. map with symbol values"
@@ -89,10 +89,10 @@ replace('hello-world', '-', '_')
 // =============================================
 "15. type distinction"
 let sym = 'test'
-let str = "test"
-(sym is symbol)
-(str is string)
-(sym is string)
+let str = "test";
+(sym is symbol);
+(str is string);
+(sym is string);
 (str is symbol)
 
 // =============================================
@@ -107,11 +107,11 @@ let str = "test"
 <span id: "test", class: "bold">
 
 "18. element with content"
-<p; "Hello world">
-<div; "text"; 123>
+<p "Hello world">
+<div "text"; 123>
 
 "19. nested elements"
-<ul; <li; "item1">; <li; "item2">>
+<ul <li "item1">; <li "item2">>
 
 // =============================================
 // Section 8: Symbol in functions
@@ -122,7 +122,7 @@ make_tag('svg', 'rect')
 make_tag('html', 'div')
 
 "21. symbol in conditional"
-let mode = 'dark'
+let mode = 'dark';
 [if (mode == 'dark') "dark mode" else "light mode"]
 
 // =============================================
@@ -130,9 +130,9 @@ let mode = 'dark'
 // =============================================
 "22. symbol interning"
 let s1 = 'interned'
-let s2 = 'interned'
+let s2 = 'interned';
 (s1 == s2)
-let s3 = 'different'
+let s3 = 'different';
 (s1 == s3)
 // =============================================
 // Section 10: Namespace member access (e.ns.attr)
@@ -147,10 +147,10 @@ svg.rect
 svg.circle
 xlink.href
 
-"25. compare qualified symbols"
+"25. compare qualified symbols";
 // svg.rect has namespace target, 'svg.rect' does not
 // so they are not equal (different namespace identity)
-(svg.rect == svg.rect)
-(svg.rect == svg.circle)
+(svg.rect == svg.rect);
+(svg.rect == svg.circle);
 // but string representation is the same
 (string(svg.rect) == "svg.rect")

@@ -2310,11 +2310,18 @@ void lambda_ast_register_name(Transpiler* tp, AstNamedNode* node) {
 
 AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
         LambdaSourceSpan span, StrView name, bool is_proc) {
+    // An unnamed function is an arrow/closure: AST_NODE_FUNC_EXPR, matching the
+    // CST builder. Forward declarations always carry a name, so keying on the
+    // spelling is safe. Consumers group FUNC_EXPR with FUNC everywhere, so this
+    // only restores the distinction the AST already models — it is not a
+    // behaviour change.
+    bool is_anonymous = name.length == 0;
     AstFuncNode* fn_node = (AstFuncNode*)alloc_ast_node_from_span(tp,
-        is_proc ? AST_NODE_PROC : AST_NODE_FUNC, span, sizeof(AstFuncNode));
+        is_proc ? AST_NODE_PROC : is_anonymous ? AST_NODE_FUNC_EXPR : AST_NODE_FUNC,
+        span, sizeof(AstFuncNode));
     fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-    fn_type->is_anonymous = false;
+    fn_type->is_anonymous = is_anonymous;
     fn_type->is_proc = is_proc;
     fn_type->param = NULL;
     fn_type->param_count = 0;
@@ -2325,7 +2332,10 @@ AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
     fn_type->returned = &TYPE_ANY;
     set_function_return_contract(fn_type,
         is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
-    fn_node->name = name_pool_create_strview(tp->name_pool, name);
+    // an anonymous function has no name at all, matching the CST builder —
+    // an empty String would print as `(name "")` and read as a named function.
+    fn_node->name = is_anonymous ? NULL
+        : name_pool_create_strview(tp->name_pool, name);
     // The forward declaration must be safely visible before its body exists.
     // Completion later fills these fields in place so every early reference
     // keeps the binding identity registered in the enclosing scope.
@@ -11359,35 +11369,8 @@ static AstNode* build_propagate_expr(Transpiler* tp, TSNode propagate_node) {
 // parser (parse_type_pattern.cpp) turns the token's source text into the same
 // AST-node/Type shapes the CST builders used to produce.
 
-static AstNode* build_type_pattern_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_type_pattern_text(tp, src.str, src.str + src.length, node);
-    if (!built) {
-        AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node, sizeof(AstTypeNode));
-        err->type = (Type*)&LIT_TYPE_ERROR;
-        return (AstNode*)err;
-    }
-    return built;
-}
 
-static AstNode* build_primary_type_pattern_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_primary_type_text(tp, src.str, src.str + src.length, node);
-    if (!built) {
-        AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node, sizeof(AstTypeNode));
-        err->type = (Type*)&LIT_TYPE_ERROR;
-        return (AstNode*)err;
-    }
-    return built;
-}
 
-static AstNode* build_return_type_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_return_type_text(tp, src.str, src.str + src.length, node);
-    if (built) { return built; }
-    return build_function_return_contract_node(tp, node, &TYPE_ERROR,
-        &TYPE_ERROR, false);
-}
 
 static AstNode* build_return_type(Transpiler* tp, TSNode node) {
     // `return_type` remains the fielded grammar wrapper; its entire interior
@@ -11399,15 +11382,6 @@ static AstNode* build_return_type(Transpiler* tp, TSNode node) {
         &TYPE_ERROR, false);
 }
 
-static AstNode* build_view_pattern_token(Transpiler* tp, TSNode node) {
-    StrView src = ts_node_source(tp, node);
-    AstNode* built = parse_view_pattern_text(tp, src.str, src.str + src.length, node);
-    if (built) { return built; }
-    AstTypeNode* err = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, node,
-        sizeof(AstTypeNode));
-    err->type = (Type*)&LIT_TYPE_ERROR;
-    return (AstNode*)err;
-}
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // depth guard: bail (NULL, the existing error convention) before the recursion
@@ -11469,9 +11443,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_LET_STAM:  case SYM_TYPE_DEFINE:
         return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
+        // S16.6.1: one node carries both spellings — parenthesized head with
+        // an expression body, or bare head with a braced body.
         return build_for_expr(tp, expr_node);
-    case SYM_FOR_STAM:
-        return build_for_stam(tp, expr_node);
     case SYM_WHILE_STAM:
         return build_while_stam(tp, expr_node);
     case SYM_BREAK_STAM:
@@ -11480,8 +11454,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_continue_stam(tp, expr_node);
     case SYM_RETURN_STAM:
         return build_return_stam(tp, expr_node);
-    case SYM_RAISE_STAM:
-        return build_raise_stam(tp, expr_node);
     case SYM_RAISE_EXPR:
         return build_raise_expr(tp, expr_node);
     case SYM_VAR_STAM:
@@ -11491,7 +11463,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_APPLY_STAM:
         return build_apply_stam(tp, expr_node);
     case SYM_IF_EXPR:
-    case SYM_IF_STAM:
         return build_if_expr(tp, expr_node);
     case SYM_MATCH_EXPR:
         return build_match(tp, expr_node);
@@ -11611,20 +11582,12 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     case SYM_BASE_TYPE:
         return build_base_type(tp, expr_node);
-    // The type sub-language arrives as scanner tokens; the CST type node kinds
-    // that used to be dispatched here no longer exist in the trimmed grammar.
+    // The type sub-language no longer arrives as opaque scanner tokens: with
+    // Tree-sitter out of the production path (Design_Syntax 4.4) the reference
+    // grammar spells the type tiers structurally again, so the extraction-token
+    // dispatch entries retired with them.
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
-    case sym_type_pattern_token:
-    case sym_content_type_token:
-    case sym_pattern_island_token:
-        return build_type_pattern_token(tp, expr_node);
-    case sym_primary_type_pattern_token:
-        return build_primary_type_pattern_token(tp, expr_node);
-    case sym_return_type_token:
-        return build_return_type_token(tp, expr_node);
-    case sym_view_pattern_token:
-        return build_view_pattern_token(tp, expr_node);
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
@@ -12857,6 +12820,16 @@ static void direct_object_add_method(LambdaDirectAstSink* sink, AstNode* method)
     method_name->length = fn->name->len;
     tm->name = method_name;
     tm->fn_type = (TypeFunc*)fn->type;
+    // T0 binds methods from the AST definition; without the direct-builder
+    // identity fields it sees a name-only method and evaluates the member as
+    // a non-callable value instead of entering the interpreted body.
+    tm->ast_def = fn;
+    tm->ast_module = sink->tp->script_owner;
+    tm->arity = 0;
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        tm->arity++;
+    }
     tm->is_proc = method->node_type == AST_NODE_PROC;
     if (!sink->object_type->methods) sink->object_type->methods = tm;
     else sink->object_type->methods_last->next = tm;
@@ -13856,23 +13829,43 @@ static AstNode* direct_start_node(Transpiler* tp, LambdaSourceSpan span,
     return (AstNode*)start;
 }
 
+// S12.3.3: a user-defined field or method on the receiver shadows a
+// method-eligible builtin of the same name. `out_has_user_member` reports any
+// match, field or method, so the caller can suppress the builtin even when the
+// match is a plain field — a field carries no TypeMethod to return, and
+// returning NULL alone would let the builtin capture the call.
 static TypeMethod* direct_lookup_object_method(Transpiler* tp,
-        AstNode* receiver, StrView name) {
+        AstNode* receiver, StrView name, bool* out_has_user_member) {
+    if (out_has_user_member) *out_has_user_member = false;
     if (!receiver || !receiver->type) return NULL;
     Type* receiver_type = receiver->type;
-    if (receiver_type->type_id != LMD_TYPE_OBJECT ||
+    if (!is_map_family_type_id(receiver_type->type_id) ||
             is_global_simple_type(receiver_type)) return NULL;
+    if (receiver_type->type_id != LMD_TYPE_OBJECT) {
+        // maps, vmaps, and elements carry shape entries but no method table.
+        FOR_EACH_MAP_FIELD((TypeMap*)receiver_type, field) {
+            if (field->name && field->name->length == name.length &&
+                    strncmp(field->name->str, name.str, name.length) == 0) {
+                if (out_has_user_member) *out_has_user_member = true;
+                break;
+            }
+        }
+        return NULL;
+    }
     TypeObject* object_type = (TypeObject*)receiver_type;
     for (TypeObject* owner = object_type; owner; owner = owner->base) {
         for (ShapeEntry* field = owner->shape; field; field = field->next) {
             if (field->name && field->name->length == name.length &&
                     strncmp(field->name->str, name.str, name.length) == 0) {
-                return NULL; // fields shadow methods, matching the CST path.
+                // fields shadow methods, matching the CST path.
+                if (out_has_user_member) *out_has_user_member = true;
+                return NULL;
             }
         }
         for (TypeMethod* method = owner->methods; method; method = method->next) {
             if (method->name && method->name->length == name.length &&
                     strncmp(method->name->str, name.str, name.length) == 0) {
+                if (out_has_user_member) *out_has_user_member = true;
                 return method;
             }
         }
@@ -13926,19 +13919,11 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
                 if (entry && entry->node) {
                     call->function = entry->node;
                     effective = entry->node;
-                } else {
-                    // Method-only builtins (for example `map.set`) are
-                    // registered under their receiver-aware arity and are
-                    // not visible through ordinary name lookup.
-                    TypeId object_type = object->type ? object->type->type_id : LMD_TYPE_ANY;
-                    info = get_sys_func_for_method(&field_name, arg_count,
-                        object_type);
-                    if (info) {
-                        method_call = true;
-                        call->argument = object;
-                        object->next = arguments;
-                    }
                 }
+                // otherwise fall through to the shared receiver-aware lookup
+                // below. Resolving a method-only builtin here skipped the
+                // user-member check and let `sum`/`avg` shadow an identically
+                // named object method, violating S12.3.3.
             }
         }
         if (!info && field && field->node_type == AST_NODE_IDENT) {
@@ -13949,14 +13934,15 @@ AstNode* build_call_node_from_parts(Transpiler* tp, LambdaSourceSpan span,
             StrView field_name = strview_init(((AstIdentNode*)field)->name->chars,
                 ((AstIdentNode*)field)->name->len);
             TypeId object_type = receiver && receiver->type ? receiver->type->type_id : LMD_TYPE_ANY;
+            bool receiver_has_member = false;
             TypeMethod* user_method = direct_lookup_object_method(tp, receiver,
-                field_name);
+                field_name, &receiver_has_member);
             if (user_method) {
                 user_method_found = true;
                 user_method_is_proc = user_method->is_proc;
                 user_method_receiver = receiver;
                 user_method_name = field_name;
-            } else {
+            } else if (!receiver_has_member) {
                 info = get_sys_func_for_method(&field_name, arg_count, object_type);
                 if (info) {
                     method_call = true;
@@ -14730,6 +14716,69 @@ static Type* direct_loop_value_type(Transpiler* tp, AstNode* source,
     return set_type_any(tp, ANY_LOOP_SRC);
 }
 
+// The direct reduction builder constructs a join predicate before the binding
+// reduction installs its new loop name. Reattach only unresolved identifiers
+// for that binding; otherwise T0 evaluates `c.id`/`r.id` as ItemError while MIR
+// still resolves the same source name during lowering (D7.2.1/D8.1.1v2).
+static void direct_rebind_join_ident(AstNode* node, String* name,
+        NameEntry* entry) {
+    if (!node || !name || !entry) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (!ident->entry && ident->name && ident->name->len == name->len &&
+                memcmp(ident->name->chars, name->chars, name->len) == 0) {
+            ident->entry = entry;
+            if (entry->node && entry->node->type) ident->type = entry->node->type;
+        }
+        return;
+    }
+    case AST_NODE_PRIMARY:
+        direct_rebind_join_ident(((AstPrimaryNode*)node)->expr, name, entry);
+        return;
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        direct_rebind_join_ident(binary->left, name, entry);
+        direct_rebind_join_ident(binary->right, name, entry);
+        return;
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
+        direct_rebind_join_ident(((AstUnaryNode*)node)->operand, name, entry);
+        return;
+    case AST_NODE_MEMBER_EXPR: {
+        // Dotted field names are keys, not bindings; only the object side can
+        // refer to the just-installed loop variable.
+        direct_rebind_join_ident(((AstFieldNode*)node)->object, name, entry);
+        return;
+    }
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        direct_rebind_join_ident(field->object, name, entry);
+        if (!field->field || field->field->node_type != AST_NODE_IDENT)
+            direct_rebind_join_ident(field->field, name, entry);
+        return;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        direct_rebind_join_ident(call->function, name, entry);
+        for (AstNode* arg = call->argument; arg; arg = arg->next)
+            direct_rebind_join_ident(arg, name, entry);
+        return;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        direct_rebind_join_ident(branch->cond, name, entry);
+        direct_rebind_join_ident(branch->then, name, entry);
+        direct_rebind_join_ident(branch->otherwise, name, entry);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
 AstNode* build_loop_from_parts(Transpiler* tp, LambdaSourceSpan span,
         LambdaToken name_token, LambdaToken index_token, uint32_t flags,
         AstNode* index_type, AstNode* source, AstNode* join) {
@@ -14765,7 +14814,11 @@ AstNode* build_loop_from_parts(Transpiler* tp, LambdaSourceSpan span,
         lambda_ast_register_name(tp, index);
     }
     lambda_ast_register_name(tp, (AstNamedNode*)loop);
-    if (join) build_join_key_specs(tp, loop, join);
+    if (join) {
+        NameEntry* loop_entry = lookup_name_in_current_scope(tp, loop->name);
+        direct_rebind_join_ident(join, loop->name, loop_entry);
+        build_join_key_specs(tp, loop, join);
+    }
     if (loop->optional && !join) {
         record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
             "optional for binding requires an `on` condition");
@@ -15476,8 +15529,11 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // Keep a committed path reduction alive after a semantic path
             // rejection; the enclosing expression must report the error
             // rather than dereference a null reduction value (D8.1.1v3).
+            // must be a full AstPathNode: the node is tagged AST_NODE_PATH_EXPR,
+            // so the transpiler casts and reads `authority` — a bare AstNode
+            // allocation left that read past the end of the object.
             node = alloc_ast_node_from_span(tp, AST_NODE_PATH_EXPR,
-                reduction->span, sizeof(AstNode));
+                reduction->span, sizeof(AstPathNode));
             node->type = &TYPE_ERROR;
         }
         return direct_ast_value(node);
@@ -15585,8 +15641,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
             return direct_ast_value(child0);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_GROUP_KEY) {
+            // Group keys have a smaller layout than the owning clause; the
+            // planner uses this tag to avoid treating a key as a clause entry.
             AstGroupKey* key = (AstGroupKey*)alloc_ast_node_from_span(tp,
-                AST_NODE_GROUP_CLAUSE, reduction->span, sizeof(AstGroupKey));
+                AST_NODE_GROUP_KEY, reduction->span, sizeof(AstGroupKey));
             key->expr = child0;
             key->alias = reduction->detail_token.kind
                 ? name_pool_create_strview(tp->name_pool,
@@ -15611,6 +15669,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
             grouped->name = group->name;
             grouped->type = &TYPE_ELMT;
             lambda_ast_register_name(tp, grouped);
+            // The aggregate scope is entered before `into` is registered;
+            // retain its NameEntry so T0 can publish the materialized group
+            // without re-looking the binding up in the closed row scope.
+            group->entry = lookup_name_in_current_scope(tp, group->name);
             return direct_ast_value((AstNode*)group);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_ORDER) {

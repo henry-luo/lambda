@@ -134,14 +134,14 @@ fn _font_resource_names(pdf, page) {
 // comprehension — Lambda's `++` rejects array/list mixes.
 fn _wrap_clip_ids(out, clip_ids, i) {
     if (i < 0) { out }
-    else { _wrap_clip_ids(<g 'clip-path': "url(#" ++ clip_ids[i] ++ ")"; out>, clip_ids, i - 1) }
+    else { _wrap_clip_ids(<g 'clip-path': "url(#" ++ clip_ids[i] ++ ")", out>, clip_ids, i - 1) }
 }
 
 fn _wrap_emit_with_ctm(emit, ctm, clip_ids) {
     if (len(emit) == 0) { emit }
     else {
         let base = if (not util.is_identity(ctm)) { svg.group(util.fmt_matrix(ctm), [emit[0]]) }
-                   else { emit[0] }
+                   else { emit[0] };
         [_wrap_clip_ids(base, clip_ids, len(clip_ids) - 1)]
     }
 }
@@ -553,7 +553,7 @@ fn _is_tf_name(op_record) {
 }
 
 fn _list_contains(list, name) {
-    let hits = (for (s in list where s == name) s)
+    let hits = (for (s in list where s == name) s);
     (len(hits) >= 1)
 }
 
@@ -578,12 +578,12 @@ fn _collect_font_names(ops) {
 }
 
 fn _resolve_fonts(pdf, page, ops) {
-    let names = _collect_font_names(ops)
+    let names = _collect_font_names(ops);
     [for (nm in names) { name: nm, info: _runtime_font_info(font.resolve_font(pdf, page, nm)) }]
 }
 
 pub fn resolve_page_fonts(pdf, page) {
-    let names = _font_resource_names(pdf, page)
+    let names = _font_resource_names(pdf, page);
     [for (nm in names) { name: nm, info: _runtime_font_info(font.resolve_font(pdf, page, nm)) }]
 }
 
@@ -645,7 +645,7 @@ fn _is_form_do(op, pdf, page) {
     else if (not (op.operands[0] is map))  { false }
     else if (op.operands[0].kind != "name") { false }
     else {
-        let xo = image.lookup_xobject(pdf, page, op.operands[0].value)
+        let xo = image.lookup_xobject(pdf, page, op.operands[0].value);
         (xo != null) and (xo.kind == "form")
     }
 }
@@ -698,7 +698,7 @@ fn _form_bounds_attr(fc) {
     if (fc == null or fc.dict == null or not (fc.dict.BBox is array) or len(fc.dict.BBox) < 4) { "" }
     else {
         let x0 = util.num(fc.dict.BBox[0]); let y0 = util.num(fc.dict.BBox[1])
-        let x1 = util.num(fc.dict.BBox[2]); let y1 = util.num(fc.dict.BBox[3])
+        let x1 = util.num(fc.dict.BBox[2]); let y1 = util.num(fc.dict.BBox[3]);
         (util.fmt_num(x0) ++ " " ++ util.fmt_num(y0) ++ " " ++
          util.fmt_num(x1 - x0) ++ " " ++ util.fmt_num(y1 - y0))
     }
@@ -734,17 +734,17 @@ fn _form_child_state(pdf, st, fc) {
 
 fn _form_group(children, opacity_value, bounds_attr) {
     if (opacity_value < 1.0 and bounds_attr != "") {
-        <g opacity: util.fmt_num(opacity_value), 'data-pdf-bounds': bounds_attr;
+        <g opacity: util.fmt_num(opacity_value), 'data-pdf-bounds': bounds_attr,
             for (c in children) c
         >
     }
     else if (opacity_value < 1.0) {
-        <g opacity: util.fmt_num(opacity_value);
+        <g opacity: util.fmt_num(opacity_value),
             for (c in children) c
         >
     }
     else {
-        <g;
+        <g
             for (c in children) c
         >
     }
@@ -752,7 +752,7 @@ fn _form_group(children, opacity_value, bounds_attr) {
 
 fn _image_opacity_group(children, opacity_value) {
     if (opacity_value < 1.0) {
-        [<g opacity: util.fmt_num(opacity_value);
+        [<g opacity: util.fmt_num(opacity_value),
             for (c in children) c
         >]
     }
@@ -983,12 +983,12 @@ fn _step_do(ctx, operands, i, pdf, page, fonts, page_h, clip_prefix) {
 
 fn _clip_element(cid, pending_clip_rule, pending_clip_d, clip_xform) {
     if (pending_clip_rule == "evenodd") {
-        <clipPath id: cid;
+        <clipPath id: cid,
             <path d: pending_clip_d, transform: clip_xform, 'clip-rule': "evenodd">
         >
     }
     else {
-        <clipPath id: cid;
+        <clipPath id: cid,
             <path d: pending_clip_d, transform: clip_xform>
         >
     }

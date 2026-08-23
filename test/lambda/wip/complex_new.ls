@@ -177,10 +177,10 @@ pub fn perform_statistical_analysis(dataset) {
     }
     
     fn perform_hypothesis_test(sample1, sample2, test_type) {
-        [if (test_type == "t_test")
-            let mean1 = avg(sample1),
-            let mean2 = avg(sample2),
-            let diff = abs(mean1 - mean2),
+        [if (test_type == "t_test") {
+            let mean1 = avg(sample1)
+            let mean2 = avg(sample2)
+            let diff = abs(mean1 - mean2)
             {
                 test_type: "Two-sample t-test",
                 mean_difference: diff,
@@ -190,6 +190,7 @@ pub fn perform_statistical_analysis(dataset) {
                 interpretation: (if (diff > 1.0) "Statistically significant difference" 
                                else "No significant difference detected")
             }
+        }
         else {
             test_type: "Unknown test",
             error: "Unsupported test type: " + test_type
@@ -198,7 +199,7 @@ pub fn perform_statistical_analysis(dataset) {
     
     let validation_results = validate_dataset(dataset);
     
-    [if (!validation_results.is_valid)
+    [if (not validation_results.is_valid)
         {
             success: false,
             error: "Dataset validation failed",
@@ -251,7 +252,7 @@ pub fn manage_system_configuration(config_files, environment) {
         environment_configs: len((for (config in configurations) 
                                 (if (config.environment_specific) config else null))),
         global_configs: len((for (config in configurations) 
-                           (if (!config.environment_specific) config else null)))
+                           (if (not config.environment_specific) config else null)))
     };
     
     {

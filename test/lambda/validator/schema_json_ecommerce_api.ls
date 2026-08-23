@@ -31,7 +31,6 @@ type ProductType = {
     dimensions: DimensionsType?,      // optional product dimensions
     inStock: bool,                    // required stock availability flag
     stockQuantity: int?,              // optional stock quantity (minimum 0)
-    images: [string]?                 // optional array of image URLs - explicit array syntax
     images: string*,                  // zero or more image URLs (max 5)
     metadata: ProductMetadataType?    // optional metadata
 }

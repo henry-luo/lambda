@@ -16,5 +16,5 @@ fn pipe_ok() string {
 view int | string { ~ }
 view named_element: <item> { ~ }
 
-[/.root.branch, .relative.branch, union_ok(), nullable_ok(), raised_ok() or 0,
+[/.root.branch, \.relative.branch, union_ok(), nullable_ok(), raised_ok() or 0,
  division_ok(), leading_dot_float_ok(), member_ok(), pipe_ok()]

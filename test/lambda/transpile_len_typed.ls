@@ -7,7 +7,7 @@
 
 fn str_len(s: string) { len(s) }
 
-"1. Typed string len"
+"1. Typed string len";
 [
     str_len("hello"),
     str_len("Lambda Script"),
@@ -18,7 +18,7 @@ fn str_len(s: string) { len(s) }
 // Section 2: len on inline collections (generic fn_len)
 // ============================================
 
-"2. Inline collection len"
+"2. Inline collection len";
 [
     len([1, 2, 3, 4]),
     len([10]),
@@ -33,7 +33,7 @@ fn str_len(s: string) { len(s) }
 fn is_empty_str(s: string) { len(s) == 0 }
 fn str_has_content(s: string) { (len(s) > 0) }
 
-"3. len in boolean expressions"
+"3. len in boolean expressions";
 [
     is_empty_str("hello"),
     is_empty_str("x"),
@@ -46,7 +46,7 @@ fn str_has_content(s: string) { (len(s) > 0) }
 // ============================================
 
 "4. len in arithmetic"
-let arr = [10, 20, 30]
+let arr = [10, 20, 30];
 [sum(arr) + len(arr), len(arr) * 10]
 
 // ============================================
@@ -55,7 +55,7 @@ let arr = [10, 20, 30]
 
 fn generic_len(x) { len(x) }
 
-"5. Untyped len fallback"
+"5. Untyped len fallback";
 [
     generic_len([1, 2, 3]),
     generic_len("hello"),
@@ -71,7 +71,7 @@ fn repeat_char(s: string, n: int) {
     l + n
 }
 
-"6. len result as int"
+"6. len result as int";
 [repeat_char("abc", 10), repeat_char("hello world", 0)]
 
 // ============================================
@@ -82,7 +82,7 @@ fn longer(a: string, b: string) {
     if (len(a) >= len(b)) a else b
 }
 
-"7. Chained len"
+"7. Chained len";
 [longer("short", "longer string"), longer("hello world", "hi")]
 
 // ============================================
@@ -90,5 +90,5 @@ fn longer(a: string, b: string) {
 // ============================================
 
 "8. Element len"
-let el = <div; "a"; "b"; "c">
+let el = <div "a"; "b"; "c">
 len(el)

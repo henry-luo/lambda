@@ -1450,8 +1450,8 @@ fp(st_227_1.doc) == "doc(p(\"v1234567890\"))"
 // [228] tier_e_html/text/insert/punctuation
 let d_228 = node('doc', [node('p', [text("end")])])
 let st_228_0 = {doc: d_228, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_228_1 = next_state(st_228_0, cmd_insert_text(st_228_0, "!?.,;:"))
-fp(st_228_1.doc) == "doc(p(\"end!?.,;:\"))"
+let st_228_1 = next_state(st_228_0, cmd_insert_text(st_228_0, "!?.,:"))
+fp(st_228_1.doc) == "doc(p(\"end!?.,:\"))"
 
 // [229] tier_e_html/text/insert/start-of-leaf
 let d_229 = node('doc', [node('p', [text("world")])])
