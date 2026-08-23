@@ -68,13 +68,6 @@ PathSegment* create_path_segment(PathSegmentType type, const char* name, long in
     return segment;
 }
 
-AstNode* build_script(Transpiler* tp, TSNode script_node) {
-    // Stub implementation - return null for tests
-    (void)tp; // Suppress unused parameter warning
-    (void)script_node; // Suppress unused parameter warning
-    return nullptr;
-}
-
 // Test fixture class for AST validator tests
 class AstValidatorTest : public ::testing::Test {
 protected:
