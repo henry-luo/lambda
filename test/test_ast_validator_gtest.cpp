@@ -22,6 +22,8 @@ extern "C" {
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
+// keep the TSNode test stub tied to the public API; validator headers no longer expose it transitively.
+#include "../lambda/tree-sitter/lib/include/tree_sitter/api.h"
 #include "../lib/mempool.h"
 #include "../lib/arraylist.h"
 #include "../lib/stringbuf.h"
