@@ -125,7 +125,7 @@ of the following rather than changing grammar tokens in isolation.
 | `lambda/runtime/lambda-eval.cpp` | Path `++` and property access use the old scheme/segment representation. | Route all path construction/composition through the shared normalizer. |
 | `lambda/runtime/interp.cpp` | Parent AST nodes are evaluated through existing member behavior; no occurrence cursor exists. | Lower root/parent navigation explicitly and carry occurrence lineage for direct navigation chains. |
 | `lambda/runtime/transpile-mir.cpp` | MIR Direct has the old parent node and current-item registers only. | Add semantic runtime imports/lowering for typed operations and navigation carriers without exposing representation assumptions. |
-| `lambda/runtime/interp_plan.cpp`, `lambda/runtime/emit_sexpr.cpp` | Know `AstParentNode`. | Migrate traversal/debug serialization to the new operation nodes. |
+| `lambda/runtime/interp_plan.cpp`, `lambda/runtime/emit_ast_dump.cpp` | Know `AstParentNode`. | Migrate traversal/debug serialization to the new operation nodes. |
 | `lambda/io/target.cpp`, `lambda/input/input.cpp` | `path_to_os_path` can project file/relative paths directly; no file authority gate exists. | Resolve logical roots first, validate file authority, then project an explicit local provider path. |
 | `lambda/core/print.cpp` | Path output delegates to old spellings. | Emit only canonical new spellings. |
 | `lambda/lambda-data.hpp`, `lambda/runtime/runner.cpp` | `EvalContext` has no path resolver/navigation capsule. | Add immutable resolver state through the opaque context pattern required by **D5.4.2**. |
@@ -706,7 +706,7 @@ land the grammar as a façade over the old `/ == file` representation.
 - `lambda/runtime/ast.hpp`, `lambda/runtime/ast-core.hpp`
 - `lambda/runtime/build_ast.cpp`
 - `lambda/runtime/interp_plan.cpp`
-- `lambda/runtime/emit_sexpr.cpp`
+- `lambda/runtime/emit_ast_dump.cpp`
 - parser and Lambda syntax tests
 
 **Exit gate**

@@ -596,7 +596,7 @@ Migrated all network and serve files (~23 files total).
 
 **Caller-side conversions** (~120 sites in lambda/ and radiant/):
 All `free()` calls on memory returned from migrated lib/ functions converted to `mem_free()`.
-Key caller files: main.cpp, runner.cpp, emit_sexpr.cpp, input.cpp, input_http.cpp, sysinfo.cpp, target.cpp, lambda-proc.cpp, event_sim.cpp, font_face.cpp, render_dvi.cpp, script_runner.cpp, surface.cpp, cmd_view_pdf.cpp.
+Key caller files: main.cpp, runner.cpp, emit_ast_dump.cpp, input.cpp, input_http.cpp, sysinfo.cpp, target.cpp, lambda-proc.cpp, event_sim.cpp, font_face.cpp, render_dvi.cpp, script_runner.cpp, surface.cpp, cmd_view_pdf.cpp.
 
 **Phase 2-5 gap fixes** (raw allocs in lambda/ files that were missed or added post-migration):
 - lambda-error.cpp: 5 malloc/calloc → mem_alloc/mem_calloc

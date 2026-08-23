@@ -36,7 +36,7 @@
 #include "runtime/transpiler.hpp"  // For Runtime struct definition
 #include "runtime/runtime-state.h"
 #include "runtime/ast.hpp"  // For print_root_item declaration
-#include "runtime/emit_sexpr.h"  // For --emit-sexpr command
+#include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
 
 // Error handling with stack traces
@@ -4781,14 +4781,6 @@ int main(int argc, char *argv[]) {
         runtime_cleanup(&runtime);
         js_batch_execution_mode = 0;
         return lambda_main_finish(0);
-    }
-
-    // Handle --emit-sexpr command (Phase 4: Redex baseline verification bridge)
-    if (argc >= 3 && strcmp(argv[1], "--emit-sexpr") == 0) {
-        const char* sexpr_path = argv[2];
-        log_debug("Emitting s-expressions for '%s'", sexpr_path);
-        int result = emit_sexpr_file(sexpr_path);
-        return lambda_main_finish(result);
     }
 
     // Handle canonical AST dump commands (Phase 1: unified AST renumber harness)

@@ -695,7 +695,7 @@
         "lambda/runtime/sys_func_registry.c",
         "lambda/runtime/side_stack.c",
         "lambda/runtime/recovery_frame.c",
-        "lambda/runtime/emit_sexpr.cpp",
+        "lambda/runtime/emit_ast_dump.cpp",
         "lambda/runtime/mem_factory_rt.cpp"
       ],
       "libraries": [
