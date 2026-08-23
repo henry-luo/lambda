@@ -10110,13 +10110,31 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
         bool layout_pending = elem->doc && elem->doc->state &&
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
-        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f) {
+        bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
+            layout_element_writing_mode(elem) == WM_VERTICAL_RL;
+        const FlexProp* flex = elem->embedp()->flex;
+        CssEnum flex_direction = flex
+            ? (CssEnum)flex->direction
+            : layout_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
+        bool column_reverse_signed_scroll = is_vertical && scroll_value < 0.0f &&
+            flex_direction == CSS_VALUE_COLUMN_REVERSE;
+        bool signed_scroll = vertical_rl_signed_scroll || column_reverse_signed_scroll;
+        bool signed_range_unresolved = signed_scroll && elem->scroller &&
+            elem->scroll()->pane &&
+            (is_vertical ? elem->scroll()->pane->v_min_scroll >= 0.0f
+                         : elem->scroll()->pane->h_min_scroll >= 0.0f);
+        // CSS Overflow permits negative offsets for vertical-rl and column-reverse
+        // flex flows; preserve them while the pane still has its [0, 0]
+        // provisional range so final layout can clamp against real overflow.
+        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f &&
+            !signed_scroll) {
             // Without a committed pane there is no writing-mode-specific
             // signed range to validate against, so pending element scroll
             // state must retain the ordinary non-negative origin.
             scroll_value = 0.0f;
         }
-        if (elem->scroller && elem->scroll()->pane && !layout_pending) {
+        if (elem->scroller && elem->scroll()->pane && !layout_pending &&
+            !signed_range_unresolved) {
             float current_x = 0.0f;
             float current_y = 0.0f;
             DocState* state = elem->doc ? elem->doc->state : nullptr;
