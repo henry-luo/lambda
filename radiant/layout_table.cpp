@@ -842,10 +842,15 @@ static bool table_empty_inline_atomic_line_top(LayoutContext* lycon,
 
 static float measure_cell_content_block_extent(ViewTableCell* tcell) {
     if (!tcell) return 0.0f;
-    // Cell content is still in the horizontal surrogate coordinate space until
-    // the vertical table grid is published. Its accumulated line-stack height,
-    // not the overlapping surrogate x bounds, is the logical block contribution.
-    return max(tcell->content_height, 0.0f);
+    float generic_extent = layout_compute_in_flow_child_width_extent(tcell);
+    float extent = 0.0f;
+    bool has_extent = layout_compute_vertical_in_flow_child_inline_extent(tcell, &extent);
+    // block-flow children already expose their physical block extent; only an
+    // inline-only cell needs the line-box calculation for forced-break columns.
+    if (!layout_vertical_parent_has_block_flow_child(tcell) && has_extent) {
+        return max(extent, 0.0f);
+    }
+    return max(generic_extent - layout_box_metrics(tcell).pad_border_h, 0.0f);
 }
 
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
@@ -1045,39 +1050,48 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
                                   float content_height, float explicit_height) {
     bool is_border_box = layout_uses_border_box(tcell);
     bool border_collapse = table && table->tb && table->tb->border_collapse;
+    bool vertical_grid = table_grid_uses_vertical_inline_axis(table);
     TableCellInsets insets = table_cell_content_insets(tcell, border_collapse);
-    float pad_top = insets.padding.top;
-    float pad_bottom = insets.padding.bottom;
+    float pad_start = vertical_grid ? insets.padding.left : insets.padding.top;
+    float pad_end = vertical_grid ? insets.padding.right : insets.padding.bottom;
     bool has_padding = tcell->bound &&
-        tcell->boundary_mut()->padding.top >= 0 &&
-        tcell->boundary_mut()->padding.bottom >= 0;
+        (vertical_grid
+            ? tcell->boundary_mut()->padding.left >= 0 &&
+              tcell->boundary_mut()->padding.right >= 0
+            : tcell->boundary_mut()->padding.top >= 0 &&
+              tcell->boundary_mut()->padding.bottom >= 0);
     if (has_padding) {
-        pad_top = insets.padding.top;
-        pad_bottom = insets.padding.bottom;
+        pad_start = vertical_grid ? insets.padding.left : insets.padding.top;
+        pad_end = vertical_grid ? insets.padding.right : insets.padding.bottom;
     } else {
-        pad_top = 0.0f;
-        pad_bottom = 0.0f;
+        pad_start = 0.0f;
+        pad_end = 0.0f;
     }
-    float border_top = 0, border_bottom = 0;
+    float border_start = 0.0f;
+    float border_end = 0.0f;
     if (table->tb->border_collapse) {
-        // Row sizing uses the pre-publication grid axes; keep its decoration
-        // on the source top/bottom edges until vertical geometry is published.
-        border_top = tcell->td->top_resolved ? tcell->td->top_resolved->width : 0.0f;
-        border_bottom = tcell->td->bottom_resolved ? tcell->td->bottom_resolved->width : 0.0f;
-        float half_borders = (border_top + border_bottom) / 2.0f;
-        border_top = half_borders / 2.0f;
-        border_bottom = half_borders - border_top;
+        // Row sizing stays in source axes until publication; map the shared
+        // border edges with the same axis as the cell block contribution.
+        border_start = vertical_grid
+            ? (tcell->td->left_resolved ? tcell->td->left_resolved->width : 0.0f)
+            : (tcell->td->top_resolved ? tcell->td->top_resolved->width : 0.0f);
+        border_end = vertical_grid
+            ? (tcell->td->right_resolved ? tcell->td->right_resolved->width : 0.0f)
+            : (tcell->td->bottom_resolved ? tcell->td->bottom_resolved->width : 0.0f);
+        float half_borders = (border_start + border_end) / 2.0f;
+        border_start = half_borders / 2.0f;
+        border_end = half_borders - border_start;
     } else {
-        border_top = insets.border.top;
-        border_bottom = insets.border.bottom;
+        border_start = vertical_grid ? insets.border.left : insets.border.top;
+        border_end = vertical_grid ? insets.border.right : insets.border.bottom;
     }
-    float content_total = content_height + pad_top + pad_bottom + border_top + border_bottom;
+    float content_total = content_height + pad_start + pad_end + border_start + border_end;
     if (explicit_height > 0) {
         float explicit_total;
         if (is_border_box) {
             explicit_total = explicit_height;
         } else {
-            explicit_total = explicit_height + pad_top + pad_bottom + border_top + border_bottom;
+            explicit_total = explicit_height + pad_start + pad_end + border_start + border_end;
         }
         return (content_total > explicit_total) ? content_total : explicit_total;
     }
@@ -3893,18 +3907,20 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
 }
 
-static void refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
-                                                       DomElement* parent) {
+void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
+                                                       DomElement* parent,
+                                                       const FontProp* inherited_font) {
     if (!lycon || !parent) return;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* element = child->as_element();
         if (element->is_table_fixup()) {
-            inherit_anonymous_table_font_from_parent(lycon, element, parent);
+            const FontProp* source_font = inherited_font ? inherited_font : parent->font;
+            if (source_font) inherit_anonymous_table_font(lycon, element, source_font);
             inherit_anonymous_table_block_props(lycon, element, parent);
             inherit_anonymous_table_inline(lycon, element, parent->in_line);
         }
-        refresh_anonymous_table_fixup_inheritance(lycon, element);
+        layout_refresh_anonymous_table_fixup_inheritance(lycon, element, inherited_font);
     }
 }
 
@@ -4182,7 +4198,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     if (tableNode->is_element()) {
         // Dynamic source rows resolve after their generated cells are made;
         // refresh the fixup boxes so they inherit the source computed values.
-        refresh_anonymous_table_fixup_inheritance(lycon, tableNode->as_element());
+        layout_refresh_anonymous_table_fixup_inheritance(lycon, tableNode->as_element());
         invalidate_anonymous_table_descendant_styles(tableNode->as_element(), false);
     }
     return table;
@@ -4566,21 +4582,35 @@ static void table_mirror_vertical_grid_descendants(View* view,
     }
 }
 
+static bool table_size_declaration_is_specified(CssDeclaration* declaration) {
+    if (!declaration || !declaration->value) return false;
+    return declaration->value->type != CSS_VALUE_TYPE_KEYWORD ||
+        declaration->value->data.keyword != CSS_VALUE_AUTO;
+}
+
 static bool table_has_explicit_physical_block_size(ViewTable* table) {
     if (!table || !table->is_element()) return false;
     DomElement* element = table->as_element();
     CssDeclaration* declaration = layout_specified_physical_size_declaration(
         element, true);
-    return declaration && declaration->property_code == CSS_PROPERTY_BLOCK_SIZE;
+    return declaration && declaration->property_code == CSS_PROPERTY_BLOCK_SIZE &&
+        table_size_declaration_is_specified(declaration);
 }
 
 static bool table_needs_vertical_geometry_publication(ViewTable* table) {
     if (!table || !layout_block_inline_axis_is_vertical(table)) return false;
-    bool has_explicit_physical_width = table->blk &&
-        table->block_mut()->given_width >= 0.0f;
+    DomElement* element = table->as_element();
+    CssDeclaration* width_declaration = element
+        ? layout_specified_physical_size_declaration(element, true) : nullptr;
+    bool has_explicit_physical_width = width_declaration &&
+        (width_declaration->property_code == CSS_PROPERTY_WIDTH ||
+         width_declaration->property_code == CSS_PROPERTY_BLOCK_SIZE) &&
+        table_size_declaration_is_specified(width_declaration);
     bool has_logical_block_size = table_has_explicit_physical_block_size(table);
     // Explicitly-sized tables retain physical geometry; the conversion below
     // is only for auto grids whose tracks are still stored in logical axes.
+    // auto layout stores the containing-block constraint in given_width; it is
+    // not an author width and must not suppress this axis publication.
     return !has_explicit_physical_width && !has_logical_block_size;
 }
 
@@ -5709,7 +5739,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
         lycon, LAYOUT_AXIS_X, -1.0f);
     lycon->available_space = AvailableSpace::make_max_content();
     // Apply the cell's CSS font properties for accurate measurement
-    if (cell->font) {
+    // Anonymous cells retain a reset-time FontProp even after their generated
+    // box is marked resolved; authored cells still use their resolved font.
+    if (cell->font && !cell_elem->is_table_fixup()) {
         setup_font(lycon->ui_context, &lycon->font, cell->font);
     }
     // CSS 2.1: Infinite width for preferred content width (no line wrapping)
@@ -7065,7 +7097,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     // Retained outer anonymous tables can be the parent's only direct child;
     // refresh them before the early no-orphan return so descendants inherit
     // the current authored parent rather than reset-time font defaults.
-    refresh_anonymous_table_fixup_inheritance(lycon, parent);
+    layout_refresh_anonymous_table_fixup_inheritance(lycon, parent);
     bool has_table_internal = false;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;

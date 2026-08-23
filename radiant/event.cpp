@@ -4293,16 +4293,36 @@ static bool dom_js_node_has_table_fixup_context(DomNode* node) {
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
+        CssEnum display = resolve_display_value((void*)element).inner;
         if (element->tag() == MARKUP_NAME_TABLE ||
             layout_element_is_anonymous_table_fixup(element) ||
-            is_table_internal_display(element->display.inner)) {
+            is_table_internal_display(display)) {
             return true;
         }
     }
     return false;
 }
 
-static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc) {
+static DomElement* dom_js_table_layout_root(DomNode* node) {
+    DomElement* fixup_parent = nullptr;
+    for (DomNode* current = node; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* element = lam::dom_require_element(current);
+        if (!element->is_table_fixup() &&
+            (element->tag() == MARKUP_NAME_TABLE ||
+             resolve_display_value((void*)element).inner == CSS_VALUE_TABLE)) {
+            return element;
+        }
+        if (!fixup_parent && element->is_table_fixup() && element->parent &&
+            element->parent->is_element()) {
+            fixup_parent = element->parent->as_element();
+        }
+    }
+    return fixup_parent;
+}
+
+static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
+                                                 SelectorMatcher* matcher) {
     if (!doc || !doc->view_tree) return;
 
     DomElement* roots[DOM_JS_MUTATION_RECORD_CAP] = {};
@@ -4318,8 +4338,33 @@ static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc) {
         if (!candidate) continue;
         if (dom_js_node_has_table_fixup_context(
                 static_cast<DomNode*>(candidate))) {
-            // Table-internal style changes are repaired as one anonymous-box
-            // structure; resetting only the real row/cell strands old fixups.
+            DomElement* table_root = nullptr;
+            if (record->kind == DOM_JS_MUTATION_STYLE ||
+                record->kind == DOM_JS_MUTATION_STYLE_REPAINT ||
+                record->kind == DOM_JS_MUTATION_ATTRIBUTE) {
+                table_root = dom_js_table_layout_root(static_cast<DomNode*>(candidate));
+            }
+            if (!table_root) continue;
+            bool already_reset = false;
+            for (int j = 0; j < root_count; j++) {
+                if (roots[j] == table_root) {
+                    already_reset = true;
+                    break;
+                }
+            }
+            if (already_reset) continue;
+            // Table-internal style changes can change anonymous-box fixup; a
+            // retained row/cell subtree otherwise preserves the old structure.
+            layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(table_root);
+            view_pool_reset_retained_subtree(
+                doc->view_tree, static_cast<DomNode*>(table_root));
+            // Reset releases inherited view properties; recascading only the
+            // target would measure descendants against the reset parent font.
+            dom_js_recascade_subtree(doc, table_root,
+                                     DOM_JS_MUTATION_ATTRIBUTE, matcher);
+            if (root_count < DOM_JS_MUTATION_RECORD_CAP) {
+                roots[root_count++] = table_root;
+            }
             continue;
         }
 
@@ -4514,7 +4559,7 @@ static bool post_html_handler_incremental_rebuild(
         }
     }
 
-    dom_js_reset_mutated_layout_subtrees(doc);
+    dom_js_reset_mutated_layout_subtrees(doc, matcher);
 
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
@@ -4617,13 +4662,6 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t0 = high_resolution_clock::now();
     dom_js_mutation_log_records(doc);
-
-    if (doc->root && doc->root->is_element()) {
-        // Anonymous table boxes are layout-only. Reconcile from the authored
-        // tree so a display mutation cannot accumulate wrappers from old states.
-        layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
-            lam::dom_require_element(doc->root));
-    }
 
     const char* fallback_reason = "none";
     if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,

@@ -3030,6 +3030,9 @@ void layout_normalize_vertical_breaks(ViewBlock* block);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
 float layout_compute_in_flow_child_width_extent(
     ViewBlock* parent, bool include_margin_box = false);
+bool layout_compute_vertical_in_flow_child_inline_extent(
+    ViewBlock* parent, float* out_extent);
+bool layout_vertical_parent_has_block_flow_child(ViewBlock* parent);
 inline bool layout_inline_box_is_orthogonal_to_parent(ViewBlock* block) {
     if (!block) return false;
     ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
@@ -3104,6 +3107,9 @@ float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
     float table_abs_x, float cell_border, float cell_padding);
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
+void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
+                                                       struct DomElement* parent,
+                                                       const FontProp* inherited_font = nullptr);
 bool is_table_internal_display(CssEnum display);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
