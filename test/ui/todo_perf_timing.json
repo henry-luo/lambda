@@ -17,7 +17,7 @@
 
     {"type": "log", "message": "--- TOGGLE TEST: click 2nd item ---"},
     {"type": "click", "target": {"selector": ".todo-item:nth-child(2)"}},
-    {"type": "assert_text", "target": {"selector": ".todo-item:nth-child(2) .checkbox"}, "contains": "✓"},
+    {"type": "assert_text", "target": {"selector": ".todo-item:nth-child(2) .checkbox"}, "equals": "○"},
 
     {"type": "log", "message": "--- TOGGLE TEST: click 3rd item ---"},
     {"type": "click", "target": {"selector": ".todo-item:nth-child(3)"}},
