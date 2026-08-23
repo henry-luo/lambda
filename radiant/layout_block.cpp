@@ -4250,8 +4250,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     }
     if (block->scroller && block->scroll_mut()->pane) {
         DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
-        bool reverse_x_scroll = block->blk &&
-            block->block()->writing_mode == WM_VERTICAL_RL;
+        // CSS Writing Modes gives vertical-rl a signed horizontal scroll range;
+        // use the inherited/resolved mode so a raw default does not clamp a
+        // pending negative scrollLeft to zero before sticky positioning sees it.
+        bool reverse_x_scroll = layout_block_writing_mode(block) == WM_VERTICAL_RL;
         if (reverse_x_scroll && scroll_flow_width > block->width) {
             // CSS Writing Modes: vertical-rl establishes the horizontal scroll
             // origin at the block-end edge, so overflow extends into negatives.
