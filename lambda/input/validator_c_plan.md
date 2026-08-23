@@ -14,7 +14,7 @@ The Lambda Schema Validator will be implemented as a C library that integrates w
 
 1. **Memory Management**: Reuse `VariableMemPool` from the transpiler
 2. **Type System**: Extend existing `Type` structures and `TypeInfo` array
-3. **AST Parsing**: Reuse Tree-sitter integration and AST building functions
+3. **AST Parsing**: Reuse the direct Lambda parser and span-based AST construction
 4. **String Handling**: Leverage existing `String`, `StrView`, and `StrBuf` structures
 5. **Container Types**: Utilize existing `List`, `Array`, `Map`, `Element` implementations
 
@@ -133,25 +133,25 @@ typedef struct SchemaParser {
 typedef struct TypeDefinition {
     StrView name;
     TypeSchema* schema_type;
-    TSNode source_node;     // original tree-sitter node
+    SourceSpan source_span; // source range for diagnostics
 } TypeDefinition;
 
 // Schema parsing functions (similar to existing build_* functions)
 TypeSchema* parse_schema_from_source(const char* source, VariableMemPool* pool);
-TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node);
-TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node);
+TypeDefinition* build_type_definition(SchemaParser* parser, AstNode* type_node);
+TypeSchema* build_schema_type(SchemaParser* parser, AstNode* type_expr_node);
 ```
 
 ### Type Expression Building
 
 ```c
 // Extend existing AST building functions
-TypeSchema* build_primitive_schema(SchemaParser* parser, TSNode node);
-TypeSchema* build_union_schema(SchemaParser* parser, TSNode node);
-TypeSchema* build_array_schema(SchemaParser* parser, TSNode node);
-TypeSchema* build_map_schema(SchemaParser* parser, TSNode node);
-TypeSchema* build_element_schema(SchemaParser* parser, TSNode node);
-TypeSchema* build_occurrence_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_primitive_schema(SchemaParser* parser, AstNode* node);
+TypeSchema* build_union_schema(SchemaParser* parser, AstNode* node);
+TypeSchema* build_array_schema(SchemaParser* parser, AstNode* node);
+TypeSchema* build_map_schema(SchemaParser* parser, AstNode* node);
+TypeSchema* build_element_schema(SchemaParser* parser, AstNode* node);
+TypeSchema* build_occurrence_schema(SchemaParser* parser, AstNode* node);
 ```
 
 ## 3. Validation Engine Implementation
@@ -393,7 +393,7 @@ lambda/
 ### Phase 1: Core Infrastructure (2-3 weeks)
 - [ ] Extend existing Type system with schema types
 - [ ] Implement basic ValidationContext and error structures
-- [ ] Create schema parser using existing Tree-sitter integration
+- [ ] Create schema parser using the existing direct parser and AST construction
 - [ ] Basic primitive type validation
 
 ### Phase 2: Container Types (2-3 weeks)

@@ -281,7 +281,7 @@ struct NameEntry {
     bool type_widened;
     bool is_lexical;
     // loop-head bindings need a distinct capture-analysis fact; this used to
-    // be recovered by walking the parser CST from the binding node.
+    // be recovered from parser structure at the binding node.
     bool is_for_in_head;
     bool is_const;
     bool tdz_active;

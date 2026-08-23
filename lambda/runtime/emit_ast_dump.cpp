@@ -25,8 +25,8 @@ static bool emit_prepare_direct_parse(const char* script_path,
         fprintf(stderr, "Error: Cannot read '%s'\n", script_path);
         return false;
     }
-    // normal profiles omit the Lambda Tree-sitter archive, so AST emission
-    // must not make source loading depend on a removed CST parser.
+    // AST emission must use the direct parser so normal profiles remain
+    // independent of the optional lambda-cst archive.
     // Input::create registers arena/name/shape allocators under its backing
     // pool. A raw pool leaves those root nodes dangling after pool_destroy,
     // so the factory must own the subtree until direct-AST teardown completes.

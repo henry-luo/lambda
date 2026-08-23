@@ -527,7 +527,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             fn_node->vars = NULL;
 
             // Hosted functions have no source file; use a unique empty span so
-            // diagnostics and AST identity remain deterministic without a CST node.
+            // diagnostics and AST identity remain deterministic without a parser node.
             fn_node->source_span = (SourceSpan){synthetic_offset, synthetic_offset};
             synthetic_offset++;
 

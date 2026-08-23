@@ -111,7 +111,7 @@ Tests error conditions (should fail validation):
 ## Test Implementation
 
 ### Test Runner (`test/test_validator.c`)
-- **Schema Parsing Tests**: Verify schemas parse correctly using Tree-sitter grammar
+- **Schema Parsing Tests**: Verify schemas parse correctly using the production C parser
 - **Data Validation Tests**: Validate test data against schemas
 - **Memory Management**: Uses Lambda's VariableMemPool API correctly
 - **Error Handling**: Tests both success and failure cases
@@ -127,8 +127,8 @@ Tests error conditions (should fail validation):
 ## Coverage
 
 This test suite covers:
-- ✅ **All Tree-sitter Symbols**: Tests all 50+ symbols from `ts-enum.h`
-- ✅ **All Field IDs**: Tests all 19 field IDs for AST navigation
+- ✅ **AST Validation Coverage**: Tests primitive, container, object, and advanced validation forms
+- ✅ **Source-Span Diagnostics**: Exercises source-aware AST validation errors
 - ✅ **All Type Constructs**: Primitive, complex, and advanced types
 - ✅ **Memory Pool Integration**: Tests VariableMemPool API usage
 - ✅ **CLI Integration**: Tests `lambda validate` subcommand

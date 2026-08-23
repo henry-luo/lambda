@@ -1,8 +1,8 @@
 # Lambda Runtime — Compilation Pipeline, CLI & REPL
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the end-to-end path from a `.ls` source file (or a REPL line) to a printed result: how `main()` dispatches CLI subcommands, how the default *functional* run path threads through `run_script_mir` → `load_script` → `transpile_script` → `execute_script_and_create_output`, how the *procedural* `run` path differs by a single flag, how the C hybrid recursive-descent + Pratt parser now builds the normal file/module AST directly, how explicit Tree-sitter reference/rollback mode and the transitional REPL path remain available, how module imports are resolved/deduplicated/precompiled in parallel and checked for cycles, and how the view/edit template registry and reactive template-state store are wired into the run.
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the end-to-end path from a `.ls` source file (or a REPL line) to a printed result: how `main()` dispatches CLI subcommands, how the default *functional* run path threads through `run_script_mir` → `load_script` → `transpile_script` → `execute_script_and_create_output`, how the *procedural* `run` path differs by a single flag, how the C hybrid recursive-descent + Pratt parser builds the normal file/module AST directly, how module imports are resolved/deduplicated/precompiled in parallel and checked for cycles, and how the view/edit template registry and reactive template-state store are wired into the run.
 >
-> **Primary sources:** `lambda/main.cpp` (`main()` dispatch, `run_script_file`, `run_repl`, the bridge-script builders), `lambda/main-repl.cpp` (statement-completeness checking, prompts, readline wrappers), `lambda/runner.cpp` (`transpile_script`, `load_script`, `precompile_imports`, `runner_setup_context`, `execute_script_and_create_output`, `init_module_import`, `runtime_init`/`runtime_cleanup`/`runtime_reset_heap`, `lambda_home_*`), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp` (direct parser sink), `lambda/transpile-mir.cpp` (`run_script_mir`, `compile_script_as_mir_direct`), `lambda/transpiler.hpp` (`Runtime`, `Runner`, `Heap`, function decls), `lambda/module_registry.cpp/.h`, `lambda/template_registry.cpp/.h`, `lambda/template_state.cpp/.h`, `lambda/target.cpp`.
+> **Primary sources:** `lambda/main.cpp` (`main()` dispatch, `run_script_file`, `run_repl`, the bridge-script builders), `lambda/main-repl.cpp` (statement-completeness checking, prompts, readline wrappers), `lambda/runtime/runner.cpp` (`transpile_script`, `load_script`, `runner_setup_context`, `execute_script_and_create_output`, `init_module_import`, `runtime_init`/`runtime_cleanup`/`runtime_reset_heap`, `lambda_home_*`), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp` (direct parser sink), `lambda/runtime/transpile-mir.cpp` (`run_script_mir`, `compile_script_as_mir_direct`), `lambda/runtime/transpiler.hpp` (`Runtime`, `Runner`, `Heap`, function decls), `lambda/runtime/module_registry.cpp/.h`, `lambda/runtime/template_registry.cpp/.h`, `lambda/runtime/template_state.cpp/.h`, `lambda/runtime/target.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. The former C2MIR backend is removed from Lambda; no supported build defines `LAMBDA_C2MIR`.
 
 ---
@@ -13,13 +13,11 @@ This document owns the *orchestration* layer: the control flow that turns an inv
 
 One structural fact frames the rest: **MIR Direct is the only supported code-generation path.** `transpile_script` routes execution to `compile_script_as_mir_direct`; the former C-generation arm and its Lambda-side sources have been removed. Older design notes describing a "two JIT path" world are historical.
 
-<img alt="End-to-end run pipeline" src="diagram/d01_pipeline.svg" width="720">
-
 ---
 
 ## 2. Engine state: `Runtime`, `Runner`, `Heap`
 
-`Runtime` (`transpiler.hpp:53`) is the top-level engine capsule, created and zeroed by `runtime_init` (`runner.cpp:1499`). It owns the loaded-`Script` list (`scripts`, an `ArrayList`), the reference Tree-sitter `parser` used by explicit rollback/REPL/tool paths, the type-check `max_errors` threshold (default 10), the MIR `optimize_level` (default 2), the `use_mir_direct` flag, the `dry_run` flag (mirrored into the C-visible global `g_dry_run`, `transpiler.hpp:85`), and the unified-DOM fields `ui_mode`/`result_arena`/`dom_doc`. Crucially it also holds the **retained execution state** — `heap`, `name_pool`, `type_list` — which is created lazily on the first evaluation and reused across subsequent ones (`transpiler.hpp:65`–`72`); this is what lets the REPL and the reactive DOM run many evaluations without rebuilding the GC heap.
+`Runtime` (`runtime/transpiler.hpp:82`) is the top-level engine capsule, created and zeroed by `runtime_init` (`runtime/runner.cpp`). It owns the loaded-`Script` list (`scripts`, an `ArrayList`), the type-check `max_errors` threshold (default 10), the MIR `optimize_level` (default 2), the `use_mir_direct` flag, the `dry_run` flag, and the unified-DOM fields `dom_doc`/`dom_ui_context`. Crucially it also holds the **retained execution state** — `heap`, `name_pool`, `type_list` — which is created lazily on the first evaluation and reused across subsequent ones; this is what lets the REPL and the reactive DOM run many evaluations without rebuilding the GC heap.
 
 `Runner` (`transpiler.hpp:47`) is the per-execution wrapper: a back-pointer to its `Runtime`, the `Script*` being run, and an embedded `EvalContext context`. It is stack-allocated by every entry function (`run_script`, `run_script_with_run_main`, `run_script_mir`) and initialized by `runner_init` (`runner.cpp:1242`). Because the `EvalContext` lives on the runner's stack, any runtime error is *copied* into a thread-local `persistent_last_error` before the runner unwinds (`execute_script_and_create_output`, `runner.cpp:1407`–`1411`), so the CLI can print it after the fact via `get_persistent_last_error` (`main.cpp:721`).
 
@@ -37,15 +35,14 @@ One structural fact frames the rest: **MIR Direct is the only supported code-gen
 
 `load_script` (`runner.cpp:1103`) is the heart of module loading. For the **main**, file-based, MIR-Direct script on non-Windows (i.e. `!is_import && !source && use_mir_direct && !tls_parser`, `:1110`) it first runs `precompile_imports` (§6). It then canonicalizes the path via `file_realpath` (`:1120`), scans `runtime->scripts` for an existing entry under a `scripts_mutex` (`:1127`–`1150`) — this is both the dedup cache and the circular-import check (`is_loading`, `:1134`) — and on a miss creates a stub `Script` with `is_loading = true`, appends it to `runtime->scripts`, assigns its `index`, reads the source, derives the import `directory`, and calls `transpile_script` (`:1207`). After transpilation it clears `is_loading`, prints any structured errors via `err_print` (`:1211`–`1219`), and conditionally registers the module in the cross-language registry (§7).
 
-`transpile_script` selects the first-party C parser by default: the lexer and
+`transpile_script` selects the first-party C parser: the lexer and
 recursive-descent/Pratt parser reduce directly into the typed AST through the
-span-native sink in `build_ast.cpp`; a fresh `Input` base is allocated and
-copied into the `Transpiler`; and `compile_script_as_mir_direct` performs import
-registration + `transpile_mir_ast()` + `MIR_link()`, storing `jit_context`/
-`main_func` on the script. `LAMBDA_PARSER=tree`/`tree-sitter` selects the
-reference Tree-sitter CST builder, and `LAMBDA_PARSER=compare` runs that parser
-only as a syntax oracle after the direct AST succeeds. The internals of the
-MIR call are owned by [LR_07](LR_07_MIR_Transpiler_JIT.md).
+span-native sink in `runtime/build_ast.cpp`; a fresh `Input` base is allocated
+and copied into the `Transpiler`; and `compile_script_as_mir_direct` performs
+import registration + `transpile_mir_ast()` + `MIR_link()`, storing
+`jit_context`/`main_func` on the script. The Tree-sitter grammar is not part of
+this path; the separate `lambda-cst` target is the syntax differential oracle.
+The internals of the MIR call are owned by [LR_07](LR_07_MIR_Transpiler_JIT.md).
 
 Back in `run_script_mir`, the AST is scanned for `AST_NODE_IMPORT` children (`:12862`–`12867`). If the script **has imports**, it sets up the context (`runner_setup_context`), registers BSS GC roots for *all* modules (`register_bss_gc_roots` for each `jit_context`, `:12876`–`12881`), runs every imported module's `main_func` in **reverse `runtime->scripts` order** so deepest transitive dependencies initialize first (`:12889`–`12897`), restores `context->consts`/`type_list` to the main script, and finally runs the main `main_func` under the `sigsetjmp` stack-overflow guard (`:12906`–`12922`), wrapping the result in a fresh-pool `Input` and calling `resolve_sys_paths_recursive` (`:12938`). If the script has **no imports**, it falls through to the shared `execute_script_and_create_output` (`:12952`).
 
@@ -86,7 +83,7 @@ Several subcommands synthesize a small Lambda script and feed it back through th
 
 <img alt="REPL loop and state" src="diagram/d01_repl.svg" width="720">
 
-Top-of-input commands `quit`/`q`/`exit`, `help`/`h`, and `clear` are handled only when `pending_input` is empty (`:584`–`603`). Otherwise the line is appended to `pending_input` and `check_statement_completeness` (`main-repl.cpp:130`) classifies it: a quick lexical `has_unclosed_brackets` scan (`main-repl.cpp:40`, tracks strings/line-comments/block-comments and brace/paren/bracket depth) short-circuits to **INCOMPLETE**; otherwise a Tree-sitter parse decides — no error ⇒ **COMPLETE**, `has_missing_nodes` ⇒ **INCOMPLETE**, ERROR-without-MISSING ⇒ **ERROR** (input discarded, `:620`–`625`).
+Top-of-input commands `quit`/`q`/`exit`, `help`/`h`, and `clear` are handled only when `pending_input` is empty (`:584`–`603`). Otherwise the line is appended to `pending_input` and `check_statement_completeness` (`main-repl.cpp:130`) classifies it: a quick lexical `has_unclosed_brackets` scan (`main-repl.cpp:40`, tracks strings/line-comments/block-comments and brace/paren/bracket depth) short-circuits to **INCOMPLETE**; otherwise the direct parser reports any committed syntax error when the fragment is evaluated.
 
 On **COMPLETE**, the just-finished `pending_input` is appended to `repl_history`, a synthetic `<repl-N>` path is built into a `char script_path[64]` (`:636`–`637`), and the **entire accumulated history** is re-run via `run_script_mir(runtime, repl_history->str, script_path, false)` (`:643`). This stateless re-execution model means every line replays all prior lines. On an `LMD_TYPE_ERROR` result the last input is **rolled back** by a raw byte-truncate of `repl_history` to its saved length (`:653`–`656`); on success the new output is shown as an incremental prefix diff against `last_output` (`:657`–`682`). The retained heap on `Runtime` is what keeps this affordable across turns, but the O(n²) replay and side-effect repetition are inherent (see Known Issues).
 
@@ -98,11 +95,7 @@ On **COMPLETE**, the just-finished `pending_input` is appended to `repl_history`
 
 **Dedup & circular detection.** `load_script` keys `runtime->scripts` by canonical path; a hit whose `is_loading` flag is still set is a circular import and is rejected (`runner.cpp:1134`–`1142`). The same structure serves as the compile cache.
 
-**Parallel precompile.** `precompile_imports` (`runner.cpp:929`) runs only for the main script on non-Windows in MIR-Direct mode (gated at the `load_script` call site, `:1110`). It builds an import dependency graph by recursively Tree-sitter-scanning each module's `import` statements (`discover_imports_recursive`, `:809`), computes topological depth (`compute_depth`, `:892`, which also breaks cycles), and — only when there are **≥2 imports** (`:971`) — compiles level by level from leaves up, using a `lib/thread_pool` with 8MB worker stacks (`:1044`); a single-module level is compiled in-place without thread overhead (`:1034`–`1039`). Each worker installs a thread-local parser and calls `load_script(..., is_import=true)` (`compile_module_worker`, `:911`). Afterward it **reverses** the just-added slice of `runtime->scripts` and renumbers each `index` (`:1075`–`1081`) so that `run_script_mir`'s reverse-order initialization (§3) still visits the deepest dependency first — a coupling contract between two distant functions.
-
-**Cutover note.** Normal module ASTs are now built by the C parser. The
-reference Tree-sitter scan described in the precompile paragraph remains only
-for dependency discovery and explicit rollback/REPL tooling.
+**Parallel precompile.** `precompile_imports` (`runner.cpp:929`) runs only for the main script on non-Windows in MIR-Direct mode (gated at the `load_script` call site, `:1110`). It builds an import dependency graph from each module's `import` statements (`discover_imports_recursive`, `:809`), computes topological depth (`compute_depth`, `:892`, which also breaks cycles), and — only when there are **≥2 imports** (`:971`) — compiles level by level from leaves up, using a `lib/thread_pool` with 8MB worker stacks (`:1044`); a single-module level is compiled in-place without thread overhead (`:1034`–`1039`). Each worker calls `load_script(..., is_import=true)` (`compile_module_worker`, `:911`). Afterward it **reverses** the just-added slice of `runtime->scripts` and renumbers each `index` (`:1075`–`1081`) so that `run_script_mir`'s reverse-order initialization (§3) still visits the deepest dependency first — a coupling contract between two distant functions.
 
 **Import linking.** `init_module_import` wires each `AST_NODE_IMPORT` to its compiled module: it locates the `m<index>` BSS `Mod` struct via `find_import`, then **byte-walks** the struct (advancing by `sizeof()` of each field) to populate `_mod_main`, `_init_vars`, and one pointer per public function (plus a `_b` boxed wrapper when `needs_fn_call_wrapper` is true). A parallel cross-language branch (`is_cross_lang`) instead pulls function pointers out of a JS namespace via `module_get` + `js_property_get`; MIR Direct performs its import wiring inside `compile_script_as_mir_direct`.
 
@@ -138,7 +131,7 @@ The orchestration layer carries a set of caps, fixed buffers, and ordering contr
 8. **Stateless REPL re-execution.** The whole `repl_history` is re-transpiled and re-run every turn, with error rollback implemented as a raw byte-truncate (`main.cpp:655`–`656`). Growth is O(n²) and any non-idempotent side effect repeats each turn.
 9. **`init_module_import` pointer-walk is layout-coupled.** It advances `mod_def` byte-by-byte over the `Mod` struct by `sizeof()` arithmetic mirroring the transpiler's implicit layout (`runner.cpp:359`–`496`); any change to that layout or to `needs_fn_call_wrapper` silently corrupts function-pointer binding, and the two parallel branches (Lambda vs cross-lang JS) must stay in lockstep.
 10. **Precompile reversal coupling.** Correctness depends on `precompile_imports` reversing its added slice and renumbering `index` (`runner.cpp:1075`–`1081`) so `run_script_mir`'s reverse-order import init (`transpile-mir.cpp:12889`) initializes deepest-first — a fragile contract spanning two distant functions.
-11. **Namespace export gaps.** `module_build_lambda_namespace` skips **pub vars** entirely ("addressed when we add live binding support", `module_registry.cpp:184`–`190`), so cross-language importers see only functions. `create_js_import_script` fabricates synthetic `TSNode.context[0]` byte offsets starting at 1,000,000 (`module_registry.cpp:240`, `:273`), relying on the internal fact that `ts_node_start_byte` reads `context[0]` — brittle against a Tree-sitter ABI change.
+11. **Namespace export gaps.** `module_build_lambda_namespace` skips **pub vars** entirely ("addressed when we add live binding support", `module_registry.cpp:184`–`190`), so cross-language importers see only functions.
 12. **Built-in skip list is hardcoded.** `resolve_module_path` recognizes only `math` and `io` by length+`strncmp` (`runner.cpp:755`–`757`); adding a built-in module requires editing this.
 13. **Registry registration is entry-path-asymmetric.** `load_script` registers a module for cross-language import only when `context && context->heap` exists (`runner.cpp:1233`); during pure Lambda→Lambda precompile the context is not yet set up, so those modules are not registered — only the JS→Lambda path, which sets up context first, registers them.
 14. **`g_template_registry` is a single process global** (`template_registry.cpp:13`); `template_registry_destroy` nulls it only if it matches the destroyed registry, so multiple concurrent runtimes would collide.
@@ -152,18 +145,18 @@ The orchestration layer carries a set of caps, fixed buffers, and ordering contr
 |---|---|
 | `lambda/main.cpp` | `main()` arg-parse + subcommand dispatch, `run_script_file`, `run_repl`, `lambda_main_finish`, bridge-script builders, result printing. |
 | `lambda/main-repl.cpp` | Statement-completeness (`check_statement_completeness`, `has_unclosed_brackets`, `has_missing_nodes`), prompts, readline wrappers, `print_help`. |
-| `lambda/runner.cpp` | Compile orchestration: `transpile_script`, `load_script`, `precompile_imports` + import graph, `init_module_import`, `runner_setup_context`, `execute_script_and_create_output`, `resolve_sys_paths_recursive`, `runtime_init`/`cleanup`/`reset_heap`, `lambda_home_*`, phase profiling. |
-| `lambda/transpile-mir.cpp` | `run_script_mir` (the functional+procedural entry, import init loop, recovery frame) and `compile_script_as_mir_direct` (owned by LR_07). |
-| `lambda/transpiler.hpp` | `Runtime`/`Runner`/`Heap` structs, `g_lambda_home`, and the pipeline function declarations. |
-| `lambda/module_registry.cpp/.h` | Cross-language module registry, `module_build_lambda_namespace`, `create_js_import_script`, MIR-name helpers. |
-| `lambda/template_registry.cpp/.h` | view/edit template registry, specificity-ranked `template_registry_match`, `fn_apply1`/`fn_apply2`, event handlers. |
-| `lambda/template_state.cpp/.h` | Reactive `(model, template_ref, state_name)` state store, DocState unification. |
-| `lambda/target.cpp` | Unified `Target` I/O abstraction: `item_to_target`, scheme detection, locality checks, hash-based equality. |
+| `lambda/runtime/runner.cpp` | Compile orchestration: `transpile_script`, `load_script`, `init_module_import`, `runner_setup_context`, `execute_script_and_create_output`, `resolve_sys_paths_recursive`, `runtime_init`/`cleanup`/`reset_heap`, `lambda_home_*`, phase profiling. |
+| `lambda/runtime/transpile-mir.cpp` | `run_script_mir` (the functional+procedural entry, import init loop, recovery frame) and `compile_script_as_mir_direct` (owned by LR_07). |
+| `lambda/runtime/transpiler.hpp` | `Runtime`/`Runner`/`Heap` structs and pipeline declarations. |
+| `lambda/runtime/module_registry.cpp/.h` | Cross-language module registry, `module_build_lambda_namespace`, `create_js_import_script`, MIR-name helpers. |
+| `lambda/runtime/template_registry.cpp/.h` | view/edit template registry, specificity-ranked `template_registry_match`, `fn_apply1`/`fn_apply2`, event handlers. |
+| `lambda/runtime/template_state.cpp/.h` | Reactive `(model, template_ref, state_name)` state store, DocState unification. |
+| `lambda/runtime/target.cpp` | Unified `Target` I/O abstraction: `item_to_target`, scheme detection, locality checks, hash-based equality. |
 
 ## Appendix B — Related documents
 
 - [LR_00 — Overview](LR_00_Overview.md) — the doc set index and the runtime's high-level shape.
-- [LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md) — `lambda_parse_source`, `build_script`, and the typed AST this pipeline transpiles.
+- [LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md) — the direct parser sink and typed AST this pipeline transpiles.
 - [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md) — the `Item`/`Container` values produced and printed by the run.
 - [LR_06 — The C Transpiler](LR_06_C_Transpiler.md) — historical design record for the removed C2MIR backend.
 - [LR_07 — The MIR Direct Transpiler & JIT](LR_07_MIR_Transpiler_JIT.md) — `compile_script_as_mir_direct`, the JIT, and BSS GC-root registration this pipeline invokes.

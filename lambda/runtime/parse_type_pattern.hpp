@@ -3,9 +3,8 @@
 // Type-pattern hand parser (SC4).
 //
 // The production grammar hands the whole type sub-language to the parser as one
-// opaque token (see lambda/tree-sitter-lambda/pending-sc4/). This turns such a
-// token's source text into the SAME AstNode shapes the CST type builders used
-// to produce — with the `Type*` graph attached — in a single pass.
+// opaque token. This turns that token's source text into the retained AstNode
+// shapes, with the `Type*` graph attached, in a single pass.
 //
 // Why AST nodes and not bare `Type*`: value-position types are consumed by
 // node KIND. The MIR transpiler routes `AST_NODE_ELMT_TYPE`/`MAP_TYPE`/… to
@@ -15,7 +14,7 @@
 // base-type path, which dropped its tag name — `?<p>` then matched every
 // element. So the parser produces the tier the consumers already understand.
 //
-// Grammar reference: lambda/tree-sitter-lambda/grammar-lambda.js is normative.
+// Grammar reference: lambda/tree-sitter-lambda/grammar.js is normative.
 // Design: vibe/Lambda_Grammar_Reduce5.md, vibe/Lambda_Type_Pattern.md §3.
 
 #include "ast.hpp"

@@ -96,13 +96,6 @@
       "link": "static"
     },
     {
-      "name": "tree-sitter-lambda",
-      "version": "0.1.0",
-      "include": "lambda/tree-sitter-lambda/bindings/c",
-      "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-      "link": "static"
-    },
-    {
       "name": "tree-sitter-typescript",
       "version": "0.23.2-fork",
       "include": "lambda/tree-sitter-typescript/bindings/c",
@@ -3444,8 +3437,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "tree-sitter-lambda"
+              "gtest_main"
             ],
             "binary": "test_math_ascii_gtest.exe",
             "icon": "🔤"
@@ -3458,8 +3450,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "tree-sitter-lambda"
+              "gtest_main"
             ],
             "binary": "test_markup_roundtrip_gtest.exe",
             "icon": "📝"
@@ -4899,8 +4890,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "tree-sitter-lambda"
+              "gtest_main"
             ],
             "binary": "test_math_gtest.exe",
             "icon": "🔢"

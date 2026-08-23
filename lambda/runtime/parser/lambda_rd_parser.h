@@ -319,9 +319,8 @@ void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
 const char* lambda_token_kind_name(LambdaTokenKind kind);
 
-// This entry point is implemented by the recursive-descent/Pratt core. It is
-// intentionally separate from the Tree-sitter lambda_parser() compatibility
-// wrapper while both front ends coexist.
+// This entry point is implemented by the recursive-descent/Pratt core and is
+// consumed by the direct AST sink.
 LambdaParseStatus lambda_rd_parse_source(const char* source, size_t length,
     const LambdaParseSink* sink, void* sink_context, LambdaParseMetrics* metrics,
     LambdaParseError* error);

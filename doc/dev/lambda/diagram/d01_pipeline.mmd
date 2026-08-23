@@ -7,9 +7,9 @@ flowchart TD
     D --> F
     F --> G["load_script: precompile_imports + canonical-path dedup + circular check"]
     G --> H["transpile_script"]
-    H --> H1["lambda_parse_source -> Tree-sitter CST"]
-    H1 --> H2["find_errors"]
-    H2 --> H3["build_script -> typed AST"]
+    H --> H1["C lexer + RD/Pratt parser"]
+    H1 --> H2["direct span-based AST sink"]
+    H2 --> H3["typed AST + semantic passes"]
     H3 --> H4["compile_script_as_mir_direct (LR_07)"]
     H4 --> I{"script has imports?"}
     I -->|"yes"| J["runner_setup_context + register_bss_gc_roots + run imports in reverse order"]

@@ -13,14 +13,12 @@ mkdir -p "$(dirname "$output_path")"
 
 scanner_hash=$(shasum -a 256 lambda/tree-sitter-lambda/src/scanner.c | awk '{print $1}')
 grammar_shipped_hash=$(shasum -a 256 lambda/tree-sitter-lambda/grammar.js | awk '{print $1}')
-scanner_hash=$(shasum -a 256 lambda/tree-sitter-lambda/src/scanner.c | awk '{print $1}')
 
 {
     printf '# lambda-parser-poc-manifest-v1\n'
     printf '# git_commit\t%s\n' "$(git rev-parse HEAD)"
     printf '# scanner.c.sha256\t%s\n' "$scanner_hash"
     printf '# grammar.js.sha256\t%s\n' "$grammar_shipped_hash"
-    printf '# scanner.c.sha256\t%s\n' "$scanner_hash"
     printf 'path\tbytes\tsha256\n'
     while IFS= read -r source_path; do
         source_bytes=$(wc -c < "$source_path" | tr -d '[:space:]')

@@ -572,7 +572,7 @@ struct Script : Input {
     off_t src_size;             // file size captured when loaded
     // AST-specific fields (beyond Input)
     AstNode *ast_root;
-    AstIndex ast_index;          // one dense identity/index table for all post-CST passes
+    AstIndex ast_index;          // one dense identity/index table for all post-parse passes
     NameScope* current_scope;   // current name scope
     ArrayList* const_list;      // list of constants (Script-specific)
 
@@ -641,7 +641,7 @@ typedef struct Transpiler : Script {
     int warning_count;         // accumulated downgraded-warning count
     ArrayList* warnings;       // list of LambdaError* (downgraded diagnostics)
 
-    // AST build recursion-depth guard — caps build_expr nesting so a pathologically
+    // AST build recursion-depth guard — caps reduction nesting so a pathologically
     // deep source (thousands of nested parens/brackets) reports an error instead of
     // overflowing the stack. Zeroed by the memset that initializes the Transpiler.
     int build_depth;

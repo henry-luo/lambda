@@ -1049,8 +1049,8 @@ static Type* ast_called_type_target(AstNode* function) {
     if (!function || !function->type) return NULL;
     // Built-in annotations (`i32`, `u64`, ...) are represented directly by
     // AST_NODE_TYPE with their target type.  Named type values retain the
-    // TypeType wrapper.  Accept both forms so direct and CST calls enter the
-    // same conversion lowering lane.
+    // TypeType wrapper. Accept both forms so direct reductions enter the same
+    // conversion lowering lane.
     if (function->type->type_id != LMD_TYPE_TYPE) {
         return function->node_type == AST_NODE_TYPE ? function->type : NULL;
     }
@@ -1287,8 +1287,7 @@ static void record_semantic_error_message(Transpiler* tp, SourceSpan span,
     }
 }
 
-// Record a semantic error with a Tree-sitter source range while the legacy
-// builder is active. The direct parser uses the span entry point below.
+// Record a semantic error against a source span.
 
 
 void record_semantic_error_span(Transpiler* tp, SourceSpan span,
@@ -2165,8 +2164,8 @@ void lambda_ast_register_name(Transpiler* tp, AstNamedNode* node) {
 
 AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
         SourceSpan span, StrView name, bool is_proc) {
-    // An unnamed function is an arrow/closure: AST_NODE_FUNC_EXPR, matching the
-    // CST builder. Forward declarations always carry a name, so keying on the
+    // An unnamed function is an arrow/closure: AST_NODE_FUNC_EXPR. Forward
+    // declarations always carry a name, so keying on the
     // spelling is safe. Consumers group FUNC_EXPR with FUNC everywhere, so this
     // only restores the distinction the AST already models — it is not a
     // behaviour change.
@@ -2187,8 +2186,8 @@ AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
     fn_type->returned = &TYPE_ANY;
     set_function_return_contract(fn_type,
         is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
-    // an anonymous function has no name at all, matching the CST builder —
-    // an empty String would print as `(name "")` and read as a named function.
+    // an anonymous function has no name at all — an empty String would print
+    // as `(name "")` and read as a named function.
     fn_node->name = is_anonymous ? NULL
         : name_pool_create_strview(tp->name_pool, name);
     // The forward declaration must be safely visible before its body exists.
@@ -4078,7 +4077,7 @@ AstNode* build_current_error_from_span(Transpiler* tp, SourceSpan span) {
         span, sizeof(AstNode));
     ast_node->type = &TYPE_ERROR;
     if (!tp->building_handler_body) {
-        // A direct parser cannot rely on a CST ancestor to enforce this scope;
+        // A direct parser cannot rely on a parser ancestor to enforce this scope;
         // the committed constructor owns the handler-body invariant for both paths.
         record_semantic_error_span(tp, span, ERR_INVALID_EXPR_CONTEXT,
             "current error `^` is only valid inside an error-handler body");
@@ -4164,7 +4163,7 @@ static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
 // When a branch is a content block, creates a new scope for variable shadowing
 
 
-// build a match expression from Tree-sitter CST node
+// build a match expression from committed reduction parts
 
 
 AstNode* build_match_from_parts(Transpiler* tp, SourceSpan span,
@@ -4290,8 +4289,7 @@ AstNode* build_decompose_from_parts(Transpiler* tp, SourceSpan span,
 
 
 // With the trimmed grammar a type annotation is ONE scanner token, so these
-// questions are answered from the token's text rather than by walking CST type
-// nodes (which no longer exist).
+// questions are answered from the token's text.
 
 
 
@@ -4458,8 +4456,7 @@ static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name)
 
 
 // One source of truth for the base-type keywords. A table beats the former
-// 30-branch if/else chain, and the hand parser (parse_type_pattern.cpp) needs
-// the same mapping without a CST node to hang it on.
+// 30-branch if/else chain, and the hand parser uses the same mapping.
 typedef struct { const char* name; Type* type; } BaseTypeName;
 static const BaseTypeName BASE_TYPE_NAMES[] = {
     {"null", (Type*)&LIT_TYPE_NULL},      {"bool", (Type*)&LIT_TYPE_BOOL},
@@ -4843,7 +4840,7 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
 }
 
 static void append_join_key_spec(Transpiler* tp, AstLoopNode* loop, AstNode* prior_expr, AstNode* new_expr) {
-    // Direct reductions have no Tree-sitter node; the loop span is the shared
+    // Direct reductions have no parser node; the loop span is the shared
     // source anchor for both builders.
     AstJoinKey* spec = (AstJoinKey*)alloc_ast_node_from_span(tp,
         AST_NODE_JOIN_KEY, loop->source_span, sizeof(AstJoinKey));
@@ -4991,8 +4988,7 @@ static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
 // returns NULL for variadic marker (...)
 // Fold a declared type into a TypeParam: copy the compact Type prefix, restore
 // the param-only flags, then choose the retained contract and full_type. Shared
-// with the type-pattern hand parser, which builds `fn(a: T)` params without a
-// CST node to read.
+// with the type-pattern hand parser, which builds `fn(a: T)` params from spans.
 void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* declared) {
     bool was_optional = param_type->is_optional;
     bool was_var_param = param_type->is_var_param;
@@ -5878,8 +5874,8 @@ AstNode* build_handler_from_parts(Transpiler* tp, SourceSpan span,
 
 // --- external type-pattern tokens -------------------------------------------
 // The scanner hands the whole type sub-language over as one token; the hand
-// parser (parse_type_pattern.cpp) turns the token's source text into the same
-// AST-node/Type shapes the CST builders used to produce.
+// parser (parse_type_pattern.cpp) turns the token's source text into the
+// retained AST-node/Type shapes.
 
 
 
@@ -6549,8 +6545,8 @@ static void finalize_lambda_script_ast(Transpiler* tp, AstScript* script) {
 
 
 // --- direct recursive-descent AST sink ------------------------------------
-// The sink deliberately lives beside the CST constructors so both front ends
-// share allocation, literal, name, and type ownership.  It starts with the
+// The sink deliberately lives beside the shared constructors so reductions
+// share allocation, literal, name, and type ownership. It starts with the
 // reductions whose child contract is already complete; complex declaration
 // reductions are added only after the parser publishes their binding metadata.
 
@@ -6891,7 +6887,7 @@ static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
         // Some conversion builtins (notably `int64`) share the lexer token
         // class used by type names. Resolve the callable spelling before
         // reporting an unknown type so expression-position aliases retain
-        // the same meaning as the Tree-sitter builder.
+        // the same semantic meaning.
         AstNode* builtin = build_identifier_from_span(tp, span);
         if (builtin && builtin->node_type == AST_NODE_SYS_FUNC) return builtin;
         record_unknown_base_type_span(tp, span, name);
@@ -7073,7 +7069,7 @@ static AstNode* direct_content_node(Transpiler* tp, SourceSpan span,
     for (AstNode* item = filtered; item; item = item->next) {
         content->list_type->length++;
     }
-    // Keep block typing identical to the CST builder: a multi-item functional
+    // Keep block typing stable: a multi-item functional
     // block is an open list value, not the type of its first declaration. The
     // first-item shortcut reinterprets a later native result at the caller
     // boundary (D2.2.2).
@@ -7117,8 +7113,8 @@ static void direct_finalize_type_alias(Transpiler* tp, AstNamedNode* alias) {
     if (!literal_alias && !range_alias) return;
 
     // Named literal/range aliases are first-class type values. Keep the
-    // payload under the same TypeType carrier and type-list identity as the
-    // CST builder; emitting the raw value type makes `x is Alias` test data
+    // payload under the same TypeType carrier and type-list identity; emitting
+    // the raw value type makes `x is Alias` test data
     // storage rather than the alias contract (D2.2.2).
     TypeType* wrapper = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
         sizeof(TypeType));
@@ -7223,8 +7219,7 @@ static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
         AstNode* declaration = item;
         if (item->node_type == AST_NODE_LET_STAM) {
             // The outer `let` reduction is a statement wrapper; retain only
-            // its declaration in the block's declaration chain, matching the
-            // CST builder's let-block shape.
+            // its declaration in the block's declaration chain.
             declaration = ((AstLetNode*)item)->declare;
         }
         if (declaration && (declaration->node_type == AST_NODE_ASSIGN ||
@@ -7250,7 +7245,7 @@ static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
 static Type* direct_open_binary_result_type(Transpiler* tp, AnyReason reason,
         Type* left, Type* right) {
     set_type_any(tp, reason);
-    // The CST builder preserves an open operand's exclusion contract when an
+    // Preserve an open operand's exclusion contract when an
     // operator's result remains `any`. Returning global `any` here lost
     // `any \\ error` and made later call boundaries invent errors.
     if (right->type_id == LMD_TYPE_ANY) return right;
@@ -7341,7 +7336,7 @@ static bool direct_validate_relational_operands(Transpiler* tp,
     Type* right_type = right && right->type ? lambda_type_remove_error_and_null(
         tp->pool, right->type) : NULL;
     if (!left_type || !right_type) return true;
-    // Reuse the CST magnitude predicate instead of treating every `type` tag
+    // Reuse the magnitude predicate instead of treating every `type` tag
     // as a container: abstract `number` is represented by that tag, and
     // conversions such as `int(value) < 0` are valid scalar comparisons.
     if (known_magnitude_comparable_type_set(left_type, right_type)) {
@@ -7433,8 +7428,8 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
         bool right_valid = right_type == LMD_TYPE_COMPLEX ||
             is_complex_component_type(right_type);
         if (!left_valid || !right_valid) {
-            // Preserve the Tree-sitter builder's concrete complex arithmetic
-            // contract. Leaving this pair as open any makes a typed call add
+            // Preserve the concrete complex arithmetic contract. Leaving this
+            // pair as open any makes a typed call add
             // a spurious error arm for an expression that cannot fail here.
             record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "operator '%.*s' is not defined for %s and %s",
@@ -7629,7 +7624,7 @@ AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
                 if (field_ident->name->len == 7 &&
                         memcmp(field_ident->name->chars, "max_int", 7) == 0) {
                     // keep the named math constant on the same literal lane
-                    // as the CST builder; otherwise overflow checks reject the
+                    // as the shared literal lane; otherwise overflow checks reject the
                     // canonical compact-int boundary (D2.2.2).
                     TypeInt64* constant = (TypeInt64*)alloc_type(tp->pool,
                         LMD_TYPE_INT, sizeof(TypeInt64));
@@ -7703,7 +7698,7 @@ static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
     AstSysFuncNode* node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
         AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
     node->fn_info = info;
-    // A resolved call callee mirrors the CST builder's return-typed node. A
+    // A resolved call callee carries its return-typed node. A
     // standalone sysfunc value uses the separate callable-signature builder.
     // The transpiler relies on this distinction when boxing native results at
     // handler and collection boundaries (D2.2.2).
@@ -7720,7 +7715,7 @@ static AstNode* direct_start_node(Transpiler* tp, SourceSpan span,
     start->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
     if (!tp->current_scope || !tp->current_scope->is_proc) {
         // Task creation participates in procedure return/join flow, so a
-        // direct call must retain the same scope firewall as the CST builder.
+        // direct call must retain the same scope firewall.
         record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
             "`start` is only allowed inside a procedure (pn)");
         start->type = &TYPE_ERROR;
@@ -7784,7 +7779,7 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
         for (ShapeEntry* field = owner->shape; field; field = field->next) {
             if (field->name && field->name->length == name.length &&
                     strncmp(field->name->str, name.str, name.length) == 0) {
-                // fields shadow methods, matching the CST path.
+                // fields shadow methods.
                 if (out_has_user_member) *out_has_user_member = true;
                 return NULL;
             }
@@ -7856,7 +7851,7 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         if (!info && field && field->node_type == AST_NODE_IDENT) {
             // Method receivers are not limited to identifiers: literals,
             // arrays, and chained calls must use the same receiver-aware
-            // registry lookup as `x.method()` (the CST path already does).
+            // registry lookup as `x.method()`.
             AstNode* receiver = object ? object : member->object;
             StrView field_name = strview_init(((AstIdentNode*)field)->name->chars,
                 ((AstIdentNode*)field)->name->len);
@@ -7899,7 +7894,7 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         if (!user_function) info = get_sys_func_info(&name, lookup_arg_count);
         if (!info && !user_function) {
             // Qualified imports are resolved above; bare calls need the same
-            // module-prefix fallback as the CST builder (`sqrt` -> `math_sqrt`).
+            // module-prefix fallback (`sqrt` -> `math_sqrt`).
             info = lookup_global_imported_sys_func(tp, &name, lookup_arg_count);
         }
         if (!info && !user_function) {
@@ -8069,7 +8064,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
         tag.str++;
         tag.length -= 2;
     }
-    // the CST canonicalizes whitespace around dotted tag names; preserve that
+    // Canonicalize whitespace around dotted tag names; preserve that
     // invariant for direct parsing so `<svg .rect>` and `<svg.rect>` share the
     // same element type/name (S2.4.3v2).
     bool has_tag_space = false;
@@ -8095,7 +8090,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
     TypeObject* object_type = lookup_object_type_for_tag(tp, tag);
     if (object_type) {
         // Object-typed tags are object literals, not ordinary elements; keep
-        // this decision shared with the CST path so `is Type` sees the same
+        // this decision shared with other element construction so `is Type` sees the same
         // runtime object contract (D2.2.2).
         return build_object_literal_from_items(tp, span, tag, object_type,
             children);
@@ -8261,7 +8256,7 @@ AstNamedNode* build_assignment_from_parts(Transpiler* tp, SourceSpan span,
         assignment->declared_type = declared;
         // Range annotations are membership contracts, not a storage lane.
         // Preserve the initializer's concrete type so a string range value is
-        // not emitted as a raw Range pointer (the CST builder's invariant).
+        // not emitted as a raw Range pointer.
         assignment->type = declared->type_id == LMD_TYPE_RANGE && value &&
                 value->type ? value->type : declared;
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
@@ -8335,7 +8330,7 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
     if (entry && !entry->is_mutable && !is_object_field_in_proc) {
         // Object fields are the receiver's mutable storage lane inside a pn
         // method; treating their scope entries as let bindings rejects the
-        // same bare-field assignment accepted by the CST builder (D2.2.2).
+        // same bare-field assignment accepted by object methods (D2.2.2).
         record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
             "cannot assign to let binding '%.*s'. declare it with `var` instead.",
             (int)ident->name->len, ident->name->chars);
@@ -8344,7 +8339,7 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
             entry->node && entry->node->type && !entry->has_type_annotation &&
             entry->node->type->type_id != assignment->value->type->type_id &&
             !entry->type_widened && entry->node->type->type_id != LMD_TYPE_ANY) {
-        // Keep the direct binding metadata in lockstep with the CST builder:
+        // Keep the direct binding metadata consistent:
         // an inferred var that changes type must use the Item carrier on all
         // later reads, rather than reinterpreting its new value through the
         // initializer's native lane (D2.2.2).
@@ -8418,7 +8413,7 @@ static AstNode* direct_complete_function(Transpiler* tp, SourceSpan span,
         AstListNode* content = (AstListNode*)body;
         if (content->item && !content->item->next) {
             // `build_content(..., true, ...)` collapses a one-item function
-            // block in the Tree-sitter path. Preserve that AST contract so a
+            // block. Preserve that AST contract so a
             // terminal assignment remains a procedure's implicit result
             // instead of being discarded as a CONTENT side effect (D6.1.2).
             body = content->item;
@@ -8549,8 +8544,7 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
         declare_module_import(tp, node);
         imported = true;
     } else if (!lambda_source_exists) {
-        // Keep the direct parser's import surface aligned with the CST path:
-        // a missing Lambda module may resolve to a hosted JavaScript module.
+        // A missing Lambda module may resolve to a hosted JavaScript module.
         path->str[path->length - 2] = 'j';
         path->str[path->length - 1] = 's';
         Item namespace_obj = load_js_module(tp->runtime, path->str);
@@ -8588,8 +8582,7 @@ AstNode* build_if_node_from_parts(Transpiler* tp, SourceSpan span,
         node->type = &TYPE_ERROR;
         return (AstNode*)node;
     }
-    // Direct reductions previously kept every mixed arm as a union while the
-    // CST builder widens ordinary mixed joins. Reuse the shared rule so later
+    // Keep ordinary mixed joins widened through the shared rule so later
     // boundary validation observes the same function return contracts.
     node->type = infer_if_result_type(tp, then_branch, else_branch);
     return (AstNode*)node;
@@ -8796,8 +8789,8 @@ AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
         record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
             "`while` is only allowed inside a procedure (pn)");
     }
-    // Keep procedural conditions subject to the same mask/container lint as
-    // the CST path; this guards truthy-array control flow (S5.4.1).
+    // Keep procedural conditions subject to the mask/container lint; this
+    // guards truthy-array control flow (S5.4.1).
     lint_condition_span(tp, span, condition, "while");
     if (body && body->node_type == AST_NODE_CONTENT &&
             !((AstListNode*)body)->vars) {
@@ -9396,7 +9389,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
         return direct_ast_value(node);
     }
     case LAMBDA_REDUCE_DECLARATION: {
-        // `pub` is a visibility modifier in the CST, not a distinct AST
+        // `pub` is a visibility modifier, not a distinct AST
         // node. The committed assignment/function child already owns the
         // binding entry; preserve it instead of manufacturing a declaration.
         if (reduction->form == LAMBDA_REDUCTION_FORM_IMPORT) {
@@ -9774,7 +9767,7 @@ LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
         tp->current_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     }
 
-    // Match the CST builder's top-level pass: every named function is visible
+    // Match the top-level pass: every named function is visible
     // while earlier bodies are reduced, so a declaration cannot be mistaken
     // for a same-spelled system function (for example `gamma`).
     direct_predeclare_top_level_functions(tp, source, length);

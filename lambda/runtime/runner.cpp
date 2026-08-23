@@ -85,7 +85,7 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
     }
     if (separated_relation) {
         // The direct Pratt parser reaches the same unseparated relation that
-        // Tree-sitter marks as element-ambiguous; preserve one user-facing
+        // The reference grammar marks this as element-ambiguous; preserve one user-facing
         // syntax diagnosis instead of exposing parser-internal terminology.
         snprintf(message, sizeof(message),
             "'<' and '>' are ambiguous with element syntax at statement level");
@@ -96,7 +96,7 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, message, &location);
     if (!error) return;
     if (separated_relation) {
-        // The Tree-sitter path attaches the repair to this same diagnosis
+        // The reference grammar attaches the repair to this same diagnosis
         // (lambda-error.cpp); dropping it here left the C parser naming the
         // ambiguity without telling the user how to resolve it.
         error->help = mem_strdup(
