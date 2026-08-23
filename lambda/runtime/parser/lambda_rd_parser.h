@@ -130,7 +130,7 @@ typedef enum LambdaTokenKind {
 
 typedef struct LambdaToken {
     LambdaTokenKind kind;
-    LambdaSourceSpan span;
+    SourceSpan span;
     uint32_t line;
     uint32_t column;
     // S16.1.1: a line break carries no meaning of its own, so NEWLINE never
@@ -154,7 +154,7 @@ typedef enum LambdaParseStatus {
 } LambdaParseStatus;
 
 typedef struct LambdaParseError {
-    LambdaSourceSpan span;
+    SourceSpan span;
     uint64_t expected_token_bits[4];
     LambdaTokenKind actual_kind;
     const char* message;
@@ -293,7 +293,7 @@ typedef struct LambdaParseReduction {
     // This is the complete production range, including the left child of a
     // Pratt/postfix reduction. It is therefore directly usable as AstNode's
     // source_span without reconstructing a range from opaque child values.
-    LambdaSourceSpan span;
+    SourceSpan span;
     // The committed introducer/operator token. It is zeroed when the form has
     // no token-specific interpretation.
     LambdaToken detail_token;

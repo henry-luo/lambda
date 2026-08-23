@@ -132,7 +132,8 @@ void py_scope_define(PyTranspiler* tp, String* name, PyAstNode* node, PyVarKind 
         NameEntry* current = py_scope_lookup_in(target_scope, name);
         if (current && current->node != (AstNode*)node) {
             // Python rejects a declaration after a local binding in the same scope.
-            py_error(tp, node->node, "%s declaration follows a local binding for '%.*s'",
+            py_error(tp, node->source_span,
+                "%s declaration follows a local binding for '%.*s'",
                 kind == PY_VAR_GLOBAL ? "global" : "nonlocal", (int)name->len, name->chars);
             return;
         }
@@ -149,7 +150,8 @@ void py_scope_define(PyTranspiler* tp, String* name, PyAstNode* node, PyVarKind 
         target_scope = py_scope_enclosing_function(target_scope->parent);
         if (!target_scope) {
             // A nonlocal name must resolve to a function scope, never a module.
-            py_error(tp, node->node, "nonlocal binding for '%.*s' not found",
+            py_error(tp, node->source_span,
+                "nonlocal binding for '%.*s' not found",
                 (int)name->len, name->chars);
             return;
         }
@@ -172,15 +174,16 @@ void py_scope_define(PyTranspiler* tp, String* name, PyAstNode* node, PyVarKind 
 
 // error handling functions
 
-void py_error(PyTranspiler* tp, TSNode node, const char* format, ...) {
+void py_error(PyTranspiler* tp, SourceSpan span, const char* format, ...) {
     tp->has_errors = true;
 
     if (!tp->error_buf) {
         tp->error_buf = strbuf_new();
     }
 
-    uint32_t start_row = ts_node_start_point(node).row;
-    uint32_t start_col = ts_node_start_point(node).column;
+    LambdaSourcePoint point = lambda_source_span_start_point(tp->source, span);
+    uint32_t start_row = point.row;
+    uint32_t start_col = point.column;
     strbuf_append_format(tp->error_buf, "Error at line %u, column %u: ",
                         start_row + 1, start_col + 1);
 
@@ -196,9 +199,10 @@ void py_error(PyTranspiler* tp, TSNode node, const char* format, ...) {
     log_error("py: transpiler error: %s", buffer);
 }
 
-void py_warning(PyTranspiler* tp, TSNode node, const char* format, ...) {
-    uint32_t start_row = ts_node_start_point(node).row;
-    uint32_t start_col = ts_node_start_point(node).column;
+void py_warning(PyTranspiler* tp, SourceSpan span, const char* format, ...) {
+    LambdaSourcePoint point = lambda_source_span_start_point(tp->source, span);
+    uint32_t start_row = point.row;
+    uint32_t start_col = point.column;
 
     va_list args;
     va_start(args, format);

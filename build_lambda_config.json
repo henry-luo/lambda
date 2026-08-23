@@ -64,8 +64,7 @@
   "defines": [
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION",
-    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1",
-    "LAMBDA_NO_TREE_SITTER_LAMBDA"
+    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
@@ -711,8 +710,7 @@
         "pthread"
       ],
       "defines": [
-        "UTF8PROC_STATIC",
-        "LAMBDA_NO_TREE_SITTER_LAMBDA"
+        "UTF8PROC_STATIC"
       ],
       "link": "static"
     },
@@ -909,8 +907,7 @@
         "pthread"
       ],
       "defines": [
-        "UTF8PROC_STATIC",
-        "LAMBDA_NO_TREE_SITTER_LAMBDA"
+        "UTF8PROC_STATIC"
       ],
       "link": "dynamic"
     },

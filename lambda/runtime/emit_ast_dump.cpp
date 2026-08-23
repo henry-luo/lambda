@@ -73,7 +73,7 @@ static bool emit_build_direct_ast(Transpiler* tp, const char* source) {
 }
 
 // get source text from the parser-neutral span retained on every AST node.
-static inline const char* node_src(const char* source, LambdaSourceSpan span, int* out_len) {
+static inline const char* node_src(const char* source, SourceSpan span, int* out_len) {
     *out_len = (int)lambda_source_span_length(span);
     return source + span.start_byte;
 }
@@ -235,7 +235,7 @@ static void emit_dump_contract_field(const char* label, const Type* type,
     if (type) printf(" (%s_explicit %s)", label, is_explicit ? "true" : "false");
 }
 
-static void emit_dump_source_field(const char* source, LambdaSourceSpan span) {
+static void emit_dump_source_field(const char* source, SourceSpan span) {
     int len = 0;
     const char* src = node_src(source, span, &len);
     if (len <= 0) return;

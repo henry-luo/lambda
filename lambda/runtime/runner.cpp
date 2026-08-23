@@ -54,7 +54,7 @@ static int g_compiler_timing_enabled = -1;
 static void record_direct_parse_error(Transpiler* tp, const char* script_path,
         const LambdaParseError* parse_error) {
     if (!tp || !tp->source) return;
-    LambdaSourceSpan span = parse_error ? parse_error->span : (LambdaSourceSpan){0, 0};
+    SourceSpan span = parse_error ? parse_error->span : (SourceSpan){0, 0};
     size_t source_length = strlen(tp->source);
     if (span.start_byte > source_length) span.start_byte = (uint32_t)source_length;
     if (span.end_byte < span.start_byte || span.end_byte > source_length) {
@@ -197,7 +197,6 @@ char* lambda_home_path(const char* rel) {
 // Zero overhead when disabled — all gated by profile_enabled flag.
 
 #define PROFILE_MAX_SCRIPTS 64
-#define PROFILE_MAX_IMPORT_LEVELS 64
 #define PROFILE_PATH_MAX 512
 
 typedef struct PhaseProfile {
@@ -217,21 +216,10 @@ typedef struct PhaseProfile {
     unsigned long thread_id;
 } PhaseProfile;
 
-typedef struct ImportLevelProfile {
-    int level;
-    int modules;
-    int jobs;
-    int threads;
-    int cpu_cap;
-    double elapsed_ms;
-} ImportLevelProfile;
-
 bool profile_enabled = false;
 bool profile_checked = false;
 PhaseProfile profile_data[PROFILE_MAX_SCRIPTS];
 int profile_count = 0;
-ImportLevelProfile import_level_profile_data[PROFILE_MAX_IMPORT_LEVELS];
-int import_level_profile_count = 0;
 #ifndef _WIN32
 static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
@@ -294,22 +282,6 @@ static void profile_record_phase(const PhaseProfile* profile) {
 #endif
 }
 
-#ifndef _WIN32
-// windows does not compile the parallel import profiler that records these levels.
-static void profile_record_import_level(const ImportLevelProfile* profile) {
-    if (!profile) return;
-#ifndef _WIN32
-    pthread_mutex_lock(&profile_mutex);
-#endif
-    if (import_level_profile_count < PROFILE_MAX_IMPORT_LEVELS) {
-        import_level_profile_data[import_level_profile_count++] = *profile;
-    }
-#ifndef _WIN32
-    pthread_mutex_unlock(&profile_mutex);
-#endif
-}
-#endif
-
 void profile_dump_to_file() {
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");
@@ -327,15 +299,6 @@ void profile_dump_to_file() {
                 p->script_path, p->parse_ms, p->ast_ms, p->plan_ms, p->transpile_ms,
                 p->jit_init_ms, p->mir_gen_ms, p->interp_exec_ms,
                 total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
-    }
-    if (import_level_profile_count > 0) {
-        fprintf(f, "\n# Parallel Import Levels\n");
-        fprintf(f, "# level | modules | jobs | threads | cpu_cap | elapsed_ms\n");
-        for (int i = 0; i < import_level_profile_count; i++) {
-            ImportLevelProfile* p = &import_level_profile_data[i];
-            fprintf(f, "%d\t%d\t%d\t%d\t%d\t%.3f\n",
-                    p->level, p->modules, p->jobs, p->threads, p->cpu_cap, p->elapsed_ms);
-        }
     }
     fclose(f);
 }
@@ -389,8 +352,6 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
 extern "C" {
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
-TSParser* lambda_parser(void);
-TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void ensure_jit_imports_initialized(void);
 }
 void ensure_sys_func_maps_initialized(void);
@@ -399,10 +360,6 @@ void print_heap_entries();
 
 // thread-specific runtime context is provided by runtime/runtime-state.cpp.
 extern __thread Context* input_context;
-
-// Thread-local parser for parallel module compilation.
-// When non-NULL, load_script() uses this instead of runtime->parser.
-static __thread TSParser* tls_parser = NULL;
 
 typedef struct ScriptIndexEntry {
     const char* path;
@@ -799,26 +756,6 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
     return true;
 }
 
-static bool lambda_tree_parser_selected(void) {
-#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
-    // normal profiles have no Lambda Tree-sitter language to select.
-    return false;
-#else
-    const char* mode = shell_getenv("LAMBDA_PARSER");
-    return mode && (strcmp(mode, "tree") == 0 ||
-        strcmp(mode, "tree-sitter") == 0);
-#endif
-}
-
-static bool lambda_parser_compare_selected(void) {
-#ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
-    return false;
-#else
-    const char* mode = shell_getenv("LAMBDA_PARSER");
-    return mode && strcmp(mode, "compare") == 0;
-#endif
-}
-
 static bool initialize_script_ast_storage(Transpiler* tp) {
     Input* input_base = Input::create(
         mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
@@ -852,80 +789,26 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     profile_time_t p0, p1, p2, p3;
     if (profiling || compiler_timing) profile_get_time(&p0);
 
-    // The first-party parser is the production default. Tree-sitter remains
-    // an explicit reference/rollback mode; compare parses with both front ends
-    // while publishing only the direct AST.
-    bool compare_parser = lambda_parser_compare_selected();
-    bool direct_parser = !lambda_tree_parser_selected();
-    TSNode root_node = {};
     get_time(&start);
     tp->source = script->source;
-    if (direct_parser) {
-        AstScript* direct_root = NULL;
-        LambdaParseError parse_error = {};
-        if (!initialize_script_ast_storage(tp) ||
-                lambda_rd_build_ast(tp, tp->source, strlen(tp->source),
-                    &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
-            // A parser failure must enter the same structured diagnostic lane
-            // as a Tree-sitter ERROR node, or callers see only a generic
-            // execution failure after the direct-parser cutover.
-            record_direct_parse_error(tp, script_path, &parse_error);
-            log_error("C parser rejected %s: %s", script_path,
-                parse_error.message ? parse_error.message : "direct AST reduction failed");
-            return;
-        }
-        tp->syntax_tree = NULL;
-        tp->ast_root = (AstNode*)direct_root;
-        if (compare_parser) {
-            TSTree* reference_tree = lambda_parse_source(tp->parser, tp->source);
-            if (!reference_tree || ts_node_has_error(ts_tree_root_node(reference_tree))) {
-                log_error("parser compare: Tree-sitter rejected source accepted by C parser: %s",
-                    script_path);
-                if (reference_tree) ts_tree_delete(reference_tree);
-                return;
-            }
-            ts_tree_delete(reference_tree);
-        }
-    } else {
-        // parse the source with the retained Tree-sitter oracle.
-        tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
-        if (tp->syntax_tree == NULL) {
-            log_error("Error: Failed to parse the source code.");
-            return;
-        }
-        root_node = ts_tree_root_node(tp->syntax_tree);
+    AstScript* direct_root = NULL;
+    LambdaParseError parse_error = {};
+    if (!initialize_script_ast_storage(tp) ||
+            lambda_rd_build_ast(tp, tp->source, strlen(tp->source),
+                &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
+        // A direct-parser failure must enter the structured diagnostic lane so
+        // callers receive the same source-aware error contract as other inputs.
+        record_direct_parse_error(tp, script_path, &parse_error);
+        log_error("C parser rejected %s: %s", script_path,
+            parse_error.message ? parse_error.message : "direct AST reduction failed");
+        return;
     }
+    tp->ast_root = (AstNode*)direct_root;
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
     if (profiling || compiler_timing) profile_get_time(&p1);
 
-#ifndef NDEBUG
-    // print the syntax tree as an s-expr
-    if (!direct_parser) print_ts_root(tp->source, tp->syntax_tree);
-#endif
-
-    // check if the syntax tree is valid
-    if (!direct_parser && ts_node_has_error(root_node)) {
-        log_error("Syntax tree has errors.");
-
-        // collect structured parse errors
-        if (!tp->errors) tp->errors = arraylist_new(8);
-        find_errors(root_node, tp->source, script_path, tp->errors);
-        tp->error_count = tp->errors->length;
-        return;
-    }
-
-    // build the AST from the syntax tree when the oracle is selected.
-    if (!direct_parser) {
-        get_time(&start);
-        if (strcmp(ts_node_type(root_node), "document") != 0) {
-            log_error("Error: The tree has no valid root node.");
-            return;
-        }
-        if (!initialize_script_ast_storage(tp)) return;
-        tp->ast_root = build_script(tp, root_node);
-    }
     if (profiling || compiler_timing) profile_get_time(&p2);
     // Publish the first production pass contract now: all later Lambda work
     // consumes the indexed identity table rather than rediscovering children
@@ -1016,7 +899,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 prof.parse_ms = elapsed_ms_val(p0, p1);
                 prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3);
                 prof.plan_ms = elapsed_ms_val(plan0, plan1);
-                prof.worker_thread = tls_parser ? 1 : 0;
+                prof.worker_thread = 0;
                 prof.thread_id = profile_current_thread_id();
                 profile_record_phase(&prof);
             }
@@ -1069,7 +952,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             prof.jit_init_ms = mir_jit_init_ms;
             prof.mir_gen_ms = mir_gen_ms;
             prof.code_len = 0;
-            prof.worker_thread = tls_parser ? 1 : 0;
+            prof.worker_thread = 0;
             prof.thread_id = profile_current_thread_id();
             profile_record_phase(&prof);
         }
@@ -1079,381 +962,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 }
 
 // ============================================================================
-// Parallel Module Compilation
-// ============================================================================
-// Pre-discovers all import dependencies and compiles modules in parallel,
-// organized by topological depth (leaves first, dependents after).
-// Enabled only for MIR Direct path with ≥3 modules on non-Windows platforms.
-
-#ifndef _WIN32
-
-// Import graph node for dependency discovery
-typedef struct {
-    char* path;        // canonical absolute path (owned)
-    char* source;      // source text (owned)
-    char* directory;   // directory for relative imports (owned)
-    int* deps;         // indices of dependency nodes (owned)
-    int dep_count;
-    int dep_cap;
-    int depth;         // topological depth (0 = leaf, -1 = uncomputed)
-} ImportGraphNode;
-
-// Hashmap entry for path→index dedup
-typedef struct {
-    const char* path;
-    int index;
-} PathIndexEntry;
-
-HASHMAP_DEFINE_STRKEY(path_index, PathIndexEntry, path)
-
-// Resolve a module import path to a canonical absolute path.
-// Returns malloc'd canonical path, or NULL for built-in/URI imports.
-static char* resolve_module_path(const char* module_text, int module_len, const char* import_dir) {
-    if (module_len <= 0) return NULL;
-
-    // skip built-in modules
-    if ((module_len == 4 && strncmp(module_text, "math", 4) == 0) ||
-        (module_len == 2 && strncmp(module_text, "io", 2) == 0))
-        return NULL;
-
-    // skip bare URI imports
-    if (module_text[0] == '\'') return NULL;
-
-    StrBuf* buf = strbuf_new();
-
-    if (module_text[0] == '.') {
-        // relative import: .foo.bar → base_dir/foo/bar.ls
-        const char* base_dir = import_dir ? import_dir : "./";
-        strbuf_append_format(buf, "%s%.*s", base_dir, module_len - 1, module_text + 1);
-        char* ch = buf->str + buf->length - (module_len - 1);
-        while (*ch) { if (*ch == '.') *ch = '/'; ch++; }
-        strbuf_append_str(buf, ".ls");
-    } else {
-        // absolute import: lambda.package.chart → g_lambda_home/package/chart.ls
-        strbuf_append_format(buf, "./%.*s", module_len, module_text);
-        char* ch = buf->str + 2;
-        while (*ch) { if (*ch == '.') *ch = '/'; ch++; }
-        strbuf_append_str(buf, ".ls");
-
-        // replace first segment with g_lambda_home
-        char* segment_end = strchr(buf->str + 2, '/');
-        if (segment_end) {
-            StrBuf* fixed = strbuf_new();
-            const char* home = g_lambda_home;
-            if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_str(fixed, "./");
-            strbuf_append_str(fixed, home);
-            strbuf_append_str(fixed, segment_end);
-            strbuf_free(buf);
-            buf = fixed;
-        }
-    }
-
-    char* resolved = file_realpath(buf->str);
-    strbuf_free(buf);
-    return resolved;
-}
-
-// Add a dependency edge from parent_idx to dep_idx
-static void add_dep(ImportGraphNode* nodes, int parent_idx, int dep_idx) {
-    ImportGraphNode* parent = &nodes[parent_idx];
-    if (parent->dep_count >= parent->dep_cap) {
-        parent->dep_cap = parent->dep_cap ? parent->dep_cap * 2 : 4;
-        parent->deps = (int*)mem_realloc(parent->deps, sizeof(int) * parent->dep_cap, MEM_CAT_SYSTEM);
-    }
-    parent->deps[parent->dep_count++] = dep_idx;
-}
-
-// Recursively discover all import dependencies starting from a source file.
-// Adds new modules to the graph and records dependency edges.
-static void discover_imports_recursive(
-    TSParser* parser, int parent_idx,
-    ImportGraphNode** nodes, int* count, int* capacity,
-    struct hashmap* path_map)
-{
-    ImportGraphNode* parent = &(*nodes)[parent_idx];
-    TSTree* tree = lambda_parse_source(parser, parent->source);
-    if (!tree) return;
-
-    // Save source and directory pointers BEFORE any recursive calls that might
-    // realloc the nodes array and invalidate the parent pointer.  These are
-    // separate heap allocations that remain valid until cleanup.
-    const char* parent_source = parent->source;
-    const char* parent_dir = parent->directory;
-
-    TSNode root = ts_tree_root_node(tree);
-    TSNode child = ts_node_named_child(root, 0);
-
-    while (!ts_node_is_null(child)) {
-        if (ts_node_symbol(child) == sym_import_module) {
-            TSNode module_node = ts_node_child_by_field_id(child, field_module);
-            if (!ts_node_is_null(module_node)) {
-                uint32_t start = ts_node_start_byte(module_node);
-                uint32_t end_byte = ts_node_end_byte(module_node);
-                const char* module_text = parent_source + start;
-                int module_len = (int)(end_byte - start);
-
-                char* dep_path = resolve_module_path(module_text, module_len, parent_dir);
-                if (dep_path) {
-                    PathIndexEntry key = { .path = dep_path, .index = 0 };
-                    const PathIndexEntry* existing = (const PathIndexEntry*)hashmap_get(path_map, &key);
-
-                    int dep_idx;
-                    if (existing) {
-                        dep_idx = existing->index;
-                        mem_free(dep_path);
-                    } else {
-                        // new module discovered
-                        if (*count >= *capacity) {
-                            *capacity *= 2;
-                            *nodes = (ImportGraphNode*)mem_realloc(*nodes, sizeof(ImportGraphNode) * (*capacity), MEM_CAT_SYSTEM);
-                        }
-                        dep_idx = *count;
-                        ImportGraphNode* n = &(*nodes)[dep_idx];
-                        memset(n, 0, sizeof(ImportGraphNode));
-                        n->path = dep_path;
-                        n->source = read_text_file(dep_path);
-                        n->depth = -1;
-
-                        // extract directory
-                        const char* last_slash = strrchr(dep_path, '/');
-                        if (last_slash) {
-                            int dir_len = (int)(last_slash - dep_path + 1);
-                            n->directory = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
-                            memcpy(n->directory, dep_path, dir_len);
-                            n->directory[dir_len] = '\0';
-                        } else {
-                            n->directory = mem_strdup("./", MEM_CAT_SYSTEM);
-                        }
-
-                        PathIndexEntry entry = { .path = n->path, .index = dep_idx };
-                        hashmap_set(path_map, &entry);
-                        (*count)++;
-
-                        // recurse to discover transitive imports
-                        if (n->source) {
-                            discover_imports_recursive(parser, dep_idx,
-                                nodes, count, capacity, path_map);
-                        }
-                    }
-                    // record dependency: parent depends on dep_idx
-                    // re-fetch parent pointer since realloc may have moved the array
-                    add_dep(*nodes, parent_idx, dep_idx);
-                }
-            }
-        }
-        child = ts_node_next_named_sibling(child);
-    }
-    ts_tree_delete(tree);
-}
-
-// Compute topological depth for a node (0 = leaf, max(deps)+1 for others).
-// Uses recursive DFS with memoization.
-static int compute_depth(ImportGraphNode* nodes, int idx) {
-    if (nodes[idx].depth >= 0) return nodes[idx].depth;
-    nodes[idx].depth = 0;  // mark as computing (breaks cycles)
-    int max_dep = -1;
-    for (int i = 0; i < nodes[idx].dep_count; i++) {
-        int d = compute_depth(nodes, nodes[idx].deps[i]);
-        if (d > max_dep) max_dep = d;
-    }
-    nodes[idx].depth = max_dep + 1;
-    return nodes[idx].depth;
-}
-
-// Worker argument for parallel compilation thread
-typedef struct {
-    Runtime* runtime;
-    ImportGraphNode* node;
-    bool success;
-} CompileWorkerArg;
-
-static void compile_module_worker(void* arg) {
-    CompileWorkerArg* work = (CompileWorkerArg*)arg;
-
-    // create thread-local parser
-    tls_parser = lambda_parser();
-
-    // compile the module via load_script (thread-safe version)
-    // pass pre-read source to avoid redundant file I/O
-    Script* result = load_script(work->runtime, work->node->path, work->node->source, true);
-    work->success = (result != NULL && result->jit_context != NULL);
-
-    // cleanup thread-local parser
-    ts_parser_delete(tls_parser);
-    tls_parser = NULL;
-}
-
-// Pre-compile all import dependencies in parallel before the main script starts.
-// Discovers the full dependency graph, then compiles level by level (leaves first).
-static void precompile_imports(Runtime* runtime, const char* main_script_path) {
-    // read main script source for discovery
-    char* canonical = file_realpath(main_script_path);
-    const char* main_path = canonical ? canonical : main_script_path;
-    const char* main_source = read_text_file(main_path);
-    if (!main_source) {
-        if (canonical) mem_free(canonical);
-        return;
-    }
-
-    // extract main script directory
-    char* main_dir = NULL;
-    const char* last_slash = strrchr(main_path, '/');
-    if (last_slash) {
-        int dir_len = (int)(last_slash - main_path + 1);
-        main_dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
-        memcpy(main_dir, main_path, dir_len);
-        main_dir[dir_len] = '\0';
-    } else {
-        main_dir = mem_strdup("./", MEM_CAT_SYSTEM);
-    }
-
-    // initialize graph with main script as sentinel node (index 0, not compiled here)
-    int capacity = 32;
-    int count = 1;
-    ImportGraphNode* nodes = (ImportGraphNode*)mem_calloc(capacity, sizeof(ImportGraphNode), MEM_CAT_SYSTEM);
-    nodes[0].path = mem_strdup(main_path, MEM_CAT_SYSTEM);
-    nodes[0].source = (char*)main_source;
-    nodes[0].directory = main_dir;
-    nodes[0].depth = -1;
-
-    struct hashmap* path_map = path_index_new(64);
-    PathIndexEntry main_entry = { .path = nodes[0].path, .index = 0 };
-    hashmap_set(path_map, &main_entry);
-
-    // discover all imports recursively using a temporary parser
-    TSParser* discovery_parser = lambda_parser();
-    discover_imports_recursive(discovery_parser, 0, &nodes, &count, &capacity, path_map);
-    ts_parser_delete(discovery_parser);
-
-    // check if there are enough modules to justify parallelism
-    int import_count = count - 1;  // exclude main script (index 0)
-    if (import_count >= 2) {
-        log_info("parallel import: discovered %d modules, pre-compiling...", import_count);
-
-        // ensure one-time init before spawning threads
-        ensure_jit_imports_initialized();
-        ensure_sys_func_maps_initialized();
-
-        // compute topological depths
-        int max_depth = 0;
-        for (int i = 1; i < count; i++) {
-            int d = compute_depth(nodes, i);
-            if (d > max_depth) max_depth = d;
-        }
-
-        // compile level by level: depth 0 first (leaves), then 1, 2, ...
-        // main script (index 0) has the highest depth — skip it
-        long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
-        if (ncpus < 1) ncpus = 1;
-        if (ncpus > 8) ncpus = 8;
-
-        for (int level = 0; level <= max_depth; level++) {
-            // collect modules at this depth
-            int batch_count = 0;
-            for (int i = 1; i < count; i++) {
-                if (nodes[i].depth == level && nodes[i].source) batch_count++;
-            }
-            if (batch_count == 0) continue;
-
-            // skip already-cached modules
-            CompileWorkerArg* args = (CompileWorkerArg*)mem_calloc(batch_count, sizeof(CompileWorkerArg), MEM_CAT_SYSTEM);
-            int actual = 0;
-            pthread_mutex_lock(&scripts_mutex);
-            for (int i = 1; i < count; i++) {
-                if (nodes[i].depth != level || !nodes[i].source) continue;
-                // check if already in cache
-                bool cached = runtime_script_index_get_current(runtime, nodes[i].path) != NULL;
-                if (!cached) {
-                    args[actual].runtime = runtime;
-                    args[actual].node = &nodes[i];
-                    args[actual].success = false;
-                    actual++;
-                }
-            }
-            pthread_mutex_unlock(&scripts_mutex);
-
-            if (actual == 0) {
-                mem_free(args);
-                continue;
-            }
-
-            bool level_profiling = is_profile_enabled();
-            profile_time_t level_start, level_end;
-            if (level_profiling) profile_get_time(&level_start);
-            int threads_used = 1;
-            if (actual == 1) {
-                // single module — compile in-place without thread overhead
-                tls_parser = lambda_parser();
-                load_script(runtime, args[0].node->path, args[0].node->source, true);
-                ts_parser_delete(tls_parser);
-                tls_parser = NULL;
-            } else {
-                // parallel compilation via lib/thread_pool. 8MB worker stacks
-                // accommodate the transpiler's deep recursion.
-                threads_used = actual;
-                ThreadPool* tp = tp_create_with_stack(actual, 8 * 1024 * 1024);
-                if (tp) {
-                    for (int i = 0; i < actual; i++) {
-                        tp_submit(tp, compile_module_worker, &args[i]);
-                    }
-                    tp_wait_all(tp);
-                    tp_destroy(tp);
-                }
-            }
-            if (level_profiling) {
-                profile_get_time(&level_end);
-                ImportLevelProfile level_profile;
-                memset(&level_profile, 0, sizeof(level_profile));
-                level_profile.level = level;
-                level_profile.modules = batch_count;
-                level_profile.jobs = actual;
-                level_profile.threads = threads_used;
-                level_profile.cpu_cap = (int)ncpus;
-                level_profile.elapsed_ms = elapsed_ms_val(level_start, level_end);
-                profile_record_import_level(&level_profile);
-            }
-            mem_free(args);
-        }
-
-        log_info("parallel import: pre-compilation complete");
-
-        // compiled MIR imports embed module indexes, so post-compile
-        // renumbering corrupts their mN symbol references. Import-cone traversal
-        // now supplies dependency order without mutating these stable indexes.
-    }
-
-    // cleanup graph
-    hashmap_free(path_map);
-    for (int i = 0; i < count; i++) {
-        // don't free source for index 0 — that was read_text_file'd and will be freed
-        // when load_script reads it again (or it might be the same pointer)
-        if (i > 0) mem_free(nodes[i].source);
-        mem_free(nodes[i].path);
-        mem_free(nodes[i].directory);
-        mem_free(nodes[i].deps);
-    }
-    // index 0's source was malloc'd by read_text_file — free it
-    mem_free((void*)main_source);
-    // main_dir is nodes[0].directory, already freed above
-    mem_free(nodes);
-    if (canonical) mem_free(canonical);
-}
-
-#endif  // !_WIN32
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
-
-#ifndef _WIN32
-    // The direct parser loads imports as part of its AST reduction. Keep the
-    // Tree-sitter import-graph precompile only for the explicit reference and
-    // compare modes so the production path does not parse Lambda twice.
-    if (!is_import && !source && runtime->use_mir_direct && !tls_parser &&
-            (lambda_tree_parser_selected() || lambda_parser_compare_selected())) {
-        precompile_imports(runtime, script_path);
-    }
-#endif
 
     // Normalize path to canonical absolute path for reliable deduplication
     // (skip for source-provided scripts like REPL which have synthetic paths)
@@ -1551,7 +1062,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
     transpiler.script_owner = new_script;
-    transpiler.parser = tls_parser ? tls_parser : runtime->parser;
     transpiler.runtime = runtime;
     transpiler.error_count = 0;
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
@@ -1631,19 +1141,6 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     return script;
 }
 
-static TSPoint repl_source_point(const char* source, size_t length) {
-    TSPoint point = {0, 0};
-    for (size_t i = 0; i < length; i++) {
-        if (source[i] == '\n') {
-            point.row++;
-            point.column = 0;
-        } else {
-            point.column++;
-        }
-    }
-    return point;
-}
-
 static void repl_restore_scope(NameScope* scope, NameEntry* first,
         NameEntry* last) {
     if (!scope) return;
@@ -1700,18 +1197,13 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
         return false;
     }
     script->repl_source = strbuf_new_cap(256);
-    script->repl_syntax_trees = arraylist_new(8);
-    if (!script->repl_source || !script->repl_syntax_trees) {
+    if (!script->repl_source) {
         log_error("interp-repl: could not allocate retained source state");
         // The bootstrap source still has Script ownership until both retained
         // buffers exist; clear partial replacements before common teardown.
         if (script->repl_source) {
             strbuf_free(script->repl_source);
             script->repl_source = NULL;
-        }
-        if (script->repl_syntax_trees) {
-            arraylist_free(script->repl_syntax_trees);
-            script->repl_syntax_trees = NULL;
         }
         runner_init(runtime, &session->runner);
         session->runner.script = script;
@@ -1741,14 +1233,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
             !session->runner.script || !source) return ItemError;
     Script* script = session->runner.script;
     AstScript* root = (AstScript*)script->ast_root;
-    if (!root || !script->repl_source || !script->repl_syntax_trees) return ItemError;
-
-    TSTree* tree = lambda_parse_source(session->runner.runtime->parser, source);
-    if (!tree || ts_node_has_error(ts_tree_root_node(tree))) {
-        if (tree) ts_tree_delete(tree);
-        log_error("interp-repl: parser rejected completed input");
-        return ItemError;
-    }
+    if (!root || !script->repl_source) return ItemError;
 
     size_t saved_source_length = script->repl_source->length;
     size_t prefix_length = saved_source_length;
@@ -1758,18 +1243,6 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     }
     strbuf_append_str(script->repl_source, source);
     script->source = script->repl_source->str;
-
-    // Fragment trees are parsed independently for O(size-of-input) latency.
-    // Shift their spans into the append-only source before AST construction so
-    // literal readers always see Script::source at the node's byte range.
-    TSInputEdit edit = {};
-    edit.start_byte = 0;
-    edit.old_end_byte = 0;
-    edit.new_end_byte = (uint32_t)prefix_length;
-    edit.start_point = {0, 0};
-    edit.old_end_point = {0, 0};
-    edit.new_end_point = repl_source_point(script->repl_source->str, prefix_length);
-    ts_tree_edit(tree, &edit);
 
     NameScope* globals = root->global_vars;
     NameEntry* saved_scope_first = globals ? globals->first : NULL;
@@ -1781,29 +1254,44 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
     tp.script_owner = script;
-    tp.parser = session->runner.runtime->parser;
     tp.runtime = session->runner.runtime;
     tp.current_scope = globals;
     tp.max_errors = session->runner.runtime->max_errors > 0
         ? session->runner.runtime->max_errors : 10;
     tp.errors = arraylist_new(4);
-    AstNode* fragment = build_repl_fragment(&tp, ts_tree_root_node(tree));
+
+    AstScript* parsed_root = NULL;
+    LambdaParseError parse_error = {};
+    const char* fragment_source = script->source + prefix_length;
+    LambdaParseStatus parse_status = lambda_rd_build_ast(&tp, fragment_source,
+        strlen(source), &parsed_root, &parse_error);
+    if (parse_status != LAMBDA_PARSE_OK || !parsed_root) {
+        record_direct_parse_error(&tp, "<repl>", &parse_error);
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        script->interp_slab_count = saved_slab_count;
+        repl_restore_source(script, saved_source_length);
+        repl_free_transpiler_errors(tp.errors);
+        log_error("interp-repl: direct parser rejected completed input");
+        return ItemError;
+    }
+
+    AstNode* fragment = parsed_root->child;
     if (tp.error_count != 0 || !fragment) {
         repl_restore_scope(globals, saved_scope_first, saved_scope_last);
         if (script->const_list) script->const_list->length = saved_const_count;
         if (script->type_list) script->type_list->length = saved_type_count;
+        script->interp_slab_count = saved_slab_count;
         repl_restore_source(script, saved_source_length);
-        // Fragment diagnostics are not owned by the retained Script pool.
-        // Release them before rolling the temporary declaration state back.
         repl_free_transpiler_errors(tp.errors);
-        ts_tree_delete(tree);
         return ItemError;
     }
+    // Direct parsing is intentionally fragment-local for REPL latency. Rebase
+    // every retained AST span before the fragment sees the append-only source.
+    lambda_ast_shift_source_spans(fragment, (uint32_t)prefix_length);
     repl_free_transpiler_errors(tp.errors);
 
-    // The whole-program pre-scan is intentionally fail-closed. Running it on
-    // a temporary root admits only a fragment that T0 can execute; imports and
-    // other unsupported new forms leave the existing session untouched.
     AstScript scan_root = {};
     scan_root.node_type = AST_SCRIPT;
     scan_root.child = fragment;
@@ -1819,11 +1307,8 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         repl_restore_scope(globals, saved_scope_first, saved_scope_last);
         if (script->const_list) script->const_list->length = saved_const_count;
         if (script->type_list) script->type_list->length = saved_type_count;
-        // A failed grow cannot publish the planned count: the next execution
-        // would otherwise ask the sealed module state for slots it never got.
         if (!slab_grown) script->interp_slab_count = saved_slab_count;
         repl_restore_source(script, saved_source_length);
-        ts_tree_delete(tree);
         log_error("interp-repl: rejected fragment node=%s",
             interp_node_kind_name(reject));
         return ItemError;
@@ -1843,7 +1328,6 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         if (script->type_list) script->type_list->length = saved_type_count;
         ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
         repl_restore_source(script, saved_source_length);
-        ts_tree_delete(tree);
         return ItemError;
     }
 
@@ -1856,7 +1340,6 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         if (script->type_list) script->type_list->length = saved_type_count;
         ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
         repl_restore_source(script, saved_source_length);
-        ts_tree_delete(tree);
         return ItemError;
     }
     Item result = interp_run_repl_fragment(&session->runner, fragment);
@@ -1870,12 +1353,10 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
         repl_restore_source(script, saved_source_length);
         lambda_module_state_snapshot_dispose(&snapshot);
-        ts_tree_delete(tree);
         return result;
     }
     lambda_module_state_snapshot_dispose(&snapshot);
     script->repl_last_top_level = fragment_last;
-    arraylist_append(script->repl_syntax_trees, tree);
     return result;
 }
 
@@ -2171,7 +1652,6 @@ void runtime_init(Runtime* runtime) {
     // MIR Direct is the sole Lambda backend; keep the mode bit true for cache
     // and import scheduling code that still uses it as a fast-path predicate.
     runtime->use_mir_direct = true;
-    runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
     runtime->script_index = script_index_new(64);
     runtime->max_errors = 10;  // default error threshold
@@ -2207,17 +1687,9 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         runtime_script_index_delete_script(runtime, script);
     }
     if (script->reference) mem_free((void*)script->reference);
-    if (script->repl_syntax_trees) {
-        for (int i = 0; i < script->repl_syntax_trees->length; i++) {
-            TSTree* tree = (TSTree*)script->repl_syntax_trees->data[i];
-            if (tree) ts_tree_delete(tree);
-        }
-        arraylist_free(script->repl_syntax_trees);
-    }
     if (script->repl_source) strbuf_free(script->repl_source);
     else if (script->source) mem_free((void*)script->source);
     if (script->directory) mem_free((void*)script->directory);
-    if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
     // The T0 load path keeps the indexed AST alive for the Script's lifetime
     // (AIO4) instead of releasing it at the MIR handoff; destroying a zeroed
     // AstIndex is a no-op, so this covers both tiers.

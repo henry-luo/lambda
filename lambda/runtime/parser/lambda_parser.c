@@ -60,7 +60,7 @@ static uint64_t mix_hash(uint64_t hash, uint64_t value) {
 
 static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser,
         LambdaReductionKind kind, LambdaReductionForm form,
-        LambdaSourceSpan span, LambdaToken detail_token,
+        SourceSpan span, LambdaToken detail_token,
         LambdaToken secondary_token, uint32_t flags,
         const LambdaToken* name_tokens, uint32_t name_count,
         const LambdaParseValue* children, uint32_t child_count) {
@@ -108,14 +108,14 @@ static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser,
 
 static LambdaParseValue parser_reduce_detail(LambdaRdParser* parser,
         LambdaReductionKind kind, LambdaReductionForm form,
-        LambdaSourceSpan span, LambdaToken detail_token,
+        SourceSpan span, LambdaToken detail_token,
         const LambdaParseValue* children, uint32_t child_count) {
     return parser_reduce_detail_ex(parser, kind, form, span, detail_token,
         (LambdaToken){0}, 0, NULL, 0, children, child_count);
 }
 
 static LambdaParseValue parser_reduce(LambdaRdParser* parser,
-        LambdaReductionKind kind, LambdaSourceSpan span,
+        LambdaReductionKind kind, SourceSpan span,
         const LambdaParseValue* children, uint32_t child_count) {
     LambdaToken no_detail = {0};
     return parser_reduce_detail(parser, kind, LAMBDA_REDUCTION_FORM_NONE, span,
@@ -124,7 +124,7 @@ static LambdaParseValue parser_reduce(LambdaRdParser* parser,
 
 static LambdaParseValue parser_reduce_token(LambdaRdParser* parser,
         LambdaReductionKind kind, LambdaReductionForm form,
-        LambdaSourceSpan span, LambdaToken detail_token,
+        SourceSpan span, LambdaToken detail_token,
         const LambdaParseValue* children, uint32_t child_count) {
     return parser_reduce_detail(parser, kind, form, span, detail_token, children,
         child_count);
@@ -132,7 +132,7 @@ static LambdaParseValue parser_reduce_token(LambdaRdParser* parser,
 
 static LambdaParseValue parser_reduce_tokens(LambdaRdParser* parser,
         LambdaReductionKind kind, LambdaReductionForm form,
-        LambdaSourceSpan span, LambdaToken detail_token,
+        SourceSpan span, LambdaToken detail_token,
         LambdaToken secondary_token, uint32_t flags,
         const LambdaParseValue* children, uint32_t child_count) {
     return parser_reduce_detail_ex(parser, kind, form, span, detail_token,
@@ -140,7 +140,7 @@ static LambdaParseValue parser_reduce_tokens(LambdaRdParser* parser,
 }
 
 static LambdaParseValue parser_reduce_name_tokens(LambdaRdParser* parser,
-        LambdaReductionKind kind, LambdaSourceSpan span, LambdaToken first,
+        LambdaReductionKind kind, SourceSpan span, LambdaToken first,
         const LambdaToken* names, uint32_t name_count, uint32_t flags,
         const LambdaParseValue* children, uint32_t child_count) {
     return parser_reduce_detail_ex(parser, kind,
@@ -149,14 +149,14 @@ static LambdaParseValue parser_reduce_name_tokens(LambdaRdParser* parser,
 }
 
 static LambdaParseValue parser_list_append(LambdaRdParser* parser,
-        LambdaSourceSpan span, LambdaParseValue list, LambdaParseValue item) {
+        SourceSpan span, LambdaParseValue list, LambdaParseValue item) {
     if (!list) return parser_reduce(parser, LAMBDA_REDUCE_LIST, span, &item, 1);
     LambdaParseValue children[2] = {list, item};
     return parser_reduce(parser, LAMBDA_REDUCE_LIST, span, children, 2);
 }
 
 static LambdaParseValue parser_for_clause_append(LambdaRdParser* parser,
-        LambdaSourceSpan span, LambdaParseValue list, LambdaParseValue item) {
+        SourceSpan span, LambdaParseValue list, LambdaParseValue item) {
     if (!list) {
         return parser_reduce_token(parser, LAMBDA_REDUCE_LIST,
             LAMBDA_REDUCTION_FORM_FOR_CLAUSES, span, (LambdaToken){0}, &item, 1);
@@ -167,7 +167,7 @@ static LambdaParseValue parser_for_clause_append(LambdaRdParser* parser,
 }
 
 static LambdaParseValue parser_content_append(LambdaRdParser* parser,
-        LambdaSourceSpan span, LambdaParseValue list, LambdaParseValue item) {
+        SourceSpan span, LambdaParseValue list, LambdaParseValue item) {
     if (!list) {
         return parser_reduce_token(parser, LAMBDA_REDUCE_LIST,
             LAMBDA_REDUCTION_FORM_CONTENT, span, (LambdaToken){0}, &item, 1);
@@ -178,7 +178,7 @@ static LambdaParseValue parser_content_append(LambdaRdParser* parser,
 }
 
 static LambdaParseValue parser_parameter_append(LambdaRdParser* parser,
-        LambdaSourceSpan span, LambdaParseValue list, LambdaParseValue item) {
+        SourceSpan span, LambdaParseValue list, LambdaParseValue item) {
     if (!list) {
         return parser_reduce_token(parser, LAMBDA_REDUCE_LIST,
             LAMBDA_REDUCTION_FORM_PARAMETERS, span, (LambdaToken){0}, &item, 1);
@@ -391,8 +391,8 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
 
 // Type/path semantics deliberately do not live here.  The direct-AST phase
 // will pass these committed source spans to parse_type_pattern.cpp and
-// parse_path_expr.cpp after their TSNode diagnostic dependency is replaced by
-// LambdaSourceSpan.  This POC parser only owns their outer placement.
+// parse_path_expr.cpp after their parser-node diagnostic dependency is replaced by
+// SourceSpan.  This POC parser only owns their outer placement.
 static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
     if (!token_starts_type(first.kind)) {
@@ -502,7 +502,7 @@ static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
             LAMBDA_TOK_BASE_TYPE);
         return 0;
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT,
         LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
 }
@@ -520,7 +520,7 @@ static bool parse_annotation_type_slot_value(LambdaRdParser* parser,
         // The type-pattern parser owns range construction. Re-submit the
         // committed source span after consuming the upper expression so the
         // direct sink receives a TypeRange instead of the lower literal.
-        LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         value = parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT,
             LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
     }
@@ -529,7 +529,7 @@ static bool parse_annotation_type_slot_value(LambdaRdParser* parser,
         LambdaParseValue constraint = parse_expression(parser, 0);
         if (!constraint) return false;
         LambdaParseValue children[2] = {value, constraint};
-        LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         value = parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT,
             LAMBDA_REDUCTION_FORM_TOKEN, span, first, (LambdaToken){0},
             LAMBDA_REDUCTION_FLAG_ANNOTATION_CONSTRAINT, children, 2);
@@ -565,7 +565,7 @@ static LambdaParseValue parse_primary_type_slot(LambdaRdParser* parser) {
             }
         } while (nesting);
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT,
         LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
 }
@@ -594,7 +594,7 @@ static LambdaParseValue parse_path_slot(LambdaRdParser* parser) {
     while (parser_accept(parser, LAMBDA_TOK_DOT)) {
         if (!parse_path_segment(parser)) return 0;
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_PATH_SLOT,
         LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
 }
@@ -609,7 +609,7 @@ static LambdaParseValue parse_array(LambdaRdParser* parser) {
             LambdaParseValue item = parse_expression(parser, 0);
             if (parser->status != LAMBDA_PARSE_OK) return 0;
             items = parser_list_append(parser,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 items, item);
             parser_skip_newlines(parser);
             if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
@@ -617,7 +617,7 @@ static LambdaParseValue parse_array(LambdaRdParser* parser) {
         } while (true);
         if (!parser_expect(parser, LAMBDA_TOK_RBRACKET, "expected ']' after array items")) return 0;
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce(parser, LAMBDA_REDUCE_ARRAY, span, items ? &items : NULL, items ? 1u : 0u);
 }
 
@@ -638,12 +638,12 @@ static LambdaParseValue parse_map(LambdaRdParser* parser) {
             parser_skip_newlines(parser);
             LambdaParseValue value = parse_expression(parser, 0);
             if (parser->status != LAMBDA_PARSE_OK) return 0;
-            LambdaSourceSpan item_span = {key.span.start_byte, parser->current.span.start_byte};
+            SourceSpan item_span = {key.span.start_byte, parser->current.span.start_byte};
             LambdaParseValue item = parser_reduce_token(parser,
                 LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_MAP_ITEM,
                 item_span, key, &value, 1);
             items = parser_list_append(parser,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 items, item);
             parser_skip_newlines(parser);
             if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
@@ -651,7 +651,7 @@ static LambdaParseValue parse_map(LambdaRdParser* parser) {
         } while (true);
         if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after map items")) return 0;
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce(parser, LAMBDA_REDUCE_MAP, span, items ? &items : NULL, items ? 1u : 0u);
 }
 
@@ -726,7 +726,7 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
         parser->stop_at_element_attribute_close--;
         parser->stop_at_element_close--;
         if (parser->status != LAMBDA_PARSE_OK) return 0;
-        LambdaSourceSpan attribute_span = {attribute_name.span.start_byte,
+        SourceSpan attribute_span = {attribute_name.span.start_byte,
             parser->current.span.start_byte};
         children[count++] = parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
             LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE, attribute_span,
@@ -776,7 +776,7 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
         if (parser->status != LAMBDA_PARSE_OK) return 0;
     }
     if (!parser_expect(parser, LAMBDA_TOK_GT, "expected '>' after element")) return 0;
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_ELEMENT,
         LAMBDA_REDUCTION_FORM_TOKEN, span, tag, children, count);
 }
@@ -858,13 +858,13 @@ static LambdaParseValue parse_arrow_parameters(LambdaRdParser* parser) {
         if (default_value) parameter_children[child_count++] = default_value;
         LambdaParseValue parameter = parser_reduce_tokens(parser,
             LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_PARAMETER,
-            (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
             name, (LambdaToken){0},
             (optional ? LAMBDA_REDUCTION_FLAG_OPTIONAL : 0u) |
                 (is_var ? LAMBDA_REDUCTION_FLAG_VAR : 0u),
             parameter_children, child_count);
         parameters = parser_parameter_append(parser,
-            (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
             parameters, parameter);
         parser_skip_newlines(parser);
         if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
@@ -911,7 +911,7 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
         children[count++] = parse_expression(parser, 0);
         parser->procedural_depth = arrow_saved_depth;
         if (parser->status != LAMBDA_PARSE_OK) return 0;
-        LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FUNCTION,
             LAMBDA_REDUCTION_FORM_FUNCTION, span, first, (LambdaToken){0},
             raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0u, children, count);
@@ -942,7 +942,7 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
         parser_set_error(parser, "expected an expression inside parentheses", LAMBDA_TOK_IDENTIFIER);
         return 0;
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_GROUP,
         LAMBDA_REDUCTION_FORM_GROUP, span, first, children, count);
 }
@@ -999,7 +999,7 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
     // position and contributes nothing in content position, which retires the
     // ternary-style requirement the expression form used to carry.
     if (parser->current.kind != LAMBDA_TOK_ELSE) {
-        LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         return parser_reduce(parser, LAMBDA_REDUCE_IF, span, children, 2);
     }
     parser_advance(parser);
@@ -1015,7 +1015,7 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
         children[2] = parse_expression(parser, 0);
     }
     if (parser->status != LAMBDA_PARSE_OK) return 0;
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce(parser, LAMBDA_REDUCE_IF, span, children, 3);
 }
 
@@ -1081,7 +1081,7 @@ static LambdaParseValue parse_for_binding(LambdaRdParser* parser) {
     }
     return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
         LAMBDA_REDUCTION_FORM_FOR_BINDING,
-        (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
         name, index, flags, children, child_count);
 }
 
@@ -1098,7 +1098,7 @@ static LambdaParseValue parse_for_let_clause(LambdaRdParser* parser) {
     if (!value) return 0;
     return parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
         LAMBDA_REDUCTION_FORM_FOR_LET,
-        (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
         name, &value, 1);
 }
 
@@ -1136,10 +1136,10 @@ static LambdaParseValue parse_for_group_clause(LambdaRdParser* parser) {
         }
         LambdaParseValue key_item = parser_reduce_token(parser,
             LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_FOR_GROUP_KEY,
-            (LambdaSourceSpan){key_first.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){key_first.span.start_byte, parser->current.span.start_byte},
             alias, &key, 1);
         keys = parser_list_append(parser,
-            (LambdaSourceSpan){key_first.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){key_first.span.start_byte, parser->current.span.start_byte},
             keys, key_item);
         parser_skip_newlines(parser);
         if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
@@ -1154,7 +1154,7 @@ static LambdaParseValue parse_for_group_clause(LambdaRdParser* parser) {
     parser_advance(parser);
     return parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
         LAMBDA_REDUCTION_FORM_FOR_GROUP,
-        (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
         name, &keys, 1);
 }
 
@@ -1269,7 +1269,7 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
     uint32_t flags = parenthesized ? 0 : LAMBDA_REDUCTION_FLAG_BODY_BLOCK;
     LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FOR,
         LAMBDA_REDUCTION_FORM_NONE,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
         first, (LambdaToken){0}, flags, children, 2);
     parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
         LAMBDA_REDUCTION_FORM_FOR_END, first.span, first, NULL, 0);
@@ -1297,7 +1297,7 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
             if (parser_accept(parser, LAMBDA_TOK_TO)) {
                 parser_skip_newlines(parser);
                 if (!parse_expression(parser, 0)) return 0;
-                LambdaSourceSpan span = {pattern_first.span.start_byte,
+                SourceSpan span = {pattern_first.span.start_byte,
                     parser->current.span.start_byte};
                 pattern = parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT,
                     LAMBDA_REDUCTION_FORM_TOKEN, span, pattern_first, NULL, 0);
@@ -1307,7 +1307,7 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
                 LambdaParseValue constraint = parse_expression(parser, 0);
                 if (!constraint) return 0;
                 LambdaParseValue pattern_children[2] = {pattern, constraint};
-                LambdaSourceSpan span = {pattern_first.span.start_byte,
+                SourceSpan span = {pattern_first.span.start_byte,
                     parser->current.span.start_byte};
                 pattern = parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT,
                     LAMBDA_REDUCTION_FORM_TOKEN, span, pattern_first, (LambdaToken){0},
@@ -1345,10 +1345,10 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
         arm_children[arm_child_count++] = body;
         LambdaParseValue arm = parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
             LAMBDA_REDUCTION_FORM_MATCH_ARM,
-            (LambdaSourceSpan){arm_first.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){arm_first.span.start_byte, parser->current.span.start_byte},
             arm_first, arm_children, arm_child_count);
         arms = parser_list_append(parser,
-            (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte}, arms, arm);
+            (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, arms, arm);
         arm_count++;
     }
     if (!arm_count) {
@@ -1358,7 +1358,7 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
     if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after match arms")) return 0;
     LambdaParseValue children[2] = {scrutinee, arms};
     return parser_reduce(parser, LAMBDA_REDUCE_MATCH,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte}, children, 2);
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, children, 2);
 }
 
 static LambdaParseValue parse_while_statement(LambdaRdParser* parser) {
@@ -1380,7 +1380,7 @@ static LambdaParseValue parse_while_statement(LambdaRdParser* parser) {
     LambdaParseValue children[2] = {condition, body};
     LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FOR,
         LAMBDA_REDUCTION_FORM_FOR_WHILE,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
         first, (LambdaToken){0}, 0, children, 2);
     parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
         LAMBDA_REDUCTION_FORM_WHILE_END, first.span, first, NULL, 0);
@@ -1429,7 +1429,7 @@ static LambdaParseValue parse_assignment_clause(LambdaRdParser* parser,
     parser_skip_newlines(parser);
     LambdaParseValue value = parse_expression(parser, 0);
     if (parser->status != LAMBDA_PARSE_OK) return 0;
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     LambdaParseValue children[2];
     uint32_t child_count = 0;
     if (type_value) children[child_count++] = type_value;
@@ -1452,7 +1452,7 @@ static LambdaParseValue parse_let_expression(LambdaRdParser* parser) {
         "expected a binding name after let", "expected '=' after let binding");
     if (parser->status != LAMBDA_PARSE_OK) return 0;
     return parser_reduce(parser, LAMBDA_REDUCE_LET,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte}, &value, 1);
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, &value, 1);
 }
 
 static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
@@ -1520,7 +1520,7 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         LambdaParseValue child = parse_expression(parser,
             first.kind == LAMBDA_TOK_NOT ? LAMBDA_BP_MEMBERSHIP : LAMBDA_BP_PREFIX);
         if (parser->status == LAMBDA_PARSE_OK) {
-            LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+            SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
             value = parser_reduce_token(parser, LAMBDA_REDUCE_PREFIX,
                 LAMBDA_REDUCTION_FORM_TOKEN, span, first, &child, 1);
         }
@@ -1536,7 +1536,7 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         parser_advance(parser);
         LambdaParseValue child = parse_expression(parser, 0);
         if (parser->status == LAMBDA_PARSE_OK) {
-            LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+            SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
             value = parser_reduce_token(parser, LAMBDA_REDUCE_PREFIX,
                 LAMBDA_REDUCTION_FORM_TOKEN, span, first, &child, 1);
         }
@@ -1636,7 +1636,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
                             children[argument_count + 1] = parser_reduce_token(parser,
                                 LAMBDA_REDUCE_STATEMENT,
                                 LAMBDA_REDUCTION_FORM_NAMED_ARGUMENT,
-                                (LambdaSourceSpan){argument_first.span.start_byte,
+                                (SourceSpan){argument_first.span.start_byte,
                                     parser->current.span.start_byte},
                                 argument_first, &children[argument_count + 1], 1);
                         }
@@ -1651,7 +1651,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
                 } while (true);
                 if (!parser_expect(parser, LAMBDA_TOK_RPAREN, "expected ')' after arguments")) return 0;
             }
-            LambdaSourceSpan span = {left_start_byte, parser->current.span.start_byte};
+            SourceSpan span = {left_start_byte, parser->current.span.start_byte};
             uint32_t call_flags = parser->pipe_rhs_depth == parser->expression_depth &&
                 !parser->pipe_rhs_has_current
                 ? LAMBDA_REDUCTION_FLAG_PIPE_INJECT : 0u;
@@ -1676,7 +1676,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
                 parser_skip_newlines(parser);
             } while (true);
             if (!parser_expect(parser, LAMBDA_TOK_RBRACKET, "expected ']' after index")) return 0;
-            LambdaSourceSpan span = {left_start_byte, parser->current.span.start_byte};
+            SourceSpan span = {left_start_byte, parser->current.span.start_byte};
             left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX,
                 LAMBDA_REDUCTION_FORM_INDEX, span, first, children,
                 index_count + 1);
@@ -1687,7 +1687,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
             // direct sink needs the field spelling without re-lexing the span.
             LambdaToken field = parser->current;
             if (!parse_path_segment(parser)) return 0;
-            LambdaSourceSpan span = {left_start_byte, parser->current.span.start_byte};
+            SourceSpan span = {left_start_byte, parser->current.span.start_byte};
             left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX,
                 LAMBDA_REDUCTION_FORM_MEMBER, span, field, children, 1);
             continue;
@@ -1696,7 +1696,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
                 parser_accept(parser, LAMBDA_TOK_DOT_QUESTION)) {
             children[1] = parse_primary_type_slot(parser);
             if (parser->status != LAMBDA_PARSE_OK) return 0;
-            LambdaSourceSpan span = {left_start_byte, parser->current.span.start_byte};
+            SourceSpan span = {left_start_byte, parser->current.span.start_byte};
             left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX,
                 LAMBDA_REDUCTION_FORM_QUERY, span, first, children, 2);
             continue;
@@ -1731,7 +1731,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
                     handler_child_count = 3;
                 }
             }
-            LambdaSourceSpan span = {left_start_byte, parser->current.span.start_byte};
+            SourceSpan span = {left_start_byte, parser->current.span.start_byte};
             left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX,
                 handler ? LAMBDA_REDUCTION_FORM_HANDLER :
                     LAMBDA_REDUCTION_FORM_PROPAGATE, span, first, children,
@@ -1806,7 +1806,7 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
             parser->top_level_statement_relation = true;
         }
         LambdaParseValue children[2] = {left, right};
-        LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         left = parser_reduce_token(parser, LAMBDA_REDUCE_BINARY,
             LAMBDA_REDUCTION_FORM_TOKEN, span, op, children, 2);
         left_is_element = false;
@@ -1869,13 +1869,13 @@ static bool parse_parameter_list(LambdaRdParser* parser) {
         if (default_value) parameter_children[child_count++] = default_value;
         LambdaParseValue parameter = parser_reduce_tokens(parser,
             LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_PARAMETER,
-            (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
             name, (LambdaToken){0},
             (optional ? LAMBDA_REDUCTION_FLAG_OPTIONAL : 0u) |
                 (is_var ? LAMBDA_REDUCTION_FLAG_VAR : 0u),
             parameter_children, child_count);
         parameters = parser_parameter_append(parser,
-            (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
             parameters, parameter);
         parser_skip_newlines(parser);
         if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
@@ -1901,7 +1901,7 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser,
     if (is_public) function_flags |= LAMBDA_REDUCTION_FLAG_PUBLIC;
     parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
         LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN,
-        (LambdaSourceSpan){first.span.start_byte, name.span.end_byte},
+        (SourceSpan){first.span.start_byte, name.span.end_byte},
         first, name, function_flags, NULL, 0);
     if (!parse_parameter_list(parser)) return 0;
     LambdaParseValue children[5];
@@ -1948,7 +1948,7 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser,
     }
     if (parser->status != LAMBDA_PARSE_OK) return 0;
     children[child_count++] = child;
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FUNCTION,
         LAMBDA_REDUCTION_FORM_FUNCTION, span, first, name, flags,
         children, child_count);
@@ -1970,7 +1970,7 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     if (!pattern) return 0;
     parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
         LAMBDA_REDUCTION_FORM_VIEW_BEGIN,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
         first, name, 0, &pattern, 1);
 
     LambdaParseValue parameters = 0;
@@ -1997,7 +1997,7 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
             if (!value) return 0;
             parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW,
                 LAMBDA_REDUCTION_FORM_VIEW_STATE,
-                (LambdaSourceSpan){state_name.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){state_name.span.start_byte, parser->current.span.start_byte},
                 state_name, (LambdaToken){0}, 0, &value, 1);
         } while (parser_accept(parser, LAMBDA_TOK_COMMA));
     }
@@ -2015,7 +2015,7 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
         parser_advance(parser);
         parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_VIEW_HANDLER_BEGIN,
-            (LambdaSourceSpan){on.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){on.span.start_byte, parser->current.span.start_byte},
             event, (LambdaToken){0}, 0, NULL, 0);
         if (!parse_parameter_list(parser)) return 0;
         LambdaParseValue handler_parameters = parser->last_parameter_list;
@@ -2029,21 +2029,21 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
         };
         parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW,
             LAMBDA_REDUCTION_FORM_VIEW_HANDLER,
-            (LambdaSourceSpan){on.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){on.span.start_byte, parser->current.span.start_byte},
             event, (LambdaToken){0}, 0, handler_children, 2);
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_VIEW_HANDLER_END,
-            (LambdaSourceSpan){on.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){on.span.start_byte, parser->current.span.start_byte},
             event, NULL, 0);
     }
     LambdaParseValue view_children[2] = {parameters, body};
     LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW,
         LAMBDA_REDUCTION_FORM_VIEW,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
         first, name, 0, view_children, 2);
     parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
         LAMBDA_REDUCTION_FORM_VIEW_END,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
         first, NULL, 0);
     return result;
 }
@@ -2063,7 +2063,7 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
         if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
         LambdaParseValue declarations = parser_reduce_tokens(parser,
             LAMBDA_REDUCE_DECLARATION, LAMBDA_REDUCTION_FORM_TYPE_ALIAS,
-            (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
             name, (LambdaToken){0},
             is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, &type_value, 1);
         while (parser_accept(parser, LAMBDA_TOK_COMMA)) {
@@ -2078,11 +2078,11 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
             if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
             LambdaParseValue alias = parser_reduce_tokens(parser,
                 LAMBDA_REDUCE_DECLARATION, LAMBDA_REDUCTION_FORM_TYPE_ALIAS,
-                (LambdaSourceSpan){name.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){name.span.start_byte, parser->current.span.start_byte},
                 name, (LambdaToken){0},
                 is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, &type_value, 1);
             declarations = parser_list_append(parser,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 declarations, alias);
         }
         return declarations;
@@ -2132,7 +2132,7 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
                     that.span, that, NULL, 0);
                 parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
                     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT,
-                    (LambdaSourceSpan){that.span.start_byte, parser->current.span.start_byte},
+                    (SourceSpan){that.span.start_byte, parser->current.span.start_byte},
                     that, &constraint, 1);
                 continue;
             }
@@ -2172,7 +2172,7 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
                 }
                 parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
                     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD,
-                    (LambdaSourceSpan){field.span.start_byte, parser->current.span.start_byte},
+                    (SourceSpan){field.span.start_byte, parser->current.span.start_byte},
                     field, (LambdaToken){0}, field_flags, children, child_count);
                 continue;
             }
@@ -2184,7 +2184,7 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
                 if (!content_type) return 0;
                 parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
                     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONTENT,
-                    (LambdaSourceSpan){content.span.start_byte, parser->current.span.start_byte},
+                    (SourceSpan){content.span.start_byte, parser->current.span.start_byte},
                     content, &content_type, 1);
                 continue;
             }
@@ -2194,7 +2194,7 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
         }
         if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after object type body")) return 0;
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     if (first.kind == LAMBDA_TOK_TYPE && parser->current.kind != LAMBDA_TOK_EQ) {
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_TYPE_OBJECT_END, first.span, first, NULL, 0);
@@ -2213,14 +2213,14 @@ static LambdaParseValue parse_var_statement(LambdaRdParser* parser) {
             "expected a mutable binding name", "expected '=' after mutable binding");
         if (!declaration) return 0;
         declarations = parser_list_append(parser,
-            (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+            (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
             declarations, declaration);
     } while (parser_accept(parser, LAMBDA_TOK_COMMA));
     // Leave the optional `;` for parse_content so it remains the separator
     // between this declaration and the next statement.
     return parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
         LAMBDA_REDUCTION_FORM_VAR,
-        (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+        (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
         first, &declarations, 1);
 }
 
@@ -2286,7 +2286,7 @@ static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
         child_count = 3;
     }
     if (parser->status != LAMBDA_PARSE_OK) return 0;
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     parser->last_statement_self_delimiting = true;
     return parser_reduce(parser, LAMBDA_REDUCE_IF, span, children, child_count);
 }
@@ -2341,10 +2341,10 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             module.span.end_byte = module_last.span.end_byte;
             LambdaParseValue item = parser_reduce_tokens(parser,
                 LAMBDA_REDUCE_DECLARATION, LAMBDA_REDUCTION_FORM_IMPORT,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 alias, module, 0, NULL, 0);
             imports = parser_list_append(parser,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 imports, item);
         } while (parser_accept(parser, LAMBDA_TOK_COMMA));
         return imports;
@@ -2382,7 +2382,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             // a following statement from becoming adjacent to this one.
             parser_advance(parser);
             return parser_reduce(parser, LAMBDA_REDUCE_STATEMENT,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte}, NULL, 0);
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, NULL, 0);
         }
         if (parser->current.kind == LAMBDA_TOK_IF && if_starts_block_statement(parser)) {
             return parse_if_statement(parser);
@@ -2401,10 +2401,10 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
                     "expected '=' after let binding");
                 if (!binding) return 0;
                 bindings = parser_list_append(parser,
-                    (LambdaSourceSpan){first.span.start_byte,
+                    (SourceSpan){first.span.start_byte,
                         parser->current.span.start_byte}, bindings, binding);
             }
-            LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+            SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
             if (is_public) {
                 // S16.9.1 made `pub` a modifier that composes with `let`, but the
                 // flag is only honoured on a DECLARATION reduction. Reducing
@@ -2428,7 +2428,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             }
             return parser_reduce_tokens(parser, LAMBDA_REDUCE_DECLARATION,
                 LAMBDA_REDUCTION_FORM_NONE,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 first, (LambdaToken){0}, LAMBDA_REDUCTION_FLAG_PUBLIC,
                 &public_value, 1);
         }
@@ -2451,7 +2451,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             // Dropping `return` here made every direct-parser procedure fall
             // through as null instead of preserving its procedural effect (D6.1.2).
             return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT, form,
-                (LambdaSourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
                 control, (LambdaToken){0}, 0, value ? &value : NULL,
                 value ? 1 : 0);
         } else {
@@ -2464,7 +2464,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
                 LambdaParseValue value = parse_expression(parser, 0);
                 if (!value) return 0;
                 LambdaParseValue children[2] = {expr, value};
-                LambdaSourceSpan span = {first.span.start_byte,
+                SourceSpan span = {first.span.start_byte,
                     parser->current.span.start_byte};
                 return parser_reduce(parser, LAMBDA_REDUCE_ASSIGNMENT, span,
                     children, 2);
@@ -2474,11 +2474,11 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
                     LAMBDA_TOK_NEWLINE);
                 return 0;
             }
-            LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+            SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
             return parser_reduce(parser, LAMBDA_REDUCE_STATEMENT, span, &expr, 1);
         }
     }
-    LambdaSourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce(parser, LAMBDA_REDUCE_DECLARATION, span, NULL, 0);
 }
 
@@ -2518,10 +2518,10 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
             child = parse_postfix(parser, child, child_first.span.start_byte);
             if (parser->status != LAMBDA_PARSE_OK) return 0;
             LambdaParseValue statement = parser_reduce(parser, LAMBDA_REDUCE_STATEMENT,
-                (LambdaSourceSpan){child_first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){child_first.span.start_byte, parser->current.span.start_byte},
                 &child, 1);
             content = parser_content_append(parser,
-                (LambdaSourceSpan){child_first.span.start_byte, parser->current.span.start_byte},
+                (SourceSpan){child_first.span.start_byte, parser->current.span.start_byte},
                 content, statement);
             if (!has_content) content_start = child_first.span.start_byte;
             has_content = true;
@@ -2540,7 +2540,7 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         LambdaParseValue statement = parse_statement(parser);
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         content = parser_content_append(parser,
-            (LambdaSourceSpan){statement_token.span.start_byte,
+            (SourceSpan){statement_token.span.start_byte,
                 parser->current.span.start_byte}, content, statement);
         if (!has_content) content_start = statement_token.span.start_byte;
         has_content = true;
@@ -2614,7 +2614,7 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
             return 0;
         }
     }
-    LambdaSourceSpan span = {content_start, parser->current.span.start_byte};
+    SourceSpan span = {content_start, parser->current.span.start_byte};
     return parser_reduce(parser, LAMBDA_REDUCE_CONTENT, span,
         content ? &content : NULL, content ? 1u : 0u);
 }
@@ -2656,7 +2656,7 @@ LambdaParseStatus lambda_rd_parse_source(const char* source, size_t length,
         parser_set_error(&parser, "unexpected trailing input", LAMBDA_TOK_EOF);
     }
     if (parser.status == LAMBDA_PARSE_OK) {
-        LambdaSourceSpan span = {0, (uint32_t)length};
+        SourceSpan span = {0, (uint32_t)length};
         parser_reduce(&parser, LAMBDA_REDUCE_DOCUMENT, span, &content, content ? 1u : 0u);
     }
     return parser.status;

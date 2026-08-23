@@ -2,18 +2,7 @@
 #include <limits.h>
 
 static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
-    if (!fn || ts_node_is_null(fn->node)) return false;
-    TSNode node = ts_node_parent(fn->node);
-    while (!ts_node_is_null(node)) {
-        const char* node_type = ts_node_type(node);
-        if (node_type &&
-            (strncmp(node_type, "class", 5) == 0 ||
-             strcmp(node_type, "class_body") == 0)) {
-            return true;
-        }
-        node = ts_node_parent(node);
-    }
-    return false;
+    return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
 static bool jm_node_has_direct_eval_call(JsAstNode* node) {
@@ -262,7 +251,7 @@ const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt) {
         strbuf_append_int(sb, mt->em.label_counter++);
     }
     strbuf_append_char(sb, '_');
-    strbuf_append_int(sb, ts_node_start_byte(fn->node));
+    strbuf_append_int(sb, fn->source_span.start_byte);
     const char* name = jm_persist_name(sb->str);
     strbuf_free(sb);
     return name;
@@ -414,13 +403,13 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     // receiving the constructed object as `this`; evaluating the expression at
     // class definition would permanently capture the wrong receiver.
     function->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
-    function->node = field->node;
+    function->source_span = field->source_span;
     function->body = (JsAstNode*)body;
     body->node_type = JS_AST_NODE_BLOCK_STATEMENT;
-    body->node = field->node;
+    body->source_span = field->source_span;
     body->statements = (JsAstNode*)result;
     result->node_type = JS_AST_NODE_RETURN_STATEMENT;
-    result->node = field->node;
+    result->source_span = field->source_span;
     result->argument = field->value;
 
     int function_index = mt->func_count;
@@ -428,7 +417,7 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     memset(collected, 0, sizeof(JsFuncCollected));
     collected->node = function;
     collected->name = jm_format_name("class_field_initializer_%d_%u",
-        function_index, ts_node_start_byte(field->node));
+        function_index, field->source_span.start_byte);
     collected->parent_index = -1;
     collected->is_strict = true;
     collected->is_class_field_initializer = true;
@@ -656,8 +645,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             ce->method_count = 0;
             ce->constructor = NULL;
             {
-                const char* class_node_type = ts_node_type(cls->node);
-                ce->is_declaration = class_node_type && strcmp(class_node_type, "class_declaration") == 0;
+                ce->is_declaration = cls->node_type == JS_AST_NODE_CLASS_DECLARATION;
             }
             ce->inner_module_var_index = -1;
             int class_body_functions_start = mt->func_count;

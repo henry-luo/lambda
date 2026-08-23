@@ -730,10 +730,8 @@ static bool jm_function_source_span(JsMirTranspiler* mt,
         JsFunctionNode* fn_node, const char** text_out, uint32_t* len_out) {
     if (!mt || !fn_node || !text_out || !len_out || !mt->tp ||
             !mt->tp->source) return false;
-    TSNode node = fn_node->node;
-    if (ts_node_is_null(node)) return false;
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
+    uint32_t start = fn_node->source_span.start_byte;
+    uint32_t end = fn_node->source_span.end_byte;
     if (end <= start || end > mt->tp->source_length) return false;
     const char* text = mt->tp->source + start;
     uint32_t len = end - start;
@@ -872,10 +870,8 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
 // toString does not need an observable backing property or a name-based probe.
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node) {
     if (!cls_node || !mt->tp || !mt->tp->source) return;
-    TSNode node = cls_node->node;
-    if (ts_node_is_null(node)) return;
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
+    uint32_t start = cls_node->source_span.start_byte;
+    uint32_t end = cls_node->source_span.end_byte;
     if (end <= start || end > mt->tp->source_length) return;
     const char* text = mt->tp->source + start;
     uint32_t len = end - start;

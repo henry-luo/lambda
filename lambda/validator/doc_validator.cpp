@@ -12,19 +12,11 @@
 #include "../../lib/strview.h"
 #include "../../lib/memtrack.h"
 #include "../runtime/transpiler.hpp"
+#include "../runtime/ast_build.hpp"
 #include "validator.hpp"
 #include "../core/mark_reader.hpp"
 #include "../runtime/lambda-error.h"
 
-// External function declarations
-extern "C" {
-    TSParser* lambda_parser(void);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-}
-
-// C++ function declarations (no extern "C" needed)
-void find_errors(TSNode node, const char* source, const char* file, ArrayList* errors);
-AstNode* build_script(Transpiler* tp, TSNode script_node);
 ArrayList* arraylist_new(size_t initial_capacity);
 
 // C++ function declarations (no extern "C" needed)
@@ -44,16 +36,6 @@ Transpiler* transpiler_create(Pool* pool) {
 
 void transpiler_destroy(Transpiler* transpiler) {
     if (!transpiler) return;
-
-    // free tree-sitter resources (heap-allocated, not pool-managed)
-    if (transpiler->syntax_tree) {
-        ts_tree_delete(transpiler->syntax_tree);
-        transpiler->syntax_tree = nullptr;
-    }
-    if (transpiler->parser) {
-        ts_parser_delete(transpiler->parser);
-        transpiler->parser = nullptr;
-    }
 
     // free arraylists (heap-allocated via arraylist_new)
     if (transpiler->type_list) {
@@ -79,14 +61,6 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
         return nullptr;
     }
 
-    // Initialize transpiler components if not already done
-    if (!transpiler->parser) {
-        transpiler->parser = lambda_parser();
-        if (!transpiler->parser) {
-            return nullptr;
-        }
-    }
-
     // Initialize memory pool if not already done
     if (!transpiler->pool) {
         transpiler->pool = mem_pool_create(NULL, MEM_ROLE_VALIDATOR, "doc_validator");
@@ -108,37 +82,19 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
         }
     }
 
-    // Parse the source code to syntax tree
+    // Build directly from committed source spans. The validator is part of
+    // the normal runtime and must not require the Lambda Tree-sitter grammar.
     transpiler->source = source;
-    transpiler->syntax_tree = lambda_parse_source(transpiler->parser, source);
-    if (!transpiler->syntax_tree) {
+    AstScript* ast_root = nullptr;
+    LambdaParseError parse_error = {};
+    if (lambda_rd_build_ast(transpiler, source, strlen(source), &ast_root,
+            &parse_error) != LAMBDA_PARSE_OK || !ast_root) {
+        log_error("validator: direct parser rejected source: %s",
+            parse_error.message ? parse_error.message : "syntax error");
         return nullptr;
     }
-
-    // Get root node and validate
-    TSNode root_node = ts_tree_root_node(transpiler->syntax_tree);
-    if (ts_node_has_error(root_node)) {
-        // Log syntax errors but continue - validator will handle them
-        log_error("Syntax tree has errors - parsing failed");
-        ArrayList* parse_errors = arraylist_new(8);
-        find_errors(root_node, source, "<validator>", parse_errors);
-        for (int i = 0; i < parse_errors->length; i++) {
-            err_print((LambdaError*)parse_errors->data[i]);
-        }
-        arraylist_free(parse_errors);
-        return nullptr;
-    }
-
-    // Validate root node type
-    if (strcmp(ts_node_type(root_node), "document") != 0) {
-        return nullptr;
-    }
-
-    // Build AST from syntax tree using existing build_script function
-    AstNode* ast_root = build_script(transpiler, root_node);
-    transpiler->ast_root = ast_root;
-
-    return ast_root;
+    transpiler->ast_root = (AstNode*)ast_root;
+    return (AstNode*)ast_root;
 }
 
 // ==================== Hash Functions for Type Registry ====================

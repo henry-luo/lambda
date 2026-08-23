@@ -16,7 +16,6 @@
 #include "../lib/log.h"
 extern "C" {
     #include "../lib/url.h"
-    #include <tree_sitter/api.h>
     #include <mpdecimal.h>
 }
 #define LAMBDA_STATIC
@@ -25,17 +24,6 @@ extern "C" {
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool);
 extern "C" Item input_from_source(char* source, Url* url, String* type, String* flavor);
 extern "C" char* read_text_file(const char* filename);
-// Tree-sitter function declarations
-extern "C" const TSLanguage *tree_sitter_lambda(void);
-extern "C" TSParser* lambda_parser(void) {
-    TSParser *parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_lambda());
-    return parser;
-}
-extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
-    TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
-    return tree;
-}
 // Use the existing function from lib/file.c
 extern "C" char* read_text_file(const char *filename);
 

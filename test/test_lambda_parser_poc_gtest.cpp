@@ -29,8 +29,8 @@ static void expect_kinds(const char* source, const LambdaTokenKind* expected,
 }
 
 struct ParserSeamRecorder {
-    LambdaSourceSpan type_span;
-    LambdaSourceSpan path_span;
+    SourceSpan type_span;
+    SourceSpan path_span;
     int type_count;
     int path_count;
 };

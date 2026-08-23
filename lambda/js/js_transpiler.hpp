@@ -149,7 +149,7 @@ JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode n
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 
 // Error handling functions
-void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
+void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);
 
 // Early error detection (js_early_errors.cpp)
 int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
