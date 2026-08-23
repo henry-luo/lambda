@@ -2570,9 +2570,9 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
     printf(")");
 }
 
-// The C recursive-descent parser is production; Tree-sitter is the reference
-// front end, selected explicitly via LAMBDA_PARSER=tree. Both emitters walk the
-// same AstNode tree, so the dump is parser-agnostic once the root is built.
+// The C recursive-descent parser is production in normal profiles; the
+// Tree-sitter CST verifier is isolated in lambda-cst. Both emitters walk the
+// same AstNode tree when a normal runtime root is built.
 static bool emit_tree_parser_selected(void) {
 #ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
     return false;

@@ -18,7 +18,7 @@ const TSLanguage *tree_sitter_lambda(void);
 
 TSParser * lambda_parser(void) {
 #ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
-  // release builds use the RD/Pratt frontend; no Lambda grammar archive is linked.
+  // normal profiles use the RD/Pratt frontend; no Lambda grammar archive is linked.
   return NULL;
 #else
   TSParser *parser = ts_parser_new();
@@ -39,4 +39,3 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
   return tree;
 #endif
 }
-
