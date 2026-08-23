@@ -3309,7 +3309,9 @@ build-lambda-static: build-radiant
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back
 # into test-lambda-baseline transitively.
-build-input-baseline: build-lambda-data
+# input runners link these archives directly, so declare them here to make a
+# clean focused build materialize every linker input before the test link.
+build-input-baseline: build-lambda-data $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB) $(RE2_LIB)
 	@echo "Building input baseline test executables..."
 	$(call run_make_with_error_summary,input-baseline,debug_native,,$(INPUT_BASELINE_TEST_PROJECTS))
 
