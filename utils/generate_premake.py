@@ -525,12 +525,7 @@ class PremakeGenerator:
             vlog(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
 
     def _release_excluded_libraries(self) -> set[str]:
-        """Return archives intentionally absent from optimized host builds.
-
-        The direct Lambda parser is the release frontend. Keeping this list in
-        the build config lets debug/reference configurations retain the
-        Tree-sitter oracle without making the release link depend on it.
-        """
+        """Return archives intentionally omitted by a configuration overlay."""
         return set(self.config.get('release_exclude_libraries', []))
 
     def _get_consolidated_includes(self) -> List[str]:
@@ -1063,6 +1058,9 @@ class PremakeGenerator:
         targets = self.config.get('targets', [])
 
         for lib in targets:
+            only_variants = lib.get('only_variants', [])
+            if only_variants and self.variant not in only_variants:
+                continue
             # Every configured target is a library; name-gating prevented small shared
             # support libraries from being expressed without pulling the monolithic input target.
             self._generate_complex_library(lib)
@@ -1226,6 +1224,9 @@ class PremakeGenerator:
             '    objdir "build/obj/%{prj.name}"',
             '    ',
         ])
+        if link_type == 'executable':
+            self.premake_content.append('    targetextension ".exe"')
+            self.premake_content.append('    ')
 
         target_name = lib.get('target_name')
         if target_name:
@@ -2877,7 +2878,6 @@ class PremakeGenerator:
                 # Windows: use the same explicit paths as the main lambda program
                 windows_lib_paths = [
                     "../../lambda/tree-sitter/libtree-sitter.a",
-                    "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "../../win-native-deps/lib/libmir.a",
                     "/clang64/lib/libmpdec.a",
                     "../../win-native-deps/lib/libutf8proc.a",
@@ -2897,6 +2897,9 @@ class PremakeGenerator:
                     "/clang64/lib/libmbedx509.a",
                     "/clang64/lib/libmbedcrypto.a",
                 ]
+                if 'tree-sitter-lambda' in self.external_libraries:
+                    windows_lib_paths.insert(
+                        1, "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a")
                 for lib_path in windows_lib_paths:
                     self.premake_content.append(f'        "{lib_path}",')
                 # Add dynamic system libraries
@@ -3318,9 +3321,10 @@ class PremakeGenerator:
         all_includes.extend([
             ".",
             "lambda/tree-sitter/lib/include",
-            "lambda/tree-sitter-lambda/bindings/c",
             "lib/mem-pool/include",
         ])
+        if 'tree-sitter-lambda' in self.external_libraries:
+            all_includes.append("lambda/tree-sitter-lambda/bindings/c")
 
         # Add external library include paths (excluding dev_libraries)
         dev_lib_names = {lib.get('name', '') if isinstance(lib, dict) else lib
@@ -3459,9 +3463,9 @@ class PremakeGenerator:
                 '    '
             ])
 
-        # The Lambda Tree-sitter archive is a debug/reference-only oracle.
-        # Keep it available to debug configurations while making its absence
-        # explicit in both optimized host configurations.
+        # Keep any explicitly configured debug-only archives out of optimized
+        # host configurations. The Lambda Tree-sitter archive is not configured
+        # for any normal profile; lambda-cst adds it through its own overlay.
         if debug_only_static_libs:
             for configuration in ('debug', 'debug_profile'):
                 self.premake_content.extend([

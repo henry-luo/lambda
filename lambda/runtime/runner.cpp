@@ -801,7 +801,7 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
 
 static bool lambda_tree_parser_selected(void) {
 #ifdef LAMBDA_NO_TREE_SITTER_LAMBDA
-    // release builds have no Lambda Tree-sitter language to select.
+    // normal profiles have no Lambda Tree-sitter language to select.
     return false;
 #else
     const char* mode = shell_getenv("LAMBDA_PARSER");

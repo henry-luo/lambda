@@ -43,6 +43,11 @@ else
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
 
+# Keep the isolated CST profile's generated Premake file out of the normal
+# profile's generated configuration while retaining the repository root as
+# Premake's relative-path base.
+LAMBDA_CST_PREMAKE_FILE := premake5.lambda-cst.lua
+
 NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; then echo "$$n"; else echo 1; fi)
 
 # Render visual tests are CPU-heavy but independent; leave one core free for
@@ -523,11 +528,13 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-# Core: only parsers needed by lambda.exe (Lambda, JS, TS, LaTeX)
-tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# Core: only parsers needed by lambda.exe (JS, TS, LaTeX)
+# Normal Lambda profiles use the first-party C parser.  The Lambda
+# Tree-sitter archive is built only by the dedicated CST differential profile.
+tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
-# Release frontends use the direct RD/Pratt parser, so do not build the
-# otherwise-unused Lambda Tree-sitter archive for release or release-profile.
+# Release frontends use the same direct RD/Pratt parser, so keep the Lambda
+# Tree-sitter archive out of every normal profile.
 tree-sitter-release-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
 # All: includes jube-only parsers (Python, Bash, Ruby)
@@ -537,7 +544,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
@@ -565,6 +572,7 @@ help:
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  lambda-cst    - Build the Tree-sitter Lambda CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
@@ -733,6 +741,14 @@ print-jobs:
 
 $(LAMBDA_EXE): build
 
+# Build the isolated Tree-sitter Lambda CST verifier.  Normal Lambda
+# profiles deliberately do not build or link TREE_SITTER_LAMBDA_LIB.
+lambda-cst: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
+	@mkdir -p temp/lambda-parser-poc build/premake
+	@echo "Generating lambda-cst Premake configuration..."
+	$(PYTHON) utils/generate_premake.py --variant lambda-cst --output $(LAMBDA_CST_PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(LAMBDA_CST_PREMAKE_FILE)
+	$(call run_make_with_error_summary,lambda-cst,debug_native,,lambda-cst)
 
 
 
