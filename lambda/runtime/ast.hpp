@@ -4,203 +4,11 @@
 extern "C" {
 #endif
 
-#include <tree_sitter/api.h>
 #include <sys/types.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
-#include "ts-enum.h"
 #include "../../lib/mempool.h"
-
-#define SYM_NULL sym_null
-#define SYM_NAMED_VALUE sym_named_value
-#define SYM_INT sym_integer
-#define SYM_FLOAT sym_float
-#define SYM_IMAGINARY sym_imaginary
-#define SYM_DECIMAL sym_decimal
-#define SYM_SIZED_INT sym_sized_integer
-#define SYM_SIZED_FLOAT sym_sized_float
-#define SYM_STRING sym_string
-#define SYM_SYMBOL sym_symbol
-// Note: string_content, symbol_content, escape_sequence no longer exist
-// as strings and symbols are now single tokens that include escapes
-#define SYM_DATETIME sym_datetime
-#define SYM_BINARY sym_binary
-
-#define SYM_CONTENT sym_content
-#define SYM_ARRAY sym_array
-#define SYM_MAP_ITEM sym_map_item
-#define SYM_MAP sym_map
-#define SYM_ELEMENT sym_element
-#define SYM_ATTR sym_attr
-
-#define SYM_IDENT sym_identifier
-#define SYM_MEMBER_EXPR sym_member_expr
-#define SYM_INDEX_EXPR sym_index_expr
-#define SYM_CALL_EXPR sym_call_expr
-#define SYM_QUERY_EXPR sym_query_expr
-#define SYM_PRIMARY_EXPR sym_primary_expr
-#define SYM_UNARY_EXPR sym_unary_expr
-#define SYM_BINARY_EXPR sym_binary_expr
-#define SYM_BINARY_EXPR_NO_PIPE sym_binary_expr_no_pipe
-#define SYM_EXPR sym__expr
-#define SYM_EXPR_NO_PIPE sym_expr_no_pipe
-#define SYM_TYPE_EXPR sym__type_pattern
-#define SYM_ANNOTATION_TYPE sym__annotation_type
-
-// Path wildcards for glob patterns
-#define SYM_PATH_WILDCARD sym_path_wildcard
-
-// Path/navigation tokens.
-#define SYM_PATH_PARENT sym_path_parent
-#define SYM_PATH_ROOT sym_path_root
-#define SYM_PATH_EXPR sym_path_expr
-#define SYM_CURRENT_PARENT_EXPR sym_current_parent_expr
-
-// Pipe expression current item references (pipe is now part of binary_expr)
-#define SYM_CURRENT_EXPR sym_current_expr
-#define SYM_CURRENT_ERROR_EXPR sym_current_error_expr
-#define SYM_LAST_INDEX sym_last_index
-
-#define SYM_ASSIGN_EXPR sym_assign_expr
-#define SYM_IF_EXPR sym_if_expr
-#define SYM_MATCH_EXPR sym_match_expr
-#define SYM_MATCH_ARM sym_match_arm
-#define SYM_MATCH_DEFAULT sym_match_default
-#define SYM_LET_EXPR sym_let_expr
-#define SYM_LET_STAM sym_let_stam
-#define SYM_FOR_EXPR sym_for_expr
-#define SYM_WHILE_STAM sym_while_expr
-#define SYM_BREAK_STAM sym_break_stam
-#define SYM_CONTINUE_STAM sym_continue_stam
-#define SYM_RETURN_STAM sym_return_stam
-#define SYM_RAISE_EXPR sym_raise_expr
-#define SYM_VAR_STAM sym_var_stam
-#define SYM_ASSIGN_STAM sym_assign_stam
-#define SYM_APPLY_STAM sym_apply_stam
-
-#define SYM_BASE_TYPE sym_base_type
-#define SYM_ARRAY_TYPE sym_array_type
-#define SYM_LIST_TYPE sym_list_type
-#define SYM_MAP_TYPE_ITEM sym_map_type_item
-#define SYM_MAP_TYPE sym_map_type
-#define SYM_CONTENT_TYPE sym_content_type
-#define SYM_ELEMENT_TYPE sym_element_type
-#define SYM_FN_TYPE sym_fn_type
-#define SYM_RANGE_TYPE sym_range_type
-#define SYM_RETURN_TYPE sym_return_type
-#define SYM_PRIMARY_TYPE sym_primary_type
-#define SYM_BINARY_TYPE sym_binary_type
-#define SYM_CONSTRAINED_TYPE sym_constrained_type
-#define SYM_GROUPED_TYPE sym_grouped_type
-#define SYM_TYPE_DEFINE sym_type_stam
-#define SYM_TYPE_OCCURRENCE sym_type_occurrence
-
-#define SYM_FUNC_STAM sym_fn_stam
-#define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
-#define SYM_FUNC_EXPR sym_fn_expr
-// #define SYM_SYS_FUNC sym_sys_func
-#define SYM_IMPORT_MODULE sym_import_module
-
-// Object type definition symbols
-#define SYM_OBJECT_TYPE sym_object_type
-#define SYM_THAT_CONSTRAINT sym_that_constraint
-
-// String/Symbol Pattern symbols
-#define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
-#define SYM_PATTERN_ISLAND sym_pattern_island
-#define SYM_PATTERN_OCCURRENCE_TYPE sym_pattern_occurrence_type
-#define SYM_PATTERN_NEGATION_TYPE sym_pattern_negation_type
-#define SYM_PATTERN_UNARY_TYPE sym_pattern_unary_type
-// SYM_PATTERN_ANY removed — merged into SYM_PATTERN_CHAR_CLASS
-#define SYM_OCCURRENCE_COUNT sym_occurrence_count
-// Unified type/pattern symbols
-#define SYM_TYPE_SEQ sym_type_seq
-#define SYM_PATTERN_GROUP sym_pattern_group
-#define SYM_TYPE_NEGATION sym_type_negation
-
-#define SYM_COMMENT sym_comment
-#define SYM_NAMED_ARGUMENT sym_named_argument
-
-// View/Edit template symbols
-#define SYM_VIEW_STAM sym_view_stam
-#define SYM_VIEW_PATTERN sym_view_pattern
-#define SYM_STATE_DECL sym_state_decl
-#define SYM_STATE_ENTRY sym_state_entry
-#define SYM_EVENT_HANDLER sym_event_handler
-#define SYM_HANDLER_EXPR sym_handler_expr
-#define SYM_PROPAGATE_EXPR sym_propagate_expr
-
-#define FIELD_COND field_cond
-#define FIELD_THEN field_then
-#define FIELD_ELSE field_else
-#define FIELD_SCRUTINEE field_scrutinee
-#define FIELD_LEFT field_left
-#define FIELD_RIGHT field_right
-#define FIELD_LAST field_last
-#define FIELD_NAME field_name
-#define FIELD_AS field_as
-#define FIELD_TYPE field_type
-#define FIELD_OBJECT field_object
-#define FIELD_OP field_op
-#define FIELD_FIELD field_field
-#define FIELD_BODY field_body
-#define FIELD_TAG field_tag
-#define FIELD_DECLARE field_declare
-#define FIELD_FUNCTION field_function
-#define FIELD_ARGUMENT field_argument
-#define FIELD_OPERATOR field_operator
-#define FIELD_OPERAND field_operand
-#define FIELD_ALIAS field_alias
-#define FIELD_MODULE field_module
-#define FIELD_PUB field_pub
-#define FIELD_KIND field_kind
-#define FIELD_ON field_on
-#define FIELD_OPTIONAL field_optional
-#define FIELD_DEFAULT field_default
-#define FIELD_VALUE field_value
-#define FIELD_VARIADIC field_variadic
-#define FIELD_VAR field_var
-#define FIELD_TARGET field_target
-#define FIELD_PREFIX field_prefix
-#define FIELD_URI field_uri
-#define FIELD_PATTERN field_pattern
-#define FIELD_INDEX field_index
-#define FIELD_INDEX_TYPE field_index_type
-#define FIELD_SEGMENT field_segment
-#define FIELD_DECOMPOSE field_decompose
-#define FIELD_BASE field_base
-#define FIELD_CONSTRAINT field_constraint
-// For expression clause fields
-#define FIELD_LET field_let
-#define FIELD_WHERE field_where
-#define FIELD_GROUP field_group
-#define FIELD_ORDER field_order
-#define FIELD_LIMIT field_limit
-#define FIELD_OFFSET field_offset
-#define FIELD_SPEC field_spec
-#define FIELD_DIR field_dir
-#define FIELD_KEY field_key
-#define FIELD_COUNT field_count
-#define FIELD_EXPR field_expr
-#define FIELD_ERROR field_error
-#define FIELD_PROPAGATE field_propagate
-#define FIELD_QUERY field_query
-#define FIELD_START field_start
-#define FIELD_END field_end
-// View/Edit template fields
-#define FIELD_STATE field_state
-#define FIELD_HANDLER field_handler
-#define FIELD_EVENT field_event
-
-// Symbols for for-expression clauses
-#define SYM_FOR_LET_CLAUSE sym_for_let_clause
-#define SYM_FOR_WHERE_CLAUSE sym_for_where_clause
-#define SYM_ORDER_SPEC sym_order_spec
-#define SYM_FOR_ORDER_CLAUSE sym_for_order_clause
-#define SYM_FOR_GROUP_CLAUSE sym_for_group_clause
-#define SYM_FOR_LIMIT_CLAUSE sym_for_limit_clause
-#define SYM_FOR_OFFSET_CLAUSE sym_for_offset_clause
 
 #ifdef __cplusplus
 }
@@ -595,7 +403,7 @@ typedef struct AstEventHandler : AstNode {
 // Literal spellings that carry no const-pool entry are re-read from source at
 // use. Shared by MIR lowering and the T0 interpreter so both decode the same
 // bytes to the same value.
-static inline int64_t parse_int_literal_span(const char* source, LambdaSourceSpan span) {
+static inline int64_t parse_int_literal_span(const char* source, SourceSpan span) {
     const char* text = source + span.start_byte;
     int len = (int)lambda_source_span_length(span);
 
@@ -636,18 +444,8 @@ static inline int64_t parse_int_literal_span(const char* source, LambdaSourceSpa
     return value;
 }
 
-static inline bool parse_bool_literal_span(const char* source, LambdaSourceSpan span) {
+static inline bool parse_bool_literal_span(const char* source, SourceSpan span) {
     return source[span.start_byte] == 't';
-}
-
-static inline int64_t parse_int_literal(const char* source, TSNode node) {
-    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
-    return parse_int_literal_span(source, span);
-}
-
-static inline bool parse_bool_literal(const char* source, TSNode node) {
-    LambdaSourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
-    return parse_bool_literal_span(source, span);
 }
 
 // A type node's runtime identity is not always its TypeId: `date`/`time` share
@@ -757,10 +555,6 @@ typedef Item (*main_func_t)(Context*);
 typedef struct MIR_context *MIR_context_t;
 struct Transpiler;
 
-// Builds one P4 REPL input against an already populated module scope. The
-// caller owns the parsed tree for the lifetime of the returned AST fragment.
-AstNode* build_repl_fragment(Transpiler* tp, TSNode document_node);
-
 // Script extends Input to inherit unified memory management
 struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
@@ -776,8 +570,6 @@ struct Script : Input {
     LangProfile* profile;       // dormant Phase-1 language profile hook table
     time_t src_mtime;           // file timestamp captured when loaded
     off_t src_size;             // file size captured when loaded
-    TSTree* syntax_tree;
-
     // AST-specific fields (beyond Input)
     AstNode *ast_root;
     AstIndex ast_index;          // one dense identity/index table for all post-CST passes
@@ -812,11 +604,9 @@ struct Script : Input {
     uint32_t interp_satellite_count; // unique MIR satellite image sequence
     bool interp_views_registered;   // T0 view entries published in this context
 
-    // P4 keeps each incrementally parsed REPL fragment alive because every
-    // AstNode retains Tree-sitter spans into its source tree. `source` aliases
-    // repl_source->str in that mode and must not be freed independently.
+    // The REPL keeps its append-only source buffer alive because AST source
+    // spans point into it. `source` aliases repl_source->str in that mode.
     StrBuf* repl_source;
-    ArrayList* repl_syntax_trees;
     // Append cursor makes retained REPL history O(fragment) to extend rather
     // than re-walking every prior top-level node on each completed input.
     AstNode* repl_last_top_level;
@@ -837,7 +627,6 @@ typedef struct Transpiler : Script {
     // adopted. Object methods need this stable owner for their interpreter
     // closures; `(Script*)this` is valid only during construction.
     Script* script_owner;
-    TSParser* parser;
     Runtime* runtime;
 
     // Error tracking for accumulated type errors

@@ -355,9 +355,9 @@ bool jm_scope_env_name_matches_binding(const char* scope_name,
     if (!at) return false;
     size_t base_len = (size_t)(at - scope_name);
     if (strlen(name) != base_len || strncmp(scope_name, name, base_len) != 0) return false;
-    if (!binding_node || ts_node_is_null(binding_node->node)) return false;
+    if (!binding_node) return false;
     const char* key = jm_format_name("%s@%u:%u", name,
-        ts_node_start_byte(binding_node->node), ts_node_end_byte(binding_node->node));
+        binding_node->source_span.start_byte, binding_node->source_span.end_byte);
     return strcmp(scope_name, key) == 0;
 }
 

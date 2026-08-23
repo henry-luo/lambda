@@ -30,7 +30,7 @@ returns an `AstNode*`-backed value. No Lambda CST or replacement syntax tree is
 retained. `lambda_rd_build_ast` is the production adapter and fail-closes on an
 unsupported reduction or syntax error.
 
-`LambdaSourceSpan` is the shared half-open source contract. The existing type
+`SourceSpan` is the shared half-open source contract. The existing type
 pattern and static-path parsers consume the same spans, so the direct path does
 not synthesize `TSNode` objects or duplicate those subgrammars.
 
@@ -95,7 +95,7 @@ A few dispatch subtleties:
 
 <img alt="AstNode hierarchy" src="diagram/d02_ast_hierarchy.svg" width="720">
 
-Every AST node derives (via C++ struct inheritance) from `struct AstNode` (`ast.hpp:302`): `AstNodeType node_type`; `Type* type` (the inferred type — **every node carries one**); `AstNode* next` (sibling linked list); and `TSNode node` (a back-pointer to the CST node for source spans and error reporting). The node tags are the `AstNodeType` enum (`ast.hpp:223`–`300`), spanning `AST_NODE_NULL` through `AST_SCRIPT` (~75 tags).
+Every AST node derives (via C++ struct inheritance) from `struct AstNode` (`ast.hpp:302`): `AstNodeType node_type`; `Type* type` (the inferred type — **every node carries one**); `AstNode* next` (sibling linked list); and `SourceSpan source_span` (a parser-neutral half-open byte range for source text and diagnostics). The node tags are the `AstNodeType` enum (`ast.hpp:223`–`300`), spanning `AST_NODE_NULL` through `AST_SCRIPT` (~75 tags).
 
 The concrete node structs (tag → struct → key fields, `ast.hpp` line):
 

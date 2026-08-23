@@ -271,7 +271,7 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 
 // Error handling functions
 
-void js_error(JsTranspiler* tp, TSNode node, const char* format, ...) {
+void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...) {
     tp->has_errors = true;
 
     if (!tp->error_buf) {
@@ -279,8 +279,9 @@ void js_error(JsTranspiler* tp, TSNode node, const char* format, ...) {
     }
 
     // Add location information
-    uint32_t start_row = ts_node_start_point(node).row;
-    uint32_t start_col = ts_node_start_point(node).column;
+    LambdaSourcePoint point = lambda_source_span_start_point(tp->source, span);
+    uint32_t start_row = point.row;
+    uint32_t start_col = point.column;
     strbuf_append_format(tp->error_buf, "Error at line %u, column %u: ",
                         start_row + 1, start_col + 1);
 

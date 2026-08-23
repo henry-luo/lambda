@@ -88,7 +88,8 @@ static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
             tp->ast_pool, sizeof(JsIdentifierNode));
         memset(placeholder, 0, sizeof(JsIdentifierNode));
         placeholder->node_type = JS_AST_NODE_IDENTIFIER;
-        placeholder->node = declarator_node;
+        placeholder->source_span = (SourceSpan){ts_node_start_byte(declarator_node),
+            ts_node_end_byte(declarator_node)};
         placeholder->type = js_set_type_any(tp, ANY_ERROR_RECOVERY);
         placeholder->name = name;
         js_scope_define(tp, name, (JsAstNode*)placeholder, JS_VAR_VAR);
@@ -289,7 +290,8 @@ JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode n
     JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->ast_pool, size);
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;
-    ast_node->node = node;
+    ast_node->source_span = (SourceSpan){ts_node_start_byte(node),
+        ts_node_end_byte(node)};
     return ast_node;
 }
 
@@ -690,6 +692,50 @@ static void js_bind_pattern_names(JsTranspiler* tp, JsAstNode* pattern, JsVarKin
                 js_bind_pattern_names(tp, prop, kind);
             }
             prop = prop->next;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void js_mark_for_in_head_bindings(JsAstNode* pattern) {
+    if (!pattern) return;
+    if (pattern->node_type == (int)TS_AST_NODE_PARAMETER) {
+        js_mark_for_in_head_bindings(((TsParameterNode*)pattern)->pattern);
+        return;
+    }
+    switch (pattern->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)pattern;
+        if (id->entry) id->entry->is_for_in_head = true;
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* assignment = (JsAssignmentPatternNode*)pattern;
+        js_mark_for_in_head_bindings(assignment->left);
+        break;
+    }
+    case JS_AST_NODE_REST_ELEMENT: {
+        JsSpreadElementNode* rest = (JsSpreadElementNode*)pattern;
+        js_mark_for_in_head_bindings(rest->argument);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* array = (JsArrayNode*)pattern;
+        for (JsAstNode* element = array->elements; element; element = element->next)
+            js_mark_for_in_head_bindings(element);
+        break;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN: {
+        JsObjectPatternNode* object = (JsObjectPatternNode*)pattern;
+        for (JsAstNode* property = object->properties; property; property = property->next) {
+            if (property->node_type == JS_AST_NODE_PROPERTY)
+                js_mark_for_in_head_bindings(((JsPropertyNode*)property)->value);
+            else
+                js_mark_for_in_head_bindings(property);
         }
         break;
     }
@@ -3389,6 +3435,8 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
         // synthetic `let [..]` recovery path reaches this shared bind point.
         js_bind_pattern_names(tp, for_of->left, (JsVarKind)for_of->kind);
     }
+    if (!is_for_of && for_of->declares_binding)
+        js_mark_for_in_head_bindings(for_of->left);
 
     TSNode init_node = ts_node_child_by_field_name(for_node, "value", strlen("value"));
     if (!ts_node_is_null(init_node)) {

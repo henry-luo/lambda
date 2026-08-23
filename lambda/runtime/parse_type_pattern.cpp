@@ -3,6 +3,7 @@
 #include "transpiler.hpp"
 #include "lambda-error.h"
 #include "../../lib/log.h"
+#include <tree_sitter/api.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -29,7 +30,7 @@ struct Lexer {
     Transpiler* tp;
     const char* p;
     const char* end;
-    LambdaSourceSpan origin;
+    SourceSpan origin;
     bool failed;
 };
 
@@ -1104,7 +1105,7 @@ AstNode* parse_view_pattern(Lexer* lx) {
 }  // namespace
 
 AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* node = parse_union(&lx);
     if (!node || lx.failed) { return NULL; }
@@ -1114,7 +1115,7 @@ AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
 }
 
 AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* node = parse_primary(&lx);
     if (!node || lx.failed) { return NULL; }
@@ -1122,7 +1123,7 @@ AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
 }
 
 AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* ok = parse_return_type_pattern(&lx);
     if (!ok || lx.failed) { return NULL; }
@@ -1147,7 +1148,7 @@ AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
 }
 
 AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* pattern = parse_view_pattern(&lx);
     if (!pattern || lx.failed) { return NULL; }
@@ -1158,24 +1159,24 @@ AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
 
 AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin,
         const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
     return parse_type_pattern_text_span(tp, begin, end, span);
 }
 
 AstNode* parse_primary_type_text(Transpiler* tp, const char* begin,
         const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
     return parse_primary_type_text_span(tp, begin, end, span);
 }
 
 AstNode* parse_return_type_text(Transpiler* tp, const char* begin,
         const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
     return parse_return_type_text_span(tp, begin, end, span);
 }
 
 AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin,
         const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
+    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
     return parse_view_pattern_text_span(tp, begin, end, span);
 }

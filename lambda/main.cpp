@@ -478,7 +478,6 @@ extern "C" {
     char* read_text_file(const char *filename);
     void write_text_file(const char *filename, const char *content);
     int write_binary_file(const char* filename, const char* data, size_t len);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source);
     void js_reset_template_registry(void);
 }
 
@@ -728,8 +727,8 @@ enum StatementStatus {
     STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
     STMT_ERROR          // statement has a syntax error
 };
-StatementStatus check_statement_completeness(TSParser* parser, const char* source);
-void print_repl_syntax_error(TSParser* parser, const char* source);
+StatementStatus check_statement_completeness(const char* source);
+void print_repl_syntax_error(const char* source);
 
 // Linux-specific compatibility functions
 #ifdef NATIVE_LINUX_BUILD
@@ -847,7 +846,7 @@ void run_repl(Runtime *runtime) {
         mem_free(line);
 
         // Check if statement is complete using Tree-sitter
-        StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
+        StatementStatus status = check_statement_completeness(pending_input->str);
 
         if (status == STMT_INCOMPLETE) {
             // Need more input - continue with continuation prompt
@@ -856,7 +855,7 @@ void run_repl(Runtime *runtime) {
 
         if (status == STMT_ERROR) {
             // Syntax error - discard the pending input and let user retry
-            print_repl_syntax_error(runtime->parser, pending_input->str);
+            print_repl_syntax_error(pending_input->str);
             printf("Input discarded.\n");
             strbuf_reset(pending_input);
             continue;

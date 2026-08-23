@@ -1426,7 +1426,7 @@ typedef enum JubeDirectValueKind {
 typedef struct JubeDirectValue {
     JubeDirectValueKind kind;
     LambdaTokenKind token_kind;
-    LambdaSourceSpan span;
+    SourceSpan span;
     struct JubeDirectValue* next;
 } JubeDirectValue;
 
@@ -1448,7 +1448,7 @@ static JubeDirectValue* jube_direct_value_from_parse(LambdaParseValue value) {
 }
 
 static char* jube_direct_span_text(const JubeDirectSink* sink,
-                                   LambdaSourceSpan span) {
+                                   SourceSpan span) {
     if (!sink || !sink->source || span.end_byte < span.start_byte ||
             span.end_byte > sink->source_length) return NULL;
     return jube_strndup(sink->source + span.start_byte,
@@ -1458,7 +1458,7 @@ static char* jube_direct_span_text(const JubeDirectSink* sink,
 static JubeDirectValue* jube_direct_new_value(JubeDirectSink* sink,
                                                JubeDirectValueKind kind,
                                                LambdaTokenKind token_kind,
-                                               LambdaSourceSpan span) {
+                                               SourceSpan span) {
     JubeDirectValue* value = (JubeDirectValue*)calloc(1, sizeof(JubeDirectValue));
     if (!value) {
         sink->failed = true;

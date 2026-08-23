@@ -121,10 +121,10 @@ The sink is not an intermediate representation. Each completed production is red
 The parser core has a C ABI and uses no `std::` types:
 
 ```c
-typedef struct LambdaSourceSpan {
+typedef struct SourceSpan {
     uint32_t start_byte;
     uint32_t end_byte;
-} LambdaSourceSpan;
+} SourceSpan;
 
 typedef enum LambdaParseStatus {
     LAMBDA_PARSE_OK,
@@ -133,7 +133,7 @@ typedef enum LambdaParseStatus {
 } LambdaParseStatus;
 
 typedef struct LambdaParseError {
-    LambdaSourceSpan span;
+    SourceSpan span;
     uint64_t expected_token_bits[4];
     int actual_token;
     const char* message;
@@ -184,7 +184,7 @@ Recursive descent owns forms with a decisive leading token or delimiter:
 
 The existing first-party `parse_type_pattern.cpp` and `parse_path_expr.cpp` prove that bounded hand parsing already fits the Lambda grammar. The C parser owns only the **outer placement and exact source span** of a type slot or static-path slot. Its committed span is then passed to those existing parser entry points by the direct-AST sink; it does not create a second semantic type/path grammar.
 
-Today those helpers take `Transpiler*` and `TSNode` because they allocate existing AST/type/path objects and attach diagnostics. P1 keeps the corresponding C reductions as source-span seams, without attempting to synthesize a `TSNode`. P2.1 replaces that diagnostic/location dependency with `LambdaSourceSpan`; P2.2 then adapts the existing helpers and constructors for the direct-AST sink. This is a prerequisite for reuse, not permission to copy their grammar into `lambda_parser.c`.
+Today those helpers take `Transpiler*` and `TSNode` because they allocate existing AST/type/path objects and attach diagnostics. P1 keeps the corresponding C reductions as source-span seams, without attempting to synthesize a `TSNode`. P2.1 replaces that diagnostic/location dependency with `SourceSpan`; P2.2 then adapts the existing helpers and constructors for the direct-AST sink. This is a prerequisite for reuse, not permission to copy their grammar into `lambda_parser.c`.
 
 ### 5.4 Pratt expression layer
 
@@ -426,7 +426,9 @@ produces the canonical `lm.` AST.
 
 ### P2.1 — make retained AST source locations parser-neutral
 
-Replace `AstNode::TSNode node` with a parser-neutral source reference, preferably the two-offset `LambdaSourceSpan`. Migrate all retained-AST consumers:
+`AstNode::source_span` is now the parser-neutral two-offset `SourceSpan`; the
+transitional `AstNode::node` field has been removed. Retained-AST consumers use
+the span for:
 
 - source-text slicing and literal conversion;
 - structured semantic diagnostics;
@@ -435,18 +437,19 @@ Replace `AstNode::TSNode node` with a parser-neutral source reference, preferabl
 - interpreter literal reads;
 - type/path/pattern helpers that currently accept a `TSNode` only for location.
 
-The existing Tree-sitter builder converts each `TSNode` to `LambdaSourceSpan` at AST allocation. This compatibility step must pass unchanged before the C AST sink is enabled. It proves downstream consumers no longer require a live `TSTree` and allows the current syntax tree to be deleted immediately after AST construction.
+The legacy CST adapter converts each `TSNode` to `SourceSpan` at AST allocation,
+while the direct parser supplies the same range from its reductions. No
+retained AST node requires a live `TSTree`.
 
 Because core AST nodes are shared under D8.2.1, the source reference is parser-neutral for all language profiles. Tree-sitter-based guest builders fill the same range from their `TSNode`; they do not force Tree-sitter storage back into core `AstNode`.
 
-**P2.1 checkpoint (2026-08-20):** `LambdaSourceSpan` is the common half-open
+**P2.1 checkpoint (2026-08-20):** `SourceSpan` is the common half-open
 byte-range type in `lambda/runtime/source_span.h`; every `AstNode` stores it.
-The CST allocator populates it from `TSNode`, while the direct sink allocates
-from the same span entry point. Structured diagnostics, literal decoding in
-T0/MIR, MIR source-name identity, and AST dump source extraction read the
-retained span. Type-pattern and static-path parsers have equivalent span entry
-points; their CST APIs are compatibility adapters only. `AstNode::node` remains
-a zeroed compatibility field for the explicit reference/REPL path.
+The legacy CST adapter and direct sink populate it from their respective parser
+coordinates. Structured diagnostics, literal decoding in T0/MIR, MIR
+source-name identity, and AST dump source extraction read the retained span.
+Type-pattern and static-path parsers have equivalent span entry points; their
+CST APIs are isolated compatibility adapters.
 
 ### P2.2 — separate traversal from AST construction
 

@@ -26,9 +26,13 @@ extern "C" {
 // TS transpiler creation — uses unified JsTranspiler with TS mode
 // ============================================================================
 
-// local alloc helper for lowering code (same as alloc_js_ast_node but takes int node_type)
-static JsAstNode* alloc_ts_ast_node(JsTranspiler* tp, int node_type, TSNode node, size_t size) {
-    return alloc_js_ast_node(tp, (JsAstNodeType)node_type, node, size);
+static JsAstNode* alloc_ts_ast_node(JsTranspiler* tp, int node_type,
+        SourceSpan span, size_t size) {
+    JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->ast_pool, size);
+    memset(ast_node, 0, size);
+    ast_node->node_type = (JsAstNodeType)node_type;
+    ast_node->source_span = span;
+    return ast_node;
 }
 
 static TsTranspiler* ts_transpiler_create(Runtime* runtime) {
@@ -64,7 +68,7 @@ static void ts_transpiler_destroy(TsTranspiler* tp) {
 // Lower: enum Direction { Up, Down = 5, Left }
 // Into:  const Direction = { Up: 0, Down: 5, Left: 6, 0: "Up", 5: "Down", 6: "Left" };
 static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* enum_decl) {
-    TSNode dummy = enum_decl->node;
+    SourceSpan dummy = enum_decl->source_span;
 
     // build object literal with forward (name → value) and reverse (value → name) mappings
     JsObjectNode* obj = (JsObjectNode*)alloc_ts_ast_node(tp,
@@ -438,7 +442,7 @@ static JsAstNode* ts_lower_expr_tree(TsTranspiler* tp, JsAstNode* node) {
 // ============================================================================
 
 static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarationNode* ns) {
-    TSNode dummy = ns->node;
+    SourceSpan dummy = ns->source_span;
 
     // create: var Foo;
     JsVariableDeclaratorNode* ns_decl = (JsVariableDeclaratorNode*)alloc_ts_ast_node(tp,
@@ -616,7 +620,7 @@ static JsAstNode* ts_lower_class_with_decorators(TsTranspiler* tp,
     TsDecoratorNode** decorators, int deco_count, JsAstNode* class_node)
 {
     JsClassNode* cls = (JsClassNode*)class_node;
-    TSNode dummy = class_node->node;
+    SourceSpan dummy = class_node->source_span;
     if (!cls->name) return class_node;
 
     // convert class declaration to expression: let ClassName = class ClassName { }
