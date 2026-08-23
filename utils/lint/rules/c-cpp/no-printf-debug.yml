@@ -6,7 +6,7 @@ message: >-
   log_debug/log_info/log_error helpers in lib/log.h (they route through
   log.txt, respect the log config, and start each line with a searchable
   prefix). CLI subcommand handlers, the REPL, polyglot-runtime
-  print/puts/echo builtins, the s-expression dumper, and the PDF byte writer
+  print/puts/echo builtins, the AST dumper, and the PDF byte writer
   are all legitimate stdout emitters and are excluded by file. Mark a
   single-line debug-print exception with "// PRINTF_OK: <reason>".
 metadata:
@@ -72,7 +72,7 @@ ignores:
   - "lib/avl_tree.c"                       # printfs all in avl_tree_print debug helper
   - "lib/test_utils_pool.c"                # test fixture setup
   - "lib/test_utils_runtime.cpp"           # test fixture setup
-  # Lambda's own s-expression dumper (Racket bridge).
-  - "lambda/emit_sexpr.cpp"
+  # Lambda's own AST dumper.
+  - "lambda/runtime/emit_ast_dump.cpp"
   # PDF byte writer is by definition I/O-producing.
   - "lib/pdf_writer.c"

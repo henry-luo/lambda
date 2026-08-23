@@ -165,7 +165,7 @@ T0 implements the two existing channels, nothing new:
 
 ### 4.9 Construct coverage map
 
-The full walker, by node family (the complete per-kind inventory is the P1 checklist; `emit_sexpr.cpp` is the reference for a complete Lambda AST traversal):
+The full walker, by node family (the complete per-kind inventory is the P1 checklist; `emit_ast_dump.cpp` is the reference for a complete Lambda AST traversal):
 
 | Family | Strategy |
 |---|---|

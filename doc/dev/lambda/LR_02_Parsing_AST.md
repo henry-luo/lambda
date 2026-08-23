@@ -2,7 +2,7 @@
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how the first-party C lexer and hybrid recursive-descent + Pratt parser reduce source directly to a typed AST, with the Tree-sitter CST builder retained as an explicit reference/rollback adapter. It owns the direct reduction dispatch, the shared AST construction seams, the concrete node hierarchy, build-time (forward, local, structural) type inference, and scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
 >
-> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/parse.c` (explicit Tree-sitter reference wrapper), `lambda/tree-sitter-lambda/grammar.js` (the grammar that auto-generates reference `parser.c`), `lambda/ts-enum.h` (the auto-generated symbol/field id enums), `lambda/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/emit_sexpr.cpp` (a read-only AST consumer for the formal-semantics bridge).
+> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/parse.c` (explicit Tree-sitter reference wrapper), `lambda/tree-sitter-lambda/grammar.js` (the grammar that auto-generates reference `parser.c`), `lambda/ts-enum.h` (the auto-generated symbol/field id enums), `lambda/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/runtime/emit_ast_dump.cpp` (a read-only structural AST-dump consumer).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -74,7 +74,7 @@ direct sink; it is not the normal file/module front end.
 
 ### 3.1 Entry: `build_script`
 
-`build_script` (`build_ast.cpp:8199`, declared `transpiler.hpp:102`) is the construction root, called from `runner.cpp:579` (the main transpile path) and `emit_sexpr.cpp:1989` (the s-expr dump). It allocates an `AstScript` node (tag `AST_SCRIPT`), then allocates the global `NameScope` and points both `tp->current_scope` and `AstScript::global_vars` at it (`build_ast.cpp:8202`). It iterates the named children of the `document` node: `SYM_IMPORT_MODULE` → `build_module_import`, `SYM_CONTENT` → `build_content(tp, child, /*flatten*/true, /*is_global*/true)`, `SYM_COMMENT` skipped (`build_ast.cpp:8210`–`8223`). Results are chained through `AstNode::next` into `AstScript::child`, and the script's own type is taken from its first child (`build_ast.cpp:8231`). (Note: the function returns `AstNode*`, although the object it allocates is an `AstScript`.)
+`build_script` (`build_ast.cpp:8199`, declared `transpiler.hpp:102`) is the construction root, called from `runner.cpp:579` (the main transpile path). It allocates an `AstScript` node (tag `AST_SCRIPT`), then allocates the global `NameScope` and points both `tp->current_scope` and `AstScript::global_vars` at it (`build_ast.cpp:8202`). It iterates the named children of the `document` node: `SYM_IMPORT_MODULE` → `build_module_import`, `SYM_CONTENT` → `build_content(tp, child, /*flatten*/true, /*is_global*/true)`, `SYM_COMMENT` skipped (`build_ast.cpp:8210`–`8223`). Results are chained through `AstNode::next` into `AstScript::child`, and the script's own type is taken from its first child (`build_ast.cpp:8231`). (Note: the function returns `AstNode*`, although the object it allocates is an `AstScript`.)
 
 ### 3.2 Central dispatch: `build_expr`
 
@@ -89,7 +89,7 @@ A few dispatch subtleties:
 
 `build_primary_expr` (`build_ast.cpp:2606`) is the second-tier dispatcher: it wraps a single child in an `AstPrimaryNode`, inferring scalar literal types inline and delegating compound forms (`SYM_IDENT` → `build_identifier`, plus arrays, maps, elements, member/index → path-or-field detection, calls, queries, parent/path/current expressions). `is_const` types are re-allocated to strip the const flag (`build_ast.cpp:2687`–`2690`).
 
-`emit_sexpr.cpp` is a second, read-only consumer of the same AST: it calls `build_script` (`emit_sexpr.cpp:1989`) and walks the result to emit Redex-compatible s-expressions for the Racket formal-semantics bridge. It is off the JIT path entirely.
+`emit_ast_dump.cpp` is a read-only consumer of the direct AST: it initializes the parser-neutral input state, calls `lambda_rd_build_ast`, and walks the result to emit the canonical structural dump used by AST and type-inference verification. It is off the JIT path entirely.
 
 ### 3.3 The `AstNode` hierarchy
 
@@ -243,7 +243,7 @@ The inference and resolution code carries a set of deliberate workarounds and la
 | `lambda/ts-enum.h` | Auto-generated `ts_symbol_identifiers` / `ts_field_identifiers` enums; aliased to `SYM_*` / `FIELD_*` in `ast.hpp`. |
 | `lambda/ast.hpp` | `AstNode` base + concrete node structs, `AstNodeType` enum, `NameScope`/`NameEntry`/`CaptureInfo`/`NamespaceEntry`, `AstScript`. |
 | `lambda/build_ast.cpp` | The CST→AST builder: `build_script`, `build_expr` dispatch, per-construct `build_*`, type inference, scope/name resolution, import resolution, capture analysis. |
-| `lambda/emit_sexpr.cpp` | Read-only AST consumer: builds the AST then emits Redex s-expressions for the formal-semantics bridge; off the JIT path. |
+| `lambda/runtime/emit_ast_dump.cpp` | Read-only AST consumer: builds the AST then emits the canonical structural dump; off the JIT path. |
 
 ## Appendix B — Related documents
 

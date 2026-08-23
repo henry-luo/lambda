@@ -219,7 +219,7 @@ The findings by file (Top 12, covering 96 % of the corpus):
 
 | File | Hits | Why printf is legitimate |
 |---|---:|---|
-| `lambda/emit_sexpr.cpp` | 628 | Deliberate s-expression emitter to stdout — its job is to print. |
+| `lambda/runtime/emit_ast_dump.cpp` | 44 | Canonical AST dumper to stdout — its job is to print. |
 | `lib/` (pdf_writer.c, hashmap.c test, file.c errors, etc.) | 118 | PDF byte writer, hash-map self-test, file.c error reporters. |
 | `lambda/module/rb/rb_print.cpp` + `rb_runtime.cpp` | 111 | Ruby `print`/`puts`/`p` builtin implementations. |
 | `radiant/webdriver/cmd_webdriver.cpp` | 45 | CLI subcommand handler — same family as `lambda/main.cpp` (already excluded). |
@@ -266,8 +266,8 @@ ignores:
   - "lambda/bash/transpile_bash_mir.cpp"
   - "lambda/bash/bash_runtime.cpp"
   - "lambda/module/py/py_stdlib.cpp"
-  # Lambda's own s-expression dumper (Racket bridge)
-  - "lambda/emit_sexpr.cpp"
+  # Lambda's own AST dumper
+  - "lambda/runtime/emit_ast_dump.cpp"
   # PDF byte writer is by definition I/O-producing
   - "lib/pdf_writer.c"
 ```
