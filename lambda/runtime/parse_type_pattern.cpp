@@ -3,7 +3,6 @@
 #include "transpiler.hpp"
 #include "lambda-error.h"
 #include "../../lib/log.h"
-#include <tree_sitter/api.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -1155,28 +1154,4 @@ AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
     skip_space(&lx);
     if (lx.p != lx.end) { fail(&lx, "trailing view pattern input"); return NULL; }
     return pattern;
-}
-
-AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_type_pattern_text_span(tp, begin, end, span);
-}
-
-AstNode* parse_primary_type_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_primary_type_text_span(tp, begin, end, span);
-}
-
-AstNode* parse_return_type_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_return_type_text_span(tp, begin, end, span);
-}
-
-AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_view_pattern_text_span(tp, begin, end, span);
 }

@@ -1,7 +1,6 @@
 #include "parse_path_expr.hpp"
 #include "type_build.hpp"
 #include "transpiler.hpp"
-#include <tree_sitter/api.h>
 
 #include <limits.h>
 #include <string.h>
@@ -280,13 +279,6 @@ AstNode* build_static_path_ast_from_span(Transpiler* tp, SourceSpan span,
     return (AstNode*)path;
 }
 
-AstNode* build_static_path_ast(Transpiler* tp, TSNode origin, PathScheme scheme,
-        String* authority, ArrayList* segments, int first_segment) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return build_static_path_ast_from_span(tp, span, scheme, authority, segments,
-        first_segment);
-}
-
 static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
         const char* end, SourceSpan span, bool report_errors) {
     PathLexer lx = {tp, begin, end, span, false, report_errors, arraylist_new(8)};
@@ -316,18 +308,6 @@ static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
         lx.segments, first_segment);
     arraylist_free(lx.segments);
     return path;
-}
-
-AstNode* parse_path_expr_text(Transpiler* tp, const char* begin, const char* end,
-        TSNode origin) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_path_expr_text_impl(tp, begin, end, span, true);
-}
-
-AstNode* try_parse_path_expr_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    SourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_path_expr_text_impl(tp, begin, end, span, false);
 }
 
 AstNode* parse_path_expr_text_span(Transpiler* tp, const char* begin,
