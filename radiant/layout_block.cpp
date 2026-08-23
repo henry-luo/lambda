@@ -2878,7 +2878,7 @@ static bool vertical_parent_has_atomic_block_flow(ViewBlock* parent) {
         parent->inl()->vertical_align == CSS_VALUE_BOTTOM;
 }
 
-static bool vertical_parent_has_block_flow_child(ViewBlock* parent) {
+bool layout_vertical_parent_has_block_flow_child(ViewBlock* parent) {
     if (!parent || !parent->is_element()) return false;
     for (View* child = lam::view_require_element(parent)->first_placed_child();
          child; child = child->next()) {
@@ -2973,7 +2973,7 @@ static float layout_vertical_flow_extent(ViewBlock* parent, bool margin_box_mode
     bool has_in_flow_child = false;
     bool has_normal_block_child = false;
     bool has_atomic_inline_child = false;
-    bool has_block_flow_child = vertical_parent_has_block_flow_child(parent);
+    bool has_block_flow_child = layout_vertical_parent_has_block_flow_child(parent);
     bool children_are_axis_mapped = parent->blk &&
         parent->blk->vertical_geometry_published;
     bool has_line_clamp = parent->blk && parent->block()->line_clamp > 0;
@@ -3126,8 +3126,8 @@ float layout_compute_in_flow_child_width_extent(ViewBlock* parent,
     return layout_horizontal_flow_extent(parent, include_margin_box);
 }
 
-static bool compute_vertical_block_child_inline_extent(ViewBlock* parent,
-                                                       float* out_extent) {
+bool layout_compute_vertical_in_flow_child_inline_extent(ViewBlock* parent,
+                                                         float* out_extent) {
     if (!parent || !parent->is_element() || !out_extent) return false;
     BoxMetrics parent_box = layout_box_metrics(parent);
     float content_left = parent_box.border.left + parent_box.padding.left;
@@ -3353,7 +3353,7 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
     float content_width = layout_content_size_from_border_box(block, block->width, true);
     ViewElement* element = lam::view_require_element(block);
     bool atomic_block_flow = vertical_parent_has_atomic_block_flow(block);
-    bool has_block_flow_child = vertical_parent_has_block_flow_child(block);
+    bool has_block_flow_child = layout_vertical_parent_has_block_flow_child(block);
     // Vertical table cells defer geometry publication until track sizing, so
     // their surrogate y offsets still identify forced-break columns here.
     bool has_explicit_baseline_child =
@@ -3893,8 +3893,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 logical_block_flow = block_box.pad_border_h;
             }
             logical_inline_flow = flow_height + block_box.pad_border_v;
-        } else if (compute_vertical_block_child_inline_extent(block,
-                                                               &normal_block_inline_extent)) {
+        } else if (layout_compute_vertical_in_flow_child_inline_extent(
+                       block, &normal_block_inline_extent)) {
             has_normal_block_child = true;
             bool sideways_rl_rtl =
                 layout_element_css_writing_mode(block->as_element()) ==
@@ -3909,7 +3909,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 }
             }
             if (sideways_rl_rtl &&
-                !vertical_parent_has_block_flow_child(block) &&
+                !layout_vertical_parent_has_block_flow_child(block) &&
                 has_direct_text) {
                 normal_block_inline_extent += lycon->block.max_width;
             }
@@ -5168,7 +5168,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             if ((block->display.inner == CSS_VALUE_FLOW || block->display.inner == CSS_VALUE_FLOW_ROOT) && !is_orphaned_table_internal) {
                 DomElement* block_elem = block->as_element();
                 if (block_elem && wrap_orphaned_table_children(lycon, block_elem)) {
-                    child = block->first_child;
+                    // fixup changes the DOM child chain; the retained view chain still describes the pre-fixup tree.
+                    child = block_elem->first_child;
                 }
             }
             if (block->display.inner == CSS_VALUE_FLOW || block->display.inner == CSS_VALUE_FLOW_ROOT || is_orphaned_table_internal) {

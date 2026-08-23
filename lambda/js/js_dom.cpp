@@ -354,12 +354,93 @@ static DomNode* js_dom_mutation_source_parent(DomNode* parent) {
     return parent;
 }
 
-static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent) {
+static DomNode* js_dom_table_fixup_significant_sibling(DomNode* child,
+                                                       bool forward) {
+    for (DomNode* sibling = child ? (forward ? child->next_sibling
+                                             : child->prev_sibling) : nullptr;
+         sibling; sibling = forward ? sibling->next_sibling : sibling->prev_sibling) {
+        if (sibling->is_text()) {
+            if (!layout_dom_text_has_non_whitespace(sibling->as_text())) continue;
+            return sibling;
+        }
+        if (!sibling->is_element()) return sibling;
+        DisplayValue display = resolve_display_value((void*)sibling);
+        if (layout_display_is_none(display)) continue;
+        return sibling;
+    }
+    return nullptr;
+}
+
+static bool js_dom_table_fixup_cells_only_descendants(DomNode* node,
+                                                       bool* has_cell) {
+    if (!node || !node->is_element()) return false;
+    for (DomNode* child = node->as_element()->first_child; child;
+         child = child->next_sibling) {
+        if (child->is_text()) {
+            if (!layout_dom_text_has_non_whitespace(child->as_text())) continue;
+            return false;
+        }
+        if (!child->is_element()) return false;
+        CssEnum display = resolve_display_value((void*)child).inner;
+        if (display == CSS_VALUE_TABLE_CELL) {
+            if (has_cell) *has_cell = true;
+            continue;
+        }
+        if (display != CSS_VALUE_TABLE_ROW &&
+            display != CSS_VALUE_TABLE_ROW_GROUP &&
+            display != CSS_VALUE_TABLE_HEADER_GROUP &&
+            display != CSS_VALUE_TABLE_FOOTER_GROUP) {
+            return false;
+        }
+        if (!child->as_element()->is_table_fixup() ||
+            !js_dom_table_fixup_cells_only_descendants(child, has_cell)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool js_dom_table_fixup_is_cells_only_run(DomNode* node) {
+    if (!node || !node->is_element() || !node->as_element()->is_table_fixup()) {
+        return false;
+    }
+    bool has_cell = false;
+    return js_dom_table_fixup_cells_only_descendants(node, &has_cell) && has_cell;
+}
+
+static bool js_dom_removal_merges_table_fixup_runs(DomElement* parent,
+                                                  DomNode* child) {
+    if (!parent || !child ||
+        resolve_display_value((void*)parent).outer != CSS_VALUE_INLINE) {
+        return false;
+    }
+    DomNode* previous = js_dom_table_fixup_significant_sibling(child, false);
+    DomNode* next = js_dom_table_fixup_significant_sibling(child, true);
+    bool previous_cells = js_dom_table_fixup_is_cells_only_run(previous);
+    bool next_cells = js_dom_table_fixup_is_cells_only_run(next);
+    return previous_cells && next_cells;
+}
+
+static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent,
+                                                        DomNode* changed_child = nullptr) {
     DomNode* source_parent = js_dom_mutation_source_parent(
         static_cast<DomNode*>(parent));
     if (!source_parent || !source_parent->is_element()) return nullptr;
     DomElement* source_element = source_parent->as_element();
-    layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+    bool changes_table_structure = !changed_child || !changed_child->is_element();
+    bool merges_table_fixup_runs = false;
+    if (changed_child && changed_child->is_element()) {
+        DisplayValue display = resolve_display_value((void*)changed_child);
+        changes_table_structure = is_table_internal_display(display.inner);
+        merges_table_fixup_runs = js_dom_removal_merges_table_fixup_runs(
+            source_element, changed_child);
+    }
+    if (changes_table_structure || merges_table_fixup_runs) {
+        // table-internal removal changes the fixup input; rebuild the generated
+        // boxes so the next layout sees the authored table structure. Removing
+        // a separator between two cell-only runs has the same effect.
+        layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+    }
     return source_element;
 }
 
@@ -13399,7 +13480,7 @@ static bool js_dom_text_is_backed_child(DomElement* parent, DomText* text) {
 
 static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return false;
-    parent = js_dom_prepare_children_for_mutation(parent);
+    parent = js_dom_prepare_children_for_mutation(parent, child);
     if (!parent || child->parent != parent) return false;
     if (!child->is_element()) {
         if (child->is_text()) {
