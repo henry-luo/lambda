@@ -261,9 +261,17 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
     bool is_word_start, uint32_t* out) {
     if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
         switch (codepoint) {
+        case 0x01C4: // uppercase DZ with caron has titlecase ǅ
+        case 0x01C5:
         case 0x01C6: out[0] = 0x01C5; return 1;
+        case 0x01C7: // uppercase LJ has titlecase ǈ
+        case 0x01C8:
         case 0x01C9: out[0] = 0x01C8; return 1;
+        case 0x01CA: // uppercase NJ has titlecase ǋ
+        case 0x01CB:
         case 0x01CC: out[0] = 0x01CB; return 1;
+        case 0x01F1: // uppercase DZ has titlecase ǲ
+        case 0x01F2:
         case 0x01F3: out[0] = 0x01F2; return 1;
         }
     }

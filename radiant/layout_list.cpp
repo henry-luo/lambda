@@ -107,27 +107,42 @@ static bool get_element_counter_set_value(DomElement* elem, const char* counter_
     return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_SET,
                                               counter_name, 0, out_value);
 }
+
+static bool is_html_list_container_tag(NameId tag);
+
 // DFS walk: calculate the dynamic initial value for a reversed counter.
 // Skips subtrees that create a new scope (counter-reset) for the same counter.
 // Per CSS Lists 3 §4.4.2: the last non-zero increment is added after the walk.
 // Returns true if a counter-set was encountered (caller should stop walking).
 static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_name,
-                                      int* total, int* last_nonzero, int* set_value) {
+                                      int* total, int* last_nonzero, int* set_value,
+                                      bool include_implicit_reversed_list_item) {
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
+        // HTML list containers establish an implicit list-item scope even when
+        // no authored counter-reset declaration is present.
+        if (include_implicit_reversed_list_item &&
+            is_html_list_container_tag(elem->tag_id)) {
+            continue;
+        }
         // skip subtree if this element resets the same counter (new scope)
         if (element_resets_counter(elem, counter_name)) continue;
         // CSS Lists 3 §4.4.2: negate increments for a reversed counter and
         // retain the last non-zero value for the post-walk correction.
         int inc = 0;
         bool has_increment = get_element_counter_inc(elem, counter_name, &inc);
+        if (!has_increment && include_implicit_reversed_list_item &&
+            elem->tag_id == MARKUP_NAME_LI) {
+            inc = -1;
+            has_increment = true;
+        }
         int increment_negated = -inc;
         if (has_increment && increment_negated != 0) {
             *last_nonzero = increment_negated;
         }
-        // Per CSS Lists 3 §4.4.2, a counter-set contributes its value before
-        // the final correction; its same-element increment is not added here.
+        // CSS Lists 3 §4.4.2: a counter-set stops the walk before this element's
+        // increment is added; the final correction still uses its last value.
         int sv = 0;
         if (get_element_counter_set_value(elem, counter_name, &sv)) {
             *set_value = sv;
@@ -135,7 +150,10 @@ static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_na
         }
         *total += increment_negated;
         // recurse into children; stop if counter-set found in subtree
-        if (sum_reversed_counter_incs(elem, counter_name, total, last_nonzero, set_value)) return true;
+        if (sum_reversed_counter_incs(elem, counter_name, total, last_nonzero,
+                                      set_value, include_implicit_reversed_list_item)) {
+            return true;
+        }
     }
     return false;
 }
@@ -269,35 +287,12 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     // using the same DFS algorithm as CSS counter-reset: reversed(list-item)
     if (is_reversed_ol && start_value == 0) {
         int total = 0, last_nz = 0, set_val = 0;
-        // Account for implicit list-item auto-increment on LIs:
-        // LIs without explicit counter-increment get implicit -1 (reversed)
-        for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
-            if (!child->is_element()) continue;
-            DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
-            // skip subtree if it resets list-item (new scope)
-            if (element_resets_counter(child_elem, "list-item")) continue;
-            // check explicit counter-increment
-            int inc = 0;
-            bool has_explicit = get_element_counter_inc(child_elem, "list-item", &inc);
-            if (has_explicit) {
-                if (inc != 0) {
-                    total += inc;
-                    last_nz = inc;
-                }
-            } else if (child_elem->tag_id == MARKUP_NAME_LI) {
-                // implicit list-item -1 for reversed OL
-                total += -1;
-                last_nz = -1;
-            }
-            // check counter-set
-            int sv = 0;
-            if (get_element_counter_set_value(child_elem, "list-item", &sv)) {
-                set_val = sv;
-                break;
-            }
-        }
-        if (last_nz != 0) {
-            int initial = -(total + last_nz) + set_val;
+        bool has_set = sum_reversed_counter_incs(
+            dom_elem, "list-item", &total, &last_nz, &set_val, true);
+        if (last_nz != 0 || has_set) {
+            // CSS Lists 3 §4.4.2: the shared walk already negates implicit and
+            // explicit increments and omits the increment on a counter-set node.
+            int initial = total + last_nz + set_val;
             char set_spec2[64];
             snprintf(set_spec2, sizeof(set_spec2), "list-item %d", initial);
             counter_set(lycon->counter_context, set_spec2);
@@ -324,7 +319,8 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
         const char* rev_name = get_reversed_counter_name(func);
         if (!rev_name) return;
         int total = 0, last_nz = 0, set_val = 0;
-        bool has_set = sum_reversed_counter_incs(dom_elem, rev_name, &total, &last_nz, &set_val);
+        bool has_set = sum_reversed_counter_incs(dom_elem, rev_name, &total, &last_nz,
+                                                &set_val, false);
         if (last_nz == 0 && !has_set) return; // no non-zero increments and no counter-set found
         int initial = total + last_nz + set_val;
         char set_spec[128];
@@ -364,6 +360,31 @@ bool layout_marker_is_outside(View* view) {
     // CSS Lists 3 §3: outside markers paint beside the principal box and do not
     // contribute to its in-flow size; inside markers remain ordinary inline content.
     return marker_prop && marker_prop->is_outside;
+}
+
+bool layout_list_item_has_in_flow_content(DomElement* element) {
+    if (!element) return false;
+    // CSS Lists 3: marker separation is content followed by a collapsible
+    // gap; generated content therefore keeps that gap from being trailing.
+    if (dom_element_has_before_content(element) ||
+        dom_element_has_after_content(element)) {
+        return true;
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            if (layout_text_node_has_content(child)) return true;
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        DisplayValue child_display = resolve_display_value(child);
+        if (layout_display_is_none(child_display) ||
+            layout_element_is_abs_or_fixed(child_elem)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 static float list_marker_bullet_inline_size(float font_size, bool is_outside,
@@ -520,6 +541,14 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
             radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_text));
         }
     }
+    if (!marker_prop->has_explicit_content && !is_string_marker &&
+        marker_prop->text_content && font_handle) {
+        size_t marker_length = strlen(marker_prop->text_content);
+        if (marker_length > 0 && marker_prop->text_content[marker_length - 1] == ' ') {
+            TextExtents space = font_measure_text(font_handle, " ", 1);
+            marker_prop->trailing_space_width = space.width;
+        }
+    }
     // CSS Lists 3 §4.2: compute marker width from content
     // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
     if (marker_prop->is_image_marker) {
@@ -622,10 +651,14 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     // CSS 2.1 §12.5: list-style-type is inherited. Check element first, then parent.
     CssEnum effective_list_style = block->blk ? block->block()->list_style_type : (CssEnum)0;
     if (effective_list_style == 0) {
-        // Inherit from parent <ol>/<ul> element
-        DomElement* parent_elem = dom_elem->parent_element();
-        if (parent_elem && parent_elem->blk) {
-            effective_list_style = parent_elem->block()->list_style_type;
+        // CSS Lists 3 §4.1: list-style-type inherits through every inline
+        // ancestor, so an intervening span must not hide its ordered-list value.
+        for (DomElement* ancestor = dom_elem->parent_element(); ancestor;
+             ancestor = ancestor->parent_element()) {
+            if (ancestor->blk && ancestor->block()->list_style_type != 0) {
+                effective_list_style = ancestor->block()->list_style_type;
+                break;
+            }
         }
         if (effective_list_style == 0) {
             effective_list_style = CSS_VALUE_DISC;
@@ -753,6 +786,15 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         if (marker_elem) {
             block->pseudo->marker = marker_elem;
             block->pseudo->marker_generated = true;
+            MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(marker_elem->blk);
+            if (marker_prop && !is_outside_position &&
+                marker_prop->trailing_space_width > 0.0f &&
+                !layout_list_item_has_in_flow_content(dom_elem)) {
+                // CSS Text 3 §4.1.3: an empty inside list item's default
+                // marker separator is collapsible at the line end.
+                marker_prop->width -= marker_prop->trailing_space_width;
+                marker_prop->trailing_space_trimmed = true;
+            }
             sync_marker_line_height(lycon, block,
                                     reinterpret_cast<MarkerProp*>(marker_elem->blk),
                                     marker_font_size);

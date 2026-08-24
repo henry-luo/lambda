@@ -167,6 +167,13 @@ static void bidi_count_views(View* view, int line_number, int depth,
         }
         if (current->view_type == RDT_VIEW_INLINE) {
             counts->spans++;
+            if (layout_inline_span_isolate(
+                    lam::view_require<RDT_VIEW_INLINE>(current))) {
+                // CSS Writing Modes: an isolate participates in the parent
+                // paragraph as one atomic inline item, not as its text runs.
+                counts->chars++;
+                return false;
+            }
             if (current_depth > counts->max_depth) counts->max_depth = current_depth;
             return true;
         }
@@ -271,6 +278,16 @@ static void bidi_fill_views(View* view, int line_number, int depth,
             span_info->max_visual = -1;
             span_info->left_edge = bidi_span_edge_width(span_info->span, true);
             span_info->right_edge = bidi_span_edge_width(span_info->span, false);
+            bool isolate = layout_inline_span_isolate(span_info->span);
+            if (isolate) {
+                BidiCharFragment* fragment = &chars[(*char_cursor)++];
+                fragment->atomic_view = static_cast<View*>(span_info->span);
+                fragment->codepoint = span_info->span->blk->direction == CSS_VALUE_RTL
+                    ? 0x0627 : 0x0041;
+                fragment->width = span_info->span->width;
+                span_info->logical_end = *char_cursor - 1;
+                continue;
+            }
             bidi_fill_views(span_info->span->first_child, line_number, depth + 1,
                             chars, rects, spans, char_cursor, rect_cursor, span_cursor,
                             direction);
@@ -398,7 +415,15 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         if (logical >= 0 && logical < char_count) {
             chars[logical].visual_x = cursor;
             if (chars[logical].atomic_view) {
-                chars[logical].atomic_view->x = cursor;
+                View* atomic_view = chars[logical].atomic_view;
+                float atomic_shift = cursor - atomic_view->x;
+                atomic_view->x = cursor;
+                if (atomic_shift != 0.0f &&
+                    atomic_view->view_type == RDT_VIEW_INLINE) {
+                    // moving an isolated inline must carry its generated text
+                    // with it; otherwise only the wrapper changes position.
+                    layout_shift_view_children(atomic_view, atomic_shift, 0.0f);
+                }
             }
             if (chars[logical].width > 0.0f) cursor += chars[logical].width;
         }

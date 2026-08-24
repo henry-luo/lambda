@@ -27,7 +27,7 @@ extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename
 
 static void align_and_discard_phantom_inline_line(LayoutContext* lycon);
 
-static bool line_has_prior_flow_content(const Linebox* line) {
+bool line_has_prior_flow_content(const Linebox* line) {
     return line &&
         (line->last_text_rect ||
          line->has_replaced_content ||
@@ -1533,7 +1533,6 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
         origin, pseudo, lycon->counter_context, lycon->scratch.arena);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
     if (!content) content = "";
-
     DomNode* first = pseudo_element->first_child;
     if (first && first->is_text()) {
         DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
@@ -5748,6 +5747,23 @@ static bool layout_vertical_whitespace_inline_anchor(ViewText* text,
     return true;
 }
 
+static bool layout_vertical_subtree_has_isolated_inline(View* view) {
+    while (view) {
+        if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+            if (layout_inline_span_isolate(span)) {
+                return true;
+            }
+            if (span->first_child &&
+                layout_vertical_subtree_has_isolated_inline(span->first_child)) {
+                return true;
+            }
+        }
+        view = view->next();
+    }
+    return false;
+}
+
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
                                                float inline_extent,
@@ -5797,6 +5813,9 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 // CSS Writing Modes centers the glyph area in the vertical line
                 ViewBlock* text_block = layout_nearest_block_ancestor(
                     text->parent_view());
+                bool line_has_isolated_inline = text_block &&
+                    layout_vertical_subtree_has_isolated_inline(
+                        text_block->first_child);
                 bool line_axis_already_trimmed = text_block && text_block->blk &&
                     text_block->block()->text_box_trim_applied;
                 float inline_leading = !line_axis_already_trimmed &&
@@ -5811,9 +5830,12 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                     text_parent_block &&
                     layout_block_inline_axis_is_vertical(text_parent_block) !=
                         layout_block_inline_axis_is_vertical(text_block);
+                // CSS Writing Modes 4 §4.2: an isolated vertical inline uses
+                // the central baseline; retain the orthogonal inline-block
+                // case while extending it to marker-like isolated runs.
                 bool vertical_central = use_central_baseline &&
                     !reverse_inline_axis &&
-                    mixed_vertical_baseline &&
+                    (mixed_vertical_baseline || line_has_isolated_inline) &&
                     (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL);
                 bool center_painted_vertical_glyph = vertical_central &&
                     has_painted_codepoint;
@@ -5871,9 +5893,16 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
             float logical_height = span->height;
             ViewBlock* span_block = layout_nearest_block_ancestor(
                 span->parent_view());
+            bool line_has_isolated_inline = span_block &&
+                layout_vertical_subtree_has_isolated_inline(
+                    span_block->first_child);
+            // CSS Writing Modes 4 §4.2: an isolated vertical inline uses the
+            // central baseline; retain existing inline-block baseline behavior
+            // while extending it to marker-like isolated runs.
             bool vertical_central = use_central_baseline &&
                 !reverse_inline_axis &&
-                span_block && span_block->view_type == RDT_VIEW_INLINE_BLOCK &&
+                (line_has_isolated_inline ||
+                 (span_block && span_block->view_type == RDT_VIEW_INLINE_BLOCK)) &&
                 (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL);
             float logical_y = vertical_central
                 ? (block_extent - logical_height) / 2.0f
@@ -8534,9 +8563,27 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.advance_x = effective_left;
             }
             bool parent_nowrap = false;
+            View* nowrap_descendant = static_cast<View*>(block);
             for (DomNode* cur = block->parent; cur; cur = cur->parent) {
                 if (!cur->is_element()) break;
                 DomElement* elem = lam::dom_require_element(cur);
+                if (elem->view_type == RDT_VIEW_INLINE) {
+                    ViewSpan* inline_parent = lam::view_require<RDT_VIEW_INLINE>(elem);
+                    // CSS Text: a nowrap inline box may still start on a new
+                    // line; only its prior in-flow content makes this child
+                    // part of an unbreakable sequence.
+                    bool has_prior_inline_content =
+                        inline_parent->first_placed_child() != nowrap_descendant;
+                    if (elem->blk && elem->block_mut()->white_space != 0) {
+                        CssEnum ws = elem->block()->white_space;
+                        if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
+                            parent_nowrap = has_prior_inline_content;
+                            break;
+                        }
+                    }
+                    nowrap_descendant = static_cast<View*>(inline_parent);
+                    continue;
+                }
                 if (elem->blk && elem->block_mut()->white_space != 0) {
                     CssEnum ws = elem->block()->white_space;
                     parent_nowrap = (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
@@ -8565,6 +8612,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 effective_left + margin_box_width <= effective_right) {
                 lycon->line.advance_x = effective_left;
             }
+            // CSS Text: a collapsible separator is a break opportunity before
+            // an atomic inline; include it in fit testing so overflow selects
+            // that opportunity, then line_break() removes the separator.
             if (lycon->line.advance_x + margin_box_width > effective_right && !parent_nowrap) {
                 if (!lycon->line.is_line_start && has_prior_flow_content) {
                     // CSS 2.1 §9.4.2: Break to next line if there's prior content
