@@ -15,7 +15,8 @@ lambda validate file.json            # Default schema
 
 ## Type System
 
-**Scalar Types:**
+Scalar Types:
+
 | Form | Meaning |
 |---|---|
 | `null bool int float decimal` | Primitives |
@@ -24,7 +25,8 @@ lambda validate file.json            # Default schema
 | `u8 u16 u32 u64` | Sized unsigned integers |
 | `f16 f32 f64` | Sized floats |
 
-**Container Types:**
+Container Types:
+
 | Form | Meaning |
 |---|---|
 | `range, 1 to 10` | Range (inclusive both ends; also "a" to "z") |
@@ -32,7 +34,8 @@ lambda validate file.json            # Default schema
 | `map, {key: 'symbol'}` | Map |
 | `element, <div class: bold, "text" <br>>` | Element |
 
-**Type Operators:**
+Type Operators:
+
 | Form | Meaning |
 |---|---|
 | `int \| string` | Union type |
@@ -49,7 +52,8 @@ lambda validate file.json            # Default schema
 | `{a: int, b: bool}` | Map type |
 | `<div id:symbol; <br>>` | Element type |
 
-**Type Declarations:**
+Type Declarations:
+
 | Form | Meaning |
 |---|---|
 | `type User = {name: string, age: int}` | Map type alias |
@@ -70,7 +74,8 @@ type Counter {
 type Circle : Shape { radius: float }   // Inheritance
 ```
 
-**Literals & Access:**
+Literals & Access:
+
 | Form | Meaning |
 |---|---|
 | `let p = <Point x: 1.0, y: 2.0>` | Object literal |
@@ -79,7 +84,8 @@ type Circle : Shape { radius: float }   // Inheritance
 | `c.double()` | Method call |
 | `<Point *:p, x: 5.0>` | Copy and override |
 
-**Type Checking (nominal only):**
+Type Checking (nominal only):
+
 | Form | Meaning |
 |---|---|
 | `p is Point` | true |
@@ -107,7 +113,8 @@ type Vec {
 
 ## Literals
 
-**Numbers:**
+Numbers:
+
 | Form | Meaning |
 |---|---|
 | `42` | Integer |
@@ -119,18 +126,20 @@ type Vec {
 | `inf` `nan` | Special values |
 | `0xFF` | Hexadecimal int literal |
 
-**Sized numeric literals (postfix suffix):**
+Sized numeric literals (postfix suffix):
+
 | Form | Meaning |
 |---|---|
 | `42i8` `-128i8` `1000i16` `100000i32` `100i64` | Signed |
 | `255u8` `60000u16` `3000000000u32` `1000u64` | Unsigned |
 | `0.5f16` `3.14f32` `2.7f64` | Float |
 
-**Strings & Symbols:**
+Strings & Symbols:
+
 | Form | Meaning |
 |---|---|
 | `"hello"` | String |
-| `"multi-line`<br>`string"` | Multi-line string |
+| `"multi-line string"` | Multi-line string — a literal newline may appear inside the quotes |
 | `'symbol'` | Symbol |
 | `symbol` | Unquoted symbol |
 | `'name' == "name"` | `false` — symbol is not string |
@@ -139,20 +148,23 @@ type Vec {
 
 `''` is invalid: empty symbols do not exist.
 
-**Binary:**
+Binary:
+
 | Form | Meaning |
 |---|---|
 | `b'\xDEADBEEF'` | Hex binary |
 | `b'\64QUVGRw=='` | Base64 binary |
 
-**DateTime:**
+DateTime:
+
 | Form | Meaning |
 |---|---|
 | `t'2025-01-01T14:30:00Z'` | DateTime |
 | `t'2025-04-26' is date` | Sub-type: date |
 | `t'10:30:00' is time` | Sub-type: time |
 
-**Member properties:**
+Member properties:
+
 | Form | Meaning |
 |---|---|
 | `dt.date` `dt.year` `dt.month` `dt.day` | Date parts |
@@ -160,27 +172,31 @@ type Vec {
 | `dt.weekday` `dt.yearday` `dt.week` `dt.quarter` | Derived |
 | `dt.unix` `dt.timezone` `dt.utc_offset` `dt.utc` `dt.local` | Zone / epoch |
 
-**Formatting:**
+Formatting:
+
 | Form | Meaning |
 |---|---|
 | `dt.format("YYYY-MM-DD")` | Pattern |
 | `dt.format('iso')` | Named format |
 
-**Constructors:**
+Constructors:
+
 | Form | Meaning |
 |---|---|
 | `datetime()` `today()` `justnow()` | Current date/time |
 | `datetime(2025, 4, 26, 10, 30)` | From parts |
 | `date(2025, 4, 26)` `time(10, 30, 45)` | Date / time only |
 
-**Collections:**
+Collections:
+
 | Form | Meaning |
 |---|---|
 | `[1, 2, 3]` | Array |
 | `{a: 1, b: 2}` | Map |
 | `<div id: "main">` | Element |
 
-**Indexing & Slicing:**
+Indexing & Slicing:
+
 | Form | Meaning |
 |---|---|
 | `arr[0]` | First element |
@@ -208,13 +224,15 @@ import xlink: 'http://www.w3.org/1999/xlink'
 
 ## Variables & Declarations
 
-**Let Expressions (immutable):**
+Let Expressions (immutable):
+
 | Form | Meaning |
 |---|---|
 | `(let x = 5, x + 1, x * 2)` | Single binding |
 | `(let a = 1, b = 2, a + b)` | Multiple bindings |
 
-**Let Statements (immutable):**
+Let Statements (immutable):
+
 | Form | Meaning |
 |---|---|
 | `let x = 42` | Immutable binding |
@@ -224,7 +242,8 @@ import xlink: 'http://www.w3.org/1999/xlink'
 | `let a = 1, b = 2` | Multiple bindings |
 | `x = 10` | ERROR E211: cannot reassign let binding |
 
-**Var Statements (mutable, `pn` only):**
+Var Statements (mutable, `pn` only):
+
 | Form | Meaning |
 |---|---|
 | `var x = 0` | Mutable variable |
@@ -237,7 +256,8 @@ import xlink: 'http://www.w3.org/1999/xlink'
 
 ## Operators
 
-**Arithmetic:**
+Arithmetic:
+
 | Operator | Meaning |
 |---|---|
 | `+` | addition |
@@ -248,12 +268,14 @@ import xlink: 'http://www.w3.org/1999/xlink'
 | `%` | modulo |
 | `**` | exponentiation |
 
-**Spread `*`:**
+Spread `*`:
+
 | Given | Expression | Result |
 |---|---|---|
 | `let a = [1, 2, 3]` | `(*a, *[10, 20])` | `(1, 2, 3, 10, 20)` |
 
-**Comparison:**
+Comparison:
+
 | Operator | Meaning |
 |---|---|
 | `==` | equal |
@@ -264,6 +286,7 @@ import xlink: 'http://www.w3.org/1999/xlink'
 | `>=` | greater or equal |
 
 `==` performs **structural deep equality** on all types:
+
 | Form | Meaning |
 |---|---|
 | `[1, 2] == [1, 2]` | true  (array) |
@@ -271,14 +294,16 @@ import xlink: 'http://www.w3.org/1999/xlink'
 | `[1] == [1.0]` | true  (numeric promotion) |
 | `(1 to 3) == [1, 2, 3]` | true  (cross-type sequence) |
 
-**Logical:**
+Logical:
+
 | Operator | Meaning |
 |---|---|
 | `and` | logical and |
 | `or` | logical or |
 | `not` | logical not |
 
-**Type & Set:**
+Type & Set:
+
 | Operator | Meaning |
 |---|---|
 | `is` | type check |
@@ -288,13 +313,15 @@ import xlink: 'http://www.w3.org/1999/xlink'
 | `&` | intersection |
 | `!` | exclusion |
 
-**Query:** type-based search
+Query: type-based search
+
 | Form | Meaning |
 |---|---|
 | `?   .?` | recursive descendant search |
 | `expr[T]` | child-level query (direct only) |
 
-**Vector Arithmetic:**
+Vector Arithmetic:
+
 | Expression | Result | |
 |---|---|---|
 | `1 + [2, 3]` | `[3, 4]` | scalar broadcast |
@@ -304,7 +331,8 @@ Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 ## Pipe Expressions
 
-**Pipe `|>` with current item `~`:**
+Pipe `|>` with current item `~`:
+
 | Form | Meaning |
 |---|---|
 | `[1,2,3] \|> ~ * 2` | [2,4,6] - map over items |
@@ -312,14 +340,16 @@ Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 | `users \|> ~.age` | [12,20,62] - extract field |
 | `['a','b'] \|> {i:~#, v:~}` | ~# = index/key |
 
-**Filter with `that`:**
+Filter with `that`:
+
 | Form | Meaning |
 |---|---|
 | `[1,2,3,4,5] that (~ > 3)` | [4,5] |
 | `users that (age >= 18) \|> ~.name` | filter then map |
 | `[1,2,3] \|> ~ ** 2 that (~ > 5) \|> sum` | 13 (4+9) |
 
-**Spreading in Array Literals:** pipe and filter results flatten
+Spreading in Array Literals: pipe and filter results flatten
+
 | Form | Meaning |
 |---|---|
 | `[1, [2,3] \|> ~, 4, 5]` | [1, 2, 3, 4, 5] |
@@ -330,24 +360,27 @@ Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 **Results in document order** (depth-first, pre-order).
 
-**Query `?` — attributes + all descendants:**
+Query `?` — attributes + all descendants:
+
 | Form | Meaning |
 |---|---|
-| `html?<img>` | all <img> at any depth |
-| `html?<div class: string>` | <div> with class attr |
+| `html?<img>` | all `<img>` at any depth |
+| `html?<div class: string>` | `<div>` with class attr |
 | `data?int` | all int values in tree |
 | `data?(int \| string)` | all int or string values |
 | `data?{name: string}` | maps with string 'name' |
 | `data?{status: "ok"}` | maps where status == "ok" |
 
-**Self-inclusive query `.?` — self + attributes + all descendants:**
+Self-inclusive query `.?` — self + attributes + all descendants:
+
 | Form | Meaning |
 |---|---|
 | `div.?<div>` | includes div itself if it matches |
 | `el.?int` | self + all int values in subtree |
 | `42.?int` | [42] — trivial self-match |
 
-**Child-level query `[T]` — direct attributes + children only (no recursion):**
+Child-level query `[T]` — direct attributes + children only (no recursion):
+
 | Form | Meaning |
 |---|---|
 | `[1, "a", 3, true][int]` | [1, 3] — int items |
@@ -372,14 +405,16 @@ Data type determines output format:
 
 ## Control Flow
 
-**If Expressions (parenthesized condition, else required):**
+If Expressions (parenthesized condition, else required):
+
 | Form | Meaning |
 |---|---|
 | `if (x > 0) "positive" else "non-positive"` | Simple |
 | `if (score >= 90) "A" else if (score >= 80) "B" else "C"` | Chained |
 | `if (x > 0) "pos" else { "neg" }` | Block `else` |
 
-**If Statements (block body, else optional):**
+If Statements (block body, else optional):
+
 | Form | Meaning |
 |---|---|
 | `if x > 0 { "positive" }` | No `else` |
@@ -410,7 +445,8 @@ match input {
 }
 ```
 
-**For Expressions:** (produce spreadable arrays — pipe/filter also spread, see above)
+For Expressions: (produce spreadable arrays — pipe/filter also spread, see above)
+
 | Expression | Result | |
 |---|---|---|
 | `for (x in [1, 2, 3]) x * 2` | `[2, 4, 6]` | |
@@ -454,13 +490,15 @@ for (o in os, c in cs on o.a==c.a and o.b==c.b) {...}  // multi-key
 for item in collection { transform(item) }
 ```
 
-**Procedural Control (in `pn`):**
+Procedural Control (in `pn`):
+
 | Form | Meaning |
 |---|---|
 | `var x = 0` | Mutable variable |
 | `while (c) { break; continue; return x }` | Loop and its jumps |
 
-**Assignment Targets (in `pn`):**
+Assignment Targets (in `pn`):
+
 | Form | Meaning |
 |---|---|
 | `x = 10` | Variable reassignment (var only) |
@@ -471,14 +509,15 @@ for item in collection { transform(item) }
 
 ## Functions
 
-**Function Declaration:**
+Function Declaration:
+
 | Form | Meaning |
 |---|---|
 | `fn add(a: int, b: int) int { a + b }` | Statement body |
 | `fn multiply(x: int, y: int) => x * y` | Expression body |
 | `let square = (x) => x * x` | Anonymous function |
 | `pn f(n) { var x = 0; while (x < n) { x = x + 1 }; x }` | Procedural function |
-| `pn advance(pos: float[], vel: float[], n: int) { … }` | Array parameters |
+| `pn advance(pos: float[], vel: float[], n: int) { ... }` | Array parameters |
 
 ## Concurrency (`pn` only)
 
@@ -506,7 +545,8 @@ exit cancels then joins. A `start` operand may not capture an outer `var` by
 reference—copy to `let` or use messages. Imported JS Promises are `wait`-able;
 exported Lambda `pn`s return Promises to JavaScript.
 
-**Advanced Features:**
+Advanced Features:
+
 | Form | Meaning |
 |---|---|
 | `fn f(x?:int)` | optional param |
@@ -519,7 +559,8 @@ exported Lambda `pn`s return Promises to JavaScript.
 
 Define named patterns for string validation and matching. Uses regex-like syntax integrated into the type system.
 
-**Definition:**
+Definition:
+
 | Form | Meaning |
 |---|---|
 | `type digits = \(d+)` | one or more digits |
@@ -527,7 +568,8 @@ Define named patterns for string validation and matching. Uses regex-like syntax
 | `type ws = \(s+)` | whitespace |
 | `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
 
-**Type check (`is`) — full-match semantics:**
+Type check (`is`) — full-match semantics:
+
 | Form | Meaning |
 |---|---|
 | `"hello@world.com" is email` | true |
@@ -549,6 +591,7 @@ Given `type SymIdent = \symbol(a w*)`:
 | `"foo" is SymIdent` | `false` — string value, symbol pattern |
 
 **Inline (unnamed) patterns** work anywhere a type does:
+
 | Form | Meaning |
 |---|---|
 | `"abc" is \(a+)` | `true` |
@@ -578,6 +621,7 @@ Given `type SymIdent = \symbol(a w*)`:
 **Range:**
 
 `s to e` creates a range from `s` to `e` (inclusive both ends). Bounds are exact integers or single-codepoint strings. `range(s,e,step)` creates a range with custom step (exclusive end).
+
 | Form | Meaning |
 |---|---|
 | `1 to 5` | [1, 2, 3, 4, 5] |
@@ -591,14 +635,16 @@ Given `type SymIdent = \symbol(a w*)`:
 All three accept both plain strings and named patterns as the second argument:
 Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
 
-**`replace(str, pattern_or_string, replacement)`**
+`replace(str, pattern_or_string, replacement)`
+
 | Form | Result |
 |---|---|
 | `replace("a1b2c3", digit, "X")` | `"aXbXcX"` |
 | `replace("hello   world", ws, " ")` | `"hello world"` |
 | `replace("abc", "b", "")` | `"ac"` |
 
-**`split(str, pattern_or_string)`**
+`split(str, pattern_or_string)`
+
 | Form | Result |
 |---|---|
 | `split("a,b,c", ",")` | `["a", "b", "c"]` |
@@ -612,10 +658,11 @@ Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
 > `["abc"]`, and the keep-delimiters form returns `["a1b2c3"]` unchanged.
 > `replace` and `find` handle patterns correctly. Tracked as LR09-8.
 
-**`find(str, pattern_or_string)` → `[{value, index}, …]`**
+`find(str, pattern_or_string)` → `[{value, index}, ...]`
+
 | Form | Result |
 |---|---|
-| `find("a1b22c333", digits)` | `[{value:"1", index:1}, {value:"22", index:3}, …]` |
+| `find("a1b22c333", digits)` | `[{value:"1", index:1}, {value:"22", index:3}, ...]` |
 | `find("hello world", "lo")` | `[{value: "lo", index: 3}]` |
 
 **Collection:**
@@ -649,7 +696,8 @@ format(data, 'yaml')                // Format as YAML
 
 ## Modules, Imports & Exports
 
-**Import Syntax:**
+Import Syntax:
+
 | Form | Meaning |
 |---|---|
 | `import module_name` | Built-in module |
@@ -686,14 +734,16 @@ v is Vec2      // true
 ```
 ## Error Handling
 
-**Creating Errors:**
+Creating Errors:
+
 | Form | Meaning |
 |---|---|
 | `error("Message")` | Message only |
 | `error("load failed", inner_err)` | With an inner error |
 | `error({code: 304, message: "div by zero"})` | Structured payload |
 
-**Error Return Types (`T^E`):**
+Error Return Types (`T^E`):
+
 | Form | Meaning |
 |---|---|
 | `fn parse(s: string) int^ {...}` | int or any error |
