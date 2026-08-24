@@ -455,12 +455,7 @@ For Expressions: (produce spreadable arrays — pipe/filter also spread, see abo
 | `[for (i in 1 to 2) for (j in 1 to 2) i*j]` | `[1, 2, 2, 4]` | nested for-expressions flatten |
 | `[for (x in []) x]` | `[]` | empty for produces spreadable null, which is skipped |
 | `for (k at {a: 1, b: 2}) k` | `['a', 'b']` | iterate a map by key |
-| `for (k, v at {a: 1, b: 2}) k ++ v` | `['a1', 'b2']` | key and value — **see note** |
-
-> **Known defect.** The paired `at` form binds **both** names to the key, so
-> `for (k, v at {a: 1, b: 2}) k ++ v` currently yields `['aa', 'bb']`, not
-> `['a1', 'b2']`. The bare `for k, v in c` form binds key and value correctly.
-> Tracked as LR02-8.
+| `for (k, v at {a: 1, b: 2}) k ++ v` | `['a1', 'b2']` | key and value (S8.1.3) |
 
 **For Expression Clauses:** `let`, `where`, `group by`, `order by`, `limit`, `offset`
 ```lambda

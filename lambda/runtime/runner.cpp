@@ -80,6 +80,13 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
             char previous = tp->source[--cursor];
             if (previous == ' ' || previous == '\t') continue;
             separated_relation = previous == '<' || previous == '>';
+            // '=>' and '|>' end in '>' but are not relations; without this
+            // guard an arrow-body error ('=> return x') was rewritten into the
+            // element-ambiguity diagnosis, hiding the parser's real repair.
+            if (separated_relation && previous == '>' && cursor > 0 &&
+                    (tp->source[cursor - 1] == '=' || tp->source[cursor - 1] == '|')) {
+                separated_relation = false;
+            }
             break;
         }
     }

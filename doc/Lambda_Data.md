@@ -1072,7 +1072,7 @@ let report = {
     items: (for (sale in sales) {
         id: sale.id,
         amount: sale.amount,
-        formatted: "$" ++ string(sale.amount)
+        formatted: "$" ++ sale.amount
     })
 }
 ```

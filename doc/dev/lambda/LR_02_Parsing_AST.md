@@ -175,7 +175,7 @@ Errors are accumulated, not fatal: `record_type_error` (`build_ast.cpp:330`) and
 
 ## Known Issues & Future Improvements
 
-Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR02-1 – LR02-10** (open/partial; LR02-8 through LR02-10 were found during verification, not extracted from this section) and **LR02-R1 – LR02-R6** (resolved, Appendix A).
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR02-1 – LR02-12** (open/partial; LR02-8 through LR02-12 were found during verification/implementation, not extracted from this section) and **LR02-R1 – LR02-R9** (resolved, Appendix A).
 
 The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 

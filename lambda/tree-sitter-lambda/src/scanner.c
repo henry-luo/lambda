@@ -66,11 +66,30 @@ enum TokenType {
     // `123abc` and `0b1010` LEXICAL errors instead of silent splits into a
     // number plus a juxtaposed statement.
     NUM_BOUNDARY,
+    // S16.6.6: emitted (zero-width) before an EXPRESSION BODY only when the
+    // word there is not `return`/`break`/`continue`. Those are statements, and
+    // the four unbraced body positions are expression positions. Without this
+    // the word-rule fallback lexes them as plain identifiers wherever the
+    // keyword token is not valid, so `if (c) return -1` silently misparsed as
+    // a subtraction from a variable named `return` (LR02-12). Scoped to those
+    // four positions, not to every identifier, to keep the scanner's blast
+    // radius small (see the §7.17 note on scanner fragility).
+    EXPR_BODY_START,
     // Never emitted. Tree-sitter marks every external token valid during error
     // recovery; this sentinel is valid nowhere in the grammar, so seeing it
     // means recovery is running and the scanner should decline.
     ERROR_SENTINEL,
 };
+
+// The statement keywords S16.6.6 bars from an unbraced expression body.
+static bool is_control_statement_word(const char *word, unsigned n) {
+    switch (n) {
+        case 5: return memcmp(word, "break", 5) == 0;
+        case 6: return memcmp(word, "return", 6) == 0;
+        case 8: return memcmp(word, "continue", 8) == 0;
+        default: return false;
+    }
+}
 
 void *tree_sitter_lambda_external_scanner_create(void) {
     return NULL;  // stateless by design; see the §7.17 note below
@@ -262,6 +281,31 @@ bool tree_sitter_lambda_external_scanner_scan(
         // advanced past it, and mark_end sits before it.
         slash_pending = true;
         break;
+    }
+
+    // S16.6.6: veto an unbraced expression body that starts with a statement
+    // keyword. Zero-width and stateless — a pure function of the lookahead —
+    // so it carries none of the §7.17 carry-stale-state hazard. Placed after
+    // whitespace/comment skipping because the keyword follows a space
+    // (`if (c) return`), and mark_end above already fixed the zero-width
+    // position. Withholding the token kills the expression-body alternative,
+    // which is exactly the rejection S16.6.6 requires.
+    if (valid_symbols[EXPR_BODY_START] && !slash_pending) {
+        if (is_identifier_start(lexer->lookahead)) {
+            char word[16];
+            unsigned n = 0;
+            while (is_identifier_continue(lexer->lookahead)) {
+                if (n + 1 < sizeof(word)) { word[n] = (char)lexer->lookahead; }
+                n++;
+                lexer->advance(lexer, false);
+            }
+            if (n < sizeof(word)) {
+                word[n] = '\0';
+                if (is_control_statement_word(word, n)) { return false; }
+            }
+        }
+        lexer->result_symbol = EXPR_BODY_START;
+        return true;
     }
 
     // NOT_PAREN gates the bare spelling of `if`/`while` heads (S16.6.2) and the

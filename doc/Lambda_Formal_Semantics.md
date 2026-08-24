@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 12.0.0 (2026-08-24)
+**Spec version:** 14.1.0 (2026-08-24)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -860,6 +860,17 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   *Whatever `for…in` walks, `in` tests.* [C5.3a]
 - **S8.1.2** On elements, `in` ranges over attribute values then children;
   `at` ranges over attribute keys — one meaning across the map/list duality.
+- **S8.1.3*** **Axis and arity are independent.** The axis (`in`/`at`) selects
+  WHICH members are walked; the arity of the binding selects the PROJECTION
+  over those same members. One name binds the axis's own element — `for (x in
+  c)` a value, `for (k at c)` a name. Two names bind `(key, value)` of each
+  walked member, on either axis: `for (k, v in c)` and `for (k, v at c)`.
+  The axis still decides membership, so the paired forms are not synonyms —
+  on an element `for (k, v at e)` yields attribute pairs only, while
+  `for (k, v in e)` also walks children; on an array `for (k, v at a)` is
+  empty because an `IntKey` is not a name (S8.2.2v2). S8.1.1's mirror law is
+  unaffected: it equates the single-name iteration with membership on the same
+  axis, and the paired form walks that identical member set. [C5.3a]
 
 ### S8.2 The key space
 
@@ -1539,6 +1550,47 @@ below by its section.
   and `while` are procedural-only; a `for` is a comprehension in functional
   context and an effect loop in procedural context. [Design_Syntax §5.6,
   S12.1]
+- **S16.6.6*** Control statements require braces. `return`, `break`, and
+  `continue` are statements and are admitted **only inside a braced body**.
+  Every unbraced control body — the paren-form `if`/`for` body, an `else`
+  body, a `case T:` arm, and every `=>` arrow body — is an expression
+  position and rejects them (`raise` is an expression and remains valid
+  there). A braced block in any of those positions is the statement spelling
+  and admits them: `if (c) { return x }`, `case T: { return x }`. Two
+  grounds: the C-family unbraced guard interacts fatally with the greedy
+  return (S16.2.5) — `if (c) return` ⏎ `cleanup()` would silently parse as
+  `return cleanup()` — and the paren/bare split (S16.6.1) is precisely the
+  expression/statement split, which a statement body in the paren spelling
+  would dissolve. Each rejection names the repair. [Design_Syntax §6 point
+  35]
+- **S16.6.7*** A procedure has exactly **one body form**: the braced
+  statement block `pn name(...) { ... }`. `=>` bodies are fn-only, named or
+  anonymous — an expression-bodied procedure is redundant with `fn` plus
+  S16.6.6, and the reference grammar never accepted it. [Design_Syntax §6
+  point 36]
+- **S16.6.8*** A **procedural block is a statement, never an expression**.
+  A braced block whose top level contains a pn-only construct (`return`,
+  `break`, `continue`, `var`, assignment) is rejected in every expression
+  position: after `case T:`, in tuple/argument/operand position, as an `=>`
+  arrow body. Ground: an expression must produce a value, and a procedural
+  block may not — `({ return 99 }, 123)` returned 99 from the enclosing
+  procedure and the tuple never existed; the expression syntax was a lie.
+  Functional blocks (`{ 1; 2 }`, `{ let r = f(x); g(r) }`) and maps remain
+  expressions everywhere, so `case T: { … }` stays legal and — by this very
+  ruling — can never conceal a statement: after `:`, braces are a map or a
+  pure block, nothing else. Classification is by interior, extending
+  S16.4.1v2's doctrine from brace-disambiguation to statement-ness.
+  [Design_Syntax §6 point 37]
+- **S16.6.9*** **Branch homogeneity.** An `if`/`else` chain or `match` is
+  either a **value form** — every branch an expression, where functional
+  blocks, maps, and diverging `raise` arms all count as expressions — or a
+  **control form** — every branch a procedural block, the whole form a
+  statement that yields no value and is illegal in value position. Mixtures
+  (`if (c) { return 1 } else 0`, a braced-statement `case` arm beside a
+  `default: expr` arm) are rejected. Match surface reading: `:` arms are
+  value arms, braced arms are control arms. The fn/pn classification rides
+  the S12.1 effect boundary and lives in semantic analysis per S16.6.5.
+  [Design_Syntax §6 point 38]
 
 ### S16.7 Script top level
 
@@ -1657,7 +1709,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
 | S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
-| S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership still tests the whole key space (`1 at [10,20,30]` returns true); iteration conforms. |
+| S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
+| S8.1.3 | **Conformant as of 2026-08-24.** `key_only` redirected the primary binding to the key even when a paired binding was present, so `for (k, v at c)` bound BOTH names to the key — a silent wrong answer, and the three worked examples in `doc/Lambda_Expr_Stam.md` had never been run. Fixed in `build_ast` by gating `key_only` on the absence of `index_name`; `key_filter` is untouched, so the axis still restricts membership (paired `at` on an element yields attribute pairs only, on an array yields nothing). Both tiers read the same flag, so one fix covers MIR Direct and the interpreter. |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
@@ -1674,6 +1727,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24.** Ratified 2026-08-21 and implemented since: `test/c_s16_conformance.sh` passes 123/123 against the production C recursive-descent parser and `test/ts_s16_conformance.sh` 118/118 against the Tree-sitter reference grammar. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Both defects this row previously named are fixed: `return` ⏎ *value* now returns the value (S16.2.5), and the type scanners no longer continue on a line-start `!` (S16.2.3). Residue: the `!` fix must still be applied to the four sibling Tree-sitter scanners (`primary_type_pattern_token`, `return_type_token`, `view_pattern_token`, `content_type_token`) — O3 in [Design_Syntax §6](../vibe/Lambda_Design_Syntax.md); and a comment can defeat the line-start guard in Tree-sitter only, one-directionally and benignly ([Design_Syntax §7.17](../vibe/Lambda_Design_Syntax.md)). The user-facing doc sweep (O4) is outstanding: 60 of 172 `lambda` code blocks in `Lambda_Expr_Stam.md`, `Lambda_Reference.md`, `Lambda_Cheatsheet.md`, and `Lambda_Func.md` no longer parse. |
 | S16.4.1v2 | **Conformant as of 2026-08-22.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
 | S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
+| S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (ratified and implemented together). The C parser rejects every unbraced control-statement body with a repair-naming diagnostic, and `parse_function_declaration` rejects `pn ... =>` outright — closing a §4.4 divergence where the C parser was the outlier (1 doc site migrated, 0 test/std uses). The Tree-sitter reference grammar enforces the same bar via a zero-width `_expr_body_start` scanner guard withheld before `return`/`break`/`continue`, scoped to the four unbraced body positions rather than to every identifier; without it the word-rule fallback lexed those keywords as identifiers, so `if (c) return -1` misparsed as a subtraction rather than being rejected. A misfiring `runner.cpp` heuristic that rewrote arrow-body errors into the element-ambiguity diagnosis (the `>` of `=>` matched its relation walk-back) was guarded. Verified: C 140/140, Tree-sitter 135/135 on identical case sets; full 700-file `.ls` corpus cross-check shows zero movement (76 pre-existing failures before and after). |
+| S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (ratified and implemented same day). Enforced in `build_ast` semantic analysis per S16.6.5, reported as `E312`: `reject_procedural_block_operand` guards tuple/list/array elements, call arguments, binary operands and `=>` arrow bodies; `validate_match_branch_homogeneity` and `validate_if_branch_homogeneity` enforce S16.6.9. Classification is the shared `ast_branch_kind`, which is **three-way and recursive** — a first cut that scanned only a block's immediate top level for pn-only statements over-rejected two real shapes: a branch whose sole top-level item is a nested control `if` (`if (c) { if (d) { r = 3 } else { r = 2 } } else { r = 1 }`), and an EMPTY branch (`} else if (c) { } else {`), which commits to neither side and is therefore NEUTRAL, pairing with both. Migration cost was as predicted: 1 doc example (`doc/Lambda_Expr_Stam.md` — its `default: null` value arm beside control arms became the do-nothing control arm `default { }`), 0 test/corpus changes. Verified: C harness 152/152 (12 new cases; detection extended to E312 since these are semantic, not parse, rejections), Tree-sitter 135/135, `make test-lambda-baseline` 3868/3868. C-suite only by design — the reference grammar is a parser and has no semantic tier. |
 | S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3, S16.9.5 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
 
@@ -1698,7 +1753,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken — measured 2026-08-24, `&` and `!` evaluate correctly in `is`/`match` pattern position but are rejected in `let`/parameter annotation position; LR02-9 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md)); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
 - **SO10** A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) — real question, future design (S7.9.3).
 - **SO11** Whether a non-null scalar iterates once (`len(5)`): `for (i in 5)` yields nothing while `5 |> ~` yields one item; the S8.3.1 law requires them to agree before `len(5)` is settled.
-- **SO12** `for (k, v at c)` paired form: the "does not parse" premise is stale (measured 2026-08-24) — it parses and runs, but binds **both** names to the key, where the bare `for k, v in c` correctly binds key and value. Whether the form should exist is still open; that it silently mis-binds meanwhile is a defect, tracked as LR02-8 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md).
+- **SO12** *(closed 2026-08-24 — ruled in as S8.1.3.)* The paired `for (k, v at c)` form exists and binds `(key, value)` over the `at` axis. Both the "does not parse" premise and the both-names-bound-to-the-key implementation were wrong; the latter is fixed and tracked as LR02-R9.
 
 **Values, COW, resources**
 - **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
@@ -1734,6 +1789,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 
 **Surface syntax**
 - **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
+- **SO36** Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or only as a bare statement / the whole RHS of a binding (`let r = pn_func(); (r, 123)`) — the A-normal-form effect-sequencing discipline. Deliberately split off from S16.6.8/S16.6.9 and left open: it is **less severe** than the branching statements those rulings bar, because a pn call still produces a value — the enclosing expression evaluates rather than evaporating; the cost is only effects and their ordering embedded in expression evaluation. Adopting it would outlaw shipped idioms (`if (exists(p)) { … }`, `let config = if exists(p) { input(p, 'json') } else {…}`), so it needs its own cost survey. An S12 effect-boundary question, next to the fn/pn one-bit-effect-system note. [S12.1]
 
 ## Appendix C — Decision-Record Index
 
