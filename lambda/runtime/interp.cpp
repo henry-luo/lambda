@@ -1076,6 +1076,20 @@ static bool interp_typed_map_assignment(AstNode* node) {
     return root && ast_declared_type_is_map(root->declared_type);
 }
 
+static bool interp_typed_array_assignment(AstNode* node) {
+    if (!node || (node->node_type != AST_NODE_INDEX_ASSIGN_STAM &&
+            node->node_type != AST_NODE_MEMBER_ASSIGN_STAM)) return false;
+    AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)node;
+    AstCowPath path = {};
+    if (!ast_collect_cow_path(&path, assignment->object) ||
+            !path.root || path.root->node_type != AST_NODE_IDENT) return false;
+    NameEntry* root = ((AstIdentNode*)path.root)->entry;
+    // A typed array store has its own checked setter even when the enclosing
+    // procedure does not declare `^E`; dropping that setter's ItemError would
+    // turn a rejected element into a successful statement (S7.6).
+    return root && ast_declared_array_element(root->declared_type) != NULL;
+}
+
 // T0 discards procedural statement values in content blocks just as MIR does.
 // preserve a failure before that discard when the enclosing procedure exposes
 // an error channel, or a direct checked map store already owns that boundary.
@@ -1084,7 +1098,7 @@ static void interp_propagate_proc_side_effect_error(InterpFrame* f,
     if (!f || !node || !item_is_error(value) ||
             !side_effect_result_can_error(node->node_type)) return;
     TypeFunc* signature = f->fn ? (TypeFunc*)((AstNode*)f->fn)->type : NULL;
-    if (interp_typed_map_assignment(node) ||
+    if (interp_typed_map_assignment(node) || interp_typed_array_assignment(node) ||
             (signature && signature->type_id == LMD_TYPE_FUNC && signature->can_raise)) {
         interp_signal(f, EvalSignal::RETURNED, value);
     }
@@ -3178,6 +3192,511 @@ static AstNode* interp_navigation_direct_parent(AstNode* node) {
         ? field->object : NULL;
 }
 
+typedef struct InterpFastIntValue {
+    int64_t value;
+    bool boolean;
+} InterpFastIntValue;
+
+typedef struct InterpFastIntCache {
+    const AstNode* nodes[32];
+    int64_t values[32];
+    int count;
+} InterpFastIntCache;
+
+static bool interp_fast_int_expr_shape(AstNode* node);
+static bool interp_fast_int_stmt_shape(AstNode* node);
+
+static bool interp_fast_int_expr_shape(AstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY:
+        return ((AstPrimaryNode*)node)->expr
+            ? interp_fast_int_expr_shape(((AstPrimaryNode*)node)->expr)
+            : node->type && node->type->type_id == LMD_TYPE_INT;
+    case AST_NODE_IDENT:
+        return ((AstIdentNode*)node)->entry && node->type &&
+            node->type->type_id == LMD_TYPE_INT;
+    case AST_NODE_UNARY:
+        return ((AstUnaryNode*)node)->op == OPERATOR_NEG &&
+            interp_fast_int_expr_shape(((AstUnaryNode*)node)->operand);
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        switch (binary->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_MOD: case OPERATOR_EQ: case OPERATOR_NE:
+        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+            return interp_fast_int_expr_shape(binary->left) &&
+                interp_fast_int_expr_shape(binary->right);
+        default:
+            return false;
+        }
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
+                !((AstSysFuncNode*)callee)->fn_info ||
+                ((AstSysFuncNode*)callee)->fn_info->fn != SYSFUNC_SHR) return false;
+        AstNode* first = call->argument;
+        AstNode* second = first ? first->next : NULL;
+        return first && second && !second->next &&
+            interp_fast_int_expr_shape(first) &&
+            interp_fast_int_expr_shape(second);
+    }
+    default:
+        return false;
+    }
+}
+
+static bool interp_fast_int_stmt_shape(AstNode* node) {
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CONTENT) {
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            if (!interp_fast_int_stmt_shape(item)) return false;
+        }
+        return true;
+    }
+    if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        NameEntry* target = assign->target_entry;
+        if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
+            target = ((AstIdentNode*)assign->left)->entry;
+        }
+        return target && target->declared_type &&
+            target->declared_type->type_id == LMD_TYPE_INT &&
+            interp_fast_int_expr_shape(assign->value);
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        return interp_fast_int_expr_shape(branch->cond) &&
+            interp_fast_int_stmt_shape(branch->then) &&
+            (!branch->otherwise || interp_fast_int_stmt_shape(branch->otherwise));
+    }
+    return false;
+}
+
+static void interp_fast_int_cache_node(InterpFastIntCache* cache, AstNode* node,
+        InterpFastIntCache* owner) {
+    (void)owner;
+    if (!cache || !node || cache->count >= 32) return;
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (primary->expr) {
+            interp_fast_int_cache_node(cache, primary->expr, owner);
+        } else if (node->type && node->type->type_id == LMD_TYPE_INT) {
+            for (int i = 0; i < cache->count; i++) {
+                if (cache->nodes[i] == node) return;
+            }
+            cache->nodes[cache->count] = node;
+            cache->values[cache->count] = 0;
+            cache->count++;
+        }
+        return;
+    }
+    if (node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        interp_fast_int_cache_node(cache, binary->left, owner);
+        interp_fast_int_cache_node(cache, binary->right, owner);
+    } else if (node->node_type == AST_NODE_UNARY) {
+        interp_fast_int_cache_node(cache, ((AstUnaryNode*)node)->operand, owner);
+    } else if (node->node_type == AST_NODE_CALL_EXPR) {
+        for (AstNode* arg = ((AstCallNode*)node)->argument; arg; arg = arg->next) {
+            interp_fast_int_cache_node(cache, arg, owner);
+        }
+    } else if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        interp_fast_int_cache_node(cache, branch->cond, owner);
+        interp_fast_int_cache_node(cache, branch->then, owner);
+        interp_fast_int_cache_node(cache, branch->otherwise, owner);
+    } else if (node->node_type == AST_NODE_CONTENT) {
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            interp_fast_int_cache_node(cache, item, owner);
+        }
+    } else if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        interp_fast_int_cache_node(cache, ((AstAssignStamNode*)node)->value, owner);
+    }
+}
+
+static bool interp_fast_int_cache_fill(InterpFastIntCache* cache,
+        InterpFrame* frame, AstNode* root) {
+    if (!cache || !frame) return false;
+    interp_fast_int_cache_node(cache, root, cache);
+    for (int i = 0; i < cache->count; i++) {
+        Item literal = eval_literal(frame, (AstNode*)cache->nodes[i]);
+        if (get_type_id(literal) != LMD_TYPE_INT) return false;
+        cache->values[i] = lambda_int_item_to_i64(literal);
+    }
+    return true;
+}
+
+static bool interp_fast_int_cache_read(const InterpFastIntCache* cache,
+        const AstNode* node, int64_t* value) {
+    if (!cache || !node || !value) return false;
+    for (int i = 0; i < cache->count; i++) {
+        if (cache->nodes[i] == node) {
+            *value = cache->values[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+// The compact int lane is the exact finite integer band exposed by `i2it`.
+// Fast arithmetic must leave the specialized loop when a result would leave
+// that band; the ordinary evaluator then applies the language's total numeric
+// conversion instead of allowing signed C++ overflow to change the result.
+static bool interp_fast_int_apply(Operator op, int64_t left, int64_t right,
+        int64_t* result) {
+    if (!result) return false;
+    __int128 value = 0;
+    switch (op) {
+    case OPERATOR_ADD: value = (__int128)left + (__int128)right; break;
+    case OPERATOR_SUB: value = (__int128)left - (__int128)right; break;
+    case OPERATOR_MUL: value = (__int128)left * (__int128)right; break;
+    case OPERATOR_MOD:
+        if (right == 0) return false;
+        value = (__int128)left % (__int128)right;
+        break;
+    default: return false;
+    }
+    if (value < (__int128)INT53_MIN || value > (__int128)INT53_MAX) return false;
+    *result = (int64_t)value;
+    return true;
+}
+
+static bool interp_fast_int_read_binding(InterpFrame* frame, NameEntry* entry,
+        int64_t* value) {
+    if (!frame || !entry || !value ||
+            entry->binding_storage != BINDING_STORAGE_REGISTER ||
+            entry->slot < 0 || (uint32_t)entry->slot >= frame->scratch_base ||
+            (frame->st && frame->st->view_bindings) ||
+            (frame->fn && frame->fn->captures)) return false;
+    Item item = (Item){.item = frame->slots[entry->slot]};
+    if (get_type_id(item) != LMD_TYPE_INT) return false;
+    *value = lambda_int_item_to_i64(item);
+    return true;
+}
+
+static bool interp_fast_int_eval(InterpFrame* frame, AstNode* node,
+        const InterpFastIntCache* cache, InterpFastIntValue* out) {
+    if (!frame || !node || !out) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (primary->expr) return interp_fast_int_eval(frame, primary->expr, cache, out);
+        int64_t value = 0;
+        if (!interp_fast_int_cache_read(cache, node, &value)) return false;
+        out->value = value;
+        out->boolean = false;
+        return true;
+    }
+    case AST_NODE_IDENT: {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (!interp_fast_int_read_binding(frame, entry, &out->value)) return false;
+        out->boolean = false;
+        return true;
+    }
+    case AST_NODE_UNARY: {
+        InterpFastIntValue operand;
+        if (!interp_fast_int_eval(frame, ((AstUnaryNode*)node)->operand, cache, &operand) ||
+                operand.boolean || !interp_fast_int_apply(OPERATOR_SUB, 0,
+                    operand.value, &out->value)) return false;
+        out->boolean = false;
+        return true;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        InterpFastIntValue left, right;
+        if (!interp_fast_int_eval(frame, binary->left, cache, &left) ||
+                !interp_fast_int_eval(frame, binary->right, cache, &right) ||
+                left.boolean || right.boolean) return false;
+        switch (binary->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_MOD:
+            if (!interp_fast_int_apply(binary->op, left.value, right.value,
+                    &out->value)) return false;
+            out->boolean = false;
+            return true;
+        case OPERATOR_EQ: out->value = left.value == right.value; out->boolean = true; return true;
+        case OPERATOR_NE: out->value = left.value != right.value; out->boolean = true; return true;
+        case OPERATOR_LT: out->value = left.value < right.value; out->boolean = true; return true;
+        case OPERATOR_LE: out->value = left.value <= right.value; out->boolean = true; return true;
+        case OPERATOR_GT: out->value = left.value > right.value; out->boolean = true; return true;
+        case OPERATOR_GE: out->value = left.value >= right.value; out->boolean = true; return true;
+        default: return false;
+        }
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        AstNode* first = call->argument;
+        AstNode* second = first ? first->next : NULL;
+        InterpFastIntValue left, shift;
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC || !first || !second ||
+                second->next || ((AstSysFuncNode*)callee)->fn_info->fn != SYSFUNC_SHR ||
+                !interp_fast_int_eval(frame, first, cache, &left) ||
+                !interp_fast_int_eval(frame, second, cache, &shift) ||
+                left.boolean || shift.boolean || shift.value < 0 || shift.value >= 64) return false;
+        out->value = left.value >> shift.value;
+        out->boolean = false;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+static bool interp_fast_int_exec(InterpFrame* frame, AstNode* node,
+        const InterpFastIntCache* cache) {
+    if (!frame || !node) return false;
+    if (node->node_type == AST_NODE_CONTENT) {
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            if (!interp_fast_int_exec(frame, item, cache)) return false;
+        }
+        return true;
+    }
+    if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        NameEntry* target = assign->target_entry;
+        if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
+            target = ((AstIdentNode*)assign->left)->entry;
+        }
+        InterpFastIntValue value;
+        if (!target || !interp_fast_int_eval(frame, assign->value, cache, &value) ||
+                value.boolean) return false;
+        if (target->binding_storage != BINDING_STORAGE_REGISTER ||
+                target->slot < 0 || (uint32_t)target->slot >= frame->scratch_base ||
+                (frame->st && frame->st->view_bindings) ||
+                (frame->fn && frame->fn->captures)) return false;
+        frame->slots[target->slot] = i2it(value.value);
+        return true;
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        InterpFastIntValue condition;
+        if (!interp_fast_int_eval(frame, branch->cond, cache, &condition)) return false;
+        bool truth = condition.boolean ? condition.value != 0 : condition.value != 0;
+        return truth ? interp_fast_int_exec(frame, branch->then, cache) :
+            (!branch->otherwise || interp_fast_int_exec(frame, branch->otherwise, cache));
+    }
+    return false;
+}
+
+typedef struct InterpFastIntOperand {
+    NameEntry* entry;
+    int64_t constant;
+    bool is_constant;
+} InterpFastIntOperand;
+
+typedef struct InterpFastIntLinearOp {
+    NameEntry* target;
+    InterpFastIntOperand left;
+    InterpFastIntOperand right;
+    Operator op;
+} InterpFastIntLinearOp;
+
+static bool interp_fast_int_linear_operand(AstNode* node,
+        const InterpFastIntCache* cache, InterpFastIntOperand* out) {
+    if (!node || !out) return false;
+    // Keep literal primaries intact for the cache lookup; unwrapping first
+    // would turn the constant into its leaf and make an otherwise linear
+    // accumulator loop fall back to the boxed evaluator.
+    if (node->node_type == AST_NODE_PRIMARY && !((AstPrimaryNode*)node)->expr &&
+            node->type && node->type->type_id == LMD_TYPE_INT) {
+        out->entry = NULL;
+        out->is_constant = true;
+        return interp_fast_int_cache_read(cache, node, &out->constant);
+    }
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_IDENT) {
+        out->entry = ((AstIdentNode*)node)->entry;
+        out->is_constant = false;
+        return out->entry && out->entry->declared_type &&
+            out->entry->declared_type->type_id == LMD_TYPE_INT;
+    }
+    return false;
+}
+
+static bool interp_fast_int_linear_binding_ok(InterpFrame* frame,
+        NameEntry* entry) {
+    return frame && entry && entry->binding_storage == BINDING_STORAGE_REGISTER &&
+        entry->slot >= 0 && (uint32_t)entry->slot < frame->scratch_base &&
+        (!frame->st || !frame->st->view_bindings) &&
+        (!frame->fn || !frame->fn->captures);
+}
+
+static bool interp_fast_int_linear_read(InterpFrame* frame,
+        const InterpFastIntOperand* operand, int64_t* value) {
+    if (!frame || !operand || !value) return false;
+    if (operand->is_constant) {
+        *value = operand->constant;
+        return true;
+    }
+    if (!interp_fast_int_linear_binding_ok(frame, operand->entry)) return false;
+    Item item = (Item){.item = frame->slots[operand->entry->slot]};
+    if (get_type_id(item) != LMD_TYPE_INT) return false;
+    *value = lambda_int_item_to_i64(item);
+    return true;
+}
+
+static bool interp_fast_int_linear_operand_same(const InterpFastIntOperand* left,
+        const InterpFastIntOperand* right) {
+    if (!left || !right || left->is_constant != right->is_constant) return false;
+    return left->is_constant ? left->constant == right->constant :
+        left->entry == right->entry;
+}
+
+static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
+        const InterpFastIntCache* cache, Item* result) {
+    if (!frame || !loop || !cache || !result ||
+            loop->cond->node_type != AST_NODE_BINARY ||
+            loop->body->node_type != AST_NODE_CONTENT) return false;
+    AstBinaryNode* condition = (AstBinaryNode*)loop->cond;
+    switch (condition->op) {
+    case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+    case OPERATOR_GT: case OPERATOR_GE: break;
+    default: return false;
+    }
+    InterpFastIntOperand cond_left, cond_right;
+    if (!interp_fast_int_linear_operand(condition->left, cache, &cond_left) ||
+            !interp_fast_int_linear_operand(condition->right, cache, &cond_right)) return false;
+
+    InterpFastIntLinearOp ops[8] = {};
+    int op_count = 0;
+    for (AstNode* item = ((AstListNode*)loop->body)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_ASSIGN_STAM || op_count >= 8) return false;
+        AstAssignStamNode* assign = (AstAssignStamNode*)item;
+        NameEntry* target = assign->target_entry;
+        if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
+            target = ((AstIdentNode*)assign->left)->entry;
+        }
+        AstNode* value_node = ast_unwrap_primary(assign->value);
+        if (!target || !value_node || value_node->node_type != AST_NODE_BINARY ||
+                !interp_fast_int_linear_binding_ok(frame, target)) return false;
+        AstBinaryNode* value = (AstBinaryNode*)value_node;
+        switch (value->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_MOD: break;
+        default: return false;
+        }
+        if (!interp_fast_int_linear_operand(value->left, cache, &ops[op_count].left) ||
+                !interp_fast_int_linear_operand(value->right, cache, &ops[op_count].right)) return false;
+        ops[op_count].target = target;
+        ops[op_count].op = value->op;
+        op_count++;
+    }
+    if (op_count == 0) return false;
+
+    // A positive repeated-subtraction loop has a closed form. This is still a
+    // structural integer-loop rule: it admits only `x >= y` with `x = x - y`
+    // and an optional independent `q = q + constant`, preserving ordinary
+    // evaluation for every other loop shape (S4.4.2).
+    if (condition->op == OPERATOR_GE && !cond_left.is_constant &&
+            cond_left.entry &&
+            (!cond_right.is_constant || cond_right.entry != cond_left.entry)) {
+        int subtract_index = -1;
+        int accumulator_index = -1;
+        for (int i = 0; i < op_count; i++) {
+            InterpFastIntLinearOp* op = &ops[i];
+            if (op->target == cond_left.entry && op->op == OPERATOR_SUB &&
+                    !op->left.is_constant && op->left.entry == cond_left.entry &&
+                    interp_fast_int_linear_operand_same(&op->right, &cond_right)) {
+                subtract_index = i;
+                continue;
+            }
+            if (op->op == OPERATOR_ADD && !op->left.is_constant &&
+                    op->left.entry == op->target && op->right.is_constant &&
+                    op->target != cond_left.entry &&
+                    (!cond_right.is_constant || op->target != cond_right.entry)) {
+                if (accumulator_index >= 0) {
+                    accumulator_index = -2;
+                    break;
+                }
+                accumulator_index = i;
+                continue;
+            }
+            subtract_index = -2;
+            break;
+        }
+        if (subtract_index >= 0 && accumulator_index >= -1) {
+            int64_t left = 0, right = 0;
+            if (!interp_fast_int_linear_read(frame, &cond_left, &left) ||
+                    !interp_fast_int_linear_read(frame, &cond_right, &right) ||
+                    right <= 0) {
+                return false;
+            }
+            if (left >= right) {
+                __int128 iterations = (__int128)left / (__int128)right;
+                __int128 remainder = (__int128)left - iterations * (__int128)right;
+                if (remainder < (__int128)INT53_MIN || remainder > (__int128)INT53_MAX) {
+                    return false;
+                }
+                if (accumulator_index >= 0) {
+                    InterpFastIntLinearOp* accumulator = &ops[accumulator_index];
+                    int64_t current = 0;
+                    InterpFastIntOperand accumulator_operand = {
+                        accumulator->target, 0, false};
+                    if (!interp_fast_int_linear_read(frame, &accumulator_operand,
+                            &current)) {
+                        return false;
+                    }
+                    __int128 next = (__int128)current + iterations *
+                        (__int128)accumulator->right.constant;
+                    if (next < (__int128)INT53_MIN || next > (__int128)INT53_MAX) return false;
+                    frame->slots[accumulator->target->slot] = i2it((int64_t)next);
+                }
+                frame->slots[cond_left.entry->slot] = i2it((int64_t)remainder);
+                *result = ItemNull;
+                return true;
+            }
+        }
+    }
+
+    for (;;) {
+        int64_t left = 0, right = 0;
+        if (!interp_fast_int_linear_read(frame, &cond_left, &left) ||
+                !interp_fast_int_linear_read(frame, &cond_right, &right)) return false;
+        bool truth = condition->op == OPERATOR_EQ ? left == right :
+            condition->op == OPERATOR_NE ? left != right :
+            condition->op == OPERATOR_LT ? left < right :
+            condition->op == OPERATOR_LE ? left <= right :
+            condition->op == OPERATOR_GT ? left > right : left >= right;
+        if (!truth) break;
+
+        int64_t next_values[8];
+        for (int i = 0; i < op_count; i++) {
+            int64_t a = 0, b = 0;
+            if (!interp_fast_int_linear_read(frame, &ops[i].left, &a) ||
+                    !interp_fast_int_linear_read(frame, &ops[i].right, &b)) return false;
+            if (!interp_fast_int_apply(ops[i].op, a, b, &next_values[i])) return false;
+        }
+        for (int i = 0; i < op_count; i++) {
+            frame->slots[ops[i].target->slot] = i2it(next_values[i]);
+        }
+    }
+    *result = ItemNull;
+    return true;
+}
+
+static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
+        Item* result) {
+    if (!frame || !loop || !result ||
+            !interp_fast_int_expr_shape(loop->cond) ||
+            !interp_fast_int_stmt_shape(loop->body)) return false;
+    InterpFastIntCache cache = {};
+    if (!interp_fast_int_cache_fill(&cache, frame, loop->cond) ||
+            !interp_fast_int_cache_fill(&cache, frame, loop->body)) return false;
+    if (interp_fast_int_linear_while(frame, loop, &cache, result)) return true;
+    for (;;) {
+        InterpFastIntValue condition;
+        if (!interp_fast_int_eval(frame, loop->cond, &cache, &condition)) return false;
+        bool truth = condition.boolean ? condition.value != 0 : condition.value != 0;
+        if (!truth) break;
+        if (!interp_fast_int_exec(frame, loop->body, &cache)) return false;
+    }
+    *result = ItemNull;
+    return true;
+}
+
 static Item eval_expr(InterpFrame* f, AstNode* node) {
     if (!node) return ItemNull;
     f->cur = node;
@@ -3704,6 +4223,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_DO_WHILE_STAM: {
         AstWhileNode* loop = (AstWhileNode*)node;
         bool test_first = node->node_type == AST_NODE_WHILE_STAM;
+        if (test_first) {
+            Item fast_result = ItemNull;
+            if (interp_fast_int_while(f, loop, &fast_result)) return fast_result;
+        }
         for (;;) {
             if (test_first) {
                 Item cond = eval_expr(f, loop->cond);
@@ -3872,6 +4395,49 @@ typedef struct InterpBorrowedCall {
     NameEntry* entries[LAMBDA_MAX_FUNCTION_ARGS];
 } InterpBorrowedCall;
 
+// Borrowed `var` arguments are uncommon, but keeping their publication
+// buffers on the C stack made deeply recursive interpreted calls consume a
+// fixed block per activation. Allocate those escape buffers independently so
+// recursion depth is bounded by the language frame/side-root budget rather
+// than native stack frame size (D5.3.3).
+class InterpBorrowedScratch {
+public:
+    Item* values;
+    TypeId* scalar_types;
+    uint64_t* scalar_payloads;
+
+    explicit InterpBorrowedScratch(bool needed)
+            : values(NULL), scalar_types(NULL), scalar_payloads(NULL) {
+        if (!needed) return;
+        values = (Item*)mem_calloc(LAMBDA_MAX_FUNCTION_ARGS, sizeof(Item), MEM_CAT_EVAL);
+        scalar_types = (TypeId*)mem_calloc(LAMBDA_MAX_FUNCTION_ARGS,
+            sizeof(TypeId), MEM_CAT_EVAL);
+        scalar_payloads = (uint64_t*)mem_calloc(LAMBDA_MAX_FUNCTION_ARGS,
+            sizeof(uint64_t), MEM_CAT_EVAL);
+        if (!values || !scalar_types || !scalar_payloads) {
+            mem_free(values);
+            mem_free(scalar_types);
+            mem_free(scalar_payloads);
+            values = NULL;
+            scalar_types = NULL;
+            scalar_payloads = NULL;
+        }
+    }
+
+    ~InterpBorrowedScratch() {
+        mem_free(values);
+        mem_free(scalar_types);
+        mem_free(scalar_payloads);
+    }
+
+    bool valid(bool needed) const {
+        return !needed || (values && scalar_types && scalar_payloads);
+    }
+
+    InterpBorrowedScratch(const InterpBorrowedScratch&) = delete;
+    InterpBorrowedScratch& operator=(const InterpBorrowedScratch&) = delete;
+};
+
 static Item interp_call_internal(Function* fn, const Item* args, int argc,
         const InterpBorrowedCall* borrowed) {
     InterpState* st = interp_current_state();
@@ -3923,9 +4489,12 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     Item result = ItemNull;
     TypeId escaped_scalar_type = LMD_TYPE_NULL;
     uint64_t escaped_scalar_payload = 0;
-    Item borrowed_values[LAMBDA_MAX_FUNCTION_ARGS] = {};
-    TypeId borrowed_scalar_types[LAMBDA_MAX_FUNCTION_ARGS] = {};
-    uint64_t borrowed_scalar_payloads[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    InterpBorrowedScratch borrowed_scratch(borrowed && borrowed->caller);
+    if (!borrowed_scratch.valid(borrowed && borrowed->caller)) {
+        st->depth++;
+        log_error("interp: could not allocate borrowed argument scratch");
+        return ItemError;
+    }
     {
         InterpFrameGuard guard(st, fn_node, module, &fn_node->analysis->frame_plan,
             (Item*)fn->closure_env, fn->closure_field_count, fn->method, method_self);
@@ -3991,20 +4560,30 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 frame->signal == EvalSignal::ERROR_SKIP) {
             result = interp_signal_payload(frame);
         }
+        if (signature && signature->has_explicit_return_contract &&
+                signature->return_contract && !item_is_error(result)) {
+            // The MIR return firewall checks a dynamic body at every declared
+            // return site. T0 must perform the same check before the callee
+            // frame closes, otherwise `fn f() int { any_value() }` leaks its
+            // runtime value to the caller without the required E201 (S7.7.2).
+            Item checked = interp_coerce_declared_binding(frame, result,
+                signature->return_contract, "function return");
+            result = checked;
+        }
         if (borrowed && borrowed->caller) {
             for (int index = 0; index < (int)params; index++) {
                 if (!borrowed->entries[index]) continue;
                 Item value = (Item){.item = frame->slots[index]};
                 TypeId type = get_type_id(value);
-                borrowed_scalar_types[index] = type;
+                borrowed_scratch.scalar_types[index] = type;
                 if (type == LMD_TYPE_INT64) {
-                    borrowed_scalar_payloads[index] = (uint64_t)value.get_int64();
-                    borrowed_values[index] = ItemNull;
+                    borrowed_scratch.scalar_payloads[index] = (uint64_t)value.get_int64();
+                    borrowed_scratch.values[index] = ItemNull;
                 } else if (type == LMD_TYPE_UINT64) {
-                    borrowed_scalar_payloads[index] = value.get_uint64();
-                    borrowed_values[index] = ItemNull;
+                    borrowed_scratch.scalar_payloads[index] = value.get_uint64();
+                    borrowed_scratch.values[index] = ItemNull;
                 } else {
-                    borrowed_values[index] = scalar_storage_read(value, false);
+                    borrowed_scratch.values[index] = scalar_storage_read(value, false);
                 }
             }
         }
@@ -4034,11 +4613,11 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
             NameEntry* entry = borrowed->entries[index];
             if (!entry) continue;
-            Item value = borrowed_scalar_types[index] == LMD_TYPE_INT64
-                ? box_int64_value((int64_t)borrowed_scalar_payloads[index])
-                : borrowed_scalar_types[index] == LMD_TYPE_UINT64
-                    ? box_uint64_value(borrowed_scalar_payloads[index])
-                    : borrowed_values[index];
+            Item value = borrowed_scratch.scalar_types[index] == LMD_TYPE_INT64
+                ? box_int64_value((int64_t)borrowed_scratch.scalar_payloads[index])
+                : borrowed_scratch.scalar_types[index] == LMD_TYPE_UINT64
+                    ? box_uint64_value(borrowed_scratch.scalar_payloads[index])
+                    : borrowed_scratch.values[index];
             // The callee frame owns its param slot, but a `var` argument is
             // the caller's mutable root. Publish after the callee extent
             // closes so a wide scalar cannot retain a dead number-stack home.

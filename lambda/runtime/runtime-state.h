@@ -73,6 +73,8 @@ uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 Context* eval_context_tls_runtime(void);
 void* lambda_module_const_at(const struct LambdaModuleLayout* layout,
                              uint32_t index);
+void* lambda_module_const_at_state(void* module_state, uint32_t index);
+Item lambda_module_var_at(void* module_state, uint32_t slot);
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 void lambda_module_state_reset(void);
 void lambda_module_state_destroy(void);

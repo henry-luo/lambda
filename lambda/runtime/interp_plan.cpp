@@ -24,12 +24,10 @@
 // Complete Lambda child traversal
 // ---------------------------------------------------------------------------
 
-typedef void (*InterpChildFn)(AstNode* child, void* ctx);
-
 // Visits every structural child edge of `node`, excluding `node->next` (the
 // caller owns sibling iteration) and excluding NameEntry->node declaration
 // links — the AST is a DAG and those links are reads, never evaluation edges.
-static void interp_visit_children(AstNode* node, InterpChildFn visit, void* ctx) {
+void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx) {
     if (!node || !visit) return;
 #define V(field) do { AstNode* _c = (AstNode*)(field); if (_c) visit(_c, ctx); } while (0)
 #define VLIST(field) do { \
@@ -1676,6 +1674,13 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     if (should_use_tco(fn)) plan_mark_tail_calls(fn->body, fn);
     uint32_t body_need = plan_need(fn->body);
     if (body_need > pc.max_scratch) pc.max_scratch = body_need;
+    if (signature && signature->has_explicit_return_contract &&
+            pc.max_scratch < 1) {
+        // Return-contract admission roots the computed value while the shared
+        // checker may allocate. A literal-only body otherwise plans zero
+        // scratch slots and the checker would borrow the signal home (S7.7.2).
+        pc.max_scratch = 1;
+    }
     plan_finish(&pc);
     if (pc.failed) outer->failed = true;
 

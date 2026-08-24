@@ -1553,7 +1553,7 @@ check-error-recovery:
 	@python3 test/error_handling/check_recovery_boundaries.py
 
 # ---------------------------------------------------------------------------
-# T0 AST interpreter (LAMBDA_TIER=interp) — vibe/Lambda_Impl_Ast_Interp.md
+# T0 AST interpreter (LAMBDA_TIER=interp) — vibe/impl/Lambda_Impl_Ast_Interp.md
 # ---------------------------------------------------------------------------
 
 # Differential gate: every script in the committed P0 subset must match its

@@ -26,6 +26,7 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #include "recovery_frame.h"
 #include "heap_api.h"
 #include "runtime-state.h"
+#include "concurrency.h"
 #include "../../lib/arraylist.h"
 #include <mir.h>
 #include <mir-gen.h>
@@ -38,6 +39,7 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #include <windows.h> // QueryPerformanceCounter for MIR timing
 #else
 #include <alloca.h>
+#include <pthread.h>
 #endif
 #include <time.h>
 
@@ -54,6 +56,7 @@ void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void clear_persistent_last_error();
 extern __thread EvalContext* context;
+extern __thread Context* input_context;
 
 // Ensure MIR inline allocation offsets stay correct if Context struct changes.
 // EvalContext extends Context via single non-virtual inheritance; the layout is
@@ -127,6 +130,7 @@ struct MirTranspiler {
     // definition except this target are dynamic through those Function slots.
     Script* interp_module_owner;
     AstFuncNode* satellite_target;
+    uint32_t satellite_module_state_id;
 
     // Pattern type list (shared with Script's type_list for const_pattern access)
     ArrayList* type_list;
@@ -206,6 +210,7 @@ struct MirTranspiler {
     // materialization. It is reset with module_state_reg at each function
     // boundary so an entry register never crosses MIR functions.
     MIR_insn_t module_state_tail;
+    MIR_reg_t module_rooted_reg;
 
     // Type-list pointer register: holds this module's type_list ArrayList* so that
     // cross-module function calls use the right type_list for map/elmt/object allocation.
@@ -1900,6 +1905,12 @@ static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value,
 static void lambda_call_root_value(void* owner, MIR_reg_t reg,
         JitValueClass value_class) {
     MirTranspiler* mt = (MirTranspiler*)owner;
+    if (mt && mt->module_rooted_reg == reg) {
+        // Module slabs are exact GC roots already. Publishing the same value
+        // into a transient MIR home lets root write-back reload an uninitialized
+        // scratch slot over the stable module binding (D5.2).
+        return;
+    }
     if (mt && mt->em.frame.active && mt->em.frame.root_base && reg) {
         create_gc_root_slot(mt, reg, value_class);
     }
@@ -4485,14 +4496,24 @@ static MIR_reg_t emit_module_state_load_after(MirTranspiler* mt, MIR_insn_t afte
         MIR_new_reg_op(mt->ctx, table),
         MIR_new_mem_op(mt->ctx, MIR_T_I64,
             offsetof(EvalContext, module_states), mt->em.frame.runtime, 0, 1)));
-    MIR_reg_t layout_addr = new_reg(mt, "module_layout", MIR_T_I64);
-    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, layout_addr),
-        MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
     MIR_reg_t module_id = new_reg(mt, "module_id", MIR_T_I64);
-    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, module_id),
-        MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, layout_addr, 0, 1)));
+    if (mt->satellite_target && mt->interp_module_owner) {
+        // A task-backed satellite shares T0's slab but has an independently
+        // linked MIR image. Resolve the owner's reserved id directly instead
+        // of reading mutable BSS metadata that another image can relocate
+        // during batch compilation (D5.2, D8.2).
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, module_id),
+            MIR_new_int_op(mt->ctx, (int64_t)mt->satellite_module_state_id)));
+    } else {
+        MIR_reg_t layout_addr = new_reg(mt, "module_layout", MIR_T_I64);
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, layout_addr),
+            MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, module_id),
+            MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, layout_addr, 0, 1)));
+    }
     MIR_reg_t state = new_reg(mt, "module_state", MIR_T_I64);
     emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, state),
@@ -4591,6 +4612,11 @@ static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
         MIR_new_reg_op(mt->ctx, vars),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
             state, 0, 1)));
+    if (mt->satellite_target) {
+        return emit_call_2(mt, "lambda_module_var_at", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, state),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gvar->slot));
+    }
     MIR_reg_t boxed = new_reg(mt, "gv_val", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, boxed),
@@ -4690,6 +4716,12 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
 // ============================================================================
 
 static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t as_type) {
+    if (mt && mt->satellite_target) {
+        MIR_reg_t state = emit_module_state(mt);
+        return emit_call_2(mt, "lambda_module_const_at_state", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, state),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, const_index));
+    }
     // Use a call boundary here: MIR may reuse a virtual register across an
     // arbitrary preceding runtime call, while literal pool ownership is fixed
     // per context/module instance. This path has no sharing or synchronization.
@@ -18137,7 +18169,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     MIR_reg_t boxed_fn = emit_box(mt, fn_val, fn_tid);
     // Argument evaluation can allocate. Keep an indexed/member function value
     // rooted until the dispatcher receives it rather than reusing a stale pointer.
-    int boxed_fn_root = create_gc_root_slot(mt, boxed_fn);
+    // A module binding already lives in the context-owned module slab root
+    // range. Adding a second temporary root here lets async MIR write-back
+    // reload an uninitialized scratch home over the live module value (D5.2).
+    bool module_fn_rooted = mir_argument_is_module_binding(mt, call_node->function);
+    int boxed_fn_root = module_fn_rooted
+        ? -1 : create_gc_root_slot(mt, boxed_fn);
 
     // Count and box args
     AstNode* arg = call_node->argument;
@@ -18161,10 +18198,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
     // the null sentinel instead of allocating a dead generated home.
 
     if (arg_count == 0) {
+        mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
+        mt->module_rooted_reg = 0;
     } else if (arg_count <= 3) {
         MIR_reg_t args[3];
         int arg_roots[3];
@@ -18175,10 +18214,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             arg_roots[i] = create_gc_root_slot(mt, args[i]);
             arg = arg->next;
         }
-        boxed_fn = load_gc_root_slot(mt, boxed_fn_root, "dynamic_fn");
+        if (boxed_fn_root >= 0) {
+            boxed_fn = load_gc_root_slot(mt, boxed_fn_root, "dynamic_fn");
+        }
         for (int i = 0; i < arg_count; i++) {
             args[i] = load_gc_root_slot(mt, arg_roots[i], "dynamic_arg");
         }
+        mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
         if (arg_count == 1) {
             dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
@@ -18217,6 +18259,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_new_reg_op(mt->ctx, args[2]),
                 MIR_new_int_op(mt->ctx, 0)));
         }
+        mt->module_rooted_reg = 0;
     } else {
         // `fn_call_into` owns the common dynamic ABI. Build a rooted List so
         // every 4-8 argument call reaches its checked dispatch instead of
@@ -18234,13 +18277,17 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_arg));
             arg = arg->next;
         }
-        boxed_fn = load_gc_root_slot(mt, boxed_fn_root, "dynamic_fn");
+        if (boxed_fn_root >= 0) {
+            boxed_fn = load_gc_root_slot(mt, boxed_fn_root, "dynamic_fn");
+        }
         args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
+        mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
+        mt->module_rooted_reg = 0;
     }
 
     // Dynamic calls (fn_call0/1/2/3) return Item (already boxed).
@@ -25460,7 +25507,7 @@ static void mir_callsite_join_specialization_type(CallSiteEntry* e, int pos,
     // because `ANY` here conflates "genuinely dynamic argument" with "this round
     // cannot type it yet" and poisons the second case too. Fixing it properly
     // means separating those two, not flipping this branch [T19-4; see
-    // vibe/Lambda_Impl_Tune19.md]. Do not relax the resolve-time guards while
+    // vibe/impl/Lambda_Impl_Tune19.md]. Do not relax the resolve-time guards while
     // this stands -- that combination miscompiles cd.
     if (pos < 0 || pos >= e->param_count || pos >= 16 ||
             tid == LMD_TYPE_ANY) {
@@ -26689,6 +26736,8 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
     mt.ast_index = ast_index;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
+    mt.satellite_module_state_id = interp_module_owner
+        ? interp_module_owner->module_state_id : 0;
     mt.satellite_property_key_base = satellite_target && interp_module_owner
         ? lambda_module_state_property_key_count(interp_module_owner->module_state_id)
         : 0;
@@ -27785,6 +27834,152 @@ static ArrayList* collect_import_cone(Script* main_script) {
 // Main entry point for MIR compilation
 // ============================================================================
 
+#ifndef _WIN32
+// A recursive T0 call keeps its continuation in the native C++ evaluator
+// stack. The normal CLI thread has an OS-sized stack that is sufficient for
+// ordinary Lambda recursion but not for the deliberately deep `ack2` corpus
+// row. Run the interpreter on a bounded worker stack so the existing recovery
+// boundary can report a language fault instead of receiving a raw guard-page
+// hit (D5.3.3, S7.4.3).
+#define INTERP_WORKER_STACK_SIZE (128U * 1024U * 1024U)
+
+struct InterpWorkerArgs {
+    Runner* runner;
+    bool run_main;
+    Item result;
+    bool initialized;
+};
+
+static void* interp_worker_entry(void* opaque) {
+    InterpWorkerArgs* args = (InterpWorkerArgs*)opaque;
+    if (!args || !args->runner || !args->runner->context) return NULL;
+    EvalContext* eval = args->runner->context;
+    if (!eval_context_thread_initialize(eval)) return NULL;
+    args->initialized = true;
+    input_context = (Context*)eval;
+    lambda_stack_init();
+    eval->stack_limit = _lambda_stack_limit;
+    if (!lambda_side_stack_bind()) {
+        log_error("interp-worker: failed to bind side-stack regions");
+        args->result = ItemError;
+    } else {
+        args->result = interp_run_script(args->runner, args->run_main);
+    }
+    if (!eval_context_thread_shutdown(eval)) {
+        log_error("interp-worker: failed to release evaluator context");
+    }
+    return NULL;
+}
+
+static Item interp_run_with_worker_stack(Runner* runner, bool run_main) {
+    if (!runner || !runner->context) return ItemError;
+    EvalContext* eval = runner->context;
+    if (!eval_context_thread_shutdown(eval)) return ItemError;
+
+    InterpWorkerArgs args = {runner, run_main, ItemError, false};
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        log_error("interp-worker: failed to configure large stack");
+        eval_context_thread_initialize(eval);
+        input_context = (Context*)eval;
+        return ItemError;
+    }
+    if (pthread_attr_setstacksize(&attr, INTERP_WORKER_STACK_SIZE) != 0) {
+        log_error("interp-worker: failed to configure large stack");
+        pthread_attr_destroy(&attr);
+        eval_context_thread_initialize(eval);
+        input_context = (Context*)eval;
+        return ItemError;
+    }
+    pthread_t worker;
+    int create_status = pthread_create(&worker, &attr, interp_worker_entry, &args);
+    pthread_attr_destroy(&attr);
+    if (create_status != 0) {
+        log_error("interp-worker: failed to create large-stack worker");
+        eval_context_thread_initialize(eval);
+        input_context = (Context*)eval;
+        return ItemError;
+    }
+    pthread_join(worker, NULL);
+    if (!eval_context_thread_initialize(eval)) {
+        log_error("interp-worker: failed to restore evaluator context");
+        return ItemError;
+    }
+    input_context = (Context*)eval;
+    if (!lambda_side_stack_bind()) {
+        log_error("interp-worker: failed to restore side-stack regions");
+        return ItemError;
+    }
+    return args.initialized ? args.result : ItemError;
+}
+
+typedef struct InterpStackScan {
+    String* functions[128];
+    String* calls[256];
+    int function_count;
+    int call_count;
+    bool has_handler;
+} InterpStackScan;
+
+static void interp_stack_scan_record(AstNode* node, InterpStackScan* scan) {
+    if (!node || !scan) return;
+    if (node->node_type == AST_NODE_HANDLER_EXPR ||
+            node->node_type == AST_NODE_HANDLER_STAM) {
+        scan->has_handler = true;
+    } else if ((node->node_type == AST_NODE_FUNC ||
+            node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC ||
+            node->node_type == AST_NODE_ARROW_FUNC ||
+            node->node_type == AST_NODE_METHOD) && scan->function_count < 128) {
+        String* name = ((AstFuncNode*)node)->name;
+        if (name) scan->functions[scan->function_count++] = name;
+    } else if (node->node_type == AST_NODE_CALL_EXPR && scan->call_count < 256) {
+        AstNode* function = ast_unwrap_primary(((AstCallNode*)node)->function);
+        if (function && function->node_type == AST_NODE_IDENT) {
+            String* name = ((AstIdentNode*)function)->name;
+            if (name) scan->calls[scan->call_count++] = name;
+        }
+    }
+}
+
+static void interp_stack_scan_node(AstNode* node, AstNode* parent, void* opaque) {
+    (void)parent;
+    InterpStackScan* scan = (InterpStackScan*)opaque;
+    interp_stack_scan_record(node, scan);
+    interp_visit_children(node, [](AstNode* child, void* ctx) {
+        interp_stack_scan_node(child, NULL, ctx);
+    }, opaque);
+}
+
+static bool interp_script_needs_large_stack(const Script* script) {
+    if (!script || !script->ast_root) return false;
+    InterpStackScan scan = {};
+    interp_stack_scan_record(script->ast_root, &scan);
+    interp_visit_children(script->ast_root, [](AstNode* child, void* ctx) {
+        interp_stack_scan_node(child, NULL, ctx);
+    }, &scan);
+    bool has_recursive_call = false;
+    for (int call_index = 0; call_index < scan.call_count && !has_recursive_call;
+            call_index++) {
+        for (int function_index = 0; function_index < scan.function_count;
+                function_index++) {
+            String* call_name = scan.calls[call_index];
+            String* function_name = scan.functions[function_index];
+            if (call_name && function_name && call_name->len == function_name->len &&
+                    memcmp(call_name->chars, function_name->chars,
+                        call_name->len) == 0) {
+                has_recursive_call = true;
+                break;
+            }
+        }
+    }
+    // Fault-catching recursive procedures intentionally rely on the ordinary
+    // stack guard to publish S7.4.3; moving them to the large worker would let
+    // ASan consume the expanded stack before the recovery landing runs.
+    return has_recursive_call && !scan.has_handler;
+}
+#endif
+
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main,
                       bool compile_only) {
     log_notice("Running script with MIR JIT compilation (direct)");
@@ -27834,7 +28029,21 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         }
         runner_setup_context(&runner);
         if (!runner.context) return nullptr;
-        Item result = interp_run_script(&runner, run_main);
+        Item result;
+#ifndef _WIN32
+        result = interp_script_needs_large_stack(runner.script)
+            ? interp_run_with_worker_stack(&runner, run_main)
+            : interp_run_script(&runner, run_main);
+#else
+        result = interp_run_script(&runner, run_main);
+#endif
+        if ((!runtime || !runtime->no_task_drain) && runner.context->scheduler) {
+            // The JIT output path drains spawned tasks before its Runtime is
+            // reused. T0 must do the same: a pending async satellite retains
+            // its Script/AST pool, so batch heap/script teardown otherwise
+            // leaves the next worker with a dangling task callback (D5.4.3).
+            lambda_scheduler_drain(runner.context->scheduler);
+        }
         preserve_context_last_error(result);
         Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(output_pool, nullptr);

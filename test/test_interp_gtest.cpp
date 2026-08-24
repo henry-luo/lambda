@@ -1,5 +1,5 @@
 //==============================================================================
-// T0 AST interpreter tests (D8.1.1v2, vibe/Lambda_Impl_Ast_Interp.md §5)
+// T0 AST interpreter tests (D8.1.1v2, vibe/impl/Lambda_Impl_Ast_Interp.md §5)
 //
 // Three layers:
 //   1. Differential — every script in the committed P0 subset must produce

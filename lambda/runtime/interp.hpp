@@ -64,6 +64,12 @@ enum class EvalSignal : uint8_t {
 
 struct InterpState;
 
+// Complete Lambda-AST child traversal used by interpreter-owned analyses.
+// The core AstIndex visitor intentionally omits Lambda-only statement edges;
+// callers that need whole-script facts must use this traversal instead.
+typedef void (*InterpAstChildVisitor)(AstNode* child, void* ctx);
+void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx);
+
 // Slot window layout, matching FnFramePlan (ast-core.hpp):
 //   [ 0 .. param_count )                          parameters
 //   [ param_count .. param_count+local_count )    locals (block scopes flattened)
