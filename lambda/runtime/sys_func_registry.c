@@ -1220,6 +1220,8 @@ extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
+extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
+extern Item lambda_module_var_at(void* module_state, uint32_t slot);
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 extern Item fn_member_by_id(Item item, NameId name_id);
@@ -1614,8 +1616,20 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_var_at", FPTR(lambda_module_var_at),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_module_const_at", FPTR(lambda_module_const_at),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_const_at_state", FPTR(lambda_module_const_at_state),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
@@ -1862,6 +1876,7 @@ JitImport jit_runtime_imports[] = {
     // Field access / indexing
     // ========================================================================
     {"fn_index", FPTR(fn_index)},
+    {"fn_index_set", FPTR(fn_index_set)},
     // Member reads never leave a wide payload above the caller's watermark:
     // int64/uint64 map fields come back as `l2it(field_ptr)` pointing at the
     // map's own persistent storage (D5.2.2), native lanes box inline, and the
@@ -1917,12 +1932,15 @@ JitImport jit_runtime_imports[] = {
     // Array/map mutation (procedural)
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
+    {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
+    {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
     {"cow_mark_shared", FPTR(cow_mark_shared)},
     {"cow_bind_var", FPTR(cow_bind_var)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
     {"array_set_cow", FPTR(array_set_cow)},
+    {"member_set_cow", FPTR(member_set_cow)},
     {"map_set_cow", FPTR(map_set_cow)},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set", FPTR(cow_path_set)},
@@ -3515,7 +3533,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
         "lambda_restore_number_frame_top",
-        "owned_item_slot_store", "lambda_module_var_store",
+        "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
+        "lambda_module_const_at_state",
         "lambda_module_name_id_at",
         "js_active_module_name_id", "js_active_module_name_item",
         "lambda_async_frame_get_word",

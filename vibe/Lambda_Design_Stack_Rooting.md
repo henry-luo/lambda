@@ -917,7 +917,7 @@ see §12.
 frames are pool-pinned
 (Stack_Frame_Python PO2/PO8). Python adopts safepoint-current slots by
 construction when it ports onto the unified AST + `MirEmitter`
-(`Lambda_Unified_AST_Impl_Plan.md`; `Lambda_Impl_Stack_Frame_Py.md` P1
+(`Lambda_Unified_AST_Impl_Plan.md`; `impl/Lambda_Impl_Stack_Frame_Py.md` P1
 already routes its frames through the shared em pair). Until then, the Python
 entry path is disabled.
 

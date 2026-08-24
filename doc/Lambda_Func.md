@@ -83,13 +83,14 @@ fn square(n: int) => n ** 2
 ### Anonymous Functions
 
 ```lambda
-// Lambda expressions
-(x: int) => x * 2
+// Arrow form — parentheses around the parameter list are required
+let double = (x: int) => x * 2
 
-fn (x: int, y: int) { ... }
+// fn form, unnamed
+let add = fn (x: int, y: int) { x + y }
 
 // With inferred types
-(x) => x * 2
+let twice = (x) => x * 2
 ```
 
 
@@ -194,9 +195,9 @@ Access variadic arguments with `varg()`:
 | `varg(n)` | The nth variadic argument (0-indexed) |
 
 ```lambda
-fn first_or_default(default, ...) => {
+fn first_or_default(fallback, ...) => {
     if (len(varg()) > 0) varg(0)
-    else default
+    else fallback
 }
 
 first_or_default(0, 1, 2, 3)   // 1
@@ -242,7 +243,7 @@ pn publish_first(var doc: element) {
 }
 
 pn main() {
-    var doc = <article; <p "draft">>
+    var doc = <article <p "draft">>
     var snapshot = doc
     publish_first(doc)
     print(snapshot[0][0])  // draft
@@ -274,7 +275,7 @@ calculate(2.5, 3.0, "add")
 process(filter(sort(data)))
 
 // Method-style chaining (preferred)
-data.sort().filter(x => x > 0).process()
+data.sort().filter((x) => x > 0).process()
 ```
 
 ### Partial Application
@@ -291,30 +292,23 @@ add5(3)   // 8
 
 System functions can be called using method syntax:
 
-```lambda
-// Traditional prefix style
-len(arr)
-sum([1, 2, 3])
-slice("hello", 0, 3)
+The two spellings are equivalent:
 
-// Method style (equivalent)
-arr.len()
-[1, 2, 3].sum()
-"hello".slice(0, 3)
+| Prefix style | Method style |
+|---|---|
+| `len(arr)` | `arr.len()` |
+| `sum([1, 2, 3])` | `[1, 2, 3].sum()` |
+| `slice("hello", 0, 3)` | `"hello".slice(0, 3)` |
 
-// Array operations
-[3, 1, 4, 1, 5].sort()          // [1, 1, 3, 4, 5]
-[3, 1, 4, 1, 5].sum()           // 14
-[3, 1, 4, 1, 5].unique()        // [3, 1, 4, 5]
-
-// Chained
-[5, 3, 1, 4, 2].sort().reverse()  // [5, 4, 3, 2, 1]
-
-// Type conversion
-42.string()                      // "42"
-"123".int()                      // 123
-3.14.floor()                     // 3
-```
+| Kind | Expression | Result |
+|---|---|---|
+| Array operations | `[3, 1, 4, 1, 5].sort()` | `[1, 1, 3, 4, 5]` |
+| | `[3, 1, 4, 1, 5].sum()` | `14` |
+| | `[3, 1, 4, 1, 5].unique()` | `[3, 1, 4, 5]` |
+| Chained | `[5, 3, 1, 4, 2].sort().reverse()` | `[5, 4, 3, 2, 1]` |
+| Type conversion | `42.string()` | `"42"` |
+| | `"123".int()` | `123` |
+| | `3.14.floor()` | `3` |
 
 #### Supported Functions
 
@@ -339,14 +333,14 @@ Method syntax enables fluent operations:
 ```lambda
 // Chained method calls
 let result = data
-    .filter(x => x > 0)
-    .map(x => x * 2)
+    .filter((x) => x > 0)
+    .map((x) => x * 2)
     .sort()
     .take(10)
     .sum()
 
 // Equivalent nested calls (harder to read)
-let result = sum(take(sort(map(filter(data, x => x > 0), x => x * 2)), 10))
+let result = sum(take(sort(map(filter(data, (x) => x > 0), (x) => x * 2)), 10))
 ```
 
 ### Mutating Object Methods
@@ -358,7 +352,7 @@ remain read-only.
 
 ```lambda
 type Counter {
-    value: int = 0;
+    value: int = 0,
     pn add(n: int) {
         value = value + n
     }

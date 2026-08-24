@@ -1,5 +1,5 @@
 //==============================================================================
-// T0 AST interpreter tests (D8.1.1v2, vibe/Lambda_Impl_Ast_Interp.md §5)
+// T0 AST interpreter tests (D8.1.1v2, vibe/impl/Lambda_Impl_Ast_Interp.md §5)
 //
 // Three layers:
 //   1. Differential — every script in the committed P0 subset must produce
@@ -391,6 +391,17 @@ TEST(InterpWalker, NumericMaskAssignmentUsesTheVectorStore) {
     // A typed bool mask owns its lane/shape checks in fn_index_assign; T0 must
     // use that same in-place vector store for scalar, block, and N-D writes.
     const char* script = "test/lambda/proc/proc_mask_assign.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, InvalidMemberAccessUsesNullReadsAndHardWriteErrors) {
+    // S7.1.1v2 makes every invalid read null; S7.1.3v2 makes every invalid
+    // write an ItemError that crosses the pn handler in both execution tiers.
+    const char* script = "test/lambda/proc/proc_invalid_member_access.ls";
     RunResult jit = run_script(script, "jit", /*procedural=*/true);
     RunResult interp = run_script(script, "interp", /*procedural=*/true);
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);

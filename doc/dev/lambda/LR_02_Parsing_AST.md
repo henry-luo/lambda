@@ -1,19 +1,17 @@
 # Lambda Runtime — Parsing & AST Construction
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how the first-party C lexer and hybrid recursive-descent + Pratt parser reduce source directly to a typed AST, with the Tree-sitter CST builder retained as an explicit reference/rollback adapter. It owns the direct reduction dispatch, the shared AST construction seams, the concrete node hierarchy, build-time (forward, local, structural) type inference, and scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how the first-party C lexer and hybrid recursive-descent + Pratt parser reduce source directly to a typed AST. The Tree-sitter grammar is retained only as an isolated syntax-reference verifier. This document owns the direct reduction dispatch, shared AST construction seams, concrete node hierarchy, build-time (forward, local, structural) type inference, and scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
 >
-> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/parse.c` (explicit Tree-sitter reference wrapper), `lambda/tree-sitter-lambda/grammar.js` (the grammar that auto-generates reference `parser.c`), `lambda/ts-enum.h` (the auto-generated symbol/field id enums), `lambda/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/runtime/emit_ast_dump.cpp` (a read-only structural AST-dump consumer).
+> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/runtime/parse.c` (direct parser translation unit), `lambda/tree-sitter-lambda/grammar.js` (the isolated reference grammar), `test/lambda_parser_poc_diff.c` (CST differential verifier), `lambda/runtime/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/runtime/emit_ast_dump.cpp` (a read-only structural AST-dump consumer).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
 
 ## 1. Purpose & scope
 
-The Lambda front end is a two-stage pipeline. Stage one is **parsing**: a Tree-sitter grammar turns source text into a CST, a lossless tree whose nodes are tagged with numeric `TSSymbol` ids. Stage two is **AST construction**: `build_ast.cpp` walks the CST and emits a typed AST whose nodes are C++ structs derived from a common `AstNode` base, each annotated with the `Type*` that the builder infers for it on the way down. The backends never touch the CST — they lower the typed AST.
+The Lambda front end is a two-stage pipeline. Stage one is **parsing**: the first-party C lexer and recursive-descent/Pratt parser reduce source directly into parser-neutral values. Stage two is **AST construction**: the direct sink in `build_ast.cpp` emits typed AST nodes derived from a common `AstNode` base, each annotated with the `Type*` inferred during construction. The Tree-sitter grammar is used separately by `lambda-cst` for differential verification; the normal compiler never walks its CST.
 
-Three responsibilities live here and nowhere else: the central CST→AST **dispatch** (`build_expr` switching on the Tree-sitter symbol), the **build-time type inference** that stamps a `Type*` on every node (a forward, local, structural scheme — not a constraint solver), and **name resolution** — the scope chain, two-pass top-level build for forward references, closure-capture analysis, and module/import resolution. The `Type*` objects produced here are *owned* by [LR_03](LR_03_Value_and_Type_Model.md); this document only describes the inference rules that select and produce them. How the AST is then lowered to native code is [LR_06](LR_06_C_Transpiler.md) / [LR_07](LR_07_MIR_Transpiler_JIT.md); where this stage sits in the end-to-end run is [LR_01](LR_01_Compilation_Pipeline.md).
-
-<img alt="CST to typed-AST dispatch flow" src="diagram/d02_cst_to_ast.svg" width="720">
+Three responsibilities live here and nowhere else: the direct reduction sink, the **build-time type inference** that stamps a `Type*` on every node (a forward, local, structural scheme — not a constraint solver), and **name resolution** — the scope chain, forward-reference handling, closure-capture analysis, and module/import resolution. The `Type*` objects produced here are *owned* by [LR_03](LR_03_Value_and_Type_Model.md); this document only describes the inference rules that select and produce them. How the AST is then lowered to native code is [LR_06](LR_06_C_Transpiler.md) / [LR_07](LR_07_MIR_Transpiler_JIT.md); where this stage sits in the end-to-end run is [LR_01](LR_01_Compilation_Pipeline.md).
 
 ---
 
@@ -21,29 +19,13 @@ Three responsibilities live here and nowhere else: the central CST→AST **dispa
 
 ### 2.1 Production parser — `lambda_lexer.c` + `lambda_parser.c`
 
-Normal Lambda files and modules use the first-party parser by default. The
-lexer is a streaming C17 scanner with bounded lookahead; recursive descent owns
-documents, declarations, statements, containers, and the type/path seams, while
-one Pratt table owns prefix, postfix, and infix expression binding. Each
-committed production immediately calls the direct sink in `build_ast.cpp` and
-returns an `AstNode*`-backed value. No Lambda CST or replacement syntax tree is
-retained. `lambda_rd_build_ast` is the production adapter and fail-closes on an
-unsupported reduction or syntax error.
+Normal Lambda files and modules use the first-party parser by default. The lexer is a streaming C17 scanner with bounded lookahead; recursive descent owns documents, declarations, statements, containers, and the type/path seams, while one Pratt table owns prefix, postfix, and infix expression binding. Each committed production immediately calls the direct sink in `build_ast.cpp` and returns an `AstNode*`-backed value. No Lambda CST or replacement syntax tree is retained. `lambda_rd_build_ast` is the production adapter and fail-closes on an unsupported reduction or syntax error.
 
-`SourceSpan` is the shared half-open source contract. The existing type
-pattern and static-path parsers consume the same spans, so the direct path does
-not synthesize `TSNode` objects or duplicate those subgrammars.
+`SourceSpan` is the shared half-open source contract. The existing type pattern and static-path parsers consume the same spans, so the direct path does not synthesize `TSNode` objects or duplicate those subgrammars.
 
-### 2.2 Reference wrapper — `parse.c`
+### 2.2 Parser translation unit — `parse.c`
 
-`parse.c` is the explicit reference path and does no direct-AST work.
-`lambda_parser()` creates a `TSParser` and sets its language to
-`tree_sitter_lambda()` (the symbol exported by generated `parser.c`);
-`lambda_parse_source()` runs `ts_parser_parse_string()` to produce a `TSTree`.
-`LAMBDA_PARSER=tree`/`tree-sitter` selects this adapter, while
-`LAMBDA_PARSER=compare` uses it only as a syntax oracle after the direct AST is
-built. The REPL and legacy inspection tools still retain trees for their
-append-only fragment transactions.
+`parse.c` embeds `lambda_lexer.c` and `lambda_parser.c` into the runtime parser translation unit. It does not create or retain a Tree-sitter parser. The isolated `lambda-cst` target separately compiles `test/lambda_parser_poc_diff.c` with the generated reference grammar.
 
 ### 2.3 Reference grammar — `grammar.js`
 
@@ -60,36 +42,13 @@ The **operator precedence table** (`grammar.js:139`–`173`, tight→loose) is `
 
 Two deliberate symbol-count optimizations matter downstream: 30 type keywords are folded into a single `_base_type_kw` token, and `true`/`false`/`inf`/`nan` are folded into one `named_value` token — so the builder must re-discriminate them by source text. `string`/`symbol` literals are *single tokens* (escapes lexed inside) so that a `/*` inside a string is not mis-read as a comment. The grammar declares only five `conflicts` (`grammar.js:130`–`136`) and **no external scanner**; several validity checks are intentionally pushed into `build_ast.cpp` (e.g. `apply;` is only legal in view/edit bodies, rejected later by semantic analysis).
 
-### 2.3 The symbol enums — `ts-enum.h`
-
-`ts-enum.h` (295 lines) is auto-generated from the generated `parser.c` (by `update_ts_enum.sh`). It defines two enums: `ts_symbol_identifiers` (`ts-enum.h:4`, the `sym_*` / `anon_sym_*` / `aux_sym_*` node symbols) and `ts_field_identifiers` (`ts-enum.h:238`, the `field_*` ids). `ast.hpp` then `#define`s human-readable `SYM_*` / `FIELD_*` aliases over these enumerators (e.g. `SYM_INT` aliases `sym_integer`, `ast.hpp:11`–`124`). These aliases are exactly what `build_expr`'s switch cases test, so the dispatch is *numeric `TSSymbol` → `case SYM_X` → `build_x()`*. Because the enum values are regenerated whenever the grammar changes, the `SYM_*` switch is the contract that keeps builder and grammar in step.
-
 ---
 
-## 3. Reference CST → typed AST adapter and shared construction
+## 3. Direct AST construction and shared semantics
 
-The following CST dispatch remains for explicit Tree-sitter mode, REPL
-fragments, and legacy tools. Its semantic constructors are shared with the
-direct sink; it is not the normal file/module front end.
+The C parser commits each reduction with a `SourceSpan` and already-built child values. `lambda_rd_build_ast` installs the direct sink in `build_ast.cpp`, creates the `AstScript` root, and reduces declarations, expressions, containers, type patterns, paths, and procedure constructs into typed AST nodes. The sink calls shared span-based constructors for allocation, literals, names, scopes, type contracts, diagnostics, and semantic validation.
 
-### 3.1 Entry: `build_script`
-
-`build_script` (`build_ast.cpp:8199`, declared `transpiler.hpp:102`) is the construction root, called from `runner.cpp:579` (the main transpile path). It allocates an `AstScript` node (tag `AST_SCRIPT`), then allocates the global `NameScope` and points both `tp->current_scope` and `AstScript::global_vars` at it (`build_ast.cpp:8202`). It iterates the named children of the `document` node: `SYM_IMPORT_MODULE` → `build_module_import`, `SYM_CONTENT` → `build_content(tp, child, /*flatten*/true, /*is_global*/true)`, `SYM_COMMENT` skipped (`build_ast.cpp:8210`–`8223`). Results are chained through `AstNode::next` into `AstScript::child`, and the script's own type is taken from its first child (`build_ast.cpp:8231`). (Note: the function returns `AstNode*`, although the object it allocates is an `AstScript`.)
-
-### 3.2 Central dispatch: `build_expr`
-
-`build_expr` (`build_ast.cpp:7378`) is the switch that turns one CST node into one AST node. It is recursion-guarded by a `lam::RecursionGuard` against `MAX_BUILD_DEPTH` (1000, `build_ast.cpp:21`); over-deep source returns `NULL` rather than overflowing the C stack (`build_ast.cpp:7381`–`7385`). It reads `TSSymbol symbol = ts_node_symbol(expr_node)` and `switch`es over the `SYM_*` constants to the matching `build_*` function (`build_ast.cpp:7389`–`7607`).
-
-A few dispatch subtleties:
-
-- **Wrapper unwrapping.** `SYM_EXPR` / `SYM_TYPE_EXPR` are pure grammar wrappers: the builder descends to their single named child and recurses (`build_ast.cpp:7391`–`7408`).
-- **Inline literals.** Scalar literals have no dedicated node type — they are built inline in the switch. Unsuffixed integer literals must fit Lambda's semantic safe band ±(2⁵³−1); larger source literals are compile errors requiring an explicit `i64`, `u64`, `n`, `m`, or float spelling. The 56-bit physical payload does not enlarge the source-level `int` domain ([LR_03 §2](LR_03_Value_and_Type_Model.md)).
-- **Object-literal routing.** The grammar parses object construction as an `element` shape, e.g. `<TypeName field: value>` or `<TypeName>`. `build_elmt` checks whether the tag name resolves to an object type and, if so, builds an `AstObjectLiteralNode` rather than a markup element (`build_ast.cpp:5703`–`5720`). The older `{TypeName}` empty-object pre-check still exists in the map builder, but current `map` grammar requires `key: expr` items, so `{TypeName}` is not accepted source syntax.
-- **Field / cursor access.** Named children are fetched by `ts_node_child_by_field_id(node, FIELD_X)`; repeated fields (multi-dimensional `arr[i,j,k]`, import children) are gathered with a tree cursor (`ts_tree_cursor_*`, e.g. `build_field_expr` `1224`–`1246`, `build_module_import` `7758`–`7773`). Source text comes from `node_name_text` (`build_ast.cpp:716`), which strips surrounding quotes for `SYM_SYMBOL`; identifier and key text is interned into the `NamePool` via `name_pool_create_strview`, yielding pointer-equal `String*` that the scope lookups exploit.
-
-`build_primary_expr` (`build_ast.cpp:2606`) is the second-tier dispatcher: it wraps a single child in an `AstPrimaryNode`, inferring scalar literal types inline and delegating compound forms (`SYM_IDENT` → `build_identifier`, plus arrays, maps, elements, member/index → path-or-field detection, calls, queries, parent/path/current expressions). `is_const` types are re-allocated to strip the const flag (`build_ast.cpp:2687`–`2690`).
-
-`emit_ast_dump.cpp` is a read-only consumer of the direct AST: it initializes the parser-neutral input state, calls `lambda_rd_build_ast`, and walks the result to emit the canonical structural dump used by AST and type-inference verification. It is off the JIT path entirely.
+Unlike the retired CST adapter, this path never fabricates parser nodes or looks up generated Tree-sitter symbol IDs. The `lambda-cst` verifier exercises syntax acceptance separately; it does not participate in AST construction.
 
 ### 3.3 The `AstNode` hierarchy
 
@@ -145,7 +104,7 @@ Literals get either a canonical singleton (`LIT_INT`, `LIT_BOOL`, `LIT_NULL`) or
 - **Comparisons** `== != is in` → `LMD_TYPE_BOOL`. But the **ordering** ops `< <= > >=` are *representation-sensitive* (`build_ast.cpp:3201`–`3216`): a numeric-array operand → `ARRAY_NUM` (an element-wise mask via `vec_cmp`), both-native-numeric → `BOOL`, anything else → `ANY` — this must stay in lockstep with the transpiler's native-vs-fallback codegen or consumers misread the result.
 - **`AND` / `OR`** → `ANY` (the truthy idiom, not a plain boolean); **`TO`** → `RANGE`; **`PIPE`** / **`WHERE`** → the node becomes `AST_NODE_PIPE`, typed from the RHS (or `ARRAY` depending on `~` presence); file output is an explicit `output(...)` procedural call.
 
-The current promotion code still relies on `TypeId` enum order and `std::max`, with decimal-result inference partly disabled. That mechanism cannot express the settled sized/non-sized entry map or distinguish the `integer` carrier from ordinary decimal. Replacing it with the shared type-directed result classifier is part of `vibe/Lambda_Impl_Numbers.md`. The builder also performs static rewrites such as `expr is nan` and chained comparisons.
+The current promotion code still relies on `TypeId` enum order and `std::max`, with decimal-result inference partly disabled. That mechanism cannot express the settled sized/non-sized entry map or distinguish the `integer` carrier from ordinary decimal. Replacing it with the shared type-directed result classifier is part of `vibe/impl/Lambda_Impl_Numbers.md`. The builder also performs static rewrites such as `expr is nan` and chained comparisons.
 
 ### 4.4 If / branch unification — `build_if_expr`
 
@@ -216,33 +175,20 @@ Errors are accumulated, not fatal: `record_type_error` (`build_ast.cpp:330`) and
 
 ## Known Issues & Future Improvements
 
-The inference and resolution code carries a set of deliberate workarounds and latent hazards, discoverable only by reading the code.
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR02-1 – LR02-10** (open/partial; LR02-8 through LR02-10 were found during verification, not extracted from this section) and **LR02-R1 – LR02-R6** (resolved, Appendix A).
 
-1. **Unknown binary operator defaults to `OPERATOR_ADD`.** `build_binary_expr` (`build_ast.cpp:3052`–`3054`) silently treats an unrecognized operator string as `+` "to prevent crashes" — this masks any drift between the grammar's operator set and the builder's string match, producing silently-wrong code rather than an error.
-2. **Numeric promotion relies on enum order instead of semantics.** `std::max(left_type, right_type)` assumes an ordering that cannot represent `float ∥ integer`, sized lane selection, or the compact/full-width entry split. Reordering the enum can also silently change results. This is replacement scope in `Lambda_Impl_Numbers.md`.
-3. **Decimal/`integer` result inference is incomplete.** The builder cannot consistently distinguish arbitrary-precision integer results from ordinary decimal results because it often reduces types to `TypeId`; the new classifier must retain the full `Type*` numeric kind.
-4. **Relational result type is representation-sensitive.** The `< <= > >=` result is `ARRAY_NUM` / `BOOL` / `ANY` depending on operand types (`build_ast.cpp:3201`–`3216`); it must stay in exact lockstep with the transpiler's vectorized-comparison codegen ([LR_07](LR_07_MIR_Transpiler_JIT.md)) or consumers misread the value.
-5. **No-`else` `if` collapses to `TYPE_ANY`.** Whenever the branch types differ (`build_ast.cpp:3471`–`3476`), the result widens to `ANY` — broad, and a precision loss for a one-armed `if`.
-6. **Undeclared global function returns stay `TYPE_ANY`.** Pass-1 and pass-2 force `TypeFunc::returned = &TYPE_ANY` for undeclared global functions (`build_ast.cpp:6957`, `7144`–`7148`) for forward-ref soundness — they are never inferred from the body, asymmetric with nested functions which are.
-7. **`raise` is not scope-checked.** `build_raise_stam` (`build_ast.cpp:6178`–`6182`) allows `raise` in procedures but does *not* hard-fail outside `is_proc`; the inline `// TODO: Also allow in pure functions with error return type` records that proper function-error-type checking is unimplemented.
-8. **`AstLoopNode` / `AstNamedNode` layout divergence.** `AstLoopNode` (`ast.hpp:403`) has an extra `index_name` before `as` versus `AstNamedNode` (`ast.hpp:388`); a wrong-type cast reads the wrong field offset. The capture code casts explicitly and documents it (`build_ast.cpp:556`–`559`), but any new code that handles loop nodes generically is exposed.
-9. **Legacy empty-object pre-check.** Current source syntax constructs objects with `<TypeName ...>`, routed through `build_elmt`. The old `{TypeName}` → `AstObjectLiteralNode` map pre-check remains in `build_expr` / `build_primary_expr`, but the current grammar no longer accepts single-identifier maps, so this path is not user-facing syntax.
-10. **`list` expressions forced to `&TYPE_ANY`.** `build_list` (`build_ast.cpp:3580`) forces the result type to `ANY` ("list returns Item, not List"), with an adjacent `// Fix scope restoration` comment (`build_ast.cpp:3622`) flagging a scope-restore rough edge.
-11. **`match`-arm `~` references can be missed.** `has_current_item_ref` (`build_ast.cpp:3310`–`3377`) walks a match node's arm list but never inspects arm *bodies* (`build_ast.cpp:3332`–`3340`), so a `~` reference inside a match arm under a pipe may go undetected.
-12. **Load-bearing guards as code smell.** The `MAX_BUILD_DEPTH = 1000` recursion cap (`build_ast.cpp:21`, returns `NULL` on over-deep source), the `entry_count > 1000` and self-parent-cycle guards in `lookup_name` (`build_ast.cpp:1779`/`1795`), and the "skip invalid node and continue — defensive recovery" arm in let/type-stam building (`build_ast.cpp:4044`) are safety nets that paper over the absence of stronger structural invariants.
-13. **`parse.c` ignores parse errors.** The wrapper neither frees trees nor checks for parse errors (`parse.c`); all error recovery is downstream, so a malformed parse is only noticed when the builder trips over a missing or `ERROR` node.
+The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 
 ---
-
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/parse.c` | Thin Tree-sitter wrapper: `lambda_parser`, `lambda_parse_source` → `TSTree`. No AST work, no error checks. |
+| `lambda/runtime/parse.c` | Production parser translation unit embedding the C lexer and recursive-descent/Pratt parser. |
 | `lambda/tree-sitter-lambda/grammar.js` | Grammar source: top-level rules (`document`/`content`/`_statement`/`_expr`), precedence table, type sublanguage, conflicts. Auto-generates `src/parser.c`. |
-| `lambda/ts-enum.h` | Auto-generated `ts_symbol_identifiers` / `ts_field_identifiers` enums; aliased to `SYM_*` / `FIELD_*` in `ast.hpp`. |
-| `lambda/ast.hpp` | `AstNode` base + concrete node structs, `AstNodeType` enum, `NameScope`/`NameEntry`/`CaptureInfo`/`NamespaceEntry`, `AstScript`. |
-| `lambda/build_ast.cpp` | The CST→AST builder: `build_script`, `build_expr` dispatch, per-construct `build_*`, type inference, scope/name resolution, import resolution, capture analysis. |
+| `test/lambda_parser_poc_diff.c` | Isolated Tree-sitter/C parser differential verifier. |
+| `lambda/runtime/ast.hpp` | `AstNode` base + concrete node structs, `AstNodeType` enum, `NameScope`/`NameEntry`/`CaptureInfo`/`NamespaceEntry`, `AstScript`. |
+| `lambda/runtime/build_ast.cpp` | Direct span-based AST sink, per-construct semantic construction, type inference, scope/name resolution, import resolution, and capture analysis. |
 | `lambda/runtime/emit_ast_dump.cpp` | Read-only AST consumer: builds the AST then emits the canonical structural dump; off the JIT path. |
 
 ## Appendix B — Related documents

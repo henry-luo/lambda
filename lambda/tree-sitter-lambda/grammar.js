@@ -562,7 +562,7 @@ module.exports = grammar({
       // would let `type E { … }` read as three juxtaposed statements (S16.1.3)
       // instead of a declaration. `type(x)` is reinstated as a call form below.
       alias($._base_type_kw, $.base_type),
-      $.pattern_island,
+      $.char_pattern_island,
       $.identifier,
       $.index_expr,
       $.path_expr,
@@ -1059,7 +1059,7 @@ module.exports = grammar({
       $.array_type,
       $.map_type,
       $.element_type,
-      $.pattern_island,
+      $.char_pattern_island,
     ),
 
     occurrence_type: $ => prec.dynamic(1, prec.right(seq(
@@ -1129,40 +1129,40 @@ module.exports = grammar({
 
     // ==================== String / symbol pattern islands =================
 
-    _pattern_tag: _ => token(choice('\\symbol(', '\\(')),
-    pattern_island: $ => seq(
-      field('tag', $._pattern_tag), field('body', $._pattern_expr), ')',
+    _char_pattern_tag: _ => token(choice('\\symbol(', '\\(')),
+    char_pattern_island: $ => seq(
+      field('tag', $._char_pattern_tag), field('body', $._char_pattern_expr), ')',
     ),
 
-    pattern_char_class: _ => choice('...', 'd', 'w', 's', 'a', '.'),
-    _pattern_primary_type: $ => choice(
-      $.range_type, $._non_null_literal, $.identifier, $.pattern_char_class,
+    char_class: _ => choice('...', 'd', 'w', 's', 'a', '.'),
+    _char_primary_type: $ => choice(
+      $.range_type, $._non_null_literal, $.identifier, $.char_class,
     ),
-    pattern_occurrence_type: $ => prec.right(seq(
-      field('operand', $._pattern_primary_type), field('operator', $.occurrence),
+    char_occurrence_type: $ => prec.right(seq(
+      field('operand', $._char_primary_type), field('operator', $.occurrence),
     )),
-    pattern_negation_type: $ => prec.right(seq(
-      '!', field('operand', $._pattern_primary_type),
+    char_negation_type: $ => prec.right(seq(
+      '!', field('operand', $._char_primary_type),
     )),
-    grouped_type: $ => prec.right(seq(
-      optional('!'), '(', $._pattern_expr, ')',
+    char_grouped_type: $ => prec.right(seq(
+      optional('!'), '(', $._char_pattern_expr, ')',
       optional(field('occurrence', $.occurrence)),
     )),
-    concat_type: $ => prec.left(1, seq(
-      choice($.pattern_unary_type, $.grouped_type),
-      repeat1(choice($.pattern_unary_type, $.grouped_type)),
+    char_concat_type: $ => prec.left(1, seq(
+      choice($.char_unary_type, $.char_grouped_type),
+      repeat1(choice($.char_unary_type, $.char_grouped_type)),
     )),
-    string_binary_type: $ => choice(...type_operators($._pattern_expr)),
-    pattern_unary_type: $ => prec.right(choice(
-      $.pattern_occurrence_type,
-      $.pattern_negation_type,
-      $._pattern_primary_type,
+    char_binary_type: $ => choice(...type_operators($._char_pattern_expr)),
+    char_unary_type: $ => prec.right(choice(
+      $.char_occurrence_type,
+      $.char_negation_type,
+      $._char_primary_type,
     )),
-    _pattern_expr: $ => choice(
-      $.pattern_unary_type,
-      $.concat_type,
-      alias($.string_binary_type, $.binary_type),
-      $.grouped_type,
+    _char_pattern_expr: $ => choice(
+      $.char_unary_type,
+      $.char_concat_type,
+      alias($.char_binary_type, $.binary_type),
+      $.char_grouped_type,
     ),
 
     // ============================== Imports ===============================

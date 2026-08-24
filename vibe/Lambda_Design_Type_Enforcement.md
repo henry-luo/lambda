@@ -3,7 +3,7 @@
 **Status:** ROUND 1 IMPLEMENTED (commit `274625d56`) — the core boundary catalog is enforced;
 round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
 firewall, `or`-narrowing, fault channel), tracked in
-[`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
+[`vibe/impl/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
 work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
 skip to the closest safe boundary) and TE-16 (the `^ { }` handler; legacy `^err` and prefix
 error tests retired) were decided 2026-08-01. The handler grammar/runtime slice and the Rev 7

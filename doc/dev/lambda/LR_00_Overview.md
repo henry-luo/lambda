@@ -11,7 +11,7 @@
 
 Lambda Script is a pure-functional, cross-platform scripting language for data processing and document presentation, implemented from scratch in C/C++ with JIT compilation. The *core runtime* is the part that turns Lambda source into running native code and provides the values, memory, and built-in operations that code executes against. Its defining choices:
 
-- **JIT-only execution, no interpreter.** A script is always compiled — parsed by Tree-sitter, built into a typed AST, lowered to [MIR](https://github.com/vnmakarov/mir) intermediate representation, and JIT-generated to native code. There is no tree-walking evaluator; what looks like an "evaluator" (`lambda-eval.cpp`) is in fact the C-ABI *runtime support library* the generated code calls into ([LR_09](LR_09_Runtime_Builtins.md)).
+- **JIT-only execution, no interpreter.** A script is always compiled — parsed by the first-party C parser, built into a typed AST, lowered to [MIR](https://github.com/vnmakarov/mir) intermediate representation, and JIT-generated to native code. The isolated Tree-sitter grammar is used only by the `lambda-cst` differential verifier. There is no tree-walking evaluator; what looks like an "evaluator" (`lambda-eval.cpp`) is in fact the C-ABI *runtime support library* the generated code calls into ([LR_09](LR_09_Runtime_Builtins.md)).
 - **A single 64-bit tagged value, `Item`.** Every value — scalar, container, document node, JIT temporary — is one tagged word, dispatched uniformly by `get_type_id` ([LR_03](LR_03_Value_and_Type_Model.md)). The same representation is shared with the embedded JavaScript engine and the document subsystems.
 - **One supported backend.** MIR Direct lowers the AST straight to MIR ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The former C-text/c2mir backend and its Lambda-side implementation have been removed; [LR_06](LR_06_C_Transpiler.md) is retained only as a historical design record.
 - **Garbage collection with a non-moving heap.** Object structs never move (so tagged pointers stay valid across collections), while variable-size data buffers live in a compacting data nursery ([LR_08](LR_08_Memory_and_GC.md)).
@@ -25,7 +25,7 @@ Lambda Script is a pure-functional, cross-platform scripting language for data p
 
 <img alt="C4 system context" src="diagram/c4_context.svg" width="720">
 
-A developer drives the runtime through the CLI. The runtime depends on three external systems: Tree-sitter for parsing, the MIR library for IR generation and JIT, and the host OS for files, processes, and I/O.
+A developer drives the runtime through the CLI. The runtime depends on the MIR library for IR generation and JIT and on the host OS for files, processes, and I/O. The optional `lambda-cst` verifier additionally links the Tree-sitter runtime and generated Lambda grammar.
 
 ### 2.2 Containers
 
@@ -47,8 +47,8 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 
 1. **Dispatch.** `main` parses CLI args and selects the run path; `run_script_file` → `run_script_mir`.
 2. **Load.** `load_script` reads the source, de-duplicates and circular-checks imports, and precompiles them in parallel.
-3. **Parse.** Tree-sitter produces a CST; `parse.c` is the thin wrapper over the generated grammar ([LR_02](LR_02_Parsing_AST.md)).
-4. **Build AST.** `build_script` walks the CST into a typed AST via `build_expr`, inferring expression types as it goes ([LR_02](LR_02_Parsing_AST.md)).
+3. **Parse.** The first-party C lexer and recursive-descent/Pratt parser reduce source directly through `lambda/runtime/parse.c` ([LR_02](LR_02_Parsing_AST.md)).
+4. **Build AST.** The span-based sink in `lambda/runtime/build_ast.cpp` constructs the typed AST and infers expression types as it goes ([LR_02](LR_02_Parsing_AST.md)).
 5. **Transpile.** `compile_script_as_mir_direct` lowers the AST to a MIR module — inline boxing, register-type tracking, and root/number side-frame emission ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The removed C2MIR implementation is retained only as a historical design record in [LR_06](LR_06_C_Transpiler.md).
 6. **Link & generate.** `mir.c` resolves runtime-function imports, links the module, and runs `MIR_gen` to native code; module-level globals are registered as GC roots post-link.
 7. **Run.** `execute_script_and_create_output` calls the generated `main_func(context)` under a stack-overflow guard; the result is printed by the canonical value serializer ([LR_11](LR_11_Mark_Data_API.md)).
@@ -60,7 +60,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 ### Part I — Front end
 
 - **[LR_01 — Compilation Pipeline, CLI & REPL](LR_01_Compilation_Pipeline.md)** — end-to-end orchestration, CLI subcommand dispatch, the whole-history REPL, module/template resolution and parallel precompile.
-- **[LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md)** — Tree-sitter grammar, the CST→AST dispatch, the AST node hierarchy, and build-time type inference.
+- **[LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md)** — direct C parsing, span-based AST construction, the AST node hierarchy, and build-time type inference.
 
 ### Part II — Data & types
 
@@ -103,16 +103,16 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 
 ## 6. Maturity & recurring known-issue themes
 
-The runtime is mature and heavily tested, but the per-document Known Issues sections cluster around a few recurring themes worth reading as a whole:
+The runtime is mature and heavily tested. The per-document issue lists have been consolidated into the **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, which carries every entry with a verification status (OPEN / PARTIAL / RESOLVED) against current source, re-resolved `file:line` anchors, resolved issues in Appendix A, and cross-cutting clusters in Appendix B. The recurring themes worth reading as a whole:
 
 - **MIR register immutability drives a large workaround surface.** A MIR register's type is fixed once declared, so the MIR Direct backend must truncate-or-box on type widening, force certain results (match, vectorized comparisons) to always-boxed, and carry guards like `emit_null_item_reg` and `push_l_safe`. This is the single densest known-issue cluster ([LR_07](LR_07_MIR_Transpiler_JIT.md)).
 - **Precise rooting and scalar ownership depend on honest lowering.** The transpiler must publish every heap-capable live register to the root side-stack before allocation-capable calls, while wide scalar values that outlive a number frame must be copied to storage-owned lanes. Shared emit/store helpers centralize those invariants, but new lowering paths must use them ([LR_08](LR_08_Memory_and_GC.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)).
-- **Equality and coercion are representation-sensitive.** `item_deep_equal` lacks cases for several types and falls back to pointer equality; numeric arrays compare by raw `memcmp` (robust value-equality is `sum(abs(a-b)) == 0`); `it2d`/`it2l`/`it2b` have poisoning and sentinel-collision sharp edges ([LR_03](LR_03_Value_and_Type_Model.md), [LR_05](LR_05_Strings_and_Vectors.md)).
-- **Hard-coded caps with silent failure modes.** Fixed sizes recur — map hash table, shape-chain length 64, scope depth 64, loop stack 32, inference parameter arrays 16, `ndim` 32 — and several truncate or fall back silently rather than erroring ([LR_03](LR_03_Value_and_Type_Model.md), [LR_07](LR_07_MIR_Transpiler_JIT.md), [LR_11](LR_11_Mark_Data_API.md)).
+- **Equality and coercion are representation-sensitive.** `item_deep_equal` lacks cases for several types and falls back to pointer equality; `it2d`/`it2l`/`it2b` have poisoning and sentinel-collision sharp edges — notably `INT64_ERROR == INT64_MAX`. Numeric-array equality is no longer in this list: `array_num_eq` now compares shape as structure and values element-wise across element types, retiring the `sum(abs(a-b)) == 0` workaround ([LR_03](LR_03_Value_and_Type_Model.md), [LR_05](LR_05_Strings_and_Vectors.md)).
+- **Hard-coded caps with silent failure modes.** Fixed sizes recur — map hash table, shape-chain length 64, scope depth 64, loop stack 32, shape-builder fields 64, `ndim` 32 — and several truncate or fall back silently rather than erroring. The parallel 16-entry inference parameter arrays are retired ([LR_03](LR_03_Value_and_Type_Model.md), [LR_07](LR_07_MIR_Transpiler_JIT.md), [LR_11](LR_11_Mark_Data_API.md)).
 - **One supported backend.** MIR Direct is the sole implementation target; the retired C2MIR backend has been removed from Lambda. A second type-vocabulary hazard once existed here too — the validator's parallel `TypeSchema` model — but it was dead code and has since been removed, leaving the runtime `Type*` family as the single vocabulary ([LR_03](LR_03_Value_and_Type_Model.md), [LR_13](LR_13_Schema_Validator.md)).
 - **Conservatism by default.** The safety analyzer always requests a stack check and disables TCO at the gate despite a full TCO analysis being implemented; param inference dropped speculative-INT after it truncated float arguments. These are deliberate trades of performance for correctness ([LR_12](LR_12_Procedural_Runtime.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)).
 
-None of these block normal use; they are the concrete future-improvement targets the set surfaces.
+None of these block normal use; they are the concrete future-improvement targets the set surfaces. Work them from the ledger, not from this summary.
 
 ---
 

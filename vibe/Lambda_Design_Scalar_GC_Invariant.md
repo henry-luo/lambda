@@ -396,7 +396,7 @@ immediately stores into its destination; the `getTime` return follows SG2.
 8. **Documentation synchronization** — update at least
    `Lambda_Design_Stack_API.md`, `Lambda_Impl_Numbers.md`,
    `Lambda_Impl_Sized_Int (done).md`, `Lambda_Type_Int_Sized.md`,
-   `Lambda_Impl_Stack_Frame_Py.md`, `Lambda_Issue_Scalar_Lane.md`, and
+   `impl/Lambda_Impl_Stack_Frame_Py.md`, `Lambda_Issue_Scalar_Lane.md`, and
    `Lambda_Design_MIR_Emission_Test.md` so no durable record still prescribes
    or expects a GC scalar cell.
 

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 11.0.0 (2026-08-22)
+**Spec version:** 12.0.0 (2026-08-24)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -135,9 +135,9 @@ harnesses.
   literal outside the band is a compile error; parsed data always lands in
   an exact home — parsers never reject numeric data and never silently
   place it in float. [S4.3]
-- **SI11 — Total reads, checked writes.** Reads never raise — absence is
-  `null` (or `""` for string results), slices clamp; an out-of-bounds
-  write always raises. [S7.1]
+- **SI11 — Total reads, checked writes.** Invalid member reads never raise —
+  they yield `null`; slices clamp. The corresponding invalid member write
+  always raises a hard language error. [S7.1]
 - **SI12 — The length law.** `len(x)` is exactly the number of iterations
   `for (i in x)` performs; `len` is shallow;
   `len(container) = Σ count(item)`. [S8.3]
@@ -203,17 +203,19 @@ harnesses.
   two parent steps. The retired `/a`, `..a`, and compound `_..` spellings do
   not exist. Quoted, wildcard, and dynamic steps retain their ordinary
   dotted/indexed forms. [PTH1v2, PTH2v2, PTH3–PTH4, PTH11, PTH17]
-- **S2.4.2v3*** Every hierarchical reference is a typed root plus ordered
+- **S2.4.2v4*** Every hierarchical reference is a typed root plus ordered
   operations. Ordinary keys are `NameKey` or non-negative `IntKey`; a dynamic
-  key is evaluated before lookup and must produce one of those two kinds.
-  Other key values are unsupported reads under S7.1.1. Root, parent, and
+  subscript is evaluated and normalized through S8.2.1v2 before lookup.
+  A key-domain mismatch is an invalid member access: its read yields `null`
+  under S7.1.1v2 and its write raises through the hard `T^` channel under
+  S7.1.3v2/S7.4.2. It never implies container conversion. Root, parent, and
   wildcard navigation are operation kinds, so `a.1.b` and `a.'1'.b` remain
   distinct. Postfix root `./` discards descendant steps back to the logical or
   provider/authority anchor; unresolved relative root selection remains as
   `./`. Parent steps apply left-to-right: they remove a preceding child,
   accumulate at the relative root, and clamp at an anchored root. Equality,
   hashing, printing, target resolution, and
-  `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1,
+  `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v2,
   PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
 - **S2.4.3v2*** Paths, names, symbols, and member expressions use this one
   reference scheme but retain distinct evaluation contracts. Paths are
@@ -229,7 +231,7 @@ harnesses.
   path child requires the explicit content boundary `<svg; .rect>`.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
-  S5.1.4, S8.2.2, S9.1.5, PTH13–PTH15, PTH16v2, PTH20]
+  S5.1.4, S8.2.2v2, S9.1.5, PTH13–PTH15, PTH16v2, PTH20]
 - **S2.4.4*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
@@ -523,11 +525,14 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 
 ### S7.1 Reads are total; writes are checked
 
-- **S7.1.1** Out-of-bounds and negative indexing, missing map keys, and
-  string out-of-range indexing yield **`null`**. Null propagates through
-  chained access (`data.users[5].name` → null end-to-end) and scalar
-  arithmetic (`null + 1` → null). `arr[i] or default` is the coalescing
-  idiom.* [C5]
+- **S7.1.1v2*** Every invalid member/index **read yields `null`**. This
+  includes out-of-bounds or negative sequence/string positions, missing named
+  members, a key outside the base's domain (`array["name"]`, `array[5.5]`,
+  `map[1]`), and a non-error base with no applicable member face. No invalid
+  read raises or returns an error value. Null propagates through chained access
+  (`data.users[5].name` → null end-to-end) and scalar arithmetic
+  (`null + 1` → null). `arr[i] or default` is the coalescing idiom. [C5,
+  C5.3b]
 - **S7.1.2** Slices **clamp** to bounds and return an empty collection (or
   `""` for string results — the result type is preserved). Clamping is
   symmetric: a negative offset clamps to 0, never wraps from the end
@@ -535,10 +540,12 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
   makes the whole selection `null` — a missed search degrades end-to-end
   instead of returning a plausible wrong prefix. A non-null non-integral
   offset is an `error`. [C5, RF3D]
-- **S7.1.3** An out-of-bounds **write is a raised error** — not null, not a
-  silent no-op. *Reads ask a question; writes issue a command, and a command
-  that silently does nothing hides bugs.* Growth is explicit
-  (`push`/`splice`). [C5]
+- **S7.1.3v2*** Every invalid member/index **write raises a hard language
+  error** through the `T^` channel of S7.4.2 — never a soft `T | error` value,
+  null, or a silent no-op. This includes the same bounds, key-domain, and base
+  failures covered by S7.1.1v2. *Reads ask a question; writes issue a command,
+  and a command that silently does nothing hides bugs.* Growth is explicit
+  (`push`/`splice`). [C5, C5.3b]
 
 ### S7.2 Indexing and `last`
 
@@ -856,14 +863,27 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S8.2 The key space
 
-- **S8.2.1** Every item in every container has a key, in one space: maps key
-  by symbol; arrays/lists/ranges by integer index; elements by **both**.
-  `for (k, v in c)` exposes the key uniformly (`[for (k, v in [10,20]) k]` →
-  `[0, 1]`). [§8.0 record]
-- **S8.2.2*** A *name* is a symbol key only. `at` ranges over names, so
+- **S8.2.1v2*** Every container has a fixed key domain. The sequence face of
+  arrays, lists, and ranges uses non-negative `IntKey`s. An `int`, `float`, or
+  `decimal` subscript normalizes to an `IntKey` only when its value is finite,
+  mathematically integral, exact in the index integer domain, and
+  non-negative: `a[5]`, `a[5.0]`, and `a[5.00n]` select the same member.
+  Fractional values such as `5.5`, negative integral positions, strings, and
+  symbols do not name sequence members. The named face of a map accepts
+  string and symbol subscripts as `NameKey`s; the empty string is a valid,
+  distinct name rather than absence. An element exposes both faces: an
+  `IntKey` selects a content child, while a `NameKey` selects an attribute.
+  Any subscript not admitted by the selected container face is an invalid
+  member access: the read yields `null`, while the write raises a hard error
+  under S7.1.3v2/S7.4.2.
+  `for (k, v in c)` exposes the resulting canonical key uniformly
+  (`[for (k, v in [10,20]) k]` → `[0, 1]`). [C5.3b]
+- **S8.2.2v2*** A *name* is a `NameKey`: string and symbol subscripts with the
+  same exact contents normalize to the same name, including the empty name.
+  `at` ranges over names, so
   `1 at [10, 20, 30]` is **false** — the narrower reading is what lets
   `for (k at e)` give an element's attributes without its children; an index
-  bound is written `i < len(arr)`. [§8.0.1 record]
+  bound is written `i < len(arr)`. [C5.3b; §8.0.1 record]
 
 ### S8.3 `len`
 
@@ -925,6 +945,14 @@ construct; `let` is final.* [C4]
 - **S9.1.5** No reference cells; structural `==` is the only equality.
   Cycles are unconstructible, so `==` is total and no cycle collector is
   needed.
+- **S9.1.6*** Member/index assignment may update or add only a member admitted
+  by the container's existing key domain; it never changes the container kind.
+  Thus `var a = []; a["str"] = 1` raises under S7.1.3v2 and `a` remains an array
+  rather than being promoted to a map or object. Changing kinds requires
+  whole-binding replacement with a newly constructed value, for example
+  `var a = [1]; a = {value: 1}`. Such reassignment remains subject to the
+  binding's declared type; an unannotated `var` may change runtime type under
+  S12.2.1. [S8.2.1v2, S9.1.2, C5.3b]
 
 ### S9.2 Covariance, borrows, and views
 
@@ -1000,7 +1028,7 @@ construct; `let` is final.* [C4]
 - **S10.4.1*** Postfix `.~~` is the parent-navigation step at the ordinary
   member/index precedence tier; it chains left-to-right (`value.~~.~~.name`).
   A value domain or active traversal context supplies the parent relation;
-  absence of one yields `null` and chains by S7.1.1. Path values use S2.4.2v3.
+  absence of one yields `null` and chains by S7.1.1v2. Path values use S2.4.2v4.
   A field named `.parent` remains an ordinary member, not a syntactic alias.
   [PTH3, PTH5, PTH9]
 - **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
@@ -1025,7 +1053,7 @@ construct; `let` is final.* [C4]
   anchor. For a traversal occurrence it selects the outermost occurrence from
   the active navigation path/zipper; a declared root-aware model supplies its
   own root; a standalone hierarchical value is its own root. Absence of a root
-  relation yields `null` and chains by S7.1.1. [PTH26–PTH28]
+  relation yields `null` and chains by S7.1.1v2. [PTH26–PTH28]
 - **S10.5.3*** Dynamic root navigation is occurrence-based. Its lineage lives
   in the evaluation context as a navigation path, cursor, or zipper; it never
   adds root/parent pointers or observable identity to Lambda values. [S1.4,
@@ -1059,7 +1087,7 @@ construct; `let` is final.* [C4]
   bounds of mixed domains or strings containing more than one codepoint are
   errors, not coercions. The same membership rule applies in annotations,
   match arms, and value expressions; indexing or iteration materializes each
-  character-range member as a one-codepoint string. [S7.1.1, S11.2.1]
+  character-range member as a one-codepoint string. [S7.1.1v2, S11.2.1]
 
 ### S11.2 Match
 
@@ -1524,7 +1552,7 @@ below by its section.
   [Design_Syntax §7.23]
 - **S16.7.2** **Null is stripped from content.** A `null` reaching content
   contributes nothing, however it arose — written literally, read from a
-  missing key (S7.1.1), or produced by an `else`-less `if` (S16.6.3). If
+  missing key (S7.1.1v2), or produced by an `else`-less `if` (S16.6.3). If
   stripping leaves the content empty, the script's value is a single `null`;
   that residual is the only null observable at top level. Containers do not
   normalize: `[1, null, 2]` keeps its null, so a null is observed by placing
@@ -1604,21 +1632,21 @@ below by its section.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
-[`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
-[`Lambda_Impl_Error_Rework.md`](../vibe/Lambda_Impl_Error_Rework.md),
-[`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
+Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
+[`Lambda_Impl_Error_Handling (done).md`](../vibe/impl/Lambda_Impl_Error_Handling%20(done).md),
+[`Lambda_Impl_Error_Rework.md`](../vibe/impl/Lambda_Impl_Error_Rework.md),
+[`Lambda_Impl_Int_Total (done).md`](../vibe/impl/Lambda_Impl_Int_Total%20(done).md).
 
 | Ruling | Status |
 |---|---|
-| S2.4.1v2, S2.4.2v3, S2.4.3v2–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19: maximal namespace-qualified element/attribute names, explicit `;` before a relative-path element child, logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, and network hostname discovery remain deferred. |
+| S2.4.1v2, S2.4.2v4, S2.4.3v2–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19: maximal namespace-qualified element/attribute names, explicit `;` before a relative-path element child, logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v2 key normalization remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
 | S5.5.1 | Function self-equality defect open; normalized-AST hash awaits `compile()` (S15.3). |
 | S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
 | S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
-| S7.1.1 | OOB-read→null / write→raise / clamping partially landed; slice-offset rules (RF3D) landed with regression tests. |
+| S7.1.1v2, S7.1.3v2 | Core computed array/map/element reads now return `null` for invalid keys and writes return the hard `ItemError`/`T^` channel; typed-array and mask paths share the same checked key boundary. A broader access-site audit remains for specialized editor/host surfaces. Slice-offset rules (RF3D) landed with regression tests. |
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
@@ -1629,7 +1657,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
 | S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
-| S8.2.2 | `at` membership still tests the whole key space (`1 at [10,20,30]` returns true); iteration conforms. |
+| S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership still tests the whole key space (`1 at [10,20,30]` returns true); iteration conforms. |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
@@ -1643,7 +1671,7 @@ Status of `*`-marked rulings as of 2026-08-18. Conformance plans:
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
-| S16.1–S16.6 (all) | Ratified 2026-08-21, wholly unimplemented — today's grammar terminates statements on line breaks (`statement_end` precedence tier plus a high-precedence linebreak token racing `/\s/` in `extras`), which S16.1.1 retires. Implementation: `_same_line` guard tokens and a `_member_call_dot` token (S16.2.4) in the external scanner, applied in both `grammar.js` and `grammar-lambda.js`. Known conformance bugs: `scan_type_pattern` continues a type pattern on a line-start `!` (`scanner.c:229`), which S16.2.3 classifies as dual-role — the scanner's continuation set must be a subset of S16.2.2's, in the four sibling type scanners too; `return` ⏎ *value* today returns null (S16.2.5). Migration is mechanical: every difference surfaces as a syntax error except S16.2.5 sites, which silently gain their value and need diff review. Diagnostics carry the design's usability — each S16.2.3 rejection must name both repairs. |
+| S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24.** Ratified 2026-08-21 and implemented since: `test/c_s16_conformance.sh` passes 123/123 against the production C recursive-descent parser and `test/ts_s16_conformance.sh` 118/118 against the Tree-sitter reference grammar. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Both defects this row previously named are fixed: `return` ⏎ *value* now returns the value (S16.2.5), and the type scanners no longer continue on a line-start `!` (S16.2.3). Residue: the `!` fix must still be applied to the four sibling Tree-sitter scanners (`primary_type_pattern_token`, `return_type_token`, `view_pattern_token`, `content_type_token`) — O3 in [Design_Syntax §6](../vibe/Lambda_Design_Syntax.md); and a comment can defeat the line-start guard in Tree-sitter only, one-directionally and benignly ([Design_Syntax §7.17](../vibe/Lambda_Design_Syntax.md)). The user-facing doc sweep (O4) is outstanding: 60 of 172 `lambda` code blocks in `Lambda_Expr_Stam.md`, `Lambda_Reference.md`, `Lambda_Cheatsheet.md`, and `Lambda_Func.md` no longer parse. |
 | S16.4.1v2 | **Conformant as of 2026-08-22.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
 | S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3, S16.9.5 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
@@ -1667,10 +1695,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO6** Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); where containment materializes under deferred evaluation.
 - **SO7** TE-5 R5 sticky `any`; validator schema-`any` uniformity.
 - **SO8** Should `is` become value-aware? Deliberately undecided (S11.3.1 records the intentional asymmetry).
-- **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
+- **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken — measured 2026-08-24, `&` and `!` evaluate correctly in `is`/`match` pattern position but are rejected in `let`/parameter annotation position; LR02-9 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md)); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
 - **SO10** A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) — real question, future design (S7.9.3).
 - **SO11** Whether a non-null scalar iterates once (`len(5)`): `for (i in 5)` yields nothing while `5 |> ~` yields one item; the S8.3.1 law requires them to agree before `len(5)` is settled.
-- **SO12** `for (k, v at c)` paired form does not parse; whether it should exist is open.
+- **SO12** `for (k, v at c)` paired form: the "does not parse" premise is stale (measured 2026-08-24) — it parses and runs, but binds **both** names to the key, where the bare `for k, v in c` correctly binds key and value. Whether the form should exist is still open; that it silently mis-binds meanwhile is a defect, tracked as LR02-8 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md).
 
 **Values, COW, resources**
 - **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
@@ -1699,7 +1727,6 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
 - **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — dodged by convention; Flix-style Boolean effect polymorphism is the recorded minimal fix.
 - **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
-- **SO30** Empty JSON keys (`{"": 1}` currently corrupts on round-trip) — map keys from data need a defined answer given solid symbols.
 - **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
 - **SO33** A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in assignment position — document or delete.
@@ -1718,9 +1745,9 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only) |
 | S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
-| S7 absence/errors | C5, C5.3, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| S8 membership | C5.3a; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
-| S9 mutability | C4, C4.2a/b/c, C4.3, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Design_Runtime_COW.md` |
+| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| S8 membership | C5.3a, C5.3b; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
+| S9 mutability | C4, C4.2a/b/c, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |

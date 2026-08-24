@@ -1,6 +1,7 @@
 
 #include "transpiler.hpp"
 #include "../core/lambda-decimal.hpp"
+#include "lambda-error.h"
 #include "heap_api.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -15,6 +16,7 @@
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
 extern __thread EvalContext* context;
+extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message);
 #define active_runtime ((Context*)context)
 void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
@@ -590,35 +592,58 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
 }
 
 // Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
-// Rejected on views (read-only).  Out-of-range indices silently no-op.
-void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
-    if (!arr || ndim < 1) return;
+// Rejected on views (read-only). Invalid coordinates are hard write errors.
+Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
+    if (!arr || !indices || ndim < 1) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "invalid multi-dimensional array write target");
+        return ItemError;
+    }
     if (arr->is_view && !arr->is_mutable_view) {
         log_error("array_num_set_nd: cannot mutate a read-only view; copy() first");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "cannot mutate a read-only numeric array view");
+        return ItemError;
     }
     // mutable view: the strided offset computed below lands in the base buffer
     // (data is pre-offset / strides span the base), so the write goes through.
     if (!arr->is_ndim) {
-        if (ndim != 1) return;
+        if (ndim != 1) {
+            set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+                "multi-dimensional index rank does not match the array");
+            return ItemError;
+        }
         int64_t i = indices[0];
         // c15 forbids hidden tail-relative writes through negative indexes.
-        if (i < 0 || i >= arr->length) return;
+        if (i < 0 || i >= arr->length) {
+            set_runtime_error_no_trace(ERR_INDEX_OUT_OF_BOUNDS,
+                "multi-dimensional array index is out of bounds");
+            return ItemError;
+        }
         array_num_set_item(arr, i, value);
-        return;
+        return ItemNull;
     }
     ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
-    if (!shape || shape->ndim != ndim) return;
+    if (!shape || shape->ndim != ndim) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "multi-dimensional index rank does not match the array");
+        return ItemError;
+    }
     int64_t* shp = array_num_shape_dims(shape);
     int64_t* str = array_num_shape_strides(shape);
     int64_t offset = 0;
     for (int ax = 0; ax < ndim; ax++) {
         int64_t i = indices[ax];
         // c15 forbids hidden tail-relative writes through negative coordinates.
-        if (i < 0 || i >= shp[ax]) return;
+        if (i < 0 || i >= shp[ax]) {
+            set_runtime_error_no_trace(ERR_INDEX_OUT_OF_BOUNDS,
+                "multi-dimensional array index is out of bounds");
+            return ItemError;
+        }
         offset += i * str[ax];
     }
     array_num_set_item(arr, offset, value);
+    return ItemNull;
 }
 
 // Returns the iteration count for for-in / index loops:

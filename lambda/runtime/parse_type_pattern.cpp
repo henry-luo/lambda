@@ -19,8 +19,8 @@
 //               | '{' … '}' | '<' … '>' | fn-type | island
 //
 // Every tier returns an AstNode with the SAME node kind, fields, `Type*`
-// wrapping, and type_list/const_list registration the CST type builders
-// produced — that fidelity is the contract (see the header). The shared
+// wrapping, and type_list/const_list registration expected by downstream
+// consumers — that fidelity is the contract (see the header). The shared
 // Type-construction pieces live in type_build.hpp rather than being copied.
 
 namespace {
@@ -167,7 +167,7 @@ Type* wrap_type(Lexer* lx, Type* inner) {
 }
 
 // Containers and binaries register the WRAPPER in type_list; occurrence and
-// range register the raw type — exactly the split the CST builders had.
+// range register the raw type — the split required by downstream consumers.
 Type* register_wrapped(Lexer* lx, Type* inner, int* index_out) {
     Type* wrapper = wrap_type(lx, inner);
     arraylist_append(lx->tp->type_list, wrapper);
@@ -176,7 +176,7 @@ Type* register_wrapped(Lexer* lx, Type* inner, int* index_out) {
 }
 
 // --- literals ---------------------------------------------------------------
-// Value-bearing literal types, registered like the CST's build_lit_* helpers:
+// Value-bearing literal types, registered through the shared literal/type lanes:
 // strings/ints/floats go to const_list, and the transpiler emits them from the
 // type payload or the const pool — never from the node's source span.
 
@@ -351,7 +351,7 @@ AstNode* parse_island_primary(Lexer* lx) {
     PatternCharClass klass;
     if (island_char_class(w, &klass)) {
         // the reserved atoms shadow nothing: a surrounding `let d = ...` makes
-        // `d` inside an island ambiguous, which the CST builder rejected too
+        // `d` inside an island ambiguous, which is also invalid
         NameEntry* shadowed = lookup_name(lx->tp, w);
         if (shadowed) {
             record_semantic_error_span(lx->tp, lx->origin, ERR_SEMANTIC_ERROR,
@@ -503,8 +503,8 @@ AstNode* parse_island(Lexer* lx) {
 
     if (!is_symbol && pattern_ast_literal_set(node->pattern)) {
         // Literal-only islands ARE ordinary literal unions; keeping that
-        // representation preserves the existing matching path (the CST island
-        // builder returned the body AST for exactly this case).
+        // representation preserves the existing matching path by returning the
+        // body AST for this case.
         return node->pattern;
     }
 

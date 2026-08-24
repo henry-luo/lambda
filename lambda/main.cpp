@@ -845,7 +845,7 @@ void run_repl(Runtime *runtime) {
         strbuf_append_str(pending_input, line);
         mem_free(line);
 
-        // Check if statement is complete using Tree-sitter
+        // Check whether the statement has balanced delimiters before parsing.
         StatementStatus status = check_statement_completeness(pending_input->str);
 
         if (status == STMT_INCOMPLETE) {

@@ -346,15 +346,10 @@ Use one warm-up followed by five complete measured runs, reporting the median, m
 
 Phase 1 compares parse stages only. Phase 2 repeats an end-to-end `Tree-sitter parse + CST→AST` versus `C parse→AST` comparison.
 
-The checked-in runner is `bash utils/lambda_parser_perf.sh`. It regenerates the
-frozen manifest outside the timed interval, preloads every source into memory,
-performs one warm-up, then alternates the first parser across five measured
-runs. It links the shipped Lambda Tree-sitter parser/scanner archive and
-builds the C POC at the production release front-end settings (`-O3`,
-`-DNDEBUG`, `-march=native`). Its results are a Phase 1 syntax-front-end
-measurement only: the present C POC constructs reduction hashes rather than a
-compatible `AstNode`, while Tree-sitter constructs and frees its CST. The
-Phase 2 end-to-end measurement remains the decision-quality comparison.
+The standalone CST performance harness has been retired. The measurements
+below are historical recognizer-only snapshots; the maintained verification
+runner is `bash utils/lambda_parser_diff.sh`, which keeps the Tree-sitter
+grammar isolated in the `lambda-cst` profile.
 
 **P1.5 recognizer-only checkpoint (2026-08-20):** on the 1,472-source,
 4,638,380-byte manifest, the median shipped Tree-sitter parse was **599.378
@@ -403,9 +398,7 @@ lambda/runtime/parser/lambda_lexer.c
 lambda/runtime/parser/lambda_parser.c
 lambda/runtime/parser/lambda_parser_pratt.c
 test/test_lambda_parser_poc_gtest.cpp
-test/lambda_parser_poc_perf.c
 utils/lambda_parser_manifest.sh
-utils/lambda_parser_perf.sh
 temp/lambda-parser-poc/             # generated manifests and measurements
 ```
 

@@ -142,10 +142,10 @@ Procedural functions (`pn`) currently return the value of the last expression. E
 
 ```lambda
 pn find_user(id: int): User {
-    if (id <= 0) return error("Invalid ID");
+    if (id <= 0) { return error("Invalid ID") }
     
     let user = fetch_user(id);
-    if (user == null) return error("User not found");
+    if (user == null) { return error("User not found") }
     
     return user
 }
@@ -192,8 +192,8 @@ return_stam: $ => seq(
 ```lambda
 // Guard clause pattern
 pn process_data(data: any): Result {
-    if (data == null) return error("Data is null");
-    if (data is not map) return error("Expected map");
+    if (data == null) { return error("Data is null") }
+    if (data is not map) { return error("Expected map") }
     
     let processed = transform(data);
     return {status: 'ok, data: processed}
@@ -202,7 +202,7 @@ pn process_data(data: any): Result {
 // Early return in loop
 pn find_first(predicate: fn, items: [any]): any {
     for item in items {
-        if (predicate(item)) return item
+        if (predicate(item)) { return item }
     }
     return null
 }
@@ -357,7 +357,7 @@ pn fetch_with_retry(url: string, max_retries: int): Response {
     var attempts = 0;
     while (attempts < max_retries) {
         let response = fetch(url);
-        if (response.ok) return response;
+        if (response.ok) { return response }
         attempts = attempts + 1;
         sleep(attempts * 1000)
     }
@@ -511,7 +511,7 @@ pn process_file(path: string) {
     let handle = open_file(path);
     defer close_file(handle);  // Always executed on exit
     
-    if (not valid(handle)) return error("Invalid file");
+    if (not valid(handle)) { return error("Invalid file") }
     
     // Process file...
     // close_file(handle) called automatically

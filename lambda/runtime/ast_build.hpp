@@ -2,16 +2,15 @@
 
 // Parser-neutral AST construction seams.
 //
-// The Tree-sitter walker and the first-party recursive-descent parser both
-// commit operator spelling and child AST nodes before semantic construction.
-// Keep that construction here so the two front ends do not grow independent
-// type inference or diagnostic behavior.
+// The first-party recursive-descent parser commits operator spelling and child
+// AST nodes before semantic construction. Keep that construction here so the
+// parser and semantic layer do not grow independent inference or diagnostics.
 
 #include "ast.hpp"
 #include "parser/lambda_rd_parser.h"
 
 // Span allocation is the only AST allocation primitive the direct parser may
-// use.  The legacy CST adapter is kept private to its implementation unit.
+// use.
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size);
 
@@ -21,7 +20,7 @@ AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
 void lambda_ast_shift_source_spans(AstNode* root, uint32_t byte_offset);
 
 // Lexer-neutral literal categories. The C lexer maps directly to these
-// categories, while the Tree-sitter adapter maps its token symbols once.
+// categories.
 typedef enum LambdaAstLiteralKind {
     LAMBDA_AST_LITERAL_STRING,
     LAMBDA_AST_LITERAL_SYMBOL,
@@ -81,8 +80,8 @@ AstNode* build_primary_wrapper_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* expr);
 
 // Assemble already-constructed collection children. The direct sink supplies
-// the same ordered child list as the CST walker; shape/type inference remains
-// here rather than being copied into the parser.
+// the ordered child list; shape/type inference remains here rather than being
+// copied into the parser.
 AstNode* build_array_from_items(Transpiler* tp, SourceSpan span,
         AstNode* items);
 AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,

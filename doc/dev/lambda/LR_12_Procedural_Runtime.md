@@ -35,38 +35,13 @@ These builtins are *the* reason a script must be procedural to do IO: they have 
 
 ### 2.1 Cooperative concurrency runtime
 
-The procedural runtime also owns Lambda's level-1 concurrency substrate. Under
-S13.1.1v2, the front end parses `start(target, args, options)` as an ordinary
-system-procedure call, then rewrites the resolved builtin to `AstStartNode` so
-scope ownership and capture checks remain explicit. It computes a fixed-point
-`may_await` closure from async registry entries and procedure call edges;
-indirect `pn` calls are conservative. Only procedures needing task context are
-lowered to the resumable MIR convention. Their suspension points store state
-and live Items in heap-backed `LambdaAsyncFrame`s, so parked work remains
-ordinary GC-rooted data instead of a native stack.
+The procedural runtime also owns Lambda's level-1 concurrency substrate. Under S13.1.1v2, the front end parses `start(target, args, options)` as an ordinary system-procedure call, then rewrites the resolved builtin to `AstStartNode` so scope ownership and capture checks remain explicit. It computes a fixed-point `may_await` closure from async registry entries and procedure call edges; indirect `pn` calls are conservative. Only procedures needing task context are lowered to the resumable MIR convention. Their suspension points store state and live Items in heap-backed `LambdaAsyncFrame`s, so parked work remains ordinary GC-rooted data instead of a native stack.
 
-`concurrency.cpp` implements `LambdaScheduler`, `LambdaTask`, opaque VMap task
-handles, the 1024-entry default FIFO mailbox, wait/select links, libuv timers,
-completion observers, structured scopes, cancellation masking, and async
-`io.read`. Each `EvalContext` owns one scheduler attached to the process's
-unified libuv loop. Scheduler checkpoints are macrotasks: libuv first flushes JS
-microtasks, then drains ready Lambda tasks. Completion is published only after a
-task's final successful mailbox send.
+`concurrency.cpp` implements `LambdaScheduler`, `LambdaTask`, opaque VMap task handles, the 1024-entry default FIFO mailbox, wait/select links, libuv timers, completion observers, structured scopes, cancellation masking, and async `io.read`. Each `EvalContext` owns one scheduler attached to the process's unified libuv loop. Scheduler checkpoints are macrotasks: libuv first flushes JS microtasks, then drains ready Lambda tasks. Completion is published only after a task's final successful mailbox send.
 
-`start` records the child in the current lexical task scope. The generic MIR
-exit-edge helper emits join on normal exits and cancel-then-join on error exits,
-including `return`, `break`, `continue`, and propagated-error edges. Returning a
-handle marks it escaped; sending or copying the handle does not transfer its
-scope ownership. The analyzer rejects a started procedure that captures a
-mutable outer `var`, because a resumed child must never borrow shared mutable
-state.
+`start` records the child in the current lexical task scope. The generic MIR exit-edge helper emits join on normal exits and cancel-then-join on error exits, including `return`, `break`, `continue`, and propagated-error edges. Returning a handle marks it escaped; sending or copying the handle does not transfer its scope ownership. The analyzer rejects a started procedure that captures a mutable outer `var`, because a resumed child must never borrow shared mutable state.
 
-`concurrency_js.cpp` is the JS membrane. A JavaScript Promise can park a Lambda
-task through `wait`; its rejection is converted to a Lambda error. A Lambda
-handle can be observed as a Promise through `toPromise`, and module namespaces
-wrap every exported `pn` as a Promise-returning JavaScript function. Both sides
-share the same scheduler and libuv loop; no exception representation crosses
-the boundary.
+`concurrency_js.cpp` is the JS membrane. A JavaScript Promise can park a Lambda task through `wait`; its rejection is converted to a Lambda error. A Lambda handle can be observed as a Promise through `toPromise`, and module namespaces wrap every exported `pn` as a Promise-returning JavaScript function. Both sides share the same scheduler and libuv loop; no exception representation crosses the boundary.
 
 ---
 
@@ -89,7 +64,7 @@ Procedural Lambda adds a **for-*statement*** distinct from the functional for-*e
 
 The body of such a loop is typically an **index-assignment**, lowered at `AST_NODE_INDEX_ASSIGN_STAM` (`transpile-mir.cpp:8526`). It dispatches three ways: a multi-dimensional `arr[i,j,k] = v` builds an index buffer and calls `array_num_set_nd` (`:8556`); a mask/range/`ANY` key routes through the runtime helper `fn_index_assign` (`:8574`); and the common single-int case takes a **fast path** — for a compile-time-known int `ArrayNum` with a native int index and value it emits a bounds-checked **inline store to `items[idx]`** (`:8659`), falling back to `fn_array_set` otherwise.
 
-The load-bearing fix lives in how the result of these statements is represented. **A statement has no value, but `transpile_expr` must always return a valid MIR register.** Every index-assign arm therefore ends in **`emit_null_item_reg`** (`transpile-mir.cpp:348`), which synthesizes a register holding a boxed `LMD_TYPE_NULL` Item (`:8561`, `:8578`) rather than returning the invalid sentinel register 0. Returning reg 0 — which is exactly what an earlier version did for the value-less body — crashes the MIR generator with **"undeclared reg 0"**. This is the engine fix recorded in the MEMORY index (`for-stam-pn-codegen`, `issue5-splice-push-done`): `for i in a to b { arr[i] = v }` statement loops in `pn` previously failed with that MIR error (from boxing a void body result), and `fn_index_assign` previously rejected generic arrays; both are now fixed, and the `emit_null_item_reg` sentinel is the mechanism. The same boxed-null technique is used throughout the backend for value-less `let`/`var`/`break`/`continue` — cross-referenced as Known Issue #2 in [LR_07](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements).
+The load-bearing fix lives in how the result of these statements is represented. **A statement has no value, but `transpile_expr` must always return a valid MIR register.** Every index-assign arm therefore ends in **`emit_null_item_reg`** (`transpile-mir.cpp:348`), which synthesizes a register holding a boxed `LMD_TYPE_NULL` Item (`:8561`, `:8578`) rather than returning the invalid sentinel register 0. Returning reg 0 — which is exactly what an earlier version did for the value-less body — crashes the MIR generator with **"undeclared reg 0"**. This is the engine fix recorded in the MEMORY index (`for-stam-pn-codegen`, `issue5-splice-push-done`): `for i in a to b { arr[i] = v }` statement loops in `pn` previously failed with that MIR error (from boxing a void body result), and `fn_index_assign` previously rejected generic arrays; both are now fixed, and the `emit_null_item_reg` sentinel is the mechanism. The same boxed-null technique is used throughout the backend for value-less `let`/`var`/`break`/`continue` — cross-referenced as [LR07-2](../../../vibe/Lambda_Issue_Ledger.md).
 
 ---
 
@@ -97,7 +72,7 @@ The load-bearing fix lives in how the result of these statements is represented.
 
 `safety_analyzer.cpp`/`.hpp` answers two questions about every user function: does it need a runtime **stack-overflow check**, and is it **tail-recursive** (eligible for tail-call optimization that turns recursion into a loop)? The runtime guard it feeds — the actual stack-depth check and the `sigsetjmp`-based overflow recovery — is owned by [LR_08](LR_08_Memory_and_GC.md); this analyzer is purely the *static gate* that decides who gets one.
 
-**The shipped behaviour is deliberately conservative.** `analyze_function_safety` (`:39`) does no real analysis and just logs that the conservative approach is in use. The two gate functions are hard-coded: **`function_needs_stack_check` always returns `true`** (`:46`) — every user function gets a stack check — and **`function_is_tail_recursive` always returns `false`** (`:52`) — TCO is disabled at the gate. The `SafetyAnalyzer` class methods agree: `get_safety` returns `UNSAFE` for everything (`:524`), `is_safe` returns `false` (`:530`), `is_tail_recursive` returns `false` (`:535`). The header self-describes this as the "Conservative approach" (`safety_analyzer.hpp:10`). The rationale, matching the GC-rooting story in [LR_07](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements) (#9) and the MEMORY notes, is correctness over precision: blanket stack checks are sound while the precise per-function analysis (and honest local typing it depends on) is unfinished.
+**The shipped behaviour is deliberately conservative.** `analyze_function_safety` (`:39`) does no real analysis and just logs that the conservative approach is in use. The two gate functions are hard-coded: **`function_needs_stack_check` always returns `true`** (`:46`) — every user function gets a stack check — and **`function_is_tail_recursive` always returns `false`** (`:52`) — TCO is disabled at the gate. The `SafetyAnalyzer` class methods agree: `get_safety` returns `UNSAFE` for everything (`:524`), `is_safe` returns `false` (`:530`), `is_tail_recursive` returns `false` (`:535`). The header self-describes this as the "Conservative approach" (`safety_analyzer.hpp:10`). The rationale, matching the GC-rooting story in [LR07-7](../../../vibe/Lambda_Issue_Ledger.md) and the MEMORY notes, is correctness over precision: blanket stack checks are sound while the precise per-function analysis (and honest local typing it depends on) is unfinished.
 
 **Yet the full TCO analysis is implemented — it is simply not wired in.** The file carries a complete, dead-code-reachable analysis: `is_recursive_call` (`:65`, matches a callee by resolved AST entry or by name), `has_tail_call` (`:107`, walks `if`/`match`/`list`/`content`/`return` bodies to find a recursive call in tail position), `should_use_tco` (`:197`, gates on having a name, not being a closure, and having a tail call), `has_any_recursive_call` (`:231`), `has_non_tail_recursive_call` (`:361`, distinguishes tail from non-tail position so a function with non-tail recursion still gets a check), and `is_tco_function_safe` (`:486`, true only when *all* recursion is tail recursion). The `SafetyAnalyzer` singleton is created through an audited heap-factory boundary `safety_analyzer_create` (`:26`, intentionally process-leaked) and tracks higher-order callback sys-funcs in a static `callback_sys_funcs_[]` table (`:510`) for future use. So the gate is hard-`true`/`false` while the machinery behind it is real — flipping the gate to consult `should_use_tco`/`is_tco_function_safe` is the intended path to enabling precise stack checks and TCO.
 
@@ -115,16 +90,11 @@ The load-bearing fix lives in how the result of these statements is represented.
 
 ## Known Issues & Future Improvements
 
-1. **`fetch_response_to_item` returns a bare String, not a structured response.** The TODO at `lambda-proc.cpp:551` — *"Implement proper map structure when the complex type system is working"* — means `pn_fetch` hands back only the response body as a String; status, headers, and metadata are dropped. A proper `{status, headers, body}` map is pending type-system work.
-2. **Mutation builtins swallow type errors.** `pn_push` (`lambda-data.cpp:631`) silently returns its input unchanged (only a `log_error`) when handed a non-`LMD_TYPE_ARRAY` value, and `pn_splice` likewise returns unchanged on a wrong-type array, a non-integer `start`/`count`, or a view/N-D `ArrayNum`. None of these propagate an error Item to the script, so a mis-typed `push`/`splice` fails invisibly — the script sees an unmodified array with no signal.
-3. **Safety gate hard-coded, TCO disabled despite being implemented.** `function_needs_stack_check` is hard-`true` and `function_is_tail_recursive` is hard-`false` (`safety_analyzer.cpp:46`/`:52`), so *every* user function pays for a stack check and *no* function gets tail-call optimization — even though `should_use_tco`/`has_tail_call`/`is_tco_function_safe` are fully implemented and would correctly classify many functions. This is sound but pessimistic; it is the static-analysis side of the GC-rooting/honest-typing issue tracked in [LR_07](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements) #9 and [LR_08](LR_08_Memory_and_GC.md).
-4. **`push` is generic-`Array`-only.** `pn_push` rejects `ArrayNum`, so there is no in-place append for typed numeric arrays (only `splice` removal is supported on `ArrayNum`); growing a typed array still requires a rebuild.
-5. **`splice` cannot touch views or N-D arrays.** The `is_view`/`is_ndim` guard (`lambda-data.cpp:669`) is correct but a usability cap: in-place removal on a strided/shared typed buffer requires an explicit `copy()`/`ravel()` first.
-6. **`g_dry_run` is a process-global.** It gates all IO procedures from a single non-thread-local flag (`lambda-proc.cpp:23`); concurrent compilation/execution that wants per-run dry-run semantics has no per-context override.
-7. **The procedural surface is thin and ad hoc.** IO procedures are a hand-curated set in one file with bespoke validation per procedure; there is no general effect/capability system, so adding (e.g.) a network-write or process-spawn procedure means another bespoke `pn_*` plus a registry row.
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR12-1 – LR12-7**.
+
+The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 
 ---
-
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |

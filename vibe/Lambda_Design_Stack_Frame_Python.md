@@ -1,8 +1,8 @@
 # Lambda Stack Frame — Python Runtime: Current State, Alignment Design, Open Issues
 
-**Status:** design PROPOSED — alignment decisions PS1–PS10, open-issues ledger PO1–PO9; nothing implemented yet. **Implementation plan: `vibe/Lambda_Impl_Stack_Frame_Py.md`** (stages P0–P4, gates, censuses).
+**Status:** design PROPOSED — alignment decisions PS1–PS10, open-issues ledger PO1–PO9; nothing implemented yet. **Implementation plan: `vibe/impl/Lambda_Impl_Stack_Frame_Py.md`** (stages P0–P4, gates, censuses).
 **Date:** 2026-07-15
-**Context:** Third front-end onto the stack-frame architecture. `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20) is IMPLEMENTED for Lambda MIR-Direct and LambdaJS (phase records: `vibe/Lambda_Impl_Stack_Frame.md`, `vibe/Lambda_Impl_Stack_Frame_JS.md`, `vibe/Lambda_Impl_Stack_Frame_JS2.md`). This doc reviews where LambdaPy (`lambda/module/py/`, ~18.6k LOC across 17 files) stands, designs its alignment, and ledgers what stays open — the Python analog of the JS JO ledger (`vibe/Lambda_Design_Stack_Frame_JS.md`). Python is also the designated first guest port for the unified AST (U-series), so the alignment should ride the shared-emitter machinery rather than grow a third bespoke frame implementation.
+**Context:** Third front-end onto the stack-frame architecture. `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20) is IMPLEMENTED for Lambda MIR-Direct and LambdaJS (phase records: `vibe/impl/Lambda_Impl_Stack_Frame.md`, `vibe/impl/Lambda_Impl_Stack_Frame_JS.md`, `vibe/impl/Lambda_Impl_Stack_Frame_JS2.md`). This doc reviews where LambdaPy (`lambda/module/py/`, ~18.6k LOC across 17 files) stands, designs its alignment, and ledgers what stays open — the Python analog of the JS JO ledger (`vibe/Lambda_Design_Stack_Frame_JS.md`). Python is also the designated first guest port for the unified AST (U-series), so the alignment should ride the shared-emitter machinery rather than grow a third bespoke frame implementation.
 
 Facts verified in code 2026-07-15; file:line references are to that tree state.
 
@@ -99,7 +99,7 @@ The governing principle: Python is the **smallest** SF port of the three — no 
 
 ### Staging
 
-Detailed stages, censuses, and gates live in the implementation plan, `vibe/Lambda_Impl_Stack_Frame_Py.md`: **P0** preludes (PO1 fix + audits) → **P1** frames/rooting/entry boundary (PS1, PS2, PS9) → **P2** env + generator ownership (PS3, PS4) → **P3** args/numbers/re-homing (PS5, PS6, PS10) → **P4** caps + docs. The standing contract: Lambda **and** JS baselines byte-identical at every stage; Python's own gate is `make test-jube` + `test_py_gtest`.
+Detailed stages, censuses, and gates live in the implementation plan, `vibe/impl/Lambda_Impl_Stack_Frame_Py.md`: **P0** preludes (PO1 fix + audits) → **P1** frames/rooting/entry boundary (PS1, PS2, PS9) → **P2** env + generator ownership (PS3, PS4) → **P3** args/numbers/re-homing (PS5, PS6, PS10) → **P4** caps + docs. The standing contract: Lambda **and** JS baselines byte-identical at every stage; Python's own gate is `make test-jube` + `test_py_gtest`.
 
 ---
 

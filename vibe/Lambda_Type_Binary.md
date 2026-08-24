@@ -1,14 +1,14 @@
 # Lambda Binary Type — Enhancement Proposal
 
-> **Status:** Proposal for Tiers 2–4; **Tier 1 core and §11 shared byte-storage substrate IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) and [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md). Eligible Binary/Uint8Array/Uint8ClampedArray/Buffer/DataView conversions now retain shared storage with copy-on-write isolation; SharedArrayBuffer conversions remain explicit copies. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§11** byte-storage substrate unification **implemented** (separate value types over shared storage), **§5.2** encode/decode selector API **settled** (namespaced `hex.encode` form rejected), **§4.2/§4.4** element-op semantics settled and implemented (`b[i]` → u8, out-of-bounds → `null`, `++` → byte concat).
+> **Status:** Proposal for Tiers 2–4; **Tier 1 core and §11 shared byte-storage substrate IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) and [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md). Eligible Binary/Uint8Array/Uint8ClampedArray/Buffer/DataView conversions now retain shared storage with copy-on-write isolation; SharedArrayBuffer conversions remain explicit copies. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§11** byte-storage substrate unification **implemented** (separate value types over shared storage), **§5.2** encode/decode selector API **settled** (namespaced `hex.encode` form rejected), **§4.2/§4.4** element-op semantics settled and implemented (`b[i]` → u8, out-of-bounds → `null`, `++` → byte concat).
 > **Scope:** Lambda Script `binary` primitive type — runtime representation, language surface, and stdlib roadmap.
 > **Related:**
 > - [Lambda_Data.md](../doc/Lambda_Data.md#binary-literals) — binary literal syntax
 > - [Lambda_Type.md](../doc/Lambda_Type.md) — type hierarchy
 > - [LR_00_Overview.md](../doc/dev/lambda/LR_00_Overview.md) — runtime value model (`String*`-backed storage)
 > - [JS_00_Overview.md](../doc/dev/js/JS_00_Overview.md) — `ArrayBuffer`/`Uint8Array`/`DataView` machinery in the JS jube (`lambda/js/js_typed_array.{h,cpp}`, `js_buffer.cpp`)
-> - [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) — the executed Tier-1 implementation plan (B1–B8, Phases 1–5; its Phase-6 sketch is superseded by §11 and `Lambda_Impl_Binary2.md`)
-> - [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md) — detailed implementation plan for the accepted shared byte-storage substrate (§11)
+> - [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) — the executed Tier-1 implementation plan (B1–B8, Phases 1–5; its Phase-6 sketch is superseded by §11 and `impl/Lambda_Impl_Binary2.md`)
+> - [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) — detailed implementation plan for the accepted shared byte-storage substrate (§11)
 > - [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) — binary pipelines/streams (PL1–PL11); PL5 flat-buffer representation is this doc's Tier 3.1
 > - [Lambda_Type_Binary_Schema.md](Lambda_Type_Binary_Schema.md) — schema-driven structured views (`Velmt`) over binary
 
@@ -396,7 +396,7 @@ Each entry takes `binary → binary`; the streaming forms are exactly the PL6 tr
 
 ### 6.6 Cross‑runtime zero‑copy bridge
 
-> **Status 2026-07-15:** the original safe copy bridge shipped in [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md); [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md) has now replaced eligible copies with retained `ByteStorage` spans. `Buffer.from(Binary)`, `Uint8Array` construction, and `binary(Uint8Array/Uint8ClampedArray/Buffer/DataView)` share non-shared storage until the first JS write, when the stable ArrayBuffer handle COWs. SharedArrayBuffer remains a mandatory snapshot copy. **The value types stay distinct — see §10; only storage ownership is shared.**
+> **Status 2026-07-15:** the original safe copy bridge shipped in [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md); [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) has now replaced eligible copies with retained `ByteStorage` spans. `Buffer.from(Binary)`, `Uint8Array` construction, and `binary(Uint8Array/Uint8ClampedArray/Buffer/DataView)` share non-shared storage until the first JS write, when the stable ArrayBuffer handle COWs. SharedArrayBuffer remains a mandatory snapshot copy. **The value types stay distinct — see §10; only storage ownership is shared.**
 
 Make Lambda `binary` share the **same physical buffer** as JS `Uint8Array` and (future) Python `bytes`/`bytearray`. Lambda's [Jube runtime](../doc/Lambda_Jube_Runtime.md) is the right place to define the contract:
 
@@ -407,7 +407,7 @@ Make Lambda `binary` share the **same physical buffer** as JS `Uint8Array` and (
 
 The authoritative ownership, copy-on-write, detach, resize, transfer, and
 `SharedArrayBuffer` rules are in §11; the executable migration is
-[Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md).
+[Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md).
 
 ### 6.7 Buffer protocol / FFI
 
@@ -468,7 +468,7 @@ Lock down each codec with property tests:
 |---|---|---|---|
 | **1** | Foundation | Decoded representation ✅; canonical print ✅; `len` ✅; `binary()` ✅; formatter/I-O egress ✅; JS copy bridge ✅ (impl plan Phases 1–5); indexing ✅; slicing ✅; membership ✅; iteration ✅; `++` byte concat ✅ | **landed 2026-07-15** |
 | **2** | Structured access | Builder; encoding stdlib (`encode`/`decode` selector API, §5.2); endian accessors; `pack`/`unpack`; bit‑pattern `match` | proposal |
-| **3** | Performance & ecosystem | Shared byte-storage substrate and sub‑binary zero‑copy slicing (**= PL5 flat buffer**, §11); file I/O; `mmap`; crypto; compression (= PL6 transducers streaming); cross‑runtime zero-copy buffer; FFI | substrate design accepted; implementation planned in `Lambda_Impl_Binary2.md`; remaining items proposal |
+| **3** | Performance & ecosystem | Shared byte-storage substrate and sub‑binary zero‑copy slicing (**= PL5 flat buffer**, §11); file I/O; `mmap`; crypto; compression (= PL6 transducers streaming); cross‑runtime zero-copy buffer; FFI | substrate design accepted; implementation planned in `impl/Lambda_Impl_Binary2.md`; remaining items proposal |
 | **4** | Polish | Hexdump; validators; constant‑time eq; round‑trip / fuzz tests; full docs | proposal |
 
 Tier 1's decode core was the unblocker: every later tier assumes binaries are real bytes, not source‑text shadows. With the Tier-1 element operations now landed, Tiers 2–4 can proceed independently and incrementally.
@@ -516,7 +516,7 @@ The `binary` type is the **chunk currency** of Lambda's binary pipelines: a bina
 ## 11. Accepted design: shared byte-storage substrate, separate value types
 
 *(Accepted and implemented 2026-07-15. As-built implementation record:
-[Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md). This section supersedes the
+[Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md). This section supersedes the
 older parent-`Binary*` sub-view sketch in §6.1 and makes the PL5 convergence
 contract precise.)*
 
@@ -741,4 +741,4 @@ finalization, not context-end cleanup only:
 The implementation must preserve the Phase-1–5 tests unchanged while adding
 new storage lifetime, COW, subview, detach/resize/transfer, GC-stress, and
 cross-runtime regressions. The ordered work and acceptance gates are specified
-in [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md).
+in [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md).

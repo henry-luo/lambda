@@ -2,10 +2,8 @@
 
 // Shared Type* construction surface.
 //
-// These were private to build_ast.cpp's CST-driven builders. The type-pattern
-// hand parser (parse_type_pattern.cpp) builds the same `Type*` graphs from
-// source text rather than from CST nodes, so the pieces that do not depend on a
-// Shared type-construction helpers are promoted here instead of being copied.
+// These helpers are shared by the direct AST builder and the type-pattern hand
+// parser. Keep the common type construction here instead of copying it.
 
 #include "ast.hpp"
 #include "lambda-error.h"
@@ -20,14 +18,12 @@ Type* lookup_base_type_name(Transpiler* tp, StrView name);
 // inclusive bounds a TypeUnary carries (max_count -1 means unbounded).
 void parse_occurrence_count(StrView op_str, int* min_count, int* max_count);
 
-// Append one field to a map/element shape. The CST path passes an AstNode and
-// reads its name/type; this is that core, taking the two values directly.
+// Append one field to a map/element shape from its already-resolved name/type.
 ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* name, Type* field_type,
         ShapeEntry** shape, ShapeEntry** prev_entry, int byte_offset);
 
 // Fold a declared type into a TypeParam (compact prefix, retained contract,
-// full_type selection). Used for `fn(a: T)` params on both the CST and the
-// hand-parser path.
+// full_type selection). Used for `fn(a: T)` parameters.
 void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* declared);
 
 // Declare a fn type's return contract.
@@ -72,8 +68,7 @@ const char* base_type_alias_suggestion(StrView name);
 void record_unknown_base_type_span(Transpiler* tp, SourceSpan span,
         StrView type_name);
 
-// Record a diagnostic against a CST node. Defined in build_ast.cpp; promoted
-// here so the hand parser can report through the same channel rather than
-// inventing a second one.
+// Record a diagnostic against a source span. Defined in build_ast.cpp so the
+// hand parser can report through the same channel rather than inventing one.
 void record_semantic_error_span(Transpiler* tp, SourceSpan span,
         LambdaErrorCode code, const char* format, ...);

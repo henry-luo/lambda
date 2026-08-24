@@ -1376,7 +1376,7 @@ rooting architecture changes and require broader tests than the core MIR probe.
 | Collector entry and side-root range | `lambda/lambda-mem.cpp` |
 | Registered roots, side-root scan, compatibility/debug conservative scan | `lib/gc/gc_heap.c` |
 | Stack overflow recovery | `lambda/lambda-stack.cpp`, `lambda/lambda-stack.h` |
-| Implementation checklist/history | `vibe/Lambda_Impl_Stack_Frame.md` |
+| Implementation checklist/history | `vibe/impl/Lambda_Impl_Stack_Frame.md` |
 | Design and migration rationale | `vibe/Lambda_Design_Stack_Frame.md` |
 | JavaScript MIR companion review | `vibe/Lambda_Stack_JS_MIR.md` |
 | Latest rooting design and cross-tier MIR profile | `vibe/Lambda_Design_Stack_Rooting.md` §12 |

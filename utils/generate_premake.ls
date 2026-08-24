@@ -1395,7 +1395,7 @@ pn test_source_exists(test_entry) {
 
 // Build force-load/whole-archive options for test with input-full dependency
 pn build_force_load_opts(ext_libs, platform) {
-    var ts_libs = ["tree-sitter-lambda", "tree-sitter"]
+    var ts_libs = ["tree-sitter"]
     if (platform == "linux") {
         // Linux: use --whole-archive
         var result = ["-Wl,--whole-archive"]
@@ -1457,7 +1457,6 @@ pn build_input_full_test_linkopts(config, ext_libs, platform) {
         // add Windows-specific library paths
         var win_libs = [
             "../../lambda/tree-sitter/libtree-sitter.a",
-            "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
             "../../win-native-deps/lib/libmir.a",
             "/mingw64/lib/libmpdec.a",
             "../../win-native-deps/lib/libutf8proc.a",

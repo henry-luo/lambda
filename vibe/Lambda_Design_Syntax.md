@@ -1286,7 +1286,8 @@ for scalars".
     extraction externals — but a *small* scanner remains, since newline
     awareness is impossible in pure grammar rules (`extras` hides
     whitespace). Its new job is only the S16 guards (§4.4).
-33. Closed-tail juxtaposition (supersedes the blanket token-class rule at
+33. Closed-tail juxtaposition — full probe-verified open/closed table in
+    §7.14 — (supersedes the blanket token-class rule at
     statement boundaries): a line-start dual-role token errors only when
     the previous statement ends in an EXPRESSION; after a structural closer
     of a non-postfixable construct (fn/pn/type{}/view bodies, braced
@@ -1354,9 +1355,35 @@ for scalars".
   conformance entry; the design doc is added to the spec Basis and
   Appendix C. `D#` was ruled the wrong home — the grammar change touches D8
   only insofar as parse-tree shapes change. A future dedicated formal syntax
-  document is tracked as `SO35`. Remaining: sweep the user-facing docs
-  (`Lambda_Expr_Stam.md`, `Lambda_Reference.md`, `Lambda_Cheatsheet.md`,
-  `Lambda_Func.md`) whose examples carry the old spellings.
+  document is tracked as `SO35`.
+
+  **Remaining: the user-facing doc sweep, measured 2026-08-24.** Every fenced
+  ```lambda block in the four docs was extracted and parse-checked against the
+  production parser: **60 of 172 fail**.
+
+  | Document | Failing blocks |
+  |---|---:|
+  | `doc/Lambda_Cheatsheet.md` | 26 |
+  | `doc/Lambda_Expr_Stam.md` | 20 |
+  | `doc/Lambda_Func.md` | 7 |
+  | `doc/Lambda_Reference.md` | 7 |
+
+  Causes, by parser diagnostic:
+
+  | Count | Diagnostic | Ruling |
+  |---:|---|---|
+  | 28 | *token cannot continue the previous line* | S16.2.3 — one-example-per-line listings (`-x` ⏎ `+x`, `[1,2] + [3,4]`) |
+  | 11 | *expected an expression* | mixed; includes non-code fenced as `lambda` |
+  | 5 | *object-type members are separated by `,`, not `;`* | §7.11 |
+  | 4 | *trailing `;` is not a statement separator* | decided point 15 |
+  | 3 | *`pub` modifies a declaration; write `pub let`* | §7.6 |
+  | 2 | *expected `,` between element attributes and content* | §7.11 |
+  | 7 | assorted (retired `@./path` sigil → `\.a.b` per §7.15; arity/paren shape) | — |
+
+  Not all 60 are prose bugs: at least one block is an operator table
+  (`+  -  *  /  div  %  **`) fenced as `lambda` and should lose the language
+  tag rather than be rewritten. The sweep needs a per-block judgement, not a
+  mechanical rewrite.
 
 ---
 
@@ -1780,6 +1807,57 @@ each with its ambiguity exhibit:
   This is the trap in any "ends with `}`" mental shortcut: the rule is
   closed-*tail* (non-postfixable construct), never closed-*bracket*.
 
+**The complete classification, probe-verified against the C parser
+(2026-08-23).** The operational test is mechanical: put the construct on one
+line and a line-start `[1]` on the next. If it parses, the tail is closed; if
+it only parses once a `;` is added, the tail is open.
+
+| Construct | Tail | Example |
+|---|---|---|
+| `let` | **open** | `let x = 5` |
+| `var` | **open** | `var v = 5` |
+| assignment | **open** | `v = 5` |
+| type **alias** | **open** | `type T = int` |
+| `fn`/`pn` with a `=>` body | **open** | `fn f() => 1` |
+| `return` *value* | **open** | `return 5` |
+| bare expression | **open** | `1 + 1`, `f(x)` |
+| bare **map literal** | **open** | `{a: 1}` |
+| bare **block expression** | **open** | `{ let q = 1 q }` |
+| bare **element** | **open** | `<d "x">` |
+| `fn`/`pn` with a **braced** body | closed | `fn f() { 1 }` |
+| **object** type | closed | `type T { a: int }` |
+| braced `if` | closed | `if c { … } else { … }` |
+| braced `for` | closed | `for x in l { … }` |
+| `while` | closed | `while c { … }` |
+| `match` | closed | `match x { … }` |
+| `view` / `edit` | closed | `view v { … }` |
+| `import` | closed | `import math` |
+| `break` / `continue` | closed | `break` |
+
+Two rows do the teaching. **`type` and `fn` appear on BOTH sides** — the kind
+never decides, only the tail: `type T = int` is open and `type T { … }` is
+closed; `fn f() => 1` is open and `fn f() { 1 }` is closed. And **`{a: 1}` /
+`<d "x">` are open despite ending in `}` and `>`**, because primaries take
+postfix — which is why the shortcut is closed-*tail*, never closed-*bracket*.
+
+The implementation encodes exactly this: `parse_content` grants closed-tail
+status to `fn`/`pn`/`type`/`view`/`edit`/`while`/`match`/`if`/`for`/`pub` only
+when `prev_kind == LAMBDA_TOK_RBRACE`. Just `break`, `continue`, and `import`
+are closed on the keyword alone.
+
+**Diagnostics (fixed 2026-08-23).** Every open-tail rejection now names its
+repair: *"this token cannot continue the previous line; write ';' to start a
+new statement, or move it to the end of that line"*. It briefly did not —
+`record_direct_parse_error` (runner.cpp) discarded `parse_error->message`
+and synthesized `Unexpected syntax near 'X'` for everything except the
+`<`/`>` case, so EVERY parser diagnosis was replaced at the CLI boundary:
+the S16.2.3 repair, `'pub' modifies a declaration; write 'pub let'`,
+`object-type members are separated by ',', not ';'`, and the rest. The
+parser's message is now used when it has one. One structural exception
+remains by design: an unlexable token (`actual_kind == LAMBDA_TOK_ERROR`)
+keeps the synthesized form, because "invalid token" names nothing while
+`Unexpected syntax near '\d'` names the offender.
+
 **The golden test DERIVES the classification (ruled).** The open/closed
 boundary is not an enumerated list but a consequence of S16.1.1: **a tail
 is open exactly when the one-line spelling glues.** If `let x = arr` ⏎
@@ -1917,7 +1995,7 @@ motivating case) no longer competes at all — with the relative path
 respelled, `.rect` cannot be a path, so `<svg .rect>` is unambiguously the
 qualified tag and the path-child form is `<svg, \\.rect>`.
 
-### 7.16 Digit-adjacent identifiers (OPEN — found by the implementation audit)
+### 7.16 Digit-adjacent identifiers (decided and implemented — found by the implementation audit)
 
 **Finding.** `let a = 123abc` parses as `let a = 123` followed by the
 statement `abc`, and `let a = 0b1010` as `let a = 0` followed by `b1010`.
@@ -2284,7 +2362,7 @@ virtual `<file …>` / `<script …>` element. Two reasons, in order of weight:
 **Consequences — top level normalizes like content.**
 
 - **Nulls are stripped.** A `null` reaching content contributes nothing,
-  however it arose: written literally, read from a missing key (S7.1.1), or
+  however it arose: written literally, read from a missing key (S7.1.1v2), or
   produced by an `else`-less `if` (S16.6.3). If stripping empties the content,
   the script's value is a single residual `null`.
 - **Adjacent strings merge**, *after* stripping — so `"a" ⏎ null ⏎ "b"` is

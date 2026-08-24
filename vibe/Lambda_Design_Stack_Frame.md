@@ -1,6 +1,6 @@
 # Lambda Stack Frame Design — Precise Rooting + Frame-Scoped Number Stack
 
-**Status:** IMPLEMENTED (Lambda + LambdaJS) — SF1–SF20 and OS1–OS11 are closed for both MIR-Direct transpilers. The phase records are `vibe/Lambda_Impl_Stack_Frame.md` and `vibe/Lambda_Impl_Stack_Frame_JS.md`.
+**Status:** IMPLEMENTED (Lambda + LambdaJS) — SF1–SF20 and OS1–OS11 are closed for both MIR-Direct transpilers. The phase records are `vibe/impl/Lambda_Impl_Stack_Frame.md` and `vibe/impl/Lambda_Impl_Stack_Frame_JS.md`.
 **Scalar-storage successor (2026-07-20):** `vibe/Lambda_Design_Stack_API.md`
 Phase 7 supersedes this document's pre-Phase-7 scalar inventory and nursery
 discussion. `INT64`/`UINT64` now use activation/caller number homes and
@@ -227,7 +227,7 @@ Note `ANY^E` with a possible wide scalar does **not** need `[item, scalar, error
 - **The flag is load-bearing (SF12 reasoning):** no code path may interpret a tail word as a pointer without `CONTAINER_FLAG_JS_PROPS`. All accounting lives in central accessors (`js_array_props` / `js_array_set_props` / a `tail_reserved()` anchor helper); the `+1` never appears inline at a use site.
 - **GC gets simpler, not more complex:** today the trace walk guesses — `gc_mark_possible_item(extra)` (`gc_heap.c:1004`), the same raw-word-as-pointer ambiguity SF12 banned from the root stack. After migration the props slot is a tagged Item traced *precisely* behind the flag, and the conservative guess is deleted. No new struct: hardcoded trace offsets (`gc_heap.c:929–1145`) and both transpilers' emitted member offsets are untouched.
 - **Lazy allocation:** the slot is reserved on first prop attach; flag set ⟺ slot holds a valid tagged Map Item. Common-case JS arrays (indexed elements only) pay nothing. Memory vs the subtype is identical (8 bytes per props-bearing array); indexed load vs fixed-offset field is noise.
-- **Implementation record:** `vibe/Lambda_Impl_Stack_Frame_JS2.md`; the checked census and provenance audit are in `vibe/Lambda_Impl_Stack_Frame_JS2_Inventory.md`. The migration is complete, including precise tracing, both buffer-growth paths, dense-boundary auditing, and the polyglot int64/DateTime/out-of-band-double matrix, so the phase-2 J3d prerequisite is cleared.
+- **Implementation record:** `vibe/impl/Lambda_Impl_Stack_Frame_JS2.md`; the checked census and provenance audit are in `vibe/impl/Lambda_Impl_Stack_Frame_JS2_Inventory.md`. The migration is complete, including precise tracing, both buffer-growth paths, dense-boundary auditing, and the polyglot int64/DateTime/out-of-band-double matrix, so the phase-2 J3d prerequisite is cleared.
 **Hard invariant** (new): *a container's wide-scalar Items point only into its own buffer* — enforced at every clone/concat/copy-in site. ⚠️ Verification item: the concat path (`lambda-eval.cpp:350`) memcpys Item slots without copying/rebasing tail payloads — result Items point into the source arrays' tails; if a source is collected while the result lives, they dangle. Latent today; fixed by the invariant.
 
 **SF16 — Reads of wide scalars out of containers: reference iff immortal storage, else copy.** *(decided 2026-07-15)*

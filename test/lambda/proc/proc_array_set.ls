@@ -1,6 +1,11 @@
 // Test array indexed assignment in procedural code
 // P0 feature for AWFY benchmarks
 
+pn write_array(var arr, key, value) int^ {
+    arr[key] = value
+    return 1
+}
+
 // Test 1: Basic integer array assignment
 pn test_array_int_set() {
     var arr = [10, 20, 30, 40, 50]
@@ -19,11 +24,17 @@ pn test_array_int_set() {
     print("\n")
 }
 
-// Test 2: Negative indexes are absent and writes do not tail-write
+// Test 2: Negative indexes are hard write errors and do not tail-write
 pn test_array_negative_index() {
     var arr = [1, 2, 3, 4, 5]
-    arr[-1] = 99
-    arr[-3] = 77
+    var first_error = null
+    write_array(arr, -1, 99) ^ { first_error = ^ }
+    var second_error = null
+    write_array(arr, -3, 77) ^ { second_error = ^ }
+    print(first_error is error)
+    print(" ")
+    print(second_error is error)
+    print(" ")
     print(arr[2])
     print(" ")
     print(arr[4])

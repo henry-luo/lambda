@@ -2317,6 +2317,7 @@ extern "C" {
 
     // generic field access function
     Item fn_index(Item item, Item index);
+    Item fn_index_set(Item item, Item index, Item value);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
     Item fn_member_by_id(Item item, uint32_t name_id);
@@ -2400,7 +2401,11 @@ extern "C" {
         const char* boundary);
     Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
+    Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
+        const char* boundary);
     Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_lane(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
@@ -2610,7 +2615,7 @@ extern "C" {
     int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
     ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read
-    void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value); // multi-dim write
+    Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value); // multi-dim write
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);
@@ -2661,7 +2666,7 @@ extern "C" {
     Item fn_min_axis(Item arr, Item axis);       // min along axis (via min(arr, axis) / min(arr, axis:N))
     Item fn_max_axis(Item arr, Item axis);       // max along axis
     Item fn_mask_index(Item arr, Item mask);     // arr[mask] — boolean mask selection
-    void fn_index_assign(Item arr, Item idx, Item val);  // arr[mask] = v — masked write (procedural in-place)
+    Item fn_index_assign(Item arr, Item idx, Item val);  // arr[mask] = v — masked write (procedural in-place)
     Item vec_cmp(Item a, Item b, int op);        // vectorized a OP b → ELEM_BOOL mask (op = operator-OPERATOR_EQ)
     // overload wrappers (the sysfunc dispatcher resolves fn_<name><argcount>)
     Item fn_sum1(Item arr);            Item fn_sum2(Item arr, Item axis);
@@ -2778,7 +2783,7 @@ extern "C" {
     // compound assignment support (procedural only)
     Item fn_mutable_value(Item value);
     Item fn_array_set(Array* arr, int64_t index, Item value);
-    void fn_map_set(Item map, Item key, Item value);
+    Item fn_map_set(Item map, Item key, Item value);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
     Item cow_bind_var(Item value);
@@ -2788,7 +2793,8 @@ extern "C" {
     void cow_profile_note_vmap_snapshot(void);
     void cow_profile_note_vmap_rejection(void);
     void cow_profile_dump(void);
-    Item array_set_cow(Item owner, int64_t index, Item value);
+    Item array_set_cow(Item owner, Item key, Item value);
+    Item member_set_cow(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);
     Item cow_path_set_raw(Item owner, Item key, Item value);
     Item cow_path_set(Item owner, Item path, Item value);

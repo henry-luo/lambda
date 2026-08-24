@@ -87,12 +87,14 @@ A reference root is one of:
   for a dynamic member expression.
 
 Ordinary hierarchical keys have exactly the two kinds already present in
-Lambda's unified container key space (**S8.2.1**): a name/symbol key or a
-non-negative integer key. Parent and wildcard steps are navigation operations,
+Lambda's unified container key space (**S8.2.1v2**): a `NameKey` normalized
+from a string or symbol, or an `IntKey` normalized from an exact non-negative
+integral numeric value. Parent and wildcard steps are navigation operations,
 not additional key kinds. Root selection is likewise an operation, never a
-key. `DynamicKey` defers choosing a key until evaluation; its result must still
-be a symbol/name key or non-negative integer key. Unsupported key values
-follow ordinary total-read behavior (**S7.1.1**).
+key. `DynamicKey` defers choosing a key until evaluation; the resolved
+container must admit the normalized key kind. A mismatch is an invalid member
+access: reads yield `null` under **S7.1.1v2**, while writes raise through the
+hard `T^` channel under **S7.1.3v2** and **S7.4.2**.
 
 This is a reference/address model, not a new mutable reference-cell type.
 It does not introduce aliasing, object identity, or a `ref` equality relation;
@@ -176,7 +178,8 @@ without a contextual scanner token or a runtime resolution guess.
 Lexical shadowing chooses the namespace/binding before lowering; it is not a
 runtime search through every namespace. Identifier spelling and symbol
 spelling produce the same `NameKey` identity when used as a key in the same
-identity scope, consistent with **S8.2.2** and **D4.6.1v2**.
+identity scope; string subscripts normalize by the same exact contents,
+consistent with **S8.2.2v2** and **D4.6.1v2**.
 
 A standalone symbol still evaluates to its key value. When a symbol is used as
 a static reference head, its namespace supplies the root just as it does for
@@ -422,7 +425,7 @@ part of the path algebra; neither introduces another path form.
 ### 6.1 Root and parent normalization
 
 The postfix root operation discards descendant steps back to the current
-hierarchy anchor (**S2.4.2v3**):
+hierarchy anchor (**S2.4.2v4**):
 
 1. At the logical-global root, the anchor is `/`.
 2. At an absolute provider path, the anchor retains the provider and selected
@@ -540,7 +543,7 @@ It invokes the root relation supplied for that value occurrence:
 | No root relation | `null` |
 
 Missing root navigation is a total read and returns `null`; subsequent access
-follows ordinary null propagation (**S7.1.1**). Initial `/` and postfix `./`
+follows ordinary null propagation (**S7.1.1v2**). Initial `/` and postfix `./`
 therefore retain one root-selection concept under **S1.7**: the initial form
 has the resolution universe as its implicit base, while the postfix form has
 an explicit runtime or path base (**S10.5.1–S10.5.2**).
@@ -570,7 +573,7 @@ A field literally named `parent` remains an ordinary `.parent` member.
 its `parent` field, but the two spellings are not syntactic aliases.
 
 Missing parent navigation is a total read and returns `null`; subsequent
-access then follows ordinary null propagation (**S7.1.1**). Logical-global and
+access then follows ordinary null propagation (**S7.1.1v2**). Logical-global and
 absolute provider/authority roots are the path-specific exception: their
 parent operation clamps to the same root so path normalization remains closed.
 
@@ -785,112 +788,22 @@ At minimum, implementation tests must cover:
 
 ## 14. Open issues and non-decided options
 
-### PTH-O1: leading relative integer key and string-key input
+### PTH-O1: leading relative integer key and string-key input — RESOLVED
 
-**Status: open; the syntax and normalization described here are a possible
-solution only. They are not part of PTH1–PTH29 or the normative semantics.**
+Lambda assigns `.1` to the float literal `0.1` under **S4.3.1**; it must remain
+a float. A relative path beginning with `IntKey(1)` therefore uses the indexed
+form `.[1]`. The symbol spelling `.'1'` deliberately remains `NameKey("1")`
+under **S2.4.2v4** and **PTH14**.
 
-Lambda already assigns `.1` to the float literal `0.1` under **S4.3.1**. It
-must remain a float. Consequently, an `IntKey(1)` cannot be the first step of
-a relative path using the otherwise ordinary dotted integer spelling:
+The former `StringKeyInput` option is rejected by **S8.2.1v2** and C5.3b.
+Strings are names, not a second spelling of numeric keys: `"1"` normalizes to
+`NameKey("1")` on a map or element's attribute face and is an invalid member
+key on an array: reads yield `null`, and writes hard-raise. It is never parsed
+into `IntKey(1)`. The empty string is
+likewise a valid `NameKey`, resolving the former SO30 uncertainty.
 
-```lambda
-.1       // float 0.1, not a relative path
-```
-
-`.'1'` is not an alternative spelling for that integer step. It deliberately
-means `NameKey("1")` under **S2.4.2v3** and **PTH14**. The indexed form
-`.[1]` can apply an integer key to the relative root, but whether it should be
-the canonical static-path spelling, remain an indexed/dynamic form, or be
-supplemented by another spelling is open.
-
-One possible solution is to admit a double-quoted dotted step:
-
-```lambda
-a."name"
-a."1"
-."1"
-```
-
-In this option, the double-quoted form supplies a transient `StringKeyInput`;
-it does **not** add a third resolved key kind or change Lambda's container data
-model. Resolution normalizes it to one of the two keys already required by
-**S2.4.2v3** and **S8.2.1**:
-
-```text
-ResolvedKey = NameKey | IntKey
-
-normalize(StringKeyInput(s)) =
-    IntKey(parse_decimal(s))  if s is a canonical non-negative integer key
-    NameKey(s)                otherwise
-```
-
-The resulting equivalences would be:
-
-```lambda
-a."name"  == a.name == a.'name'  // NameKey("name")
-a."1"     == a.1                 // IntKey(1)
-a.'1'                            // NameKey("1"); remains distinct
-
-."1"                             // relative path beginning with IntKey(1)
-.1                               // still float 0.1
-.'1'                             // relative path beginning with NameKey("1")
-```
-
-A precise JS-like candidate recognizes only canonical ASCII decimal index
-spellings, `0 | [1-9][0-9]*`, within Lambda's `IntKey` range. It would classify
-the following without permissive number parsing:
-
-```lambda
-."0"      // IntKey(0)
-."12"     // IntKey(12)
-."01"     // NameKey("01")
-."+1"     // NameKey("+1")
-."-1"     // NameKey("-1")
-."1.0"    // NameKey("1.0")
-."1e2"    // NameKey("1e2")
-```
-
-Escapes would be decoded before classification, so `a."\u0031"` would have
-the same key as `a."1"`. The treatment of an empty decoded string and an
-all-digit value outside the `IntKey` range remains part of the option; it must
-be reconciled with the empty-key issue **SO30** rather than inferred from an
-implementation accident.
-
-If adopted, the normalization cannot be unique to dotted syntax. A string
-produced by a dynamic key expression must pass through the same key resolver
-to preserve optimized/generic parity under **S1.6** and **PTH20**:
-
-```lambda
-a["name"] == a."name"
-a["1"]    == a."1"
-```
-
-This is a material semantic change. In particular, `a["1"]` currently reaches
-a name-keyed map member by its text in the ordinary runtime path; the option
-would instead normalize it to `IntKey(1)`, with `a.'1'` remaining the explicit
-named-key access. Numeric JSON object keys, map literals, empty keys, and
-interop projections therefore require an audit before any decision.
-
-Path values would retain only the normalized `NameKey` or `IntKey`; they would
-not retain `StringKeyInput`. Equality, hashing, composition, resolution, and
-printing would consequently observe the normalized key. A canonical printer
-would need a context-sensitive escape: an integer step may print as `.1`
-after an existing base, but an initial relative `IntKey(1)` must print as
-`."1"` because `.1` reparses as a float. A normalized name prints by the
-ordinary identifier or quoted-symbol rules.
-
-Adopting the option would require, at minimum:
-
-- grammar support for double-quoted fields in paths and member expressions;
-- one decoded-string-to-key normalization helper shared by static and dynamic
-  lookup;
-- matching AST, path construction, equality/hash, formatter, and diagnostic
-  behavior;
-- tests for canonical decimals, non-canonical numeric-looking names, escaped
-  spellings, bounds, empty keys, maps, arrays, elements, JSON, and interop;
-- revision of **S2.4.2v3** in the formal semantics before implementation.
-
-Until that broader cost is accepted, the decided model remains exactly
-`NameKey | IntKey`, double-quoted dotted steps are not Lambda syntax, and no
-`StringKeyInput` coercion is normative.
+Double-quoted dotted member syntax remains unselected. If introduced later,
+it must preserve the string-to-`NameKey` rule and cannot restore numeric-string
+coercion. The decided model remains `NameKey | IntKey`; ordinary string and
+symbol inputs normalize to `NameKey`, while only exact integral numeric inputs
+normalize to `IntKey`.

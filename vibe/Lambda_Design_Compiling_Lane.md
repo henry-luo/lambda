@@ -543,7 +543,7 @@ authority decides each field's storage lane, and every writer and reader obeys
 it. Rulings **TB1/TB2** below were given 2026-08-20; the boundary/adoption
 consequences live in [`Lambda_Design_Type_Boundary.md`](Lambda_Design_Type_Boundary.md),
 which defers to this section for the storage rules. Investigation record:
-`Lambda_Impl_Tune19.md` §11.
+`impl/Lambda_Impl_Tune19.md` §11.
 
 ### 10.1 The classification authority and the slot formats
 

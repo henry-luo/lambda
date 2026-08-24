@@ -1299,8 +1299,10 @@ class PremakeGenerator:
         if 'include' in lib:
             all_includes.append(lib['include'])
 
-        # Add tree-sitter includes
-        for lib_name in ['tree-sitter', 'tree-sitter-lambda']:
+        # Add the shared Tree-sitter runtime include. Lambda's Tree-sitter
+        # grammar is isolated to the lambda-cst variant and is not a normal
+        # library-project dependency.
+        for lib_name in ['tree-sitter']:
             if lib_name in self.external_libraries:
                 include_path = self.external_libraries[lib_name]['include']
                 if include_path:
@@ -2683,7 +2685,7 @@ class PremakeGenerator:
                             lib_path = f"../../{lib_path}"
 
                         # Special handling for tree-sitter libraries - add them to external_static_libs (linkoptions)
-                        if lib_name in ['tree-sitter', 'tree-sitter-lambda', 'tree-sitter-latex-math']:
+                        if lib_name in ['tree-sitter', 'tree-sitter-latex-math']:
                             external_static_libs.append(lib_path)
                         # On Linux/Windows, static libs need to come after internal libs in link order
                         # because internal libraries can have unresolved symbols that these libs provide
@@ -2897,9 +2899,6 @@ class PremakeGenerator:
                     "/clang64/lib/libmbedx509.a",
                     "/clang64/lib/libmbedcrypto.a",
                 ]
-                if 'tree-sitter-lambda' in self.external_libraries:
-                    windows_lib_paths.insert(
-                        1, "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a")
                 for lib_path in windows_lib_paths:
                     self.premake_content.append(f'        "{lib_path}",')
                 # Add dynamic system libraries
@@ -3074,7 +3073,7 @@ class PremakeGenerator:
                 # lambda-data references the LaTeX parser entry points from
                 # its archive, so these archives must remain live after the
                 # data library is placed on the link line.
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter',
+                for lib_name in ['tree-sitter',
                                  'tree-sitter-latex', 'tree-sitter-latex-math']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
@@ -3084,7 +3083,7 @@ class PremakeGenerator:
                 self.premake_content.append('        "-Wl,--no-whole-archive",')
             elif self.use_macos_config:
                 # macOS: use -force_load for each library
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                for lib_name in ['tree-sitter']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3092,7 +3091,7 @@ class PremakeGenerator:
                         self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
             else:
                 # Default: just link normally without forcing symbol inclusion
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                for lib_name in ['tree-sitter']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3323,9 +3322,6 @@ class PremakeGenerator:
             "lambda/tree-sitter/lib/include",
             "lib/mem-pool/include",
         ])
-        if 'tree-sitter-lambda' in self.external_libraries:
-            all_includes.append("lambda/tree-sitter-lambda/bindings/c")
-
         # Add external library include paths (excluding dev_libraries)
         dev_lib_names = {lib.get('name', '') if isinstance(lib, dict) else lib
                         for lib in self.config.get('dev_libraries', [])}

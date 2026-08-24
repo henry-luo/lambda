@@ -75,13 +75,50 @@ check_and_install_latex_package "framed"
 echo -e "${YELLOW}Generating PDF cheatsheets...${NC}"
 echo
 
+# GitHub and pandoc want OPPOSITE spellings for a literal pipe inside a code
+# span in a table cell: GFM needs it escaped (`int \| string`) or the cell
+# breaks, while pandoc's `markdown` reader protects a bare pipe there and
+# typesets an escaped one literally as "int \| string".  The reader cannot
+# simply be switched to gfm — only the `markdown` reader computes the relative
+# p{} column widths this narrow 3-column sheet needs to wrap instead of
+# overflowing.  So the checked-in Markdown stays GFM-correct and the pipes are
+# normalised here, on a temporary copy, for the LaTeX pass only.
+WORK_MD="$(mktemp -t lambda_cheatsheet).md"
+trap 'rm -f "$WORK_MD"' EXIT
+# Scoped to code spans only: an escaped pipe OUTSIDE a span is a real cell
+# separator to both readers, so unescaping it there would split the cell.
+perl -pe 'if (/^\|/) { s{(`[^`]*`)}{ my $x = $1; $x =~ s/\\\|/|/g; $x }ge }' \
+    ../Lambda_Cheatsheet.md \
+  | perl -pe '
+      # Nearly every table on this sheet is the same two columns, so 42 repeated
+      # "Form | Meaning" headers cost a page of vertical space and tell the
+      # reader nothing.  Emptying the header cells makes pandoc emit a headerless
+      # table.  Headers that actually name their columns (Given/Expression/
+      # Result, Operator, ...) are left alone, and the checked-in Markdown keeps
+      # all of them so the GitHub rendering stays labelled.
+      s/^\| Form \| Meaning \|$/|  |  |/;
+    ' \
+  | perl -0777 -pe '
+      # Group labels are plain paragraphs, so LaTeX has nothing to hook spacing
+      # onto.  Emit a raw \addvspace before any standalone one-line paragraph
+      # that introduces a table.  Injected here rather than written into the
+      # Markdown, where it would show up literally on GitHub.
+      s{\n\n([^\n|#>`\\][^\n]*)\n\n(\|)}{\n\n\\addvspace{5pt}\n\n$1\n\n$2}g;
+    ' \
+  > "$WORK_MD"
+
 # Generate landscape PDF
 echo -e "${BLUE}Generating landscape PDF...${NC}"
-if pandoc ../Lambda_Cheatsheet.md \
+if pandoc "$WORK_MD" \
     -o ../Lambda_Cheatsheet.pdf \
     --template=template_landscape.tex \
     --listings \
     --pdf-engine=xelatex \
+    `# Tables must WRAP inside the narrow 3-column layout. Pandoc only emits` \
+    `# relative p{} widths for tables it considers wide; at the default` \
+    `# --columns=72 most of this sheet's tables came out as natural-width` \
+    `# 'll' columns and overflowed the column. 20 makes every table wrap.` \
+    --columns=20 \
     -V geometry:a4paper,landscape,margin=0.5in; then
 
     if [[ -f "../Lambda_Cheatsheet.pdf" ]]; then

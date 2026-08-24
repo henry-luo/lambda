@@ -188,7 +188,7 @@ the problem is the second error channel and everything built to manage it.
   deletes the provably redundant ones. Knowledge applied *after* emission —
   and the analysis itself became a compile-time cost.
 - **G2** *(never born — `52c0f3c02`, 2026-07-24;
-  [`Lambda_Impl_Online_Exception (done).md`](../Lambda_Impl_Online_Exception%20(done).md)
+  [`Lambda_Impl_Online_Exception (done).md`](../impl/Lambda_Impl_Online_Exception%20(done).md)
   OE1–OE10)*: knowledge moved to emission time — `exc_track` answers "can the
   flag possibly be set here?" before emitting anything; G1's peephole and
   offline pass were deleted. But its ceiling is the `UNKNOWN` state: catalog
@@ -216,7 +216,7 @@ around nested function compilation must be preserved.
 #### JR3.1 — JS adopts the Lambda error model
 
 Cross-checked 2026-08-07 against the revised error handling that landed in
-`0d8cc5222` (`Lambda_Impl_Error_Handling (done).md`, `Lambda_Error_Runtime.md`,
+`0d8cc5222` (`vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Error_Runtime.md`,
 `lambda/runtime/lambda-error.h`). The Lambda side is already **single-lane
 in-band**, not two-lane:
 
@@ -233,7 +233,7 @@ in-band**, not two-lane:
   signatures** (`can_raise` gate).
 
 JS therefore does not get an error model of its own; it slots into Lambda's
-four outcome kinds (`Lambda_Impl_Error_Handling (done).md` §6):
+four outcome kinds (`vibe/impl/Lambda_Impl_Error_Handling (done).md` §6):
 
 | Lambda outcome kind | JS counterpart |
 |---|---|

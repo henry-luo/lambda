@@ -108,7 +108,7 @@ StatementStatus check_statement_completeness(const char* source) {
     }
 
     // First, do a quick lexical check for unclosed brackets
-    // This catches incomplete statements that Tree-sitter would report as ERROR
+    // This catches incomplete statements before the direct parser reports them
     if (has_unclosed_brackets(source)) {
         return STMT_INCOMPLETE;
     }

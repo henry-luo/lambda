@@ -391,12 +391,12 @@ pn nested_break() {
 
 // Early return
 pn early_return(n) {
-    if (n < 0) return -1;
-    if (n == 0) return 0;
+    if (n < 0) { return -1 }
+    if (n == 0) { return 0 }
     var x = 1;
     while (x < n) {
         x = x * 2;
-        if (x > 1000) return 1000;
+        if (x > 1000) { return 1000 }
     }
     return x;
 }
@@ -540,48 +540,11 @@ quantile([1,2,3], 2)
 
 ### Test Harness Architecture
 
-```cpp
-// test/fuzzy/lambda_fuzzer.cpp
-
-class LambdaFuzzer {
-public:
-    enum Stage {
-        PARSE,
-        BUILD_AST,
-        TRANSPILE,
-        JIT_COMPILE,
-        EXECUTE
-    };
-    
-    struct Result {
-        Stage failed_stage;
-        bool crashed;
-        bool timeout;
-        std::string error_message;
-        double execution_time;
-        size_t memory_peak;
-    };
-    
-    Result fuzz(const std::string& input, int timeout_ms = 5000);
-    
-private:
-    bool parse(const std::string& input);
-    bool build_ast();
-    bool transpile();
-    bool jit_compile();
-    bool execute();
-};
-
-// Differential testing: compare interpreter vs JIT results
-class DifferentialFuzzer {
-public:
-    bool compare(const std::string& input) {
-        auto interp_result = run_interpreter(input);
-        auto jit_result = run_jit(input);
-        return results_match(interp_result, jit_result);
-    }
-};
-```
+The maintained Lambda fuzzer is the shell runner at
+`test/fuzzy/lambda/test_fuzzy.sh`. It executes the production `lambda.exe`
+against the corpus with timeout and crash capture. The former standalone C++
+harness depended on the retired Lambda Tree-sitter/CST API and has been
+removed.
 
 ### Corpus Management
 
@@ -596,36 +559,13 @@ test/fuzzy/
 │   ├── grammar_gen.cpp  # Grammar-based generation
 │   ├── mutator.cpp      # Mutation engine
 │   └── minimizer.cpp    # Crash case minimizer
-└── harness/
-    ├── lambda_fuzzer.cpp
-    └── differential_fuzzer.cpp
-```
-
-### Build & Run
-
-Add to `Makefile`:
-
-```makefile
-# Fuzzy testing
-test-fuzzy: build-fuzzy
-	@echo "Running fuzzy tests..."
-	./build/bin/lambda_fuzzer --duration=1h --corpus=test/fuzzy/corpus
-
-build-fuzzy: build
-	@echo "Building fuzzer..."
-	$(CXX) $(CXXFLAGS) -fsanitize=address,undefined \
-		test/fuzzy/harness/lambda_fuzzer.cpp \
-		test/fuzzy/generators/grammar_gen.cpp \
-		test/fuzzy/generators/mutator.cpp \
-		-o build/bin/lambda_fuzzer \
-		-Lbuild/lib -llambda
+└── harness/                 # reserved for future standalone tools
 ```
 
 **Usage:**
 ```bash
-make test-fuzzy                    # Run 1-hour fuzzy test
-make test-fuzzy DURATION=4h        # Run 4-hour fuzzy test
-make build-fuzzy                   # Build fuzzer only
+make test-fuzzy                    # Run the configured fuzzy duration
+./test/fuzzy/lambda/test_fuzzy.sh --duration=3600
 ```
 
 ---

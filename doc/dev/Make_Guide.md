@@ -10,7 +10,7 @@ Run `make help` for a quick summary, or see below for full details.
 
 | Target          | Description                                                                                                                                                                          |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds tree-sitter libs, RE2, and regenerates parser/embed headers if needed. |
+| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds the normal Tree-sitter input libraries, RE2, and embed headers. The Lambda reference grammar is built only by `lambda-cst`. |
 | `debug`         | Debug build with AddressSanitizer enabled.                                                                                                                                           |
 | `release`       | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda_release.exe`.   |
 | `rebuild`       | Force complete rebuild (`clean-all` + `build`).                                                                                                                                      |
@@ -44,7 +44,7 @@ make lambda-cli         # headless CLI release build
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `clean`                     | Remove compiled object files (`build/obj`, `build/lib`), legacy `.o`/`.d` files, executables (`lambda.exe`, `lambda_debug.exe`, `lambda_release.exe`), and transpiled temp files. **Does not** remove tree-sitter libraries, RE2 library, or build directories themselves. Fast — allows incremental rebuild. |
 | `clean-test`                | Remove test executables, test output directories, `.dSYM` bundles, and test build JSON files.                                                                                                                                                                                                                 |
-| `clean-grammar`             | Remove auto-generated grammar and embed files: `parser.c`, `ts-enum.h`, `lambda-embed.h`.                                                                                                                                                                                                                     |
+| `clean-grammar`             | Remove auto-generated Lambda CST grammar and embed files: `parser.c`, `grammar.json`, `node-types.json`, and `lambda-embed.h`.                                                                                                                                                                                   |
 | `clean-premake`             | Remove Premake build directory (`build/premake`) and generated `.lua`/`.make` files.                                                                                                                                                                                                                          |
 | `clean-all`                 | Deep clean. Runs `clean-premake` + `clean-test`, then removes all build directories, all tree-sitter `.a` and `.o` files, and the RE2 library. Everything must be rebuilt from scratch after this.                                                                                    |
 | `distclean`                 | Most thorough clean. Runs `clean-all` + `clean-grammar` + `clean-test`, then removes all `.exe` files.                                                                                                                                                                                                        |
@@ -68,19 +68,19 @@ distclean
 
 | Target | Description |
 |--------|-------------|
-| `generate-grammar` | Regenerate parser and `ts-enum.h` from `grammar.js`. Usually triggered automatically when `grammar.js` changes. |
-| `tree-sitter-libs` | Build all tree-sitter static libraries (tree-sitter, tree-sitter-lambda, tree-sitter-javascript, tree-sitter-latex, tree-sitter-latex-math). The core tree-sitter library is built using the amalgamated `lib.c` approach with no ICU dependency. Auto-regenerates parsers if `grammar.js` files changed. |
+| `generate-grammar` | Regenerate the isolated Lambda CST parser artifacts from `grammar.js`. |
+| `tree-sitter-libs` | Build the Tree-sitter static libraries used by input grammars and other language frontends. The isolated Lambda CST archive is built by `lambda-cst`. |
 
 ### Auto-generation Rules
 
 The build system automatically manages the dependency chain:
 
 ```
-grammar.js → parser.c → ts-enum.h → C/C++ source files
+grammar.js → parser.c → lambda-cst verifier
 lambda.h   → lambda-embed.h
 ```
 
-When `grammar.js` is modified, `parser.c` and `ts-enum.h` are regenerated before compilation.
+When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated before `lambda-cst` is built.
 
 ---
 

@@ -2,9 +2,8 @@
 
 #include <stdint.h>
 
-// Parser-neutral source coordinates.  Every byte range is half-open over the
-// original UTF-8 source buffer so a direct parser never has to manufacture a
-// Tree-sitter node merely to identify an AST location.
+// Parser-neutral source coordinates. Every byte range is half-open over the
+// original UTF-8 source buffer.
 typedef struct SourceSpan {
     uint32_t start_byte;
     uint32_t end_byte;

@@ -4,9 +4,9 @@
 **Date:** 2026-07-15
 **Context:** Successor ledger to `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20, OS1–OS11 all closed). With the Lambda phase-1 implementation complete and the JS phase (J1–J3) largely landed, the JS detailed-design docs (`doc/dev/js/JS_01`–`JS_16`) were swept for stack-frame-related issues **not owned by any of the three implementation plans**:
 
-- `vibe/Lambda_Impl_Stack_Frame.md` — phase 1, Lambda MIR-Direct + shared runtime
-- `vibe/Lambda_Impl_Stack_Frame_JS.md` — phase 2, JS transpiler/runtime onto side stacks
-- `vibe/Lambda_Impl_Stack_Frame_JS2.md` — SF15-J, JS-array `extra`/props migration
+- `vibe/impl/Lambda_Impl_Stack_Frame.md` — phase 1, Lambda MIR-Direct + shared runtime
+- `vibe/impl/Lambda_Impl_Stack_Frame_JS.md` — phase 2, JS transpiler/runtime onto side stacks
+- `vibe/impl/Lambda_Impl_Stack_Frame_JS2.md` — SF15-J, JS-array `extra`/props migration
 
 Already tracked elsewhere and therefore **not** in this ledger: broad C-helper migration to the RAII root guard and conservative-scan retirement (phase-2 §1 "Out of scope (phase 3+)"); `js_args_stack` unification (explicitly keep-as-is unless profiling says otherwise); `js_await_sync` real suspension *architecture* (owned by the concurrency K-series / SF20 — but its JS-doc symptom is recorded here as JO9 so it isn't lost). Doc-staleness ("nursery" vocabulary in JS_01/04/09/15/16 and LR_01/03/04/09) was fixed 2026-07-15 alongside this ledger — not an open issue.
 

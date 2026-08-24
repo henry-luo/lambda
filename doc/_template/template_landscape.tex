@@ -6,6 +6,55 @@
 \usepackage{titlesec}
 \usepackage{listings}
 \usepackage{fancyhdr}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc}
+\usepackage{etoolbox}
+% Pandoc emits \texorpdfstring{}{} for any heading containing inline formatting
+% (e.g. "## Concurrency (`pn` only)"); that macro comes from hyperref. Without
+% it the build fails on an undefined control sequence — this predates the table
+% work and is why the committed PDF had gone stale.
+\usepackage[hidelinks]{hyperref}
+
+% Pandoc emits every pipe table as a `longtable`, but longtable is a
+% page-breaking environment and cannot appear inside `multicols`, which wraps
+% this whole sheet. Map it onto a plain `tabular` that flows inside a column,
+% and neutralise longtable's head/foot markers, which tabular does not know.
+% Pandoc's form is \begin{longtable}[]{<colspec>}, so the optional argument is
+% absorbed and only the column spec is handed to tabular.
+\makeatletter
+\renewenvironment{longtable}[2][]{%
+  \setlength{\LTleft}{0pt}\setlength{\LTright}{0pt}%
+  \begin{tabular}{#2}%
+}{%
+  \end{tabular}%
+}
+\def\endhead{}
+\def\endfirsthead{}
+\def\endfoot{}
+\def\endlastfoot{}
+\makeatother
+
+% Tables must fit a narrow 3-column sheet: shrink the type and tighten padding.
+\AtBeginEnvironment{tabular}{\fontsize{6.5}{8}\selectfont}
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.0}
+% booktabs pads generously around every rule. With ~50 tables on the sheet that
+% padding alone runs to most of a page, so drive it to zero.
+\setlength{\aboverulesep}{0pt}
+\setlength{\belowrulesep}{0pt}
+\setlength{\abovetopsep}{0pt}
+\setlength{\belowbottomsep}{0pt}
+\setlength{\defaultaddspace}{2pt}
+% With the header row suppressed, pandoc's \toprule lands directly under the
+% group label and reads as a divider between the two. Drop it; \midrule and
+% \bottomrule still close the table off below.
+% With the header suppressed, pandoc's \toprule lands directly under the group
+% label and reads as a divider between the two. booktabs' rule macros open an
+% \noalign that they close themselves, so they cannot be wrapped or expanded
+% away without misplacing the \noalign pandoc emits next — set the thickness
+% they draw at instead. \midrule keeps \lightrulewidth for the few tables that
+% still carry a header.
+\setlength{\heavyrulewidth}{0pt}
 
 % Configure listings for code blocks - breakable across columns
 \lstset{
@@ -16,8 +65,8 @@
   columns=fullflexible,
   keepspaces=true,
   frame=none,
-  aboveskip=3pt,
-  belowskip=3pt,
+  aboveskip=1pt,
+  belowskip=1pt,
   xleftmargin=3pt,
   xrightmargin=3pt,
   commentstyle=\color[rgb]{0.56,0.35,0.01}\itshape,
@@ -73,10 +122,10 @@
 
 % Configure sections - make them slightly bigger and more compact
 \titleformat{\section}[block]{\normalfont\Large\bfseries}{}{0pt}{}
-\titlespacing*{\section}{0pt}{3pt plus 1pt minus 1pt}{1pt plus 1pt minus 1pt}
+\titlespacing*{\section}{0pt}{10pt plus 2pt minus 1pt}{1pt plus 1pt minus 1pt}
 
 \titleformat{\subsection}[block]{\normalfont\large\bfseries}{}{0pt}{}
-\titlespacing*{\subsection}{0pt}{2pt plus 1pt minus 1pt}{0pt plus 1pt minus 1pt}
+\titlespacing*{\subsection}{0pt}{9pt plus 2pt minus 1pt}{0pt plus 1pt minus 1pt}
 
 % Don't print section numbers
 \setcounter{secnumdepth}{0}

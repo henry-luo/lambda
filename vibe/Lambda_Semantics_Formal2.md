@@ -234,6 +234,36 @@ operator.** The decision path, recorded:
   coherence); implement `at` membership over maps, elements, arrays (index),
   and decide ranges; document the `in`/`at` pair as the value/key axis.
 
+#### C5.3b Subscript key domains and container-kind stability (2026-08-24) — RESOLVED
+
+**Designer ruling:**
+
+1. The sequence face of an array, list, or range accepts only a non-negative,
+   exact integral numeric subscript. `int`, `float`, and `decimal` values share
+   that rule: `5`, `5.0`, and exact decimal `5` select the same integer key;
+   `5.5`, strings, symbols, and negative positions do not name members. Every
+   such invalid read yields `null`; every invalid write raises through the hard
+   `T^` channel. The same convention applies to all other key-domain mismatches.
+2. A map accepts string and symbol subscripts as names. Equal text denotes the
+   same named key, and `""` is explicitly valid: its falsiness does not turn it
+   into absence. This resolves SO30; the observed empty-JSON-key corruption is
+   now unambiguously an implementation bug.
+3. An element dispatches by key kind: an integer key selects a content child;
+   a string or symbol name selects an attribute.
+4. Member/index assignment may update or add a member allowed by the existing
+   container, but never converts the container kind. In particular,
+   `var a = []; a["str"] = 1` raises a hard error; the MIR behavior that routes
+   this through numeric index 0 is a conformance defect, not language precedent.
+5. A kind change is explicit whole-binding replacement with a reconstructed
+   value, for example `var a = [1]; a = {value: 1}`. An unannotated `var` may
+   change runtime type; an annotated binding must admit the replacement type.
+
+This ruling governs subscripting and member assignment. It does not reopen the
+separate `at` membership axis: `at` continues to range over names only. It is
+formalized as S2.4.2v4, S8.2.1v2, S8.2.2v2, and S9.1.6 in formal-semantics
+version 12.0.0. The major version reflects the deliberate rejection of programs
+that relied on accidental array-to-named-key behavior.
+
 #### C5.4 Follow-ups (C5)
 
 1. Implement: array OOB/negative-index reads → null (replacing error values); OOB
@@ -1966,7 +1996,7 @@ symmetry: bounded, wrapping, poison-free.
   existing out-of-band-float precedent (`d2it`, `lambda.h:1286`). The 53-bit band survives
   as *carrier capacity*, never again as a semantic bound. Full plan, including the
   `i2it`-overflow-arm fix that closes the O1 divergence, the range-proven-`i64`-lane rule, and
-  the convergence with the 2026-08-01 tuning work: `vibe/Lambda_Impl_Int_Total.md`.
+  the convergence with the 2026-08-01 tuning work: `vibe/impl/Lambda_Impl_Int_Total.md`.
 - `int.inf`/`int.nan` payload encoding (reserved compact payloads vs. cells) — open, see
   that plan's Phase A.
 - Value-aware admission under §11.4 now passes any finite integral float into int (e.g.
