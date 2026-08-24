@@ -4613,16 +4613,22 @@ static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
         MIR_new_reg_op(mt->ctx, vars),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
             state, 0, 1)));
+    MIR_reg_t boxed = 0;
     if (mt->satellite_target) {
-        return emit_call_2(mt, "lambda_module_var_at", MIR_T_I64,
+        // Satellite slab reads are boxed Item values just like the T0 slab.
+        // The old early return skipped the native unbox below, so an `int`
+        // module binding entered scalar MIR arithmetic as raw Item bits and
+        // produced `inf` after promotion (D8.1.1v4 / D5.3.3).
+        boxed = emit_call_2(mt, "lambda_module_var_at", MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, state),
             MIR_T_I64, MIR_new_int_op(mt->ctx, gvar->slot));
+    } else {
+        boxed = new_reg(mt, "gv_val", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, boxed),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                (MIR_disp_t)gvar->slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
     }
-    MIR_reg_t boxed = new_reg(mt, "gv_val", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, boxed),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            (MIR_disp_t)gvar->slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
     // Unbox to native type if needed
     TypeId tid = gvar->type_id;
     if (mir_is_native_scalar_value_type(tid) || tid == LMD_TYPE_STRING) {
@@ -18262,10 +18268,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         }
         mt->module_rooted_reg = 0;
     } else {
-        // `fn_call_into` owns the common dynamic ABI. Build a rooted List so
-        // every 4-8 argument call reaches its checked dispatch instead of
-        // silently returning the function value after MIR lowering.
-        MIR_reg_t args_list = emit_call_0(mt, "list", MIR_T_P);
+        // `fn_call_into` owns the common dynamic ABI. Build a rooted plain
+        // Array so every 4-8 argument call reaches its checked dispatch. A
+        // source `list()` is content-oriented and list_push merges adjacent
+        // strings under an input context, collapsing `f("a", "b", ...)` to
+        // one argument before signature checking (D5.2).
+        MIR_reg_t args_list = emit_call_0(mt, "array", MIR_T_P);
         int args_list_root = create_pointer_gc_root_slot(mt, args_list);
         arg = call_node->argument;
         while (arg) {
@@ -18273,7 +18281,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             int boxed_arg_root = create_gc_root_slot(mt, boxed_arg);
             args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
             boxed_arg = load_gc_root_slot(mt, boxed_arg_root, "dynamic_arg");
-            emit_call_void_2(mt, "list_push", MIR_T_P,
+            emit_call_void_2(mt, "array_push", MIR_T_P,
                 MIR_new_reg_op(mt->ctx, args_list),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_arg));
             arg = arg->next;

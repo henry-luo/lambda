@@ -299,9 +299,9 @@ T0 removes the per-line **compile** share (today: full re-lower + re-link + re-c
 - **P2 — tiering.** Promotion cells, `LAMBDA_INTERPRETED` entry ABI, satellite lowering contract (§5.2), Script-scoped analysis persistence, entry swap. *Gate: promoted-function outputs identical to interp; perf floor gate 5.*
 - **P3 — one-engine unification.** `EvalMode::CONST` folder in the pass manager; `EvalMode::PREDICATE` for `that`; validator de-JIT. *Gate: fold-on/fold-off differential; `validate` runs with JIT never initialized.*
 - **P4 — REPL/shell persistent environment.** Script-alive-across-lines, appended statements, persistent slab + counters. *Gate: REPL latency flat in history length.*
-- **P5 — default flip + spec.** `auto` becomes default; MIR-interp demoted to diagnostic; size thresholds retired; **D8.1.1v2 + U26 amendment + LR/JS doc updates land in the same change** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
+- **P5 — default flip + spec. ✅ LANDED 2026-08-24.** `auto` is the unset default; MIR-interp remains diagnostic and `jit` remains the explicit eager path. The release `test_lambda_gtest` corpus is green under the default AUTO policy (**758/758**), including the P2 scalar-module, dynamic-argument, object/procedure, and var-call regressions. **D8.1.1v4 + the implementation-doc status update record the landed selector and gate** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
 
-Each phase is landable and revertible behind `LAMBDA_TIER`; nothing before P5 changes default behavior.
+Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO the shipped default while preserving explicit `interp` and `jit` controls.
 
 ## 12. Considered and rejected
 

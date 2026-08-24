@@ -14,9 +14,12 @@ run() {
   local exp="$1" name="$2" src="$3"
   printf '%b' "$src" > "$WORK/case.ls"
   out=$("$ROOT/lambda.exe" "$WORK/case.ls" --no-log 2>&1)
-  # Match the PARSE error code only: a script can parse fine and still fail at
-  # run time (an unresolved import, say), which must not read as a rejection.
-  if echo "$out" | grep -qE 'error\[E100\]'; then got=R; else got=A; fi
+  # A rejection is a COMPILE-TIME diagnosis: E100 from the parser, or E312 from
+  # semantic analysis (S16.6.8/S16.6.9 classify block interiors, which the
+  # parser cannot see, so they are reported there). Deliberately not "any
+  # error": a script can parse and analyse fine and still fail at run time — an
+  # unresolved import, say — which must not read as a rejection.
+  if echo "$out" | grep -qE 'error\[E(100|312)\]'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
 }
@@ -131,6 +134,40 @@ run A "fluent chain call"                  'let d = [1]\nlet n = d\n.len()\n'
 run A "fluent chain, type-keyword member"  'let n = 42\nlet s = n\n.string()\n'
 run A "fluent chain, .int() member"        'let s = "12"\nlet n = s\n.int()\n'
 run A "fluent chain, .map( member"         'let d = [1]\nlet r = d\n.map((x) => x)\n'
+echo "--- corner: S16.6.6/7 statement bodies need braces ---"
+run R "if body bare return"          'pn main() {\nlet k = 1\nif (k == 2) return -1\n1\n}\n'
+run R "else body bare return"        'pn main() {\nlet k = 1\nif (k == 2) { 0 } else return -1\n1\n}\n'
+run R "if body bare break"           'pn main() {\nvar i = 0\nwhile (i < 3) { i = i + 1; if (i == 2) break }\ni\n}\n'
+run R "for body bare return"         'pn main() {\nfor (x in [1,2]) return x\n0\n}\n'
+run R "case colon bare return"       'pn main() {\nmatch 1 { case int: return 99 default: 0 }\n}\n'
+run R "arrow body bare return"       'let f = (x) => return x\nf(1)\n'
+run R "pn arrow expr body"           'pn p() => 1\npn main() { p() }\n'
+run R "pn arrow braced body"         'pn p() => { 1 }\npn main() { p() }\n'
+run A "if braced return"             'pn main() {\nlet k = 1\nif (k == 1) { return 7 }\n0\n}\n'
+# S16.6.6 admitted braces after `case T:`; S16.6.8 later narrowed that to
+# FUNCTIONAL blocks only, so this case now carries the functional interior.
+# The procedural spelling is asserted as R below.
+run A "case colon braced fn block"   'pn main() {\nmatch 1 { case int: { let a = 2; a * 3 } default: 0 }\n}\n'
+run A "if body raise is expression"  'pn main() {\nlet k = 1\nlet r = if (k == 2) raise error("x") else 5\nr\n}\n'
+run A "pn braced body"               'pn p() { 1 }\npn main() { p() }\n'
+run A "identifier with keyword prefix" 'let returnValue = 1\nlet r = if (returnValue == 1) returnValue else 0\nr\n'
+run A "arrow body with binop tail"   'let f = (x, y) => x > y\nf(3, 1)\n'
+# C-suite only BY DESIGN, not as a divergence: S16.6.8/S16.6.9 classify a
+# block's interior on the S12.1 effect boundary, which is semantic analysis.
+# The Tree-sitter reference grammar is a parser and has no such tier.
+echo "--- corner: S16.6.8/9 procedural blocks are not expressions ---"
+run R "procedural block in tuple"    'pn main() {\nlet t = ({ return 99 }, 123)\nt\n}\n'
+run R "procedural block in array"    'pn main() {\nlet a = [{ return 9 }, 2]\na\n}\n'
+run R "procedural block as operand"  'pn main() {\nlet x = { return 9 } + 1\nx\n}\n'
+run R "procedural block as call arg" 'fn f(x) { x }\npn main() {\nlet r = f({ return 9 })\nr\n}\n'
+run R "procedural block after case:" 'pn main() {\nmatch 1 { case int: { return 99 } default: 0 }\n}\n'
+run R "mixed match arms"             'pn main() {\nmatch 1 { case int { return 5 } default: 0 }\n9\n}\n'
+run R "mixed if branches"            'pn main() {\nlet k = 2\nlet x = if (k == 1) { return 1 } else 0\nx\n}\n'
+run A "functional block in tuple"    'let t = ({ 1; 2 }, 3)\nt\n'
+run A "functional block after case:" 'pn main() {\nmatch 1 { case int: { let a = 2; a * 3 } default: 0 }\n}\n'
+run A "block-else all functional"    'fn d(x) { x * 10 }\nlet m = if (1 > 2) "ok" else { let r = d(3); "v" ++ string(r) }\nm\n'
+run A "nested if/else all control"   'pn main() {\nvar x = 10\nvar r = 0\nif (x > 5) { if (x > 8) { r = 3 } else { r = 2 } } else { r = 1 }\nr\n}\n'
+run A "empty else-if branch"         'pn main() {\nvar s = 0\nvar i = 2\nif (i == 1) { s = s + 10 } else if (i == 2) { } else { s = s + 1 }\ns\n}\n'
 run R "line-start .digit stays dual-role"  'let a = 1\na\n.5\n'
 run A "relative path statement"            'let p = \\.a.b\np\n'
 run A "rooted path statement"              'let p = /.a.b\np\n'

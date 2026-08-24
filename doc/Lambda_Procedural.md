@@ -449,8 +449,8 @@ pn greet(name: string) {
     print(msg)
 }
 
-// Expression body
-pn double(x: int) => x * 2
+// A procedure body is always a braced statement block ('=>' bodies are fn-only)
+pn double(x: int) int { return x * 2 }
 
 // With return type annotation
 pn factorial(n: int) int {
@@ -491,7 +491,7 @@ pn main() {
         sum = sum + i
         i = i + 1
     }
-    "Sum 1..10 = " ++ string(sum)
+    "Sum 1..10 = " ++ sum
 }
 ```
 
@@ -567,7 +567,7 @@ type Account {
         ~.name = name                    // ~.name = field, name = parameter
     }
 
-    fn describe() => name ++ ": " ++ string(balance)
+    fn describe() => name ++ ": " ++ balance
 }
 ```
 

@@ -681,7 +681,7 @@ for (k at m) k
 **Key-value pairs** — `for (k, v at map)`:
 
 ```lambda
-for (k, v at {a: 1, b: 2, c: 3}) k ++ "=" ++ string(v)
+for (k, v at {a: 1, b: 2, c: 3}) k ++ "=" ++ v
 // ['a=1', 'b=2', 'c=3']
 
 let scores = map(["alice", 95, "bob", 87])
@@ -1030,11 +1030,11 @@ Expression arms (`case T: expr`) and statement arms (`case T { stmts }`) can be 
 fn describe(shape) => match shape.tag {
     case 'circle' {
         let area = 3.14159 * shape.r ** 2;
-        "circle with area " ++ string(area)
+        "circle with area " ++ area
     }
     case 'rect' {
         let area = shape.w * shape.h;
-        "rectangle with area " ++ string(area)
+        "rectangle with area " ++ area
     }
     default: "unknown shape"
 }
@@ -1069,10 +1069,15 @@ pn handle(event) {
             if (event.key == "Escape") { return null }
             process_key(event.key)
         }
-        default: null
+        default { }
     }
 }
 ```
+
+> S16.6.9: the `case` arms here are control arms — they assign and `return`
+> rather than yielding a value — so `default` must be one too. An empty block
+> is the do-nothing control arm; `default: null` (or `default { null }`) is a
+> *value* arm and would make the match a rejected mixture.
 
 ### Match in Let Bindings
 

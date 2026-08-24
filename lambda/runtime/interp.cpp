@@ -32,7 +32,9 @@ extern "C" Item pn_output_append_mir(Item source, Item target);
 // Tier selection
 // ---------------------------------------------------------------------------
 
-static LambdaTier g_lambda_tier = LAMBDA_TIER_JIT;
+// auto is the shipped policy: cold definitions start in T0 and eligible hot
+// definitions promote through the per-function satellite path (D8.1.1v4).
+static LambdaTier g_lambda_tier = LAMBDA_TIER_AUTO;
 
 static InterpState* interp_current_state(void);
 
