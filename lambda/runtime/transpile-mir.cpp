@@ -13,6 +13,7 @@
 
 extern "C" int lambda_mir_lazy_enabled(void);
 #include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
@@ -27855,6 +27856,16 @@ static void* interp_worker_entry(void* opaque) {
     if (!args || !args->runner || !args->runner->context) return NULL;
     EvalContext* eval = args->runner->context;
     if (!eval_context_thread_initialize(eval)) return NULL;
+    // The large-stack worker has independent JS TLS; bind the shared capsule
+    // before an async bridge (for example toPromise) can allocate GC-owned JS
+    // values, preserving the owner/thread invariant (D5.3.3).
+    bool js_state_initialized = !eval->js_state ||
+        js_runtime_state_thread_initialize(eval);
+    if (!js_state_initialized) {
+        log_error("interp-worker: failed to bind JavaScript runtime state");
+        eval_context_thread_shutdown(eval);
+        return NULL;
+    }
     args->initialized = true;
     input_context = (Context*)eval;
     lambda_stack_init();
@@ -27864,6 +27875,10 @@ static void* interp_worker_entry(void* opaque) {
         args->result = ItemError;
     } else {
         args->result = interp_run_script(args->runner, args->run_main);
+    }
+    if (js_state_initialized && eval->js_state &&
+            !js_runtime_state_thread_shutdown(eval)) {
+        log_error("interp-worker: failed to release JavaScript runtime state");
     }
     if (!eval_context_thread_shutdown(eval)) {
         log_error("interp-worker: failed to release evaluator context");
