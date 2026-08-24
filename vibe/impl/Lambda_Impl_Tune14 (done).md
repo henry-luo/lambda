@@ -3,10 +3,10 @@
 - **Date:** 2026-08-06 (rev 2 — rewritten from measured profiles; rev 1's unprofiled
   hypotheses are corrected in §2.6)
 - **Input:** `test/benchmark/Overall_Result23.md` (Lambda commit `91dbb15dd5`),
-  `vibe/Lambda_Impl_Tune13 (done).md`, sampling profiles in `temp/prof14/` (see §5)
+  `vibe/impl/Lambda_Impl_Tune13 (done).md`, sampling profiles in `temp/prof14/` (see §5)
 - **Status:** IMPLEMENTED — 2026-08-06 (code, gates, and measured closeout below)
-- **Related:** `vibe/Lambda_Impl_Tune13 (done).md`, `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`,
-  `vibe/Lambda_Result15_Bottlenecks.md`, `vibe/Lambda_Impl_Tune9_GC (done).md`,
+- **Related:** `vibe/impl/Lambda_Impl_Tune13 (done).md`, `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`,
+  `vibe/Lambda_Result15_Bottlenecks.md`, `vibe/impl/Lambda_Impl_Tune9_GC (done).md`,
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/Lambda_Design_Name_Identity.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S1.4–S1.6, S4.1, S4.5.3, S11.4;
   `doc/Lambda_Formal_Design.md` D2.2–D2.6, D3.2–D3.3, D4.4, D5.2–D5.3, D8.3–D8.4, D8.6

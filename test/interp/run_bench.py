@@ -3,7 +3,7 @@
 
 Runs the §6.1 corpus under both tiers on the same binary, selected by
 LAMBDA_TIER, and writes temp/interp_bench.tsv plus a Markdown table ready to
-paste into vibe/Lambda_Impl_Ast_Interp.md §6.2.
+paste into vibe/impl/Lambda_Impl_Ast_Interp.md §6.2.
 
 Protocol (U33): release build, one warm-up plus N measured runs, median.
 Peak RSS comes from the child's own ru_maxrss via resource.getrusage on the

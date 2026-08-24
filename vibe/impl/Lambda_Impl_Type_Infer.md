@@ -4,7 +4,7 @@
 - **Status:** IP0–IP4 and IP6 IMPLEMENTED; carrier sweep DONE (§14); TIG1 LANDED (§15); reverts retried (§16); int-lane audit DONE (§17); the graphviz "regression" resolved as a keyed-sort BUG FIX with stale goldens (§18). Census 28,203 → 22,890; `test_lambda_gtest` 732/732. IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
 - **Design authority:** `vibe/Lambda_Design_Type_Infer.md` (TI1–TI8, TIG1–TIG17); this doc implements only its *decided* items and never resolves an open design question in code — where an open question gates a slice, the interim disposition is stated and the slice stays inside it
 - **Formal authority:** D2.4.1, D2.5.3, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.6.1–D8.6.3; S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1–S11.4.4; SI3v2, SI14
-- **Related:** `vibe/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D3.3
+- **Related:** `vibe/impl/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D3.3
 - **ID series:** `IP#` (impl phases), sub-items `IP#.#`
 
 ## 0. Ground truth this plan builds on (verified 2026-08-18)

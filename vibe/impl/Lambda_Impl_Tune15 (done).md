@@ -2,12 +2,12 @@
 
 - **Date:** 2026-08-07
 - **Input:** `test/benchmark/Overall_Result24.md` (Lambda commit `83a7099e4e`, archived binary
-  `test/benchmark/exe/lambda-v24-83a7099e4e`), `vibe/Lambda_Impl_Tune14 (done).md`,
+  `test/benchmark/exe/lambda-v24-83a7099e4e`), `vibe/impl/Lambda_Impl_Tune14 (done).md`,
   `test/benchmark/benchmark_results_v23_c2mir.json` (C2MIR ceiling; the C2MIR path is frozen
   per house rule 14, so v23 C2MIR timings remain valid), fresh sampling profiles in
   `temp/prof15/` (§5)
 - **Status:** IMPLEMENTED — implementation slices and verification complete; residual performance gaps are recorded in §8
-- **Related:** `vibe/Lambda_Impl_Tune14 (done).md`, `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`,
+- **Related:** `vibe/impl/Lambda_Impl_Tune14 (done).md`, `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`,
   `vibe/Lambda_Design_Compiling_Dual_Func.md`, `vibe/Lambda_Design_Name_Identity.md`,
   `vibe/Lambda_Design_Type_Enforcement.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;

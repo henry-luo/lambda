@@ -1220,6 +1220,8 @@ extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
+extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
+extern Item lambda_module_var_at(void* module_state, uint32_t slot);
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 extern Item fn_member_by_id(Item item, NameId name_id);
@@ -1614,8 +1616,20 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_var_at", FPTR(lambda_module_var_at),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_module_const_at", FPTR(lambda_module_const_at),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_const_at_state", FPTR(lambda_module_const_at_state),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
@@ -3519,7 +3533,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
         "lambda_restore_number_frame_top",
-        "owned_item_slot_store", "lambda_module_var_store",
+        "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
+        "lambda_module_const_at_state",
         "lambda_module_name_id_at",
         "js_active_module_name_id", "js_active_module_name_item",
         "lambda_async_frame_get_word",

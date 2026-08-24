@@ -17,7 +17,7 @@
 > - `vibe/Lambda_Design_Jube_Lang_Hosting.md` — the hosted-language architecture
 >   (Python); this document reuses its principles and delivery machinery but is
 >   **not** a language hosting
-> - `vibe/Lambda_Impl_Hosted_Python.md` — the staged migration template (H0–H10)
+> - `vibe/impl/Lambda_Impl_Hosted_Python.md` — the staged migration template (H0–H10)
 > - `doc/Lambda_Jube_Runtime.md` — user-facing runtime/bundle description
 
 All file:line references were verified against master on 2026-07-25 and will

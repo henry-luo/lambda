@@ -1,7 +1,7 @@
 // Object literals evaluated repeatedly at one call site must stay fully
 // independent: mutation, delete, defineProperty, freeze and null-writes on one
 // instance must never be observable on another. Pins the invariant that any
-// shape-sharing scheme (see vibe/Lambda_Impl_Tune6.md J2) has to preserve.
+// shape-sharing scheme (see vibe/impl/Lambda_Impl_Tune6.md J2) has to preserve.
 // 1. type-changing write on one instance only
 var made = [];
 for (var i = 0; i < 5; i++) made.push({ a: 1, b: 2 });

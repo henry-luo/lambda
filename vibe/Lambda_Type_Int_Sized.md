@@ -287,8 +287,8 @@ BigInt, type-directed.
    sized-numeric wording (type tables, wrap examples, `i64`/`f64` alias
    rows) verified accurate against the current build.
 
-Historical implementation plan for items 1–2: `vibe/Lambda_Impl_Sized_Int.md`.
-Current arithmetic realignment plan: `vibe/Lambda_Impl_Numbers.md`.
+Historical implementation plan for items 1–2: `vibe/impl/Lambda_Impl_Sized_Int.md`.
+Current arithmetic realignment plan: `vibe/impl/Lambda_Impl_Numbers.md`.
 
 ## 8. Test coverage
 

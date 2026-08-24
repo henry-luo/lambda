@@ -12,7 +12,7 @@ are not accumulated into a grab bag; they are deferred.
 
 **Implements:** the allocation portion of `Lambda_Tuning_Proposal.md` R7, based
 on the current tree and the post-bitmap follow-up to
-`vibe/Lambda_Impl_Tune8_Result15_Bottlenecks.md`. Precise `RootFrame`/`Rooted`
+`vibe/impl/Lambda_Impl_Tune8_Result15_Bottlenecks.md`. Precise `RootFrame`/`Rooted`
 ownership remains mandatory. Objects remain non-moving. Conservative native
 stack scanning remains retired.
 

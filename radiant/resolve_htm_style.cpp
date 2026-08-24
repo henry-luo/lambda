@@ -249,6 +249,24 @@ static void apply_html_body_margin_attribute(LayoutContext* lycon, ViewBlock* bl
     }
 }
 
+static constexpr float HTML_BODY_DEFAULT_MARGIN = 8.0f;
+
+void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem) {
+    if (!lycon || !dom_elem || dom_elem->tag() != MARKUP_NAME_BODY || !dom_elem->bound) {
+        return;
+    }
+    ViewBlock* block = lam::unsafe_view_block_api_span(
+        lam::view_require_element(static_cast<View*>(dom_elem)));
+    float body_margin = HTML_BODY_DEFAULT_MARGIN *
+        layout_effective_zoom(static_cast<View*>(block));
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        CssBoxSide box_side = (CssBoxSide)side;
+        if (*radiant_spacing_specificity(&block->boundary_mut()->margin, box_side) < 0) {
+            *radiant_spacing_value(&block->boundary_mut()->margin, box_side) = body_margin;
+        }
+    }
+}
+
 static float html_pixel_dimension_or_default(DomNode* element, const char* attribute,
                                              float default_value, bool require_digit_start) {
     const char* value = element->get_attribute(attribute);
@@ -813,7 +831,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->ensure_boundary(lycon);
         // the UA margin is a CSS length and must follow the ancestor zoom;
         // leaving this literal unscaled shortens auto-height roots under zoom.
-        float body_margin = 8.0f * layout_effective_zoom(static_cast<View*>(block));
+        float body_margin = HTML_BODY_DEFAULT_MARGIN *
+            layout_effective_zoom(static_cast<View*>(block));
         radiant_spacing_set_all(&block->boundary_mut()->margin, body_margin);
         // Handle HTML bgcolor attribute (e.g., <body bgcolor="#fff">)
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");

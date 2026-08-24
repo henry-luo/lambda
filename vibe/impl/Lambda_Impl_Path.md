@@ -10,15 +10,15 @@
 > **Design authority:** `vibe/Lambda_Type_Path.md` (PTH1v2, PTH2v2,
 > PTH3–PTH29)
 >
-> **Normative semantics:** [S2.4](../doc/Lambda_Formal_Semantics.md#s24-paths),
-> [S7.1.1v2](../doc/Lambda_Formal_Semantics.md#s71-reads-are-total-writes-are-checked),
-> [S10.4](../doc/Lambda_Formal_Semantics.md#s104-parent-navigation), and
-> [S10.5](../doc/Lambda_Formal_Semantics.md#s105-root-navigation)
+> **Normative semantics:** [S2.4](../../doc/Lambda_Formal_Semantics.md#s24-paths),
+> [S7.1.1v2](../../doc/Lambda_Formal_Semantics.md#s71-reads-are-total-writes-are-checked),
+> [S10.4](../../doc/Lambda_Formal_Semantics.md#s104-parent-navigation), and
+> [S10.5](../../doc/Lambda_Formal_Semantics.md#s105-root-navigation)
 >
 > **Normative implementation constraints:**
-> [D1.6](../doc/Lambda_Formal_Design.md#d1-architecture),
-> [D4.6](../doc/Lambda_Formal_Design.md#d46-name-identity), and
-> [D5.4](../doc/Lambda_Formal_Design.md#d54-runtime-globals-and-evalcontext)
+> [D1.6](../../doc/Lambda_Formal_Design.md#d1-architecture),
+> [D4.6](../../doc/Lambda_Formal_Design.md#d46-name-identity), and
+> [D5.4](../../doc/Lambda_Formal_Design.md#d54-runtime-globals-and-evalcontext)
 
 ## 1. Outcome and implementation boundary
 

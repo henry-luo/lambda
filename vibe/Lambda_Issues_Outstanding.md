@@ -2,10 +2,10 @@
 
 **Status:** living rollup — index of everything open, with pointers to owning ledgers/docs; update as items close.
 **Date:** 2026-07-16
-**Scope:** Lambda core runtime + LambdaJS. Python has its own ledger (`vibe/Lambda_Design_Stack_Frame_Python.md` PO1–PO9 + `vibe/Lambda_Impl_Stack_Frame_Py.md`); Radiant is tracked in `vibe/radiant/`.
+**Scope:** Lambda core runtime + LambdaJS. Python has its own ledger (`vibe/Lambda_Design_Stack_Frame_Python.md` PO1–PO9 + `vibe/impl/Lambda_Impl_Stack_Frame_Py.md`); Radiant is tracked in `vibe/radiant/`.
 **Sources:** full Known-Issues sweeps of `doc/dev/lambda/LR_01–13` and `doc/dev/js/JS_01–16` (2026-07-15/16), the JO ledger (`vibe/Lambda_Design_Stack_Frame_JS.md`), and session-verified corrections. ⚠️ The tree is moving fast — items marked **[verified]** were re-checked in code this session; unmarked items are as the doc sweeps reported them and may have moved.
 
-**Closed context (not in this ledger):** the stack-frame architecture is fully IMPLEMENTED — SF1–SF20/OS1–OS11 for Lambda and JS, SF15-J JS-array props migration included (`vibe/Lambda_Impl_Stack_Frame*.md` all carry implementation records). Rooting-shadow-frame overhead, the numeric-nursery leak, scalar re-homing, and the JS-array `extra` collision are done.
+**Closed context (not in this ledger):** the stack-frame architecture is fully IMPLEMENTED — SF1–SF20/OS1–OS11 for Lambda and JS, SF15-J JS-array props migration included (`vibe/impl/Lambda_Impl_Stack_Frame*.md` all carry implementation records). Rooting-shadow-frame overhead, the numeric-nursery leak, scalar re-homing, and the JS-array `extra` collision are done.
 
 ---
 
@@ -25,7 +25,7 @@
 
 **OI-5 — MIR value-representation contract (Lambda MIR-Direct).** No single canonical contract for type↔representation at each boundary (LR_07 closing verdict). Concrete casualties: INT64 arithmetic never native (`push_l_safe` false-positive tag range ~[2.88e17, 3.60e17]); FLOAT→INT widening truncates in loops / boxes outside; indirect/closure calls >3 args return wrong values; typed-array construction diverges from C2MIR (LR_07 #1/#3/#4/#5); errors silently coerce to 0/0.0/false when unboxed. SF10 small-int64 inlining landed; the contract doc would close the family.
 
-**OI-6 — Codegen quality cluster (JS).** Destination-passing lowering (66–88% of MIR is MOVs, JS_04 §1/JS_15 §5.5); shape-based polymorphic inline caching (JS_15 §5.3 — see design record below); ADD-inference recovery, realm-scoped intrinsic-prototype cache, and float register residency are **in flight via Tune-6** (`vibe/Lambda_Impl_JS_Tune.md` Tracks A/D/B). **De-pointered relocatable MIR** (~59 baked realm pointers) blocks artifact caching (JS_01 §9.8/JS_15 §6) — design exists (MIR cache MC1–MC8, P1–P5 prerequisite).
+**OI-6 — Codegen quality cluster (JS).** Destination-passing lowering (66–88% of MIR is MOVs, JS_04 §1/JS_15 §5.5); shape-based polymorphic inline caching (JS_15 §5.3 — see design record below); ADD-inference recovery, realm-scoped intrinsic-prototype cache, and float register residency are **in flight via Tune-6** (`vibe/impl/Lambda_Impl_JS_Tune.md` Tracks A/D/B). **De-pointered relocatable MIR** (~59 baked realm pointers) blocks artifact caching (JS_01 §9.8/JS_15 §6) — design exists (MIR cache MC1–MC8, P1–P5 prerequisite).
 *PIC design record (withdrawn from Tune-6 on 2026-07-16 — judged too complicated for that plan; needs its own design pass before code):* the constraints (single-tier JIT, no code patching, no deopt — G5) force a **data-driven** cache, not a code-patched one: per-call-site side-table entries `{ TypeMap* shape, void* target, uint32_t guard_version }` × 2 ways, owned by the compiled module — realm-scoped by construction, which is what the earlier reverted process-global prototype cache got wrong (leaked one realm's prototype into another). Open decision: **invalidation granularity** — (a) one per-realm version bumped on any prototype/method mutation (cheapest; thrashes under test262's constant prototype mutation) vs (b) per-shape version counters (+8 B per TypeMap; recommended). Companion fix: the **duplicate-class-name full deopt** (JS_07 §7.7) — re-key the shaped construction/devirtualization fast paths by constructor/`TypeMap` identity instead of class-name strings; deliberately targeted, must not grow into the OI-2 marker migration. Mandatory fixtures inherited from the reverted widening attempt: `Object.defineProperty`/`Object.seal` on cached-shape objects, two same-named classes exercising both fast paths, prototype mutation after cache warm. Benchmarks: richards/deltablue; dup-name construction microbench.
 
 **OI-7 — Node compat majors.** Async `fs` runs synchronously inline (event loop not integrated); stream internals are stubs (K27 shared stream core is the settled design that fixes this); `vm` does not isolate (security-relevant); crypto lacks asymmetric primitives; `fs.watch`/`child_process.fork` missing (JS_14 §1–4, §6–7).
@@ -114,7 +114,7 @@ Items already rolled into §1/§2 are not repeated.
 | De-pointered MIR P1–P5 | MIR cache MC1–MC8 | OI-6 artifact caching |
 | JS threading P1–P3 | JT1–JT7 | worker isolation/watchdog; feeds `vm` realm isolation |
 | Concurrency Stage A/B (`start`, K11–K18) | v3 adopted | JO9 real suspension; actor/mailbox K20 |
-| Stack-frame Python port P0–P4 | PS1–PS10 + `Lambda_Impl_Stack_Frame_Py.md` | PO1–PO6; unblocks SF9 scan retirement |
+| Stack-frame Python port P0–P4 | PS1–PS10 + `impl/Lambda_Impl_Stack_Frame_Py.md` | PO1–PO6; unblocks SF9 scan retirement |
 
 ## 6. Cross-cutting hygiene themes (one policy each, not per-site fixes)
 

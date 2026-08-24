@@ -111,7 +111,7 @@ the J2 edge cases exhaustively (40261 entries, 0 regressions).
 
 ---
 
-**Status: PLANNED — 2026-07-24.** Split from `vibe/Lambda_Impl_Tune4.md` (which
+**Status: PLANNED — 2026-07-24.** Split from `vibe/impl/Lambda_Impl_Tune4.md` (which
 keeps the shared-GC and Lambda/MIR phases); this plan owns the **JS-engine-specific**
 tunings. The two plans share one diagnosis (Tune4 §1 / §1 below), one measurement
 protocol, and one exit run (Result12).
@@ -120,7 +120,7 @@ ownership in mark) change every LambdaJS baseline — awfy/cd's 2360x is ~70%
 GC-2, not a JS-engine defect. Land G1/G2, or at minimum re-run the J0 probe
 baselines after them, before attributing wins to J1/J2.
 **Related:** `vibe/Lambda_Tuning_Proposal.md` R2/R3 and OI-6 own the property-IC
-work that this plan deliberately does not touch; `vibe/Lambda_Impl_JS_Tune (done).md`
+work that this plan deliberately does not touch; `vibe/impl/Lambda_Impl_JS_Tune (done).md`
 is the completed Tune-6 predecessor.
 **Diagnosis provenance:** release-build `sample` profiles + disassembly + source
 tracing, 2026-07-24, two commits past the Result11 commit (`52c0f3c02`, benchmark

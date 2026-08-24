@@ -2296,7 +2296,17 @@ static float intrinsic_list_item_marker_width(LayoutContext* lycon,
         view_block->pseudo->marker->blk) {
         MarkerProp* marker = reinterpret_cast<MarkerProp*>(
             view_block->pseudo->marker->blk);
-        if (marker->width > 0.0f) return marker->width;
+        if (marker->width > 0.0f) {
+            float width = marker->width;
+            DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(view_block);
+            if (element && !marker->is_outside &&
+                !marker->trailing_space_trimmed &&
+                marker->trailing_space_width > 0.0f &&
+                !layout_list_item_has_in_flow_content(element)) {
+                width -= marker->trailing_space_width;
+            }
+            return max(width, 0.0f);
+        }
     }
     float font_size = 16.0f;
     if (view_block && view_block->font && view_block->fontp()->font_size > 0.0f) {
@@ -2848,11 +2858,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
     NameId intrinsic_tag = element->tag();
+    // CSS Sizing 3: a figure's UA margins are used box edges, so resolve them
+    // before an anonymous table cell records the element's contribution.
     bool intrinsic_needs_resolved_style =
         intrinsic_tag == MARKUP_NAME_BUTTON || intrinsic_tag == MARKUP_NAME_INPUT ||
         intrinsic_tag == MARKUP_NAME_UL || intrinsic_tag == MARKUP_NAME_OL ||
         intrinsic_tag == MARKUP_NAME_MENU || intrinsic_tag == MARKUP_NAME_RUBY ||
-        intrinsic_tag == MARKUP_NAME_RT;
+        intrinsic_tag == MARKUP_NAME_RT || intrinsic_tag == MARKUP_NAME_FIGURE;
     bool intrinsic_needs_multicol_style = element->specified_style &&
         (style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLUMNS) ||
          style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLUMN_COUNT) ||
@@ -4517,6 +4529,29 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float vertical_block_axis_sum = 0.0f;
     bool has_inline_content = false;
     bool has_in_flow_block_child = false;
+    bool intrinsic_list_item_scope = false;
+    if (lycon->counter_context &&
+        view_block->display.outer == CSS_VALUE_LIST_ITEM &&
+        intrinsic_list_item_has_table_ancestor(element)) {
+        // CSS Lists 3: intrinsic sizing must use the list item's own counter
+        // scope before measuring its marker and generated list-item children.
+        counter_push_scope(lycon->counter_context);
+        intrinsic_list_item_scope = true;
+        if (view_block->blk && view_block->block_mut()->counter_reset) {
+            counter_reset(lycon->counter_context,
+                          view_block->block()->counter_reset);
+            compute_reversed_counter_initial(lycon, element);
+        }
+        if (view_block->blk && view_block->block_mut()->counter_increment) {
+            counter_increment(lycon->counter_context,
+                              view_block->block()->counter_increment);
+        }
+        if (view_block->blk && view_block->block_mut()->counter_set) {
+            counter_set(lycon->counter_context, view_block->block()->counter_set);
+        }
+        process_list_item(lycon, view_block, element, element,
+                          view_block->display);
+    }
     bool inline_run_ends_with_collapsible_space = false;
     float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
     float nonfirst_inline_min_max = 0.0f;  // Max min-content of non-first inline children (for neg text-indent)
@@ -5221,7 +5256,21 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // An atomic inline-level box contains its own formatting context;
                 // descendant forced breaks cannot split the containing inline run.
                 // Add first line to current inline run
-                inline_max_sum += child_sizes.first_line_max;
+                float first_line_max = child_sizes.first_line_max;
+                float last_line_max = child_sizes.last_line_max;
+                if (child->is_element() &&
+                    intrinsic_element_box_decoration_break(child->as_element()) !=
+                        CSS_VALUE_CLONE) {
+                    LayoutIntrinsicMarginPair margins =
+                        layout_intrinsic_horizontal_margin_pair(
+                            lycon, child->as_element());
+                    // CSS 2.1 §8.3: forced-break line fragments carry an
+                    // inline element's start margin on the first line and its
+                    // end margin on the last; propagated widths omit them.
+                    first_line_max += margins.left;
+                    last_line_max += margins.right;
+                }
+                inline_max_sum += first_line_max;
                 if (child->is_element() &&
                     intrinsic_element_box_decoration_break(child->as_element()) ==
                         CSS_VALUE_CLONE) {
@@ -5251,7 +5300,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // The internal max-content covers the widest internal line
                 sizes.max_content = max(sizes.max_content, child_sizes.max_content);
                 // Start new inline run with the last line width
-                inline_max_sum = child_sizes.last_line_max;
+                inline_max_sum = last_line_max;
                 inline_run_ends_with_collapsible_space = false;
             } else {
                 bool break_before_child = explicit_box_decoration_run_sizing &&
@@ -5848,6 +5897,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // padding, and sizing constraints have been aggregated.
     sizes.min_content = layout_clamp_dimension(sizes.min_content);
     sizes.max_content = layout_clamp_dimension(sizes.max_content);
+
+    if (intrinsic_list_item_scope) {
+        counter_pop_scope_propagate(lycon->counter_context, true);
+    }
 
     // store result in intrinsic sizing cache
     if (!content_only && !intrinsic_percentage_width_is_indefinite(lycon) &&

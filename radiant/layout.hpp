@@ -1493,6 +1493,7 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display);
 bool layout_marker_is_outside(View* view);
+bool layout_list_item_has_in_flow_content(DomElement* element);
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
@@ -2996,6 +2997,12 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
+inline bool layout_inline_span_isolate(ViewSpan* span) {
+    if (!span || !span->blk) return false;
+    CssEnum unicode_bidi = span->block()->unicode_bidi;
+    return unicode_bidi == CSS_VALUE_ISOLATE ||
+        unicode_bidi == CSS_VALUE_ISOLATE_OVERRIDE;
+}
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
                                                float inline_extent,
@@ -3555,6 +3562,7 @@ void line_break(LayoutContext* lycon);
 void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
                                              bool update_ancestor_bounds);
+bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
@@ -3563,6 +3571,7 @@ int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
+void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem);
 View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);

@@ -3,7 +3,7 @@
 **Status:** Proposal — elaborates MC6 (Route B) of `vibe/Lambda_Design_MIR_Cache.md` §5.3 into an implementable design
 **Date:** 2026-07-24
 **Scope:** Lambda modules and main scripts under MIR Direct. The container format, relocation journal, loader, and verifier are designed **language-neutral** so LambdaJS and other Jube guests can adopt them later (§10); only the Lambda de-pointering plan (§6) is language-specific.
-**Companions:** `Lambda_Design_MIR_Cache.md` (levels & prior decisions MC1–MC8; L1 is implemented per `Lambda_Impl_MIR_Cache_L1 (done).md`), `Lambda_Design_Native_Module.md` §7.4/P14 (cache-not-distribution), `Lambda_Design_JS_Cache.md` (JS in-process cache; supplies the fail-closed state discipline reused here), `Lambda_Design_MIR_Emission_Test.md` (dump/verifier infra reused for the determinism gate).
+**Companions:** `Lambda_Design_MIR_Cache.md` (levels & prior decisions MC1–MC8; L1 is implemented per `impl/Lambda_Impl_MIR_Cache_L1 (done).md`), `Lambda_Design_Native_Module.md` §7.4/P14 (cache-not-distribution), `Lambda_Design_JS_Cache.md` (JS in-process cache; supplies the fail-closed state discipline reused here), `Lambda_Design_MIR_Emission_Test.md` (dump/verifier infra reused for the determinism gate).
 
 ---
 

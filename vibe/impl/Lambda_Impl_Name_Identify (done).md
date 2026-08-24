@@ -1,7 +1,7 @@
 # Lambda Name Identity — Detailed Implementation Plan
 
 **Status:** Draft implementation plan  
-**Design authority:** [Lambda_Design_Name_Identity.md](./Lambda_Design_Name_Identity.md)  
+**Design authority:** [Lambda_Design_Name_Identity.md](../Lambda_Design_Name_Identity.md)  
 **Scope:** NamePool evolution, generated global `NameId` catalogs, and migration of
 Input/markup/Radiant/Lambda/JavaScript name handling  
 **Cache status:** Persistent MIR-cache and module-section reconciliation is deferred

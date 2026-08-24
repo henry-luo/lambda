@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic synthetic Lambda scripts for the T0 turnaround measurement.
 
-Corpus item C2 of vibe/Lambda_Impl_Ast_Interp.md §6.1: run-once straight-line
+Corpus item C2 of vibe/impl/Lambda_Impl_Ast_Interp.md §6.1: run-once straight-line
 code at 1k / 5k / 20k lines, which is where compile cost dominates by
 construction. Every construct stays inside the P0 walker subset so the scripts
 interpret end to end (fallback=0).

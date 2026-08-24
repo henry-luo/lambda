@@ -17,7 +17,7 @@ inventory re-verified against the live tree; hazards H1–H9 added); rev 3 2026-
 | `vibe/Lambda_Design_Stack_Frame.md` | Defines root/number frame lifetime and the normal epilogue invariants a jump bypasses |
 | `vibe/Lambda_Design_Type_Enforcement.md` | TE-16/TE-18 own the language surface; C14 defines the unchecked system-fault channel |
 | `vibe/Lambda_Design_Runtime_Error_Handling.md` | Owns ordinary Lambda, LambdaJS, and hosted-language failures; every such failure returns through each frame |
-| `vibe/Lambda_Impl_Error_Handling (done).md` | Records the Lambda-specific implementation that consumes the ordinary returned error lane |
+| `vibe/impl/Lambda_Impl_Error_Handling (done).md` | Records the Lambda-specific implementation that consumes the ordinary returned error lane |
 
 ---
 

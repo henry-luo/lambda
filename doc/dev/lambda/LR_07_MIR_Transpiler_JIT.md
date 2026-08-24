@@ -94,7 +94,7 @@ The cache is intentionally narrow: it applies only to MIR Direct Lambda imports.
 
 Invalidation is mtime/size based. A file-backed cache hit stats the canonical path; if the source changed, the stale script and retained dependents are retired from the index and the current load falls through to a fresh compile. The cache is enabled by default in both debug and release builds (`LAMBDA_MIR_CACHE_DEFAULT=1` unless a build opts out). `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for timing comparisons while keeping normal import deduplication and circular-import detection within a single compilation.
 
-Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](../../../vibe/Lambda_Impl_MIR_Cache_L1.md).
+Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](../../../vibe/impl/Lambda_Impl_MIR_Cache_L1.md).
 
 ---
 

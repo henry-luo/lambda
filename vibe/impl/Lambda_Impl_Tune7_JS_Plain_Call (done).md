@@ -2,7 +2,7 @@
 
 **Status: RESULT14 COMPLETE; PERFORMANCE IMPLEMENTATION PARTIAL — refreshed
 locally and audited 2026-07-26.**
-**Successor of:** `vibe/Lambda_Impl_Tune6.md`. Tune6's Track J did **not**
+**Successor of:** `vibe/impl/Lambda_Impl_Tune6.md`. Tune6's Track J did **not**
 land: its census found that richards missed the existing load IC on only
 0.01% of probes, so J1/J3 were dropped. Tune7 therefore does not assume a new
 method PIC; it measures the invocation share that remains after the current
@@ -13,7 +13,7 @@ R4.1–R4.4) as a phased plan.
 **Baseline assumptions (verified 2026-07-26 against the landed merges and
 Tune6 execution record):**
 
-1. **`vibe/Lambda_Impl_Stack_Marge (done).md` Merges A/B/C are COMPLETE and
+1. **`vibe/impl/Lambda_Impl_Stack_Marge (done).md` Merges A/B/C are COMPLETE and
    performance-repaired.** Merge A's final form has **no per-call argument
    ABI at all**: each generated function reserves its maximum lexically
    overlapping argument arity as a **fixed suffix of its canonical side-root
@@ -27,7 +27,7 @@ Tune6 execution record):**
    The repair also landed `JS_FUNC_FLAG_USES_WITH` (1024) and gated
    `js_with_set_stack` install/restore behind real `with` state — part of
    §0 row 11 is therefore already done.
-2. **`vibe/Lambda_Impl_Online_Exception (done).md` is landed** — the per-call
+2. **`vibe/impl/Lambda_Impl_Online_Exception (done).md` is landed** — the per-call
    exception-poll tax (R5's emission side) is owned there and is **out of
    scope** here; only residual poll counts appear in the exit measurement.
 3. **Tune6 is closed and Result13 is the current floor.** Result13 is
@@ -653,7 +653,7 @@ optimization whose measured gain is already small.
 ### 8.4 Recommended follow-up
 
 > **2026-07-26 update:** items 2/3/5 are now designed in
-> `vibe/Lambda_Impl_Tune_JS_Dynamic_Call.md` (per-callee entry specialization,
+> `vibe/impl/Lambda_Impl_Tune_JS_Dynamic_Call.md` (per-callee entry specialization,
 > DC1–DC7), backed by fresh `sample` attribution: on a plain 2-arg dynamic
 > call the two-layer dispatcher+invoke protocol measures ≈57% of loop time,
 > smeared across unconditional work — the evidence that resolves the

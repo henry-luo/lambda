@@ -22,9 +22,9 @@ Related documents:
   Lambda's user-facing `error`, `raise`, `T^E`, propagation, and handler syntax.
 - [`doc/dev/lambda/LR_10_Error_Handling.md`](../doc/dev/lambda/LR_10_Error_Handling.md)
   inventories Lambda's current runtime error representation and guard helpers.
-- [`Lambda_Impl_Error_Handling (done).md`](<Lambda_Impl_Error_Handling (done).md>)
+- [`Lambda_Impl_Error_Handling (done).md`](<impl/Lambda_Impl_Error_Handling (done).md>)
   records the earlier Lambda-specific implementation work.
-- [`Lambda_Impl_Error_Rework.md`](Lambda_Impl_Error_Rework.md) is the phased
+- [`Lambda_Impl_Error_Rework.md`](impl/Lambda_Impl_Error_Rework.md) is the phased
   implementation and conformance plan for this design, including resume-safe
   lowering of the existing postfix procedure-call handler.
 - [`Lambda_Design_Exec_Recovery.md`](Lambda_Design_Exec_Recovery.md) owns the

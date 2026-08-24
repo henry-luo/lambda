@@ -283,7 +283,7 @@ the design has no `Item[N]`, `MAX_ARGS`, or speculative per-call root
 reservation. The existing 32-formal context-wrapper and 16/15-formal native
 callback boundaries remain checked dispatch-ABI limits, not adapter-storage
 capacities. The complete implementation plan is
-`vibe/Lambda_Impl_JS_Dynamic_Arg.md`.
+`vibe/impl/Lambda_Impl_JS_Dynamic_Arg.md`.
 
 ### Fixed call-related arrays and limits
 

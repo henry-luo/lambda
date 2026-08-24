@@ -507,6 +507,25 @@ extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
     return ((void**)state->consts)[index];
 }
 
+extern "C" void* lambda_module_const_at_state(void* module_state,
+        uint32_t index) {
+    LambdaModuleState* state = (LambdaModuleState*)module_state;
+    if (!state || !state->consts) return NULL;
+    // Satellites carry the owner's slab state directly; resolving constants
+    // through it avoids stale per-image layout metadata during batch linking
+    // (D5.2, D8.2).
+    return ((void**)state->consts)[index];
+}
+
+extern "C" Item lambda_module_var_at(void* module_state, uint32_t slot) {
+    LambdaModuleState* state = (LambdaModuleState*)module_state;
+    if (!state || !state->vars || slot >= state->var_count) return ItemNull;
+    // Keep satellite reads on the same checked slab accessor as T0. A direct
+    // MIR load can be overwritten by root write-back when its value is already
+    // owned by the module root range (D5.2).
+    return state->vars[slot];
+}
+
 extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
         Item item) {
     LambdaModuleState* state = (LambdaModuleState*)module_state;

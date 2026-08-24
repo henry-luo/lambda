@@ -24,12 +24,10 @@
 // Complete Lambda child traversal
 // ---------------------------------------------------------------------------
 
-typedef void (*InterpChildFn)(AstNode* child, void* ctx);
-
 // Visits every structural child edge of `node`, excluding `node->next` (the
 // caller owns sibling iteration) and excluding NameEntry->node declaration
 // links — the AST is a DAG and those links are reads, never evaluation edges.
-static void interp_visit_children(AstNode* node, InterpChildFn visit, void* ctx) {
+void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx) {
     if (!node || !visit) return;
 #define V(field) do { AstNode* _c = (AstNode*)(field); if (_c) visit(_c, ctx); } while (0)
 #define VLIST(field) do { \
@@ -1676,6 +1674,13 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     if (should_use_tco(fn)) plan_mark_tail_calls(fn->body, fn);
     uint32_t body_need = plan_need(fn->body);
     if (body_need > pc.max_scratch) pc.max_scratch = body_need;
+    if (signature && signature->has_explicit_return_contract &&
+            pc.max_scratch < 1) {
+        // Return-contract admission roots the computed value while the shared
+        // checker may allocate. A literal-only body otherwise plans zero
+        // scratch slots and the checker would borrow the signal home (S7.7.2).
+        pc.max_scratch = 1;
+    }
     plan_finish(&pc);
     if (pc.failed) outer->failed = true;
 
@@ -1869,16 +1874,72 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         sc->ok = false;
         return;
     case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_ASSIGN_STAM:
+    case AST_NODE_VAR_STAM:
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_VIEW:
-        // Member reads use the shared context key image; writes still need a
-        // boxed replacement channel that this satellite ABI does not expose.
+        // Procedural writes (including a local var) and indexed/member stores
+        // need the T0 frame's replacement channel. A satellite has no safe
+        // publication path for those roots (D3.3.1 / D5.2).
         sc->ok = false;
         return;
+    case AST_NODE_MATCH_EXPR:
+        // Pattern arms carry compiled regex/type-list state that is owned by
+        // the T0 module activation. A satellite has no equivalent pattern
+        // image, so keep the whole match expression in T0 (D5.2).
+        sc->ok = false;
+        return;
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        AstFuncNode* direct = ast_direct_call_function(call);
+        TypeFunc* signature = direct && ((AstNode*)direct)->type &&
+                ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
+            ? (TypeFunc*)((AstNode*)direct)->type : NULL;
+        if (signature && ast_type_func_has_var_parameter(signature)) {
+            // Even an exact direct call carries borrowed roots; the satellite
+            // ABI cannot preserve the caller's var write-back slots.
+            sc->ok = false;
+            return;
+        }
+        if (callee && callee->node_type != AST_NODE_SYS_FUNC && !direct) {
+            // A satellite cannot prove the target ABI for an indirect Lambda
+            // call. An `any` callee may resolve to a `var` procedure after
+            // promotion, but the boxed dispatcher has no caller-root
+            // write-back channel (D3.3.1 / D5.2).
+            sc->ok = false;
+            return;
+        }
+        if (callee && callee->node_type == AST_NODE_IDENT && !direct) {
+            NameEntry* entry = ((AstIdentNode*)callee)->entry;
+            AstNode* binding = entry ? entry->node : NULL;
+            bool local_dynamic = entry && !entry->import && binding &&
+                binding->node_type != AST_NODE_FUNC &&
+                binding->node_type != AST_NODE_FUNC_EXPR &&
+                binding->node_type != AST_NODE_PROC;
+            if (local_dynamic) {
+                // The boxed dispatcher deliberately has no mutable-borrow
+                // channel for an indirect local target. Pin this caller so a
+                // var-parameter edge cannot be deferred at runtime (D3.3.1).
+                sc->ok = false;
+                return;
+            }
+        }
+        break;
+    }
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
         NameEntry* entry = ident->entry;
         if (!entry) break;
+        if (entry->node && entry->node->node_type == AST_NODE_KEY_EXPR) {
+            // Object-method field identifiers resolve through the receiver's
+            // shape, not a stable scalar/module slot. The satellite native
+            // lane cannot reconstruct that receiver field contract (D2.2.2,
+            // D5.2), so keep the method in T0.
+            sc->ok = false;
+            return;
+        }
         bool hosted_js = entry->import && entry->import->is_cross_lang &&
             entry->import->script && entry->import->script->profile == &js_profile;
         if (entry->import && !hosted_js &&
@@ -1910,6 +1971,32 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
         // deliberately has no mutable-borrow write-back channel.
         return false;
     }
+    for (TypeParam* param = signature ? signature->param : NULL;
+            param; param = param->next) {
+        Type* contract = param->contract_type ? param->contract_type :
+            (Type*)param;
+        TypeId tid = contract ? contract->type_id : LMD_TYPE_ANY;
+        bool structured_contract = contract && tid == LMD_TYPE_TYPE &&
+            contract->kind != TYPE_KIND_SIMPLE;
+        if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ARRAY ||
+                tid == LMD_TYPE_ARRAY_NUM || tid == LMD_TYPE_MAP ||
+                tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_OBJECT ||
+                tid == LMD_TYPE_VMAP || structured_contract) {
+            // Broad/aggregate parameters need the full interpreter's Item
+            // contract. The satellite ABI's raw carrier specialization can
+            // otherwise turn typed arrays, structured contracts, or map state
+            // into a valid-looking but incorrect value (D2.2.2, D5.2).
+            return false;
+        }
+    }
+    // Keep the satellite admission gate aligned with the complete T0
+    // capability scanner. The old satellite-only walk checked nested
+    // definitions and imports but skipped system ABI, COW, index-shape, and
+    // call-signature guards; complex promoted bodies then ran a MIR subset
+    // that silently dropped layout/PDF/editor state (D8.1.1v4).
+    ScanCtx full_scan = {true, AST_NODE_NULL};
+    interp_scan_visit(fn->body, &full_scan);
+    if (!full_scan.ok) return false;
     SatelliteScanCtx sc = {true};
     interp_scan_satellite_node((AstNode*)fn->body, &sc);
     return sc.ok;

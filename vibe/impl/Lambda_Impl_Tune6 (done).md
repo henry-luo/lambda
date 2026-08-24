@@ -150,7 +150,7 @@ cannot touch (matmul, ray) are the tell — if they move, the run is invalid.
 ---
 
 **Original plan status: PLANNED — 2026-07-24.**
-**Successor of:** `vibe/Lambda_Impl_Tune4.md` + `vibe/Lambda_Impl_Tune5.md`
+**Successor of:** `vibe/impl/Lambda_Impl_Tune4.md` + `vibe/impl/Lambda_Impl_Tune5.md`
 (both IMPLEMENTED, exit = Result12). Result12 moved the geo means (MIR 4.73x→3.01x,
 LJS 19.3x→15.1x) and proved the remaining tail is **not** GC, typed elements, or
 array stores — it is property/shape lookup cost on both engines:
@@ -162,7 +162,7 @@ array stores — it is property/shape lookup cost on both engines:
   — all the *untyped* `.ls` variants) is string-keyed map field access; nbody
   15x and the float family also pay boxed `math.sqrt` — **R6**.
 
-**Naming note:** the completed `vibe/Lambda_Impl_JS_Tune (done).md` was informally
+**Naming note:** the completed `vibe/impl/Lambda_Impl_JS_Tune (done).md` was informally
 called "Tune-6" inside `Lambda_Tuning_Proposal.md`. This file supersedes that
 number under the TuneN file series; the old plan is referred to below as
 *JS-Tune (done)*.

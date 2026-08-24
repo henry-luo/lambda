@@ -1076,7 +1076,9 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
         }
         for (int i = 0; family && i < family->fonts->length; i++) {
             FontEntry* e = (FontEntry*)family->fonts->data[i];
-            if (!e) continue;
+            // lazy TTC expansion leaves its placeholder in the family list;
+            // scoring it can tie a real face with its default weight metadata.
+            if (!e || e->is_placeholder) continue;
             float score = calculate_match_score(e, criteria);
             if (score > best_score) {
                 best_score = score;

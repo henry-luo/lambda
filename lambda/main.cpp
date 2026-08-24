@@ -1950,16 +1950,15 @@ static int node_runner_main(int argc, char** argv) {
     return lambda_main_finish(final_status);
 }
 
-// LAMBDA_TIER selects the execution tier (D8.1.1v2). Unset or `jit` keeps the
-// shipped eager whole-module pipeline bit-for-bit; `interp` runs T0 and
-// `auto` starts in T0, promoting eligible functions through P2's
-// satellite entry path.
+// LAMBDA_TIER selects the execution tier (D8.1.1v4). Unset selects the
+// shipped `auto` policy; `jit` explicitly requests eager whole-module
+// compilation, while `interp` runs T0 without promotion.
 static void apply_lambda_tier_env(void) {
     const char* text = getenv("LAMBDA_TIER");
     if (!text || !text[0]) return;
-    LambdaTier tier = LAMBDA_TIER_JIT;
+    LambdaTier tier = LAMBDA_TIER_AUTO;
     if (!lambda_tier_parse(text, &tier)) {
-        log_warn("interp: unrecognized LAMBDA_TIER='%s'; using jit", text);
+        log_warn("interp: unrecognized LAMBDA_TIER='%s'; using auto", text);
         return;
     }
     lambda_tier_set(tier);
@@ -1972,11 +1971,11 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
         return true;
     }
     if (strncmp(arg, "--tier=", 7) == 0) {
-        LambdaTier tier = LAMBDA_TIER_JIT;
+        LambdaTier tier = LAMBDA_TIER_AUTO;
         if (lambda_tier_parse(arg + 7, &tier)) {
             lambda_tier_set(tier);
         } else {
-            log_warn("interp: unrecognized %s; using jit", arg);
+            log_warn("interp: unrecognized %s; using auto", arg);
         }
         return true;
     }
@@ -3986,6 +3985,13 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Each batch item is an isolated evaluation: the loop tears down its
+        // heap, name pool, module registry, and module slabs after every
+        // script. Retaining an imported MIR Script across that boundary leaves
+        // its cached Items and type images pointing into the retired heap, so
+        // disable L1 module retention for this command (D5.4.3).
+        runtime.mir_cache_disabled = true;
+
         char line[1024];
         while (fgets(line, sizeof(line), stdin)) {
             // trim trailing whitespace
@@ -4814,7 +4820,7 @@ int main(int argc, char *argv[]) {
             printf("  This means that if the script defines a main function, it will be\n");
             printf("  automatically executed during script execution.\n");
             printf("\nExamples:\n");
-            printf("  %s run script.ls                 # Run script with MIR Direct JIT (default)\n", argv[0]);
+            printf("  %s run script.ls                 # Run script with adaptive auto tier (default)\n", argv[0]);
             return lambda_main_finish(0);
         }
 

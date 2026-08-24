@@ -3,7 +3,7 @@
 - **Date:** 2026-08-17
 - **Input:** `test/benchmark/Overall_Result30.md` / `benchmark_results_v30.json`; fresh finalized-MIR dumps of 14 typed benchmarks against their native C2MIR ports under `temp/mir_cmp/` (`*.lambda.mir` vs `*.c2m.mir`, script `dump_all.sh`, timings `timings.tsv`, narrative `MIR_Efficiency_Analysis.md`)
 - **Status:** IMPLEMENTED — E1–E6 mechanisms and the retained follow-on slices landed; full gates and release evidence are recorded in §§6–7
-- **Related:** `vibe/Lambda_Impl_Tune17 (done).md` (T1–T5, regression ledger), `vibe/Lambda_Impl_Tune16 (done).md` (C-slices, categorical bar), `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (Result18 M1–M8 mechanism catalog, T-A/T-B/T-C/T-D), `vibe/Lambda_Design_Const_Pool.md` (CP1, CP7), `vibe/Lambda_Design_Compiling.md` (LC1), `vibe/Lambda_Design_Compiling_Nullable.md`
+- **Related:** `vibe/impl/Lambda_Impl_Tune17 (done).md` (T1–T5, regression ledger), `vibe/impl/Lambda_Impl_Tune16 (done).md` (C-slices, categorical bar), `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (Result18 M1–M8 mechanism catalog, T-A/T-B/T-C/T-D), `vibe/Lambda_Design_Const_Pool.md` (CP1, CP7), `vibe/Lambda_Design_Compiling.md` (LC1), `vibe/Lambda_Design_Compiling_Nullable.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S7.1, S7.2.1; `doc/Lambda_Formal_Design.md` D2.2.3, D2.5.2–D2.5.3, D2.6.1–D2.6.3, D2.7.1, D3.2.1, D3.3.1–D3.3.3, D4.6.1v2–D4.6.2v2, D4.7.1, D5.3.1, D5.3.4–D5.3.5, D5.4.3, D8.3.3, D8.4.1, D8.6.1–D8.6.3
 
 ## 0. Method and provenance

@@ -16,7 +16,7 @@
 > **Related designs:**
 > - `vibe/Lambda_Design_Native_Module.md` — module ABI, capability tables, VMap projections
 > - `vibe/Lambda_Design_Jube_Lang_Hosting.md` — hosted-language architecture (Python first)
-> - `vibe/Lambda_Impl_Hosted_Python.md` — staged carve-out execution (H0–H10)
+> - `vibe/impl/Lambda_Impl_Hosted_Python.md` — staged carve-out execution (H0–H10)
 > - `vibe/Lambda_Design_Jube_Node_Hosting.md` — Node compat as Jube modules (JN1–JN14, N0–N7)
 > - `vibe/radiant/Radiant_Design_Concurrency.md` — pages as Lambda isolates (JA15 context)
 > - `vibe/radiant/Radiant_Design_State_Management.md` — Lambda-page regeneration model (JA15 context)

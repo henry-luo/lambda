@@ -431,8 +431,8 @@ Several root causes cut across multiple suites and fixing them would have compou
    - DFS walk of all child elements
    - For each child, negate its `counter-increment` value and accumulate in running total
    - Track the last non-zero negated increment
-   - If a `counter-set` for `list-item` is found, add its value to the total and terminate early
-   - Final initial value = `-(total + last_non_zero_increment) + set_value` (or `+ ol_start` if no counter-set)
+   - If a `counter-set` for `list-item` is found, add its value and terminate before adding that element's increment
+   - Add the last non-zero negated increment after the walk; final initial value = `total + last_non_zero_increment + set_value`
 
 3. **Auto-increment suppression** (`layout_block.cpp`): When an `<li>` has explicit `counter-increment: list-item <value>` in its CSS, the implicit +1 auto-increment from `display: list-item` must be suppressed. Added `strstr(block->blk->counter_increment, "list-item")` check to detect explicit overrides.
 

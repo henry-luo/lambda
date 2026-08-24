@@ -188,7 +188,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 
 ## Analysis: Result27 vs Tune17 (2026-08-09)
 
-Result27 is the measurement of the Tune17 implementation (`vibe/Lambda_Impl_Tune17.md`,
+Result27 is the measurement of the Tune17 implementation (`vibe/impl/Lambda_Impl_Tune17.md`,
 commit `0f65f9d6df`). The headline is flat, and the movement underneath is large but
 net-zero. All row deltas below are stated as ratio-to-Node change, so host drift between
 runs is factored out.
