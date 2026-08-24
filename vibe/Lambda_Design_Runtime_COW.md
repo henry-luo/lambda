@@ -267,7 +267,8 @@ Lambda-only.
 Stage 1 adds a parallel Lambda-only family:
 
 ```c
-Item array_set_cow(Item owner, int64_t index, Item value);
+Item array_set_cow(Item owner, Item key, Item value);
+Item member_set_cow(Item owner, Item key, Item value);
 Item map_set_cow(Item owner, Item key, Item value);
 Item vmap_set_cow(Item owner, Item key, Item value);
 ```

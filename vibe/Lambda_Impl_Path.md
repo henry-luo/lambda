@@ -11,7 +11,7 @@
 > PTH3–PTH29)
 >
 > **Normative semantics:** [S2.4](../doc/Lambda_Formal_Semantics.md#s24-paths),
-> [S7.1.1](../doc/Lambda_Formal_Semantics.md#s71-reads-are-total-writes-are-checked),
+> [S7.1.1v2](../doc/Lambda_Formal_Semantics.md#s71-reads-are-total-writes-are-checked),
 > [S10.4](../doc/Lambda_Formal_Semantics.md#s104-parent-navigation), and
 > [S10.5](../doc/Lambda_Formal_Semantics.md#s105-root-navigation)
 >
@@ -45,7 +45,7 @@ a.'name'              // NameKey(name)
 The implementation is complete only when parsing, AST construction,
 interpretation, MIR Direct, path algebra, equality/hash/printing, target
 qualification, and effectful I/O all observe the same root and operation
-model. This is required by **S1.6**, **S2.4.2v3**, and **PTH20**.
+model. This is required by **S1.6**, **S2.4.2v4**, and **PTH20**.
 
 For `file.hostname.a.b`, this iteration supports filesystem access only when
 `hostname` identifies the current machine. It still parses, constructs,
@@ -61,9 +61,9 @@ credentials, and remote directory traversal are deferred.
 - Logical, relative, and explicit provider/authority roots remain structurally
   distinct (**S2.4.5v2**, **PTH21–PTH24**).
 - Typed `NameKey` and `IntKey` path operations; no conversion of integer keys
-  into names (**S2.4.2v3**, **PTH13–PTH14**).
+  into names (**S2.4.2v4**, **PTH13–PTH14**).
 - Left-to-right root/parent normalization and normalized composition
-  (**S2.4.2v3**, **PTH7–PTH8**, **PTH28**).
+  (**S2.4.2v4**, **PTH7–PTH8**, **PTH28**).
 - Immutable, evaluation-owned logical-root resolution with longest-prefix
   mounts, cycle rejection, and no existence-based fallback (**S2.4.4**,
   **PTH17–PTH19**).
@@ -82,10 +82,11 @@ deferred as stated above.
 
 ### 1.2 Explicitly excluded or deferred
 
-- The optional `a."str"`/`StringKeyInput` design in PTH-O1 is not implemented.
-  `.1` remains a float literal in leading expression position, and the rare
-  leading relative integer-key path therefore remains unexpressible. `a.1`
-  remains an `IntKey` member step.
+- The rejected numeric `StringKeyInput` coercion in PTH-O1 is not implemented.
+  Double-quoted dotted member syntax remains unselected.
+  `.1` remains a float literal in leading expression position; a leading
+  relative integer-key path uses `.[1]`, while `a.1` remains an `IntKey`
+  member step.
 - The old `/a`, `..a`, `value ..`, and `value .._..` forms receive no permanent
   compatibility aliases (**PTH11**).
 - Remote file transport and local-network hostname discovery are deferred.
@@ -174,15 +175,17 @@ typedef enum RefOpKind {
 The exact header location follows the existing NameId ownership boundary, but
 the semantic rules are fixed:
 
-- names and symbols become `NameKey` through the same NamePool operation;
-- integer keys are admitted only from exact non-negative integer values;
-  negative, fractional, or otherwise unsupported dynamic keys take the
-  unsupported-read path under **S2.4.2v3** and **S7.1.1**;
+- names, symbols, and string subscripts become `NameKey` through the same
+  NamePool operation, including the empty string;
+- `int`, `float`, and `decimal` keys become `IntKey` only from finite, exact,
+  non-negative integral values in the index domain. Negative, fractional, and
+  wrong-domain keys follow the uniform invalid-read→`null` / invalid-write→hard-
+  raise rule under **S2.4.2v4**, **S7.1.1v2**, **S7.1.3v2**, and **S8.2.1v2**;
 - no stringification of integer keys and no parsing numeric-looking names back
   into integers;
 - dynamic index expressions validate their result into `NameKey` or `IntKey`;
-  unsupported values return the domain's normal unsupported/missing read
-  result rather than creating a third retained key kind;
+  a key kind unsupported by the resolved container yields `null` on read and a
+  hard raised error on write rather than a third retained key kind;
 - NameId is semantic identity inside its scope, in accordance with
   **D4.6.1v2**; text is retained only where canonical printing, provider
   projection, or cross-context reconstruction requires it;
@@ -534,7 +537,7 @@ Implementation rules:
 5. A standalone hierarchical value with no occurrence cursor is its own root
    for `value./` and has no parent for `value.~~`.
 6. A scalar or host value with no defined hierarchy relation returns `null`;
-   missing subsequent navigation continues under **S7.1.1**.
+   missing subsequent navigation continues under **S7.1.1v2**.
 7. Host-backed hierarchical models may later supply a cursor/zipper adapter,
    but this iteration must not invent lineage by scanning for equal values.
    Equal values at different occurrences may have different parents, as
@@ -921,7 +924,7 @@ Final evidence records:
 - Standalone hierarchical value: self root, missing parent.
 - Scalar/unsupported host relation: `null`.
 - Path-specialized root/parent normalization.
-- Missing relation followed by more steps remains `null` under **S7.1.1**.
+- Missing relation followed by more steps remains `null` under **S7.1.1v2**.
 - Forced GC, nested evaluation, and any supported suspended activation.
 
 ### 5.5 Provider/I/O regression
@@ -1008,7 +1011,8 @@ Completion of this plan deliberately leaves these follow-ups open:
 - Windows remote volume/UNC semantics;
 - user-facing resolver/mount configuration syntax beyond the internal/default
   immutable table;
-- PTH-O1 `StringKeyInput`/`a."str"` option;
+- any future double-quoted dotted member syntax, constrained by PTH-O1 and
+  **S8.2.1v2** to preserve string-to-`NameKey` normalization;
 - lateral/sibling navigation under SO19;
 - broader lexical/import namespace unification beyond the typed-key adapter;
 - any host data model that needs a custom root/parent zipper.

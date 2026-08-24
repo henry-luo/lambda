@@ -153,7 +153,7 @@ extern "C" const char* js_property_index_chars(int64_t index, int* out_len) {
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
-extern void fn_map_set(Item map_item, Item key, Item value);
+extern Item fn_map_set(Item map_item, Item key, Item value);
 
 // Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG

@@ -2,6 +2,11 @@
 // Layer: 3 | Category: boundary | Covers: rapid type changes, many mutations, grow/shrink
 // Mode: procedural
 
+pn write_empty_map(var obj, key, value) int^ {
+    obj[key] = value
+    return 1
+}
+
 pn main() {
     // ===== Many sequential assignments =====
     var x = 0
@@ -25,11 +30,12 @@ pn main() {
 
     // ===== Map field additions =====
     var obj = {}
-    obj.a = 1
-    obj.b = 2
-    obj.c = 3
-    obj.d = 4
-    obj.e = 5
+    var first_map_error = null
+    write_empty_map(obj, "a", 1) ^ { first_map_error = ^ }
+    var second_map_error = null
+    write_empty_map(obj, "e", 5) ^ { second_map_error = ^ }
+    print(first_map_error is error)
+    print(second_map_error is error)
     print(obj.a)
     print(obj.e)
 

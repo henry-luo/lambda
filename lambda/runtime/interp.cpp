@@ -3644,10 +3644,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 log_error("interp: planned N-D assignment target is not an ArrayNum");
                 return ItemError;
             }
-            // c15 bounds are owned by array_num_set_nd: invalid coordinates
-            // are a no-op rather than an accidental scalar COW replacement.
-            array_num_set_nd(owner.get().array_num, ndim, indices, value_slot.get());
-            return ItemNull;
+            Item write_result = array_num_set_nd(owner.get().array_num, ndim, indices,
+                value_slot.get());
+            return item_is_error(write_result) ? write_result : ItemNull;
         }
 
         Scratch key_slot(f);
@@ -3662,8 +3661,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // A mask store mutates the numeric buffer in place. Alias and var
             // boundaries have already detached this binding, so this must use
             // MIR's shared helper rather than fabricate a scalar COW index.
-            fn_index_assign(owner.get(), key_slot.get(), value_slot.get());
-            return ItemNull;
+            Item write_result = fn_index_assign(owner.get(), key_slot.get(), value_slot.get());
+            return item_is_error(write_result) ? write_result : ItemNull;
         }
 
         // Dispatch on the owner's runtime type, not the syntax: `m["k"] = v`
@@ -3675,9 +3674,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 array_element->type_id != LMD_TYPE_ANY) {
             const char* boundary = "typed array index assignment";
             replacement = root->is_var_param
-                ? lambda_array_set_checked_inplace(owner.get(), it2l(key_slot.get()),
+                ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
-                : lambda_array_set_checked(owner.get(), it2l(key_slot.get()),
+                : lambda_array_set_checked_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary);
         } else if (ast_declared_type_is_map(root->declared_type)) {
             // a typed map write validates a detached candidate before it is
@@ -3691,26 +3690,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 : lambda_map_set_checked(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary);
         } else {
-            switch (get_type_id(owner.get())) {
-            case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-                replacement = array_set_cow(owner.get(), it2l(key_slot.get()),
-                    value_slot.get());
-                break;
-            case LMD_TYPE_ELEMENT:
-                // An Element carries independent attribute-map and child-list
-                // layouts; use the matching COW entry so a member write never
-                // treats its string key as a positional child index.
-                replacement = node->node_type == AST_NODE_MEMBER_ASSIGN_STAM
-                    ? map_set_cow(owner.get(), key_slot.get(), value_slot.get())
-                    : array_set_cow(owner.get(), it2l(key_slot.get()), value_slot.get());
-                break;
-            case LMD_TYPE_VMAP:
-                replacement = vmap_set_cow(owner.get(), key_slot.get(), value_slot.get());
-                break;
-            default:
-                replacement = map_set_cow(owner.get(), key_slot.get(), value_slot.get());
-                break;
-            }
+            // One checked boundary covers arrays, maps, elements, and VMAPs;
+            // invalid key domains must return ItemError instead of selecting a
+            // different container face or being coerced to index zero.
+            replacement = member_set_cow(owner.get(), key_slot.get(), value_slot.get());
         }
         if (item_is_error(replacement)) return replacement;
         // Publish the (possibly new) owner back at its binding.

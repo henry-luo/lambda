@@ -2362,7 +2362,7 @@ virtual `<file …>` / `<script …>` element. Two reasons, in order of weight:
 **Consequences — top level normalizes like content.**
 
 - **Nulls are stripped.** A `null` reaching content contributes nothing,
-  however it arose: written literally, read from a missing key (S7.1.1), or
+  however it arose: written literally, read from a missing key (S7.1.1v2), or
   produced by an `else`-less `if` (S16.6.3). If stripping empties the content,
   the script's value is a single residual `null`.
 - **Adjacent strings merge**, *after* stripping — so `"a" ⏎ null ⏎ "b"` is

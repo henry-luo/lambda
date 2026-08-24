@@ -538,6 +538,7 @@ test/lambda/proc/proc_nullable_pointer_scalar_lane_function_boundary.ls	run
 test/lambda/proc/proc_number_model_realign.ls	run
 test/lambda/proc/proc_object_counter.ls	run
 test/lambda/proc/proc_oob_write_error.ls	run
+test/lambda/proc/proc_invalid_member_access.ls	run
 test/lambda/proc/proc_optional_map_binding.ls	run
 test/lambda/proc/proc_ord_returns_int.ls	run
 test/lambda/proc/proc_param_div_infer.ls	run
