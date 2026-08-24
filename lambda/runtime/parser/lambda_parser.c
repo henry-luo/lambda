@@ -1612,8 +1612,17 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser,
             // continues across the break for ANY member — full leading-dot
             // fluent chains, not just the `.ident(` call form. `.digit` stays
             // dual-role: `a.5` is an integer member field, `.5` is a float.
+            //
+            // The admitted set must be the one `parse_path_segment` accepts for
+            // a member name, minus the spellings that keep a start reading.
+            // Testing LAMBDA_TOK_IDENTIFIER alone desynced the two: a member
+            // whose name is a type keyword (`.map(`, `.int(`, `.string(`) lexes
+            // as LAMBDA_TOK_BASE_TYPE, so the guard rejected the very chains the
+            // member parser would then have accepted on one line (LR02-11).
+            // `token_is_key` is that shared set; INTEGER/SLASH/PARENT/STAR_STAR
+            // stay out because each still has a non-member reading at line start.
             bool member_chain = first.kind == LAMBDA_TOK_DOT &&
-                parser->next.kind == LAMBDA_TOK_IDENTIFIER;
+                token_is_key(parser->next.kind);
             if (!member_chain) return left;
         }
         LambdaParseValue children[65] = {0};

@@ -1355,9 +1355,35 @@ for scalars".
   conformance entry; the design doc is added to the spec Basis and
   Appendix C. `D#` was ruled the wrong home — the grammar change touches D8
   only insofar as parse-tree shapes change. A future dedicated formal syntax
-  document is tracked as `SO35`. Remaining: sweep the user-facing docs
-  (`Lambda_Expr_Stam.md`, `Lambda_Reference.md`, `Lambda_Cheatsheet.md`,
-  `Lambda_Func.md`) whose examples carry the old spellings.
+  document is tracked as `SO35`.
+
+  **Remaining: the user-facing doc sweep, measured 2026-08-24.** Every fenced
+  ```lambda block in the four docs was extracted and parse-checked against the
+  production parser: **60 of 172 fail**.
+
+  | Document | Failing blocks |
+  |---|---:|
+  | `doc/Lambda_Cheatsheet.md` | 26 |
+  | `doc/Lambda_Expr_Stam.md` | 20 |
+  | `doc/Lambda_Func.md` | 7 |
+  | `doc/Lambda_Reference.md` | 7 |
+
+  Causes, by parser diagnostic:
+
+  | Count | Diagnostic | Ruling |
+  |---:|---|---|
+  | 28 | *token cannot continue the previous line* | S16.2.3 — one-example-per-line listings (`-x` ⏎ `+x`, `[1,2] + [3,4]`) |
+  | 11 | *expected an expression* | mixed; includes non-code fenced as `lambda` |
+  | 5 | *object-type members are separated by `,`, not `;`* | §7.11 |
+  | 4 | *trailing `;` is not a statement separator* | decided point 15 |
+  | 3 | *`pub` modifies a declaration; write `pub let`* | §7.6 |
+  | 2 | *expected `,` between element attributes and content* | §7.11 |
+  | 7 | assorted (retired `@./path` sigil → `\.a.b` per §7.15; arity/paren shape) | — |
+
+  Not all 60 are prose bugs: at least one block is an operator table
+  (`+  -  *  /  div  %  **`) fenced as `lambda` and should lose the language
+  tag rather than be rewritten. The sweep needs a per-block judgement, not a
+  mechanical rewrite.
 
 ---
 
@@ -1969,7 +1995,7 @@ motivating case) no longer competes at all — with the relative path
 respelled, `.rect` cannot be a path, so `<svg .rect>` is unambiguously the
 qualified tag and the path-child form is `<svg, \\.rect>`.
 
-### 7.16 Digit-adjacent identifiers (OPEN — found by the implementation audit)
+### 7.16 Digit-adjacent identifiers (decided and implemented — found by the implementation audit)
 
 **Finding.** `let a = 123abc` parses as `let a = 123` followed by the
 statement `abc`, and `let a = 0b1010` as `let a = 0` followed by `b1010`.
