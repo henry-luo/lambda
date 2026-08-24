@@ -50,9 +50,12 @@ enum class EvalSignal : uint8_t {
     BROKE,
     CONTINUED,
     ERROR_SKIP,
-    // Self-tail-call: the parameter slots already hold the next iteration's
+    // self-tail-call: the parameter slots already hold the next iteration's
     // arguments and interp_call should re-enter the body rather than recurse.
     TAIL_CALL,
+    // a direct self-tail call reached the T1 threshold. Its argument slots
+    // hold the rooted source values for one ordinary boxed native entry.
+    TAIL_CALL_JIT,
 };
 
 // The same iteration ceiling lowering applies to its TCO loop, so a runaway
@@ -83,6 +86,9 @@ struct InterpFrame {
     Script*             module;      // owner of const_list / type_list / slab
     const FnFramePlan*  plan;
     uint64_t*           slots;       // side-root window base (Item lanes)
+    // the active Function is rooted beside the frame slots so a tail handoff
+    // can publish and invoke it across satellite compilation (D8.1.1v5).
+    uint64_t*           callable_slot;
     Item*               env;         // closure capture env (NULL when not a closure)
     uint32_t            env_count;
     const TypeMethod*   method;      // non-null for an interpreted bound object method

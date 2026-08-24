@@ -1083,6 +1083,10 @@ typedef struct FnPromotionCell {
     FnPromotionState state;
     uint32_t call_count;
     uint32_t backedge_count;
+    // self-tail edges are eligible for entry-equivalent handoff, unlike a
+    // general loop backedge which has no native frame materialization point
+    // (D8.1.1v5).
+    uint32_t tail_edge_count;
     void* boxed_entry;
 } FnPromotionCell;
 

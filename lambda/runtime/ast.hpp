@@ -602,6 +602,8 @@ struct Script : Input {
     bool interp_supported;          // pre-scan found only P0/P1-covered kinds
     AstNodeType interp_reject_kind; // first unsupported kind, for the log line
     uint32_t interp_satellite_count; // unique MIR satellite image sequence
+    bool interp_whole_script_poc_attempted; // opt-in AUTO whole-module POC gate
+    bool interp_whole_script_poc_active;    // whole-module image published
     bool interp_views_registered;   // T0 view entries published in this context
 
     // The REPL keeps its append-only source buffer alive because AST source
@@ -628,6 +630,17 @@ typedef struct Transpiler : Script {
     // closures; `(Script*)this` is valid only during construction.
     Script* script_owner;
     Runtime* runtime;
+    // The lazy whole-script POC runs MIR Direct while the T0 AST index is
+    // still needed by the active interpreter. Ordinary eager loading can
+    // release this index after code generation; the POC must retain it.
+    bool preserve_ast_index;
+    // Whole-script AUTO POC lowering addresses the already-planned T0 module
+    // slab, so MIR globals must use the same module-slot contract instead of
+    // creating an eager BSS layout (D8.1.1v4/D7.2.1).
+    bool compile_against_interp_slab;
+    // Mark the full-image POC lowering so non-admitted local callees stay on
+    // the normal dynamic tier boundary while admitted recursion remains direct.
+    bool whole_script_poc;
 
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count

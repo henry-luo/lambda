@@ -577,6 +577,44 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
         << "] stderr=[" << interp.stderr_text << "]";
 }
 
+TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
+    // four self-tail edges leave a definition one edge short of the default
+    // threshold. This guards against accidentally using call_count (which
+    // also includes the outer entry) as the handoff budget (D8.1.1v5).
+    const char* below_path = "temp/interp_case_tail_handoff_below.ls";
+    write_script(below_path,
+        "pn loop(n: int, acc: int) int {\n"
+        "    if (n <= 0) { return acc }\n"
+        "    return loop(n - 1, acc + 1)\n"
+        "}\n"
+        "pn main() {\n"
+        "    print(loop(4, 0))\n"
+        "    print(\"\\n\")\n"
+        "}\n");
+    RunResult below = run_script(below_path, "auto", /*procedural=*/true);
+    EXPECT_EQ(below.exit_code, 0);
+    EXPECT_EQ(trim_trailing(below.stdout_text), "4");
+    EXPECT_EQ(below.stderr_text.find("satellite compiled function='loop'"), (size_t)-1);
+
+    // the fifth direct self-tail boundary compiles and transfers the same
+    // activation into T1; the remaining fifteen iterations must stay correct.
+    const char* handoff_path = "temp/interp_case_tail_handoff.ls";
+    write_script(handoff_path,
+        "pn loop(n: int, acc: int) int {\n"
+        "    if (n <= 0) { return acc }\n"
+        "    return loop(n - 1, acc + 1)\n"
+        "}\n"
+        "pn main() {\n"
+        "    print(loop(20, 0))\n"
+        "    print(\"\\n\")\n"
+        "}\n");
+    RunResult handoff = run_script(handoff_path, "auto", /*procedural=*/true);
+    EXPECT_EQ(handoff.exit_code, 0);
+    EXPECT_EQ(trim_trailing(handoff.stdout_text), "20");
+    EXPECT_NE(handoff.stderr_text.find("satellite compiled function='loop'"), (size_t)-1)
+        << "the fifth self-tail edge did not hand off the active activation";
+}
+
 //==============================================================================
 // 4. Fallback accounting
 //==============================================================================
