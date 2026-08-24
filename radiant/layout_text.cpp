@@ -1212,12 +1212,6 @@ CssEnum get_white_space_value(DomNode* node) {
             return CSS_VALUE_NORMAL;
         }
         DomElement* elem = lam::dom_require_element(current);
-        if (elem->blk && elem->block_mut()->white_space != 0) {
-            CssEnum ws = elem->block()->white_space;
-            if (is_concrete_white_space_value(ws)) {
-                return ws;
-            }
-        }
         bool has_specified_white_space = false;
         if (elem->specified_style) {
             CssDeclaration* ws_decl = style_tree_get_declaration(
@@ -1228,6 +1222,14 @@ CssEnum get_white_space_value(DomNode* node) {
                 if (is_concrete_white_space_value(ws)) {
                     return ws;
                 }
+            }
+        }
+        // CSS Text: an element's specified value overrides the inherited field
+        // cached on its inline view; the latter may still contain the parent value.
+        if (elem->blk && elem->block_mut()->white_space != 0) {
+            CssEnum ws = elem->block()->white_space;
+            if (is_concrete_white_space_value(ws)) {
+                return ws;
             }
         }
         NameId tag = elem->tag();
@@ -3058,6 +3060,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     CssEnum white_space = get_white_space_value(text_node);  // todo: white-space should be put in BlockContext
     bool collapse_spaces = ws_collapse_spaces(white_space);
     bool collapse_newlines = ws_collapse_newlines(white_space);
+    // CSS Text 3 §4.1.1: trim a preceding inline's collapsible trailing space
+    // before a preserved segment break forces the next line.
+    if (!collapse_newlines && (*text_start == '\n' || *text_start == '\r') &&
+        lycon->line.trailing_space_width > 0.0f && lycon->line.last_text_rect) {
+        line_consume_trailing_collapsible_space(lycon, true, true);
+    }
     // CSS Sizing 3: In max-content mode, never wrap — measure full unwrapped width
     bool wrap_lines = ws_wrap_lines(white_space) &&
         !lycon->available_space.width.is_max_content();
@@ -3089,6 +3097,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     uint32_t last_processed_cp = 0;
     // CSS Text 3 §5.2: Track whether the text had a leading space before collapsing.
     bool had_leading_space = is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'));
+    bool had_explicit_leading_space =
+        is_space(*str) && *str != '\n' && *str != '\r';
 
     bool at_collapsible_text_edge = line_is_at_collapsible_text_edge(lycon);
     if (collapse_spaces && (at_collapsible_text_edge || lycon->line.has_space) && is_space(*str)) {
@@ -3148,7 +3158,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     // CSS Text 3 §5.2: Before placing any characters, check whether the first
-    if (wrap_lines && !lycon->line.is_line_start && !break_all && had_leading_space) {
+    if (collapse_spaces && wrap_lines && !lycon->line.is_line_start &&
+        !break_all && had_leading_space) {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         float remaining = line_right - lycon->line.advance_x;
@@ -3165,10 +3176,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
         }
         // the candidate line width; otherwise overflow creates a false
-        // CSS Text 3 §5.2: a collapsed whitespace opportunity still permits
-        // the next word to wrap when the preceding line is exactly full.
+        // CSS Text 3 §5.2: a collapsed leading space still permits the next word
+        // to wrap when the preceding line is exactly full.
+        // CSS Text 3 §5.2: a literal collapsible separator creates the wrap
+        // opportunity at an exactly full line; a leading segment break alone does not.
+        bool exact_full_collapsed_space = had_explicit_leading_space &&
+            remaining >= -0.001f;
         bool first_word_does_not_fit = first_word_w + leading_space_w > remaining &&
-            (remaining > 0.0f || lycon->line.wrap_opportunity_before_nowrap);
+            (remaining > 0.0f || lycon->line.wrap_opportunity_before_nowrap ||
+             exact_full_collapsed_space);
         if (first_word_w > 0 && (first_word_does_not_fit ||
                                  (min_content_line && remaining <= 0.0f))) {
             record_inline_box_decoration_fragment(lycon, text_node);
@@ -3818,8 +3834,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon->line.has_space = false;
                 lycon->line.trailing_space_width = 0;
             }
-            lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
-            lycon->line.last_space_kind = BRK_SPACE;
+            // CSS Text 3 §5.2: non-wrapping white-space modes must not leak a space
+            // break opportunity into a later inline text node.
+            if (wrap_lines) {
+                lycon->line.last_space = str - 1;
+                lycon->line.last_space_pos = rect->width;
+                lycon->line.last_space_kind = BRK_SPACE;
+            }
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces.
             if (collapse_spaces) {
                 lycon->line.has_space = true;

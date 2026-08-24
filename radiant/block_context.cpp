@@ -419,10 +419,11 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
 
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
                                               bool line_query,
-                                              bool float_placement_query) {
+                                              bool float_placement_query,
+                                              float horizontal_offset) {
     FloatAvailableSpace space;
-    space.left = ctx->float_left_edge;
-    space.right = ctx->float_right_edge;
+    space.left = ctx->float_left_edge + horizontal_offset;
+    space.right = ctx->float_right_edge + horizontal_offset;
     space.has_left_float = false;
     space.has_right_float = false;
 

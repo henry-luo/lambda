@@ -1367,6 +1367,30 @@ static float compute_cell_strut_baseline(LayoutContext* lycon, ViewTableCell* tc
     return baseline;
 }
 
+static bool table_cell_is_anonymous(ViewTableCell* cell);
+static bool table_cell_is_in_anonymous_table(ViewTableCell* cell);
+
+static void position_zero_height_out_of_flow_cell(LayoutContext* lycon,
+                                                   ViewTableCell* tcell) {
+    if (!lycon || !tcell || !tcell->td || !table_cell_is_in_anonymous_table(tcell) ||
+        tcell->height != 0.0f ||
+        table_cell_has_baseline_line(tcell)) {
+        return;
+    }
+    bool has_out_of_flow_content = false;
+    for (View* child = tcell->first_child; child; child = child->next_sibling) {
+        if (table_cell_vertical_align_skips_child(child)) {
+            has_out_of_flow_content = true;
+            break;
+        }
+    }
+    if (has_out_of_flow_content) {
+        // CSS 2.1 §§10.8.1, 17.2.1: a zero-height cell with only
+        // out-of-flow content still positions its border box on the cell strut.
+        tcell->y = compute_cell_strut_baseline(lycon, tcell);
+    }
+}
+
 static float compute_inline_atomic_baseline_for_cell(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return 0.0f;
     float item_height = block->height + (block->bound ?
@@ -4905,6 +4929,18 @@ static bool table_cell_is_anonymous(ViewTableCell* cell) {
     return element && element->tag_name && strcmp(element->tag_name, "::anon-td") == 0;
 }
 
+static bool table_cell_is_in_anonymous_table(ViewTableCell* cell) {
+    if (!cell) return false;
+    for (DomNode* parent = cell->parent; parent && parent->is_element();
+         parent = parent->parent) {
+        DomElement* element = parent->as_element();
+        if (element->tag_name && strncmp(element->tag_name, "::anon-", 7) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool table_height_allows_cell_percentage_resolution(ViewTable* table,
                                                            ViewTableCell* cell) {
     CssDeclaration* declaration = table
@@ -5147,7 +5183,8 @@ static void table_track_row_metrics(TableMetadata* meta, int row_idx, float row_
     meta->row_heights[row_idx] = row_height;
 }
 
-static void table_place_collapsed_row(ViewTable* table, TableMetadata* meta,
+static void table_place_collapsed_row(LayoutContext* lycon, ViewTable* table,
+                                      TableMetadata* meta,
                                       ViewTableRow* trow, float row_y,
                                       float row_width, float metadata_y,
                                       float* col_widths, float* col_x_positions,
@@ -5241,7 +5278,8 @@ static bool table_layout_flow_row(LayoutContext* lycon, ViewTable* table,
     bool is_collapsed = row_idx < meta->row_count && meta->row_collapsed[row_idx];
     if (is_collapsed) {
         table_place_collapsed_row(
-            table, meta, trow, in_group ? *current_y - group_start_y : *current_y,
+            lycon, table, meta, trow,
+            in_group ? *current_y - group_start_y : *current_y,
             row_width, *current_y, col_widths, col_x_positions, columns, row_idx);
         (*global_row_index)++;
         return false;
@@ -7364,5 +7402,9 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             table->block_mut()->last_line_baseline = last_baseline;
         }
     }
+    table->each_cell([&](ViewTableRow* row, ViewTableCell* cell) {
+        (void)row;
+        position_zero_height_out_of_flow_cell(lycon, cell);
+    });
 
 }

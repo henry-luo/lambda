@@ -2732,8 +2732,8 @@ static void shift_deferred_inline_line(View* child,
     }
 }
 
-static void align_deferred_inline_line_runs(ViewElement* parent, float final_content_width,
-                                            CssEnum text_align) {
+void layout_align_deferred_inline_line_runs(ViewElement* parent, float final_content_width,
+                                             CssEnum text_align) {
     if (!parent || final_content_width <= 0.0f ||
         (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT)) {
         return;
@@ -3312,7 +3312,7 @@ static void adjust_block_children_after_shrink(LayoutContext* lycon,
         // text-align: use child's own value if it has blk, otherwise inherit from parent
         CssEnum ta = cb->blk ? cb->block()->text_align : inherited_text_align;
         if (ta == CSS_VALUE_CENTER || ta == CSS_VALUE_RIGHT) {
-            align_deferred_inline_line_runs(lam::view_require_element(cb), new_avail_cw, ta);
+            layout_align_deferred_inline_line_runs(lam::view_require_element(cb), new_avail_cw, ta);
         }
         adjust_block_children_after_shrink(lycon, cb, max(new_avail_cw, 0.0f), ta);
     }
@@ -4031,9 +4031,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT) {
             float final_content_width = block->width;
             final_content_width -= block_box.pad_border_h;
-            align_deferred_inline_line_runs(lam::view_require_element(block),
-                                            final_content_width,
-                                            lycon->block.text_align);
+            layout_align_deferred_inline_line_runs(lam::view_require_element(block),
+                                                   final_content_width,
+                                                   lycon->block.text_align);
         }
         // CSS 2.1 §10.3.3: Adjust block-level children that stretched to the
         float shrunk_cw = block->width;
@@ -5020,7 +5020,10 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
             walker = walker->parent_view();
         }
         float query_y = bfc_y_offset + lycon->block.advance_y;
-        FloatAvailableSpace space = block_context_space_at_y(bfc, query_y, line_height);
+        // CSS 2.1 §9.5: a line inside a negatively offset run-in uses its
+        // local inline origin when testing the shared BFC's float intrusion.
+        FloatAvailableSpace space = block_context_space_at_y(
+            bfc, query_y, line_height, false, false, bfc_x_offset);
         if (space.has_left_float) {
             float local_left = space.left - bfc_x_offset;
             if (local_left > lycon->line.effective_left) {
@@ -6997,11 +7000,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             const char* html_height_attr = block->get_attribute("height");
             bool has_html_width = html_width_attr && html_width_attr[0] >= '0' && html_width_attr[0] <= '9';
             bool has_html_height = html_height_attr && html_height_attr[0] >= '0' && html_height_attr[0] <= '9';
-            bool has_explicit_dimension = has_css_width || has_css_height;
+            // HTML dimensions establish the failed image's replaced box; alt text
+            // must not replace a size supplied by the markup.
+            bool has_explicit_dimension = has_css_width || has_css_height ||
+                has_html_width || has_html_height;
+            bool block_level_markup_dimensions =
+                (block->display.outer == CSS_VALUE_BLOCK ||
+                 block->display.outer == CSS_VALUE_LIST_ITEM) &&
+                has_html_width && has_html_height;
             bool default_inline_alt_fallback = alt_text && alt_text[0] != '\0' &&
                 !has_author_display;
             if (alt_text && alt_text[0] != '\0' &&
-                (!has_explicit_dimension || default_inline_alt_fallback)) {
+                (!has_explicit_dimension ||
+                 (default_inline_alt_fallback && !block_level_markup_dimensions))) {
                 layout_set_broken_image_alt_fallback(lycon, block, false);
             } else {
                 if (block->embed) {
@@ -7025,7 +7036,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     layout_store_given_axis(lycon, block, 16.0f, true, false);
                 }
                 if (lycon->block.given_height < 0.0f) {
-                    layout_store_given_axis(lycon, block, 16.0f, false, false);
+                    ViewBlock* percentage_parent = layout_nearest_block_ancestor(
+                        block->parent_view());
+                    bool definite_zero_percentage_height = block->blk &&
+                        !isnan(block->block()->given_height_percent) &&
+                        percentage_parent && percentage_parent->blk &&
+                        percentage_parent->block()->given_height >= 0.0f &&
+                        !layout_block_has_automatic_size(percentage_parent, false) &&
+                        percentage_parent->content_height <= 0.0f;
+                    // CSS Sizing 3: a percentage against a definite zero-height
+                    // containing block is 0, not the broken-image fallback size.
+                    layout_store_given_axis(lycon, block,
+                        definite_zero_percentage_height ? 0.0f : 16.0f,
+                        false, false);
                 }
             }
         }
@@ -7596,6 +7619,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     }
                 }
             }
+        }
+        if (!block->boundary()->has_flow_margin) {
+            // Preserve the resolved margin box before normal-flow collapse can
+            // consume it; fragmentation needs the uncollapsed CSS margins.
+            block->boundary_mut()->flow_margin = block->boundary()->margin;
+            block->boundary_mut()->has_flow_margin = true;
         }
         *out_original_margin_top = block->boundary()->margin.top;
         block->x += block->boundary()->margin.left;

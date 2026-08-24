@@ -675,7 +675,7 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
  * Used for run-in: if a run-in box contains a block-level element,
  * the run-in box itself becomes a block box.
  */
-static bool run_in_contains_block_child(DomNode* node) {
+static bool run_in_descendants_contain_block(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = node->as_element();
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
@@ -687,9 +687,20 @@ static bool run_in_contains_block_child(DomNode* node) {
                 child_display.inner == CSS_VALUE_TABLE) {
                 return true;
             }
+            // CSS 2.1 §9.2.3: a block inside an ordinary inline descendant
+            // still makes the containing run-in a block-level box; atomic
+            // inline-level descendants keep their independent formatting context.
+            if (child_display.outer == CSS_VALUE_INLINE &&
+                run_in_descendants_contain_block(child)) {
+                return true;
+            }
         }
     }
     return false;
+}
+
+static bool run_in_contains_block_child(DomNode* node) {
+    return run_in_descendants_contain_block(node);
 }
 
 /**
@@ -1826,7 +1837,12 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     }
 
     marker->view_type = RDT_VIEW_NONE;
-    marker->x = lycon->line.advance_x;
+    // CSS Tables 3 §2.1: a suppressed table-column principal box has no own
+    // position; block-contained markers use the line start, while inline
+    // parents retain the inline insertion point used by their line box.
+    bool inline_parent = elem->parent && elem->parent->is_element() &&
+        resolve_display_value(elem->parent).outer == CSS_VALUE_INLINE;
+    marker->x = inline_parent ? lycon->line.advance_x : lycon->line.left;
     marker->y = lycon->block.advance_y;
     marker->width = 0.0f;
     marker->height = 0.0f;

@@ -1301,6 +1301,10 @@ typedef struct MultiColumnProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct BoundaryProp {
     Margin margin;
+    // CSS fragmentation uses the resolved margin box, not the value left after
+    // normal-flow margin collapsing mutates the layout boundary.
+    Margin flow_margin;
+    bool has_flow_margin;
     Spacing padding;
     BorderProp* border;
     BackgroundProp* background;
