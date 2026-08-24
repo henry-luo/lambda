@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-15 (rev 10 — U26 superseded: AST interpreter adopted by user ruling, `vibe/Lambda_Design_Ast_Interpreter.md` / **D8.1.1v2**)
 **Status:** Design settled — ledger U1–U36 in §9; continuation decisions U27–U36 are implementation requirements; **U26 superseded 2026-08-15** (§12 retained as the historical record)
-**Related:** `vibe/Lambda_Impl_Tune_Ast.md`, `vibe/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
+**Related:** `vibe/impl/Lambda_Impl_Tune_Ast.md`, `vibe/impl/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
 
 ---
 
@@ -577,7 +577,7 @@ Optimization cannot use whole-test wall time as a proxy for compiler work. Both 
 
 The batch protocols emit one timing/volume record per compiled test/module, and both GTest harnesses persist the same TSV schema. For JS, the code counts each test's top-level module after MIR finalization and prints its function count and finalized instruction count; the count uses the same definition as MT7 (`test_mir_ratchet_gtest`: labels and declarations are excluded). This is a compact size record, not a full textual MIR dump, so measurement does not add dump-I/O cost. Missing, duplicate, retried, or differently named samples make a comparison invalid. The older Lambda `LAMBDA_PROFILE` shared-file path may remain for ad-hoc diagnostics during migration, but it is not a gate because concurrent batch processes can overwrite it.
 
-The **D8.6.4v2** hard exit metrics and capture protocol are specified in `vibe/Lambda_Impl_Tune_Ast.md`: at least 10% lower median aggregate `build_transpile_us` for `test_lambda_gtest`, at least 20% for `test_js_gtest`, and at least 2,000 net physical C/C++ LOC removed from the Lambda/JS runtime scope. Finalized MIR instructions for the frozen JS large-library cohort and complete corpus remain required numeric diagnostics with per-library attribution, but are not exit gates. Scheduler improvements are welcome and reported separately, but cannot satisfy the compiler-time gates.
+The **D8.6.4v2** hard exit metrics and capture protocol are specified in `vibe/impl/Lambda_Impl_Tune_Ast.md`: at least 10% lower median aggregate `build_transpile_us` for `test_lambda_gtest`, at least 20% for `test_js_gtest`, and at least 2,000 net physical C/C++ LOC removed from the Lambda/JS runtime scope. Finalized MIR instructions for the frozen JS large-library cohort and complete corpus remain required numeric diagnostics with per-library attribution, but are not exit gates. Scheduler improvements are welcome and reported separately, but cannot satisfy the compiler-time gates.
 
 ---
 
@@ -645,9 +645,9 @@ Porting order: **Python first** (most complete, already wired into Lambda's impo
 
 ## 8. Migration Plan
 
-**Live status, 2026-08-12:** the numbered phases below are the historical structural migration plan. The common AST, common node aliases, `FnAnalysis`, and `MirEmitter` are substantially landed. The remaining implementation is now governed by `vibe/Lambda_Impl_Tune_Ast.md`, whose continuation sequence is: measurement → common traversal/index → explicit facts/pass manager → demand-driven `MirValue` lowering → duplicate-path deletion → hard-gate closeout. The old phase text remains as design provenance; it is not the current checklist.
+**Live status, 2026-08-12:** the numbered phases below are the historical structural migration plan. The common AST, common node aliases, `FnAnalysis`, and `MirEmitter` are substantially landed. The remaining implementation is now governed by `vibe/impl/Lambda_Impl_Tune_Ast.md`, whose continuation sequence is: measurement → common traversal/index → explicit facts/pass manager → demand-driven `MirValue` lowering → duplicate-path deletion → hard-gate closeout. The old phase text remains as design provenance; it is not the current checklist.
 
-Historical method: K17's extract-after-convergence — never a big-bang rewrite; every phase keeps both pipelines green. The current continuation gates are the hard contracts in `vibe/Lambda_Impl_Tune_Ast.md` §2 and the closeout matrix in §11; the numbered phase record below is not used to substitute older corpus counts or looser wall-time measurements.
+Historical method: K17's extract-after-convergence — never a big-bang rewrite; every phase keeps both pipelines green. The current continuation gates are the hard contracts in `vibe/impl/Lambda_Impl_Tune_Ast.md` §2 and the closeout matrix in §11; the numbered phase record below is not used to substitute older corpus counts or looser wall-time measurements.
 
 **Track interleaving with concurrency work (U21, user-confirmed):** Phase 0 lands first — it is the shared prerequisite of *both* this project and the concurrency plan (Stage A runs JIT'd frames concurrently and must not be built on the G1 rooting hack). Then **concurrency Stage A proceeds in parallel with Phases 1–3** (Stage A works against the new emitter API in `transpile-mir.cpp`; Phases 1–3 live mostly in `ast-core`/builders/analysis — low contention). Phase 4's resumable-function-transform extraction then has **two green clients** (JS async/generators + Lambda's Stage-B transform), honoring K17's two-client rule; Stage B ships on the shared transform.
 

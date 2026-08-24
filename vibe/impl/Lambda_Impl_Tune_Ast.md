@@ -4,7 +4,7 @@
 **Status:** Implementation in progress; Phase 0/1/2/3 slices are landed, and the remaining work is performance/LOC closure
 **Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3, D8.6.4v2
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` U27–U36  
-**Predecessor:** `vibe/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
+**Predecessor:** `vibe/impl/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
 
 ---
 

@@ -177,7 +177,7 @@ verification snapshot above.
 ## 8. Phase 6 — convergence sketch (PL5 pointer, not this plan's scope)
 
 > **Follow-up accepted and planned:** the storage-not-type unification is now
-> authoritative in [Lambda_Type_Binary.md](Lambda_Type_Binary.md) §11, with the
+> authoritative in [Lambda_Type_Binary.md](../Lambda_Type_Binary.md) §11, with the
 > phased implementation and verification plan in
 > [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md). The paragraph below is kept
 > as the original compatibility target for Phases 1–5.

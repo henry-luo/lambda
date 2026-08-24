@@ -104,7 +104,7 @@ Literals get either a canonical singleton (`LIT_INT`, `LIT_BOOL`, `LIT_NULL`) or
 - **Comparisons** `== != is in` → `LMD_TYPE_BOOL`. But the **ordering** ops `< <= > >=` are *representation-sensitive* (`build_ast.cpp:3201`–`3216`): a numeric-array operand → `ARRAY_NUM` (an element-wise mask via `vec_cmp`), both-native-numeric → `BOOL`, anything else → `ANY` — this must stay in lockstep with the transpiler's native-vs-fallback codegen or consumers misread the result.
 - **`AND` / `OR`** → `ANY` (the truthy idiom, not a plain boolean); **`TO`** → `RANGE`; **`PIPE`** / **`WHERE`** → the node becomes `AST_NODE_PIPE`, typed from the RHS (or `ARRAY` depending on `~` presence); file output is an explicit `output(...)` procedural call.
 
-The current promotion code still relies on `TypeId` enum order and `std::max`, with decimal-result inference partly disabled. That mechanism cannot express the settled sized/non-sized entry map or distinguish the `integer` carrier from ordinary decimal. Replacing it with the shared type-directed result classifier is part of `vibe/Lambda_Impl_Numbers.md`. The builder also performs static rewrites such as `expr is nan` and chained comparisons.
+The current promotion code still relies on `TypeId` enum order and `std::max`, with decimal-result inference partly disabled. That mechanism cannot express the settled sized/non-sized entry map or distinguish the `integer` carrier from ordinary decimal. Replacing it with the shared type-directed result classifier is part of `vibe/impl/Lambda_Impl_Numbers.md`. The builder also performs static rewrites such as `expr is nan` and chained comparisons.
 
 ### 4.4 If / branch unification — `build_if_expr`
 

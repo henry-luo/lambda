@@ -2,9 +2,9 @@
 
 > **Status:** Complete — implementation Phases 0–6 and all applicable regression gates verified
 > **Plan date:** 2026-07-15
-> **Design authority:** [Lambda_Type_Binary.md](Lambda_Type_Binary.md) §11
+> **Design authority:** [Lambda_Type_Binary.md](../Lambda_Type_Binary.md) §11
 > **Predecessor:** [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) — decoded-byte semantics and the safe copy bridge, implemented through Phase 5
-> **Pipeline dependency:** [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) PL5 — refcounted flats and zero-copy subviews
+> **Pipeline dependency:** [Lambda_Design_Pipeline.md](../Lambda_Design_Pipeline.md) PL5 — refcounted flats and zero-copy subviews
 
 ## 0. Objective and completion definition
 

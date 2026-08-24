@@ -13,7 +13,7 @@
   `vibe/Lambda_Design_Compiling_Lane.md` §10 and
   `vibe/Lambda_Design_Type_Boundary.md`.
 - **Input:** `test/benchmark/Overall_Result32.md` / `benchmark_results_v32.json` (commit `a6192c1086`, archived binary `test/benchmark/exe/lambda-v32-a6192c1086`), paired against `benchmark_results_v31.json`; fresh finalized-MIR dumps of 13 untyped/typed pairs under `temp/r32/` taken with `LAMBDA_MIR_DUMP_PATH=… ./lambda.exe run <bench>[2].ls` on the same binary; §7 uses `test/benchmark/Overall_Result33.md` / `benchmark_results_v33.json` (commit `8705d85c5a`, archived binary `test/benchmark/exe/lambda-v33-8705d85c5a`)
-- **Related:** `vibe/Lambda_Impl_Tune18.md` (E1–E6, landed), `vibe/Lambda_Impl_Tune17 (done).md` (T1–T5, lane unification), `vibe/Lambda_Impl_Tune16 (done).md` (categorical bar), `vibe/Lambda_Design_Compiling_Lane.md` (ValueRep), `vibe/Lambda_Design_Compiling.md` (LC1), `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (M1–M8, T-A/T-B)
+- **Related:** `vibe/impl/Lambda_Impl_Tune18.md` (E1–E6, landed), `vibe/impl/Lambda_Impl_Tune17 (done).md` (T1–T5, lane unification), `vibe/impl/Lambda_Impl_Tune16 (done).md` (categorical bar), `vibe/Lambda_Design_Compiling_Lane.md` (ValueRep), `vibe/Lambda_Design_Compiling.md` (LC1), `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (M1–M8, T-A/T-B)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S7.1, S7.2.1; `doc/Lambda_Formal_Design.md` D2.2.2–D2.2.3, D2.5.1, D2.5.3, D2.6.2–D2.6.3, D3.2.1, D3.3.1, D3.3.3, D4.6.1v2–D4.6.2v2, D4.7.1, D5.3.1, D5.3.4, D8.1.1v2, D8.3.3, D8.6.1–D8.6.3
 - **ID series:** `T19-#` (round-prefixed; extends the tune-round convention without colliding with Tune14 `F#`, Tune15 `B#`, Tune16 `C#`, Tune17 `T#`, Tune18 `E#`)
 

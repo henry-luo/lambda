@@ -3,7 +3,7 @@
 **Status:** implemented and verified
 **Completed:** 2026-07-15
 **Design:** `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20)
-**Scope:** Lambda MIR-Direct plus the shared runtime. JS frame emission remains phase 2 in `vibe/Lambda_Impl_Stack_Frame_JS.md`; C2MIR frame emission is intentionally unchanged per OS6.
+**Scope:** Lambda MIR-Direct plus the shared runtime. JS frame emission remains phase 2 in `vibe/impl/Lambda_Impl_Stack_Frame_JS.md`; C2MIR frame emission is intentionally unchanged per OS6.
 
 > **Scalar-storage successor:** this is the Phase 1 implementation record.
 > `vibe/Lambda_Design_Stack_API.md` Phase 7 supersedes its compact-`INT64`,
@@ -159,7 +159,7 @@ The full test262 run also served as the long-process memory/recovery soak: all 4
 
 Phase 1 is complete. The following are intentionally outside this document rather than incomplete Lambda work:
 
-- JS-generated static root/number frames and JS two-lane returns (`vibe/Lambda_Impl_Stack_Frame_JS.md`);
+- JS-generated static root/number frames and JS two-lane returns (`vibe/impl/Lambda_Impl_Stack_Frame_JS.md`);
 - conservative native-stack scan retirement, which requires the JS and remaining host-helper migrations;
 - broad adoption of `LambdaRootGuard` beyond the completed pilot;
 - changes to C2MIR frame emission.

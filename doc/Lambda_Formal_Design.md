@@ -1450,7 +1450,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
-| D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Impl_Error_Handling (done).md` |
+| D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
 | D3.4 | Shape_Pool §1–§8; Transpile_Map DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpile_Map.md`, `Lambda_Design_Name_Identity.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
@@ -1463,18 +1463,18 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
 | D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
-| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1 + call-ABI notes; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
-| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Impl_Tune_Ast.md` |
+| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md` |
 
 The decision records preserve the full deliberations — every alternative
 that lost and the arguments that did not persuade. This specification is

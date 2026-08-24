@@ -1633,9 +1633,9 @@ below by its section.
 ## Appendix A — Implementation Footnotes
 
 Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
-[`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
-[`Lambda_Impl_Error_Rework.md`](../vibe/Lambda_Impl_Error_Rework.md),
-[`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
+[`Lambda_Impl_Error_Handling (done).md`](../vibe/impl/Lambda_Impl_Error_Handling%20(done).md),
+[`Lambda_Impl_Error_Rework.md`](../vibe/impl/Lambda_Impl_Error_Rework.md),
+[`Lambda_Impl_Int_Total (done).md`](../vibe/impl/Lambda_Impl_Int_Total%20(done).md).
 
 | Ruling | Status |
 |---|---|

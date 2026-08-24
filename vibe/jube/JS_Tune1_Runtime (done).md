@@ -4,7 +4,7 @@
 **Tree anchor**: master `b9b30f4ac`
 **Design authority**: `vibe/jube/JS_Runtime_Redesign.md` JR3/JR3.1/JR3.2 (all
 rulings), §6 phases R2a/R2b. History: G0–G3 per JR3;
-`vibe/Lambda_Impl_Online_Exception (done).md` (G2, superseded in place).
+`vibe/impl/Lambda_Impl_Online_Exception (done).md` (G2, superseded in place).
 **Baseline evidence**: `vibe/jube/JS_Profiling_Helpers.md`.
 
 **Decision.** The LJS exception path now uses Lambda's in-band merged-lane

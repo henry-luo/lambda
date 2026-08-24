@@ -3,12 +3,12 @@
 - **Date:** 2026-08-08
 - **Input:** `test/benchmark/Overall_Result25.md` (Lambda commit `acb46fb4d`, archived binary
   `test/benchmark/exe/lambda-v25-812ddaef0b`), `test/benchmark/Overall_Result24.md`,
-  `vibe/Lambda_Impl_Tune15.md` (§8 implementation record), full typed-source audit of all
+  `vibe/impl/Lambda_Impl_Tune15.md` (§8 implementation record), full typed-source audit of all
   55 `test/benchmark/*/[name]2.ls` files (§3, 2026-08-07)
 - **Status:** IMPLEMENTED — C0–C7 code, source repair, regression coverage, and verification gates complete; measured target status is recorded in §6
-- **Related:** `vibe/Lambda_Impl_Tune15.md`, `vibe/Lambda_Impl_Tune14 (done).md`,
+- **Related:** `vibe/impl/Lambda_Impl_Tune15.md`, `vibe/impl/Lambda_Impl_Tune14 (done).md`,
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`, `vibe/Lambda_Design_Name_Identity.md`,
-  `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/Lambda_Impl_Tune13.md` (R22 typed-store
+  `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Tune13.md` (R22 typed-store
   dissection), `vibe/Lambda_Issue_Type_Support.md` (TS-3 ANY downgrade)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;
   `doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3, D5.2–D5.3,
@@ -169,7 +169,7 @@ spectralnorm delta was the warning that the v24 attributions were partially stal
 2. **brainfuck still typed-worse after the packed-fill witness ⇒ the cost moved to writes.**
    Reads through the witness got cheap; `tape[dp] = …` still routes through the checked
    store path the Result22 dissection measured at clone+validate per store
-   (`lambda_array_set_checked`; `vibe/Lambda_Impl_Tune13.md` R22-1). matmul (fully typed,
+   (`lambda_array_set_checked`; `vibe/impl/Lambda_Impl_Tune13.md` R22-1). matmul (fully typed,
    still +9%) is the clean specimen: the annotation's only remaining cost is the store
    path. That is C1.
 3. **deltablue −6% / gcbench flat / splay +8% ⇒ B3 never engaged — and §3 shows why.** The

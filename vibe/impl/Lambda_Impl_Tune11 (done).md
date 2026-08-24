@@ -32,7 +32,7 @@ precise GC rooting.
 - `vibe/Lambda_Design_Compiling_Nullable.md`;
 - `vibe/Lambda_Design_Runtime_COW.md`;
 - `vibe/Lambda_Design_Name_Identity.md`;
-- `vibe/Lambda_Impl_Name_Identify (done).md`;
+- `vibe/impl/Lambda_Impl_Name_Identify (done).md`;
 - `test/benchmark/Overall_Result18.md`;
 - `test/benchmark/Overall_Result20.md`.
 

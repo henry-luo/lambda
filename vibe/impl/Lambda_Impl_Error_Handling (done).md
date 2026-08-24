@@ -252,7 +252,7 @@ declared params and returns — all of which C2's framing missed.
 
 **Acceptance is read from the destination contract, never from syntactic position.** The
 predicate needs no new machinery; both halves already exist in
-[`type_contract.hpp`](../lambda/runtime/type_contract.hpp):
+[`type_contract.hpp`](../../lambda/runtime/type_contract.hpp):
 
 - `lambda_type_accepts_error(Type*)` — admission (`any`, `error`, `T | error`, `T^`);
 - `lambda_type_lane_storage_desc(Type*, LaneStorageDesc*)` — representation; already "returns

@@ -7,10 +7,10 @@
   release profiles, and side-by-side Lambda/C2MIR MIR as evidence
 - **Primary implementation area:** `lambda/runtime/transpile-mir.cpp` and Lambda-owned runtime
   helpers; the vendored MIR tree and the frozen legacy `--c2mir` path are out of scope
-- **Baseline:** [`test/benchmark/Overall_Result21.md`](../test/benchmark/Overall_Result21.md)
+- **Baseline:** [`test/benchmark/Overall_Result21.md`](../../test/benchmark/Overall_Result21.md)
 - **Prior plan:** [`Lambda_Impl_Tune11 (done).md`](Lambda_Impl_Tune11%20%28done%29.md)
-- **Numeric authority:** [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md)
-  §4.7 and [`Lambda_Semantics_Int_Type.md`](Lambda_Semantics_Int_Type.md)
+- **Numeric authority:** [`doc/Lambda_Formal_Semantics.md`](../../doc/Lambda_Formal_Semantics.md)
+  §4.7 and [`Lambda_Semantics_Int_Type.md`](../Lambda_Semantics_Int_Type.md)
 
 ## 0. Closeout ledger — 2026-08-06
 
@@ -66,9 +66,9 @@ The static MIR report records candidate/archive module totals of 691/804 instruc
 `collatz`, 504/595 for `array1`, 1,943/2,018 for `quicksort`, and 1,356/1,509 for `matmul`.
 Those are audit signals only; the timing table is the acceptance evidence.
 
-The complete Result22 artifacts are [`benchmark_results_v22.json`](../test/benchmark/benchmark_results_v22.json),
-[`benchmark_results_v22_c2mir.json`](../test/benchmark/benchmark_results_v22_c2mir.json), and
-[`Overall_Result22.md`](../test/benchmark/Overall_Result22.md). The standard run covers all 56
+The complete Result22 artifacts are [`benchmark_results_v22.json`](../../test/benchmark/benchmark_results_v22.json),
+[`benchmark_results_v22_c2mir.json`](../../test/benchmark/benchmark_results_v22_c2mir.json), and
+[`Overall_Result22.md`](../../test/benchmark/Overall_Result22.md). The standard run covers all 56
 canonical rows with three runs each for MIR untyped, MIR typed, LambdaJS, QuickJS, and Node.js;
 MIR, MIR typed, LambdaJS, and Node.js have 56/56 timings, while QuickJS has six recorded
 `exit_1` cells. The separately measured C2MIR pass covers 44/56 rows, with the remaining twelve
@@ -215,7 +215,7 @@ overheads. They rank investigation targets; they are not literal per-row accepta
 
 ### 2.4 Native integer versus double evidence
 
-[`test/benchmark/Result_Double_vs_Int.md`](../test/benchmark/Result_Double_vs_Int.md) compares
+[`test/benchmark/Result_Double_vs_Int.md`](../../test/benchmark/Result_Double_vs_Int.md) compares
 matched C2MIR integer and double ports:
 
 - double/int geomean is only **1.33x** over 24 pairs;

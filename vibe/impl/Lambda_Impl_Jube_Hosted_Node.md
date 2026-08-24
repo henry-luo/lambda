@@ -329,7 +329,7 @@
 > N8 is the formerly deferrable web-platform tail split out of Node closure so
 > the WPT dependency cannot make N7 internally contradictory.
 >
-> **Template:** `vibe/Lambda_Impl_Hosted_Python.md` (H0–H10). This plan reuses
+> **Template:** `vibe/impl/Lambda_Impl_Hosted_Python.md` (H0–H10). This plan reuses
 > its stage anatomy (Goal / Tasks / Exit gate), its checkpoint discipline
 > (static first, behavioral parity, then dynamic), and its verification matrix
 > shape. The runtime relationship is inverted — the engine calls the module —

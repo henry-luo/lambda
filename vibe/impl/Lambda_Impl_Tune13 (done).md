@@ -6,7 +6,7 @@
   release-profile gates. The retained implementation and all required correctness gates are
   recorded below.
 - **Related:** `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (historical Result18 dissection),
-  `vibe/Lambda_Impl_Tune11 (done).md`, `vibe/Lambda_Impl_Tune12.md`,
+  `vibe/impl/Lambda_Impl_Tune11 (done).md`, `vibe/impl/Lambda_Impl_Tune12.md`,
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/Lambda_Design_Compiling_Lane.md`,
   and `vibe/Lambda_Semantics_Int_Type.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S1.4–S1.6, S4.1, S4.5.3,

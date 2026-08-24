@@ -4,12 +4,12 @@
 - **Input:** `test/benchmark/Overall_Result26.md` (Lambda commit `7a876454d0`, archived
   binary `test/benchmark/exe/lambda-v26-7a876454d0`), `test/benchmark/Overall_Result25.md`,
   `test/benchmark/Overall_Result18.md` (pre-enforcement reference),
-  `vibe/Lambda_Impl_Tune16.md` (§6 implementation record), MIR dumps and Node-normalized
+  `vibe/impl/Lambda_Impl_Tune16.md` (§6 implementation record), MIR dumps and Node-normalized
   row comparisons in `temp/prof16/` (comparison scripts `cmp2.py`/`cmp3.py`)
 - **Status:** IMPLEMENTED — the safe T1–T4 slices and their verification fixtures are
   landed; residual benchmark targets that require a new representation design remain
   explicitly evidence-gated rather than being claimed as cleared
-- **Related:** `vibe/Lambda_Impl_Tune16.md`, `vibe/Lambda_Impl_Tune15.md`,
+- **Related:** `vibe/impl/Lambda_Impl_Tune16.md`, `vibe/impl/Lambda_Impl_Tune15.md`,
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`, `vibe/Lambda_Design_Type_Enforcement.md`,
   `vibe/Lambda_Issue_Type_Support.md` (TS-3)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;

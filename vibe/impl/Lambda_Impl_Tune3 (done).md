@@ -11,7 +11,7 @@
 > **M3 (COW anchor)** is SUPERSEDED — the designer went straight to refcount
 > COW instead of patching the eager clone: design
 > `vibe/Lambda_Design_COW.md` (CW10 retires the anchor), implementation plan
-> `vibe/Lambda_Impl_Tune_COW.md` (which also absorbs M3's remedy (a) as a
+> `vibe/impl/Lambda_Impl_Tune_COW.md` (which also absorbs M3's remedy (a) as a
 > stopgap and remedy (c) into its JIT phase). **M4 (boxed element loads /
 > `any` arithmetic)** is diagnosis only (§6.4), tracked in
 > `vibe/Lambda_Tuning_Proposal.md` under R6. The full M3 analysis text
@@ -280,7 +280,7 @@ M3 never landed here. The eager-clone anchor (`fn_mutable_value` +
 refcount-COW design: `vibe/Lambda_Design_COW.md` — its §2 restates this
 section's diagnosis as Context B, CW10 replaces the anchor with O(1)
 share-and-mark, and its §7 retires the clone context from the mutation path.
-Implementation: `vibe/Lambda_Impl_Tune_COW.md`. Of the old remedies, (a)
+Implementation: `vibe/impl/Lambda_Impl_Tune_COW.md`. Of the old remedies, (a)
 runtime scalar early-return survives as that plan's stopgap Phase A0, and
 (c) trust-definite-scalar-types folds into its JIT phase; (b) lazy
 visited-map and (d) demotion repair die with the anchor itself. The full
@@ -297,7 +297,7 @@ byte-identical → correctness sweep on all timed benchmark rows → numbers
 recorded in §6.
 
 **Final verification (Result11) did NOT run here** — it is deliberately
-deferred to the exit of `vibe/Lambda_Impl_Tune_COW.md` (COW Stage 1), so the
+deferred to the exit of `vibe/impl/Lambda_Impl_Tune_COW.md` (COW Stage 1), so the
 fresh benchmark round measures M1+M2 *and* the anchor retirement together:
 full protocol re-run (3-run median, release, 180 s), output-correctness sweep
 in the protocol (`WRONG_OUTPUT_ROWS` + sweep — a wrong-but-fast row must
@@ -383,7 +383,7 @@ that barely moved are dominated by costs outside M1/M2:
 
 - **collatz, and part of primes/array1** — the COW anchor (M3): collatz's
   profile was malloc/`hashmap_new`, untouched by M1/M2. Now owned by
-  `vibe/Lambda_Design_COW.md` / `vibe/Lambda_Impl_Tune_COW.md` (§4).
+  `vibe/Lambda_Design_COW.md` / `vibe/impl/Lambda_Impl_Tune_COW.md` (§4).
 - **matmul, triangl, array1** — `any`-typed values flowing through *array
   element loads*. Index arithmetic is now inline, but each element load still
   returns a boxed Item and the arithmetic on loaded values takes the boxed
@@ -463,6 +463,6 @@ so the two paths are pinned against each other.
 
 ### 6.6 Next
 
-The anchor (ex-M3) is retired by COW Stage 1 — `vibe/Lambda_Impl_Tune_COW.md`
+The anchor (ex-M3) is retired by COW Stage 1 — `vibe/impl/Lambda_Impl_Tune_COW.md`
 — whose exit runs the full benchmark protocol as **Result11** (correctness
 sweep in-protocol). M4 is queued in `vibe/Lambda_Tuning_Proposal.md` R6.

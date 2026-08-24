@@ -35,7 +35,7 @@ AST node for one is to be added.
   error channels, handler/propagation behavior, suspension, and the closed
   native-fault carve-out.
 - **REH-D1–REH-D14** in
-  [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md)
+  [`Lambda_Design_Runtime_Error_Handling.md`](../Lambda_Design_Runtime_Error_Handling.md)
   — detailed cross-language transport and enforcement design.
 
 The formal documents win if this plan drifts. Any implementation discovery

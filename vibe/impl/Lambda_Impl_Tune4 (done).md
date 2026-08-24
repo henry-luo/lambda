@@ -132,11 +132,11 @@ every GC probe and both new tests.
 ---
 
 **Status: PLANNED — 2026-07-24.**
-**Successor of:** `vibe/Lambda_Impl_Tune_COW (done).md` (exit = Result11). This plan
+**Successor of:** `vibe/impl/Lambda_Impl_Tune_COW (done).md` (exit = Result11). This plan
 consumes the Result11 diagnosis that `Lambda_Tuning_Proposal.md` R0 called for and
 executes the highest-leverage subset of R6 plus the newly root-caused shared-GC
 defects. **The JS-engine-specific phases (holey-array watermark, canonical numeric
-index) are split out to `vibe/Lambda_Impl_Tune5.md`** — this plan owns the
+index) are split out to `vibe/impl/Lambda_Impl_Tune5.md`** — this plan owns the
 shared-runtime (GC) and Lambda/MIR work; the GC phases G1/G2 change LambdaJS
 baselines too, so Tune5 measures against post-G1/G2 baselines.
 **Diagnosis provenance:** release-build `sample` profiles + disassembly + source
@@ -144,7 +144,7 @@ tracing, 2026-07-24, two commits past the Result11 commit (`52c0f3c02`, benchmar
 commit `1704c2f43`). Absolute times ran ~1.3–1.5x above the Result11 report
 (different host state); all conclusions rest on hot-frame proportions, not
 absolutes. Evidence recorded in §1; LJS-specific evidence lives in Tune5 §1.
-**Related plans:** `vibe/Lambda_Impl_Tune5.md` (LJS phases J1/J2),
+**Related plans:** `vibe/impl/Lambda_Impl_Tune5.md` (LJS phases J1/J2),
 `vibe/Lambda_Tuning_Proposal.md` (R2/R3/R7 stay owned there),
 `vibe/Lambda_Design_COW.md` Stage 2 (ArrayNum COW/views — untouched here),
 `vibe/Lambda_Design_MIR_Emission_Test.md` (MT7 budgets gate all emission changes).
@@ -487,7 +487,7 @@ Order: **G0 → G1 → G2 → M1 → M2** (→ S1 only on evidence).
 Rationale: G1/G2 are small, benefit both engines at once, and change the
 baseline under every later phase (re-run probes after each); M1 is MIR's
 biggest geo-mean lever; M2 is the most design-sensitive and goes last.
-`vibe/Lambda_Impl_Tune5.md` (J0 → J1 → J2) proceeds after G1/G2 land — its
+`vibe/impl/Lambda_Impl_Tune5.md` (J0 → J1 → J2) proceeds after G1/G2 land — its
 phases are code-independent of M1/M2 and may run in parallel with them.
 
 Each phase lands independently green: baseline suites 100%, MT7 budgets
