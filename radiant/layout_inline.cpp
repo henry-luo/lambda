@@ -156,6 +156,46 @@ static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
     return true;
 }
 
+bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {
+    if (!span || !span->blk) return false;
+    CssEnum white_space = span->block()->white_space;
+    if (white_space != CSS_VALUE_NORMAL) return false;
+
+    LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(span);
+    if (edges.left != 0.0f || edges.right != 0.0f ||
+        edges.top != 0.0f || edges.bottom != 0.0f) {
+        return false;
+    }
+    if (span->bound && (span->boundary()->margin.left != 0.0f ||
+                        span->boundary()->margin.right != 0.0f)) {
+        return false;
+    }
+    if (span->bound && span->boundary()->background) {
+        BackgroundProp* background = span->boundary()->background;
+        if (background->color.a > 0 || background->image ||
+            background->gradient_type != GRADIENT_NONE ||
+            background->linear_layer_count > 0 ||
+            background->radial_layer_count > 0) {
+            return false;
+        }
+    }
+
+    bool saw_collapsed_text = false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->is_text()) {
+            DomText* text = lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child));
+            if ((child->view_type == RDT_VIEW_TEXT && child->width > 0.0f) ||
+                !text_is_all_collapsible_space(text, span)) {
+                return false;
+            }
+            saw_collapsed_text = true;
+        } else {
+            return false;
+        }
+    }
+    return saw_collapsed_text;
+}
+
 static bool view_has_non_trailing_line_content(View* view, ViewSpan* span) {
     if (!view) return false;
     bool found = false;
@@ -900,13 +940,38 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return false;
     };
 
+    // CSS 2.1 §10.6.1: zero-width continuation rects carry line position but
+    // do not enlarge an inline ancestor that has a visible text fragment.
+    auto get_text_visible_edge = [](View* c, bool horizontal, bool end_edge,
+                                    float* edge_out) -> bool {
+        if (!c || c->view_type != RDT_VIEW_TEXT || !edge_out) return false;
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(c);
+        bool found = false;
+        float edge = end_edge ? -FLT_MAX : FLT_MAX;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->width <= 0.0f || rect->height <= 0.0f) continue;
+            float fragment_edge = horizontal
+                ? (end_edge ? rect->x + rect->width : rect->x)
+                : (end_edge ? rect->y + rect->height : rect->y);
+            edge = end_edge ? max(edge, fragment_edge) : min(edge, fragment_edge);
+            found = true;
+        }
+        if (found) *edge_out = edge;
+        return found;
+    };
+
     auto get_child_static_x_edge = [&get_child_relative_offset,
                                     &text_child_uses_slice_decoration,
-                                    &text_child_has_collapsed_leading_fragment](
+                                    &text_child_has_collapsed_leading_fragment,
+                                    &get_text_visible_edge](
         View* c, bool right_edge) -> float {
         float dx = 0.0f;
         get_child_relative_offset(c, &dx, nullptr);
         float edge = c->x - dx + (right_edge ? c->width : 0.0f);
+        float visible_edge = 0.0f;
+        if (get_text_visible_edge(c, true, right_edge, &visible_edge)) {
+            edge = visible_edge - dx;
+        }
         if (text_child_uses_slice_decoration(c) &&
             text_child_has_collapsed_leading_fragment(c)) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(c);
@@ -967,11 +1032,17 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     };
     // CSS 2.1 §10.6.1: For inline non-replaced elements, vertical borders/padding
     // CSS 2.1 §9.4.3: Relative positioning moves a box visually but does not
-    auto get_child_static_y_edge = [&get_child_relative_offset](
+    auto get_child_static_y_edge = [&get_child_relative_offset,
+                                    &get_text_visible_edge](
         View* c, bool bottom_edge) -> float {
         float dy = 0.0f;
         get_child_relative_offset(c, nullptr, &dy);
-        return c->y - dy + (bottom_edge ? c->height : 0.0f);
+        float edge = c->y - dy + (bottom_edge ? c->height : 0.0f);
+        float visible_edge = 0.0f;
+        if (get_text_visible_edge(c, false, bottom_edge, &visible_edge)) {
+            edge = visible_edge - dy;
+        }
+        return edge;
     };
     auto get_child_static_y = [&get_child_static_y_edge](View* c) {
         return get_child_static_y_edge(c, false);
@@ -1804,12 +1875,32 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         bool has_direct_visible_text = span_has_direct_visible_text(span);
         bool direct_text_brackets_block =
             span_has_direct_text_on_both_sides_of_block(span);
-        // CSS 2.1 §9.2.1.1: a split inline spans the line extent when direct
-        // content brackets an in-flow block; an out-of-flow child must not
-        // widen the inline containing block beyond its direct content.
-        span->width = span->has_split_inline_fragment_union() &&
-            (!has_direct_visible_text || direct_text_brackets_block)
-            ? max(measured_width, containing_line_width) : measured_width;
+        ViewBlock* first_in_flow_block = nullptr;
+        if (!has_direct_visible_text && !span->has_split_inline_fragment_union()) {
+            for (View* fragment = span->first_child; fragment; fragment = fragment->next()) {
+                ViewBlock* block_fragment = lam::view_as_block(fragment);
+                if (block_fragment && !layout_block_is_out_of_flow(block_fragment)) {
+                    first_in_flow_block = block_fragment;
+                    break;
+                }
+            }
+        }
+        if (first_in_flow_block) {
+            // CSS 2.1 §9.2.1.1: an inline containing only a block is split
+            // into zero-area edge fragments; the block must not widen that span.
+            span->x = lycon->line.left;
+            span->y = first_in_flow_block->y;
+            span->width = 0.0f;
+            span->height = 0.0f;
+            span->content_height = 0.0f;
+        } else {
+            // CSS 2.1 §9.2.1.1: a split inline spans the line extent when direct
+            // content brackets an in-flow block; an out-of-flow child must not
+            // widen the inline containing block beyond its direct content.
+            span->width = span->has_split_inline_fragment_union() &&
+                (!has_direct_visible_text || direct_text_brackets_block)
+                ? max(measured_width, containing_line_width) : measured_width;
+        }
         // CSS 2.1 §9.2.1.1: Extend span bounding box upward to cover the leading
         {
             bool has_inline_start = inline_has_axis_edge_decoration(
@@ -2191,6 +2282,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
     }
+    if (span->height == 0 && had_children && saved_trailing > 0.0f &&
+        layout_span_children_have_no_line_content(span)) {
+        // css 2.1 §10.8.1: trimming a trailing space removes its advance,
+        // not the inline strut.
+        span->content_height = lycon->block.line_height;
+        if (lycon->line.start_view || !lycon->line.is_line_start) {
+            span->height = span->content_height;
+        }
+    }
     if (last_child_for_trim && saved_trailing > 0) {
         last_child_for_trim->width += saved_trailing;
     }
@@ -2199,6 +2299,23 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         layout_relative_positioned(lycon, lam::unsafe_view_block_api_span(span));
     } else if (span->position && span->positionp()->position == CSS_VALUE_STICKY) {
         layout_sticky_positioned(lycon, lam::unsafe_view_block_api_span(span));
+    }
+
+    if (layout_inline_is_collapsed_whitespace_only(span)) {
+        // cssom view: a collapsed whitespace-only inline has no generated box.
+        // Its local zero rect is rooted at the containing block.
+        FragmentUnion* collapsed = span->ensure_fragment_union(
+            FRAGMENT_UNION_COLLAPSED_LINE);
+        if (collapsed) {
+            collapsed->min_x = collapsed->max_x = 0.0f;
+            collapsed->min_y = collapsed->max_y = 0.0f;
+        }
+        span->set_has_collapsed_line_fragment_union(true);
+        span->x = 0.0f;
+        span->y = 0.0f;
+        span->width = 0.0f;
+        span->height = 0.0f;
+        span->content_height = 0.0f;
     }
 
     lycon->font = pa_font;

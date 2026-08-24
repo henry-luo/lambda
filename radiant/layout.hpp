@@ -358,6 +358,9 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             CssPropertyCode property,
                                             float inline_base = -1.0f,
                                             bool include_bound = true);
+void layout_align_deferred_inline_line_runs(ViewElement* parent,
+                                             float final_content_width,
+                                             CssEnum text_align);
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
     float min_content_width;
@@ -1302,6 +1305,7 @@ float compute_view_last_text_baseline(
 } // namespace radiant
 
 CssEnum get_white_space_value(DomNode* node);
+bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span);
 inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
            white_space == CSS_VALUE_PRE_LINE || white_space == 0;
@@ -1504,6 +1508,9 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 typedef struct MulticolFlowItem {
     ViewBlock* block;
     float height;
+    float content_height;
+    float margin_before;
+    float margin_after;
     float inline_offset;
     bool can_fragment;
     bool spans_all;
@@ -1535,6 +1542,9 @@ typedef struct ColumnFragment {
 // spanner path and the ordinary container path from drifting in ownership.
 struct MulticolGroupScratch {
     float* heights;
+    float* content_heights;
+    float* margin_before;
+    float* margin_after;
     bool* can_fragment;
     bool* break_before;
     bool* break_after;
@@ -1542,6 +1552,12 @@ struct MulticolGroupScratch {
 
     bool init(ScratchArena* scratch) {
         heights = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        content_heights = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        margin_before = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        margin_after = (float*)scratch_alloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(float));
         can_fragment = (bool*)scratch_alloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(bool));
@@ -1551,7 +1567,8 @@ struct MulticolGroupScratch {
             MAX_MULTICOL_BLOCKS * sizeof(bool));
         fragments = (ColumnFragment*)scratch_calloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
-        return heights && can_fragment && break_before && break_after && fragments;
+        return heights && content_heights && margin_before && margin_after &&
+            can_fragment && break_before && break_after && fragments;
     }
 
     void release(ScratchArena* scratch) {
@@ -1559,12 +1576,18 @@ struct MulticolGroupScratch {
         if (break_after) scratch_free(scratch, break_after);
         if (break_before) scratch_free(scratch, break_before);
         if (can_fragment) scratch_free(scratch, can_fragment);
+        if (margin_after) scratch_free(scratch, margin_after);
+        if (margin_before) scratch_free(scratch, margin_before);
+        if (content_heights) scratch_free(scratch, content_heights);
         if (heights) scratch_free(scratch, heights);
         fragments = nullptr;
         break_after = nullptr;
         break_before = nullptr;
         can_fragment = nullptr;
         heights = nullptr;
+        margin_after = nullptr;
+        margin_before = nullptr;
+        content_heights = nullptr;
     }
 };
 // Keep the bounded flow-item buffer paired with its scratch lifetime; nested
@@ -1603,6 +1626,8 @@ typedef struct FragmentedFlowCursor {
     ColumnGroup* group;
     int current_fragment;
     float block_offset;
+    float pending_margin_after;
+    bool has_item_in_fragment;
 } FragmentedFlowCursor;
 // A normalized projection avoids separate fragment-index math in text and
 // block paths; both must clamp negative offsets and use the same row pitch.
@@ -3272,11 +3297,14 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
  *                   line that already originated above the float.
  * @param float_placement_query Apply same-side float intrusion at the
  *                              candidate top even for a zero-height float.
+ * @param horizontal_offset Translate returned bounds into a caller-local
+ *                          inline coordinate system whose origin is in BFC space.
  * @return Available space bounds adjusted for floats
  */
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
                                               bool line_query = false,
-                                              bool float_placement_query = false);
+                                              bool float_placement_query = false,
+                                              float horizontal_offset = 0.0f);
 // Return the next lower edge of any float strictly below the candidate Y.
 // Float-avoidance and positioned static placement share this boundary rule.
 float block_context_next_float_boundary(BlockContext* ctx, float y);
