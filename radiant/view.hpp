@@ -1411,6 +1411,7 @@ typedef struct MarkerProp {
     float ascender;          // Marker font normal-line ascender
     float descender;         // Marker font normal-line descender
     float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
+    float trailing_space_width; // Collapsible separator after a default text marker
     char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
     ListStyleImage image;     // list-style-image URL or gradient
     ImageSurface* loaded_image; // cached loaded image for layout and render
@@ -1418,6 +1419,7 @@ typedef struct MarkerProp {
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
     bool reserves_first_line; // outside marker has no parent list gutter to occupy
     bool has_explicit_content; // ::marker content overrides the list-style marker
+    bool trailing_space_trimmed; // marker-only lines have discarded the separator
 } MarkerProp;
 
 /**

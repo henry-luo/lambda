@@ -1438,6 +1438,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 css_transition_resolve(dom_elem, lycon);
             }
 
+            // CSS Zoom resolves author lengths after UA defaults; refresh only
+            // untouched body sides so authored margins remain cascade winners.
+            layout_refresh_html_body_ua_margin(lycon, dom_elem);
+
             if (dom_elem->bound) {
                 ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
                 float used_font_size = (span->font && span->fontp()->font_size > 0)
@@ -1934,6 +1938,40 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
     return lycon->block.advance_y + vertical_offset + half_leading - border_top - padding_top;
 }
 
+static bool layout_inline_span_has_content_on_line(View* view, int line_number) {
+    if (!view || view->view_type == RDT_VIEW_NONE ||
+        layout_view_is_out_of_flow(view)) {
+        return false;
+    }
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            // collapsed whitespace has line membership but no inline content;
+            // non-collapsible spaces and combining marks still participate.
+            if (rect->line_number == line_number &&
+                layout_text_rect_content_kind(text, rect) !=
+                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (view->view_type == RDT_VIEW_INLINE) {
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (!span->first_child) return true;
+        for (View* child = span->first_child; child; child = child->next()) {
+            if (layout_inline_span_has_content_on_line(child, line_number)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (view->view_type == RDT_VIEW_BR || view->view_type == RDT_VIEW_MARKER) {
+        return true;
+    }
+    return view->inline_line_number == line_number;
+}
+
 void view_vertical_align(LayoutContext* lycon, View* view) {
     // CSS 2.1 §10.8.1: The line box height is determined by baseline-aligned content
     float baseline_line_height = 0.0f;
@@ -2158,6 +2196,18 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
     else if (view->view_type == RDT_VIEW_INLINE) {
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (span->has_collapsed_line_fragment_union() &&
+            layout_span_children_have_no_line_content(span)) {
+            // CSS Inline 3: a collapsed zero-content fragment already carries
+            // its line position; later-line alignment must not move it.
+            return;
+        }
+        if (!layout_inline_span_has_content_on_line(
+                static_cast<View*>(span), lycon->block.line_number)) {
+            // CSS 2.1 §10.8.1: a split inline's previous-line fragment must
+            // not be realigned against a later line box.
+            return;
+        }
         if (span->tag() == MARKUP_NAME_RT && span->parent && span->parent->is_element() &&
             span->parent->tag() == MARKUP_NAME_RUBY) {
             return;
@@ -3048,10 +3098,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     float marker_content_height =
                         ((marker_prop->loaded_image || marker_prop->is_image_marker) &&
                          marker_prop->height > 0.0f) ? marker_prop->height : 0.0f;
-                    // an image marker must retain the line fragment's height so
-                    // its replaced content stays vertically centered with text.
-                    marker_span->height = max(marker_content_height,
-                        max(lycon->block.line_height, marker_prop->line_height));
+                    // CSS Lists: a replaced image marker uses its used object
+                    // size for the marker fragment; normal line-height applies
+                    // only when the marker has no replaced image content.
+                    marker_span->height = marker_content_height > 0.0f
+                        ? marker_content_height
+                        : max(lycon->block.line_height, marker_prop->line_height);
 
                     if (marker_prop->is_outside) {
                         marker_span->x = marker_prop->reserves_first_line
@@ -3096,23 +3148,24 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         lycon->line.advance_x += marker_prop->width;
                     }
 
-                    bool raster_image_raises_line =
-                        marker_prop->is_image_marker ||
-                        (marker_prop->loaded_image &&
-                         marker_prop->loaded_image->format != IMAGE_FORMAT_SVG &&
-                         marker_span->height > lycon->block.line_height);
-                    if (raster_image_raises_line) {
-                        if (marker_prop->is_image_marker) {
-                            // Align the replaced marker's bottom edge to the
-                            // line baseline; using its full height as ascent
-                            // would add the text strut's descent a second time.
-                            float image_ascender = max(
-                                0.0f, marker_span->height - lycon->block.init_descender);
-                            lycon->line.max_ascender = max(
-                                lycon->line.max_ascender, image_ascender);
-                        } else if (marker_span->height > lycon->line.max_ascender) {
-                            lycon->line.max_ascender = marker_span->height;
-                        }
+                    // CSS Lists 3 §3.3: every generated image marker is a
+                    // replaced marker, including URL images using the 1em
+                    // default object size when no intrinsic size is present.
+                    bool image_marker_raises_line =
+                        (marker_prop->is_image_marker || marker_prop->loaded_image) &&
+                        marker_span->height > lycon->block.line_height;
+                    if (image_marker_raises_line) {
+                        // CSS Inline: a default-sized image marker uses its
+                        // bottom edge as the baseline, just like a gradient
+                        // marker with an explicit used object size.
+                        bool default_sized_image = marker_prop->is_image_marker ||
+                            (marker_prop->loaded_image &&
+                             !marker_prop->loaded_image->has_intrinsic_size);
+                        float image_ascender = default_sized_image
+                            ? max(0.0f, marker_span->height - lycon->block.init_descender)
+                            : max(0.0f, marker_span->height);
+                        lycon->line.max_ascender = max(
+                            lycon->line.max_ascender, image_ascender);
                         if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
                         lycon->line.is_line_start = false;
                         lycon->line.has_replaced_content = true;

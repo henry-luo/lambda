@@ -528,6 +528,15 @@ float font_get_cell_height(FontHandle* handle) {
         }
     }
 
+    float platform_ascent, platform_descent, platform_line_height;
+    if (font_get_handle_platform_metrics(handle, &platform_ascent,
+                                          &platform_descent,
+                                          &platform_line_height)) {
+        // text rectangles use the resolved platform font box; HHEA includes
+        // extra vertical space that Chromium does not expose in DOMRects.
+        return platform_ascent + platform_descent;
+    }
+
     // FontTables hhea+head → ascent + descent in CSS pixels
     HheaTable* hhea = font_tables_get_hhea(ft);
     HeadTable* head = font_tables_get_head(ft);
