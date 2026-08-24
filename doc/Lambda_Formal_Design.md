@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.26.4 (2026-08-24)
+**Spec version:** 1.26.5 (2026-08-25)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1082,7 +1082,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v4*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v5*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1091,6 +1091,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   baseline execution mode and the retained AST is the runtime source of truth;
   the shipped Lambda script policy is **AUTO**: each definition starts in T0,
   and an eligible hot definition may promote to its P2 boxed MIR satellite.
+  Ordinary interpreted entries promote at `LAMBDA_JIT_THRESHOLD` (**5** by
+  default). A direct, validated self-tail edge also increments the
+  definition-site call and tail-edge counters; at the same threshold it may
+  synchronously publish the eligible satellite and transfer to its ordinary
+  boxed entry with the rooted next-call arguments. This is a tail-entry
+  handoff, not general OSR: no interpreter program counter or arbitrary local
+  frame is materialized into MIR. General loop backedges remain next-entry
+  promotion candidates (`LAMBDA_JIT_BACKEDGE`, default 1024).
   `LAMBDA_TIER=interp` pins the run to T0, while `LAMBDA_TIER=jit` explicitly
   selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
   (**T1**). The REPL and legacy inspection tools
@@ -1305,7 +1313,7 @@ Status of `*`-marked rulings as of 2026-08-24.
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (js_dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.1.1v4 | Decided 2026-08-24. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector now chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. The release AUTO corpus gate is green at 758/758, with P3 restricted PREDICATE/CONST slices and P4's persistent-REPL vertical slice still scoped separately. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
+| D8.1.1v5 | Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
@@ -1379,7 +1387,7 @@ Numbered `DO#` (design-open); each links to its record.
   deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
   OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
   JR3.
-- **DO25** Interpreter tier (D8.1.1v4) remains open for breadth/performance: satellite-module
+- **DO25** Interpreter tier (D8.1.1v5) remains open for breadth/performance: satellite-module
   treatment under the MT7 emission budgets (AIO2); cross-context visibility of
   promotion cells (AIO8); once-called hot bodies — `run`-mode `main` with
   heavy inline loops never re-enters, so backedge marking never pays; escape

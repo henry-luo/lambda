@@ -131,6 +131,7 @@ struct MirTranspiler {
     // definition except this target are dynamic through those Function slots.
     Script* interp_module_owner;
     AstFuncNode* satellite_target;
+    bool whole_script_poc;
     uint32_t satellite_module_state_id;
 
     // Pattern type list (shared with Script's type_list for const_pattern access)
@@ -4498,11 +4499,11 @@ static MIR_reg_t emit_module_state_load_after(MirTranspiler* mt, MIR_insn_t afte
         MIR_new_mem_op(mt->ctx, MIR_T_I64,
             offsetof(EvalContext, module_states), mt->em.frame.runtime, 0, 1)));
     MIR_reg_t module_id = new_reg(mt, "module_id", MIR_T_I64);
-    if (mt->satellite_target && mt->interp_module_owner) {
-        // A task-backed satellite shares T0's slab but has an independently
-        // linked MIR image. Resolve the owner's reserved id directly instead
-        // of reading mutable BSS metadata that another image can relocate
-        // during batch compilation (D5.2, D8.2).
+    if (mt->interp_module_owner) {
+        // T0-backed satellites and the whole-script POC share the owner's slab
+        // but have independently linked MIR images. Resolve the owner's
+        // reserved id directly instead of reading mutable BSS metadata that
+        // another image can relocate during batch compilation (D5.2, D8.2).
         emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, module_id),
             MIR_new_int_op(mt->ctx, (int64_t)mt->satellite_module_state_id)));
@@ -4582,7 +4583,7 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
     // module-wide while virtual registers are function-local (D4.6.1v2-D4.6.2v2).
     MIR_reg_t state = emit_module_state(mt);
     uint32_t state_index = index;
-    if (mt->satellite_target) {
+    if (mt->satellite_target || mt->interp_module_owner) {
         if (index > UINT32_MAX - mt->satellite_property_key_base) return 0;
         state_index += mt->satellite_property_key_base;
     }
@@ -4614,8 +4615,8 @@ static MIR_reg_t load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
             state, 0, 1)));
     MIR_reg_t boxed = 0;
-    if (mt->satellite_target) {
-        // Satellite slab reads are boxed Item values just like the T0 slab.
+    if (mt->satellite_target || mt->interp_module_owner) {
+        // T0-backed MIR reads are boxed Item values just like the T0 slab.
         // The old early return skipped the native unbox below, so an `int`
         // module binding entered scalar MIR arithmetic as raw Item bits and
         // produced `inf` after promotion (D8.1.1v4 / D5.3.3).
@@ -4723,7 +4724,7 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
 // ============================================================================
 
 static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t as_type) {
-    if (mt && mt->satellite_target) {
+    if (mt && (mt->satellite_target || mt->interp_module_owner)) {
         MIR_reg_t state = emit_module_state(mt);
         return emit_call_2(mt, "lambda_module_const_at_state", MIR_T_P,
             MIR_T_P, MIR_new_reg_op(mt->ctx, state),
@@ -5443,6 +5444,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             MirVarEntry* cap_var = find_var(mt, name_buf);
             bool satellite_dynamic_target = mt->satellite_target &&
                 entry_node != (AstNode*)mt->satellite_target;
+            bool whole_script_dynamic_target = mt->whole_script_poc &&
+                !interp_satellite_supported((AstFuncNode*)entry_node);
+            satellite_dynamic_target = satellite_dynamic_target ||
+                whole_script_dynamic_target;
             if (!cap_var && !satellite_dynamic_target) {
                 goto function_reference;
             }
@@ -17067,6 +17072,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
              entry_node->node_type == AST_NODE_PROC) &&
             entry_node != (AstNode*)mt->satellite_target;
+        bool whole_script_dynamic_target = mt->whole_script_poc && entry_node &&
+            (entry_node->node_type == AST_NODE_FUNC ||
+             entry_node->node_type == AST_NODE_FUNC_EXPR ||
+             entry_node->node_type == AST_NODE_PROC) &&
+            !interp_satellite_supported((AstFuncNode*)entry_node);
+        satellite_dynamic_target = satellite_dynamic_target ||
+            whole_script_dynamic_target;
         if (!is_fn_variable && !satellite_dynamic_target && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
             entry_node->node_type == AST_NODE_FUNC_EXPR ||
             entry_node->node_type == AST_NODE_PROC)) {
@@ -26720,6 +26732,7 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
                                     MirModuleArtifacts* out_artifacts,
                                     Script* interp_module_owner,
                                     AstFuncNode* satellite_target,
+                                    bool whole_script_poc,
                                     const AstIndex* ast_index) {
     log_notice("transpile AST to MIR (direct)");
 
@@ -26745,9 +26758,10 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
     mt.ast_index = ast_index;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
+    mt.whole_script_poc = whole_script_poc;
     mt.satellite_module_state_id = interp_module_owner
         ? interp_module_owner->module_state_id : 0;
-    mt.satellite_property_key_base = satellite_target && interp_module_owner
+    mt.satellite_property_key_base = interp_module_owner
         ? lambda_module_state_property_key_count(interp_module_owner->module_state_id)
         : 0;
     mt.source = source;
@@ -27031,7 +27045,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                        ArrayList** out_property_keys) {
     transpile_mir_ast_named(ctx, script, source, type_list, const_list,
         script_pool, name_pool, &MIR_DEFAULT_MODULE_NAMES,
-        out_property_keys, NULL, NULL, NULL, NULL);
+        out_property_keys, NULL, NULL, NULL, false, NULL);
 }
 
 // P2's satellite has its own BSS symbols even though it shares the Script's
@@ -27150,7 +27164,7 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     transpile_mir_ast_named(script->jit_context, &satellite_root, script->source,
         script->type_list, script->const_list, script->pool, script->name_pool,
         &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
-        &script->ast_index);
+        false, &script->ast_index);
     if (property_keys && property_keys->length != 0) {
         uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
         for (int index = 0; index < property_keys->length; index++) {
@@ -27558,7 +27572,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     ArrayList* property_keys = NULL;
     transpile_mir_ast_named(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
         tp->pool, tp->name_pool, &MIR_DEFAULT_MODULE_NAMES, &property_keys,
-        NULL, NULL, NULL, &tp->ast_index);
+        NULL, tp->compile_against_interp_slab ? script : NULL,
+        NULL,
+        tp->whole_script_poc, &tp->ast_index);
     uint64_t mir_module_count = 0;
     uint64_t mir_function_count = 0;
     uint64_t mir_instruction_count = 0;
@@ -27769,7 +27785,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     // Lambda MIR currently consumes the indexed AST during the compiler pass;
     // release its malloc-backed table before transferring the Script fields so
     // batch teardown never retains an index whose AST owner is already gone.
-    ast_index_destroy(&tp->ast_index);
+    if (!tp->preserve_ast_index) {
+        ast_index_destroy(&tp->ast_index);
+    }
 
     // Copy Script-sized portion of Transpiler back to the Script object
     script_adopt_transpiler(script, tp);
