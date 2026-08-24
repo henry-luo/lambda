@@ -6370,6 +6370,13 @@ static float layout_ratio_transfer_block_to_inline(ViewBlock* block, float block
     return transferred_width;
 }
 
+static bool layout_percentage_width_basis_is_cyclic(BlockContext* containing_context) {
+    if (!containing_context) return false;
+    // css 2.1 §10.3.5/§10.3.9: shrink-to-fit width cannot resolve a child
+    // percentage before that child's intrinsic contribution is known.
+    return layout_is_shrink_to_fit_width(containing_context->establishing_element);
+}
+
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block,
                           Linebox *pa_line, float* out_original_margin_top,
@@ -6834,16 +6841,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 w = object_view_box.width;
                 h = object_view_box.height;
             }
-            if (block->blk && !isnan(block->block()->given_width_percent) &&
-                block->block()->given_width_percent > 0) {
-                float cb_width = pa_block->content_width;
-                if (cb_width > 0) {
-                    lycon->block.given_width = cb_width * block->block()->given_width_percent / 100.0f;
+            if (block->blk && pa_block) {
+                bool percentage_width_cyclic = layout_percentage_width_basis_is_cyclic(pa_block);
+                if (!isnan(block->block()->given_width_percent) &&
+                    (pa_block->given_width >= 0.0f ||
+                     (percentage_width_cyclic && pa_block->content_width > 0.0f))) {
+                    lycon->block.given_width = pa_block->content_width *
+                        block->block()->given_width_percent / 100.0f;
+                }
+                if (!isnan(block->block()->given_height_percent) &&
+                    pa_block->given_height >= 0.0f) {
+                    lycon->block.given_height = pa_block->content_height *
+                        block->block()->given_height_percent / 100.0f;
                 }
             }
-            bool width_is_zero_percent = (lycon->block.given_width == 0 &&
-                                          block->blk && !isnan(block->block()->given_width_percent));
-            if (lycon->block.given_width < 0 || lycon->block.given_height < 0 || width_is_zero_percent) {
+            // css 2.1 §10.3.2/§10.6.2: a percentage against a definite zero
+            // containing block is zero; intrinsic image dimensions must not replace it.
+            if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
                 float intrinsic_aspect_ratio = h > 0.0f ? w / h : 0.0f;
                 float css_aspect_ratio = layout_preferred_aspect_ratio(block);
                 bool css_ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
@@ -6866,7 +6880,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 LayoutAxisPair<bool*> css_ratio_derived = {
                     &image_width_auto_derived_from_css_ratio,
                     &image_height_auto_derived_from_css_ratio};
-                bool has_one_axis_given = (!width_is_zero_percent && given_size.x >= 0.0f) ||
+                bool has_one_axis_given = given_size.x >= 0.0f ||
                     (given_size.x < 0.0f && given_size.y >= 0.0f);
                 LayoutAxis source_axis = given_size.x >= 0.0f
                     ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
