@@ -1862,6 +1862,7 @@ JitImport jit_runtime_imports[] = {
     // Field access / indexing
     // ========================================================================
     {"fn_index", FPTR(fn_index)},
+    {"fn_index_set", FPTR(fn_index_set)},
     // Member reads never leave a wide payload above the caller's watermark:
     // int64/uint64 map fields come back as `l2it(field_ptr)` pointing at the
     // map's own persistent storage (D5.2.2), native lanes box inline, and the
@@ -1917,12 +1918,15 @@ JitImport jit_runtime_imports[] = {
     // Array/map mutation (procedural)
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
+    {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
+    {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
     {"cow_mark_shared", FPTR(cow_mark_shared)},
     {"cow_bind_var", FPTR(cow_bind_var)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
     {"array_set_cow", FPTR(array_set_cow)},
+    {"member_set_cow", FPTR(member_set_cow)},
     {"map_set_cow", FPTR(map_set_cow)},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set", FPTR(cow_path_set)},

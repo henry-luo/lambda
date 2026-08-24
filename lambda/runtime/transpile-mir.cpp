@@ -16153,6 +16153,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+                emit_return_if_item_error(mt, replacement);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, cow_root->reg),
                     MIR_new_reg_op(mt->ctx, replacement)));
@@ -20342,20 +20343,41 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     value_native_proven);
                 if (!native_write_witness) {
                     MIR_reg_t value = transpile_box_item(mt, ca->value);
-                    MIR_reg_t index = transpile_expr(mt, ca->key);
-                    if (!is_integer_type_id(index_type)) {
-                        index = emit_unbox(mt, index, LMD_TYPE_INT);
-                    }
-                    // G0 exception 1: the checked setter takes a machine
-                    // index, so it leaves int's double lane here.
-                    index = emit_machine_index(mt, index, LMD_TYPE_INT);
                     MIR_reg_t owner = emit_box(mt, typed_root->reg, typed_root->type_id);
-                    const char* checked_set = writes_through_caller
-                        ? "lambda_array_set_checked_inplace" : "lambda_array_set_checked";
-                    MIR_reg_t replacement = emit_checked_array_store(mt, checked_set, owner,
-                        index, value, typed_root->full_type,
-                        "typed array element assignment",
-                        has_lane_contract ? &lane_desc : NULL);
+                    MIR_reg_t replacement;
+                    if (!index_is_integral) {
+                        // Preserve the semantic key until the checked helper
+                        // validates exact float/decimal integers; narrowing a
+                        // string or fractional key here would silently target
+                        // slot zero instead of producing S7.1.3v2's error.
+                        MIR_reg_t key = transpile_box_item(mt, ca->key);
+                        const char* checked_set_item = writes_through_caller
+                            ? "lambda_array_set_checked_inplace_item"
+                            : "lambda_array_set_checked_item";
+                        replacement = emit_call_5(mt, checked_set_item, MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                            MIR_T_P, MIR_new_int_op(mt->ctx,
+                                (int64_t)(uintptr_t)typed_root->full_type),
+                            MIR_T_P, MIR_new_reg_op(mt->ctx,
+                                emit_load_string_literal(mt,
+                                    "typed array element assignment")));
+                    } else {
+                        MIR_reg_t index = transpile_expr(mt, ca->key);
+                        if (!is_integer_type_id(index_type)) {
+                            index = emit_unbox(mt, index, LMD_TYPE_INT);
+                        }
+                        // G0 exception 1: the checked setter takes a machine
+                        // index, so it leaves int's double lane here.
+                        index = emit_machine_index(mt, index, LMD_TYPE_INT);
+                        const char* checked_set = writes_through_caller
+                            ? "lambda_array_set_checked_inplace" : "lambda_array_set_checked";
+                        replacement = emit_checked_array_store(mt, checked_set, owner,
+                            index, value, typed_root->full_type,
+                            "typed array element assignment",
+                            has_lane_contract ? &lane_desc : NULL);
+                    }
                     emit_return_if_item_error(mt, replacement);
                     // Descriptor-backed lanes can rebuild ArrayNum into a general Array.
                     // Keep the replacement's container tag instead of treating
@@ -20414,13 +20436,13 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_reg_t obj_item = transpile_expr(mt, ca->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
             MIR_reg_t boxed_val = transpile_box_item(mt, ca->value);
-            // object_type_set_method returns an Item used by the surrounding expression.
-            (void)emit_call_4(mt, "array_num_set_nd", MIR_T_I64,
+            MIR_reg_t write_result = emit_call_4(mt, "array_num_set_nd", MIR_T_I64,
                 MIR_T_P,   MIR_new_reg_op(mt->ctx, arr_ptr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
                 MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-            return emit_null_item_reg(mt);
+            emit_return_if_item_error(mt, write_result);
+            return write_result;
         }
 
         // Masked / slice assignment: arr[mask] = v (mask is a typed bool array),
@@ -20434,17 +20456,57 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             get_effective_type(mt, ca->key) != LMD_TYPE_INT &&
             mir_index_expr_is_native_int(mt, ca->key);
 
+        // Route statically known invalid key domains through the checked
+        // runtime boundary before any machine-index coercion. Otherwise a
+        // string or fractional key can be unboxed as zero and mutate an
+        // unrelated sequence slot instead of raising the required hard error.
+        if (ca->key && !ca->key->next) {
+            TypeId key_tid = get_effective_type(mt, ca->key);
+            TypeId object_tid = get_effective_type(mt, ca->object);
+            bool key_is_known = key_tid != LMD_TYPE_ANY && key_tid != LMD_TYPE_NULL;
+            bool key_is_index = is_integer_type_id(key_tid);
+            bool key_is_name = is_text_type_id(key_tid);
+            bool object_is_sequence = object_tid == LMD_TYPE_ARRAY ||
+                object_tid == LMD_TYPE_ARRAY_NUM;
+            bool object_is_named = object_tid == LMD_TYPE_MAP ||
+                object_tid == LMD_TYPE_OBJECT || object_tid == LMD_TYPE_VMAP;
+            bool object_is_element = object_tid == LMD_TYPE_ELEMENT;
+            bool invalid_static = key_is_known &&
+                ((object_is_sequence && !key_is_index && key_tid != LMD_TYPE_ARRAY_NUM &&
+                    key_tid != LMD_TYPE_RANGE) ||
+                 (object_is_named && !key_is_name) ||
+                 (object_is_element && !key_is_index && !key_is_name) ||
+                 (!object_is_sequence && !object_is_named && !object_is_element &&
+                    object_tid != LMD_TYPE_ANY));
+            // Computed map/element access must use the map-or-child setter even
+            // when the key is valid; the positional fast path only addresses
+            // sequence storage and would otherwise reinterpret the map pointer.
+            bool route_member = object_is_named || object_is_element;
+            if (invalid_static || route_member) {
+                MIR_reg_t owner = transpile_box_item(mt, ca->object);
+                MIR_reg_t key = transpile_box_item(mt, ca->key);
+                MIR_reg_t value = transpile_box_item(mt, ca->value);
+                MIR_reg_t write_result = emit_call_3(mt, "member_set_cow", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+                emit_return_if_item_error(mt, write_result);
+                return write_result;
+            }
+        }
+
         if (ca->key && !ca->key->next && !assign_key_native) {
             TypeId key_tid = get_effective_type(mt, ca->key);
             if (key_tid == LMD_TYPE_ARRAY_NUM || key_tid == LMD_TYPE_RANGE || key_tid == LMD_TYPE_ANY) {
                 MIR_reg_t arr_item = transpile_box_item(mt, ca->object);
                 MIR_reg_t key_item = transpile_box_item(mt, ca->key);
                 MIR_reg_t val_item = transpile_box_item(mt, ca->value);
-                (void)emit_call_3(mt, "fn_index_assign", MIR_T_I64,
+                MIR_reg_t write_result = emit_call_3(mt, "fn_index_assign", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_item),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val_item));
-                return emit_null_item_reg(mt);
+                emit_return_if_item_error(mt, write_result);
+                return write_result;
             }
         }
 
@@ -20498,16 +20560,13 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // Evaluate the value before borrowing the root: a RHS call may
             // observe the pre-write owner, and COW replacement must not move it first.
             MIR_reg_t value = transpile_box_item(mt, ca->value);
-            // G0 exception 1: array_set_cow's index parameter is an int64_t,
-            // so the subscript leaves int's double lane here. emit_index_value
-            // already delivers that lane whatever the key expression's own type.
-            MIR_reg_t index = emit_machine_index(mt,
-                emit_index_value(mt, ca->key, false), LMD_TYPE_INT);
+            MIR_reg_t key = transpile_box_item(mt, ca->key);
             MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-            MIR_reg_t replacement = emit_call_3(mt, "array_set_cow", MIR_T_I64,
+            MIR_reg_t replacement = emit_call_3(mt, "member_set_cow", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+            emit_return_if_item_error(mt, replacement);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, cow_root->reg),
                 MIR_new_reg_op(mt->ctx, replacement)));
@@ -21164,6 +21223,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+            emit_return_if_item_error(mt, replacement);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, cow_root->reg),
                 MIR_new_reg_op(mt->ctx, replacement)));
@@ -21194,10 +21254,11 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             key = transpile_box_item(mt, ca->key);
         }
         MIR_reg_t val = transpile_box_item(mt, ca->value);
-        emit_call_void_3(mt, "fn_map_set",
+        MIR_reg_t write_result = emit_call_3(mt, "fn_map_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        emit_return_if_item_error(mt, write_result);
         // Return null (void statement)
         MIR_reg_t r = new_reg(mt, "void", MIR_T_I64);
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
@@ -24779,10 +24840,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
                     MIR_reg_t boxed_val = emit_box(mt, var->reg, var->type_id);
                     // method field locals are snapshots; write them back before returning to preserve mutations.
-                    emit_call_void_3(mt, "fn_map_set",
+                    MIR_reg_t write_result = emit_call_3(mt, "fn_map_set", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->self_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                    emit_return_if_item_error(mt, write_result);
                 }
             }
             field = field->next;

@@ -4094,7 +4094,25 @@ Item fn_index(Item item, Item index_item) {
     // Arithmetic-derived semantic integers are decimal-backed Items. Sequence
     // access must consume their exact value instead of rejecting the storage tag.
     int64_t index = -1;
-    if (lambda_item_to_int64_exact(index_item, &index)) return item_at(item, index);
+    if (lambda_item_to_int64_exact(index_item, &index)) {
+        // Numeric keys are positional only for indexable faces. Sending a
+        // numeric key to item_at for a map/object used to log an unsupported
+        // type even though S7.1.1v2 requires a quiet null read.
+        switch (item_type) {
+        case LMD_TYPE_ARRAY:
+        case LMD_TYPE_ARRAY_NUM:
+        case LMD_TYPE_RANGE:
+        case LMD_TYPE_ELEMENT:
+        case LMD_TYPE_STRING:
+        case LMD_TYPE_SYMBOL:
+        case LMD_TYPE_BINARY:
+        case LMD_TYPE_PATH:
+        case LMD_TYPE_VMAP:
+            return item_at(item, index);
+        default:
+            return ItemNull;
+        }
+    }
 
     TypeId index_type = get_type_id(index_item);
     switch (index_type) {
@@ -4129,6 +4147,45 @@ Item fn_index(Item item, Item index_item) {
     }
 
     return ItemNull;
+}
+
+// All dynamic member stores enter through this boundary so a key-domain
+// mismatch cannot be truncated into index zero (or silently dropped by a map
+// setter). Reads remain total in fn_index; writes are hard language errors.
+Item fn_index_set(Item item, Item key, Item value) {
+    TypeId item_type = get_type_id(item);
+    if (item_type == LMD_TYPE_ERROR) return item;
+
+    int64_t index = 0;
+    bool has_index_key = lambda_item_to_int64_exact(key, &index);
+    bool has_name_key = is_text_type_id(get_type_id(key));
+
+    if (item_type == LMD_TYPE_ARRAY || item_type == LMD_TYPE_ARRAY_NUM) {
+        if (!has_index_key) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "invalid sequence member write: key must be an exact non-negative integer");
+            return ItemError;
+        }
+        return fn_array_set(item.array, index, value);
+    }
+    if (item_type == LMD_TYPE_ELEMENT) {
+        if (has_index_key) return fn_array_set(item.array, index, value);
+        if (has_name_key) return fn_map_set(item, key, value);
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid element member write: key must be an exact integer or string/symbol");
+        return ItemError;
+    }
+    if (item_type == LMD_TYPE_MAP || item_type == LMD_TYPE_OBJECT ||
+            item_type == LMD_TYPE_VMAP) {
+        if (has_name_key) return fn_map_set(item, key, value);
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid named member write: key must be string or symbol");
+        return ItemError;
+    }
+
+    set_runtime_error(ERR_TYPE_MISMATCH,
+        "invalid member write: base has no writable member face");
+    return ItemError;
 }
 
 int64_t fn_int64_index(Item item) {
@@ -7908,7 +7965,8 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
     }
     if (field) {
-        fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
+        Item set_result = fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
+        if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
     } else if (!map_extend_open_shape(rooted_candidate.get(), rooted_key.get(),
                    rooted_value.get())) {
         return lambda_type_error(rooted_value.get(), contract, boundary);
@@ -8068,9 +8126,31 @@ Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expec
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false, NULL);
 }
 
+Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
+        const char* boundary) {
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid typed array member write: key must be an exact integer");
+        return ItemError;
+    }
+    return lambda_array_set_checked(owner, index, value, expected, boundary);
+}
+
 Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary) {
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, NULL);
+}
+
+Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
+        const char* boundary) {
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid typed array member write: key must be an exact integer");
+        return ItemError;
+    }
+    return lambda_array_set_checked_inplace(owner, index, value, expected, boundary);
 }
 
 static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
@@ -8101,7 +8181,7 @@ Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
 }
 
-Item array_set_cow(Item owner, int64_t index, Item value) {
+Item array_set_cow(Item owner, Item key, Item value) {
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
     TypeId type_id = get_type_id(replacement);
@@ -8110,16 +8190,26 @@ Item array_set_cow(Item owner, int64_t index, Item value) {
         log_error("cow array mutation rejected non-array owner type %d", type_id);
         return ItemError;
     }
-    if (index < 0) {
-        // Negative procedural indices are absent writes; keep that legacy
-        // no-op while positive out-of-range writes still report their error.
-        return replacement;
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid sequence member write: key must be an exact integer");
+        return ItemError;
     }
     // COW receives the semantic Item value from a procedural assignment. The
     // canonical setter must decide whether the compact lane can admit it or
     // whether the array must widen; calling array_num_set_item directly would
     // coerce an incompatible value and silently lose the required Item shape.
     if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
+    return replacement;
+}
+
+Item member_set_cow(Item owner, Item key, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+
+    Item result = fn_index_set(replacement, key, value);
+    if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     return replacement;
 }
 
@@ -8133,7 +8223,8 @@ Item map_set_cow(Item owner, Item key, Item value) {
         return ItemError;
     }
     if (type_id == LMD_TYPE_VMAP) return vmap_set_cow(replacement, key, value);
-    fn_map_set(replacement, key, value);
+    Item result = fn_map_set(replacement, key, value);
+    if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     return replacement;
 }
 
@@ -8812,15 +8903,20 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     return refreshed ? refreshed : entry;
 }
 
-void fn_map_set(Item map_item, Item key, Item value) {
+Item fn_map_set(Item map_item, Item key, Item value) {
     TypeId map_type_id = get_type_id(map_item);
 
     // VMap: in-place mutation via vtable
     if (map_type_id == LMD_TYPE_VMAP) {
+        if (!is_text_type_id(get_type_id(key))) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "invalid named member write: key must be string or symbol");
+            return ItemError;
+        }
         // VMap backing storage is lazy for host wrappers; route all writes
         // through the public setter so ordinary maps allocate on first write.
         vmap_set(map_item, key, value);
-        return;
+        return ItemNull;
     }
 
     // support both Map and Element (Element has map-like attributes)
@@ -8831,34 +8927,34 @@ void fn_map_set(Item map_item, Item key, Item value) {
 
     if (map_type_id == LMD_TYPE_MAP) {
         Map* mp = map_item.map;
-        if (!mp) { log_error("fn_map_set: null map"); return; }
-        if (mp->is_static) { log_error("fn_map_set: cannot mutate static map"); return; }
+        if (!mp) { log_error("fn_map_set: null map"); return ItemError; }
+        if (mp->is_static) { log_error("fn_map_set: cannot mutate static map"); return ItemError; }
         type_slot = &mp->type;
         data_slot = &mp->data;
         cap_slot = &mp->data_cap;
     } else if (map_type_id == LMD_TYPE_OBJECT) {
         Object* obj = map_item.object;
-        if (!obj) { log_error("fn_map_set: null object"); return; }
-        if (obj->is_static) { log_error("fn_map_set: cannot mutate static object"); return; }
+        if (!obj) { log_error("fn_map_set: null object"); return ItemError; }
+        if (obj->is_static) { log_error("fn_map_set: cannot mutate static object"); return ItemError; }
         type_slot = &obj->type;
         data_slot = &obj->data;
         cap_slot = &obj->data_cap;
     } else if (map_type_id == LMD_TYPE_ELEMENT) {
         Element* el = (Element*)map_item.container;
-        if (!el) { log_error("fn_map_set: null element"); return; }
-        if (el->is_static) { log_error("fn_map_set: cannot mutate static element"); return; }
+        if (!el) { log_error("fn_map_set: null element"); return ItemError; }
+        if (el->is_static) { log_error("fn_map_set: cannot mutate static element"); return ItemError; }
         type_slot = &el->type;
         data_slot = &el->data;
         cap_slot = &el->data_cap;
     } else {
         log_error("fn_map_set: not a map or element (type=%d)", map_type_id);
-        return;
+        return ItemError;
     }
 
     map_type = (TypeMap*)*type_slot;
     if (!map_type || !map_type->shape) {
         log_error("fn_map_set: no shape");
-        return;
+        return ItemError;
     }
 
     // get key text; Lambda strings/symbols are length-bearing even when their
@@ -8877,11 +8973,11 @@ void fn_map_set(Item map_item, Item key, Item value) {
         key_len = sym ? sym->len : 0;
     } else {
         log_error("fn_map_set: key must be string or symbol");
-        return;
+        return ItemError;
     }
     if (!key_cstr) {
         log_error("fn_map_set: null key string");
-        return;
+        return ItemError;
     }
     NameRef key_ref = key_type == LMD_TYPE_STRING &&
         string_is_pooled(key_string) ? key_string : NULL;
@@ -8905,7 +9001,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
             TypeId field_type = entry->type->type_id;
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
-            if (!entry || !entry->type) return;
+            if (!entry || !entry->type) return ItemError;
             // A reserved constructor slot becomes observable only at the
             // source assignment that reaches this storage write.
             if (map_type_id == LMD_TYPE_MAP) {
@@ -8917,20 +9013,20 @@ void fn_map_set(Item map_item, Item key, Item value) {
             LaneStorageDesc lane = {};
             if (shape_entry_uses_native_lane(entry, &lane) &&
                     map_shape_field_store_native_lane(field_ptr, entry, value)) {
-                return;
+                return ItemNull;
             }
 
             if (field_type == value_type) {
                 // same type — fast path: in-place update
                 map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
-                return;
+                return ItemNull;
             }
 
             // FLOAT field + INT value → widen int to double (lossless, no reshape)
             if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
                 *(double*)field_ptr = lambda_int_item_value(value);
-                return;
+                return ItemNull;
             }
 
             // `int` and `int64` both occupy eight bytes, but their slot
@@ -8947,7 +9043,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 if (old_bsz == new_bsz) {
                     map_field_store(field_ptr, value, value_type);
                     entry->type = type_info[value_type].type;
-                    return;
+                    return ItemNull;
                 }
             }
 
@@ -8995,7 +9091,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
                         if (shape_entry_retag_is_safe(map_type, value_type)) {
                             entry->type = type_info[value_type].type;
                         }
-                        return;
+                        return ItemNull;
                     }
                 }
             }
@@ -9010,7 +9106,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 if (shape_entry_retag_is_safe(map_type, value_type)) {
                     entry->type = type_info[value_type].type;
                 }
-                return;
+                return ItemNull;
             }
 
             // type change — rebuild shape with new field type
@@ -9020,9 +9116,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,
                                         type_info[value_type].type, value);
-            return;
+            return ItemNull;
         }
         entry = entry->next;
     }
+    // A shaped map cannot grow through an unknown member write; return the
+    // hard error so callers do not mistake the old silent no-op for success.
     log_error("fn_map_set: field '%s' not found", key_cstr);
+    return ItemError;
 }

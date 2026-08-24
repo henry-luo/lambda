@@ -398,6 +398,17 @@ TEST(InterpWalker, NumericMaskAssignmentUsesTheVectorStore) {
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
+TEST(InterpWalker, InvalidMemberAccessUsesNullReadsAndHardWriteErrors) {
+    // S7.1.1v2 makes every invalid read null; S7.1.3v2 makes every invalid
+    // write an ItemError that crosses the pn handler in both execution tiers.
+    const char* script = "test/lambda/proc/proc_invalid_member_access.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
 TEST(InterpWalker, DirectNumericNdimIndicesUseArrayNumHelpers) {
     // Fixed coordinates on a direct N-D numeric literal must retain ArrayNum's
     // axis bounds and in-place store semantics across both execution tiers.

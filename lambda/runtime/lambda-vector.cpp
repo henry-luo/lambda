@@ -3,6 +3,7 @@
 
 #include "transpiler.hpp"
 #include "lambda-number-runtime.hpp"
+#include "lambda-error.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"
@@ -33,6 +34,7 @@ static int cmp_double_asc(const void* a, const void* b, void* udata) {
 }
 
 extern __thread EvalContext* context;
+extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message);
 
 // Forward declarations from lambda-eval-num.cpp
 Item push_d(double val);
@@ -3919,47 +3921,40 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
 // fn_mask_index.  `mask` is a bool ArrayNum the same shape as `arr`.  Reached only
 // from procedural index-assign statements (so it is procedural by construction).
 // Scalar RHS fills every selected element; array RHS is consumed in order.
-void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
-    // Generic Array with a plain integer index: the index was statically typed ANY
-    // (e.g. a range-for loop variable `for i in a to b { arr[i] = v }`) but is
-    // dynamically an int. Route to the ordinary element write — masks/ranges only
-    // apply to typed numeric arrays. fn_array_set handles negatives and bounds.
-    {
-        TypeId arr_tid = get_type_id(arr_item);
-        int64_t i = 0;
-        if (arr_tid == LMD_TYPE_ARRAY &&
-                lambda_item_to_int64_exact(idx_item, &i)) {
-            fn_array_set(arr_item.array, i, val_item);
-            return;
-        }
-    }
-    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
-        log_error("arr[idx] = v: masked assignment requires a typed numeric array target");
-        return;
+Item fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
+    // Scalar writes and non-numeric containers use the checked member setter so
+    // dynamic keys cannot be truncated and invalid writes cannot disappear.
+    TypeId arr_tid = get_type_id(arr_item);
+    if (arr_tid != LMD_TYPE_ARRAY_NUM || get_type_id(idx_item) != LMD_TYPE_ARRAY_NUM) {
+        return fn_index_set(arr_item, idx_item, val_item);
     }
     ArrayNum* arr = arr_item.array_num;
     if (arr->is_view && !arr->is_mutable_view) {
         log_error("arr[mask] = v: cannot mutate a read-only view; copy() first");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "cannot mutate a read-only numeric array view");
+        return ItemError;
     }
     TypeId it = get_type_id(idx_item);
     // plain integer index — element write (this path is reached when the index is
     // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
     int64_t scalar_index = 0;
     if (lambda_item_to_int64_exact(idx_item, &scalar_index)) {
-        int64_t i = scalar_index;
-        if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
-        return;
+        return fn_index_set(arr_item, idx_item, val_item);
     }
     if (it == LMD_TYPE_RANGE) {
         // range slicing is not an indexing read either (use subview); keep the
         // write side consistent rather than inventing write-only slice semantics.
         log_error("arr[a to b] = v: range slice-assignment is not supported; use subview/element writes");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "range slice-assignment is not supported");
+        return ItemError;
     }
     if (it != LMD_TYPE_ARRAY_NUM || idx_item.array_num->get_elem_type() != ELEM_BOOL) {
         log_error("arr[idx] = v: index must be a boolean mask (got %s)", get_type_name(it));
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "numeric array write key must be an integer or boolean mask");
+        return ItemError;
     }
     ArrayNum* mask = idx_item.array_num;
     int64_t a_shape[32], a_str[32], m_shape[32], m_str[32];
@@ -3969,7 +3964,9 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     for (int d = 0; same && d < a_ndim; d++) if (m_shape[d] != a_shape[d]) same = false;
     if (!same) {
         log_error("arr[mask] = v: mask shape must match the array shape");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "numeric array mask shape must match the target shape");
+        return ItemError;
     }
     int64_t total = 1;
     for (int d = 0; d < a_ndim; d++) total *= a_shape[d];
@@ -3991,6 +3988,7 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
             idx[d] = 0; a_off -= a_shape[d] * a_str[d]; m_off -= m_shape[d] * m_str[d];
         }
     }
+    return ItemNull;
 }
 
 Item fn_sum_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_SUM,  "sum");  }

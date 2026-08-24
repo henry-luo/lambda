@@ -169,7 +169,7 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 
 | Family | Strategy |
 |---|---|
-| Literals, ident, member/index/field access | const-list resolution (§4.1); slot loads (§4.3); `fn_member`/`fn_index` helpers for dynamic access, `null` totality per S7.1.1 comes free from the helpers |
+| Literals, ident, member/index/field access | const-list resolution (§4.1); slot loads (§4.3); `fn_member`/`fn_index` helpers for dynamic access, `null` totality per S7.1.1v2 comes free from the helpers |
 | Unary/binary/comparison/set ops | evaluate operands (left → scratch slot → right), call the boxed helper for the operator (`fn_add`, `fn_eq`, …) — the numeric tower, meets, and int totality (S4.4, SI7) live in the helpers |
 | `and`/`or`/`if` | short-circuit walk (S10.2.3); truthiness by tag via the existing helper (S3.1/S3.2) |
 | `let`/`pub`, destructuring | evaluate initializer, deferred-check per S7.7.2, store slot/slab |

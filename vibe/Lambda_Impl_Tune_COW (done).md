@@ -160,7 +160,8 @@ via `to_closure_named(compiled_fn, arity, boxed-self-as-closure_env, name)`;
   or mark `cow_state`. Add replacement-returning Lambda-only entry points:
 
   ```c
-  Item array_set_cow(Item owner, int64_t index, Item value);
+  Item array_set_cow(Item owner, Item key, Item value);
+  Item member_set_cow(Item owner, Item key, Item value);
   Item map_set_cow(Item owner, Item key, Item value);
   Item vmap_set_cow(Item owner, Item key, Item value);
   ```
