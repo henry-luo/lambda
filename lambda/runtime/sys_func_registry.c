@@ -1083,6 +1083,15 @@ SysFuncInfo sys_func_defs[] = {
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
 
     // ========================================================================
+    // S12.3.4 dynamic application. Two rows, one surface name: the AST builder
+    // picks fn_ or pn_ by ENCLOSING colour, which fixes the error convention.
+    // is_proc marks only the pn row, so an fn context resolves the fn row.
+    {SYSFUNC_CALL, "call", 2, &TYPE_ANY, false, true, false, LMD_TYPE_FUNC, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply_args", FPTR(fn_apply_args), NULL, NULL, false, 0},
+
+    {SYSPROC_CALL, "call", 2, &TYPE_ANY, true, true, false, LMD_TYPE_FUNC, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_apply_args", FPTR(pn_apply_args), NULL, NULL, false, 0},
+
     // View/edit template apply
     // ========================================================================
     {SYSFUNC_APPLY1, "apply", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
@@ -1738,6 +1747,8 @@ JitImport jit_runtime_imports[] = {
     {"fn_pow", FPTR(fn_pow)},
     // value-level union lowers through the generic runtime helper in MIR.
     {"fn_union", FPTR(fn_union)},
+    {"fn_intersect", FPTR(fn_intersect)},
+    {"fn_exclude", FPTR(fn_exclude)},
     {"fn_pos", FPTR(fn_pos)},
     {"fn_neg", FPTR(fn_neg)},
     {"fn_eq", FPTR(fn_eq)},

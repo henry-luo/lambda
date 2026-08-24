@@ -876,6 +876,8 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_GE:        return fn_ge(left, right);
     case OPERATOR_TO:        return fn_to(left, right);
     case OPERATOR_UNION:     return fn_union(left, right);
+    case OPERATOR_INTERSECT: return fn_intersect(left, right);
+    case OPERATOR_EXCLUDE:   return fn_exclude(left, right);
     case OPERATOR_IS:        return (Item){.item = b2it(fn_is(left, right))};
     // `expr is nan` lowers to a one-operand fn_is_nan call (transpile-mir.cpp);
     // the parsed `nan` on the right is a marker, not a compared value.
@@ -4193,7 +4195,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Type* array_element = ast_declared_array_element(root->declared_type);
         if (path.count == 0 && array_element &&
                 array_element->type_id != LMD_TYPE_ANY) {
-            const char* boundary = "typed array index assignment";
+            // SI3v2: the two tiers must word one diagnostic identically, or a
+            // golden pins whichever tier happened to run. MIR Direct says
+            // "element" here (transpile-mir.cpp), so T0 matches it.
+            const char* boundary = "typed array element assignment";
             replacement = root->is_var_param
                 ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
@@ -4845,6 +4850,9 @@ static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
     }
     lambda_function_mark_mir_public_return_shape(fn, public_shape);
 }
+
+
+extern "C" int g_mir_interp_mode;
 
 bool interp_promote_function_if_hot(Function* fn) {
     if (!fn || fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED ||

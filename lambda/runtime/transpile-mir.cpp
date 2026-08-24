@@ -8840,6 +8840,8 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
     case OPERATOR_MOD: fn_name = "fn_mod"; break;
     case OPERATOR_POW: fn_name = "fn_pow"; break;
     case OPERATOR_UNION: fn_name = "fn_union"; break;
+    case OPERATOR_INTERSECT: fn_name = "fn_intersect"; break;
+    case OPERATOR_EXCLUDE: fn_name = "fn_exclude"; break;
     case OPERATOR_EQ: fn_name = "fn_eq"; break;
     case OPERATOR_NE: fn_name = "fn_ne"; break;
     case OPERATOR_LT: fn_name = "fn_lt"; break;
@@ -27106,9 +27108,15 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
             !interp_satellite_supported(fn)) {
         return false;
     }
+    // `--mir-interp` runs MIR's own interpreter: jit_init skips MIR_gen_init,
+    // so this context has no generator to link against or to finish.
+    bool satellite_interp = g_mir_interp_mode != 0;
     if (!script->jit_context) {
         script->jit_context = jit_init(runtime->optimize_level);
-        script->mir_gen_initialized = true;
+        // Must mirror jit_init's own branch. Claiming a generator that was
+        // never initialized made teardown call MIR_gen_finish on a garbage
+        // gen_ctx and segfault in finish_data_flow.
+        script->mir_gen_initialized = !satellite_interp;
         if (!script->jit_context) {
             log_error("interp-tier: could not create satellite MIR context");
             return false;
@@ -27181,10 +27189,15 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     }
     if (property_keys) arraylist_free(property_keys);
 
-    MIR_link(script->jit_context, MIR_set_gen_interface, import_resolver);
+    // Follow the same mode branch the module compiler uses so a satellite
+    // matches the interface its context actually carries.
+    MIR_link(script->jit_context, satellite_interp ? MIR_set_interp_interface :
+        MIR_set_gen_interface, import_resolver);
     StrBuf* entry_name = strbuf_new_cap(96);
     write_fn_name_ex(entry_name, (AstFuncNode*)fn, NULL, "_b");
-    void* entry = entry_name ? jit_gen_func(script->jit_context, entry_name->str) : NULL;
+    void* entry = !entry_name ? NULL
+        : (satellite_interp ? find_func(script->jit_context, entry_name->str)
+                            : jit_gen_func(script->jit_context, entry_name->str));
     if (entry_name) strbuf_free(entry_name);
     if (!entry || !artifacts.consts_bss || !artifacts.consts_bss->addr ||
             !artifacts.type_list_bss || !artifacts.type_list_bss->addr ||

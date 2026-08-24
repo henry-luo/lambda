@@ -7735,8 +7735,24 @@ AstNode* build_query_node_from_parts(Transpiler* tp, SourceSpan span,
     return (AstNode*)node;
 }
 
+// S12.1.4/S12.3.4: `call` is effect-polymorphic, so it has two registry rows —
+// one per colour — and the `(name, arg_count)` lookup cannot tell them apart
+// (the LR09-1 hazard). Resolve the tie here, where the enclosing colour is
+// known: the ENCLOSING context fixes the error convention (fn returns, pn
+// raises), while the TARGET's colour is what S12.1.4 checks.
+static SysFuncInfo* resolve_effect_polymorphic_row(Transpiler* tp,
+        SysFuncInfo* info) {
+    if (!info || info->fn != SYSFUNC_CALL) return info;
+    if (!tp->current_scope || !tp->current_scope->is_proc) return info;
+    for (int i = 0; i < sys_func_def_count; i++) {
+        if (sys_func_defs[i].fn == SYSPROC_CALL) return &sys_func_defs[i];
+    }
+    return info;
+}
+
 static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
         SysFuncInfo* info) {
+    info = resolve_effect_polymorphic_row(tp, info);
     AstSysFuncNode* node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
         AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
     node->fn_info = info;
@@ -7838,6 +7854,33 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
         }
     }
     return NULL;
+}
+
+// S12.1.4: `call(f, args)` takes its colour from `f`. Resolve that statically
+// whenever `f` names a known function — a compile error beats the runtime one,
+// and the runtime check cannot see a closure whose `fn_type` was never
+// populated. A dynamically-computed `f` falls through to the runtime check.
+static void validate_effect_polymorphic_call(Transpiler* tp, SourceSpan span,
+        AstNode* function, AstNode* arguments) {
+    AstNode* callee = ast_unwrap_primary(function);
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return;
+    SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+    if (!info || (info->fn != SYSFUNC_CALL && info->fn != SYSPROC_CALL)) return;
+    if (tp->current_scope && tp->current_scope->is_proc) return;  // pn context: any target
+    AstNode* target = ast_unwrap_primary(arguments);
+    if (!target || target->node_type != AST_NODE_IDENT) return;
+    AstIdentNode* ident = (AstIdentNode*)target;
+    AstNode* binding = ident->entry ? ident->entry->node : NULL;
+    TypeFunc* signature = binding && binding->type &&
+            binding->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)binding->type : NULL;
+    if (signature && signature->is_proc) {
+        record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
+            "call: '%.*s' is a procedure (pn) and cannot be called from a "
+            "function (fn)",
+            ident->name ? (int)ident->name->len : 0,
+            ident->name ? ident->name->chars : "");
+    }
 }
 
 AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
@@ -8053,6 +8096,9 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
             lookup_arg_count + (method_call ? 1 : 0))) {
         call->type = &TYPE_ERROR;
     }
+    // After resolution: the callee is an IDENT until the builder rewrites it
+    // to the AST_NODE_SYS_FUNC, so this must run here, not on the inputs.
+    validate_effect_polymorphic_call(tp, span, call->function, call->argument);
     return (AstNode*)call;
 }
 

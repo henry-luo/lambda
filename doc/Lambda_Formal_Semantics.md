@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 14.1.0 (2026-08-24)
+**Spec version:** 15.0.0 (2026-08-24)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1187,6 +1187,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.1.3** Reactive templates are the doctrine applied: template body =
   pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
   architecture enforced by the effect bit. [Features §3.7]
+- **S12.1.4*** **Effect polymorphism, admitted narrowly.** A function may
+  take its colour from an argument rather than declaring one. `call` (S12.3.4)
+  is the first and, for now, only such function: `call(f, args)` is `fn` when
+  `f` is `fn` and `pn` when `f` is `pn`. The colour is resolved **statically
+  whenever `f`'s is statically known**, and checked at **run time** otherwise
+  — a dynamic callee is exactly the case where the bit cannot be read off the
+  source. This is the minimal instance of SO28's pure-iff-argument-pure
+  polymorphism; it does not generalize to user-declared signatures, which
+  still carry one declared bit each (S12.1.1).
 
 ### S12.2 Assignment
 
@@ -1217,6 +1226,28 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   builtin accepts the receiver as its first argument and returns its own
   result rather than erroring. The shadow-proof accessor for intrinsic names
   remains `name(item)` (S15.4).
+
+- **S12.3.4*** **`call(f, args)` is the dynamic-application form.** It
+  applies `f` to the members of the array `args` as individual arguments,
+  and is the sanctioned way to forward a collected argument list — notably
+  `fn outer(...) => call(inner, varg())`, which nothing else expresses when
+  `inner` is itself variadic. Its colour follows `f` (S12.1.4). Three
+  consequences follow from its being dynamic by construction, and are
+  accepted rather than worked around: arity is checked at run time, not
+  statically (S12.3.1 still bounds the callee's own slots); the result type
+  is `any`; and the call takes the dynamic ABI, not a direct-call fast path.
+  A `pn` target reached from `fn` context is an error — statically when `f`'s
+  colour is known, at run time otherwise. Error convention follows the
+  resolved colour: an `fn`-coloured `call` **returns** an error value, a
+  `pn`-coloured `call` **raises**. `args` must be an array; any other type is
+  an error.
+- **S12.3.5*** **Spread does not expand into an argument list.** `*x`
+  splices where a **container** is being built — array, list, and map
+  literals (S16.8.6) — and nowhere else; in argument position it passes its
+  operand as one value. The expansion was considered and **rejected**: it
+  would need call-site syntax and semantics of its own, cost the static
+  arity check that S12.3.1 relies on, and silently divert calls to the
+  dynamic ABI, all for a case `call` already covers generally.
 
 ### S12.4 Resources
 
@@ -1780,7 +1811,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 **Sys funcs and surface**
 - **SO26** RF6 mutator convention: updated-owner vs unit; and `splice`'s public result (owner / unit / removed members).
 - **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
-- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — dodged by convention; Flix-style Boolean effect polymorphism is the recorded minimal fix.
+- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — still dodged by convention for user-declared signatures; Flix-style Boolean effect polymorphism remains the recorded minimal fix. **Partially answered 2026-08-24**: S12.1.4 admits the first effect-polymorphic function, `call` (S12.3.4), whose colour follows its first argument, resolved statically where possible and checked at run time otherwise. Whether that mechanism should be exposed to user signatures — letting an HOF declare "pure iff its function argument is pure" — is the part that stays open.
 - **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
 - **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.

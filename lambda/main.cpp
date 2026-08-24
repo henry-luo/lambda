@@ -864,10 +864,15 @@ void run_repl(Runtime *runtime) {
         if (persistent_interp) {
             Item result = interp_repl_session_eval(&interp_session, pending_input->str);
             strbuf_reset(pending_input);
-            if (get_type_id(result) == LMD_TYPE_ERROR) {
+            if (get_type_id(result) == LMD_TYPE_ERROR && interp_session.last_input_rejected) {
                 // The session restores its slab and AST append transaction
                 // before returning an error, so the next input sees the last
                 // successful environment rather than a partially evaluated cell.
+                // Print the diagnosis first: the rollback notice alone told the
+                // user nothing about WHY, which silently dropped every parse and
+                // type diagnostic the REPL is supposed to teach with.
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) err_print(last_error);
                 printf("Error during execution. Last input rolled back.\n");
                 continue;
             }
@@ -908,7 +913,9 @@ void run_repl(Runtime *runtime) {
 
         if (output_input) {
             if (output_input->root.type_id() == LMD_TYPE_ERROR) {
-                // Runtime error - rollback the last input
+                // Runtime error - rollback the last input, after reporting why.
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) err_print(last_error);
                 printf("Error during execution. Last input rolled back.\n");
                 repl_history->str[saved_history_len] = '\0';
                 repl_history->length = saved_history_len;
@@ -4879,6 +4886,13 @@ int main(int argc, char *argv[]) {
         // without running the script.
         if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
+            // The flag exists to PRODUCE a MIR artifact, so it must pin the
+            // JIT tier. Under the default LAMBDA_TIER_AUTO an eligible script
+            // is planned for the T0 interpreter, no MIR is emitted, and the
+            // run finishes "successfully" having written nothing — which is
+            // how the whole MIR emission suite came to fail at once. An
+            // explicit --tier= later on the command line still wins.
+            lambda_tier_set(LAMBDA_TIER_JIT);
         }
         else if (apply_common_mir_option(argv[i], &runtime)) {
         }
