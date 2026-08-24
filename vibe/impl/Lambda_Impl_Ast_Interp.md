@@ -1,10 +1,10 @@
 # AST Interpreter — Implementation Plan, Phases P0–P5
 
-**Date:** 2026-08-22 (rev 64 — **687-row P1 promotion and renderer/parser repair**)
-**Status:** **P1's committed corpus is now fully interpreted.** The AST walker covers the P1 expression, comprehension, type/pattern, document/path/query, procedural/error, module, numeric-carrier, COW-mutation, joined-group, pipe-file, procedural-window, view/edit-template, hosted-JavaScript import, typed-object-update, async/task-procedure, object-method, and typed-parameter slices through the same runtime helpers and representation boundaries as MIR. The committed differential corpus is now **687 discovered scripts = 687 interpreted matches, 0 fallbacks, and 0 inconclusive rows; 0 unclassified and 0 divergent rows**. The former renderer rows were repaired by restoring the production Tree-sitter parser artifact expected by `ts-enum.h`; the three invalid object/map fixtures were converted to legal `run`-mode `pn main` coverage, with JIT goldens regenerated and matched by T0. Task-backed procedure bodies still delegate only their resumable continuation to a P2 MIR satellite while the module and synchronous code remain under T0. P3 validator ownership, P4's retained REPL slice, and P5's default-tier flip remain subsequent phases.
-**Design authority:** `doc/Lambda_Formal_Design.md` **D8.1.1v2** (T0 default, tiered execution), D5.1.1/D5.1.2 (side-stack frames), D5.3.2/D5.3.3 (MAY_GC + native rooting contract), D6.2.1/D6.2.3/D6.2.4 (function values, snapshot captures, traced env), D7.2.1/D7.2.2 (module slabs, init transaction), DI14; `doc/Lambda_Formal_Semantics.md` S3.1, S7.7.1/S7.7.2/S7.7.3, S7.11.4, S9.1, S11.2.1/S11.3.1, **S14.1**, SI3v2.
+**Date:** 2026-08-24 (rev 66 — **AUTO default and release gate green**)
+**Status:** **P1's committed corpus is fully interpreted, and AUTO is the unset default.** The AST walker covers the P1 expression, comprehension, type/pattern, document/path/query, procedural/error, module, numeric-carrier, COW-mutation, joined-group, pipe-file, procedural-window, view/edit-template, hosted-JavaScript import, typed-object-update, async/task-procedure, object-method, and typed-parameter slices through the same runtime helpers and representation boundaries as MIR. The committed differential corpus remains **687 discovered scripts = 687 interpreted matches, 0 fallbacks, and 0 inconclusive rows; 0 unclassified and 0 divergent rows**. The former renderer rows were repaired by restoring the production Tree-sitter parser artifact expected by `ts-enum.h`; the three invalid object/map fixtures were converted to legal `run`-mode `pn main` coverage, with JIT goldens regenerated and matched by T0. Task-backed procedure bodies still delegate only their resumable continuation to a P2 MIR satellite while the module and synchronous code remain under T0. The release `test_lambda_gtest` gate is green under the unset default AUTO, forced `interp`, and forced `jit`: **758/758 tests pass**. P2 promotion now fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI.
+**Design authority:** `doc/Lambda_Formal_Design.md` **D8.1.1v4** (AUTO default selector, tiered execution), D5.1.1/D5.1.2 (side-stack frames), D5.3.2/D5.3.3 (MAY_GC + native rooting contract), D6.2.1/D6.2.3/D6.2.4 (function values, snapshot captures, traced env), D7.2.1/D7.2.2 (module slabs, init transaction), DI14; `doc/Lambda_Formal_Semantics.md` S3.1, S7.7.1/S7.7.2/S7.7.3, S7.11.4, S9.1, S11.2.1/S11.3.1, **S14.1**, SI3v2.
 **Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI22 confirmed; AIO1–AIO12 = DO25). This revision adds the nullable/pointer native-array declaration boundary, numeric-mask vector-store bridge, fixed-coordinate N-D ArrayNum read/write bridge, direct-binding VMap-set COW bridge, correct Element content traversal plus a bounded direct-literal COW bridge, recursive declared structural-map admission plus nested checked COW update, direct object type/literal construction plus traced local-method receiver closures, the `ELEM_UINT64` literal/carrier and checked direct-store path, the P1 source-level no-task proof for immutable procedure aliases, the dynamic-numeric parameter boundary that preserves optional `null` after the call adapter, direct-binding- and proven-range-index COW slices, declared-numeric binding/error-value assignment, numeric type-call coercion, compact-NumSized array construction, grouped/ordered plus joined-comprehension slices, and pure-system named-argument source-order dispatch. It continues §11's P2, P3's PREDICATE plus immediate-scalar CONST vertical slices, and P4's persistent-REPL vertical slice; validator integration and P5 (default flip) remain subsequent gates.
-**Scope rule:** `LAMBDA_TIER` unset or `jit` remains the existing eager whole-module pipeline (MT7/D8.6.1). `auto` is opt-in T0 plus P2 promotion; it must pin an unsupported function to T0, never recompile the full module as a substitute.
+**Scope rule:** `LAMBDA_TIER` unset selects `auto`; `jit` explicitly selects the existing eager whole-module pipeline (MT7/D8.6.1), and `interp` pins T0. AUTO must pin an unsupported function to T0, never recompile the full module as a substitute. The release AUTO corpus gate is green.
 
 ---
 
@@ -580,20 +580,22 @@ dispatcher, which observes the provider's current T0-or-promoted `Function`
 entry; no imported direct wrapper symbol or mixed T0/MIR cone is created
 (D7.2.1, D8.1.1v2, D5.3.3).
 
-Verified with `test/lambda/interp_auto_tier.ls` and threshold `3`:
+The focused P2 fixtures are now exact at threshold `3` (and the import fixture
+at threshold `2`):
 
 | Tier | Result | Evidence |
 |---|---|---|
 | `interp` | `[3, 4, 5, 6, 10, 5, 6, 7, 4, 2]` | T0 only, zero fallback |
-| `auto` | same | four satellite images: self-recursive `count_down`/`sum_down`, plus `bridge` reading module `offset` and dynamically invoking `shifted` |
-| `jit` | same | existing eager whole-module control |
+| `auto` | `[3, 4, 5, 6, 10, 5, 6, 7, 4, 2]` | four scalar satellites; module reads are unboxed through the shared slab ABI |
+| `jit` | `[3, 4, 5, 6, 10, 5, 6, 7, 4, 2]` | existing eager whole-module control |
 
 `test/lambda/interp_auto_import.ls` adds the T0-import boundary: its provider
 exports `offset` and `shift`, while the importing `hot` function reads both.
 Under `auto` with `LAMBDA_JIT_THRESHOLD=2`, the provider `shift` and importing
-`hot` each publish one satellite, returning `[21, 22, 23, 24]` exactly under
-`jit`, `interp`, `auto`, and forced-GC `auto`. The importer satellite reads
-the provider's slab Function dynamically; it never resolves `mN._shift_b_*`.
+`hot` each publish one satellite and all three tiers return
+`[21, 22, 23, 24]`. The importer satellite reads the provider's slab Function
+dynamically; it never resolves `mN._shift_b_*`. The scalar slab read is
+unboxed before native MIR arithmetic, preserving the shared module contract.
 
 Still pinned to T0: captures/nested definitions, generators, and object/view
 mutation code, because their environment or replacement-channel contracts are
@@ -606,9 +608,11 @@ dynamic entry — never through on-stack replacement. `interp_auto_tier.ls`
 forces `LAMBDA_JIT_THRESHOLD=100 LAMBDA_JIT_BACKEDGE=2`; its first
 `loop_count(4)` remains T0 and the second entry compiles the sole satellite.
 Full-AST call-site analysis persistence and the complete P2 matrix remain
-open. P3's validator de-JIT, P4's persistent REPL state, and P5's default flip
-remain blocked on their stated design gates; `LAMBDA_TIER`
-unset remains `jit`.
+open. P3's validator de-JIT and P4's persistent REPL state remain blocked on
+their stated design gates. P5's selector flip is landed: `LAMBDA_TIER` unset
+selects `auto`, and the release corpus passes 758/758 with no failure or
+segfault. Batch mode deliberately disables cross-script MIR retention because
+its per-script heap/slab reset invalidates retained module Items.
 
 ### 3.2 P3 — restricted `that` predicates + immediate-scalar CONST folding — **vertical slices landed 2026-08-19**
 
