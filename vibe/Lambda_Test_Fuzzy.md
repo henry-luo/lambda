@@ -391,12 +391,12 @@ pn nested_break() {
 
 // Early return
 pn early_return(n) {
-    if (n < 0) return -1;
-    if (n == 0) return 0;
+    if (n < 0) { return -1 }
+    if (n == 0) { return 0 }
     var x = 1;
     while (x < n) {
         x = x * 2;
-        if (x > 1000) return 1000;
+        if (x > 1000) { return 1000 }
     }
     return x;
 }

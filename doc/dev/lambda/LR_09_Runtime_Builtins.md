@@ -128,7 +128,7 @@ The one table feeds two unrelated consumers.
 
 ## Known Issues & Future Improvements
 
-Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR09-1 – LR09-7** (open/partial) and **LR09-R1** (resolved, Appendix A).
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR09-1 – LR09-8** (LR09-8 was found during verification, not extracted from this section) (open/partial) and **LR09-R1** (resolved, Appendix A).
 
 The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 

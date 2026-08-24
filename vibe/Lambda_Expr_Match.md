@@ -139,7 +139,7 @@ pn handle_event(event) {
             update_state({clicks: count})
         }
         case 'keypress' {
-            if (event.key == "Escape") return null;
+            if (event.key == "Escape") { return null }
             process_key(event.key)
         }
         default {
@@ -629,7 +629,7 @@ pn process_events(events) {
             }
             case 'error' {
                 log("error: " ++ event.message);
-                if (event.fatal) return null
+                if (event.fatal) { return null }
             }
             case 'shutdown' {
                 cleanup();

@@ -126,6 +126,11 @@ run A "leading file comment"                '// header\nlet a = 1\na\n'
 echo "--- corner: 7.15 dot handling ---"
 run A "fluent chain bare member"           'let m = {a: 1}\nlet v = m\n.a\n'
 run A "fluent chain call"                  'let d = [1]\nlet n = d\n.len()\n'
+# LR02-11: the member name may be a type keyword. `token_is_key` is the shared
+# admitted set, so these must track `parse_path_segment`, not LAMBDA_TOK_IDENTIFIER.
+run A "fluent chain, type-keyword member"  'let n = 42\nlet s = n\n.string()\n'
+run A "fluent chain, .int() member"        'let s = "12"\nlet n = s\n.int()\n'
+run A "fluent chain, .map( member"         'let d = [1]\nlet r = d\n.map((x) => x)\n'
 run R "line-start .digit stays dual-role"  'let a = 1\na\n.5\n'
 run A "relative path statement"            'let p = \\.a.b\np\n'
 run A "rooted path statement"              'let p = /.a.b\np\n'

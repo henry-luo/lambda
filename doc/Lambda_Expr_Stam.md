@@ -13,18 +13,17 @@ This document covers Lambda's expressions and statements, including control flow
 
 ## Table of Contents
 
-1. [Expression-Oriented Design](#expression-oriented-design)
-2. [Primary Expressions](#primary-expressions)
-3. [Arithmetic Expressions](#arithmetic-expressions)
-4. [Comparison Expressions](#comparison-expressions)
-5. [Logical Expressions](#logical-expressions)
-6. [Member Access and Null Safety](#member-access-and-null-safety)
-7. [Pipe Expressions](#pipe-expressions)
-8. [Query Expressions](#query-expressions)
-9. [Control Flow Expressions](#control-flow-expressions)
-10. [Match Expressions](#match-expressions)
-11. [Statements](#statements)
-12. [Operators](#operators)
+1. [Primary Expressions](#primary-expressions)
+2. [Arithmetic Expressions](#arithmetic-expressions)
+3. [Comparison Expressions](#comparison-expressions)
+4. [Logical Expressions](#logical-expressions)
+5. [Member Access and Null Safety](#member-access-and-null-safety)
+6. [Pipe Expressions](#pipe-expressions)
+7. [Query Expressions](#query-expressions)
+8. [Control Flow Expressions](#control-flow-expressions)
+9. [Match Expressions](#match-expressions)
+10. [Statements](#statements)
+11. [Operators](#operators)
 
 ---
 
@@ -32,15 +31,16 @@ This document covers Lambda's expressions and statements, including control flow
 
 ### Literals
 
-```lambda
-// Literals are expressions
-42
-"hello"
-true
-null
-[1, 2, 3]
-{name: "Alice"}
-```
+Literals are expressions:
+
+| Expression | Kind |
+|---|---|
+| `42` | integer |
+| `"hello"` | string |
+| `true` | boolean |
+| `null` | null |
+| `[1, 2, 3]` | array |
+| `{name: "Alice"}` | map |
 
 ### Variables
 
@@ -53,13 +53,10 @@ _underscore_name
 
 ### Parenthesized Expressions
 
-```lambda
-// Grouping for precedence
-(x + y) * z
-
-// Let expressions (parenthesized)
-(let x = 42, x + 1)  // Returns 43
-```
+| Expression | Purpose | Result |
+|---|---|---|
+| `(x + y) * z` | Grouping for precedence | |
+| `(let x = 42, x + 1)` | Let expression | `43` |
 
 ### Collection Access
 
@@ -84,48 +81,47 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 
 ### Basic Arithmetic
 
-```lambda
-5 + 3              // Addition: 8
-5 - 3              // Subtraction: 2
-5 * 3              // Multiplication: 15
-10 / 3             // Division: 3.333...
-10 div 3           // Integer division: 3
-17 % 5             // Modulo: 2
-2 ** 3             // Exponentiation: 8
-```
+Seven operators: `+`, `-`, `*`, `/`, `div`, `%`, `**`. `/` is true division, so
+`10 / 3` is `3.333...` and not `3` — `div` is the integer form. Full table with
+results: [Arithmetic Operators](#arithmetic-operators).
 
 ### Unary Operators
 
-```lambda
--x                 // Negation
-+x                 // Positive (identity)
-not x              // Logical NOT
-!T                 // Type negation (any except T)
-*x                 // Spread (expand collection)
-```
+| Expression | Meaning |
+|---|---|
+| `-x` | Negation |
+| `+x` | Positive (identity) |
+| `not x` | Logical NOT |
+| `!T` | Type negation (any except `T`) |
+| `*x` | Spread (expand collection) |
 
 ### Spread Operator
 
 The spread operator `*` expands a collection's items into the enclosing container:
 
+| Given | Expression | Result |
+|---|---|---|
+| `let a = [1, 2, 3]` | `[0, *a, 4]` | `[0, 1, 2, 3, 4]` — items spread into array |
+| `let b = (10, 20)` | `(*a, *b)` | `(1, 2, 3, 10, 20)` — spread into tuple |
+| `let base = {x: 1, y: 2}` | `{*:base, x: 10}` | `{x: 10, y: 2}` — copy map fields, override `x` |
+| `let nested = [[1, 2], [3, 4]]` | `[*nested[0], *nested[1]]` | `[1, 2, 3, 4]` |
+
+### Spread in function calls
+
+Spread is intended to supply the arguments of a [variadic
+function](Lambda_Func.md#variadic-parameters) — expanding a collection into one
+argument per item:
+
 ```lambda
-let a = [1, 2, 3]
-[0, *a, 4]             // [0, 1, 2, 3, 4] — items spread into array
-
-let b = (10, 20)
-(*a, *b)               // (1, 2, 3, 10, 20) — spread into tuple
-
-let base = {x: 1, y: 2}
-{*:base, x: 10}        // {x: 10, y: 2} — copy map fields, override x
-
-// Spread in function calls
-fn sum_all(...args) = args | reduce((a, b) => a + b, 0)
-sum_all(*[10, 20, 30])  // 60
-
-// Nested spreading
-let nested = [[1, 2], [3, 4]]
-[*nested[0], *nested[1]]  // [1, 2, 3, 4]
+fn sum_all(...) => sum(varg())
+sum_all(*[1, 2, 3])    // intended: 6, same as sum_all(1, 2, 3)
 ```
+
+> **Not yet implemented.** At a call site `*x` currently degenerates to `x`, so
+> the array arrives as a **single** argument: `sum_all(*[1, 2, 3])` behaves like
+> `sum_all([1, 2, 3])` and `len(varg())` reports `1`, not `3`. On a fixed-arity
+> function the mismatch surfaces as `function expects 2 arguments, got 1`.
+> Expansion is implemented only for container construction (the table above).
 
 Map literals construct only the fields they list. Use map spread when an update
 should preserve the fields of an existing map or record-shaped value.
@@ -134,30 +130,25 @@ should preserve the fields of an existing map or record-shaped value.
 
 Lambda supports NumPy-style element-wise operations on arrays:
 
-```lambda
-// Scalar-vector operations
-1 + [2, 3, 4]              // [3, 4, 5]
-10 - [1, 2, 3]             // [9, 8, 7]
-3 * [1, 2, 3]              // [3, 6, 9]
-2 ** [1, 2, 3]              // [2, 4, 8]
-
-// Vector-vector operations
-[1, 2, 3] + [4, 5, 6]      // [5, 7, 9]
-[10, 20, 30] - [1, 2, 3]   // [9, 18, 27]
-[2, 3, 4] * [1, 2, 3]      // [2, 6, 12]
-
-// Broadcasting
-[5] + [1, 2, 3]            // [6, 7, 8]
-```
+| Kind | Expression | Result |
+|---|---|---|
+| Scalar–vector | `1 + [2, 3, 4]` | `[3, 4, 5]` |
+| | `10 - [1, 2, 3]` | `[9, 8, 7]` |
+| | `3 * [1, 2, 3]` | `[3, 6, 9]` |
+| | `2 ** [1, 2, 3]` | `[2, 4, 8]` |
+| Vector–vector | `[1, 2, 3] + [4, 5, 6]` | `[5, 7, 9]` |
+| | `[10, 20, 30] - [1, 2, 3]` | `[9, 18, 27]` |
+| | `[2, 3, 4] * [1, 2, 3]` | `[2, 6, 12]` |
+| Broadcasting | `[5] + [1, 2, 3]` | `[6, 7, 8]` |
 
 `+` does not concatenate arrays or lists. It always means numeric addition:
 scalar broadcast for scalar-plus-sequence, and element-wise addition for
 sequence-plus-sequence. Use `++` when the intent is list/array concatenation:
 
-```lambda
-[1, 2] + [3, 4]            // [4, 6]
-[1, 2] ++ [3, 4]           // [1, 2, 3, 4]
-```
+| Expression | Result | |
+|---|---|---|
+| `[1, 2] + [3, 4]` | `[4, 6]` | element-wise addition |
+| `[1, 2] ++ [3, 4]` | `[1, 2, 3, 4]` | concatenation |
 
 ---
 
@@ -167,48 +158,40 @@ sequence-plus-sequence. Use `++` when the intent is list/array concatenation:
 
 The `==` operator performs **structural deep value equality** for all types — scalars and containers alike.
 
-```lambda
-// Scalar equality
-5 == 5             // true
-5 != 3             // true
-1 == 1.0           // true (numeric promotion: int, float, decimal)
-```
+| Expression | Result | |
+|---|---|---|
+| `5 == 5` | `true` | |
+| `5 != 3` | `true` | |
+| `1 == 1.0` | `true` | numeric promotion: int, float, decimal |
 
 #### Container Equality
 
 Containers (arrays, maps, elements) are compared by **structure**, not by reference. Two containers are equal if they have the same shape and all corresponding elements are equal:
 
-```lambda
-// Array equality
-[1, 2, 3] == [1, 2, 3]           // true
-[1, 2, 3] == [1, 2, 4]           // false (element mismatch)
-[1, 2, 3] == [1, 2]              // false (different length)
-[] == []                          // true
-
-// Numeric promotion composes into containers
-[1] == [1.0]                      // true (element-wise: 1 == 1.0)
-{a: 1} == {a: 1.0}                // true
-
-// Map equality is order-independent
-{a: 1, b: 2} == {b: 2, a: 1}     // true
-{a: 1, b: 2} == {a: 1}           // false (different key count)
-
-// Nested structural equality
-[[1, 2], [3, 4]] == [[1, 2], [3, 4]]   // true
-{a: {x: 1}} == {a: {x: 1}}             // true
-{a: [1, 2]} == {a: [1, 2]}             // true
-```
+| Kind | Expression | Result | |
+|---|---|---|---|
+| Array | `[1, 2, 3] == [1, 2, 3]` | `true` | |
+| | `[1, 2, 3] == [1, 2, 4]` | `false` | element mismatch |
+| | `[1, 2, 3] == [1, 2]` | `false` | different length |
+| | `[] == []` | `true` | |
+| Numeric promotion | `[1] == [1.0]` | `true` | element-wise: `1 == 1.0` |
+| | `{a: 1} == {a: 1.0}` | `true` | |
+| Map (order-independent) | `{a: 1, b: 2} == {b: 2, a: 1}` | `true` | |
+| | `{a: 1, b: 2} == {a: 1}` | `false` | different key count |
+| Nested | `[[1, 2], [3, 4]] == [[1, 2], [3, 4]]` | `true` | |
+| | `{a: {x: 1}} == {a: {x: 1}}` | `true` | |
+| | `{a: [1, 2]} == {a: [1, 2]}` | `true` | |
 
 #### Cross-Type Sequence Equality
 
 Ranges and arrays are **sequences** — they compare equal across types if they contain the same elements:
 
-```lambda
-(1 to 3) == [1, 2, 3]            // true (range vs array)
-[1, 2, 3] == (1 to 3)            // true (symmetric)
-(1 to 3) == [1, 2, 4]            // false
-(1 to 3) == [1, 2]               // false (different length)
-```
+| Expression | Result | |
+|---|---|---|
+| `(1 to 3) == [1, 2, 3]` | `true` | range vs array |
+| `[1, 2, 3] == (1 to 3)` | `true` | symmetric |
+| `(1 to 3) == [1, 2, 4]` | `false` | |
+| `(1 to 3) == [1, 2]` | `false` | different length |
 
 #### Function Equality
 
@@ -224,59 +207,57 @@ f == f                            // true (same reference)
 
 Follows IEEE 754: `NaN != NaN`, including inside containers:
 
-```lambda
-let x = 0.0 / 0.0
-x == x                            // false
-[x] == [x]                        // false
-```
+Given `let x = 0.0 / 0.0`:
+
+| Expression | Result |
+|---|---|
+| `x == x` | `false` |
+| `[x] == [x]` | `false` |
 
 ### Relational
 
-```lambda
-3 < 5              // Less than: true
-5 > 3              // Greater than: true
-3 <= 5             // Less than or equal: true
-5 >= 3             // Greater than or equal: true
-```
+Four operators: `<`, `<=`, `>`, `>=`. Examples and results:
+[Comparison Operators](#comparison-operators).
+
+At **statement** scope a bare relational needs parentheses — `(3 < 5)`, not
+`3 < 5` — because `<` and `>` are reserved there for element syntax. In
+expression position (`let b = 3 < 5`) no parentheses are needed. `==` and `!=`
+are unambiguous and never need them.
 
 ### Null Comparisons
 
 Null can be compared with any type:
 
-```lambda
-null == null       // true
-null == 42         // false (not an error)
-"hello" != null    // true
+| Expression | Result | |
+|---|---|---|
+| `null == null` | `true` | |
+| `null == 42` | `false` | not an error |
+| `"hello" != null` | `true` | |
 
-// Idiomatic null check
+Idiomatic null check:
+
+```lambda
 if (x == null) "missing" else x
 ```
 
 ### Type Comparisons
 
-```lambda
-// Type checking
-42 is int              // true
-"hello" is string      // true
-!(42 is string)        // true (negated type check)
-
-// NaN detection (IEEE 754: nan == nan is false, use 'is nan' instead)
-nan is nan             // true
-(0/0) is nan           // true
-1.0 is nan             // false
-
-// Value comparison (when RHS is a value, not a type)
-42 is 42               // true (equivalent to 42 == 42)
-"hello" is "hello"     // true
-[1,2,3] is [1,2,3]    // true (structural equality)
-true is true           // true
-inf is inf             // true
-
-// Type equality
-type(42) == int        // true
-type([1,2]) == array   // true
-type(42) != string     // true
-```
+| Kind | Expression | Result | |
+|---|---|---|---|
+| Type checking | `42 is int` | `true` | |
+| | `"hello" is string` | `true` | |
+| | `not (42 is string)` | `true` | negated type check — unary `!` is type negation, not logical NOT |
+| NaN detection | `nan is nan` | `true` | `nan == nan` is `false` per IEEE 754, so use `is nan` |
+| | `(0/0) is nan` | `true` | |
+| | `1.0 is nan` | `false` | |
+| Value comparison | `42 is 42` | `true` | RHS is a value, not a type — equivalent to `42 == 42` |
+| | `"hello" is "hello"` | `true` | |
+| | `[1,2,3] is [1,2,3]` | `true` | structural equality |
+| | `true is true` | `true` | |
+| | `inf is inf` | `true` | |
+| Type equality | `type(42) == int` | `true` | |
+| | `type([1,2]) == array` | `true` | |
+| | `type(42) != string` | `true` | |
 
 ---
 
@@ -284,11 +265,8 @@ type(42) != string     // true
 
 ### Boolean Operators
 
-```lambda
-true and false     // Logical AND: false
-true or false      // Logical OR: true
-not true           // Logical NOT: false
-```
+Three operators: `and`, `or`, `not`. Both `and` and `or` short-circuit. Examples
+and results: [Logical Operators](#logical-operators).
 
 ### Short-Circuit Evaluation
 
@@ -409,19 +387,11 @@ The pipe operator (`|>`) enables fluent, left-to-right data transformation.
 
 When the left side is a collection, `~` binds to each item:
 
-```lambda
-// Double each number
-[1, 2, 3] |> ~ * 2
-// Result: [2, 4, 6]
-
-// Extract field from each item
-users |> ~.name
-// Result: ["Alice", "Bob", "Charlie"]
-
-// Transform each item
-["hello", "world"] |> ~ ++ "!"
-// Result: ["hello!", "world!"]
-```
+| Expression | Result | |
+|---|---|---|
+| `[1, 2, 3] \|> ~ * 2` | `[2, 4, 6]` | double each number |
+| `users \|> ~.name` | `["Alice", "Bob", "Charlie"]` | extract field from each item |
+| `["hello", "world"] \|> ~ ++ "!"` | `["hello!", "world!"]` | transform each item |
 
 ### Scalar Pipe
 
@@ -460,30 +430,20 @@ When the left side is a scalar, `~` binds to the whole value:
 
 When `~` is not used, the pipe passes the entire collection/data on left side to right side:
 
-```lambda
-[3, 1, 4, 1, 5] |> sum        // 14
-[3, 1, 4, 1, 5] |> sort       // [1, 1, 3, 4, 5]
-[1, 2, 3, 4, 5] |> take(3)    // [1, 2, 3]
-```
+| Expression | Result |
+|---|---|
+| `[3, 1, 4, 1, 5] \|> sum` | `14` |
+| `[3, 1, 4, 1, 5] \|> sort` | `[1, 1, 3, 4, 5]` |
+| `[1, 2, 3, 4, 5] \|> take(3)` | `[1, 2, 3]` |
 
 ### That Clause (Filtering)
 
-```lambda
-// Basic filtering
-[1, 2, 3, 4, 5] that (~ > 3)
-// Result: [4, 5]
-
-// Filter objects
-users that (age >= 18)
-// Keep only adult users
-
-// == and != work without parens
-[1, 2, 3, 4, 5] that ~ == 3
-// Result: [3]
-
-// Combined with pipe
-data | ~.name that (len(~) > 3) | ~.upper()
-```
+| Expression | Result | |
+|---|---|---|
+| `[1, 2, 3, 4, 5] that (~ > 3)` | `[4, 5]` | basic filtering |
+| `users that (age >= 18)` | adult users only | filter objects |
+| `[1, 2, 3, 4, 5] that ~ == 3` | `[3]` | `==` and `!=` work without parens |
+| `data \| ~.name that (len(~) > 3) \| ~.upper()` | | combined with pipe |
 
 > **Note:** The relational operators `<`, `>`, `<=`, `>=` conflict with element-tag
 > syntax in the parser. When a `that` (or `|`) condition uses any of these
@@ -529,21 +489,13 @@ users that (age >= min_age)
 
 Pipe (`|`) and filter (`that`) expressions inside array literals produce **spreadable results** — their array output is automatically flattened into the enclosing array, just like for-expressions and the spread operator:
 
-```lambda
-// Pipe spreads into enclosing array
-[1, [2, 3] | ~, 4, 5]                    // [1, 2, 3, 4, 5]
-[0, [1, 2, 3] | ~ * 10, 99]              // [0, 10, 20, 30, 99]
-
-// That/filter spreads into enclosing array
-[1, [1, 5, 7, 10, 15] that (~ > 5), 99]  // [1, 7, 10, 15, 99]
-
-// Non-array pipe results are pushed normally
-fn double(x: int) { x * 2 }
-[1, 5 | double, 4]                        // [1, 10, 4]
-
-// Mixed: for-expr + pipe + that
-[for (x in [1, 2]) x, [3, 4] | ~ * 10, [5, 6, 7] that (~ > 5)]  // [1, 2, 30, 40, 6, 7]
-```
+| Expression | Result | |
+|---|---|---|
+| `[1, [2, 3] \| ~, 4, 5]` | `[1, 2, 3, 4, 5]` | pipe spreads into enclosing array |
+| `[0, [1, 2, 3] \| ~ * 10, 99]` | `[0, 10, 20, 30, 99]` | |
+| `[1, [1, 5, 7, 10, 15] that (~ > 5), 99]` | `[1, 7, 10, 15, 99]` | `that` spreads into enclosing array |
+| `[1, 5 \| double, 4]` | `[1, 10, 4]` | non-array pipe results are pushed normally (given `fn double(x: int) { x * 2 }`) |
+| `[for (x in [1, 2]) x, [3, 4] \| ~ * 10, [5, 6, 7] that (~ > 5)]` | `[1, 2, 30, 40, 6, 7]` | mixed for-expr + pipe + `that` |
 
 > **Rationale:** This is consistent with for-expression and spread behavior — collection-producing
 > sub-expressions flatten into the enclosing array literal, giving a uniform "inline expansion" semantics.
@@ -644,7 +596,7 @@ let grade = if (score >= 90) "A"
             else "F"
 
 // If in let bindings
-(let x = 5, if (x > 3) "big" else "small")
+let size = (let x = 5, if (x > 3) "big" else "small")
 
 // Block else (NEW) — else branch can be a { stam } block
 let msg = if (x > 0) "ok" else {
@@ -750,40 +702,23 @@ for (k, v at {a: 1, b: 5, c: 2} where v > 2) k
 
 For expressions produce spreadable arrays that flatten when nested in other collections:
 
-```lambda
-// Nested for-expressions flatten automatically
-[for (i in 1 to 3) for (j in 1 to 3) i * j]
-// [1, 2, 3, 2, 4, 6, 3, 6, 9] — flat array, not nested
-
-// Spreading into array literals
-[0, for (x in [1, 2, 3]) x * 10, 99]
-// [0, 10, 20, 30, 99] — for-expr items spread into the array
-
-// Spreading into tuples
-(0, for (x in [1, 2]) x * 5, 99)
-// (0, 5, 10, 99)
-
-// Multiple for-expressions spread independently
-[for (x in [1, 2]) x, for (y in [3, 4]) y * 10]
-// [1, 2, 30, 40]
-```
+| Expression | Result | |
+|---|---|---|
+| `[for (i in 1 to 3) for (j in 1 to 3) i * j]` | `[1, 2, 3, 2, 4, 6, 3, 6, 9]` | nested for-expressions flatten — flat array, not nested |
+| `[0, for (x in [1, 2, 3]) x * 10, 99]` | `[0, 10, 20, 30, 99]` | for-expr items spread into the array |
+| `(0, for (x in [1, 2]) x * 5, 99)` | `(0, 5, 10, 99)` | spreading into tuples |
+| `[for (x in [1, 2]) x, for (y in [3, 4]) y * 10]` | `[1, 2, 30, 40]` | multiple for-expressions spread independently |
 
 #### Empty For Results
 
 When a for-expression iterates over an empty collection or filters all elements, it produces a **spreadable null** that is skipped when spreading:
 
-```lambda
-// Empty iteration produces spreadable null (evaluates to null)
-let v = for (i in []) i
-v == null              // true
-
-// Spreadable null is skipped in collections
-[for (i in []) i]      // [] — empty array, not [null]
-[1, for (i in []) i, 2]  // [1, 2] — null skipped
-
-// Where clause filters all elements
-[for (x in [1, 2, 3] where x > 100) x]  // []
-```
+| Expression | Result | |
+|---|---|---|
+| `v == null` given `let v = for (i in []) i` | `true` | empty iteration produces spreadable null |
+| `[for (i in []) i]` | `[]` | empty array, not `[null]` |
+| `[1, for (i in []) i, 2]` | `[1, 2]` | null skipped |
+| `[for (x in [1, 2, 3] where x > 100) x]` | `[]` | `where` clause filters all elements |
 
 ### Extended For-Expression Clauses
 
@@ -1131,7 +1066,7 @@ pn handle(event) {
             update_state({clicks: count})
         }
         case 'keypress' {
-            if (event.key == "Escape") return null;
+            if (event.key == "Escape") { return null }
             process_key(event.key)
         }
         default: null
@@ -1166,15 +1101,12 @@ let label = match status {
 
 #### Let Statements
 
-```lambda
-// Variable declaration
-let x = 42;
-let name = "Alice", age = 30;
-
-// With type annotation
-let x: int = 42;
-let items: string[] = ["a", "b", "c"];
-```
+| Declaration | Notes |
+|---|---|
+| `let x = 42` | variable declaration |
+| `let name = "Alice", age = 30` | multiple bindings in one `let` |
+| `let x: int = 42` | with type annotation |
+| `let items: string[] = ["a", "b", "c"]` | annotated array |
 
 #### If Statements
 
