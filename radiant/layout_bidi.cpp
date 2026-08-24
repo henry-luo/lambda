@@ -25,6 +25,7 @@ typedef struct BidiCharFragment {
     int logical_index;
     uint32_t codepoint;
     float width;
+    float advance_width;
     float visual_x;
 } BidiCharFragment;
 
@@ -35,6 +36,8 @@ typedef struct BidiRectInfo {
     int char_count;
     int visible_count;
     float raw_width;
+    bool collapses_spaces;
+    ViewSpan* directional_span;
 } BidiRectInfo;
 
 typedef struct BidiSpanInfo {
@@ -55,7 +58,34 @@ typedef struct BidiLineCounts {
     int max_depth;
     bool has_atomic;
     bool has_bidi_trigger;
+    bool has_bidi_layout_feature;
 } BidiLineCounts;
+
+static bool bidi_element_has_layout_feature(DomElement* element) {
+    if (!element || !element->specified_style) return false;
+    CssDeclaration* unicode_bidi = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_UNICODE_BIDI);
+    if (unicode_bidi && unicode_bidi->value &&
+        (unicode_bidi->value->type != CSS_VALUE_TYPE_KEYWORD ||
+         unicode_bidi->value->data.keyword != CSS_VALUE_NORMAL)) {
+        return true;
+    }
+    CssDeclaration* hanging_punctuation = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_HANGING_PUNCTUATION);
+    return hanging_punctuation && hanging_punctuation->value &&
+        (hanging_punctuation->value->type != CSS_VALUE_TYPE_KEYWORD ||
+         hanging_punctuation->value->data.keyword != CSS_VALUE_NONE);
+}
+
+static bool bidi_node_has_layout_feature(DomNode* node) {
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current->is_element() &&
+            bidi_element_has_layout_feature(current->as_element())) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
 #if RDT_HAS_FRIBIDI
@@ -135,12 +165,19 @@ CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback
     return fallback;
 }
 
+static bool bidi_is_line_break_codepoint(uint32_t codepoint) {
+    // CSS Text line breaking has already split these records; feeding them to
+    // UAX #9 would make a collapsed source newline act as a paragraph break.
+    return codepoint == 0x000A || codepoint == 0x000D;
+}
+
 static void bidi_count_views(View* view, int line_number, int depth,
                              CssEnum direction, BidiLineCounts* counts) {
     auto visit = [&](View* current, int current_depth) -> bool {
         if (current->view_type == RDT_VIEW_NONE) return false;
         if (current->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(current);
+            bool node_has_layout_feature = bidi_node_has_layout_feature(current);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 if (!bidi_is_line_text_rect(text, rect, line_number)) continue;
                 const unsigned char* cursor = text->text_data() + rect->start_index;
@@ -150,6 +187,14 @@ static void bidi_count_views(View* view, int line_number, int depth,
                     int consumed = utf8_decode((const char*)cursor,
                         (size_t)remaining, &codepoint);
                     if (consumed <= 0 || consumed > remaining) consumed = 1;
+                    if (bidi_is_line_break_codepoint(codepoint)) {
+                        cursor += consumed;
+                        remaining -= consumed;
+                        continue;
+                    }
+                    counts->has_bidi_layout_feature =
+                        counts->has_bidi_layout_feature ||
+                        codepoint == 0x0009 || node_has_layout_feature;
                     counts->chars++;
                     counts->has_bidi_trigger = counts->has_bidi_trigger ||
                         bidi_codepoint_triggers_reorder(codepoint) ||
@@ -166,9 +211,14 @@ static void bidi_count_views(View* view, int line_number, int depth,
             return false;
         }
         if (current->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
+            if (span->blk &&
+                (span->block()->unicode_bidi != CSS_VALUE_NORMAL ||
+                 span->block()->direction != direction)) {
+                counts->has_bidi_layout_feature = true;
+            }
             counts->spans++;
-            if (layout_inline_span_isolate(
-                    lam::view_require<RDT_VIEW_INLINE>(current))) {
+            if (layout_inline_span_isolate(span)) {
                 // CSS Writing Modes: an isolate participates in the parent
                 // paragraph as one atomic inline item, not as its text runs.
                 counts->chars++;
@@ -220,6 +270,18 @@ static bool bidi_is_collapsible_space(uint32_t codepoint) {
            codepoint == 0x000D || codepoint == 0x0020;
 }
 
+static ViewSpan* bidi_text_directional_span(ViewText* text, CssEnum direction) {
+    for (DomNode* current = text ? text->parent : nullptr;
+         current && current->is_element(); current = current->parent) {
+        DomElement* element = current->as_element();
+        if (element->view_type == RDT_VIEW_INLINE && element->blk &&
+            element->block()->direction != direction) {
+            return lam::view_require<RDT_VIEW_INLINE>(static_cast<View*>(element));
+        }
+    }
+    return nullptr;
+}
+
 static void bidi_fill_views(View* view, int line_number, int depth,
                             BidiCharFragment* chars, BidiRectInfo* rects,
                             BidiSpanInfo* spans, int* char_cursor,
@@ -240,6 +302,9 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                 rect_info->char_count = 0;
                 rect_info->visible_count = 0;
                 rect_info->raw_width = 0.0f;
+                rect_info->collapses_spaces = layout_white_space_collapses(
+                    get_white_space_value(static_cast<DomNode*>(text)));
+                rect_info->directional_span = bidi_text_directional_span(text, direction);
 
                 const unsigned char* cursor = text->text_data() + rect->start_index;
                 int remaining = rect->length;
@@ -251,6 +316,11 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                         codepoint = *cursor;
                         consumed = 1;
                     }
+                    if (bidi_is_line_break_codepoint(codepoint)) {
+                        cursor += consumed;
+                        remaining -= consumed;
+                        continue;
+                    }
                     BidiCharFragment* fragment = &chars[(*char_cursor)++];
                     fragment->text = text;
                     fragment->rect = rect;
@@ -258,6 +328,7 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                     fragment->logical_index = *char_cursor - 1;
                     fragment->codepoint = codepoint;
                     fragment->width = bidi_char_raw_width(text, codepoint);
+                    fragment->advance_width = fragment->width;
                     fragment->visual_x = 0.0f;
                     rect_info->char_count++;
                     rect_info->raw_width += fragment->width;
@@ -285,6 +356,7 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                 fragment->codepoint = span_info->span->blk->direction == CSS_VALUE_RTL
                     ? 0x0627 : 0x0041;
                 fragment->width = span_info->span->width;
+                fragment->advance_width = fragment->width;
                 span_info->logical_end = *char_cursor - 1;
                 continue;
             }
@@ -305,6 +377,7 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                 fragment->logical_index = *char_cursor - 1;
                 fragment->codepoint = bidi_marker_representative_codepoint(direction);
                 fragment->width = marker->width;
+                fragment->advance_width = fragment->width;
                 fragment->visual_x = 0.0f;
             }
             continue;
@@ -316,24 +389,52 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
                                     int rect_count) {
     for (int i = 0; i < rect_count; i++) {
         BidiRectInfo* rect_info = &rects[i];
+        bool trimmed_hidden_space = false;
+        float trimmed_space_width = 0.0f;
+        float original_raw_width = rect_info->raw_width;
         // line_break() trims a trailing collapsible space from the advance but
         // keeps it in TextRect::length; feeding that hidden character to UAX #9
         // would incorrectly widen the DOM range across reordered fragments.
         for (int j = rect_info->char_count - 1; j >= 0; j--) {
             BidiCharFragment* fragment = &chars[rect_info->first_char + j];
-            if (!bidi_is_collapsible_space(fragment->codepoint) ||
+            if (!rect_info->collapses_spaces || !rect_info->directional_span ||
+                !bidi_is_collapsible_space(fragment->codepoint) ||
                 fragment->width <= 0.0f ||
-                rect_info->raw_width - fragment->width < rect_info->rect->width - 0.01f) {
+                rect_info->raw_width <= 0.0f) {
                 break;
             }
             rect_info->raw_width -= fragment->width;
+            trimmed_space_width += fragment->width;
             fragment->width = 0.0f;
             rect_info->visible_count--;
+            trimmed_hidden_space = true;
         }
         if (rect_info->raw_width > 0.0f) {
-            float scale = rect_info->rect->width / rect_info->raw_width;
+            // keep a visible glyph at its measured width after removing a
+            // trailing space that remains in the DOM text range.
+            float target_width = rect_info->rect->width;
+            bool space_was_included_in_rect =
+                original_raw_width <= target_width + 0.01f;
+            if (trimmed_hidden_space && space_was_included_in_rect) {
+                // CSS Writing Modes bidi box construction keeps the directional
+                // inline edge while the text rect excludes its collapsed space.
+                layout_extend_fragment_union(rect_info->directional_span,
+                    FRAGMENT_UNION_INLINE, rect_info->rect->x,
+                    rect_info->rect->x + rect_info->rect->width,
+                    rect_info->rect->y,
+                    rect_info->rect->y + rect_info->rect->height);
+                target_width = max(target_width - trimmed_space_width, 0.0f);
+            }
+            float scale = target_width / rect_info->raw_width;
             for (int j = 0; j < rect_info->char_count; j++) {
-                chars[rect_info->first_char + j].width *= scale;
+                BidiCharFragment* fragment = &chars[rect_info->first_char + j];
+                fragment->width *= scale;
+                if (trimmed_hidden_space && !space_was_included_in_rect &&
+                    bidi_is_collapsible_space(fragment->codepoint)) {
+                    fragment->advance_width = 0.0f;
+                } else {
+                    fragment->advance_width *= scale;
+                }
             }
         } else {
             // The fallback font can have no glyph advance for a bidi script,
@@ -352,7 +453,8 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
             for (int j = 0; j < rect_info->char_count; j++) {
                     if (!text_codepoint_has_zero_advance(
                             chars[rect_info->first_char + j].codepoint)) {
-                    chars[rect_info->first_char + j].width = width;
+                        chars[rect_info->first_char + j].width = width;
+                        chars[rect_info->first_char + j].advance_width = width;
                 }
             }
             }
@@ -425,7 +527,9 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                     layout_shift_view_children(atomic_view, atomic_shift, 0.0f);
                 }
             }
-            if (chars[logical].width > 0.0f) cursor += chars[logical].width;
+            if (chars[logical].advance_width > 0.0f) {
+                cursor += chars[logical].advance_width;
+            }
         }
 
         for (int depth = max_depth; depth >= 0; depth--) {
@@ -499,8 +603,13 @@ void layout_bidi_line(LayoutContext* lycon) {
                      lycon->block.direction, &counts);
     // Ordinary LTR lines already have correct fragment geometry; UAX #9 must
     // only rewrite lines whose bidi data can change visual order.
+    // CSS Writing Modes applies bidi to the paragraph, but an ordinary line
+    // with no reorder trigger is already in visual order. Keep the pass for
+    // tabs, explicit bidi modes, and hanging punctuation because those
+    // features still require fragment-bound updates without an RTL codepoint
+    // to trigger reordering.
     if (counts.chars <= 0 || counts.rects <= 0 || counts.has_atomic ||
-        (!counts.has_bidi_trigger && lycon->block.direction != CSS_VALUE_RTL)) return;
+        (!counts.has_bidi_trigger && !counts.has_bidi_layout_feature)) return;
 
     BidiCharFragment* chars = (BidiCharFragment*)scratch_calloc(
         &lycon->scratch, sizeof(BidiCharFragment) * counts.chars);
@@ -605,20 +714,24 @@ void layout_bidi_line(LayoutContext* lycon) {
         }
     }
 #endif
-    if (max_level == 0) return;
+    // Explicit directional inline boxes still delimit whitespace runs when
+    // their content has no strong character to raise the paragraph level.
+    if (max_level == 0 && !counts.has_bidi_layout_feature) return;
 
     bidi_update_span_visual_ranges(chars, visual_to_logical, spans, counts.spans,
                                    counts.chars);
     bidi_place_visual_line(lycon, chars, rects, counts.rects, spans, counts.spans,
                            visual_to_logical, counts.chars, counts.max_depth);
     bidi_refresh_bounds(root, lycon->block.line_number, spans, counts.spans);
-    for (int depth = counts.max_depth; depth >= 0; depth--) {
-        for (int span_index = 0; span_index < counts.spans; span_index++) {
-            BidiSpanInfo* span_info = &spans[span_index];
-            if (span_info->depth != depth || span_info->max_visual < 0) continue;
-            recompute_span_bounding_box_after_line_layout(
-                span_info->span, inline_span_has_multiple_line_fragments(span_info->span),
-                span_info->span->font ? span_info->span->fontp()->font_handle : nullptr);
+    if (max_level > 0) {
+        for (int depth = counts.max_depth; depth >= 0; depth--) {
+            for (int span_index = 0; span_index < counts.spans; span_index++) {
+                BidiSpanInfo* span_info = &spans[span_index];
+                if (span_info->depth != depth || span_info->max_visual < 0) continue;
+                recompute_span_bounding_box_after_line_layout(
+                    span_info->span, inline_span_has_multiple_line_fragments(span_info->span),
+                    span_info->span->font ? span_info->span->fontp()->font_handle : nullptr);
+            }
         }
     }
 }

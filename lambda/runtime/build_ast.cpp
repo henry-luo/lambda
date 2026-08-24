@@ -65,6 +65,10 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
 // Forward declaration for imported module resolution
 static const char* resolve_imported_module(Transpiler* tp, StrView* name);
 
+// S16.6.8 operand guard; defined with the branch-homogeneity validators below.
+static void reject_procedural_block_operand(Transpiler* tp, AstNode* operand,
+        const char* position);
+
 // Shared element namespace desugaring helpers used by the direct parser.
 static AstNode* build_ns_attr_map_from_parts(Transpiler* tp, StrView attr_name,
         AstNode* val_expr, SourceSpan span);
@@ -2205,6 +2209,9 @@ AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
 
 AstNode* build_array_from_items(Transpiler* tp, SourceSpan span,
         AstNode* items) {
+    for (AstNode* item = items; item; item = item->next) {
+        reject_procedural_block_operand(tp, item, "an array element");
+    }
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node_from_span(tp,
         AST_NODE_ARRAY, span, sizeof(AstArrayNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
@@ -4166,6 +4173,35 @@ static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
 // build a match expression from committed reduction parts
 
 
+// S16.6.8/S16.6.9 for `match`. A `:` arm is a value arm and may not hold a
+// procedural block; a braced arm is a control arm when its interior is
+// procedural. The form must then be all-value or all-control — a mixture would
+// make the match's value depend on which arm ran, which is exactly what
+// `case 'click' { ... } default: null` silently did before.
+static void validate_match_branch_homogeneity(Transpiler* tp, AstMatchNode* node,
+        SourceSpan span) {
+    bool saw_value = false, saw_control = false;
+    SourceSpan control_span = span;
+    for (AstMatchArm* arm = node->first_arm; arm; arm = (AstMatchArm*)arm->next) {
+        AstBranchKind kind = ast_branch_kind(arm->body);
+        bool procedural = arm->body && arm->body->node_type == AST_NODE_CONTENT &&
+            kind == AST_BRANCH_CONTROL;
+        if (procedural && !arm->body_braced) {
+            record_semantic_error_span(tp, arm->source_span, ERR_INVALID_OPERATION,
+                "a `case T:` arm is a value arm and takes an expression; this "
+                "block contains statements - write `case T { ... }`");
+            return;
+        }
+        if (procedural) { saw_control = true; control_span = arm->source_span; }
+        else if (kind != AST_BRANCH_NEUTRAL) saw_value = true;
+    }
+    if (saw_value && saw_control) {
+        record_semantic_error_span(tp, control_span, ERR_INVALID_OPERATION,
+            "match arms must be all value arms or all control arms; this arm is "
+            "a statement block while another arm yields a value");
+    }
+}
+
 AstNode* build_match_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* scrutinee, AstNode* arms) {
     AstMatchNode* node = (AstMatchNode*)alloc_ast_node_from_span(tp,
@@ -4184,6 +4220,7 @@ AstNode* build_match_from_parts(Transpiler* tp, SourceSpan span,
     }
     node->type = mixed ? set_type_any(tp, ANY_JOIN) :
         (result ? result : &TYPE_NULL);
+    validate_match_branch_homogeneity(tp, node, span);
     AstNode* value = boundary_unwrap_primary(scrutinee);
     if (value && value->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)value;
@@ -7037,6 +7074,9 @@ static bool direct_view_end(LambdaDirectAstSink* sink) {
 
 static AstNode* direct_list_node(Transpiler* tp, SourceSpan span,
         AstNode* items) {
+    for (AstNode* item = items; item; item = item->next) {
+        reject_procedural_block_operand(tp, item, "a tuple or list element");
+    }
     AstListNode* list = (AstListNode*)alloc_ast_node_from_span(tp,
         AST_NODE_LIST, span, sizeof(AstListNode));
     list->item = items;
@@ -7379,6 +7419,8 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
     node->left = left;
     node->right = right;
     node->op_str = op_spelling;
+    reject_procedural_block_operand(tp, left, "an operand");
+    reject_procedural_block_operand(tp, right, "an operand");
     if (!lambda_binary_operator_from_spelling(op_spelling, &node->op)) {
         record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
             "unknown binary operator '%.*s'", (int)op_spelling.length,
@@ -7743,6 +7785,9 @@ static AstNode* direct_start_node(Transpiler* tp, SourceSpan span,
     AstCallNode* target_call = (AstCallNode*)alloc_ast_node_from_span(tp,
         AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
     target_call->function = target;
+    for (AstNode* a = args; a; a = a->next) {
+        reject_procedural_block_operand(tp, a, "a call argument");
+    }
     target_call->argument = args;
     target_call->type = fn_type ? function_call_result_type(tp, fn_type) : &TYPE_ERROR;
     target_call->can_raise = fn_type && fn_type->can_raise;
@@ -7800,6 +7845,9 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
     AstCallNode* call = (AstCallNode*)alloc_ast_node_from_span(tp,
         AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
     call->function = function;
+    for (AstNode* a = arguments; a; a = a->next) {
+        reject_procedural_block_operand(tp, a, "a call argument");
+    }
     call->argument = arguments;
     (void)validate_lambda_argument_limit(tp, span, arg_count, "call argument");
     StrView name = {0};
@@ -8567,6 +8615,85 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
     return (AstNode*)node;
 }
 
+// S16.6.8/S16.6.9 branch classification, by INTERIOR on the S12.1 boundary.
+//
+// A block is CONTROL when its top level holds a pn-only statement, or holds a
+// nested `if`/`match` that is itself CONTROL — the recursion matters: the outer
+// then-branch of a nested if/else contains only an IF node, so a top-level-only
+// scan called it a value branch and rejected working procedural code.
+// An EMPTY block is NEUTRAL and pairs with either side.
+AstBranchKind ast_branch_kind(AstNode* node) {
+    if (!node) return AST_BRANCH_NEUTRAL;
+    switch (node->node_type) {
+    case AST_NODE_CONTENT: {
+        AstBranchKind kind = AST_BRANCH_NEUTRAL;
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            if (is_procedural_only_stam(item->node_type)) return AST_BRANCH_CONTROL;
+            if (ast_branch_kind(item) == AST_BRANCH_CONTROL) return AST_BRANCH_CONTROL;
+            kind = AST_BRANCH_VALUE;
+        }
+        return kind;  // NEUTRAL only when the block is empty
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* n = (AstIfNode*)node;
+        if (ast_branch_kind(n->then) == AST_BRANCH_CONTROL ||
+                ast_branch_kind(n->otherwise) == AST_BRANCH_CONTROL) {
+            return AST_BRANCH_CONTROL;
+        }
+        return AST_BRANCH_VALUE;
+    }
+    case AST_NODE_MATCH_EXPR: {
+        for (AstMatchArm* arm = ((AstMatchNode*)node)->first_arm; arm;
+                arm = (AstMatchArm*)arm->next) {
+            if (ast_branch_kind(arm->body) == AST_BRANCH_CONTROL) {
+                return AST_BRANCH_CONTROL;
+            }
+        }
+        return AST_BRANCH_VALUE;
+    }
+    default:
+        return is_procedural_only_stam(node->node_type)
+            ? AST_BRANCH_CONTROL : AST_BRANCH_VALUE;
+    }
+}
+
+// S16.6.8: a procedural block is a statement and may not stand where a value is
+// required. Reported at the operand rather than the enclosing construct, since
+// that is where the repair goes: bind the block's effect first, then use the
+// name. Functional blocks and maps are unaffected — `ast_block_is_procedural`
+// classifies by interior.
+static void reject_procedural_block_operand(Transpiler* tp, AstNode* operand,
+        const char* position) {
+    if (!ast_block_is_procedural(operand)) return;
+    record_semantic_error_span(tp, operand->source_span, ERR_INVALID_OPERATION,
+        "a statement block is not an expression and cannot appear as %s; run it "
+        "as its own statement and bind the result first", position);
+}
+
+// S16.6.9 for `if`/`else`. Classification is by INTERIOR on the S12.1 boundary,
+// not by brace shape: a braced-but-functional else is a value branch, which is
+// what keeps the documented block-else idiom
+// (`if (x > 0) "ok" else { let r = diagnose(x); ... }`) legal. An absent else
+// contributes nothing, so a lone `if (c) { return x }` stays a control form.
+// A chained `else if` is itself an IF node and is validated on its own.
+static void validate_if_branch_homogeneity(Transpiler* tp, SourceSpan span,
+        AstNode* then_branch, AstNode* else_branch) {
+    if (!else_branch) return;
+    AstBranchKind then_kind = ast_branch_kind(then_branch);
+    AstNode* tail = ast_unwrap_primary(else_branch);
+    // An `else if` chain defers to that node's own check rather than being
+    // classified here, where its branches are not visible.
+    if (tail && tail->node_type == AST_NODE_IF_EXPR) return;
+    AstBranchKind else_kind = ast_branch_kind(else_branch);
+    // NEUTRAL is the empty branch: it commits to neither and pairs with both.
+    if (then_kind == AST_BRANCH_NEUTRAL || else_kind == AST_BRANCH_NEUTRAL) return;
+    if (then_kind == else_kind) return;
+    record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+        "if branches must be all value or all control; one branch is a "
+        "statement block while the other yields a value - lift the statement "
+        "branch out (`if (c) { ... }` on its own, then bind the value)");
+}
+
 AstNode* build_if_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* condition, AstNode* then_branch, AstNode* else_branch) {
     AstIfNode* node = (AstIfNode*)alloc_ast_node_from_span(tp,
@@ -8585,6 +8712,7 @@ AstNode* build_if_node_from_parts(Transpiler* tp, SourceSpan span,
     // Keep ordinary mixed joins widened through the shared rule so later
     // boundary validation observes the same function return contracts.
     node->type = infer_if_result_type(tp, then_branch, else_branch);
+    validate_if_branch_homogeneity(tp, span, then_branch, else_branch);
     return (AstNode*)node;
 }
 
@@ -8713,7 +8841,14 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
     loop->on = join;
     loop->key_filter = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY)
         ? LOOP_KEY_SYMBOL : LOOP_KEY_ALL;
-    loop->key_only = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY) != 0;
+    // S8.1.3: the AXIS (`in`/`at`) selects which members are walked — that is
+    // `key_filter` above — while the ARITY selects the projection. `for (k at c)`
+    // binds the key, but the paired `for (k, v at c)` walks the same name-keyed
+    // members and binds (key, value): `index_name` is the key slot and `name` is
+    // the value slot by construction, so key_only must not also redirect `name`
+    // to the key. Leaving it set bound BOTH names to the key (LR02-8).
+    loop->key_only = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY) != 0 &&
+        !loop->index_name;
     loop->optional = (flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) != 0;
     loop->type = direct_loop_value_type(tp, source, loop->key_only);
 
@@ -9228,6 +9363,11 @@ static LambdaParseValue direct_ast_reduce(void* context,
         AstNode* error_type = NULL;
         AstNode* body = direct_ast_node(
             reduction->children[reduction->child_count - 1]);
+        // S16.6.8: an `=>` body is an expression position. The braced form
+        // carries BODY_BLOCK and is the statement spelling, so it is exempt.
+        if (!(reduction->flags & LAMBDA_REDUCTION_FLAG_BODY_BLOCK)) {
+            reject_procedural_block_operand(tp, body, "an arrow `=>` body");
+        }
         uint32_t i = 0;
         if (i < reduction->child_count &&
                 direct_ast_node(reduction->children[i]) &&
@@ -9648,6 +9788,8 @@ static LambdaParseValue direct_ast_reduce(void* context,
             arm->pattern = reduction->child_count == 2
                 ? direct_ast_node(reduction->children[0]) : NULL;
             arm->body = direct_ast_node(reduction->children[reduction->child_count - 1]);
+            arm->body_braced =
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_BODY_BLOCK) != 0;
             return direct_ast_value((AstNode*)arm);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_PARAMETER) {

@@ -528,6 +528,11 @@ typedef struct AstMatchArm : AstNode {
         AstNode *body;
         AstNode *consequent;
     };
+    // S16.6.8/S16.6.9: true for the `case T { ... }` spelling, false for
+    // `case T: expr`. The two reduce to the same node, but only the colon
+    // spelling bars a procedural block, and the distinction drives the
+    // value-arm/control-arm reading.
+    bool body_braced;
 } AstMatchArm;
 
 typedef struct AstMatchNode : AstNode {

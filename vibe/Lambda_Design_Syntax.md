@@ -1312,8 +1312,67 @@ for scalars".
     Imports are unaffected — `import .mod` has a keyword introducer, so no
     ambiguity exists to escape. S2.4.1 takes a v3, S16.2.4 a v2 (§7.15).
 
+35. *(ratified 2026-08-24 as S16.6.6, spec v13.0.0)* **Control statements
+    require braces.** `return`/`break`/`continue` are rejected in every
+    unbraced expression body — paren-form `if`/`for` body, `else` body,
+    `case T:` arm, `=>` arrow body — with a diagnostic naming the braced
+    repair. The braced block IS the statement spelling wherever it appears
+    (`case T: { return x }` is legal). Decisive ground: the greedy return
+    (S16.2.5) makes the C-family unbraced guard a silent-swallow trap —
+    `if (c) return` ⏎ `cleanup()` would parse as `return cleanup()`, running
+    cleanup only on the guard path and returning its value. Cost accepted:
+    C-family developers will miss the non-braced form. Both front ends
+    enforce it: the C parser by a direct check at each body site, the
+    reference grammar by a zero-width `_expr_body_start` scanner guard
+    (context-aware lexing means a grammar-only fix is impossible — the
+    keyword falls back to `identifier` wherever only an identifier is
+    valid). The guard is scoped to the four body positions, not to every
+    identifier, keeping the §7.17 scanner blast radius small; it is
+    stateless, so it carries none of that note's stale-carry hazard.
+36. *(ratified 2026-08-24 as S16.6.7, spec v13.0.0)* **`pn` has one body
+    form**: `pn name() { ... }`. No `=>` after a procedure signature, named
+    or anonymous — `pn p() => expr` was redundant with `fn`, and
+    `pn p() => { ... }` redundant with the braced form. The C parser
+    accepting these was a front-end divergence (the TS grammar always
+    rejected them); corpus cost was 1 doc site, 0 tests.
+
+37. *(ratified 2026-08-24 as S16.6.8, spec v14.0.0; IMPLEMENTED same day)*
+    **A procedural block is a statement, never an expression.** A braced
+    block whose top level contains `return`/`break`/`continue`/`var`/
+    assignment is rejected in every expression position — after `case T:`,
+    in tuples/arguments/operands, as an arrow body. Probe that decided it:
+    `let t = ({ return 99 }, 123)` returned 99 from the enclosing pn and
+    `t` never existed — the expression evaporated. Explicitly KEPT:
+    `case T: { <functional e> }`. Three grounds: maps after `:` force brace
+    handling there regardless; fn blocks are expressions in every other
+    position (arrow bodies rely on them); and under this very ruling the
+    colon spelling can no longer conceal statements, so the redundancy that
+    motivated banning it is gone. Interior decides — S16.4.1v2's doctrine
+    lifted from map-vs-block to statement-ness.
+38. *(ratified 2026-08-24 as S16.6.9, spec v14.0.0; IMPLEMENTED same day)*
+    **Branch homogeneity: no mixed fn/pn branches.** `if`/`else` chains and
+    `match` forms are all-value (every branch an expression — functional
+    blocks, maps, and `raise` arms included) or all-control (every branch a
+    procedural block; the form is a statement, illegal in value position).
+    `if (c) { return 1 } else 0` dies; the repair is the sequencing style:
+    `if (c) { return 1 }` then `let x = 0`. Semantic classification on the
+    S12.1 boundary (fn/pn interior), NOT brace-shape uniformity — the
+    brace-shape rule would have killed the all-fn block-else idiom
+    (`if (x > 0) "ok" else { let r = d(x); … }`) for nothing. Home:
+    build_ast per §5.6. The pn-call-in-expression question is deliberately
+    NOT part of this ruling — recorded as SO36 (less severe: a pn call
+    still produces a value; only effect ordering embeds in the expression).
+    Implementation note: classification must be **three-way and recursive**.
+    Scanning only a block's immediate top level for pn-only statements
+    over-rejects a branch that merely wraps a nested control `if`, and an
+    EMPTY branch is NEUTRAL — it commits to neither side and pairs with
+    both, which is what `} else if (c) { } else {` relies on.
+
 **Open** *(O1 and O2 resolved above — decided points 13–14)***:**
 
+- **O5: pn calls in expressions** — A-normal-form effect sequencing,
+  recorded as SO36 in the formal spec; an S12 question, not an S16 one.
+  Needs its own cost survey (`if (exists(p))` and friends break under it).
 - **O3: scanner-owned type tokens** *(audited 2026-08-21; reduced to one
   conformance fix)*. Multi-line type patterns live inside
   `type_pattern_token` et al., where `src/scanner.c` — not the statement

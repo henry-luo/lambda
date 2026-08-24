@@ -25,7 +25,7 @@ Counts:
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 11 | 2 | 2 | 15 |
-| LR_02 | Parsing & AST construction | 6 | 4 | 6 | 16 |
+| LR_02 | Parsing & AST construction | 5 | 4 | 9 | 18 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
 | LR_05 | Strings, symbols & vectors | 7 | 1 | 2 | 10 |
@@ -37,7 +37,7 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 0 | 7 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| **Total** | | **96** | **10** | **28** | **134** |
+| **Total** | | **95** | **10** | **31** | **136** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -216,101 +216,6 @@ legitimately large module scopes and cause a tier mismatch (SI3v2 — see
 defensive-recovery arm is gone.
 *Residue:* the cycle guard itself is still a safety net standing in for a
 stronger structural invariant on scope entry lists.
-
-
-<a id="lr02-8"></a>**LR02-8 · `for (k, v at c)` parses but binds both names to the key · OPEN**
-*Found during the 2026-08-24 verification pass; not from the LR_02 section.*
-The paren + `at` paired loop form is accepted and runs, but the second name is
-bound to the key rather than the value:
-
-```
-let c = {a: 1, b: 2}
-for (k, v at c) { [k, v] }    →  ['a', 'a'], ['b', 'b']
-for  k, v in c  { [k, v] }    →  ['a', 1],   ['b', 2]     // correct
-```
-
-`at` selects key iteration (`AstLoopNode.key_only`, `ast.hpp:296`), and the
-paired destructuring is not re-applied on that path, so `v` silently receives
-the key. This is a **silent wrong answer**, strictly worse than a rejection.
-Note that **SO12's premise is stale** — `doc/Lambda_Formal_Semantics.md`
-Appendix B records this form as "does not parse", which has not been true since
-the C parser became production. Whether the form *should* exist is still SO12's
-open design question; until it is answered the form should mis-bind or be
-rejected, not mis-bind silently.
-
-<a id="lr02-9"></a>**LR02-9 · Binary `&` / `!` type operators work in pattern position but not in annotation position · OPEN**
-*Found during the 2026-08-24 verification pass; not from the LR_02 section.*
-Intersection (`&`) and exclusion (`!`) parse everywhere `|` does, and evaluate
-**correctly as patterns** — but a declaration annotation rejects them:
-
-| Position | `int \| string` | `int & string` | `int ! string` |
-|---|---|---|---|
-| `x is (…)` | ✓ | ✓ (`false` for `x = 1`) | ✓ (`true` for `x = 1`) |
-| `match { case … }` | ✓ | ✓ | ✓ |
-| `let a: … = 1` | ✓ | `E201: cannot initialize 'a' of type type with int` | same |
-| `fn f(a: …)` | ✓ | `E207: argument 1 expected type, got int` | same |
-
-So the type expression is built, and the pattern path consumes it, but the
-annotation path receives a `LMD_TYPE_TYPE`-tagged *value* instead of a type. The
-asymmetry is visible in the consumers: `pattern_ast_literal_set`
-(`build_ast.cpp:4309`) and `interp_pattern_matches` (`interp.cpp:2013`) each
-branch on `OPERATOR_UNION` **only**, and `OPERATOR_INTERSECT` /
-`OPERATOR_EXCLUDE` (`build_ast.cpp:3713`–`3714`) fall through them — the
-`is`/`match` results above come from a separate `fn_is` path, not these.
-
-Two consequences worth separating: the **capability** gap (annotations cannot
-use `&`/`!`) and the **diagnostic** gap — both errors name the binding or the
-argument, never the unsupported operator, so a reader is sent to the wrong
-place. The diagnostic is the cheap half.
-
-This is the implementation face of **SO9** ("a surface spelling for
-`any \ error`; the `!` exclusion operator route is broken") and of the
-`&`/`!`-unimplemented warning in the string-pattern design record.
-
-
-<a id="lr02-10"></a>**LR02-10 · Spread does not expand into a call's argument list · OPEN**
-*Found during the 2026-08-24 doc sweep; not from the LR_02 section.*
-`*x` expands only where a **container** is being built. In any other expression
-position it degenerates to its operand — one line in the interpreter,
-[`interp.cpp:778`](../lambda/runtime/interp.cpp):
-
-```c
-if (node->op == OPERATOR_SPREAD) return eval_expr(f, node->operand);
-```
-
-A call argument is an ordinary expression position, so a spread argument arrives
-as a single value. An arity probe against a working variadic
-(`fn sum_all(...) => len(varg())`) shows it directly:
-
-| Call | args received |
-|---|---:|
-| `sum_all(1, 2, 3)` | 3 |
-| `sum_all(*[1, 2, 3])` | **1** |
-| `sum_all([1, 2, 3])` | 1 |
-
-`sum_all(*[1, 2, 3])` therefore does not merely mis-count — it fails at runtime,
-because `sum` receives a one-element list whose member is an array. Variadic
-forwarding (`fn outer(...) => inner(*varg())`) fails the same way. On a
-fixed-arity callee the mismatch surfaces as `E206: function expects 2 arguments,
-got 1`, which names the arity rather than the unexpanded spread.
-
-Three sites would have to agree for this to work: `lambda_ast_validate_call_arguments`
-(`build_ast.cpp`) counts syntactic arguments with no spread awareness; the
-interpreter degenerates the spread at `interp.cpp:778`; and MIR Direct expands
-spreads only in the array builders (`transpile-mir.cpp:12888`), never at a call.
-
-**This is a documented-and-tested-but-unimplemented feature, in three spellings,
-none of which the parser accepts together with the call form:**
-
-| Where | Spelling | Status |
-|---|---|---|
-| `doc/Lambda_Func.md:181`, `doc/Lambda_Sys_Func.md:857` | `fn sum_all(...) => sum(varg())` | **the working variadic form** |
-| `doc/Lambda_Expr_Stam.md` (pre-sweep) | `fn sum_all(...args) = args \| reduce(…)` | parameter spelling does not parse |
-| `test/std/core/functions/variadic_args.ls:5`,`:21` | `fn sum_all(values...)`, `wrapper(args...) => sum_all(*args)` | parameter spelling does not parse; line 21 is exactly this forwarding case |
-
-The variadic feature itself works — only the spread-into-call half is missing.
-`doc/Lambda_Expr_Stam.md` now documents the intended form with a
-"not yet implemented" note rather than an example that silently misleads.
 
 
 ---
@@ -1052,6 +957,74 @@ and nothing else, so the ratchet bites. `make test-lambda-baseline`:
 **3867/3867**.
 
 
+<a id="lr02-r7"></a>**LR02-R7 · `pn ... =>` accepted by the C parser only; arrow-body errors rewritten into the element-ambiguity message · RESOLVED 2026-08-24**
+Two defects closed by the S16.6.6/S16.6.7 ratification. (1) `parse_function_declaration` accepted `pn p() => expr` and `pn p() => { ... }` while the Tree-sitter reference grammar rejected both — a §4.4 front-end divergence with the C parser as the outlier; now rejected with `a procedure body is a statement block — write 'pn name() { ... }'`. Corpus cost: 1 doc site (`doc/Lambda_Procedural.md`), 0 tests. (2) The `runner.cpp` relation walk-back matched the `>` of `=>`, rewriting every arrow-body diagnostic into `'<' and '>' are ambiguous with element syntax` — `(x) => return x` produced that message instead of the parser's own; the walk-back now skips `=>` and `|>`. Harness: C 138/138, TS 128/128.
+
+<a id="lr02-r8"></a>**LR02-R8 · Reference grammar lexed `return`/`break`/`continue` as identifiers in expression position · RESOLVED 2026-08-24**
+*Was LR02-12, opened the same day while implementing S16.6.6 and closed the same day.*
+
+**Symptom.** `if (c) return -1` parsed in the Tree-sitter reference grammar as a
+**subtraction from a variable named `return`** — a silent misparse, strictly
+worse than acceptance, and invisible to the compare lane because production
+rejected it.
+
+**Root cause.** Tree-sitter's lexer is context-aware and `word: $ => $.identifier`
+enables keyword extraction: a keyword token is emitted only where it is
+syntactically valid, otherwise the word falls back to `identifier`. In an
+expression position `return_stam` is not valid but `identifier` is, so the
+fallback fired. No grammar-only fix exists for this in tree-sitter 0.24 —
+per-position reserved words arrived in 0.25's `reserved` sets, and the repo
+pins 0.24.7.
+
+**Fix.** A zero-width external `_expr_body_start`, withheld by the scanner when
+the word at the cursor is `return`/`break`/`continue`, required at the four
+S16.6.6 body positions (paren-form `if`/`for` body, `else` body, `case T:` arm,
+`=>` arrow body — eight grammar sites). Withholding the token kills the
+expression-body alternative, which is exactly the rejection required. The guard
+is **scoped to those positions rather than to every identifier**, keeping the
+§7.17 scanner blast radius small, and is **stateless** — a pure function of the
+lookahead — so it carries none of that note's stale-carry hazard. The helper is
+`inline:`d: as a real nonterminal it forced a reduce conflict against a trailing
+binary operator (`=> x > y`).
+
+**Verified.** C 140/140 and Tree-sitter 135/135 on identical case sets (the five
+divergence cases moved back into the TS suite, plus controls for a
+keyword-prefixed identifier `returnValue` and an arrow body with a binary tail).
+Full 700-file `.ls` corpus cross-check: **zero movement** — the same 76
+pre-existing failures before and after, measured by regenerating both ways.
+`make test-lambda-baseline` 3868/3868.
+
+<a id="lr02-r9"></a>**LR02-R9 · `for (k, v at c)` bound both names to the key · RESOLVED 2026-08-24**
+*Was LR02-8, found during the verification pass; closed once S8.1.3 settled what the form means.*
+
+**Symptom.** `for (k, v at {a: 1, b: 2}) k ++ v` yielded `['aa', 'bb']` — the value
+name aliased the key. A **silent wrong answer**: the shape was right, only the
+binding wrong. The `where` variant was worse still — `where v > 2` compared the
+key against a number, so the filter silently returned `[]`.
+
+**Root cause.** `AstLoopNode.name` holds the LAST binding and `index_name` the
+first, so in the paired form `name` is the value slot and `index_name` the key
+slot. `at` set `key_only`, which redirects `name` to the key — correct for the
+single-name `for (k at c)`, but in the paired form it overwrote the value slot
+while `index_name` was independently getting the key.
+
+**Fix.** Gate `key_only` on the absence of `index_name` (`build_ast.cpp`).
+`key_filter` is deliberately untouched: that is what restricts the **member set**
+to name keys, so the axis still means something — paired `at` on an element
+yields attribute pairs only, and on an array yields nothing (an `IntKey` is not
+a name, S8.2.2v2). Both execution tiers read the same flag, so one fix covers
+MIR Direct and the interpreter.
+
+**Ruling first, then fix.** The form was unspecified — S8.1.1 paired `at` with a
+single name, S8.2.1v2 specified the paired form only for `in`, and SO12 recorded
+the question as open. **S8.1.3** now rules axis and arity independent: the axis
+picks which members are walked, the arity picks the projection. SO12 is closed.
+
+**Verified.** The three worked examples in `doc/Lambda_Expr_Stam.md` had never
+been run and all three were wrong; they now match. Regression test
+`test/lambda/for_at_pairs.ls` + `.txt` pins all six shapes (paired/single `at`,
+`where`, element attrs-vs-children, empty array). Baseline 3868/3868.
+
 ## A.3 Value & type model (LR_03)
 
 <a id="lr03-r1"></a>**LR03-R1 · Two parallel type vocabularies · RESOLVED**
@@ -1202,7 +1175,7 @@ together, not individually.
 | **`INT64_MAX` sentinel collision** | LR03-4, LR07-4, LR10-5 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. See [v5 int migration in flight]. |
 | **Hard-coded byte offsets** | LR01-8, LR07-12, LR08-5 | Three subsystems read struct fields at literal offsets that no `static_assert` protects. A single layout change corrupts module binding, GC tracing, or the JIT prologue silently. |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR09-6, LR10-3, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
-| **Surface syntax (S16) residue** | LR02-8 – LR02-10, SO9, SO12, O3, §7.17 | S16 itself is conformant on the harness (123/123 C, 118/118 Tree-sitter). What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
+| **Surface syntax (S16) residue** | LR02-9, LR02-10, SO9, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 
 ---

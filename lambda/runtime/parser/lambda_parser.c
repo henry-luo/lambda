@@ -240,6 +240,18 @@ static bool token_is_dual_role(LambdaTokenKind kind) {
     }
 }
 
+// S16.6.6: 'return'/'break'/'continue' are statements and are admitted only
+// inside a braced body. Every unbraced control body, else body, 'case T:' arm
+// and '=>' arrow body is an expression position; rejecting the keyword here
+// with a repair-naming message beats the generic "expected an expression".
+// 'raise' is NOT in this set — it is an expression and diverges cleanly.
+// The greedy return (S16.2.5) is why the unbraced form cannot be admitted:
+// 'if (c) return' ⏎ 'cleanup()' would silently parse as 'return cleanup()'.
+static bool token_is_control_statement(LambdaTokenKind kind) {
+    return kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_BREAK ||
+        kind == LAMBDA_TOK_CONTINUE;
+}
+
 // §7.15: `.digit` remains dual-role even though the lexer folds `.5` into a
 // single FLOAT token — across a line break it is equally a float literal
 // starting a statement and an integer member field continuing one.
@@ -903,6 +915,11 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
         }
         if (!parser_expect(parser, LAMBDA_TOK_ARROW, "expected '=>' after arrow parameters")) return 0;
         parser_skip_newlines(parser);
+        if (token_is_control_statement(parser->current.kind)) {
+            parser_set_error(parser, "'return', 'break', and 'continue' are "
+                "statements; an arrow '=>' body is an expression", LAMBDA_TOK_LBRACE);
+            return 0;
+        }
         // S16.4.2: an arrow body is fn context BY DEFINITION, even written
         // inside a `pn` — the arrow is a functional value wherever it appears,
         // so `() => {}` mid-procedure is still the empty map.
@@ -992,6 +1009,12 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_IF_BRANCH_END, first.span, first, NULL, 0);
     } else {
+        if (token_is_control_statement(parser->current.kind)) {
+            parser_set_error(parser, "'return', 'break', and 'continue' are "
+                "statements; an unbraced 'if' body is an expression - write "
+                "'if (cond) { ... }'", LAMBDA_TOK_LBRACE);
+            return 0;
+        }
         children[1] = parse_expression(parser, 0);
     }
     if (parser->status != LAMBDA_PARSE_OK) return 0;
@@ -1012,6 +1035,12 @@ static LambdaParseValue parse_if_expression(LambdaRdParser* parser) {
         parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
             LAMBDA_REDUCTION_FORM_IF_BRANCH_END, first.span, first, NULL, 0);
     } else {
+        if (token_is_control_statement(parser->current.kind)) {
+            parser_set_error(parser, "'return', 'break', and 'continue' are "
+                "statements; an unbraced 'else' body is an expression - write "
+                "'else { ... }'", LAMBDA_TOK_LBRACE);
+            return 0;
+        }
         children[2] = parse_expression(parser, 0);
     }
     if (parser->status != LAMBDA_PARSE_OK) return 0;
@@ -1258,6 +1287,12 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
         children[0] = parse_content(parser, LAMBDA_TOK_RBRACE);
         if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after for body")) return 0;
     } else if (parenthesized) {
+        if (token_is_control_statement(parser->current.kind)) {
+            parser_set_error(parser, "'return', 'break', and 'continue' are "
+                "statements; an unbraced 'for' body is an expression - write "
+                "'for (...) { ... }'", LAMBDA_TOK_LBRACE);
+            return 0;
+        }
         children[0] = parse_expression(parser, 0);
     } else {
         parser_set_error(parser, "expected '{' after for statement header", LAMBDA_TOK_LBRACE);
@@ -1325,10 +1360,21 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
             LAMBDA_REDUCTION_FORM_MATCH_ARM_BEGIN, arm_first.span, arm_first,
             NULL, 0);
         LambdaParseValue body = 0;
+        // S16.6.8 bars a procedural block after `case T:` but not after the
+        // braced arm spelling, so build_ast needs to tell the two apart; the
+        // AST node is identical either way (both reduce to CONTENT).
+        bool arm_body_braced = false;
         if (parser_accept(parser, LAMBDA_TOK_COLON)) {
             parser_skip_newlines(parser);
+            if (token_is_control_statement(parser->current.kind)) {
+                parser_set_error(parser, "'return', 'break', and 'continue' are "
+                    "statements; a 'case T:' arm takes an expression - write "
+                    "'case T { ... }'", LAMBDA_TOK_LBRACE);
+                return 0;
+            }
             body = parse_expression(parser, 0);
         } else if (parser_accept(parser, LAMBDA_TOK_LBRACE)) {
+            arm_body_braced = true;
             body = parse_content(parser, LAMBDA_TOK_RBRACE);
             if (!parser_expect(parser, LAMBDA_TOK_RBRACE, "expected '}' after match arm")) return 0;
         } else {
@@ -1343,10 +1389,12 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
         uint32_t arm_child_count = 0;
         if (pattern) arm_children[arm_child_count++] = pattern;
         arm_children[arm_child_count++] = body;
-        LambdaParseValue arm = parser_reduce_token(parser, LAMBDA_REDUCE_STATEMENT,
+        LambdaParseValue arm = parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
             LAMBDA_REDUCTION_FORM_MATCH_ARM,
             (SourceSpan){arm_first.span.start_byte, parser->current.span.start_byte},
-            arm_first, arm_children, arm_child_count);
+            arm_first, (LambdaToken){0},
+            arm_body_braced ? LAMBDA_REDUCTION_FLAG_BODY_BLOCK : 0u,
+            arm_children, arm_child_count);
         arms = parser_list_append(parser,
             (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, arms, arm);
         arm_count++;
@@ -1940,8 +1988,21 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser,
     // count: a `fn` written inside a `pn` is fn context, and must not inherit
     // the outer procedural depth.
     uint32_t saved_depth = parser->procedural_depth;
+    // S16.6.7: a procedure has exactly one body form, the braced statement
+    // block. The Tree-sitter reference grammar already rejected 'pn p() =>';
+    // the C parser accepting it was a front-end divergence.
+    if (is_proc && parser->current.kind == LAMBDA_TOK_ARROW) {
+        parser_set_error(parser, "a procedure body is a statement block - write "
+            "'pn name() { ... }'; '=>' bodies are fn-only", LAMBDA_TOK_LBRACE);
+        return 0;
+    }
     if (parser_accept(parser, LAMBDA_TOK_ARROW)) {
         parser_skip_newlines(parser);
+        if (token_is_control_statement(parser->current.kind)) {
+            parser_set_error(parser, "'return', 'break', and 'continue' are "
+                "statements; an arrow '=>' body is an expression", LAMBDA_TOK_LBRACE);
+            return 0;
+        }
         parser->procedural_depth = is_proc ? saved_depth + 1 : 0;
         child = parse_expression(parser, 0);
         parser->procedural_depth = saved_depth;
@@ -2290,6 +2351,12 @@ static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
             parser_reduce_token(parser, LAMBDA_REDUCE_CONTEXT,
                 LAMBDA_REDUCTION_FORM_IF_BRANCH_END, first.span, first, NULL, 0);
         } else {
+            if (token_is_control_statement(parser->current.kind)) {
+                parser_set_error(parser, "'return', 'break', and 'continue' are "
+                    "statements; an unbraced 'else' body is an expression - write "
+                    "'else { ... }'", LAMBDA_TOK_LBRACE);
+                return 0;
+            }
             children[2] = parse_expression(parser, 0);
         }
         child_count = 3;

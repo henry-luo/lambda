@@ -613,14 +613,14 @@ Pattern matching with union types:
 
 ```lambda
 fn describe(value: int | string | bool) => {
-    if (value is int) "integer: " ++ string(value)
+    if (value is int) "integer: " ++ value
     else if (value is string) "string: " ++ value
-    else "boolean: " ++ string(value)
+    else "boolean: " ++ value
 }
 
 fn process(value: int | string | null) => {
     if (value is null) "nothing"
-    else if (value is int) "number: " ++ string(value)
+    else if (value is int) "number: " ++ value
     else "text: " ++ value
 }
 ```
@@ -1147,7 +1147,7 @@ fn safe_process(value: any) => {
     } else if (value is string) {
         len(value)
     } else {
-        error("Unsupported type: " ++ string(type(value)))
+        error("Unsupported type: " ++ type(value))
     }
 }
 ```

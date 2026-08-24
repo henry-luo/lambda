@@ -182,6 +182,9 @@ module.exports = grammar({
     $._not_paren,
     // §7.16: a numeric literal may not run straight into an identifier.
     $._num_boundary,
+    // S16.6.6: zero-width, withheld when an unbraced expression body starts
+    // with `return`/`break`/`continue`.
+    $._expr_body_start,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -208,6 +211,11 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._number,
     $._key,
+    // S16.6.6: inlined so the guard+expression pair never becomes a reduction
+    // point of its own. As a real nonterminal it forced a choice between
+    // reducing `_expr_body` and continuing a trailing binary operator
+    // (`... => x > y`), which is not an ambiguity the guard should introduce.
+    $._expr_body,
   ],
 
 
@@ -542,6 +550,13 @@ module.exports = grammar({
       $.raise_expr,
     ),
 
+    // S16.6.6: an unbraced body is an expression position, so `return`,
+    // `break` and `continue` are barred there. The zero-width scanner guard is
+    // withheld for exactly those words; `raise` is an expression and stays
+    // valid. A BRACED body in any of these positions is the statement spelling
+    // and is unaffected.
+    _expr_body: $ => seq($._expr_body_start, $._expr),
+
     raise_expr: $ => prec.right(seq('raise', field('value', $._expr))),
 
     primary_expr: $ => prec(50, choice(
@@ -734,7 +749,7 @@ module.exports = grammar({
       '(', optional(seq(field('declare', $.parameter),
         repeat(seq(',', field('declare', $.parameter))))), ')',
       optional(field('type', $.return_type)),
-      '=>', field('body', $._expr),
+      '=>', field('body', $._expr_body),
     ),
 
     // The arrow body is an ordinary expression, and since `{...}` is now
@@ -744,14 +759,14 @@ module.exports = grammar({
       prec.dynamic(1, seq(
         '(', field('declare', $.parameter),
         repeat(seq(',', field('declare', $.parameter))), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr),
+        optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
       )),
       seq(
         '(', $._expr, repeat(seq(',', $._expr)), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr),
+        optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
       ),
       seq('(', ')', optional(field('type', $.return_type)),
-        '=>', field('body', $._expr)),
+        '=>', field('body', $._expr_body)),
     )),
 
     // ======================= Declarations and control =====================
@@ -812,10 +827,10 @@ module.exports = grammar({
     // S16.6.3 binds it to the NEAREST one, which is this rule taking it, so
     // `_if_open` outranks `_if_closed`.
     _if_open: $ => prec.right(1, choice(
-      seq('if', '(', field('cond', $._expr), ')', field('then', $._expr),
-        optional(seq('else', field('else', $._expr)))),
+      seq('if', '(', field('cond', $._expr), ')', field('then', $._expr_body),
+        optional(seq('else', field('else', $._expr_body)))),
       seq('if', $._not_paren, field('cond', $._expr), field('then', $._braced),
-        'else', field('else', $._expr)),
+        'else', field('else', $._expr_body)),
     )),
 
     // `while` is procedural-only and always discards its body value, so its
@@ -837,14 +852,14 @@ module.exports = grammar({
     match_arm: $ => prec.right(seq(
       'case', field('pattern', $._annotation_type),
       choice(
-        seq(':', field('body', $._expr)),
+        seq(':', field('body', $._expr_body)),
         field('body', $._body_block),
       ),
     )),
     match_default: $ => prec.right(seq(
       'default',
       choice(
-        seq(':', field('body', $._expr)),
+        seq(':', field('body', $._expr_body)),
         field('body', $._body_block),
       ),
     )),
@@ -911,7 +926,7 @@ module.exports = grammar({
     for_expr: $ => choice($._for_closed, $._for_open),
     _for_closed: $ => seq('for', $._loop_head, field('then', $._braced)),
     _for_open: $ => prec.right(seq('for', '(', $._loop_head, ')',
-      field('then', $._expr))),
+      field('then', $._expr_body))),
 
     break_stam: _ => 'break',
     continue_stam: _ => 'continue',
