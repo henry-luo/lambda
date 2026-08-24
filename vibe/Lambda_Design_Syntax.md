@@ -1286,7 +1286,8 @@ for scalars".
     extraction externals — but a *small* scanner remains, since newline
     awareness is impossible in pure grammar rules (`extras` hides
     whitespace). Its new job is only the S16 guards (§4.4).
-33. Closed-tail juxtaposition (supersedes the blanket token-class rule at
+33. Closed-tail juxtaposition — full probe-verified open/closed table in
+    §7.14 — (supersedes the blanket token-class rule at
     statement boundaries): a line-start dual-role token errors only when
     the previous statement ends in an EXPRESSION; after a structural closer
     of a non-postfixable construct (fn/pn/type{}/view bodies, braced
@@ -1779,6 +1780,57 @@ each with its ambiguity exhibit:
   line), so they sit on the open side despite visually ending in a closer.
   This is the trap in any "ends with `}`" mental shortcut: the rule is
   closed-*tail* (non-postfixable construct), never closed-*bracket*.
+
+**The complete classification, probe-verified against the C parser
+(2026-08-23).** The operational test is mechanical: put the construct on one
+line and a line-start `[1]` on the next. If it parses, the tail is closed; if
+it only parses once a `;` is added, the tail is open.
+
+| Construct | Tail | Example |
+|---|---|---|
+| `let` | **open** | `let x = 5` |
+| `var` | **open** | `var v = 5` |
+| assignment | **open** | `v = 5` |
+| type **alias** | **open** | `type T = int` |
+| `fn`/`pn` with a `=>` body | **open** | `fn f() => 1` |
+| `return` *value* | **open** | `return 5` |
+| bare expression | **open** | `1 + 1`, `f(x)` |
+| bare **map literal** | **open** | `{a: 1}` |
+| bare **block expression** | **open** | `{ let q = 1 q }` |
+| bare **element** | **open** | `<d "x">` |
+| `fn`/`pn` with a **braced** body | closed | `fn f() { 1 }` |
+| **object** type | closed | `type T { a: int }` |
+| braced `if` | closed | `if c { … } else { … }` |
+| braced `for` | closed | `for x in l { … }` |
+| `while` | closed | `while c { … }` |
+| `match` | closed | `match x { … }` |
+| `view` / `edit` | closed | `view v { … }` |
+| `import` | closed | `import math` |
+| `break` / `continue` | closed | `break` |
+
+Two rows do the teaching. **`type` and `fn` appear on BOTH sides** — the kind
+never decides, only the tail: `type T = int` is open and `type T { … }` is
+closed; `fn f() => 1` is open and `fn f() { 1 }` is closed. And **`{a: 1}` /
+`<d "x">` are open despite ending in `}` and `>`**, because primaries take
+postfix — which is why the shortcut is closed-*tail*, never closed-*bracket*.
+
+The implementation encodes exactly this: `parse_content` grants closed-tail
+status to `fn`/`pn`/`type`/`view`/`edit`/`while`/`match`/`if`/`for`/`pub` only
+when `prev_kind == LAMBDA_TOK_RBRACE`. Just `break`, `continue`, and `import`
+are closed on the keyword alone.
+
+**Diagnostics (fixed 2026-08-23).** Every open-tail rejection now names its
+repair: *"this token cannot continue the previous line; write ';' to start a
+new statement, or move it to the end of that line"*. It briefly did not —
+`record_direct_parse_error` (runner.cpp) discarded `parse_error->message`
+and synthesized `Unexpected syntax near 'X'` for everything except the
+`<`/`>` case, so EVERY parser diagnosis was replaced at the CLI boundary:
+the S16.2.3 repair, `'pub' modifies a declaration; write 'pub let'`,
+`object-type members are separated by ',', not ';'`, and the rest. The
+parser's message is now used when it has one. One structural exception
+remains by design: an unlexable token (`actual_kind == LAMBDA_TOK_ERROR`)
+keeps the synthesized form, because "invalid token" names nothing while
+`Unexpected syntax near '\d'` names the offender.
 
 **The golden test DERIVES the classification (ruled).** The open/closed
 boundary is not an enumerated list but a consequence of S16.1.1: **a tail

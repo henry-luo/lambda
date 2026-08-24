@@ -89,6 +89,20 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
         // syntax diagnosis instead of exposing parser-internal terminology.
         snprintf(message, sizeof(message),
             "'<' and '>' are ambiguous with element syntax at statement level");
+    } else if (parse_error && parse_error->actual_kind == LAMBDA_TOK_ERROR) {
+        // An unlexable token has no structural diagnosis to offer — the parser
+        // can only say "invalid token". Naming the offending text is strictly
+        // more useful here, so this one case keeps the synthesized form.
+        snprintf(message, sizeof(message), "Unexpected syntax near '%.*s'",
+            (int)(text_length > 30 ? 30 : text_length), text);
+    } else if (parse_error && parse_error->message && parse_error->message[0]) {
+        // The parser's own diagnosis names the repair — "write ';' to start a
+        // new statement, or move it to the end of that line", "'pub' modifies a
+        // declaration; write 'pub let'", and the rest. Synthesizing
+        // "Unexpected syntax near 'X'" here discarded every one of them, so the
+        // S16.2.3 rejections reached the user without their repair (§4.2 makes
+        // that text part of the design, not decoration).
+        snprintf(message, sizeof(message), "%s", parse_error->message);
     } else {
         snprintf(message, sizeof(message), "Unexpected syntax near '%.*s'",
             (int)(text_length > 30 ? 30 : text_length), text);
