@@ -19,7 +19,7 @@ The central design fact — and the thing most likely to surprise a reader comin
 
 <img alt="Validation flow from CLI to per-kind dispatch" src="diagram/d13_validation_flow.svg" width="614">
 
-The CLI dispatches at `main.cpp:1429` into `exec_validation` (`ast_validate.cpp:425`), which parses argv, auto-detects the input format, and resolves a default schema when `-s` is omitted. `run_ast_validation` (`ast_validate.cpp:163`) then chooses between two modes: a *syntactic* `.ls` check (parse-only) and a *document-versus-schema* validation, and for the latter it picks the schema's root type — currently by a fragile text-scan of the schema source (`:240`–`311`, see [§8](#known-issues--future-improvements)).
+The CLI dispatches at `main.cpp:1429` into `exec_validation` (`ast_validate.cpp:425`), which parses argv, auto-detects the input format, and resolves a default schema when `-s` is omitted. `run_ast_validation` (`ast_validate.cpp:163`) then chooses between two modes: a *syntactic* `.ls` check (parse-only) and a *document-versus-schema* validation, and for the latter it picks the schema's root type — currently by a fragile text-scan of the schema source (`:240`–`311`, see [LR13-3](../../../vibe/Lambda_Issue_Ledger.md)).
 
 Schema loading is `SchemaValidator::load_schema` (`doc_validator.cpp:202`). It does **not** use a bespoke schema parser; it parses the `.ls` schema through the real Lambda transpiler/AST pipeline and harvests each `type Name = …` definition into a `Type*` hashmap keyed by name. Each harvested entry is a `TypeDefinition` (declared in `validator/validator.hpp`) whose vestigial `schema_type` slot is always left `nullptr`, confirming the validator works purely on runtime `Type*` ([§7](#7-the-removed-parallel-schema-model)). Once loaded, the data `Item` is validated by `validate_document` → `validate_against_type`.
 
@@ -57,7 +57,7 @@ Validation errors accumulate as a linked list on `ValidationResult` (`validator.
 
 ## 6. Suggestions ("did you mean")
 
-`suggestions.cpp` implements Levenshtein-distance field-name and type-name suggestion: `generate_field_suggestions` ranks candidate names by edit distance (cap distance ≤ 3, top 3, `max_suggestions = 10`, with a 64-wide stack cap in the distance routine, `suggestions.cpp:54`,`129`,`140`,`159`). The machinery is complete and self-contained — but it is **not wired into the validation engine**: the error paths never populate `error->suggestions`, and `error_reporting.cpp`'s own `suggest_corrections`/`suggest_similar_names` are `nullptr` stubs (`error_reporting.cpp:37`–`50`). The feature exists in code but does not reach output ([§8](#known-issues--future-improvements)).
+`suggestions.cpp` implements Levenshtein-distance field-name and type-name suggestion: `generate_field_suggestions` ranks candidate names by edit distance (cap distance ≤ 3, top 3, `max_suggestions = 10`, with a 64-wide stack cap in the distance routine, `suggestions.cpp:54`,`129`,`140`,`159`). The machinery is complete and self-contained — but it is **not wired into the validation engine**: the error paths never populate `error->suggestions`, and `error_reporting.cpp`'s own `suggest_corrections`/`suggest_similar_names` are `nullptr` stubs (`error_reporting.cpp:37`–`50`). The feature exists in code but does not reach output ([LR13-1](../../../vibe/Lambda_Issue_Ledger.md)).
 
 ---
 
@@ -69,17 +69,11 @@ The former `schema_ast.hpp` declared a self-contained "unified schema IR" — `T
 
 ## Known Issues & Future Improvements
 
-1. **Resolved — the dead unified-schema model has been removed.** `schema_builder.cpp` (which could not even compile — it referenced an undefined `VariableMemPool` and was excluded from every build target) and `schema_ast.hpp` were deleted in a follow-up cleanup, along with their three stale `exclude_source_files` entries and the leftover `schema_builder.cpp.bak`. The two surviving structs (`TypeDefinition`, `TypeRegistryEntry`) moved to `validator/validator.hpp` ([§7](#7-the-removed-parallel-schema-model)). This retires the "two parallel type vocabularies" hazard. The `TODO` it carried (map fields → runtime shape) is gone with it.
-2. **Suggestions are built but never surfaced.** `generate_field_suggestions` (`suggestions.cpp`) is complete but unreferenced from any error path; `error_reporting.cpp:37`–`50` `suggest_*` are `nullptr` stubs. Wiring it in is a small, high-value fix.
-3. **Inconsistent `max_depth` defaults.** `SchemaValidator::create()` sets 1024 (`doc_validator.cpp:181`), the CLI sets 100 (`ast_validate.cpp:443`), and `default_options()` sets 100 (`doc_validator.cpp:814`) — three different ceilings for the same bound.
-4. **Fragile root-type selection.** The schema root type is chosen by raw `strstr`/`strncmp` text-scanning of the schema source plus a hard-coded filename map (`ast_validate.cpp:240`–`311`), with fixed `char[1024]`/`[1200]` path buffers that truncate (`:324`,`:333`).
-5. **Hard-coded caps with silent truncation.** `MAX_UNION_TYPES = 32` silently drops members of larger unions (`validate_pattern.cpp:406`); the reporting path array is `[100]` (`error_reporting.cpp:313`); `type_info[]` is assumed size 32 so any `TypeId ≥ 32` renders `"unknown"` (`validate_helpers.cpp:48`,`69`).
-6. **Unenforced options.** `strict_mode`, `allow_unknown_fields`/`--allow-unknown`, and `allow_empty_elements` are largely not acted on; the fixed-length array check is commented out (`validate.cpp:255`–`262`); warning merging is a no-op and no code path ever emits a warning (`doc_validator.cpp:510`–`513`).
-7. **Placeholder helpers.** `extract_type_from_ast_node` (`doc_validator.cpp:308`), `is_item_compatible_with_type` (`:463`), and `format_type_name` (returns `"unknown"`, `error_reporting.cpp:350`) are stubs or near-stubs.
-8. **`printf`/emoji output in production paths.** Contrary to the project logging rule ([LR_10](LR_10_Error_Handling.md) uses the logging facility), `ast_validate.cpp` (e.g. `:110`,`:165`,`:388`–`417`) and `error_reporting.cpp` write directly to stdout with `printf` and emoji rather than through `log_*`. Also `error->actual.item` truthiness treats a `0`/null actual as "absent" (`error_reporting.cpp:105`,`113`), which can misreport a legitimately-null value.
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR13-1 – LR13-7** (open/partial) and **LR13-R1** (resolved, Appendix A).
+
+The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 
 ---
-
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |
