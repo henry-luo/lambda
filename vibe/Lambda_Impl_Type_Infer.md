@@ -21,7 +21,7 @@
   (`(AST_NODE_SYS_FUNC (name "int") (success_type "number") (may_return_error
   true))`). TIG4 is therefore *row data entry + result-kind rules*, not new
   machinery.
-- `--emit-ast-dump` (`lambda/runtime/emit_sexpr.cpp`, `main.cpp:4751`) is the
+- `--emit-ast-dump` (`lambda/runtime/emit_ast_dump.cpp`, `main.cpp:4751`) is the
   established vehicle for asserting static types in tests — every phase below
   uses it instead of inventing a new probe.
 - Strictness policy is live: Lambda strict by default, `--static-warning`

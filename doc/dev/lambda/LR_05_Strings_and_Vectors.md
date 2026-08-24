@@ -139,18 +139,11 @@ Layered on the N-D `ArrayNum` is a complete image toolkit (the "Typed_Array4" sc
 
 ## 9. Known Issues & Future Improvements
 
-1. **~~`ArrayNum ==` is representation-sensitive~~ (FIXED — verified in code 2026-07-16).** `array_num_eq` (`lambda-eval.cpp:1265`) now checks N-D shape as structure, value-compares element-wise across differing element types (avoiding double-promotion precision loss on high int64/uint64 bits), compares float arrays element-wise (NaN-correct), and memcmps same-type compact arrays with the **per-type element width** from `ELEM_TYPE_SIZE`. The historical `sum(abs(a-b)) == 0` workaround is no longer needed.
-2. **`ndim` cap of 32 is unchecked → stack overflow.** `ArrayNumShape.ndim` is a `uint8_t` bounded "1..32" by comment only (`lambda.h:715`), but the broadcast/stride helpers allocate fixed `[32]` stack buffers — `get_shape_strides` (`:462`) writes `shp[i]`/`str[i]` for `i < ndim`, and `vec_broadcast_op`/`vec_cmp_broadcast`/`fn_histogram`/`fn_otsu`/`fn_label` all declare `int64_t shp[32], str[32]` (`:591`, `:669`, `:4238`, `:4262`, `:4299`) — **with no bound re-check**. A shape with `ndim > 32` overruns these stack arrays.
-3. **~~Two string orderings coexist~~ (stale at the operator level — verified 2026-07-16).** Every language comparison is raw byte order and mutually consistent: `==` (`fn_eq`), ordered `<`/`>` (`fn_lt_scalar`/`fn_gt_scalar` — `memcmp` + length tiebreak), and the sort-facing total order (`total_byte_cmp`). The utf8proc casefold comparators (`string_compare_unicode`) are used **only by the markup parser** (case-insensitive tag/attribute matching), and the Item-level `*_comp_unicode` wrappers (`utf_string.h:23`–`27`) have **no callers** — candidates for deletion, or for a future explicit collator API that would govern equality *and* ordering together (SQL/XQuery model; never a change to the core operators).
-4. **Not full UCA collation.** Even the utf8proc path is **casefold-then-`memcmp`** (§3), not the Unicode Collation Algorithm: no locale tailoring, no weight tables, no proper accent ordering. The `:91` comment overstates it as "proper Unicode collation."
-5. **`index_to_item` truncates int64 → int.** `index_to_item` (`lambda-vector.cpp:1578`) does `i2it((int)index)` — it casts the `int64_t` index to a 32-bit `int` before boxing, so pipe `map`/`where` iteration over collections longer than 2³¹ produces a wrong/wrapped `~#` index.
-6. **`fn_label` bypasses the GC with raw `malloc`/`free`.** The flood-fill stack in `fn_label` is allocated with raw `malloc` (`:4308`) and released with `free` (`:4332`), bypassing the runtime mempool/GC — contrary to the project rule to use `pool_*`/`arena_*`. It is leak-free on the success path but is untracked memory and would leak on an early-return inserted between the two.
-7. **Fixed-size buffer truncation.** The median stencil uses a 4096-element stack `medbuf` capped by `STENCIL_MEDIAN_CAP` (`:3817`/`:3853`) and rejects larger median kernels; `fn_otsu` hard-codes 256 bins in a stack `int64_t h[256]` (`:4259`). These are silent ceilings on kernel/bin size.
-8. **utf8proc allocation crosses the allocator boundary.** The normalizers return raw utf8proc-allocated buffers that callers must `raw_free` (`:124`); the `RAWALLOC_OK` annotations acknowledge this is outside the project's pool/GC discipline. A normalize failure mid-comparison frees both folded buffers and returns `UTF8PROC_COMPARE_ERROR`, which the Item wrappers surface as `BOOL_ERROR`.
-9. **No `TODO`/`FIXME` markers.** None of the issues above are tagged in-source; they are structural and discoverable only by reading the code.
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR05-1 – LR05-8** (open/partial) and **LR05-R1 – LR05-R2** (resolved, Appendix A).
+
+The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 
 ---
-
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |

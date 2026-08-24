@@ -70,8 +70,8 @@ Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 Access type with `get_type_id(Item)` - handles all variants uniformly.
 
 ### Core System Architecture
-- **Parser**: Tree-sitter grammar (`lambda/tree-sitter-lambda/grammar.js` → auto-generates `parser.c`)
-- **AST Builder**: `lambda/build_ast.cpp` - constructs typed AST from Tree-sitter CST
+- **Parser**: Direct C lexer/parser (`lambda/runtime/parser/` and `lambda/runtime/parse.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
+- **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
 - **Transpiler**: `lambda/transpile.cpp` (C code) + `lambda/transpile-mir.cpp` (MIR JIT)
 - **Runtime**: `lambda/lambda-eval.cpp` - interpreter execution + `lambda/mir.c` - JIT compilation
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
@@ -130,7 +130,8 @@ make test-radiant-baseline    # Radiant core functionalities (must pass 100%, wh
 ```bash
 make generate-grammar   # Regenerate parser from grammar.js
 ```
-Grammar source: `lambda/tree-sitter-lambda/grammar.js`. Enum mapping: `lambda/ts-enum.h` (auto-generated).
+Grammar source: `lambda/tree-sitter-lambda/grammar.js`; the generated Lambda CST
+parser is used only by the isolated `lambda-cst` verifier.
 
 ## Coding Conventions
 

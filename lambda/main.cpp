@@ -36,7 +36,7 @@
 #include "runtime/transpiler.hpp"  // For Runtime struct definition
 #include "runtime/runtime-state.h"
 #include "runtime/ast.hpp"  // For print_root_item declaration
-#include "runtime/emit_sexpr.h"  // For --emit-sexpr command
+#include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
 
 // Error handling with stack traces
@@ -478,7 +478,6 @@ extern "C" {
     char* read_text_file(const char *filename);
     void write_text_file(const char *filename, const char *content);
     int write_binary_file(const char* filename, const char* data, size_t len);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source);
     void js_reset_template_registry(void);
 }
 
@@ -728,8 +727,8 @@ enum StatementStatus {
     STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
     STMT_ERROR          // statement has a syntax error
 };
-StatementStatus check_statement_completeness(TSParser* parser, const char* source);
-void print_repl_syntax_error(TSParser* parser, const char* source);
+StatementStatus check_statement_completeness(const char* source);
+void print_repl_syntax_error(const char* source);
 
 // Linux-specific compatibility functions
 #ifdef NATIVE_LINUX_BUILD
@@ -846,8 +845,8 @@ void run_repl(Runtime *runtime) {
         strbuf_append_str(pending_input, line);
         mem_free(line);
 
-        // Check if statement is complete using Tree-sitter
-        StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
+        // Check whether the statement has balanced delimiters before parsing.
+        StatementStatus status = check_statement_completeness(pending_input->str);
 
         if (status == STMT_INCOMPLETE) {
             // Need more input - continue with continuation prompt
@@ -856,7 +855,7 @@ void run_repl(Runtime *runtime) {
 
         if (status == STMT_ERROR) {
             // Syntax error - discard the pending input and let user retry
-            print_repl_syntax_error(runtime->parser, pending_input->str);
+            print_repl_syntax_error(pending_input->str);
             printf("Input discarded.\n");
             strbuf_reset(pending_input);
             continue;
@@ -4781,14 +4780,6 @@ int main(int argc, char *argv[]) {
         runtime_cleanup(&runtime);
         js_batch_execution_mode = 0;
         return lambda_main_finish(0);
-    }
-
-    // Handle --emit-sexpr command (Phase 4: Redex baseline verification bridge)
-    if (argc >= 3 && strcmp(argv[1], "--emit-sexpr") == 0) {
-        const char* sexpr_path = argv[2];
-        log_debug("Emitting s-expressions for '%s'", sexpr_path);
-        int result = emit_sexpr_file(sexpr_path);
-        return lambda_main_finish(result);
     }
 
     // Handle canonical AST dump commands (Phase 1: unified AST renumber harness)

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <tree_sitter/api.h>
 #include "source_span.h"
 #include "../lambda.h"
 #include "value_rep.h"
@@ -281,6 +280,9 @@ struct NameEntry {
     Type* declared_type;
     bool type_widened;
     bool is_lexical;
+    // loop-head bindings need a distinct capture-analysis fact; this used to
+    // be recovered from parser structure at the binding node.
+    bool is_for_in_head;
     bool is_const;
     bool tdz_active;
     bool is_exported;
@@ -330,10 +332,7 @@ struct AstNode {
     AstNodeType node_type;
     Type *type;
     AstNode* next;
-    LambdaSourceSpan source_span;
-    // Transitional CST compatibility only. P2.1 callers must use source_span;
-    // direct-parser nodes leave this null until the field is removed at switch.
-    TSNode node;
+    SourceSpan source_span;
 };
 
 // Stable compiler identities and one authoritative child/index contract. The

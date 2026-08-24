@@ -526,9 +526,10 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             fn_node->body = NULL;
             fn_node->vars = NULL;
 
-            // Set synthetic TSNode with unique byte offset
-            memset(&fn_node->node, 0, sizeof(TSNode));
-            fn_node->node.context[0] = synthetic_offset++;  // ts_node_start_byte() reads context[0]
+            // Hosted functions have no source file; use a unique empty span so
+            // diagnostics and AST identity remain deterministic without a parser node.
+            fn_node->source_span = (SourceSpan){synthetic_offset, synthetic_offset};
+            synthetic_offset++;
 
             // Create name string in pool
             fn_node->name = (String*)pool_calloc(pool, sizeof(String) + shape->name->length + 1);
@@ -563,7 +564,8 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             tail = (AstNode*)fn_node;
 
             log_debug("module_registry: hosted export fn '%.*s' arity=%d offset=%d",
-                (int)shape->name->length, shape->name->str, arity, fn_node->node.context[0]);
+                (int)shape->name->length, shape->name->str, arity,
+                fn_node->source_span.start_byte);
         } else if (val_type != LMD_TYPE_NULL) {
             // Variable export — create synthetic pub var node
             AstLetNode* pub_node = (AstLetNode*)pool_calloc(pool, sizeof(AstLetNode));

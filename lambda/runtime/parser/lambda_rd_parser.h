@@ -130,7 +130,7 @@ typedef enum LambdaTokenKind {
 
 typedef struct LambdaToken {
     LambdaTokenKind kind;
-    LambdaSourceSpan span;
+    SourceSpan span;
     uint32_t line;
     uint32_t column;
     // S16.1.1: a line break carries no meaning of its own, so NEWLINE never
@@ -154,7 +154,7 @@ typedef enum LambdaParseStatus {
 } LambdaParseStatus;
 
 typedef struct LambdaParseError {
-    LambdaSourceSpan span;
+    SourceSpan span;
     uint64_t expected_token_bits[4];
     LambdaTokenKind actual_kind;
     const char* message;
@@ -293,7 +293,7 @@ typedef struct LambdaParseReduction {
     // This is the complete production range, including the left child of a
     // Pratt/postfix reduction. It is therefore directly usable as AstNode's
     // source_span without reconstructing a range from opaque child values.
-    LambdaSourceSpan span;
+    SourceSpan span;
     // The committed introducer/operator token. It is zeroed when the form has
     // no token-specific interpretation.
     LambdaToken detail_token;
@@ -319,9 +319,8 @@ void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
 const char* lambda_token_kind_name(LambdaTokenKind kind);
 
-// This entry point is implemented by the recursive-descent/Pratt core. It is
-// intentionally separate from the Tree-sitter lambda_parser() compatibility
-// wrapper while both front ends coexist.
+// This entry point is implemented by the recursive-descent/Pratt core and is
+// consumed by the direct AST sink.
 LambdaParseStatus lambda_rd_parse_source(const char* source, size_t length,
     const LambdaParseSink* sink, void* sink_context, LambdaParseMetrics* metrics,
     LambdaParseError* error);

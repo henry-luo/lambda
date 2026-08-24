@@ -84,7 +84,6 @@ struct Runtime {
     uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
     struct hashmap* script_index;  // canonical script path -> Script*
     ModuleRegistry* module_registry; // runtime-owned cross-language module definitions
-    TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
     bool static_warning; // --static-warning: report semantic type errors as warnings and keep compiling (Lambda relaxed mode)
@@ -137,20 +136,7 @@ extern const char* g_lambda_home;
 void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)
 char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<rel>"; caller frees
 
-#define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
-     .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
-
 void* alloc_const(Transpiler* tp, size_t size);
-AstNode* build_map(Transpiler* tp, TSNode map_node);
-AstNode* build_elmt(Transpiler* tp, TSNode element_node);
-AstNode* build_for_stam(Transpiler* tp, TSNode for_node);
-AstNode* build_expr(Transpiler* tp, TSNode expr_node);
-AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
-AstNode* build_script(Transpiler* tp, TSNode script_node);
-void print_ts_root(const char *source, TSTree* syntax_tree);
-void print_tree(TSNode node, int depth);
-
-void write_node_source(Transpiler* tp, TSNode node);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);

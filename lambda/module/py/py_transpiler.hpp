@@ -84,8 +84,8 @@ PyOperator py_operator_from_string(const char* op_str, size_t len);
 PyOperator py_augmented_operator_from_string(const char* op_str, size_t len);
 
 // Error handling functions
-void py_error(PyTranspiler* tp, TSNode node, const char* format, ...);
-void py_warning(PyTranspiler* tp, TSNode node, const char* format, ...);
+void py_error(PyTranspiler* tp, SourceSpan span, const char* format, ...);
+void py_warning(PyTranspiler* tp, SourceSpan span, const char* format, ...);
 
 // Debug functions
 void print_py_ast_node(PyAstNode* node, int indent);

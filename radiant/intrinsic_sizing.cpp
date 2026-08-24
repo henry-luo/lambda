@@ -566,6 +566,15 @@ static bool intrinsic_element_has_specified_font_size(DomElement* element) {
         style_tree_get_declaration(element->specified_style, CSS_PROPERTY_FONT_SIZE) != nullptr;
 }
 
+static bool intrinsic_element_inside_table_fixup(DomElement* element) {
+    for (DomNode* ancestor = element; ancestor; ancestor = ancestor->parent) {
+        if (ancestor->is_element() && ancestor->as_element()->is_table_fixup()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void intrinsic_complete_inherited_font(FontProp* font, FontProp* parent_font,
                                               bool preserve_zero_size) {
     radiant_fill_missing_font_values(font, parent_font, preserve_zero_size);
@@ -2858,7 +2867,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         dom_node_resolve_style(element, lycon);
     }
-    if (view_block_font->font && lycon->ui_context) {
+    bool stale_table_fixup_font = !element->styles_resolved() &&
+        intrinsic_element_inside_table_fixup(element);
+    // A retained table box can still carry reset-time font data while its
+    // effective inherited font is available in the intrinsic context.
+    if (view_block_font->font && !stale_table_fixup_font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
         font_changed = true;
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
@@ -3866,6 +3879,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
+            // Intrinsic sizing can run before normal table-tree construction;
+            // refresh retained fixups here so generated cells inherit the
+            // authored table font before their contributions are measured.
+            layout_refresh_anonymous_table_fixup_inheritance(
+                lycon, element, lycon->font.style);
             float border_spacing = 0;
             bool border_collapse = layout_table_has_collapsed_borders(lycon, element);
             if (border_collapse) {

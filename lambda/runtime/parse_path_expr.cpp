@@ -11,7 +11,7 @@ struct PathLexer {
     Transpiler* tp;
     const char* p;
     const char* end;
-    LambdaSourceSpan origin;
+    SourceSpan origin;
     bool failed;
     bool report_errors;
     ArrayList* segments;
@@ -256,7 +256,7 @@ bool parse_path_static_expr(PathLexer* lx, PathScheme* scheme,
 
 }  // namespace
 
-AstNode* build_static_path_ast_from_span(Transpiler* tp, LambdaSourceSpan span,
+AstNode* build_static_path_ast_from_span(Transpiler* tp, SourceSpan span,
         PathScheme scheme,
         String* authority, ArrayList* segments, int first_segment) {
     int segment_count = segments ? segments->length - first_segment : 0;
@@ -279,15 +279,8 @@ AstNode* build_static_path_ast_from_span(Transpiler* tp, LambdaSourceSpan span,
     return (AstNode*)path;
 }
 
-AstNode* build_static_path_ast(Transpiler* tp, TSNode origin, PathScheme scheme,
-        String* authority, ArrayList* segments, int first_segment) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return build_static_path_ast_from_span(tp, span, scheme, authority, segments,
-        first_segment);
-}
-
 static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span, bool report_errors) {
+        const char* end, SourceSpan span, bool report_errors) {
     PathLexer lx = {tp, begin, end, span, false, report_errors, arraylist_new(8)};
     PathScheme scheme = PATH_SCHEME_REL;
     bool file_local = false;
@@ -317,24 +310,12 @@ static AstNode* parse_path_expr_text_impl(Transpiler* tp, const char* begin,
     return path;
 }
 
-AstNode* parse_path_expr_text(Transpiler* tp, const char* begin, const char* end,
-        TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_path_expr_text_impl(tp, begin, end, span, true);
-}
-
-AstNode* try_parse_path_expr_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_path_expr_text_impl(tp, begin, end, span, false);
-}
-
 AstNode* parse_path_expr_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     return parse_path_expr_text_impl(tp, begin, end, span, true);
 }
 
 AstNode* try_parse_path_expr_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     return parse_path_expr_text_impl(tp, begin, end, span, false);
 }

@@ -53,43 +53,6 @@ void format_binary_literal_stringbuf(StringBuf* sb, Binary* bin) {
 void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, const char* indent);
 void print_item(StrBuf *strbuf, Item item, int depth, const char* indent);
 
-#ifndef LAMBDA_PRINT_VALUE_ONLY
-// print the syntax tree as an s-expr
-void print_ts_node(const char *source, TSNode node, uint32_t indent) {
-    if (indent > 0) log_enter();
-    const char *type = ts_node_type(node);
-    if (str_char_is_alpha(*type)) {
-        log_debug("(%s", type);
-    } else if (*type == '\'') {
-        log_debug("(\"%s\"", type);
-    } else { // special char
-        log_debug("('%s'", type);
-    }
-    // print children if any
-    uint32_t child_count = ts_node_child_count(node);
-    if (child_count > 0) {
-        for (uint32_t i = 0; i < child_count; i++) {
-            TSNode child = ts_node_child(node, i);
-            print_ts_node(source, child, indent + 1);
-        }
-    }
-    else if (str_char_is_alpha(*type)) {
-        int start_byte = ts_node_start_byte(node);
-        int end_byte = ts_node_end_byte(node);
-        const char* start = source + start_byte;
-        log_debug(" '%.*s'", end_byte - start_byte, start);
-    }
-    log_debug(")");
-    if (indent > 0) log_leave();
-}
-
-void print_ts_root(const char *source, TSTree* syntax_tree) {
-    log_debug("Syntax tree: ---------");
-    TSNode root_node = ts_tree_root_node(syntax_tree);
-    print_ts_node(source, root_node, 0);
-}
-#endif
-
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, const char* indent = NULL, bool is_attrs = false);
 
 static void print_range_char(StrBuf* strbuf, int64_t codepoint) {
@@ -925,7 +888,11 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             if (node->type && node->type->is_const) {
                 print_const(script, node->type);
             }
-            else { log_debug("(%s)", ts_node_type(node->node)); }
+            else {
+                SourceSpan span = node->source_span;
+                int length = (int)lambda_source_span_length(span);
+                log_debug("(%.*s)", length, script->source + span.start_byte);
+            }
             log_leave();
         }
         break;

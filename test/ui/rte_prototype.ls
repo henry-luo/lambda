@@ -149,10 +149,8 @@ fn editor_with_click_selection(ed, evt) map | error => edit_set_selection(ed, cl
 // ============================================================================
 // The markdown parser emits HTML-compatible tags (<h1>, <p>, <ul>, <li>,
 // <strong>, <em>, <a>, <code>, <blockquote>, ...). For each tag we declare a
-// thin `view` template of the form `<tag ; apply; >`. `apply;` is the bare
-// statement form (per Reactive_UI.md §8.3) which re-dispatches each child of
-// `~` through the template registry, splatting them as element children.
-// (`apply(target)` is the function-call form and requires an explicit target.)
+// Child results are explicitly applied and spread because the current element
+// grammar uses commas for the attribute/content boundary (S16.9.3).
 //
 // A catch-all `view any { ~ }` lets unknown inline scalar variants fall
 // through unchanged (the markdown parser produces some compound string-like
@@ -194,33 +192,33 @@ view map {
   else { "" }
 }
 
-view <h1> { <h1 apply;> }
-view <h2> { <h2; apply;> }
-view <h3> { <h3; apply;> }
-view <h4> { <h4; apply;> }
-view <h5> { <h5; apply;> }
-view <h6> { <h6; apply;> }
-view <p> { <p; apply;> }
-view <span> { <span; apply;> }
-view <strong> { <strong; apply;> }
-view <em> { <em; apply;> }
-view <u> { <u; apply;> }
-view <code> { <code; apply;> }
-view <a> { <a href:~.href; apply;> }
-view <ul> { <ul; apply;> }
-view <ol> { <ol; apply;> }
-view <li> { <li; apply;> }
-view <blockquote> { <blockquote; apply;> }
-view <table> { <table; apply;> }
-view <thead> { <thead; apply;> }
-view <tbody> { <tbody; apply;> }
-view <tfoot> { <tfoot; apply;> }
-view <tr> { <tr; apply;> }
-view <th> { <th; apply;> }
-view <td> { <td; apply;> }
+view <h1> { <h1 *[for (c in ~) apply(c)]> }
+view <h2> { <h2 *[for (c in ~) apply(c)]> }
+view <h3> { <h3 *[for (c in ~) apply(c)]> }
+view <h4> { <h4 *[for (c in ~) apply(c)]> }
+view <h5> { <h5 *[for (c in ~) apply(c)]> }
+view <h6> { <h6 *[for (c in ~) apply(c)]> }
+view <p> { <p *[for (c in ~) apply(c)]> }
+view <span> { <span *[for (c in ~) apply(c)]> }
+view <strong> { <strong *[for (c in ~) apply(c)]> }
+view <em> { <em *[for (c in ~) apply(c)]> }
+view <u> { <u *[for (c in ~) apply(c)]> }
+view <code> { <code *[for (c in ~) apply(c)]> }
+view <a> { <a href:~.href, *[for (c in ~) apply(c)]> }
+view <ul> { <ul *[for (c in ~) apply(c)]> }
+view <ol> { <ol *[for (c in ~) apply(c)]> }
+view <li> { <li *[for (c in ~) apply(c)]> }
+view <blockquote> { <blockquote *[for (c in ~) apply(c)]> }
+view <table> { <table *[for (c in ~) apply(c)]> }
+view <thead> { <thead *[for (c in ~) apply(c)]> }
+view <tbody> { <tbody *[for (c in ~) apply(c)]> }
+view <tfoot> { <tfoot *[for (c in ~) apply(c)]> }
+view <tr> { <tr *[for (c in ~) apply(c)]> }
+view <th> { <th *[for (c in ~) apply(c)]> }
+view <td> { <td *[for (c in ~) apply(c)]> }
 view <hr> { <hr> }
 view <img> { <img src:~.src, alt:~.alt> }
-view <body> { <div class:"doc-body"; apply;> }
+view <body> { <div class:"doc-body", *[for (c in ~) apply(c)]> }
 
 // ============================================================================
 // Toolbar — every button is one `view <toolbar_button>` instance whose
@@ -228,7 +226,7 @@ view <body> { <div class:"doc-body"; apply;> }
 // ============================================================================
 
 view <toolbar_button> {
-  <button class:("toolbar-btn " ++ ~.cmd); ~.label>
+  <button class:("toolbar-btn " ++ ~.cmd), ~.label>
 }
 on click() {
   emit("rte_cmd", ~.cmd)
@@ -239,8 +237,8 @@ on click() {
 // ============================================================================
 
 edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH), markdown_output: "", drag_selection: null, drag_moved: false {
-  <div class:"rte-app"
-    <div id:"toolbar", class:"toolbar"
+  <div class:"rte-app",
+    <div id:"toolbar", class:"toolbar",
       apply(<toolbar_button cmd:"btn-bold",      label:"B">)
       apply(<toolbar_button cmd:"btn-italic",    label:"I">)
       apply(<toolbar_button cmd:"btn-underline", label:"U">)
@@ -255,11 +253,11 @@ edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH),
       apply(<toolbar_button cmd:"btn-redo",      label:"Redo">)
       apply(<toolbar_button cmd:"btn-save",      label:"Save">)
     >
-    <div id:"doc", contenteditable:"true", tabindex:"0", class:"doc-host"
+    <div id:"doc", contenteditable:"true", tabindex:"0", class:"doc-host",
       apply(editor.doc)
     >
-    <pre id:"markdown-output"; markdown_output>
-    <div id:"status"; status>
+    <pre id:"markdown-output", markdown_output>
+    <div id:"status", status>
   >
 }
 on mousemove(evt) {
@@ -396,7 +394,7 @@ on rte_cmd(evt) {
 // Page shell
 // ============================================================================
 
-<html lang:"en"
+<html lang:"en",
   <head
     <meta charset:"UTF-8">
     <title "Radiant Rich Text Editor — Prototype">

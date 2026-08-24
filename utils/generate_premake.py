@@ -525,12 +525,7 @@ class PremakeGenerator:
             vlog(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
 
     def _release_excluded_libraries(self) -> set[str]:
-        """Return archives intentionally absent from optimized host builds.
-
-        The direct Lambda parser is the release frontend. Keeping this list in
-        the build config lets debug/reference configurations retain the
-        Tree-sitter oracle without making the release link depend on it.
-        """
+        """Return archives intentionally omitted by a configuration overlay."""
         return set(self.config.get('release_exclude_libraries', []))
 
     def _get_consolidated_includes(self) -> List[str]:
@@ -1063,6 +1058,9 @@ class PremakeGenerator:
         targets = self.config.get('targets', [])
 
         for lib in targets:
+            only_variants = lib.get('only_variants', [])
+            if only_variants and self.variant not in only_variants:
+                continue
             # Every configured target is a library; name-gating prevented small shared
             # support libraries from being expressed without pulling the monolithic input target.
             self._generate_complex_library(lib)
@@ -1226,6 +1224,9 @@ class PremakeGenerator:
             '    objdir "build/obj/%{prj.name}"',
             '    ',
         ])
+        if link_type == 'executable':
+            self.premake_content.append('    targetextension ".exe"')
+            self.premake_content.append('    ')
 
         target_name = lib.get('target_name')
         if target_name:
@@ -1298,8 +1299,10 @@ class PremakeGenerator:
         if 'include' in lib:
             all_includes.append(lib['include'])
 
-        # Add tree-sitter includes
-        for lib_name in ['tree-sitter', 'tree-sitter-lambda']:
+        # Add the shared Tree-sitter runtime include. Lambda's Tree-sitter
+        # grammar is isolated to the lambda-cst variant and is not a normal
+        # library-project dependency.
+        for lib_name in ['tree-sitter']:
             if lib_name in self.external_libraries:
                 include_path = self.external_libraries[lib_name]['include']
                 if include_path:
@@ -2682,7 +2685,7 @@ class PremakeGenerator:
                             lib_path = f"../../{lib_path}"
 
                         # Special handling for tree-sitter libraries - add them to external_static_libs (linkoptions)
-                        if lib_name in ['tree-sitter', 'tree-sitter-lambda', 'tree-sitter-latex-math']:
+                        if lib_name in ['tree-sitter', 'tree-sitter-latex-math']:
                             external_static_libs.append(lib_path)
                         # On Linux/Windows, static libs need to come after internal libs in link order
                         # because internal libraries can have unresolved symbols that these libs provide
@@ -2877,7 +2880,6 @@ class PremakeGenerator:
                 # Windows: use the same explicit paths as the main lambda program
                 windows_lib_paths = [
                     "../../lambda/tree-sitter/libtree-sitter.a",
-                    "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "../../win-native-deps/lib/libmir.a",
                     "/clang64/lib/libmpdec.a",
                     "../../win-native-deps/lib/libutf8proc.a",
@@ -3071,7 +3073,7 @@ class PremakeGenerator:
                 # lambda-data references the LaTeX parser entry points from
                 # its archive, so these archives must remain live after the
                 # data library is placed on the link line.
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter',
+                for lib_name in ['tree-sitter',
                                  'tree-sitter-latex', 'tree-sitter-latex-math']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
@@ -3081,7 +3083,7 @@ class PremakeGenerator:
                 self.premake_content.append('        "-Wl,--no-whole-archive",')
             elif self.use_macos_config:
                 # macOS: use -force_load for each library
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                for lib_name in ['tree-sitter']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3089,7 +3091,7 @@ class PremakeGenerator:
                         self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
             else:
                 # Default: just link normally without forcing symbol inclusion
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                for lib_name in ['tree-sitter']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3318,10 +3320,8 @@ class PremakeGenerator:
         all_includes.extend([
             ".",
             "lambda/tree-sitter/lib/include",
-            "lambda/tree-sitter-lambda/bindings/c",
             "lib/mem-pool/include",
         ])
-
         # Add external library include paths (excluding dev_libraries)
         dev_lib_names = {lib.get('name', '') if isinstance(lib, dict) else lib
                         for lib in self.config.get('dev_libraries', [])}
@@ -3459,9 +3459,9 @@ class PremakeGenerator:
                 '    '
             ])
 
-        # The Lambda Tree-sitter archive is a debug/reference-only oracle.
-        # Keep it available to debug configurations while making its absence
-        # explicit in both optimized host configurations.
+        # Keep any explicitly configured debug-only archives out of optimized
+        # host configurations. The Lambda Tree-sitter archive is not configured
+        # for any normal profile; lambda-cst adds it through its own overlay.
         if debug_only_static_libs:
             for configuration in ('debug', 'debug_profile'):
                 self.premake_content.extend([

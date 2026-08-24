@@ -16,18 +16,12 @@
 
 // Forward declarations with C linkage
 extern "C" {
-    #include <tree_sitter/api.h>
     #include <mpdecimal.h>
     Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
     String* format_data(Item item, String* type, String* flavor, Pool *pool);
     void format_item(StrBuf* buf, Item item, int indent, char* format);
     char* read_text_file(const char *filename);
-    TSParser* lambda_parser(void);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 }
-
-// Tree-sitter function declarations
-extern "C" const TSLanguage *tree_sitter_lambda(void);
 
 // Helper function to create Lambda String
 String* create_lambda_string(const char* text) {

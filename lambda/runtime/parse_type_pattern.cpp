@@ -19,8 +19,8 @@
 //               | '{' … '}' | '<' … '>' | fn-type | island
 //
 // Every tier returns an AstNode with the SAME node kind, fields, `Type*`
-// wrapping, and type_list/const_list registration the CST type builders
-// produced — that fidelity is the contract (see the header). The shared
+// wrapping, and type_list/const_list registration expected by downstream
+// consumers — that fidelity is the contract (see the header). The shared
 // Type-construction pieces live in type_build.hpp rather than being copied.
 
 namespace {
@@ -29,7 +29,7 @@ struct Lexer {
     Transpiler* tp;
     const char* p;
     const char* end;
-    LambdaSourceSpan origin;
+    SourceSpan origin;
     bool failed;
 };
 
@@ -167,7 +167,7 @@ Type* wrap_type(Lexer* lx, Type* inner) {
 }
 
 // Containers and binaries register the WRAPPER in type_list; occurrence and
-// range register the raw type — exactly the split the CST builders had.
+// range register the raw type — the split required by downstream consumers.
 Type* register_wrapped(Lexer* lx, Type* inner, int* index_out) {
     Type* wrapper = wrap_type(lx, inner);
     arraylist_append(lx->tp->type_list, wrapper);
@@ -176,7 +176,7 @@ Type* register_wrapped(Lexer* lx, Type* inner, int* index_out) {
 }
 
 // --- literals ---------------------------------------------------------------
-// Value-bearing literal types, registered like the CST's build_lit_* helpers:
+// Value-bearing literal types, registered through the shared literal/type lanes:
 // strings/ints/floats go to const_list, and the transpiler emits them from the
 // type payload or the const pool — never from the node's source span.
 
@@ -351,7 +351,7 @@ AstNode* parse_island_primary(Lexer* lx) {
     PatternCharClass klass;
     if (island_char_class(w, &klass)) {
         // the reserved atoms shadow nothing: a surrounding `let d = ...` makes
-        // `d` inside an island ambiguous, which the CST builder rejected too
+        // `d` inside an island ambiguous, which is also invalid
         NameEntry* shadowed = lookup_name(lx->tp, w);
         if (shadowed) {
             record_semantic_error_span(lx->tp, lx->origin, ERR_SEMANTIC_ERROR,
@@ -503,8 +503,8 @@ AstNode* parse_island(Lexer* lx) {
 
     if (!is_symbol && pattern_ast_literal_set(node->pattern)) {
         // Literal-only islands ARE ordinary literal unions; keeping that
-        // representation preserves the existing matching path (the CST island
-        // builder returned the body AST for exactly this case).
+        // representation preserves the existing matching path by returning the
+        // body AST for this case.
         return node->pattern;
     }
 
@@ -1104,7 +1104,7 @@ AstNode* parse_view_pattern(Lexer* lx) {
 }  // namespace
 
 AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* node = parse_union(&lx);
     if (!node || lx.failed) { return NULL; }
@@ -1114,7 +1114,7 @@ AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
 }
 
 AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* node = parse_primary(&lx);
     if (!node || lx.failed) { return NULL; }
@@ -1122,7 +1122,7 @@ AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
 }
 
 AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* ok = parse_return_type_pattern(&lx);
     if (!ok || lx.failed) { return NULL; }
@@ -1147,35 +1147,11 @@ AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
 }
 
 AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, LambdaSourceSpan span) {
+        const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
     AstNode* pattern = parse_view_pattern(&lx);
     if (!pattern || lx.failed) { return NULL; }
     skip_space(&lx);
     if (lx.p != lx.end) { fail(&lx, "trailing view pattern input"); return NULL; }
     return pattern;
-}
-
-AstNode* parse_type_pattern_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_type_pattern_text_span(tp, begin, end, span);
-}
-
-AstNode* parse_primary_type_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_primary_type_text_span(tp, begin, end, span);
-}
-
-AstNode* parse_return_type_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_return_type_text_span(tp, begin, end, span);
-}
-
-AstNode* parse_view_pattern_text(Transpiler* tp, const char* begin,
-        const char* end, TSNode origin) {
-    LambdaSourceSpan span = {ts_node_start_byte(origin), ts_node_end_byte(origin)};
-    return parse_view_pattern_text_span(tp, begin, end, span);
 }

@@ -353,7 +353,7 @@ unclassified recovery use remains.
 - `lambda/runtime/ast-core.hpp`
 - `lambda/runtime/build_ast.cpp`
 - `lambda/runtime/ast.hpp`
-- `lambda/runtime/emit_sexpr.cpp`
+- `lambda/runtime/emit_ast_dump.cpp`
 - `lambda/runtime/interp_plan.cpp`
 
 Actions:

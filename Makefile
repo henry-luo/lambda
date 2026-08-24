@@ -43,6 +43,11 @@ else
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
 
+# Keep the isolated CST profile's generated Premake file out of the normal
+# profile's generated configuration while retaining the repository root as
+# Premake's relative-path base.
+LAMBDA_CST_PREMAKE_FILE := premake5.lambda-cst.lua
+
 NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; then echo "$$n"; else echo 1; fi)
 
 # Render visual tests are CPU-heavy but independent; leave one core free for
@@ -159,14 +164,14 @@ ifneq ($(shell which ccache 2>/dev/null),)
 	export CCACHE_COMPRESS := 1
 	# time_macros: __DATE__/__TIME__ shouldn't invalidate cache entries.
 	# include_file_mtime: rely on content hash, not mtime, when headers are
-	#   regenerated identically (common with generated parser.c / ts-enum.h).
+#   regenerated identically (common with generated parser.c).
 	export CCACHE_SLOPPINESS := time_macros,include_file_mtime
 endif
 
 # Tree-sitter grammar dependencies
 # This system automatically manages the dependency chain:
-# grammar.js -> parser.c -> ts-enum.h -> C/C++ source files
-# When grammar.js is modified, the parser and enum header are automatically regenerated
+# grammar.js -> parser.c -> lambda-cst verifier
+# When grammar.js is modified, the reference parser is automatically regenerated
 # One grammar file states the whole language. The former production/reference
 # split (grammar-common.js + grammar-lambda.js) retired with S16: Tree-sitter
 # left the production parse path, so table size stopped constraining it
@@ -176,22 +181,15 @@ GRAMMAR_SCANNER_C = lambda/tree-sitter-lambda/src/scanner.c
 PARSER_C = lambda/tree-sitter-lambda/src/parser.c
 GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
-TS_ENUM_H = lambda/runtime/ts-enum.h
-UPDATE_TS_ENUM_SCRIPT = ./utils/update_ts_enum.sh
 # Use the exact project-pinned CLI directly. `npx package@version` may query
 # npm after a clean even when this dependency is installed, making release
 # builds fail offline before compilation begins.
 TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 
-# Generate parser outputs once before deriving the symbol enum.  Independent
-# recipes used to run `tree-sitter generate` concurrently, allowing the header
-# and linked parser archive to retain different symbol-number layouts.
+# Generate the reference parser outputs once. The generated parser is used only
+# by the isolated lambda-cst verifier; normal Lambda builds use the C parser.
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS) $(GRAMMAR_SCANNER_C)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-
-$(TS_ENUM_H): $(PARSER_C) $(UPDATE_TS_ENUM_SCRIPT)
-	$(UPDATE_TS_ENUM_SCRIPT)
-	@echo "Updated ts-enum.h from parser generation"
 
 # Tree-sitter library targets
 # Build from source on all platforms
@@ -523,11 +521,13 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-# Core: only parsers needed by lambda.exe (Lambda, JS, TS, LaTeX)
-tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# Core: only parsers needed by lambda.exe (JS, TS, LaTeX)
+# Normal Lambda profiles use the first-party C parser.  The Lambda
+# Tree-sitter archive is built only by the dedicated CST differential profile.
+tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
-# Release frontends use the direct RD/Pratt parser, so do not build the
-# otherwise-unused Lambda Tree-sitter archive for release or release-profile.
+# Release frontends use the same direct RD/Pratt parser, so keep the Lambda
+# Tree-sitter archive out of every normal profile.
 tree-sitter-release-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
 # All: includes jube-only parsers (Python, Bash, Ruby)
@@ -537,7 +537,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
@@ -565,6 +565,7 @@ help:
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  lambda-cst    - Build the Tree-sitter Lambda CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
@@ -577,7 +578,7 @@ help:
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
-	@echo "  clean-grammar - Remove generated grammar files (parser.c, ts-enum.h)"
+	@echo "  clean-grammar - Remove generated Lambda CST grammar files"
 	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
@@ -593,7 +594,7 @@ help:
 	@echo "  build-jube-test - Build hosted Python compatibility bundle and test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
-	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
+	@echo "  generate-grammar - Generate the Lambda CST parser from grammar.js"
 	@echo "  test-grammar-s16 - S16 surface-syntax conformance (reference grammar)"
 	@echo "                     (automatic when grammar.js changes)"
 	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
@@ -699,7 +700,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -733,11 +734,19 @@ print-jobs:
 
 $(LAMBDA_EXE): build
 
+# Build the isolated Tree-sitter Lambda CST verifier.  Normal Lambda
+# profiles deliberately do not build or link TREE_SITTER_LAMBDA_LIB.
+lambda-cst: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
+	@mkdir -p temp/lambda-parser-poc build/premake
+	@echo "Generating lambda-cst Premake configuration..."
+	$(PYTHON) utils/generate_premake.py --variant lambda-cst --output $(LAMBDA_CST_PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(LAMBDA_CST_PREMAKE_FILE)
+	$(call run_make_with_error_summary,lambda-cst,debug_native,,lambda-cst)
 
 
 
 # Debug build
-debug: $(TS_ENUM_H) tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
+debug: tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	$(call toolchain_verify)
@@ -769,7 +778,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(TS_ENUM_H) tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
+build-release-compile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -791,7 +800,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(TS_ENUM_H) tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
+build-release-profile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
@@ -807,7 +816,7 @@ build-release-profile: $(TS_ENUM_H) tree-sitter-release-libs $(RE2_LIB) $(MIR_LI
 
 # Keep regular debug free of profiler hooks so its runtime cost reflects only
 # debugging and sanitizer instrumentation; use this target to collect JS profiles.
-build-debug-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-debug-profile: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building debug_profile version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
 	$(call toolchain_verify)
@@ -825,7 +834,7 @@ build-debug-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
 
-build-cli: $(TS_ENUM_H) tree-sitter-libs
+build-cli: tree-sitter-libs
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
 	@echo "Excluded: Radiant layout engine, GUI windowing, font rendering, image codecs"
 	$(PYTHON) utils/generate_premake.py --variant cli --output $(PREMAKE_CLI_FILE)
@@ -853,7 +862,7 @@ build-jube: build build-lang-python
 # of the standard host build, so Python stays absent unless this target is run.
 # Build the matching host first: an exact Jube service-table bump must not
 # leave a freshly stamped module paired with a stale executable.
-build-lang-python: build build-windows-host-import $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
+build-lang-python: build build-windows-host-import $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building external lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
@@ -932,7 +941,7 @@ $(eval $(call release_node_module,zlib))
 # The release language module is built independently, then copied next to the
 # full distribution's unchanged host executable.  The standard bundle never
 # depends on this target.
-release-lang-python: release $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
+release-lang-python: release $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building release lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
@@ -1444,7 +1453,6 @@ clean-test:
 
 clean-grammar:
 	@echo "Cleaning generated grammar and embed files..."
-	@rm -f $(TS_ENUM_H)
 	@rm -f $(PARSER_C)
 	@rm -f $(GRAMMAR_JSON)
 	@rm -f $(NODE_TYPES_JSON)
@@ -1461,7 +1469,7 @@ type-chart:
 	@echo "Type hierarchy chart generated: doc/type_hierarchy.svg"
 
 # Generate grammar explicitly (useful for development)
-generate-grammar: $(TS_ENUM_H)
+generate-grammar: $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON)
 	@echo "Grammar generation complete."
 
 # S16 Surface Syntax conformance for the Tree-sitter reference grammar:
@@ -1952,7 +1960,7 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
-LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-multicol puppertino markdown
+LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-tables wpt-css-position wpt-css-multicol puppertino markdown
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.
@@ -3309,7 +3317,9 @@ build-lambda-static: build-radiant
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back
 # into test-lambda-baseline transitively.
-build-input-baseline: build-lambda-data
+# input runners link these archives directly, so declare them here to make a
+# clean focused build materialize every linker input before the test link.
+build-input-baseline: build-lambda-data $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB) $(RE2_LIB)
 	@echo "Building input baseline test executables..."
 	$(call run_make_with_error_summary,input-baseline,debug_native,,$(INPUT_BASELINE_TEST_PROJECTS))
 
