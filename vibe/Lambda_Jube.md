@@ -388,7 +388,7 @@ Moved the legacy C2MIR JIT path (Lambda AST → C code → c2mir_compile → MIR
 **Files guarded with `#ifdef LAMBDA_C2MIR`:**
 - `lambda/mir.c` — `#include "c2mir.h"`, `c2mir_init()`, `jit_compile_to_mir()`, `c2mir_finish()`
 - `lambda/runner.cpp` — C2MIR branch in `transpile_script()`, `transpile_ast_root` declaration, `lambda_lambda_h_len` extern
-- `lambda/main.cpp` — `--c2mir` flag parsing (3 locations), `--transpile-dir`/`--transpile-only` flags, C2MIR branches in `run_repl()` and `run_script_file()`, help text
+- `lambda/main.cpp` — `--c2mir` flag parsing (3 locations), C2MIR branches in `run_repl()` and `run_script_file()`, help text
 - `lambda/main-repl.cpp` — `print_help()` C2MIR references
 - `lambda/transpiler.hpp` — `jit_compile_to_mir()` declaration
 

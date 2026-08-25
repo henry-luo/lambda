@@ -207,7 +207,7 @@ Exit gate: baseline 100%, MIR dumps contain **zero** raw-pointer immediates (ext
 
 ## 7. Determinism gate
 
-Model A assumes: same source + same binary ⇒ byte-identical MIR emission across processes. Post-de-pointering this becomes mechanically checkable: CI job compiles a probe set (reuse the `test/mir/` fixtures + picked `test/lambda` scripts) **in two separate processes** and diffs the canonical dumps byte-for-byte (the dump infrastructure and `--transpile-only` path exist; MT2). Byte-golden full-file dumps — newly legal per §3.2 — pin it permanently. The two hashmap-order emission sites (§2.4) are covered by the same diff. Gen-level nondeterminism is separately covered by the §5.4 differential verifier (which diffs *machine code* in-process). (L3-4)
+Model A assumes: same source + same binary ⇒ byte-identical MIR emission across processes. Post-de-pointering this becomes mechanically checkable: CI job compiles a probe set (reuse the `test/mir/` fixtures + picked `test/lambda` scripts) **in two separate processes** and diffs the canonical dumps byte-for-byte using the existing dump infrastructure. Byte-golden full-file dumps — newly legal per §3.2 — pin it permanently. The two hashmap-order emission sites (§2.4) are covered by the same diff. Gen-level nondeterminism is separately covered by the §5.4 differential verifier (which diffs *machine code* in-process). (L3-4)
 
 ## 8. Cache key & management
 

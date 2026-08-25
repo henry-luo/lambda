@@ -785,7 +785,6 @@ inline std::vector<FrameSlots> parse_frame_slots(const std::string& log_text) {
 struct ProcessSpec {
     Language language = LANG_LAMBDA;
     bool procedural = false;          // Lambda script with a `pn main()`
-    bool compile_only = false;        // Lambda only: --transpile-only
     bool mir_interp = false;
     bool quiet = false;               // --no-log; suppresses MIR artifacts too
     std::vector<std::string> extra_args;
@@ -817,7 +816,6 @@ inline ProcessResult run_lambda_process(const std::string& script_path, const Pr
         if (spec.mir_interp) argv_storage.push_back("--mir-interp");
         argv_storage.push_back(script_path);
         if (spec.quiet) argv_storage.push_back("--no-log");
-        if (spec.compile_only) argv_storage.push_back("--transpile-only");
     }
     for (size_t i = 0; i < spec.extra_args.size(); i++) {
         argv_storage.push_back(spec.extra_args[i]);
@@ -860,10 +858,12 @@ inline CompileResult compile_and_dump(const std::string& script_path,
 
     ProcessSpec spec;
     spec.language = options.language;
-    // Lambda compiles without running, so nothing depends on the snippet's
-    // runtime behavior to produce its MIR. JS has no compile-only entry point.
-    spec.compile_only = (options.language == LANG_LAMBDA);
     spec.extra_args = options.extra_args;
+    if (options.language == LANG_LAMBDA) {
+        // The auto tier may select T0 and emit no MIR artifact; emission tests
+        // must exercise the ordinary JIT execution path that produces it.
+        spec.extra_args.insert(spec.extra_args.begin(), "--tier=jit");
+    }
     spec.env.push_back(std::make_pair(std::string("LAMBDA_MIR_DUMP_PATH"), result.dump_path));
     // a module-cache hit skips emission entirely, which would leave the caller
     // reading a stale or absent artifact.

@@ -4,8 +4,8 @@
 // through `lambda.exe js` and its finalized MIR artifact is checked against the
 // matching `.mir-check` sidecar.
 //
-// JS fixtures execute in v1: there is no JS compile-only entry point yet, so a
-// fixture script must be able to run to completion.
+// JS fixtures execute in v1, so each fixture script must be able to run to
+// completion.
 //
 // See vibe/Lambda_Design_MIR_Emission_Test.md and test_mir_check_helpers.hpp.
 

@@ -146,7 +146,6 @@ void print_help() {
     printf("Usage:\n");
     printf("  lambda                       - Start REPL mode (default)\n");
     printf("  lambda [script.ls]           - Run a script file\n");
-    printf("  lambda --transpile-only [script.ls] - Compile without execution\n");
     printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
     printf("  lambda --no-drain [script.ls]       - Return without draining spawned tasks\n");
     printf("  lambda --optimize=N [script.ls]     - Set MIR optimization level (0-3, default: 2)\n");
@@ -159,7 +158,6 @@ void print_help() {
     printf("  lambda fetch <url> [-o file]  - Fetch HTTP/HTTPS resource\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Options:\n");
-    printf("  --transpile-only             - Compile without execution\n");
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
     printf("  --no-drain                   - Return without draining spawned tasks\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
