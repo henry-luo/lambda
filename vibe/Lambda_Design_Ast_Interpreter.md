@@ -421,6 +421,43 @@ this a usable current end-to-end comparison: AUTO is **0.69s** faster by
 median on this mixed corpus. It does not replace a new AUTO-versus-full-JIT
 control, so it makes no claim about eager-JIT profitability.
 
+### Full-JIT stale-binary diagnostic — [measured 2026-08-25]
+
+Before the release runtime was rebuilt, the existing release
+`test_lambda_gtest` executable was run three times with `LAMBDA_TIER=jit`;
+`LAMBDA_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE`, and
+`LAMBDA_AUTO_WHOLE_SCRIPT` were unset. The current tree discovered **741
+script fixtures**, producing **759 GTests** including the negative-contract
+and binary-output tests.
+
+| Mode | Wall samples | Median | Result |
+|---|---:|---:|---|
+| Full JIT (`LAMBDA_TIER=jit`) | 35.63s, 41.25s, 35.83s | **35.83s** | **758/759 passed** |
+
+All three runs failed the same `for_at_pairs` fixture: the expected paired
+values `a=1`, `b=2`, `c=3` were produced as `a=a`, `b=b`, `c=c`, and the
+filtered map result was empty instead of `['b']`. This is a deterministic
+full-JIT correctness failure in the stale release artifact, so **35.83s is
+diagnostic timing only**, not a passing JIT performance baseline. The source
+already contained the S8.1.3 `key_only && !index_name` admission fix; the
+release `lambda.exe` had not been rebuilt from that source.
+
+### Full-JIT verification after release rebuild — [measured 2026-08-25]
+
+After `make release` and rebuilding `test_lambda_gtest` as `release_native`,
+the focused `for_at_pairs` test passed under `LAMBDA_TIER=jit`. Three fresh
+full-corpus runs, with the same unset threshold/backedge/whole-script-POC
+overrides, passed **759/759** each:
+
+| Mode | Wall samples | Median | Result |
+|---|---:|---:|---|
+| Full JIT (`LAMBDA_TIER=jit`) | 41.85s, 36.14s, 42.67s | **41.85s** | **759/759 passed** |
+
+This confirms the source-level S8.1.3 paired-`at` fix is present in the
+release artifact; the remaining spread is host-load variance, not a fixture
+mismatch. The timing is the current passing full-JIT record for the 741-script
+/ 759-test tree (**D8.1.1v5**).
+
 ### AUTO promotion-threshold sweep — [measured 2026-08-24]
 
 The release `lambda.exe` was run in `LAMBDA_TIER=auto` over the same **740
