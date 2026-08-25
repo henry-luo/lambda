@@ -36,6 +36,7 @@ extern "C" {
 #include "../lib/url.h"
 }
 
+extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
 extern "C" void js_batch_reset(void);
 extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
@@ -74,9 +75,9 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     // Promise and timer callbacks allocate during the host pump just like event
     // listeners do. The pump may initialize a fresh host thread, but it cannot
     // replace a different evaluator already assigned to that thread.
-    if (!eval_context_thread_initialize(pump_ctx)) return false;
+    if (!eval_context_init(pump_ctx)) return false;
     input_context = nullptr;
-    if (pump_ctx->js_state && !js_runtime_state_thread_initialize(pump_ctx)) {
+    if (pump_ctx->js_state && !js_runtime_state_init(pump_ctx)) {
         input_context = saved_input_ctx;
         return false;
     }
@@ -1093,6 +1094,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
                                      &js_host_config);
         }
+        // EO4: an interactive session gives the document its evaluator here, at
+        // setup, so event dispatch never has to create one.
+        if (doc) radiant_document_ensure_evaluator(doc);
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);

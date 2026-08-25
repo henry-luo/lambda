@@ -307,7 +307,7 @@ extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
 static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
         EvalContext* local_context, bool reusing_context) {
     if (!reusing_context && local_context) {
-        if (!eval_context_thread_matches(local_context)) {
+        if (!eval_context_matches(local_context)) {
             log_error("js-mir-cleanup: failed context is not current");
             return;
         }
@@ -377,8 +377,8 @@ static bool js_mir_prepare_eval_context(Runtime* runtime,
         js_context = runtime_get_eval_context(runtime);
         if (!js_context) return false;
         bool thread_ready = initialize_thread
-            ? eval_context_thread_initialize(js_context)
-            : eval_context_thread_matches(js_context);
+            ? eval_context_init(js_context)
+            : eval_context_matches(js_context);
         if (!thread_ready) return false;
         heap_init();
         context->pool = context->heap->pool;
@@ -393,7 +393,7 @@ static bool js_mir_prepare_eval_context(Runtime* runtime,
         }
     }
     context->runtime = runtime;
-    if (!js_runtime_state_thread_initialize(context)) return false;
+    if (!js_runtime_state_init(context)) return false;
     *out_context = js_context;
     *out_reusing_context = reusing_context;
     return true;
@@ -659,11 +659,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // live context.
     EvalContext* compile_context = context ? context :
         runtime_get_eval_context(runtime);
-    if (!eval_context_thread_initialize(compile_context)) {
+    if (!eval_context_init(compile_context)) {
         log_error("js-mir: cannot initialize compile recovery context");
         return ItemError;
     }
-    if (!js_runtime_state_thread_initialize(compile_context)) {
+    if (!js_runtime_state_init(compile_context)) {
         log_error("js-mir: cannot initialize compile recovery state");
         return ItemError;
     }
@@ -1355,8 +1355,8 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     runtime_context->name_pool = runtime->name_pool;
     runtime_context->type_list = runtime->type_list;
     runtime_context->pool = runtime->heap->pool;
-    if (!eval_context_thread_initialize(runtime_context) ||
-            !js_runtime_state_thread_initialize(runtime_context)) {
+    if (!eval_context_init(runtime_context) ||
+            !js_runtime_state_init(runtime_context)) {
         return ItemError;
     }
     if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
@@ -1473,12 +1473,12 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         preamble_state_destroy(out_state);
         return ItemError;
     }
-    if (!eval_context_thread_initialize(js_context)) {
+    if (!eval_context_init(js_context)) {
         preamble_state_destroy(out_state);
         return ItemError;
     }
     context->runtime = runtime;
-    if (!js_runtime_state_thread_initialize(context)) {
+    if (!js_runtime_state_init(context)) {
         preamble_state_destroy(out_state);
         return ItemError;
     }
@@ -1630,7 +1630,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
             mem_free(source);
             return ItemNull;
         }
-        if (!eval_context_thread_initialize(js_context)) {
+        if (!eval_context_init(js_context)) {
             jm_clear_active_js_transpile(NULL, NULL, source);
             mem_free(source);
             return ItemNull;
@@ -1640,7 +1640,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
         context->name_pool = name_pool_create_runtime(context->pool);
         context->type_list = arraylist_new(64);
         context->runtime = runtime;
-        if (!js_runtime_state_thread_initialize(context)) {
+        if (!js_runtime_state_init(context)) {
             jm_clear_active_js_transpile(NULL, NULL, source);
             mem_free(source);
             return ItemNull;

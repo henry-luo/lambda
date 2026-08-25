@@ -1,0 +1,21 @@
+{
+  "name": "dom package drives radio-group exclusivity",
+  "html": "test/lambda/ui/dom_pkg_radio.ls",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "log", "message": "=== radio exclusivity from the Lambda behavior template ==="},
+    {"type": "assert_checked", "target": {"selector": ".r1"}, "checked": false},
+    {"type": "assert_checked", "target": {"selector": ".r2"}, "checked": false},
+
+    {"type": "log", "message": "--- select the first radio ---"},
+    {"type": "click", "target": {"selector": ".r1"}},
+    {"type": "assert_checked", "target": {"selector": ".r1"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": ".r2"}, "checked": false},
+    {"type": "assert_count", "target": {"selector": ".changed"}, "min_count": 1},
+
+    {"type": "log", "message": "--- select the second: the first must clear ---"},
+    {"type": "click", "target": {"selector": ".r2"}},
+    {"type": "assert_checked", "target": {"selector": ".r2"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": ".r1"}, "checked": false}
+  ]
+}

@@ -276,23 +276,23 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     JsCliRunArgs* run_args = (JsCliRunArgs*)arg;
     lambda_stack_init();
     EvalContext* eval_context = runtime_get_eval_context(run_args->runtime);
-    if (!eval_context_thread_initialize(eval_context)) {
+    if (!eval_context_init(eval_context)) {
         run_args->result = ItemError;
         return NULL;
     }
     if (eval_context->js_state &&
-            !js_runtime_state_thread_initialize(eval_context)) {
-        eval_context_thread_shutdown(eval_context);
+            !js_runtime_state_init(eval_context)) {
+        eval_context_shutdown(eval_context);
         run_args->result = ItemError;
         return NULL;
     }
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
-    if (eval_context->js_state) js_runtime_state_thread_shutdown(eval_context);
+    if (eval_context->js_state) js_runtime_state_shutdown(eval_context);
     // The large-stack worker is an eval-thread lifetime boundary. Cleanup
     // starts only after join, when the caller acquires the same owner.
-    eval_context_thread_shutdown(eval_context);
+    eval_context_shutdown(eval_context);
     return NULL;
 }
 
@@ -337,7 +337,7 @@ static Item js_cli_transpile_with_execution_stack(
 
 static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_context) {
     memset(batch_context, 0, sizeof(EvalContext));
-    if (!eval_context_thread_initialize(batch_context)) return;
+    if (!eval_context_init(batch_context)) return;
     heap_init();
     batch_context->pool = batch_context->heap->pool;
     batch_context->name_pool = name_pool_create_runtime(batch_context->pool);
@@ -352,15 +352,15 @@ static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_c
 
 static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_context) {
     if (!batch_context) return;
-    if (!eval_context_thread_matches(batch_context)) {
+    if (!eval_context_matches(batch_context)) {
         log_error("test262-hot-context: owner thread mismatch during destroy");
         return;
     }
-    if (batch_context->js_state) js_runtime_state_thread_shutdown(batch_context);
+    if (batch_context->js_state) js_runtime_state_shutdown(batch_context);
     // A signal can interrupt an allocator or a GC finalizer. Reclaim the bulk
     // heap generation without running those finalizers before replacing it.
     heap_discard_unfinalized();
-    eval_context_thread_shutdown(batch_context);
+    eval_context_shutdown(batch_context);
     memset(batch_context, 0, sizeof(EvalContext));
     runtime->heap = NULL;
     runtime->name_pool = NULL;
@@ -369,7 +369,7 @@ static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_
 
 static bool js_test262_hot_context_recycle(Runtime* runtime,
         EvalContext* batch_context) {
-    if (!runtime || !batch_context || !eval_context_thread_matches(batch_context)) {
+    if (!runtime || !batch_context || !eval_context_matches(batch_context)) {
         log_error("test262-hot-context: owner mismatch during normal recycle");
         return false;
     }
@@ -1864,8 +1864,8 @@ static int node_runner_run_file(const char* exe_path, const char* file,
 #endif
         EvalContext* js_result_context = runtime_get_eval_context(&runtime);
         if (js_result_context && js_result_context->js_state) {
-            if (!eval_context_thread_initialize(js_result_context) ||
-                    !js_runtime_state_thread_initialize(js_result_context)) {
+            if (!eval_context_init(js_result_context) ||
+                    !js_runtime_state_init(js_result_context)) {
                 log_error("js-cli-result: failed to acquire Runtime owner");
                 result = ItemError;
             }
@@ -2511,8 +2511,8 @@ int main(int argc, char *argv[]) {
             // inspect exceptions, promises, or other JS semantic state.
             EvalContext* js_result_context = runtime_get_eval_context(&runtime);
             if (js_result_context && js_result_context->js_state) {
-                if (!eval_context_thread_initialize(js_result_context) ||
-                        !js_runtime_state_thread_initialize(js_result_context)) {
+                if (!eval_context_init(js_result_context) ||
+                        !js_runtime_state_init(js_result_context)) {
                     log_error("js-document-result: failed to acquire Runtime owner");
                     result = ItemError;
                 }
@@ -4612,7 +4612,7 @@ int main(int argc, char *argv[]) {
             if (hot_reload) {
                 // A recovery jump must preserve the eval-thread owner; a
                 // mismatch indicates a forbidden nested context switch.
-                if (!eval_context_thread_matches(batch_context)) {
+                if (!eval_context_matches(batch_context)) {
                     log_error("test262-hot-context: owner changed across recovery");
                     result = 1;
                 }

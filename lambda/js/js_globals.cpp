@@ -3167,7 +3167,7 @@ static bool js_process_ipc_enter(uv_handle_t* handle, JsProcessIpcScope* scope) 
     memset(scope, 0, sizeof(*scope));
     EvalContext* owner = handle ? (EvalContext*)handle->data : NULL;
     if (!owner || !owner->js_state) return false;
-    if (!eval_context_thread_matches(owner) ||
+    if (!eval_context_matches(owner) ||
             !js_runtime_state_thread_matches(owner)) {
         // libuv must deliver IPC completion on the context's owner loop.
         log_error("js-process-ipc: callback arrived on non-owner thread");

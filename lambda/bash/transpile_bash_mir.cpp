@@ -6001,7 +6001,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
             if (dd_buf) strbuf_free(dd_buf);
             return (Item){.item = ITEM_ERROR};
         }
-        if (!eval_context_thread_initialize(bash_context)) {
+        if (!eval_context_init(bash_context)) {
             ts_tree_delete(tree);
             ts_parser_delete(parser);
             bash_transpiler_destroy(tp);

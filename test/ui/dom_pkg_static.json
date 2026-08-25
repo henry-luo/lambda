@@ -1,0 +1,58 @@
+{
+  "name": "script-less HTML page: checkbox activation (native fallback by default)",
+  "html": "test/lambda/ui/dom_pkg_static.html",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== static HTML page checkbox activation; the dom package needs RADIANT_DOM_PKG_CREATE_RUNTIME=1 to own this, otherwise native handles it (ESO27) ==="
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".cb"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": ".cb"
+      },
+      "checked": false
+    },
+    {
+      "type": "log",
+      "message": "--- click toggles the box whichever path is in charge ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".cb"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": ".cb"
+      },
+      "checked": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".cb"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": ".cb"
+      },
+      "checked": false
+    }
+  ]
+}

@@ -163,6 +163,8 @@ static JsMirCache* s_js_mir_cache = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
+
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;
 }
@@ -1626,9 +1628,9 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
 
 static bool script_eval_context_activate(Runtime* runtime) {
     EvalContext* task_context = script_eval_context_prepare(runtime);
-    if (!task_context || !eval_context_thread_initialize(task_context)) return false;
+    if (!task_context || !eval_context_init(task_context)) return false;
     return !task_context->js_state ||
-        js_runtime_state_thread_initialize(task_context);
+        js_runtime_state_init(task_context);
 }
 
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
@@ -2318,14 +2320,16 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         script_runner_cleanup_source_cache();
         return;
     }
-    // The document owns this eval thread from initialization until document
-    // teardown; an ambient live context cannot be saved and restored here.
-    if (!eval_context_thread_initialize(document_context) ||
-            !js_runtime_state_thread_initialize(document_context)) {
+    // EO5v2: this document — a top-level page or an iframe's — manages its own
+    // Runtime and EvalContext, and takes the thread for its script execution.
+    // Script setup is a quiescent point, so the binding switches here rather
+    // than being refused; nothing is saved for later restore.
+    if (!radiant_eval_context_switch(document_context) ||
+            !js_runtime_state_init(document_context)) {
         if (runtime->eval_context) {
             js_runtime_state_destroy_context();
-            if (eval_context_thread_matches(runtime->eval_context)) {
-                eval_context_thread_shutdown(runtime->eval_context);
+            if (eval_context_matches(runtime->eval_context)) {
+                eval_context_shutdown(runtime->eval_context);
             }
             mem_free(runtime->eval_context);
             runtime->eval_context = nullptr;
@@ -2462,7 +2466,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // Keep the document's canonical context current through its initial task
     // drain.  Promise and timer callbacks allocate and must never observe the
     // caller's restored (or null) context.
-    if (!eval_context_thread_matches(document_context) ||
+    if (!eval_context_matches(document_context) ||
             !js_runtime_state_thread_matches(document_context)) {
         log_error("execute_document_scripts: eval-thread owner changed during execution");
         result = ItemError;
@@ -2774,9 +2778,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     handler_compile_ctx->name_pool = runtime->name_pool;
     handler_compile_ctx->type_list = runtime->type_list;
     handler_compile_ctx->pool = runtime->heap->pool;
-    if (!eval_context_thread_initialize(handler_compile_ctx) ||
+    if (!eval_context_init(handler_compile_ctx) ||
             (handler_compile_ctx->js_state &&
-             !js_runtime_state_thread_initialize(handler_compile_ctx))) {
+             !js_runtime_state_init(handler_compile_ctx))) {
         strbuf_free(compile_buf);
         hashmap_free(handlers->element_map);
         mem_pool_destroy(handlers_pool);
@@ -2867,12 +2871,12 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!runtime) return;
 
     EvalContext* owner = runtime->eval_context;
-    if (owner && !eval_context_thread_initialize(owner)) {
+    if (owner && !eval_context_init(owner)) {
         log_error("script-runner-cleanup: document owner is not current");
         return;
     }
     if (owner && owner->js_state &&
-            !js_runtime_state_thread_initialize(owner)) return;
+            !js_runtime_state_init(owner)) return;
 
     // The document runtime can have queued callback roots even when the
     // caller did not reach the normal loader teardown path.
@@ -2913,7 +2917,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;
         js_runtime_state_destroy_context();
-        if (!eval_context_thread_shutdown(retiring_context)) return;
+        if (!eval_context_shutdown(retiring_context)) return;
         mem_free(retiring_context);
         runtime->eval_context = nullptr;
     }

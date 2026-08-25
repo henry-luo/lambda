@@ -18,9 +18,9 @@ extern __thread EvalContext* context;
 // An evaluator thread acquires one context identity before execution and keeps
 // it until teardown. Nested callbacks and guest dispatch may validate the
 // owner, but must never replace and later restore the TLS pointer.
-bool eval_context_thread_initialize(EvalContext* owner);
-bool eval_context_thread_matches(const EvalContext* owner);
-bool eval_context_thread_shutdown(EvalContext* owner);
+bool eval_context_init(EvalContext* owner);
+bool eval_context_matches(const EvalContext* owner);
+bool eval_context_shutdown(EvalContext* owner);
 #endif
 
 #ifdef __cplusplus

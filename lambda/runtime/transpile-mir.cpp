@@ -27490,7 +27490,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     }
     // Compilation may initialize an otherwise idle eval thread, but it cannot
     // borrow a different live context and restore the caller afterward.
-    if (!eval_context_thread_initialize(template_context)) return;
+    if (!eval_context_init(template_context)) return;
 
     // const runs after index construction and under the thread-bound evaluator
     // context its shared walker needs. A failed/no-op attempt leaves no fact,
@@ -27893,15 +27893,15 @@ static void* interp_worker_entry(void* opaque) {
     InterpWorkerArgs* args = (InterpWorkerArgs*)opaque;
     if (!args || !args->runner || !args->runner->context) return NULL;
     EvalContext* eval = args->runner->context;
-    if (!eval_context_thread_initialize(eval)) return NULL;
+    if (!eval_context_init(eval)) return NULL;
     // The large-stack worker has independent JS TLS; bind the shared capsule
     // before an async bridge (for example toPromise) can allocate GC-owned JS
     // values, preserving the owner/thread invariant (D5.3.3).
     bool js_state_initialized = !eval->js_state ||
-        js_runtime_state_thread_initialize(eval);
+        js_runtime_state_init(eval);
     if (!js_state_initialized) {
         log_error("interp-worker: failed to bind JavaScript runtime state");
-        eval_context_thread_shutdown(eval);
+        eval_context_shutdown(eval);
         return NULL;
     }
     args->initialized = true;
@@ -27915,10 +27915,10 @@ static void* interp_worker_entry(void* opaque) {
         args->result = interp_run_script(args->runner, args->run_main);
     }
     if (js_state_initialized && eval->js_state &&
-            !js_runtime_state_thread_shutdown(eval)) {
+            !js_runtime_state_shutdown(eval)) {
         log_error("interp-worker: failed to release JavaScript runtime state");
     }
-    if (!eval_context_thread_shutdown(eval)) {
+    if (!eval_context_shutdown(eval)) {
         log_error("interp-worker: failed to release evaluator context");
     }
     return NULL;
@@ -27927,20 +27927,20 @@ static void* interp_worker_entry(void* opaque) {
 static Item interp_run_with_worker_stack(Runner* runner, bool run_main) {
     if (!runner || !runner->context) return ItemError;
     EvalContext* eval = runner->context;
-    if (!eval_context_thread_shutdown(eval)) return ItemError;
+    if (!eval_context_shutdown(eval)) return ItemError;
 
     InterpWorkerArgs args = {runner, run_main, ItemError, false};
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) {
         log_error("interp-worker: failed to configure large stack");
-        eval_context_thread_initialize(eval);
+        eval_context_init(eval);
         input_context = (Context*)eval;
         return ItemError;
     }
     if (pthread_attr_setstacksize(&attr, INTERP_WORKER_STACK_SIZE) != 0) {
         log_error("interp-worker: failed to configure large stack");
         pthread_attr_destroy(&attr);
-        eval_context_thread_initialize(eval);
+        eval_context_init(eval);
         input_context = (Context*)eval;
         return ItemError;
     }
@@ -27949,12 +27949,12 @@ static Item interp_run_with_worker_stack(Runner* runner, bool run_main) {
     pthread_attr_destroy(&attr);
     if (create_status != 0) {
         log_error("interp-worker: failed to create large-stack worker");
-        eval_context_thread_initialize(eval);
+        eval_context_init(eval);
         input_context = (Context*)eval;
         return ItemError;
     }
     pthread_join(worker, NULL);
-    if (!eval_context_thread_initialize(eval)) {
+    if (!eval_context_init(eval)) {
         log_error("interp-worker: failed to restore evaluator context");
         return ItemError;
     }

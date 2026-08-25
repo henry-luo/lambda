@@ -18,13 +18,17 @@ on click(evt) {
     radiant.dispatch(~, "change")
 }
 
-// Radio activation: selecting is one-way — clicking a checked radio does not
-// clear it. Group exclusivity still lives natively until radio_group() lands.
+// Radio activation (HTML 4.10.5.1.16). Selecting is one-way — clicking an
+// already-checked radio does nothing — and it must clear the previously
+// selected peer in the same group, so this template owns the exclusivity walk
+// too. Claiming activation without it would silently drop the deselection half.
 view <input type:'radio'> state checked {}
 on click(evt) {
     if (radiant.get_state(~, "disabled")) { return 'pass' }
-    // selecting is one-way; a click on an already-checked radio does nothing
     if (radiant.get_state(~, "checked")) { return 'pass' }
+    for (peer in radiant.radio_group(~)) {
+        radiant.set_state(peer, "checked", false)
+    }
     radiant.set_state(~, "checked", true)
     radiant.dispatch(~, "input")
     radiant.dispatch(~, "change")
