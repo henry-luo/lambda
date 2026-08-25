@@ -8,7 +8,7 @@
         "call\tjs_throw_value"
       ],
       "forbid": [
-        "eq\t{{r}}, {{r}}, 27"
+        "eq\t{{r}}, {{r}}, 26"
       ]
     },
     {
@@ -18,7 +18,7 @@
         "call\tjs_error_lane_payload"
       ],
       "count": {
-        "eq\t{{r}}, {{r}}, 27": 1
+        "eq\t{{r}}, {{r}}, 26": 1
       }
     }
   ]

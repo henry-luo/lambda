@@ -142,8 +142,7 @@ bool static_literal_item_from_type(Type* type, Item* out) {
         out->item = l2it(&value->int64_val);
         return true;
     }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         TypeFloat* value = (TypeFloat*)type;
         *out = lambda_float_ptr_to_item(&value->double_val);
         return true;

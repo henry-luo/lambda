@@ -115,10 +115,6 @@ TEST(LambdaTypedItem, CanonicalTypeTagsHaveTypedWitnesses) {
     ASSERT_TYPED_ITEM_TAG(LMD_TYPE_ERROR);
 #undef ASSERT_TYPED_ITEM_TAG
 
-    // f64 syntax is canonicalized to float; a separate witness would let a
-    // retired runtime encoding leak back into typed code.
-    static_assert(!HasItemTag<LMD_TYPE_FLOAT64>::value,
-                  "legacy float64 tag must not gain a typed witness");
     SUCCEED();
 }
 

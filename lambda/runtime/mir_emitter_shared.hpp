@@ -819,7 +819,6 @@ static inline MirScalarReturnMode em_scalar_return_mode_for_type(TypeId type_id)
     }
     switch (type_id) {
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         return MIR_SCALAR_RETURN_FLOAT;
     case LMD_TYPE_INT64:
         return MIR_SCALAR_RETURN_INT64;
@@ -1221,14 +1220,7 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
         MIR_new_reg_op(em->ctx, is_float), MIR_new_reg_op(em->ctx, item_type),
         MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
-    MIR_reg_t is_float64 = em_new_reg(em, "adopt_float64", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-        MIR_new_reg_op(em->ctx, is_float64), MIR_new_reg_op(em->ctx, item_type),
-        MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT64)));
-    MIR_reg_t scalar_float = em_new_reg(em, "adopt_float_kind", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
-        MIR_new_reg_op(em->ctx, scalar_float), MIR_new_reg_op(em->ctx, is_float),
-        MIR_new_reg_op(em->ctx, is_float64)));
+    MIR_reg_t scalar_float = is_float;
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
         MIR_new_label_op(em->ctx, l_passthrough),
         MIR_new_reg_op(em->ctx, scalar_float)));
@@ -1335,10 +1327,10 @@ static inline void em_build_pending_pair(MirEmitter* em, MIR_reg_t item,
     // branch rejects both sides of the range.
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGT,
         MIR_new_label_op(em->ctx, l_done), MIR_new_reg_op(em->ctx, off),
-        MIR_new_int_op(em->ctx, 3)));
+        MIR_new_int_op(em->ctx, PENDING_KIND_FLOAT)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGT,
         MIR_new_label_op(em->ctx, l_float), MIR_new_reg_op(em->ctx, off),
-        MIR_new_int_op(em->ctx, 1)));
+        MIR_new_int_op(em->ctx, PENDING_KIND_UINT64)));
 
     // Wide integer: payload address is the low 56 bits, kind is the tag offset.
     MIR_reg_t iptr = em_new_reg(em, "pend_iptr", MIR_T_I64);

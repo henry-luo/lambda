@@ -959,8 +959,6 @@ eq scalar_is_type, scalar_tag, LMD_TYPE_INT64
 bt int64_case, scalar_is_type
 eq scalar_is_type, scalar_tag, LMD_TYPE_FLOAT
 bt float_tag_case, scalar_is_type
-eq scalar_is_type, scalar_tag, LMD_TYPE_FLOAT64
-bt float_tag_case, scalar_is_type
 eq scalar_is_type, scalar_tag, LMD_TYPE_DTIME
 bt payload_case, scalar_is_type
 jmp classify_done

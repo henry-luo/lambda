@@ -735,8 +735,7 @@ static Item eval_literal(InterpFrame* f, AstNode* node) {
         const int64_t* slot = (const int64_t*)interp_const_at(f->module, tc->const_index);
         return (Item){.item = i2it(slot ? *slot : 0)};
     }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         // Literal floats own a stable TypeFloat slot; encode the canonical
         // Item bits directly instead of re-tagging the const pointer.
         TypeFloat* tf = (TypeFloat*)type;
@@ -4808,7 +4807,6 @@ static bool interp_const_node_supported(AstNode* node) {
         case LMD_TYPE_BOOL:
         case LMD_TYPE_INT:
         case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64:
             return true;
         default:
             return false;

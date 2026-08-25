@@ -52,7 +52,6 @@ Type TYPE_U16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT16};
 Type TYPE_U32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT32};
 Type TYPE_F16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT16};
 Type TYPE_F32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT32};
-Type TYPE_F64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_DATE = {.type_id = LMD_TYPE_DTIME};   // sub-type: date-only datetime
 Type TYPE_TIME = {.type_id = LMD_TYPE_DTIME};   // sub-type: time-only datetime
@@ -100,7 +99,6 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_INT: return "int";
         case LMD_TYPE_INT64: return "int64";
         case LMD_TYPE_FLOAT: return "float";
-        case LMD_TYPE_FLOAT64: return "float";
         case LMD_TYPE_COMPLEX: return "complex";
         case LMD_TYPE_DECIMAL: return "decimal";
         case LMD_TYPE_DTIME: return "datetime";
@@ -177,7 +175,6 @@ TypeType LIT_TYPE_U32;
 TypeType LIT_TYPE_U64;
 TypeType LIT_TYPE_F16;
 TypeType LIT_TYPE_F32;
-TypeType LIT_TYPE_F64;
 
 TypeMap EmptyMap;
 TypeElmt EmptyElmt;
@@ -235,7 +232,6 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_U64) = LIT_TYPE;  LIT_TYPE_U64.type = &TYPE_UINT64;
     *(Type*)(&LIT_TYPE_F16) = LIT_TYPE;  LIT_TYPE_F16.type = &TYPE_F16;
     *(Type*)(&LIT_TYPE_F32) = LIT_TYPE;  LIT_TYPE_F32.type = &TYPE_F32;
-    *(Type*)(&LIT_TYPE_F64) = LIT_TYPE;  LIT_TYPE_F64.type = &TYPE_FLOAT;
 
     memset(&EmptyMap, 0, sizeof(TypeMap));
     EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
@@ -261,7 +257,6 @@ void init_type_info() {
     type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // shaped int fields store one int64 lane word
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
-    type_info[LMD_TYPE_FLOAT64] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_COMPLEX] = {sizeof(Complex*), "complex", &TYPE_COMPLEX, (Type*)&LIT_TYPE_COMPLEX};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
     type_info[LMD_TYPE_DTIME] = {sizeof(DateTime), "datetime", &TYPE_DTIME, (Type*)&LIT_TYPE_DTIME};
@@ -519,8 +514,7 @@ void array_set(Array* arr, int64_t index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
     switch (type_id) {
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         if ((itm.item & ITEM_DBL_MASK) || itm.item == ITEM_FLOAT_P0 || itm.item == ITEM_FLOAT_N0) {
             break;
         }
@@ -580,7 +574,6 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
         storage[index] = {.item = u2it(payload)};
         break;
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         if (!(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
                 item.item != ITEM_FLOAT_N0) {
             *(double*)payload = item.get_double();
@@ -626,7 +619,6 @@ Item scalar_storage_read(Item item, bool immortal) {
         return box_uint64_value(value);
     }
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         return push_d(item.get_double());
     default:
         return item;
@@ -750,8 +742,7 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
             *(Item*)field_ptr = item;
             break;
         }
-        case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64: {
+        case LMD_TYPE_FLOAT: {
             // handle type coercion: int → float, int64 → float
             TypeId item_type = get_type_id(item);
             double val;
@@ -847,7 +838,6 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
             case LMD_TYPE_UINT64:
                 titem.uint64_val = item.get_uint64();  break;
             case LMD_TYPE_FLOAT:
-            case LMD_TYPE_FLOAT64:
                 titem.double_val = item.get_double();  break;
             case LMD_TYPE_DECIMAL:
                 // Preserve both decimal and integer-domain payloads in `any` fields.
@@ -971,8 +961,6 @@ Item typeditem_to_item(TypedItem *titem) {
         return {.item = u2it(&titem->uint64_val)};
     case LMD_TYPE_FLOAT:
         return lambda_float_ptr_to_item(&titem->double_val);
-    case LMD_TYPE_FLOAT64:
-        return lambda_float_ptr_to_item(&titem->double_val);
     case LMD_TYPE_DTIME:
         return {.item = k2it(titem->datetime_ptr)};
     case LMD_TYPE_DECIMAL:
@@ -1016,6 +1004,12 @@ Item typeditem_to_item(TypedItem *titem) {
 Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
     if (!map_data || !field) return ItemNull;
     void* field_ptr = map_field_ptr(map_data, field);
+    if (!field->name) {
+        // spread fields store a raw nested Map*, not a TypedItem; treating the
+        // pointer's first byte as an ANY tag truncates function/container values.
+        Map* nested = map_shape_field_to_map(map_data, field);
+        return nested ? (Item){.map = nested} : ItemNull;
+    }
     LaneStorageDesc lane = {};
     if (shape_entry_uses_native_lane(field, &lane)) {
         if (lane.kind == LANE_STORAGE_INT) {
@@ -1083,7 +1077,7 @@ bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
             *(uint64_t*)field_ptr = FLOAT_LANE_NULL_BITS;
             return true;
         }
-        if (value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_FLOAT64) {
+        if (value_type == LMD_TYPE_FLOAT) {
             *(uint64_t*)field_ptr = lambda_float_lane_from_double(value.get_double());
             return true;
         }
@@ -1147,9 +1141,6 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         // subtype survives map reads and later nullable-lane admission.
         return *(Item*)field_ptr;
     case LMD_TYPE_FLOAT:
-        result = lambda_float_ptr_to_item((const double*)field_ptr);
-        break;
-    case LMD_TYPE_FLOAT64:
         result = lambda_float_ptr_to_item((const double*)field_ptr);
         break;
     case LMD_TYPE_DTIME:
@@ -1363,7 +1354,6 @@ bool item_deep_equal(Item a, Item b) {
         case LMD_TYPE_UINT64:
             return a.get_uint64() == b.get_uint64();
         case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64:
             return a.get_double() == b.get_double();
         case LMD_TYPE_STRING: {
             String* sa = a.get_safe_string();
@@ -1444,7 +1434,7 @@ TypeId type_field_storage_type_id(const Type* type) {
             ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
         Type* base = type_field_unwrap_simple_decl(((TypeUnary*)type)->operand);
         if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
-                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
+                base->type_id == LMD_TYPE_FLOAT)) {
             return base->type_id;
         }
         if (base && base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
@@ -1468,7 +1458,7 @@ TypeId type_field_storage_type_id(const Type* type) {
             (binary->right && binary->right->type_id == LMD_TYPE_NULL ? binary->left : NULL);
         base = type_field_unwrap_simple_decl(base);
         if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
-                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
+                base->type_id == LMD_TYPE_FLOAT)) {
             return base->type_id;
         }
     }
@@ -1550,7 +1540,7 @@ bool shape_entry_uses_native_lane(const ShapeEntry* field,
     out->semantic_contract = semantic; out->base_contract = base; out->nullable = 1;
     if (base->type_id == LMD_TYPE_INT) { out->kind = LANE_STORAGE_INT; out->byte_size = 8; }
     else if (base->type_id == LMD_TYPE_BOOL) { out->kind = LANE_STORAGE_BOOL; out->byte_size = 1; }
-    else if (base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64) { out->kind = LANE_STORAGE_FLOAT64; out->byte_size = 8; }
+    else if (base->type_id == LMD_TYPE_FLOAT) { out->kind = LANE_STORAGE_FLOAT64; out->byte_size = 8; }
     else if (base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
             lambda_num_sized_is_integer(type_num_sized_kind(base))) { out->kind = LANE_STORAGE_SIZED_I64; out->byte_size = 8; }
     else if (base->type_id == LMD_TYPE_INT64 || base->type_id == LMD_TYPE_UINT64) { out->kind = LANE_STORAGE_ITEM; out->byte_size = 8; }

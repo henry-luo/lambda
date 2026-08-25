@@ -365,7 +365,6 @@ TEST_F(LambdaConcurrencyRuntime, OwnedSlotsPreserveWideIntegersWithoutGcScalarCe
     uint64_t alloc_i = gc_scalar_tag_allocation_count(LMD_TYPE_INT64);
     uint64_t alloc_u = gc_scalar_tag_allocation_count(LMD_TYPE_UINT64);
     uint64_t alloc_f = gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT);
-    uint64_t alloc_f64 = gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT64);
     Item slots[4] = {};
 
     EXPECT_FALSE(gc_is_managed(concurrency_test_gc, &source_i));
@@ -385,7 +384,6 @@ TEST_F(LambdaConcurrencyRuntime, OwnedSlotsPreserveWideIntegersWithoutGcScalarCe
     EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_INT64), alloc_i);
     EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_UINT64), alloc_u);
     EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT), alloc_f);
-    EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT64), alloc_f64);
 
     gc_register_root(concurrency_test_gc, &slots[0].item);
     gc_register_root(concurrency_test_gc, &slots[1].item);

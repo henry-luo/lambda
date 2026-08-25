@@ -198,8 +198,7 @@ to generated MIR through `lambda/sys_func_registry.c`.
 Behavior:
 
 - `LMD_TYPE_INT64`: decode the mathematical `int64` value and return its bits;
-- `LMD_TYPE_FLOAT` / `LMD_TYPE_FLOAT64`: decode the double and bit-copy it to a
-  `uint64_t`;
+- `LMD_TYPE_FLOAT`: decode the double and bit-copy it to a `uint64_t`;
 - `LMD_TYPE_DTIME`: decode the `DateTime` and bit-copy its 64-bit representation;
 - all other types: return zero.
 
@@ -216,8 +215,8 @@ Behavior after the callee number watermark has been restored:
 
 - `LMD_TYPE_INT64`: return the original Item when inline; otherwise allocate a
   new caller-owned box with `box_int64_value()`;
-- `LMD_TYPE_FLOAT` / `LMD_TYPE_FLOAT64`: return the original Item when it is an
-  inline double or packed signed zero; otherwise rebuild with `push_d()`;
+- `LMD_TYPE_FLOAT`: return the original Item when it is an inline double or
+  packed signed zero; otherwise rebuild with `push_d()`;
 - `LMD_TYPE_DTIME`: rebuild with `push_k()`;
 - all other types: return the original Item unchanged.
 
@@ -730,9 +729,9 @@ an imported helper call.
 | 16 | `ANY` — runtime value is row 9 / 12 / 13 | number-slot pointer | **yes** | rare (residue doubles, polyglot wide scalars) | `DYNAMIC` | 2 | classify → donate, 0 calls |
 | 17 | generator / async / `js_main` completion | any (protocol unaudited) | maybe | all such entries | `DYNAMIC` initially | **2** | as rows 14–16 |
 
-† `LMD_TYPE_FLOAT64` is no longer a distinct runtime rank — it is a legacy
-reserved tag and `f64` canonicalizes to `FLOAT` at production — so the old
-"float64 pointer form" collapses into these three `FLOAT` rows.
+† `f64` is a source spelling for `float`, not a runtime rank: production and
+annotations canonicalize it to `FLOAT`, so all binary64 forms use these three
+`FLOAT` rows. This preserves the scalar aliases defined by S2.1.1.
 
 ### 10.4 Reading the matrix
 

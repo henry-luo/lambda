@@ -44,14 +44,13 @@ void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release =
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr);
 static int is_gc_object(gc_heap_t* gc, void* ptr);
 
-static volatile uint64_t gc_scalar_tag_allocations[4];
+static volatile uint64_t gc_scalar_tag_allocations[3];
 
 static int gc_scalar_tag_index(uint16_t type_tag) {
     switch (type_tag) {
     case LMD_TYPE_INT64: return 0;
     case LMD_TYPE_UINT64: return 1;
     case LMD_TYPE_FLOAT: return 2;
-    case LMD_TYPE_FLOAT64: return 3;
     default: return -1;
     }
 }
@@ -1170,7 +1169,7 @@ static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
 
     // Scalar tags are never GC objects: their payloads live in owned homes.
     if (tag == LMD_TYPE_INT64_ || tag == LMD_TYPE_UINT64_ ||
-            tag == LMD_TYPE_FLOAT_ || tag == LMD_TYPE_FLOAT64) {
+            tag == LMD_TYPE_FLOAT_) {
 #ifndef NDEBUG
         void* scalar_payload = (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
         if (scalar_payload && is_gc_object(gc, scalar_payload)) {

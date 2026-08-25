@@ -200,8 +200,6 @@ static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType
     if (target->type_id == LMD_TYPE_DECIMAL) {
         return actual_tid != LMD_TYPE_COMPLEX && IS_NUMERIC_ID(actual_tid);
     }
-    if (target->type_id == LMD_TYPE_FLOAT64) target = &TYPE_FLOAT;
-    if (actual_tid == LMD_TYPE_FLOAT64) actual_tid = LMD_TYPE_FLOAT;
     if (actual_tid == target->type_id) {
         if (actual_tid != LMD_TYPE_NUM_SIZED) return true;
         return validator_sized_kind_embeds(actual_kind, (NumSizedType)target->kind);

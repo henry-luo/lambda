@@ -325,7 +325,7 @@ static bool radiant_item_to_float(Item item, float* out) {
     if (!out) return false;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_FLOAT ||
         type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
         *out = (float)it2d(item);
         return true;
@@ -337,7 +337,7 @@ static bool radiant_item_to_index(Item item, int* out) {
     if (!out) return false;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_FLOAT ||
         type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
         int64_t value = it2i(item);
         if (value < 0 || value > INT_MAX) return false;
@@ -351,7 +351,7 @@ static bool radiant_item_to_int(Item item, int* out) {
     if (!out) return false;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_FLOAT ||
         type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
         int64_t value = it2i(item);
         if (value < INT_MIN || value > INT_MAX) return false;

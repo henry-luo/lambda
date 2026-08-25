@@ -845,7 +845,6 @@ static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     case LMD_TYPE_INT64:
     case LMD_TYPE_UINT64:
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
     case LMD_TYPE_NUM_SIZED:
         return true;
     default:
@@ -1034,7 +1033,7 @@ static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
     case LMD_TYPE_INT: return lambda_int_item_to_i64(item) == 0;
     case LMD_TYPE_INT64: return item.get_int64() == 0;
     case LMD_TYPE_UINT64: return item.get_uint64() == 0;
-    case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: return item.get_double() == 0.0;
+    case LMD_TYPE_FLOAT: return item.get_double() == 0.0;
     case LMD_TYPE_NUM_SIZED:
         return item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32 ?
             item.get_num_sized_as_double() == 0.0 :

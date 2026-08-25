@@ -21,8 +21,8 @@ A/B usage (isolating one commit's effect on emission):
 `emit` writes <outdir>/summary.json so two runs can be diffed numerically, and
 `attrib` consumes the same <outdir> of .mir artifacts.
 
-LMD_TYPE_ERROR is 27 (lambda/lambda.h); the emitted test is the three-insn
-sequence `ursh rT, rV, 56` / `eq rC, rT, 27` / `bf`.
+LMD_TYPE_ERROR is 26 (lambda/lambda.h); the emitted test is the three-insn
+sequence `ursh rT, rV, 56` / `eq rC, rT, 26` / `bf`.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import re
 import subprocess
 import sys
 
-LMD_TYPE_ERROR = 27
+LMD_TYPE_ERROR = 26
 
 CALL_RE = re.compile(r"^\s*call\s+(.*)$")
 MOV_RE = re.compile(r"^\s*mov\s+(%[A-Za-z0-9_]+),\s*(%[A-Za-z0-9_]+)\s*$")

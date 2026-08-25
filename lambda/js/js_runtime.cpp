@@ -461,7 +461,7 @@ static int64_t js_array_dense_required(const Array* arr) {
 static bool js_array_value_is_numeric(Item value) {
     TypeId value_type = get_type_id(value);
     return value_type == LMD_TYPE_INT || value_type == LMD_TYPE_INT64 ||
-        value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_FLOAT64 ||
+        value_type == LMD_TYPE_FLOAT ||
         value_type == LMD_TYPE_UINT64;
 }
 

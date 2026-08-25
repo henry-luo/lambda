@@ -5140,7 +5140,7 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
                     strbuf_append_char(out, ' ');
                     strbuf_append_str_n(out, field->name->str, field->name->length);
                     strbuf_append_format(out, "=\"%" PRId64 "\"", val);
-                } else if (ftype == LMD_TYPE_FLOAT || ftype == LMD_TYPE_FLOAT64 ||
+                } else if (ftype == LMD_TYPE_FLOAT ||
                            ftype == LMD_TYPE_NUM_SIZED) {
                     double val = it2d(attr_item);
                     strbuf_append_char(out, ' ');

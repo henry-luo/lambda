@@ -32,7 +32,7 @@ Added `test/test_item_repr_gtest.cpp` and wired it through `build_lambda_config.
 
 Verified S0 slice: `test_item_repr_gtest`, `test_gc_heap_gtest`, `test_lambda_typed`, `test_js_gtest`, `test_lambda_gtest`, the three new S0 lint ratchets, and `make test-lambda-baseline` all pass after the allocator/header guardrails. Full repository gates were also run; their unrelated failures are recorded at the end of this section so S0 does not carry a stale "all green" claim.
 
-S1 runtime core is complete behind `LAMBDA_SELF_TAG_FLOAT`: `f64` production canonicalizes to the `float` runtime domain, `LMD_TYPE_FLOAT64` remains only as a legacy reserved/alias tag, universal classifiers check inline-double space before raw-pointer dereference, `flt2it` / `it2d` / `Item::get_double()` own the encode/decode boundary, float producers route through the canonical helper, and JS/PDF/DOM/typed-array stragglers that dereferenced boxed float payloads now use the public numeric conversion helpers. The S1 truthiness fix preserves Lambda semantics that all numbers are truthy, including `0.0` and `NaN`.
+S1 runtime core is complete behind `LAMBDA_SELF_TAG_FLOAT`: `f64` production and annotations canonicalize to the `float` runtime domain with no separate runtime tag, as required by the scalar aliases in S2.1.1. Universal classifiers check inline-double space before raw-pointer dereference, `flt2it` / `it2d` / `Item::get_double()` own the encode/decode boundary, float producers route through the canonical helper, and JS/PDF/DOM/typed-array stragglers that dereferenced boxed float payloads now use the public numeric conversion helpers. The S1 truthiness fix preserves Lambda semantics that all numbers are truthy, including `0.0` and `NaN`.
 
 Verified S1 slice: forced flag-on build plus focused gtests and `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` pass; forced flag-off rebuild plus focused gtests and `make test-lambda-baseline` pass. Broad release gates not run in this S1 slice — full test262, Radiant baseline, node-baseline, and ASan remain S2/S3 hardening gates before any default flip.
 
@@ -175,12 +175,12 @@ No S0-specific regression is indicated by the failing broad gates: they are outs
 
 ## S1 — Runtime core (behind `LAMBDA_SELF_TAG_FLOAT`)
 
-### S1.0 Retire `LMD_TYPE_FLOAT64` (flag-independent prerequisite)
+### S1.0 Collapse the duplicate binary64 runtime tag (flag-independent prerequisite)
 
 Design §3.7: two runtime TypeIds for one binary64 domain break canonical encoding. Coordinate with `Lambda_Semantics_Number_Model.md` Part 2 W-items (`f64` is a parse-time alias per its §3.2).
 
-- [x] `f642it` producers → produce `LMD_TYPE_FLOAT` Items via `lambda_float_ptr_to_item`; keep `f64` as an alias resolving at parse/annotation level.
-- [x] Retire live `LMD_TYPE_FLOAT64` runtime use: `is_numeric_type_id` excludes it, type metadata aliases it to `float`, `type()` / formatter-visible names stay `float`, and the MIR legacy constant path emits the canonical `LMD_TYPE_FLOAT` tag. The enum value remains reserved only for compatibility with stale artifacts.
+- [x] `f64` literal producers emit `LMD_TYPE_FLOAT` Items via `lambda_float_ptr_to_item`; keep `f64` as an alias resolving at parse/annotation level.
+- [x] Remove the duplicate enum tag and all consumers: `is_numeric_type_id` has one binary64 tag, `type()` / formatter-visible names stay `float`, and the MIR constant path emits the canonical `LMD_TYPE_FLOAT` tag. `f64` remains only a source alias per S2.1.1; no unused numeric slot is retained.
 - [x] Gate: S1 Lambda baselines green before proceeding — flag-on `make test-lambda-baseline CFLAGS=-DLAMBDA_SELF_TAG_FLOAT CXXFLAGS=-DLAMBDA_SELF_TAG_FLOAT` and flag-off `make test-lambda-baseline` both pass.
 
 ### S1.1 Classifier — `Item::type_id()` / `get_type_id`

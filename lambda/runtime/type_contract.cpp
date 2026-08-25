@@ -93,7 +93,6 @@ static LambdaWideResultProof wide_result_proof_inner(const Type* type,
     // D2.2.2's packed int and pointer-backed values are wide-free. Only the
     // out-of-band scalar family can carry a companion payload (D2.2.3).
     if (type->type_id == LMD_TYPE_FLOAT ||
-            type->type_id == LMD_TYPE_FLOAT64 ||
             type->type_id == LMD_TYPE_INT64 ||
             type->type_id == LMD_TYPE_UINT64) {
         return LAMBDA_WIDE_RESULT_CAPABLE;
@@ -108,7 +107,7 @@ LambdaWideResultProof lambda_type_wide_result_proof(const Type* type) {
 LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id) {
     if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE)
         return LAMBDA_WIDE_RESULT_UNKNOWN;
-    if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ||
+    if (type_id == LMD_TYPE_FLOAT ||
             type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64) {
         return LAMBDA_WIDE_RESULT_CAPABLE;
     }
@@ -418,7 +417,6 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
         desc.byte_size = (uint8_t)sizeof(uint8_t);
         break;
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         desc.kind = LANE_STORAGE_FLOAT64;
         desc.byte_size = (uint8_t)sizeof(double);
         break;

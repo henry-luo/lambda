@@ -6437,7 +6437,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     bool primitive_target = target_type == LMD_TYPE_BOOL ||
         target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
         target_type == LMD_TYPE_INT64 || target_type == LMD_TYPE_UINT64 ||
-        target_type == LMD_TYPE_FLOAT || target_type == LMD_TYPE_FLOAT64 ||
+        target_type == LMD_TYPE_FLOAT ||
         target_type == LMD_TYPE_DECIMAL || target_type == LMD_TYPE_SYMBOL ||
         target_type == LMD_TYPE_STRING;
     if (primitive_target) {
@@ -9322,9 +9322,9 @@ extern "C" Item js_object_is(Item left, Item right) {
     TypeId right_type = get_type_id(right);
 
     bool left_is_num = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT ||
-                        left_type == LMD_TYPE_FLOAT64 || left_type == LMD_TYPE_NUM_SIZED);
+                        left_type == LMD_TYPE_NUM_SIZED);
     bool right_is_num = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT ||
-                         right_type == LMD_TYPE_FLOAT64 || right_type == LMD_TYPE_NUM_SIZED);
+                         right_type == LMD_TYPE_NUM_SIZED);
     if (left_is_num && right_is_num) {
         // JS Numbers are boxed FLOAT Items after the number-model migration.
         double l = js_get_number(left);
@@ -9581,7 +9581,7 @@ static int64_t array_like_length(Item v) {
         TypeId len_type = get_type_id(len_val);
         if (len_type == LMD_TYPE_INT) return (int64_t)it2i(len_val);
         if (len_type == LMD_TYPE_INT64) return it2l(len_val);
-        if (len_type == LMD_TYPE_FLOAT || len_type == LMD_TYPE_FLOAT64) {
+        if (len_type == LMD_TYPE_FLOAT) {
             // Callable accessors may return a destination-homed numeric scalar;
             // treating only inline ints as lengths made the Test262 native
             // compareArray fast path disagree with the JS harness (D5.2.1).

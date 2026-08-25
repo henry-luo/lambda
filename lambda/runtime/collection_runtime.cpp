@@ -140,9 +140,8 @@ void js_elements_set_props(Array* arr, Map* props) {
         int64_t dense_count = arr->length < old_tail_start ? arr->length : old_tail_start;
         for (int64_t i = 0; i < dense_count; i++) {
             Item item = arr->items[i];
-            if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
-                        item._type_id == LMD_TYPE_FLOAT64) ||
-                    item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
+                if (!(item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1 ||
+                        item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
             Item* pointer = (Item*)item.double_ptr;
             if (pointer < arr->items + old_tail_start ||
                     pointer >= arr->items + arr->capacity) continue;

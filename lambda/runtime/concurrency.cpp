@@ -1243,7 +1243,7 @@ static bool async_word_is_number_home(uint64_t value) {
             (value & ITEM_DBL_MASK)) return false;
     uint8_t tag = (uint8_t)(value >> 56);
     uintptr_t payload = value & ~ITEM_HIGH_BYTE_MASK;
-    if (tag == LMD_TYPE_FLOAT || tag == LMD_TYPE_FLOAT64) {
+    if (tag == LMD_TYPE_FLOAT) {
         if (payload <= 1) return false;
     } else if (tag != LMD_TYPE_INT64 && tag != LMD_TYPE_UINT64) {
         return false;

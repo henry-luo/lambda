@@ -97,7 +97,7 @@ static int item_to_int(Item v) {
     if (t == LMD_TYPE_INT) return (int)it2i(v);
     // JIT offsets can be inline floats or boxed wide numerics; the canonical
     // conversion respects both representations instead of forging a pointer.
-    if (t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_FLOAT64)
+    if (t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT)
         return (int)it2d(v);
     return 0;
 }

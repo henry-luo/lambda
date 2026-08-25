@@ -542,7 +542,6 @@ extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
         state->vars[slot] = {.item = u2it(payload)};
         break;
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         if (!(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
                 item.item != ITEM_FLOAT_N0) {
             *(double*)payload = item.get_double();

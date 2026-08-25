@@ -231,8 +231,7 @@ Bool is_truthy(Item item) {
         return BOOL_FALSE;  // errors are falsy; use `is error` to test them
     case LMD_TYPE_BOOL:
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         // Lambda truthiness treats every number as truthy; inline floats must not
         // inherit JS-style zero/NaN falsiness from their raw double payload.
         return BOOL_TRUE;
@@ -1594,7 +1593,6 @@ bool lambda_type_matches(Item item, Type* expected) {
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
     case LMD_TYPE_DECIMAL:
     case LMD_TYPE_NUM_SIZED:
     case LMD_TYPE_UINT64:
@@ -1646,7 +1644,7 @@ static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
         snprintf(buffer, capacity, "int %lld", (long long)lambda_int_item_to_i64(item));
         return;
     }
-    if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+    if (type_id == LMD_TYPE_FLOAT) {
         snprintf(buffer, capacity, "float %.17g", item.get_double());
         return;
     }
@@ -1809,7 +1807,6 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
     case LMD_TYPE_DECIMAL:
     case LMD_TYPE_NUM_SIZED:
     case LMD_TYPE_UINT64:
@@ -2384,7 +2381,7 @@ static int total_type_rank(Item item) {
     switch (tid) {
     case LMD_TYPE_NULL: return 0;
     case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
-    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64:
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT:
     case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_UINT64:
     case LMD_TYPE_COMPLEX:
         return 3;
@@ -3258,8 +3255,7 @@ String* fn_string(Item itm) {
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         char buf[32];
         double dval = itm.get_double();
         snprintf(buf, sizeof(buf), "%g", dval);
@@ -7035,8 +7031,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         // Keep the packed Item: the TypeId alone does not carry i8 versus u32.
         *(Item*)field_ptr = value;
         break;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: *(double*)field_ptr = value.get_double(); break;
+    case LMD_TYPE_FLOAT: *(double*)field_ptr = value.get_double(); break;
     case LMD_TYPE_DTIME: *(DateTime**)field_ptr = value.get_datetime_ptr(); break;
     case LMD_TYPE_STRING: {
         *(String**)field_ptr = value.get_safe_string();
@@ -7082,7 +7077,6 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             titem.uint64_val = value.get_uint64();
             break;
         case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64:
             titem.double_val = value.get_double();
             break;
         case LMD_TYPE_DTIME:
