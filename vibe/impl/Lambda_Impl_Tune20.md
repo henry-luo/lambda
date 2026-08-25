@@ -140,19 +140,48 @@ and list. The reason is in the sources:
 - `list2.ls` traverses via `pn list_length(node: map?)` — bare nullable map;
 - `havlak2.ls` declares no types at all.
 
-And this is **correct Lambda**, not lazy porting: these workloads build
-mutable, aliased, partly cyclic object graphs, and per the aliasing rule a
-typed map contract *reifies and detaches* — cyclic mutable graphs must stay
-untyped maps (the cd2 arena finding; D3.4.5's transition rules only apply to
-`var`-bound untyped maps). Equivalently: these are exactly the rows Tune19 §2
-listed in the "annotation buys nothing" cohort (deltablue, havlak, microdiff
-within ±5% of untyped in v34 too).
+**Why (corrected 2026-08-25 — the first framing was wrong).** An earlier
+draft claimed these rows are "semantically barred" from typing by the
+mutability model. That is false: annotations are value contracts and do not
+change S9's mutation rules, and since the untyped scripts run correctly,
+mutability cannot be the discriminator. The actual mechanism was probed on the
+v34 binary (`temp/prof34/alias_probe*.ls`):
 
-**Consequence:** the remaining 5.23x cannot be closed by extending the
-declared-contract fast paths, because the dominant rows are semantically barred
-from declaring contracts. The untyped/inferred map path itself has to get fast
-— statically, since D8.4.1v2 forbids inline caches. That is this round's
-center of gravity.
+- **The untyped map path aliases observably today.** `var v = {val:1};
+  var c1 = {out:v}; var c2 = {out:v}; c1.out.val = 5` → `c2.out.val == 5`
+  and `v.val == 5`. Construction does *not* capture by value. This is the
+  documented **C4.1 bug catalog** state ("uniform reference — sites alias
+  today", `Lambda_Design_Runtime_COW.md`), a known divergence from S9.1.2/
+  S9.3.1, whose closure is a CW3-C prerequisite for thread-mode sharing.
+- **A declared record *holder* detaches at admission.** The same probe with
+  `type C = {out: V}` on the holders prints `c2.out.val == 1, v.val == 1`:
+  admission into shaped storage reifies into the packed layout (D3.4.1) and
+  severs sharing. A typed *node* inside untyped holders keeps aliasing;
+  the detach line is the shaped-field boundary.
+
+So typed and untyped **currently differ in observable sharing** — an
+implementation divergence between two storage paths, not a property of the
+semantics (under closed-C4.1 spec behavior both would copy). The graph
+benchmarks' mutations lean on the untyped aliasing (which is what makes them
+match their reference-semantic JS originals), so typing their holders today
+would change program behavior, and historically also paid the reification
+cost (cd2 arena→direct-refs 2.21x, splay O(n²) pre-§11.5). Hence the sources
+stay `any`/`map?`, and they are exactly Tune19 §2's "annotation buys nothing"
+cohort (deltablue, havlak, microdiff within ±5% of untyped in v34 too).
+
+⚠ Corollary worth recording: when the C4.1 catalog is closed, *untyped*
+deltablue2/havlak2 as written will change behavior too — the aliasing they
+lean on is scheduled to disappear. A spec-conformant rewrite needs explicit
+identity (id/index + owner store + `var` borrows) and *that* version is fully
+typeable. The ports and their goldens will need revisiting in the same round
+that closes C4.1.
+
+**Consequence for this round:** the dominant rows run — and for now must run
+— on the untyped/inferred map path, so extending declared-contract fast paths
+cannot reach them. The untyped path itself has to get fast — statically,
+since D8.4.1v2 forbids inline caches. That is this round's center of gravity.
+(This also future-proofs: dynamic-shaped data from JSON ingestion and guest
+languages stays on this path regardless of how the benchmarks evolve.)
 
 ## 3. Tracks (ranked; each separately land-able and gate-able)
 
@@ -292,13 +321,48 @@ the workload) parks here too.
 ### T20-6 — The v34 annotation-tax ledger (categorical-bar cleanup)
 
 binarytrees typed is **2.10x its own untyped row** (19.0 vs 9.04 ms) — the
-worst live violation of the bar (*an annotation may never cost >5%*), likely
-the declared-contract admission on an allocation-dominated tree (same
-mechanism family as T19-A/splay before §11.5 fixed adoption for recursive
-contracts — verify whether binarytrees2's node type simply predates that fix's
-gate). bounce, splay, and ack are smaller. Process per §8.3: reproduce the
-emission on a two-line probe before editing the emitter; per §8.4-2, confirm
-each row with ≥15 paired runs before and after.
+worst live violation of the bar (*an annotation may never cost >5%*). bounce,
+splay, and ack are smaller. Process per §8.3: reproduce the emission on a
+two-line probe before editing the emitter; per §8.4-2, confirm each row with
+≥15 paired runs before and after.
+
+**REGRESSION found 2026-08-25 — FIXED 2026-08-25: self-referential type names
+no longer resolved.** On v34 and pre-fix HEAD, `type Node = {left: Node?, …}`
+emitted `type-pattern: unresolved type name 'Node', using ANY`
+(`lambda/runtime/parse_type_pattern.cpp:914`) — the recursive fields silently
+degraded to ANY. v33 (`lambda-v33-8705d85c5a`) resolved the same declaration
+cleanly; the regression entered with the v33→v34 syntax-migration commits.
+**Root cause:** the C parser reduces bottom-up, so the `TYPE_SLOT` body parsed
+(and resolved names) *before* the `FORM_TYPE_ALIAS` declaration reduction
+registered the alias name — the retired CST builder's pre-registration
+(`build_assign_expr`'s pre-bound placeholder map) was lost in the port, while
+object-form `type N { … }` kept its `TYPE_OBJECT_BEGIN` pre-binding. **Fix:**
+new `LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN` context reduction emitted after
+`=` and before the type slot parses; the direct sink pre-registers the alias
+node with a placeholder `TypeType→TypeMap` and, at the declaration reduction,
+publishes the completed shape through that same map identity
+(`direct_type_alias_begin` / `direct_adopt_pending_alias_map` in
+`build_ast.cpp`), mirroring v33 semantics exactly. Pattern islands skip the
+pre-binding (own registration path). Coverage: `test/lambda/type_selfref.ls`
+asserts mismatched recursive fields fail `is` (ANY degradation would answer
+`true`, as v34 demonstrably did); output parity vs the archived v33 binary
+confirmed; `make test-lambda-baseline` 3884/3884.
+Consequences now unblocked:
+(a) binarytrees2's `Node?` fields were ANY-degraded when Result34 was measured
+— its 2.10x tax and the R34 binarytrees typed cell carry this caveat and need
+re-measurement on the fixed build;
+(b) §11.5's adoption gate (`mir_map_contract_storage_valid` refuses
+ANY-bearing contracts) could never fire on a degraded contract — the recursive
+fast path is reachable from source again. Re-measure binarytrees/splay before
+any emitter work.
+
+**Second probe drift (needs its own minimization):** `var b: N = …;
+b.next = a; a.k = 99` — the store **aliases on v33/v34** (`b.next.k == 99`)
+but **detaches on current HEAD** (`== 1`), while plain untyped stores alias on
+both. A behavioral change to declared-`var` member stores entered the last few
+commits (`temp/prof34/alias_probe8.ls`). Related to the §2.3 C4.1 discussion:
+the alias/copy line is moving between builds, which is exactly the state the
+C4.1 catalog is supposed to pin with fixtures.
 
 **Acceptance:** no row where typed > 1.05x untyped on the fixed population.
 
@@ -311,9 +375,13 @@ each row with ≥15 paired runs before and after.
   (T20-1d).
 - **No transitive closed-caller edges** (§8.1, geomean 1.02). One level from
   construction sites.
-- **No typed contracts on the graph benchmarks' sources.** The `any`/`map?`
-  typing of deltablue2/list2/havlak2 is semantically required (aliasing);
-  "fixing the benchmark" would change the measured language.
+- **No typed contracts on the graph benchmarks' sources this round.** Not a
+  semantic law (see §2.3's correction) — but typing the holders *today*
+  changes observable sharing (probe7) and therefore program behavior; the
+  sources stay as they are until the C4.1 catalog closes. (list2 is the
+  exception: its list is immutable after construction, so a recursive record
+  type is behavior-preserving post-Tune19 §11.5 — permissible, but keep a
+  dynamic-map variant as untyped-path coverage.)
 - **No flex-int revival, no C2MIR-path changes** (frozen, CLAUDE.md rule 14),
   **no vendored-dep edits** (rule 16).
 - crypto_sha1 pre-v34 MIR cells time a defective computation (Tune19 §8.5) —

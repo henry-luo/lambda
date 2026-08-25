@@ -6678,6 +6678,7 @@ struct LambdaDirectAstSink {
     AstNode* object_method_tail;
     int object_byte_offset;
     AstObjectTypeNode* completed_object;
+    AstNamedNode* pending_type_alias;
 };
 
 static LambdaParseValue direct_ast_value(AstNode* node) {
@@ -7190,6 +7191,57 @@ static AstNode* direct_type_stam(Transpiler* tp, SourceSpan span,
     return (AstNode*)node;
 }
 
+// Pre-bind a `type Name = ...` declaration before its body parses so a
+// self-referential alias (`type Node = {left: Node?}`) resolves to this
+// binding instead of degrading to ANY. The placeholder map is the map IDENTITY
+// recursive fields capture; direct_adopt_pending_alias_map publishes the
+// completed shape through that same identity when the declaration reduction
+// fires (mirrors the retired CST builder's pre-registration).
+static void direct_type_alias_begin(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    Transpiler* tp = sink->tp;
+    AstNamedNode* alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+    alias->name = name_pool_create_strview(tp->name_pool,
+        direct_token_text(tp, reduction->detail_token));
+    alias->is_type_definition = true;
+    TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
+        sizeof(TypeType));
+    TypeMap* pre_map = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP,
+        sizeof(TypeMap));
+    pre_map->struct_name = alias->name->chars;
+    pre_map->is_trusted_contract = true;
+    pre_type->type = (Type*)pre_map;
+    alias->type = (Type*)pre_type;
+    lambda_ast_register_name(tp, alias);
+    sink->pending_type_alias = alias;
+}
+
+// Recursive fields were built against the pre-registered placeholder map.
+// Publish the completed shape through that same identity so function contracts
+// and self-references cannot split into placeholder and final maps.
+static void direct_adopt_pending_alias_map(Transpiler* tp, AstNamedNode* alias,
+        TypeType* pre_type) {
+    TypeMap* pre_map = (TypeMap*)pre_type->type;
+    Type* definition = alias->type;
+    Type* actual = unwrap_simple_type_type(definition);
+    if (!actual || actual->type_id != LMD_TYPE_MAP || actual == &TYPE_MAP ||
+            actual == (Type*)pre_map || !pre_map ||
+            pre_map->type_id != LMD_TYPE_MAP) return;
+    TypeMap* actual_map = (TypeMap*)actual;
+    *pre_map = *actual_map;
+    pre_map->struct_name = alias->name->chars;
+    pre_map->is_trusted_contract = true;
+    if (pre_map->type_index >= 0 && pre_map->type_index < tp->type_list->length &&
+            tp->type_list->data[pre_map->type_index] == actual_map) {
+        tp->type_list->data[pre_map->type_index] = pre_map;
+    }
+    if (definition->type_id == LMD_TYPE_TYPE) {
+        ((TypeType*)definition)->type = (Type*)pre_map;
+    }
+    alias->type = (Type*)pre_type;
+}
+
 static void direct_finalize_type_alias(Transpiler* tp, AstNamedNode* alias) {
     if (!tp || !alias || !alias->type) return;
     Type* definition = alias->type;
@@ -7237,7 +7289,8 @@ static AstNode* direct_constrained_type(Transpiler* tp, SourceSpan span,
 }
 
 static AstNode* direct_pattern_definition(Transpiler* tp,
-        SourceSpan span, StrView name, AstNode* island) {
+        SourceSpan span, StrView name, AstNode* island,
+        AstNamedNode* pre_bound) {
     AstPatternIslandNode* source = (AstPatternIslandNode*)island;
     AstPatternDefNode* pattern = (AstPatternDefNode*)alloc_ast_node_from_span(tp,
         source->is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN,
@@ -7258,7 +7311,15 @@ static AstNode* direct_pattern_definition(Transpiler* tp,
         pattern_type->regex_source = NULL;
         pattern->type = (Type*)pattern_type;
     }
-    lambda_ast_register_name(tp, (AstNamedNode*)pattern);
+    // a parenthesized island (`type P = (\..\)`) still fires the pre-binding;
+    // repoint that entry instead of registering a duplicate definition
+    NameEntry* entry = pre_bound
+        ? lookup_name_in_current_scope(tp, pattern->name) : NULL;
+    if (entry && entry->node == (AstNode*)pre_bound) {
+        entry->node = (AstNode*)pattern;
+    } else {
+        lambda_ast_register_name(tp, (AstNamedNode*)pattern);
+    }
     return (AstNode*)pattern;
 }
 
@@ -9262,6 +9323,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 lambda_ast_enter_scope(tp, is_proc);
             return 0;
         }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN) {
+            direct_type_alias_begin(sink, reduction);
+            return 0;
+        }
         if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_BEGIN) {
             direct_object_begin(sink, reduction);
             sink->type_object_depth++;
@@ -9641,22 +9706,40 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_ALIAS) {
             StrView alias_name = direct_token_text(tp, reduction->detail_token);
+            AstNamedNode* pending = sink->pending_type_alias;
+            sink->pending_type_alias = NULL;
+            if (pending && !(pending->name->len == alias_name.length &&
+                    memcmp(pending->name->chars, alias_name.str,
+                        alias_name.length) == 0)) {
+                pending = NULL;
+            }
             if (child0 && child0->node_type == AST_NODE_PATTERN_ISLAND) {
                 AstNode* pattern = direct_pattern_definition(tp, reduction->span,
-                    alias_name, child0);
+                    alias_name, child0, pending);
                 return direct_ast_value(direct_type_stam(tp, reduction->span,
                     pattern,
                     (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0));
             }
-            AstNamedNode* alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
-                AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
-            alias->name = name_pool_create_strview(tp->name_pool,
-                alias_name);
+            // reuse the pre-bound declaration node so every self-reference
+            // captured during body parsing keeps the same binding identity
+            AstNamedNode* alias = pending;
+            TypeType* pre_type = pending && pending->type &&
+                pending->type->type_id == LMD_TYPE_TYPE
+                ? (TypeType*)pending->type : NULL;
+            if (!alias) {
+                alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                    AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+                alias->name = name_pool_create_strview(tp->name_pool,
+                    alias_name);
+            } else {
+                alias->source_span = reduction->span;
+            }
             alias->as = child0;
             alias->type = child0 && child0->type ? child0->type : &TYPE_ANY;
             alias->is_type_definition = true;
+            if (pre_type) direct_adopt_pending_alias_map(tp, alias, pre_type);
             direct_finalize_type_alias(tp, alias);
-            lambda_ast_register_name(tp, alias);
+            if (!pending) lambda_ast_register_name(tp, alias);
             return direct_ast_value(direct_type_stam(tp, reduction->span,
                 (AstNode*)alias,
                 (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0));

@@ -1132,32 +1132,73 @@ Printing a collection renders member strings verbatim:
 are unescaped and the escaped backslash collapses to one, so the output is
 ambiguous and is not re-readable as Lambda notation.
 
-<a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (unruled)**
-Clause order is constrained, and nothing in the spec says so. This is rejected:
+<a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
+Clause order is fixed: **all generators, then all `let`s**. Measured
+2026-08-25:
 
-```lambda
-[for (value in values, let key = semantic_key(value),
-      entry in entries(value, key)) entry]
-```
+| Form | |
+|---|---|
+| `for (v in vs, let k = v)` | accepted |
+| `for (v in vs, w in vs, let k = v)` | accepted |
+| `for (v in vs, let k = v, let j = k)` | accepted — lets chain, each sees the previous |
+| `for (v in vs, let k = v, w in vs)` | `error[E100]: expected let clause` |
+| `for (let k = 1, v in vs)` | `error[E100]: expected a for binding name` |
 
-with `error[E100]: expected let clause` at `entry`. Putting every generator
-before every `let` works — `[for (v in vs, e in entries(v, v * 10), let k = v) e]`
-evaluates to `[10, 20]` — but that ordering cannot express the natural case the
-entry was raised for: *compute a key from the current binding, then iterate what
-that key yields*. The workaround is to hoist the computation into a helper
-(`entries_for(value)`), which is a real loss of expressiveness rather than a
-formatting preference.
+**This is documented and deliberate**, contrary to this entry's first draft,
+which called it unruled after checking only S14.1 (group-by and joins).
+`doc/Lambda_Expr_Stam.md:726` gives the grammar —
+`for (<bindings> [, let <name> = <expr>, ...] [where <cond>] [order by <spec>]
+[limit <n>] [offset <n>]) <body>` — and states the model: *"Clauses are
+processed in logical order: bindings → let → where → order by → offset → limit
+→ body."* The parser enforces exactly that pipeline.
+
+**What remains open.** The fixed order cannot express one shape: compute a key
+from the current item, then iterate what that key yields —
+`[for (v in vs, let k = f(v), e in entries(v, k)) e]`. The workaround is a helper
+(`entries_for(v)`) that exists only to satisfy clause order. Two answers are
+coherent; the choice is a design call, not a bug fix.
+
+---
+
+**Option A — Keep it.** The fixed phases are the feature. `bindings → let →
+where → order by → offset → limit` is a pipeline, and each stage having a single
+well-defined input is what makes `where`, `order by` and `limit` compose
+predictably: `where` filters *after* every binding exists, `order by` sorts a
+settled row set, `limit` counts settled rows. Interleaving generators with `let`s
+makes "what does `where` see?" depend on clause position rather than clause kind,
+and the logical order stops being statable in one line. The cost is a helper
+function in the one dependent-iteration case — real, but small and local.
+
+*If chosen:* promote the reference-doc prose to an `S#` ruling so the order is
+normative rather than descriptive, and extend the diagnostic from
+`expected let clause` to name the rule and the repair — the shape the element
+and map-key diagnostics now use (see [i8-semidiag](#i8-semidiag),
+[i8-dqdiag](#i8-dqdiag)).
+
+**Option B — Relax it.** Allow a generator to follow a `let`. The dependency
+direction is already strictly left-to-right *within* the pipeline — `let j = k`
+proves a clause may read an earlier one — so a generator reading an earlier `let`
+introduces no new kind of dependency, only a new position for an existing one.
+On that reading the restriction is a grammar artefact rather than a semantic
+boundary, and the helper function it forces is pure ceremony. The logical order
+would be restated per-clause ("each clause sees every clause to its left")
+instead of per-phase, which is arguably simpler, not more complex.
+
+*If chosen:* the `where`/`order by`/`limit` tail must stay phase-ordered — only
+the `bindings`/`let` prefix interleaves — or the composability argument in
+Option A genuinely breaks. Rule that boundary explicitly; do not let it be
+inferred from the parser.
+
+---
+
+**Either way**, two things are owed: there is currently **no `S#` ruling** for
+clause ordering (only `doc/Lambda_Expr_Stam.md` prose), and the diagnostic
+reports *what* but not *why*. Option A makes both a small documentation and
+message change; Option B makes them a grammar change plus the same ruling.
 
 **Half already fixed:** the diagnostic used to point at the *first* generator
-(`Unexpected syntax` at `value in values`); it now names the clause kind it
-expected and points at the generator that actually conflicts.
-
-**Unruled.** S14.1 covers group-by and joins, not clause ordering, so there is no
-`S#` behind this restriction — it is parser-imposed. Two ways out: allow a
-generator after a computed binding (the ordering is a parser artefact, and the
-dependency direction is already left-to-right), or rule the ordering explicitly
-and have the diagnostic say so. Either is fine; the current state — an unruled
-restriction with a diagnostic that reports *what* but not *why* — is not.
+(`Unexpected syntax` at `value in values`); it now names the expected clause kind
+and points at the generator that actually conflicts.
 
 <a id="i8-markcomp"></a>**Issues8 · One-line Mark child comprehensions fail at the closing delimiter · RESOLVED (not a defect — wrong spelling)**
 The entry reported `<diagnostics; for (v in vs) v>` failing with `E100` where

@@ -2160,6 +2160,17 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
     LambdaToken name = parser->current;
     parser_advance(parser);
     if (parser_accept(parser, LAMBDA_TOK_EQ)) {
+        // Pre-bind the alias name before its body parses so a self-referential
+        // type (`type Node = {left: Node?}`) resolves to this declaration
+        // instead of degrading to ANY. Pattern islands define string/symbol
+        // patterns through their own registration path, so they skip the
+        // pre-binding to avoid a duplicate-definition entry.
+        if (parser->current.kind != LAMBDA_TOK_PATTERN_ISLAND) {
+            parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
+                LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN, name.span, name,
+                (LambdaToken){0},
+                is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
+        }
         LambdaParseValue type_value = 0;
         if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
         LambdaParseValue declarations = parser_reduce_tokens(parser,
@@ -2175,6 +2186,12 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
             name = parser->current;
             parser_advance(parser);
             if (!parser_expect(parser, LAMBDA_TOK_EQ, "expected '=' after type alias name")) return 0;
+            if (parser->current.kind != LAMBDA_TOK_PATTERN_ISLAND) {
+                parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
+                    LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN, name.span, name,
+                    (LambdaToken){0},
+                    is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
+            }
             type_value = 0;
             if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
             LambdaParseValue alias = parser_reduce_tokens(parser,
