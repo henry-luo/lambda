@@ -535,6 +535,39 @@ Item fn_union(Item left, Item right) {
     return { .array = result };
 }
 
+// Set intersection and exclusion, the `&` and `!` value operators. Both mirror
+// fn_union's contract: left-to-right order preserved, duplicates removed, and
+// membership decided by `fn_in` — the same relation the `in` operator tests, so
+// S8.1.1's "whatever for..in walks, in tests" extends to the set operators
+// instead of them inventing a second notion of membership.
+Item fn_intersect(Item left, Item right) {
+    GUARD_ERROR2(left, right);
+    Array* result = array();
+    int64_t left_len = fn_len(left);
+    for (int64_t i = 0; i < left_len; i++) {
+        Item item = item_at(left, i);
+        if (array_has_item(result, item)) continue;
+        Bool present = fn_in(item, right);
+        if (present >= BOOL_ERROR) return ItemError;
+        if (present == BOOL_TRUE) array_push(result, item);
+    }
+    return { .array = result };
+}
+
+Item fn_exclude(Item left, Item right) {
+    GUARD_ERROR2(left, right);
+    Array* result = array();
+    int64_t left_len = fn_len(left);
+    for (int64_t i = 0; i < left_len; i++) {
+        Item item = item_at(left, i);
+        if (array_has_item(result, item)) continue;
+        Bool present = fn_in(item, right);
+        if (present >= BOOL_ERROR) return ItemError;
+        if (present != BOOL_TRUE) array_push(result, item);
+    }
+    return { .array = result };
+}
+
 String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string
@@ -1208,6 +1241,61 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
     return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_FUNCTION,
         "fn_call_into");
+}
+
+// S12.3.4 `call(f, args)` — dynamic application. Shared body for both colours;
+// `caller_is_proc` is fixed by the ENCLOSING context at lowering time, which is
+// what selects the error convention (S12.3.4: fn returns, pn raises). The
+// TARGET's colour is read from its TypeFunc and checked here whenever the
+// static side could not (S12.1.4).
+static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_proc,
+        const char* caller) {
+    Function* fn = get_type_id(callee) == LMD_TYPE_FUNC
+        ? (Function*)(uintptr_t)callee.item : NULL;
+    if (!is_valid_function(fn)) {
+        set_runtime_error(ERR_INVALID_OPERATION,
+            "%s: first argument must be a function", caller);
+        return ItemError;
+    }
+    // S12.1.4: a pn target reached from fn context. Static analysis catches
+    // this when the callee is statically known; a dynamic callee can only be
+    // caught here.
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
+    if (!caller_is_proc && signature && signature->is_proc) {
+        set_runtime_error(ERR_PROC_IN_FN,
+            "%s: cannot call a procedure (pn) from a function (fn)", caller);
+        return ItemError;
+    }
+    // S12.3.4: `args` is an array, never coerced from a bare value — a
+    // one-element promotion would silently call a 1-arity function. Both the
+    // generic and the packed-numeric array faces are accepted; an `array[num]`
+    // is what an all-numeric literal like `[1, 2]` actually builds.
+    TypeId args_type = get_type_id(args_item);
+    if (args_type == LMD_TYPE_ARRAY) {  // lists are ARRAY at runtime
+        return fn_call_into(fn, it2list(args_item), NULL);
+    }
+    if (args_type == LMD_TYPE_ARRAY_NUM) {
+        // Packed numerics carry no Item[] to hand the dynamic ABI, so widen
+        // through the boundary accessor that already boxes each element.
+        ArrayNum* packed = (ArrayNum*)(uintptr_t)args_item.item;
+        List* widened = list();
+        for (int64_t i = 0; i < packed->length; i++) {
+            list_push(widened, array_num_get(packed, i));
+        }
+        return fn_call_into(fn, widened, NULL);
+    }
+    set_runtime_error(ERR_INVALID_OPERATION,
+        "%s: second argument must be an array of arguments, got %s",
+        caller, get_type_name(args_type));
+    return ItemError;
+}
+
+extern "C" Item fn_apply_args(Item callee, Item args_item) {
+    return lambda_dynamic_apply(callee, args_item, false, "call");
+}
+
+extern "C" Item pn_apply_args(Item callee, Item args_item) {
+    return lambda_dynamic_apply(callee, args_item, true, "call");
 }
 
 static Item lambda_dynamic_public_non_function_error(Function* fn, const char* caller) {

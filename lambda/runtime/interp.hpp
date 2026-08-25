@@ -186,6 +186,12 @@ typedef struct InterpRunStats {
 typedef struct InterpReplSession {
     Runner runner;
     bool initialized;
+    // True when the last eval REJECTED the fragment and restored the session
+    // (parse/type failure), false when evaluation ran to completion — even if
+    // it produced an error VALUE. Both return ItemError, but only the first is
+    // a rollback: an error value is an ordinary result the REPL should print,
+    // which is what the JIT REPL path does.
+    bool last_input_rejected;
 } InterpReplSession;
 
 InterpRunStats* interp_run_stats(void);
