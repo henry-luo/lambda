@@ -2528,6 +2528,38 @@ static bool radiant_dom_package_ensure(DomDocument* doc) {
     return ok;
 }
 
+static void select_open_dropdown(DocState* state, View* select_view, float scale);
+
+// Dropdown open/close for the dom package's `<select>` behavior template. The
+// policy of *when* to open belongs to the template; the overlay geometry,
+// painting and outside-click capture stay native (F2).
+extern "C" bool radiant_select_dropdown_is_open(void* dom_node) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !dom_node) return false;
+    DocState* state = event_context_target_state(ctx->evcon);
+    return state && state->open_dropdown == static_cast<View*>(static_cast<DomNode*>(dom_node));
+}
+
+extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !dom_node) return false;
+    DocState* state = event_context_target_state(ctx->evcon);
+    if (!state) return false;
+    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    if (!open) {
+        if (state->open_dropdown == view) doc_state_close_dropdown(state, view);
+        return true;
+    }
+    // one dropdown at a time, matching the native activation path
+    if (state->open_dropdown && state->open_dropdown != view) {
+        doc_state_close_dropdown(state, state->open_dropdown);
+    }
+    float scale = ctx->evcon->ui_context && ctx->evcon->ui_context->pixel_ratio > 0
+        ? ctx->evcon->ui_context->pixel_ratio : 1.0f;
+    select_open_dropdown(state, view, scale);
+    return true;
+}
+
 // Fire a synthetic DOM event from a behavior handler. Exposed as the dom
 // package's `dispatch()` primitive (ES6). The event enters the normal pipeline
 // as a fresh event, so anything it triggers is dispatched in a quiescent state
@@ -6512,6 +6544,26 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
 /**
  * Handle click on select to toggle dropdown
  */
+// Opening a dropdown is mechanism: overlay placement and sizing come from
+// layout geometry. Both the native activation path and the dom package's
+// `open_dropdown` primitive go through here so the geometry is computed once.
+static void select_open_dropdown(DocState* state, View* select_view, float scale) {
+    if (!state || !select_view) return;
+    ViewBlock* select = lam::view_require_block(select_view);
+    if (!select || !select->form) return;
+    log_debug("select_open_dropdown: opening with %d options", select->form->option_count);
+    doc_state_open_dropdown(state, select_view);
+
+    float abs_x = 0.0f, abs_y = 0.0f;
+    view_to_absolute_position(select_view, select->x,
+                              select->y + form_select_dropdown_row_height(select->form),
+                              0.0f, 0.0f, &abs_x, &abs_y);
+
+    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
+        state->dropdown_width, state->dropdown_height);
+    calculate_dropdown_dimensions(select, state, scale);
+}
+
 static bool handle_select_click(EventContext* evcon, View* target) {
     log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target,
         (target && target->is_element()) ? (lam::view_require_element(target))->tag() : -1);
@@ -6544,17 +6596,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     }
 
     // Open this dropdown
-    log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
-    doc_state_open_dropdown(state, static_cast<View*>(select));
-
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(select_view, select->x,
-                              select->y + form_select_dropdown_row_height(select->form),
-                              0.0f, 0.0f, &abs_x, &abs_y);
-
-    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
-        state->dropdown_width, state->dropdown_height);
-    calculate_dropdown_dimensions(select, state, scale);
+    select_open_dropdown(state, select_view, scale);
     return true;
 }
 
@@ -8626,6 +8668,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Snapshot before any handler runs: a behavior template may open a
+            // dropdown during dispatch, and the overlay block below must only
+            // act on one that was already open when the click arrived.
+            View* dropdown_open_at_press = state ? state->open_dropdown : nullptr;
             if (evcon.target) {
                 bool pointer_up_prevented = radiant_dispatch_pointer_event(
                     &evcon, evcon.target, "pointerup",
@@ -8778,7 +8824,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle select dropdown click FIRST (before other click handling)
             // If a dropdown is open, handle clicks on it before anything else
             bool dropdown_handled = false;
-            if (state && state->open_dropdown) {
+            // Only a dropdown that was already open when this click arrived can
+            // receive it. A click that *opens* one — which a behavior template
+            // does during dispatch, earlier in this handler than the native
+            // path did — must not then be treated as a click into it.
+            if (state && state->open_dropdown &&
+                state->open_dropdown == dropdown_open_at_press) {
                 // Check if clicking on dropdown option
                 if (handle_dropdown_option_click(&evcon, (float)mouse_x, (float)mouse_y)) {
                     // Option was selected, done - skip other click handlers
@@ -8850,7 +8901,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Handle click on select element to toggle dropdown
-                if (evcon.target && !evcon.default_prevented) {
+                if (evcon.target && !evcon.default_prevented &&
+                    !radiant_behavior_claims_event(&evcon, evcon.target, "click")) {
+                    // a behavior template owning this click also owns opening
                     handle_select_click(&evcon, evcon.target);
                 }
 

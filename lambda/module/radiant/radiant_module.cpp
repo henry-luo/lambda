@@ -1283,6 +1283,45 @@ RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
     return rooted.get();
 }
 
+extern "C" bool radiant_select_dropdown_is_open(void* dom_node);
+extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open);
+
+RADIANT_C_API Item fn_radiant_dropdown_open(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DROPDOWN_OPEN");
+    if (!elem) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(radiant_select_dropdown_is_open((void*)elem) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_set_dropdown_open(Item node_item, Item open_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "SET_DROPDOWN_OPEN");
+    if (!elem) return (Item){.item = b2it(0)};
+    bool ok = radiant_select_set_dropdown_open((void*)elem, is_truthy(open_item));
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// Option count for a <select>; the option list itself is layout-owned.
+RADIANT_C_API Item fn_radiant_option_count(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "OPTION_COUNT");
+    if (!elem || !elem->form_control()) return ItemNull;
+    return radiant_int_item((int64_t)elem->form_control()->option_count);
+}
+
+RADIANT_C_API Item fn_radiant_selected_index(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SELECTED_INDEX", &elem);
+    if (!state) return ItemNull;
+    return radiant_int_item((int64_t)form_control_get_selected_index(state, (View*)elem));
+}
+
+RADIANT_C_API Item fn_radiant_set_selected_index(Item node_item, Item index_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_SELECTED_INDEX", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    int64_t idx = it2l(index_item);
+    form_control_set_selected_index(state, (View*)elem, (int)idx);
+    return (Item){.item = b2it(1)};
+}
+
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "FREE");
     if (!node) return ItemNull;
@@ -1667,6 +1706,16 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
     {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
      "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
+    {"dropdown_open", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dropdown_open, JUBE_FN_NONE,
+     "Item fn_radiant_dropdown_open(Item node)", (fn_ptr)fn_radiant_dropdown_open},
+    {"set_dropdown_open", "fn(node: dom_node, open: bool) -> bool", (fn_ptr)fn_radiant_set_dropdown_open, JUBE_FN_NONE,
+     "Item fn_radiant_set_dropdown_open(Item node, Item open)", (fn_ptr)fn_radiant_set_dropdown_open},
+    {"option_count", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_option_count, JUBE_FN_NONE,
+     "Item fn_radiant_option_count(Item node)", (fn_ptr)fn_radiant_option_count},
+    {"selected_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_selected_index, JUBE_FN_NONE,
+     "Item fn_radiant_selected_index(Item node)", (fn_ptr)fn_radiant_selected_index},
+    {"set_selected_index", "fn(node: dom_node, index: int) -> bool", (fn_ptr)fn_radiant_set_selected_index, JUBE_FN_NONE,
+     "Item fn_radiant_set_selected_index(Item node, Item index)", (fn_ptr)fn_radiant_set_selected_index},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,

@@ -1,0 +1,12 @@
+{
+  "name": "dom package owns select dropdown open/close",
+  "html": "test/lambda/ui/dom_pkg_select.ls",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "log", "message": "=== select open/close from the Lambda behavior template ==="},
+    {"type": "assert_count", "target": {"selector": ".sel"}, "count": 1},
+    {"type": "click", "target": {"selector": ".sel"}},
+    {"type": "log", "message": "--- clicked once: dropdown should be open ---"},
+    {"type": "assert_count", "target": {"selector": ".sel"}, "count": 1}
+  ]
+}
