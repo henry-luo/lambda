@@ -37,6 +37,7 @@ typedef struct BidiRectInfo {
     int visible_count;
     float raw_width;
     bool collapses_spaces;
+    bool line_has_bidi_inline_content;
     ViewSpan* directional_span;
 } BidiRectInfo;
 
@@ -58,6 +59,7 @@ typedef struct BidiLineCounts {
     int max_depth;
     bool has_atomic;
     bool has_bidi_trigger;
+    bool has_bidi_inline_content;
     bool has_bidi_layout_feature;
 } BidiLineCounts;
 
@@ -195,14 +197,20 @@ static void bidi_count_views(View* view, int line_number, int depth,
                     counts->has_bidi_layout_feature =
                         counts->has_bidi_layout_feature ||
                         codepoint == 0x0009 || node_has_layout_feature;
+                    bool bidi_reorder = bidi_codepoint_triggers_reorder(codepoint);
+                    bool bidi_format_control = bidi_codepoint_is_format_control(codepoint);
                     counts->chars++;
                     counts->has_bidi_trigger = counts->has_bidi_trigger ||
-                        bidi_codepoint_triggers_reorder(codepoint) ||
+                        bidi_reorder ||
                         // the fragment pass protects inline-box edge geometry;
                         // controls in bare text are already represented by the
                         // normal text layout and must not reshuffle its ranges.
                         (current_depth > 0 &&
-                         bidi_codepoint_is_format_control(codepoint));
+                         bidi_format_control);
+                    counts->has_bidi_inline_content =
+                        counts->has_bidi_inline_content ||
+                        (current_depth > 0 &&
+                         (bidi_reorder || bidi_format_control));
                     cursor += consumed;
                     remaining -= consumed;
                 }
@@ -304,6 +312,7 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                 rect_info->raw_width = 0.0f;
                 rect_info->collapses_spaces = layout_white_space_collapses(
                     get_white_space_value(static_cast<DomNode*>(text)));
+                rect_info->line_has_bidi_inline_content = false;
                 rect_info->directional_span = bidi_text_directional_span(text, direction);
 
                 const unsigned char* cursor = text->text_data() + rect->start_index;
@@ -397,10 +406,18 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
         // would incorrectly widen the DOM range across reordered fragments.
         for (int j = rect_info->char_count - 1; j >= 0; j--) {
             BidiCharFragment* fragment = &chars[rect_info->first_char + j];
-            if (!rect_info->collapses_spaces || !rect_info->directional_span ||
+            // anonymous text needs this only when a sibling inline bidi run
+            // makes the line's logical and visual ranges diverge; ordinary
+            // hanging-punctuation and whitespace lines must keep their space.
+            if (!rect_info->collapses_spaces ||
                 !bidi_is_collapsible_space(fragment->codepoint) ||
                 fragment->width <= 0.0f ||
-                rect_info->raw_width <= 0.0f) {
+                rect_info->raw_width <= 0.0f ||
+                (!rect_info->directional_span &&
+                 !rect_info->line_has_bidi_inline_content) ||
+                (!rect_info->directional_span &&
+                 rect_info->raw_width - fragment->width <
+                     rect_info->rect->width - 0.01f)) {
                 break;
             }
             rect_info->raw_width -= fragment->width;
@@ -633,6 +650,9 @@ void layout_bidi_line(LayoutContext* lycon) {
                     &char_cursor, &rect_cursor, &span_cursor,
                     lycon->block.direction);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
+    for (int i = 0; i < rect_cursor; i++) {
+        rects[i].line_has_bidi_inline_content = counts.has_bidi_inline_content;
+    }
     bidi_scale_rect_widths(chars, rects, counts.rects);
 
     int max_level = 0;
