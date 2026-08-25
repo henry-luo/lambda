@@ -6,9 +6,12 @@
 </head>
 <body>
   <div id="result">pending</div>
+  <script src="./js_cache_external_classic.js"></script>
   <script>
     const isolated = typeof window.__lambdaCacheRealmLeak === "undefined" &&
-      typeof Array.prototype.__lambdaCacheRealmLeak === "undefined";
+      typeof Array.prototype.__lambdaCacheRealmLeak === "undefined" &&
+      window.__lambdaExternalCacheRuns === 1 &&
+      lambdaExternalCacheDeclaration === "external-ready";
     document.getElementById("result").textContent = isolated
       ? "js-cache-realm-isolated"
       : "js-cache-realm-leaked";

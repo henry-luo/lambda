@@ -1624,6 +1624,13 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
     return eval_context;
 }
 
+static bool script_eval_context_activate(Runtime* runtime) {
+    EvalContext* task_context = script_eval_context_prepare(runtime);
+    if (!task_context || !eval_context_thread_initialize(task_context)) return false;
+    return !task_context->js_state ||
+        js_runtime_state_thread_initialize(task_context);
+}
+
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
                                             const char* source, size_t source_len,
                                             const char* filename, bool refresh_snapshot,
@@ -1634,12 +1641,7 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
         source_len = 0;
     }
 
-    EvalContext* task_context = script_eval_context_prepare(runtime);
-    if (!task_context) return ItemError;
-
-    if (!eval_context_thread_initialize(task_context)) return ItemError;
-    if (task_context->js_state &&
-            !js_runtime_state_thread_initialize(task_context)) return ItemError;
+    if (!script_eval_context_activate(runtime)) return ItemError;
     Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename,
                                                         preamble, result_home);
     js_mir_accumulate_last_phase_timing(false);
@@ -1647,6 +1649,65 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
     if (refresh_snapshot && get_type_id(result) != LMD_TYPE_ERROR) {
         preamble_state_update_from_eval_snapshot(preamble);
     }
+    return result;
+}
+
+static Item execute_cached_external_classic(Runtime* runtime,
+                                            JsPreambleState* preamble,
+                                            const char* source, size_t source_len,
+                                            const char* filename,
+                                            DocumentScriptPhaseTiming* timing) {
+    if (!runtime || !preamble || !s_js_mir_cache ||
+            !script_eval_context_activate(runtime)) {
+        return ItemError;
+    }
+
+    if (timing) timing->cache_lookups++;
+    const JsPreambleState* cached = js_mir_cache_lookup(
+        s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+        source, source_len, filename, preamble);
+    if (timing) {
+        if (cached) timing->cache_hits++;
+        else timing->cache_misses++;
+    }
+
+    JsPreambleState compiled = {};
+    if (!cached) {
+        Item compile_result = compile_js_mir_with_preamble_len(
+            runtime, source, source_len, filename, preamble, &compiled);
+        js_mir_accumulate_last_phase_timing(false);
+        if (get_type_id(compile_result) == LMD_TYPE_ERROR) {
+            preamble_state_destroy(&compiled);
+            return compile_result;
+        }
+        cached = js_mir_cache_adopt(
+            s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+            source, source_len, filename, preamble, &compiled);
+        if (cached && timing) timing->cache_compiles++;
+        if (!cached) {
+            // Functions materialized by a compiled unit retain its MIR code.
+            // If cache ownership cannot be established, use the normal path
+            // whose deferred-MIR teardown already follows document lifetime.
+            preamble_state_destroy(&compiled);
+            uint64_t result_home = 0;
+            return execute_js_source_with_preamble(
+                runtime, preamble, source, source_len, filename,
+                true, &result_home);
+        }
+    }
+
+    Item result = execute_compiled_js_in_current_realm(
+        runtime, preamble, cached, true);
+    js_mir_cache_record_instantiation(s_js_mir_cache);
+    if (timing) timing->cache_instantiations++;
+    js_mir_accumulate_last_phase_timing(false);
+    if (get_type_id(result) != LMD_TYPE_ERROR &&
+            !preamble_state_update_from_compiled(preamble, cached)) {
+        log_error("script-cache-external: failed to publish declaration snapshot for %s",
+                  filename ? filename : "<external-script>");
+        result = ItemError;
+    }
+    preamble_state_destroy(&compiled);
     return result;
 }
 
@@ -1659,12 +1720,7 @@ static Item execute_js_module_source(Runtime* runtime, const char* source, size_
     }
     (void)source_len;
 
-    EvalContext* task_context = script_eval_context_prepare(runtime);
-    if (!task_context) return ItemError;
-
-    if (!eval_context_thread_initialize(task_context)) return ItemError;
-    if (task_context->js_state &&
-            !js_runtime_state_thread_initialize(task_context)) return ItemError;
+    if (!script_eval_context_activate(runtime)) return ItemError;
     Item result = transpile_js_module_to_mir(runtime, source, filename);
     js_mir_accumulate_last_phase_timing(false);
 
@@ -1802,7 +1858,8 @@ static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       JsPreambleState* preamble,
                                       const char* phase_name,
-                                      JsScriptTaskCollection* collection) {
+                                      JsScriptTaskCollection* collection,
+                                      DocumentScriptPhaseTiming* timing) {
     bool fatal_error = false;
     if (!queue) return true;
     size_t accepted_source_bytes = 0;
@@ -1858,10 +1915,18 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         long task_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
         uint64_t result_home = 0;
-        Item result = task->kind == JS_SCRIPT_TASK_MODULE
-            ? execute_js_module_source(runtime, source, task->source_len, filename)
-            : execute_js_source_with_preamble(runtime, preamble, source,
-                                             task->source_len, filename, true, &result_home);
+        Item result;
+        if (task->kind == JS_SCRIPT_TASK_MODULE) {
+            result = execute_js_module_source(
+                runtime, source, task->source_len, filename);
+        } else if (task->external && s_js_mir_cache && !s_retain_js_state) {
+            result = execute_cached_external_classic(
+                runtime, preamble, source, task->source_len, filename, timing);
+        } else {
+            result = execute_js_source_with_preamble(
+                runtime, preamble, source, task->source_len, filename,
+                true, &result_home);
+        }
 #ifndef NDEBUG
         if (timing_enabled) {
             long task_wall_us = script_runner_wall_now_us() - task_start_us;
@@ -2099,7 +2164,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->scheduler_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.post_dom, preamble, "post-dom", collection)) {
+    if (!execute_script_task_queue(
+            runtime, queues.post_dom, preamble, "post-dom", collection, timing)) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2114,7 +2180,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->interactive_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.defer, preamble, "defer", collection)) {
+    if (!execute_script_task_queue(
+            runtime, queues.defer, preamble, "defer", collection, timing)) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2130,7 +2197,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     // Async classics do not block DOMContentLoaded in Radiant's post-DOM
     // model, but ready async tasks still run before the window load boundary.
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.async_ready, preamble, "async-ready", collection)) {
+    if (!execute_script_task_queue(
+            runtime, queues.async_ready, preamble, "async-ready", collection, timing)) {
         any_error = true;
     }
     if (timing) timing->async_scripts_us += time_now_us() - phase_start_us;

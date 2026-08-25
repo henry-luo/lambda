@@ -4348,6 +4348,7 @@ struct LayoutOptions {
     const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
     bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
+    bool stream_layout_results;                 // write compact framed results to stdout
 };
 
 static bool layout_read_option_value(int argc, char** argv, int* index,
@@ -4396,7 +4397,9 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         {nullptr, "--continue-on-error", nullptr, &opts->continue_on_error, LAYOUT_OPTION_FLAG},
         {nullptr, "--summary", nullptr, &opts->summary, LAYOUT_OPTION_FLAG},
         {nullptr, "--auto-close", nullptr, &opts->auto_close, LAYOUT_OPTION_FLAG},
-        {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG}
+        {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG},
+        {nullptr, "--stream-layout-results", nullptr,
+         &opts->stream_layout_results, LAYOUT_OPTION_FLAG}
     };
 
     for (int i = 0; i < argc; i++) {
@@ -4449,9 +4452,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         return false;
     }
 
-    // Batch mode requires --output-dir
-    if (opts->input_file_count > 1 && !opts->output_dir) {
-        log_error("Error: batch mode (multiple input files) requires --output-dir");
+    if (opts->input_file_count > 1 && !opts->output_dir && !opts->stream_layout_results) {
+        log_error("Error: batch mode requires --output-dir or --stream-layout-results");
         return false;
     }
     if (opts->memory_profile_output_file && opts->input_file_count != 1) {
@@ -4699,7 +4701,8 @@ static bool layout_single_file(
     FILE* timing_file = nullptr,
     const char* memory_profile_output_file = nullptr,
     bool auto_close = false,
-    bool disable_animations = false
+    bool disable_animations = false,
+    FILE* result_stream = nullptr
 ) {
     auto total_start = std::chrono::high_resolution_clock::now();
     auto load_start = total_start;
@@ -4918,7 +4921,13 @@ static bool layout_single_file(
         }
 
         output_start = std::chrono::high_resolution_clock::now();
-        print_view_tree(lam::unsafe_view_element_storage(doc->view_tree->root), doc->url, output_path);
+        ViewElement* root = lam::unsafe_view_element_storage(doc->view_tree->root);
+        if (result_stream) {
+            // The batch pipe carries only schema-v2 frames; never materialize a legacy file first.
+            success = stream_view_tree_json(root, input_file, result_stream) && success;
+        } else {
+            print_view_tree(root, doc->url, output_path);
+        }
         output_end = std::chrono::high_resolution_clock::now();
         output_phase_ran = true;
 
@@ -5257,7 +5266,8 @@ int cmd_layout(int argc, char** argv) {
         return 1;
     }
 
-    bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
+    bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr) ||
+        opts.stream_layout_results;
     bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
 
     if (batch_mode) {
@@ -5333,7 +5343,8 @@ int cmd_layout(int argc, char** argv) {
                 timing_file,
                 opts.memory_profile_output_file,
                 auto_close,
-                opts.disable_animations
+                opts.disable_animations,
+                opts.stream_layout_results ? stdout : nullptr
             );
         } catch (...) {
             log_error("batch layout: uncaught exception processing %s", input_file);
@@ -5358,7 +5369,8 @@ int cmd_layout(int argc, char** argv) {
                     timing_file,
                     opts.memory_profile_output_file,
                     auto_close,
-                    opts.disable_animations
+                    opts.disable_animations,
+                    opts.stream_layout_results ? stdout : nullptr
                 );
             } catch (...) {
                 log_error("batch layout: uncaught exception processing %s", input_file);
@@ -5371,6 +5383,11 @@ int cmd_layout(int argc, char** argv) {
             _exit(1);
         }
 #endif
+
+        if (!success && opts.stream_layout_results) {
+            // Every non-crashing input gets a terminal frame so the runner retries only true gaps.
+            write_layout_result_frame(stdout, input_file, false);
+        }
 
         if (success) {
             success_count++;
@@ -5391,7 +5408,8 @@ int cmd_layout(int argc, char** argv) {
     auto batch_end = std::chrono::high_resolution_clock::now();
     double total_time_ms = std::chrono::duration<double, std::milli>(batch_end - batch_start).count();
 
-    if (opts.summary || (batch_mode && opts.input_file_count > 1)) {
+    if (!opts.stream_layout_results &&
+            (opts.summary || (batch_mode && opts.input_file_count > 1))) {
         printf("\n=== Layout Summary ===\n");
         printf("Files processed: %d\n", success_count + failure_count);
         printf("Successful: %d\n", success_count);
@@ -5412,7 +5430,9 @@ int cmd_layout(int argc, char** argv) {
     ui_context_cleanup(&ui_context);
     if (cwd) url_destroy(cwd);
 
-    printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
+    if (!opts.stream_layout_results) {
+        printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
+    }
     log_notice("Completed layout command: %d success, %d failed", success_count, failure_count);
     return failure_count > 0 ? 1 : 0;
 }

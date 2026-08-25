@@ -239,13 +239,16 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
                                       JsPreambleState* out_state);
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
                                           const JsPreambleState* base_preamble,
-                                          const JsPreambleState* compiled_state);
+                                          const JsPreambleState* compiled_state,
+                                          bool retain_unit_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble, uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble,
                                            uint64_t* result_home);
 bool preamble_state_update_from_eval_snapshot(JsPreambleState* state);
+bool preamble_state_update_from_compiled(JsPreambleState* state,
+                                         const JsPreambleState* compiled_state);
 bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out_state);
 Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
                              JsPreambleState* out_state);
