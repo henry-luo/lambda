@@ -5264,6 +5264,7 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
     TemplateEntry* entry = g_template_registry->last;
     if (!entry) return;
     template_registry_set_element_pattern(entry, match_elmt);
+    entry->interp_body_func = interp_eval_view_template;
     const char* generated_ref = view->name ? view->name->chars : NULL;
     if (!generated_ref) {
         char ref[48];
@@ -5354,7 +5355,11 @@ static Item interp_eval_view_activation(Context* host, Script* module,
         log_error("interp: view invocation has no EvalContext");
         return ItemError;
     }
-    InterpFrameGuard guard(st, NULL, module, &module->interp_plan, NULL, 0);
+    const FnFramePlan* activation_plan = &module->interp_plan;
+    if (handler && handler->interp_planned) {
+        activation_plan = &handler->interp_plan;
+    }
+    InterpFrameGuard guard(st, NULL, module, activation_plan, NULL, 0);
     if (!guard.valid()) return ItemError;
     InterpFrame* frame = guard.frame();
     void** saved_consts = st->ctx->consts;

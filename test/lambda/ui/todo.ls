@@ -22,9 +22,9 @@ view <todo_item> state toggled: false {
 on click(evt) {
   if (evt.target_class == "delete-btn") {
     emit("delete_item", ~)
-  } else {
-    toggled = not toggled
+    return
   }
+  toggled = not toggled
 }
 
 // Todo list section: edit template for model mutation (delete, clear completed, add)
